@@ -16,26 +16,31 @@
 */
 
 #include "hphp/runtime/ext/hash/ext_hash.h"
-#include <algorithm>
-#include <memory>
+
+#include "hphp/runtime/base/array-init.h"
 #include "hphp/runtime/base/comparisons.h"
-#include "hphp/runtime/ext/std/ext_std_file.h"
-#include "hphp/runtime/ext/string/ext_string.h"
-#include "hphp/runtime/ext/hash/hash_md.h"
-#include "hphp/runtime/ext/hash/hash_sha.h"
-#include "hphp/runtime/ext/hash/hash_ripemd.h"
-#include "hphp/runtime/ext/hash/hash_whirlpool.h"
-#include "hphp/runtime/ext/hash/hash_tiger.h"
-#include "hphp/runtime/ext/hash/hash_snefru.h"
-#include "hphp/runtime/ext/hash/hash_gost.h"
 #include "hphp/runtime/ext/hash/hash_adler32.h"
 #include "hphp/runtime/ext/hash/hash_crc32.h"
-#include "hphp/runtime/ext/hash/hash_haval.h"
 #include "hphp/runtime/ext/hash/hash_fnv1.h"
 #include "hphp/runtime/ext/hash/hash_furc.h"
-#include "hphp/runtime/ext/hash/hash_murmur.h"
-#include "hphp/runtime/ext/hash/hash_keccak.h"
+#include "hphp/runtime/ext/hash/hash_gost.h"
+#include "hphp/runtime/ext/hash/hash_haval.h"
 #include "hphp/runtime/ext/hash/hash_joaat.h"
+#include "hphp/runtime/ext/hash/hash_keccak.h"
+#include "hphp/runtime/ext/hash/hash_md.h"
+#include "hphp/runtime/ext/hash/hash_murmur.h"
+#include "hphp/runtime/ext/hash/hash_ripemd.h"
+#include "hphp/runtime/ext/hash/hash_sha.h"
+#include "hphp/runtime/ext/hash/hash_snefru.h"
+#include "hphp/runtime/ext/hash/hash_tiger.h"
+#include "hphp/runtime/ext/hash/hash_whirlpool.h"
+#include "hphp/runtime/ext/std/ext_std_file.h"
+#include "hphp/runtime/ext/string/ext_string.h"
+#include "hphp/runtime/ext/hash/hash_blake3.h"
+#include "hphp/runtime/ext/hash/hash_keyed_blake3.h"
+
+#include <algorithm>
+#include <memory>
 
 #if defined(HPHP_OSS)
 #define furc_hash(a, b, c) furc_hash_internal(                          \
@@ -48,23 +53,8 @@
 namespace HPHP {
 
 static struct HashExtension final : Extension {
-  HashExtension() : Extension("hash", "1.0") { }
-  void moduleInit() override {
-    HHVM_FE(hash);
-    HHVM_FE(hash_algos);
-    HHVM_FE(hash_file);
-    HHVM_FE(hash_final);
-    HHVM_FE(hash_init);
-    HHVM_FE(hash_update);
-    HHVM_FE(hash_copy);
-    HHVM_FE(hash_equals);
-    HHVM_FE(furchash_hphp_ext);
-    HHVM_FE(hphp_murmurhash);
-
-    HHVM_RC_INT(HASH_HMAC, k_HASH_HMAC);
-
-    loadSystemlib();
-  }
+  HashExtension() : Extension("hash", "1.0", "hphp_hphpi") { }
+  void moduleRegisterNative() override;
 } s_hash_extension;
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -75,64 +65,69 @@ using HashEnginePtr = std::shared_ptr<HashEngine>;
 
 struct HashEngineMapInitializer {
   HashEngineMapInitializer() {
-    HashEngines["md2"]        = HashEnginePtr(new hash_md2());
-    HashEngines["md4"]        = HashEnginePtr(new hash_md4());
-    HashEngines["md5"]        = HashEnginePtr(new hash_md5());
-    HashEngines["sha1"]       = HashEnginePtr(new hash_sha1());
-    HashEngines["sha224"]     = HashEnginePtr(new hash_sha224());
-    HashEngines["sha256"]     = HashEnginePtr(new hash_sha256());
-    HashEngines["sha384"]     = HashEnginePtr(new hash_sha384());
-    HashEngines["sha512"]     = HashEnginePtr(new hash_sha512());
-    HashEngines["ripemd128"]  = HashEnginePtr(new hash_ripemd128());
-    HashEngines["ripemd160"]  = HashEnginePtr(new hash_ripemd160());
-    HashEngines["ripemd256"]  = HashEnginePtr(new hash_ripemd256());
-    HashEngines["ripemd320"]  = HashEnginePtr(new hash_ripemd320());
-    HashEngines["whirlpool"]  = HashEnginePtr(new hash_whirlpool());
-#ifdef FACEBOOK
+    HashEngines["md2"]          = HashEnginePtr(new hash_md2());
+    HashEngines["md4"]          = HashEnginePtr(new hash_md4());
+    HashEngines["md5"]          = HashEnginePtr(new hash_md5());
+    HashEngines["sha1"]         = HashEnginePtr(new hash_sha1());
+    HashEngines["sha224"]       = HashEnginePtr(new hash_sha224());
+    HashEngines["sha256"]       = HashEnginePtr(new hash_sha256());
+    HashEngines["sha384"]       = HashEnginePtr(new hash_sha384());
+    HashEngines["sha512"]       = HashEnginePtr(new hash_sha512());
+    HashEngines["ripemd128"]    = HashEnginePtr(new hash_ripemd128());
+    HashEngines["ripemd160"]    = HashEnginePtr(new hash_ripemd160());
+    HashEngines["ripemd256"]    = HashEnginePtr(new hash_ripemd256());
+    HashEngines["ripemd320"]    = HashEnginePtr(new hash_ripemd320());
+    HashEngines["whirlpool"]    = HashEnginePtr(new hash_whirlpool());
+#ifdef HHVM_FACEBOOK
     // The original version of tiger got the endianness backwards
     // This fb-specific version remains for backward compatibility
     HashEngines["tiger128,3-fb"]
-                              = HashEnginePtr(new hash_tiger(true, 128, true));
+                                = HashEnginePtr(new hash_tiger(true, 128, true));
 #endif
-    HashEngines["tiger128,3"] = HashEnginePtr(new hash_tiger(true, 128));
-    HashEngines["tiger160,3"] = HashEnginePtr(new hash_tiger(true, 160));
-    HashEngines["tiger192,3"] = HashEnginePtr(new hash_tiger(true, 192));
-    HashEngines["tiger128,4"] = HashEnginePtr(new hash_tiger(false, 128));
-    HashEngines["tiger160,4"] = HashEnginePtr(new hash_tiger(false, 160));
+    HashEngines["tiger128,3"]   = HashEnginePtr(new hash_tiger(true, 128));
+    HashEngines["tiger160,3"]   = HashEnginePtr(new hash_tiger(true, 160));
+    HashEngines["tiger192,3"]   = HashEnginePtr(new hash_tiger(true, 192));
+    HashEngines["tiger128,4"]   = HashEnginePtr(new hash_tiger(false, 128));
+    HashEngines["tiger160,4"]   = HashEnginePtr(new hash_tiger(false, 160));
     HashEngines["tiger192,4"] = HashEnginePtr(new hash_tiger(false, 192));
 
-    HashEngines["snefru"]     = HashEnginePtr(new hash_snefru());
-    HashEngines["gost"]       = HashEnginePtr(new hash_gost());
-    HashEngines["joaat"]      = HashEnginePtr(new hash_joaat());
-#ifdef FACEBOOK
-    HashEngines["adler32-fb"] = HashEnginePtr(new hash_adler32(true));
+    HashEngines["snefru"]       = HashEnginePtr(new hash_snefru());
+    HashEngines["gost"]         = HashEnginePtr(new hash_gost());
+    HashEngines["joaat"]        = HashEnginePtr(new hash_joaat());
+#ifdef HHVM_FACEBOOK
+    HashEngines["adler32-fb"]   = HashEnginePtr(new hash_adler32(true));
 #endif
-    HashEngines["adler32"]    = HashEnginePtr(new hash_adler32(false));
-    HashEngines["crc32"]      = HashEnginePtr(new hash_crc32(false));
-    HashEngines["crc32b"]     = HashEnginePtr(new hash_crc32(true));
-    HashEngines["haval128,3"] = HashEnginePtr(new hash_haval(3,128));
-    HashEngines["haval160,3"] = HashEnginePtr(new hash_haval(3,160));
-    HashEngines["haval192,3"] = HashEnginePtr(new hash_haval(3,192));
-    HashEngines["haval224,3"] = HashEnginePtr(new hash_haval(3,224));
-    HashEngines["haval256,3"] = HashEnginePtr(new hash_haval(3,256));
-    HashEngines["haval128,4"] = HashEnginePtr(new hash_haval(4,128));
-    HashEngines["haval160,4"] = HashEnginePtr(new hash_haval(4,160));
-    HashEngines["haval192,4"] = HashEnginePtr(new hash_haval(4,192));
-    HashEngines["haval224,4"] = HashEnginePtr(new hash_haval(4,224));
-    HashEngines["haval256,4"] = HashEnginePtr(new hash_haval(4,256));
-    HashEngines["haval128,5"] = HashEnginePtr(new hash_haval(5,128));
-    HashEngines["haval160,5"] = HashEnginePtr(new hash_haval(5,160));
-    HashEngines["haval192,5"] = HashEnginePtr(new hash_haval(5,192));
-    HashEngines["haval224,5"] = HashEnginePtr(new hash_haval(5,224));
-    HashEngines["haval256,5"] = HashEnginePtr(new hash_haval(5,256));
-    HashEngines["fnv132"]     = HashEnginePtr(new hash_fnv132(false));
-    HashEngines["fnv1a32"]    = HashEnginePtr(new hash_fnv132(true));
-    HashEngines["fnv164"]     = HashEnginePtr(new hash_fnv164(false));
-    HashEngines["fnv1a64"]    = HashEnginePtr(new hash_fnv164(true));
-    HashEngines["sha3-224"]   = HashEnginePtr(new hash_keccak( 448, 28));
-    HashEngines["sha3-256"]   = HashEnginePtr(new hash_keccak( 512, 32));
-    HashEngines["sha3-384"]   = HashEnginePtr(new hash_keccak( 768, 48));
-    HashEngines["sha3-512"]   = HashEnginePtr(new hash_keccak(1024, 64));
+    HashEngines["adler32"]      = HashEnginePtr(new hash_adler32(false));
+    HashEngines["crc32"]        = HashEnginePtr(new hash_crc32(Crc32Variant::Crc32));
+    HashEngines["crc32b"]       = HashEnginePtr(new hash_crc32(Crc32Variant::Crc32B));
+    HashEngines["crc32c"]       = HashEnginePtr(new hash_crc32(Crc32Variant::Crc32C));
+    HashEngines["haval128,3"]   = HashEnginePtr(new hash_haval(3,128));
+    HashEngines["haval160,3"]   = HashEnginePtr(new hash_haval(3,160));
+    HashEngines["haval192,3"]   = HashEnginePtr(new hash_haval(3,192));
+    HashEngines["haval224,3"]   = HashEnginePtr(new hash_haval(3,224));
+    HashEngines["haval256,3"]   = HashEnginePtr(new hash_haval(3,256));
+    HashEngines["haval128,4"]   = HashEnginePtr(new hash_haval(4,128));
+    HashEngines["haval160,4"]   = HashEnginePtr(new hash_haval(4,160));
+    HashEngines["haval192,4"]   = HashEnginePtr(new hash_haval(4,192));
+    HashEngines["haval224,4"]   = HashEnginePtr(new hash_haval(4,224));
+    HashEngines["haval256,4"]   = HashEnginePtr(new hash_haval(4,256));
+    HashEngines["haval128,5"]   = HashEnginePtr(new hash_haval(5,128));
+    HashEngines["haval160,5"]   = HashEnginePtr(new hash_haval(5,160));
+    HashEngines["haval192,5"]   = HashEnginePtr(new hash_haval(5,192));
+    HashEngines["haval224,5"]   = HashEnginePtr(new hash_haval(5,224));
+    HashEngines["haval256,5"]   = HashEnginePtr(new hash_haval(5,256));
+    HashEngines["fnv132"]       = HashEnginePtr(new hash_fnv132(false));
+    HashEngines["fnv1a32"]      = HashEnginePtr(new hash_fnv132(true));
+    HashEngines["fnv164"]       = HashEnginePtr(new hash_fnv164(false));
+    HashEngines["fnv1a64"]      = HashEnginePtr(new hash_fnv164(true));
+    HashEngines["sha3-224"]     = HashEnginePtr(new hash_keccak( 448, 28));
+    HashEngines["sha3-256"]     = HashEnginePtr(new hash_keccak( 512, 32));
+    HashEngines["sha3-384"]     = HashEnginePtr(new hash_keccak( 768, 48));
+    HashEngines["sha3-512"]     = HashEnginePtr(new hash_keccak(1024, 64));
+    HashEngines["blake3"]       = HashEnginePtr(new hash_blake3());
+  #ifndef HPHP_OSS
+    HashEngines["keyed-blake3"] = HashEnginePtr(new hash_keyed_blake3());
+  #endif
   }
 };
 
@@ -150,28 +145,28 @@ struct HashContext : SweepableResourceData {
     assertx(ctx->ops);
     assertx(ctx->ops->context_size >= 0);
     ops = ctx->ops;
-    context = malloc(ops->context_size);
+    context = req::malloc_noptrs(ops->context_size);
     ops->hash_copy(context, ctx->context);
     options = ctx->options;
     if (ctx->key) {
-      key = static_cast<char*>(malloc(ops->block_size));
+      key = static_cast<char*>(req::malloc_noptrs(ops->block_size));
       memcpy(key, ctx->key, ops->block_size);
     } else {
       key = nullptr;
     }
   }
 
-  ~HashContext() {
+  ~HashContext() override {
     /* Just in case the algo has internally allocated resources */
     if (context) {
       assertx(ops->digest_size >= 0);
       unsigned char* dummy = (unsigned char*)alloca(
         sizeof(unsigned char) * ops->digest_size);
       ops->hash_final(dummy, context);
-      free(context);
+      req::free(context);
     }
 
-    free(key);
+    req::free(key);
   }
 
   bool isInvalid() const override {
@@ -182,7 +177,7 @@ struct HashContext : SweepableResourceData {
   DECLARE_RESOURCE_ALLOCATION(HashContext)
 
   // overriding ResourceData
-  const String& o_getClassNameHook() const override { return classnameof(); }
+  const OptString& o_getClassNameHook() const override { return classnameof(); }
 
   HashEnginePtr ops;
   void *context;
@@ -196,7 +191,7 @@ IMPLEMENT_RESOURCE_ALLOCATION(HashContext)
 
 ///////////////////////////////////////////////////////////////////////////////
 
-static req::ptr<HashContext> get_valid_hash_context_resource(const Resource& context,
+static req::ptr<HashContext> get_valid_hash_context_resource(const OptResource& context,
                                                              const char* func_name) {
   auto hash = dyn_cast_or_null<HashContext>(context);
   if (hash == nullptr || hash->isInvalid()) {
@@ -213,15 +208,14 @@ static req::ptr<HashContext> get_valid_hash_context_resource(const Resource& con
 // hash functions
 
 Array HHVM_FUNCTION(hash_algos) {
-  Array ret;
-  for (HashEngineMap::const_iterator iter = HashEngines.begin();
-       iter != HashEngines.end(); ++iter) {
-    ret.append(String(iter->first));
+  VecInit ret(HashEngines.size());
+  for (auto const& engine : HashEngines) {
+    ret.append(OptString(engine.first));
   }
-  return ret;
+  return ret.toArray();
 }
 
-static HashEnginePtr php_hash_fetch_ops(const String& algo) {
+static HashEnginePtr php_hash_fetch_ops(const OptString& algo) {
   HashEngineMap::const_iterator iter =
     HashEngines.find(HHVM_FN(strtolower)(algo).data());
   if (iter == HashEngines.end()) {
@@ -230,7 +224,7 @@ static HashEnginePtr php_hash_fetch_ops(const String& algo) {
   return iter->second;
 }
 
-static Variant php_hash_do_hash(const String& algo, const String& data,
+static Variant php_hash_do_hash(const OptString& algo, const OptString& data,
                                 bool isfilename,
                                 bool raw_output) {
   HashEnginePtr ops = php_hash_fetch_ops(algo);
@@ -246,24 +240,24 @@ static Variant php_hash_do_hash(const String& algo, const String& data,
     }
   }
 
-  void *context = malloc(ops->context_size);
+  void *context = req::malloc_noptrs(ops->context_size);
   ops->hash_init(context);
 
   if (isfilename) {
     for (Variant chunk = HHVM_FN(fread)(f.toResource(), 1024);
-         !is_empty_string(chunk);
+         !is_empty_string(chunk.asTypedValue());
          chunk = HHVM_FN(fread)(f.toResource(), 1024)) {
-      String schunk = chunk.toString();
+      OptString schunk = chunk.toString();
       ops->hash_update(context, (unsigned char *)schunk.data(), schunk.size());
     }
   } else {
     ops->hash_update(context, (unsigned char *)data.data(), data.size());
   }
 
-  String raw = String(ops->digest_size, ReserveString);
+  OptString raw = OptString(ops->digest_size, ReserveString);
   char *digest = raw.mutableData();
   ops->hash_final((unsigned char *)digest, context);
-  free(context);
+  req::free(context);
 
   raw.setSize(ops->digest_size);
   if (raw_output) {
@@ -272,12 +266,12 @@ static Variant php_hash_do_hash(const String& algo, const String& data,
   return HHVM_FN(bin2hex)(raw);
 }
 
-Variant HHVM_FUNCTION(hash, const String& algo, const String& data,
+Variant HHVM_FUNCTION(hash, const OptString& algo, const OptString& data,
                             bool raw_output /* = false */) {
   return php_hash_do_hash(algo, data, false, raw_output);
 }
 
-Variant HHVM_FUNCTION(hash_file, const String& algo, const String& filename,
+Variant HHVM_FUNCTION(hash_file, const OptString& algo, const OptString& filename,
                                  bool raw_output /* = false */) {
   if (filename.size() != strlen(filename.data())) {
     raise_warning(
@@ -289,8 +283,8 @@ Variant HHVM_FUNCTION(hash_file, const String& algo, const String& filename,
 }
 
 static char *prepare_hmac_key(HashEnginePtr ops, void *context,
-                              const String& key) {
-  char *K = (char*)malloc(ops->block_size);
+                              const OptString& key) {
+  char *K = (char*)req::malloc_noptrs(ops->block_size);
   memset(K, 0, ops->block_size);
   if (key.size() > ops->block_size) {
     /* Reduce the key first */
@@ -325,12 +319,12 @@ static void finalize_hmac_key(char *K, HashEnginePtr ops, void *context,
 
   /* Zero the key */
   memset(K, 0, ops->block_size);
-  free(K);
+  req::free(K);
 }
 
-Variant HHVM_FUNCTION(hash_init, const String& algo,
+Variant HHVM_FUNCTION(hash_init, const OptString& algo,
                                  int64_t options /* = 0 */,
-                                 const String& key /* = null_string */) {
+                                 const OptString& key /* = null_string */) {
   HashEnginePtr ops = php_hash_fetch_ops(algo);
   if (!ops) {
     raise_warning("Unknown hashing algorithm: %s", algo.data());
@@ -342,7 +336,7 @@ Variant HHVM_FUNCTION(hash_init, const String& algo,
     return false;
   }
 
-  void *context = malloc(ops->context_size);
+  void *context = req::malloc_noptrs(ops->context_size);
   ops->hash_init(context);
 
   const auto hash = req::make<HashContext>(ops, context, options);
@@ -352,7 +346,7 @@ Variant HHVM_FUNCTION(hash_init, const String& algo,
   return Variant(std::move(hash));
 }
 
-bool HHVM_FUNCTION(hash_update, const Resource& context, const String& data) {
+bool HHVM_FUNCTION(hash_update, const OptResource& context, const OptString& data) {
   auto hash = get_valid_hash_context_resource(context, __FUNCTION__);
   if (!hash) {
     return false;
@@ -362,21 +356,21 @@ bool HHVM_FUNCTION(hash_update, const Resource& context, const String& data) {
   return true;
 }
 
-Variant HHVM_FUNCTION(hash_final, const Resource& context,
+Variant HHVM_FUNCTION(hash_final, const OptResource& context,
                                  bool raw_output /* = false */) {
   auto hash = get_valid_hash_context_resource(context, __FUNCTION__);
   if (!hash) {
     return false;
   }
 
-  String raw = String(hash->ops->digest_size, ReserveString);
+  OptString raw = OptString(hash->ops->digest_size, ReserveString);
   char *digest = raw.mutableData();
   hash->ops->hash_final((unsigned char *)digest, hash->context);
   if (hash->options & k_HASH_HMAC) {
     finalize_hmac_key(hash->key, hash->ops, hash->context, digest);
     hash->key = NULL;
   }
-  free(hash->context);
+  req::free(hash->context);
   hash->context = NULL;
 
   raw.setSize(hash->ops->digest_size);
@@ -386,12 +380,12 @@ Variant HHVM_FUNCTION(hash_final, const Resource& context,
   return HHVM_FN(bin2hex)(raw);
 }
 
-Variant HHVM_FUNCTION(hash_copy, const Resource& context) {
+Variant HHVM_FUNCTION(hash_copy, const OptResource& context) {
   auto oldhash = get_valid_hash_context_resource(context, __FUNCTION__);
   if (!oldhash) {
     return false;
   }
-  return Resource(req::make<HashContext>(std::move(oldhash)));
+  return OptResource(req::make<HashContext>(std::move(oldhash)));
 }
 
 /**
@@ -418,8 +412,8 @@ bool HHVM_FUNCTION(hash_equals, const Variant& known, const Variant& user) {
     );
     return false;
   }
-  String known_str = known.toString();
-  String user_str = user.toString();
+  OptString known_str = known.toString();
+  OptString user_str = user.toString();
   const auto known_len = known_str.size();
   const auto known_limit = known_len - 1;
   const auto user_len = user_str.size();
@@ -435,16 +429,31 @@ bool HHVM_FUNCTION(hash_equals, const Variant& known, const Variant& user) {
   return (result == 0);
 }
 
-int64_t HHVM_FUNCTION(furchash_hphp_ext, const String& key,
+int64_t HHVM_FUNCTION(furchash_hphp_ext, const OptString& key,
                                          int64_t len, int64_t nPart) {
   len = std::max<int64_t>(std::min<int64_t>(len, key.size()), 0);
   return furc_hash(key.data(), len, nPart);
 }
 
-int64_t HHVM_FUNCTION(hphp_murmurhash, const String& key,
+int64_t HHVM_FUNCTION(hphp_murmurhash, const OptString& key,
                                        int64_t len, int64_t seed) {
   len = std::max<int64_t>(std::min<int64_t>(len, key.size()), 0);
   return murmur_hash_64A(key.data(), len, seed);
+}
+
+void HashExtension::moduleRegisterNative() {
+  HHVM_FE(hash);
+  HHVM_FE(hash_algos);
+  HHVM_FE(hash_file);
+  HHVM_FE(hash_final);
+  HHVM_FE(hash_init);
+  HHVM_FE(hash_update);
+  HHVM_FE(hash_copy);
+  HHVM_FE(hash_equals);
+  HHVM_FE(furchash_hphp_ext);
+  HHVM_FE(hphp_murmurhash);
+
+  HHVM_RC_INT(HASH_HMAC, k_HASH_HMAC);
 }
 
 ///////////////////////////////////////////////////////////////////////////////

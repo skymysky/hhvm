@@ -1,34 +1,42 @@
-<?php
+<?hh
 
-function f($a) {
+function f($a) :mixed{
   var_dump($a);
 }
 class ClassA {
-  var $val;
-  function foo() {
- f($val = 1);
- }
-  function bar() {
- f($this->val = 1);
- }
-  function goo() {
- f($val = 'val');
- f($this->$val = 2);
- }
-  function zoo() {
-    var_dump($val);
- var_dump($this->val);
+  public $val;
+  function foo() :mixed{
+    $val = 1; f($val);
+  }
+  function bar() :mixed{
+    $this->val = 1; f($this->val);
+  }
+  function goo() :mixed{
+    $val = 'val'; f($val);
+    $this->$val = 2; f($this->$val);
+  }
+  function zoo() :mixed{
+    try {
+      var_dump($val);
+    } catch (UndefinedVariableException $e) {
+      var_dump($e->getMessage());
+    }
+    var_dump($this->val);
   }
 }
-function foo() {
-  f($val2 = 1);
+function foo() :mixed{
+  $val2 = 1; f($val2);
 }
-$obj = new ClassA();
-var_dump($obj);
-$obj->foo();
-var_dump($obj);
-$obj->bar();
-var_dump($obj);
-$obj->goo();
-var_dump($obj);
-$obj->zoo();
+
+<<__EntryPoint>>
+function main() :mixed{
+  $obj = new ClassA();
+  var_dump($obj);
+  $obj->foo();
+  var_dump($obj);
+  $obj->bar();
+  var_dump($obj);
+  $obj->goo();
+  var_dump($obj);
+  $obj->zoo();
+}

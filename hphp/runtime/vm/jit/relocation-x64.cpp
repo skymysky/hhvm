@@ -16,21 +16,17 @@
 
 #include "hphp/runtime/vm/jit/relocation.h"
 
-#include "hphp/runtime/base/runtime-option.h"
-
 #include "hphp/runtime/vm/jit/align-x64.h"
-#include "hphp/runtime/vm/jit/asm-info.h"
 #include "hphp/runtime/vm/jit/cg-meta.h"
-#include "hphp/runtime/vm/jit/containers.h"
-#include "hphp/runtime/vm/jit/fixup.h"
-#include "hphp/runtime/vm/jit/ir-opcode.h"
 #include "hphp/runtime/vm/jit/smashable-instr.h"
 
-namespace HPHP { namespace jit { namespace x64 {
+#include "hphp/util/configs/jit.h"
+
+namespace HPHP::jit::x64 {
 
 namespace {
 
-TRACE_SET_MOD(hhir);
+TRACE_SET_MOD(hhir)
 
 //////////////////////////////////////////////////////////////////////
 
@@ -48,7 +44,6 @@ size_t relocateImpl(RelocationInfo& rel,
                     TCA start, TCA end,
                     DataBlock& srcBlock,
                     CGMeta& fixups,
-                    TCA* exitAddr,
                     WideJmpSet& wideJmps,
                     AreaIndex codeArea) {
   TCA src = start;
@@ -57,7 +52,6 @@ size_t relocateImpl(RelocationInfo& rel,
   bool internalRefsNeedUpdating = false;
   TCA destStart = destBlock.frontier();
   size_t asm_count{0};
-  TCA jmpDest = nullptr;
   TCA keepNopLow = nullptr;
   TCA keepNopHigh = nullptr;
   try {
@@ -91,7 +85,7 @@ size_t relocateImpl(RelocationInfo& rel,
       // that starts at byte 0 of the next cache line."
       auto nextSrc = src + di.size();
       auto const nextDest = destBlock.frontier() + di.size();
-      if (RuntimeOption::EvalJitAlignMacroFusionPairs &&
+      if (Cfg::Jit::AlignMacroFusionPairs &&
           codeArea == AreaIndex::Main) {
         while (nextSrc != end) {
           DecodedInstruction next(srcBlock.toDestAddress(nextSrc), nextSrc);
@@ -103,7 +97,7 @@ size_t relocateImpl(RelocationInfo& rel,
               // Offset to 1 past end of cache line.
               size_t offset = ALIGN_OFFSET((~(uint64_t)nextDest) + 2,
                                            x64::cache_line_size());
-              X64Assembler a { destBlock };
+              X64Assembler a(destBlock);
               a.emitNop(offset);
               destRange += offset;
               internalRefsNeedUpdating = true;
@@ -138,14 +132,10 @@ size_t relocateImpl(RelocationInfo& rel,
 
       bool preserveAlignment = keepNopLow && keepNopHigh &&
         keepNopLow <= src && keepNopHigh > src;
-      TCA target = nullptr;
       TCA dest = destBlock.frontier();
       destBlock.bytes(di.size(), srcBlock.toDestAddress(src));
       DecodedInstruction d2(destBlock.toDestAddress(dest), dest);
       if (di.hasPicOffset()) {
-        if (di.isBranch(DecodedInstruction::Unconditional)) {
-          target = di.picAddress();
-        }
         /*
          * Rip-relative offsets that point outside the range
          * being moved need to be adjusted so they continue
@@ -156,7 +146,7 @@ size_t relocateImpl(RelocationInfo& rel,
           assertx(success);
         } else {
           if (!preserveAlignment && d2.isBranch()) {
-            if (wideJmps.count(src)) {
+            if (wideJmps.contains(src)) {
               if (d2.size() < kJmpLen) {
                 d2.widenBranch();
                 internalRefsNeedUpdating = true;
@@ -171,13 +161,13 @@ size_t relocateImpl(RelocationInfo& rel,
         }
       }
       if (di.hasImmediate()) {
-        if (fixups.addressImmediates.count(src)) {
+        if (fixups.addressImmediates.contains(src)) {
           if (size_t(di.immediate() - (uint64_t)start) < range) {
             hasInternalRefs = internalRefsNeedUpdating = true;
           }
         } else {
-          if (fixups.addressImmediates.count((TCA)~uintptr_t(src))) {
-            // Handle weird, encoded offset, used by cgLdObjMethod
+          if (fixups.addressImmediates.contains((TCA)~uintptr_t(src))) {
+            // Handle weird, encoded offset, used by LdSmashable
             always_assert(di.immediate() == ((uintptr_t(src) << 1) | 1));
             bool DEBUG_ONLY success =
               d2.setImmediate(((uintptr_t)dest << 1) | 1);
@@ -218,7 +208,6 @@ size_t relocateImpl(RelocationInfo& rel,
       } else {
         dest += d2.size();
       }
-      jmpDest = target;
       assertx(dest <= destBlock.frontier());
       destBlock.setFrontier(dest);
       src += di.size();
@@ -226,10 +215,6 @@ size_t relocateImpl(RelocationInfo& rel,
         keepNopLow = keepNopHigh = nullptr;
       }
     } // while (src != end)
-
-    if (exitAddr) {
-      *exitAddr = jmpDest;
-    }
 
     rel.recordRange(start, end, destStart, destBlock.frontier());
 
@@ -355,70 +340,18 @@ void adjustForRelocation(RelocationInfo& rel, TCA srcStart, TCA srcEnd) {
   }
 }
 
-void adjustMetaDataForRelocation(RelocationInfo& rel, AsmInfo* /*asmInfo*/,
-                                 CGMeta& meta) {
-  for (auto& li : meta.literalAddrs) {
-    if (auto adjusted = rel.adjustedAddressAfter((TCA)li.second)) {
-      li.second = (uint64_t*)adjusted;
-    }
-  }
-
-  decltype(meta.codePointers) updatedCP;
-  for (auto cp : meta.codePointers) {
-    if (auto adjusted = (TCA*)rel.adjustedAddressAfter((TCA)cp)) {
-      updatedCP.emplace(adjusted);
-    } else {
-      updatedCP.emplace(cp);
-    }
-  }
-  updatedCP.swap(meta.codePointers);
-}
-
 /*
  * Adjust potentially live references that point into the relocated
  * area.
  * Must not be called until its safe to run the relocated code.
  */
 void adjustCodeForRelocation(RelocationInfo& rel, CGMeta& fixups) {
-  for (auto addr : fixups.reusedStubs) {
-    /*
-     * The stubs are terminated by a ud2. Check for it.
-     */
-    while (addr[0] != 0x0f || addr[1] != 0x0b) {
-      DecodedInstruction di(addr);
-      if (di.hasPicOffset()) {
-        if (TCA adjusted = rel.adjustedAddressAfter(di.picAddress())) {
-          di.setPicAddress(adjusted);
-        }
-      }
-      addr += di.size();
-    }
-  }
-
   for (auto codePtr : fixups.codePointers) {
     if (TCA adjusted = rel.adjustedAddressAfter(*codePtr)) {
       *codePtr = adjusted;
     }
   }
 }
-
-void findFixups(TCA start, TCA end, CGMeta& meta) {
-  while (start != end) {
-    assertx(start < end);
-    DecodedInstruction di(start);
-    start += di.size();
-
-    if (di.isCall()) {
-      if (auto fixup = FixupMap::findFixup(start)) {
-        meta.fixups.emplace_back(start, *fixup);
-      }
-      if (auto ct = getCatchTrace(start)) {
-        meta.catches.emplace_back(start, *ct);
-      }
-    }
-  }
-}
-
 
 /*
  * Relocate code in the range start, end into dest, and record
@@ -433,18 +366,17 @@ size_t relocate(RelocationInfo& rel,
                 TCA start, TCA end,
                 DataBlock& srcBlock,
                 CGMeta& fixups,
-                TCA* exitAddr,
                 AreaIndex codeArea) {
   WideJmpSet wideJmps;
   while (true) {
     try {
       return relocateImpl(rel, destBlock, start, end, srcBlock,
-                          fixups, exitAddr, wideJmps, codeArea);
-    } catch (JmpOutOfRange& j) {
+                          fixups, wideJmps, codeArea);
+    } catch (JmpOutOfRange&) {
     }
   }
 }
 
 //////////////////////////////////////////////////////////////////////
 
-}}}
+}

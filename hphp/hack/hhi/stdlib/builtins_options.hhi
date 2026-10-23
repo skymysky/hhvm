@@ -1,4 +1,4 @@
-<?hh // decl /* -*- php -*- */
+<?hh /* -*- php -*- */
 /**
  * Copyright (c) 2014, Facebook, Inc.
  * All rights reserved.
@@ -8,69 +8,88 @@
  *
  */
 
-const int CLOCK_MONOTONIC = 1;
-const int CLOCK_PROCESS_CPUTIME_ID = 2;
-const int CLOCK_REALTIME = 0;
-const int CLOCK_THREAD_CPUTIME_ID = 3;
+const int CLOCK_MONOTONIC;
+const int CLOCK_PROCESS_CPUTIME_ID;
+const int CLOCK_REALTIME;
+const int CLOCK_THREAD_CPUTIME_ID;
 
 <<__PHPStdLib>>
-function assert_options($what, $value = null);
+function dl(string $_library): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function assert($assertion);
+function extension_loaded(
+  string $name,
+)[read_globals]: HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function dl($library);
+function get_loaded_extensions(
+  bool $zend_extensions = false,
+)[read_globals]: HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function extension_loaded($name);
+function get_extension_funcs(
+  string $module_name,
+)[read_globals]: HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function get_loaded_extensions($zend_extensions = false);
+function get_cfg_var(string $_option): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function get_extension_funcs($module_name);
+function get_current_user(): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function get_cfg_var($option);
+function get_defined_constants(
+  bool $categorize = false,
+): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function get_current_user();
+function get_include_path(): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function get_defined_constants($categorize = null);
+function restore_include_path(): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function get_include_path();
+function set_include_path(
+  HH\FIXME\MISSING_PARAM_TYPE $new_include_path,
+): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function restore_include_path();
+function get_included_files(): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function set_include_path($new_include_path);
+function get_required_files(): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function get_included_files();
+function getenv(string $varname)[read_globals]: HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function get_magic_quotes_gpc();
+function getlastmod(): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function get_magic_quotes_runtime();
+function getmygid(): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function get_required_files();
+function getmyinode(): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function getenv($varname);
+function getmypid(): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function getlastmod();
+function getmyuid(): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function getmygid();
+function getopt(
+  string $options,
+  HH\FIXME\MISSING_PARAM_TYPE $longopts = null,
+): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function getmyinode();
+function getopt_with_optind(
+  string $options,
+  ?vec<string> $longopts,
+  inout int $optind,
+): dict<string, mixed>;
 <<__PHPStdLib>>
-function getmypid();
+function getrusage(int $who = 0): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function getmyuid();
+function clock_getres(
+  int $clk_id,
+  inout HH\FIXME\MISSING_PARAM_TYPE $sec,
+  inout HH\FIXME\MISSING_PARAM_TYPE $nsec,
+): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function getopt($options, $longopts = null);
+function clock_gettime(
+  int $clk_id,
+  inout HH\FIXME\MISSING_PARAM_TYPE $sec,
+  inout HH\FIXME\MISSING_PARAM_TYPE $nsec,
+)[leak_safe]: HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function getrusage($who = 0);
+function clock_gettime_ns(int $clk_id)[leak_safe]: int;
 <<__PHPStdLib>>
-function clock_getres($clk_id, &$sec, &$nsec);
+function cpu_get_count()[read_globals]: HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function clock_gettime($clk_id, &$sec, &$nsec);
-<<__PHPStdLib>>
-function clock_gettime_ns(int $clk_id): int;
-<<__PHPStdLib>>
-function cpu_get_count();
-<<__PHPStdLib>>
-function cpu_get_model();
+function cpu_get_model()[read_globals]: HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
 function hphp_memory_get_interval_peak_usage(bool $real_usage = false): int;
 <<__PHPStdLib>>
@@ -78,60 +97,80 @@ function hphp_memory_start_interval(): bool;
 <<__PHPStdLib>>
 function hphp_memory_stop_interval(): bool;
 <<__PHPStdLib>>
-function ini_alter($varname, $newvalue);
+function ini_alter(
+  string $varname,
+  HH\FIXME\MISSING_PARAM_TYPE $newvalue,
+): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function ini_get_all($extension = null);
+function ini_get_all(string $extension = ""): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function ini_get($varname);
+function ini_get(string $varname)[read_globals]: HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function ini_restore($varname);
+function ini_restore(string $varname): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function ini_set($varname, $newvalue);
+function ini_set(
+  string $varname,
+  HH\FIXME\MISSING_PARAM_TYPE $newvalue,
+): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function memory_get_allocation();
+function memory_get_allocation()[read_globals]: HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function memory_get_peak_usage($real_usage = false);
+function memory_get_peak_usage(
+  bool $real_usage = false,
+)[read_globals]: HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function memory_get_usage($real_usage = false);
+function memory_get_usage(
+  bool $real_usage = false,
+)[read_globals]: HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function php_ini_scanned_files();
+function php_ini_scanned_files(): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function php_logo_guid();
+function php_logo_guid(): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function php_sapi_name();
+function php_sapi_name()[read_globals]: HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function php_uname($mode = null);
+function php_uname(string $mode = ""): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function phpcredits($flag = 0);
+function phpcredits(
+  HH\FIXME\MISSING_PARAM_TYPE $flag = 0,
+): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function phpinfo($what = 0);
+function phpinfo(int $what = 0): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function phpversion($extension = null);
+function phpversion(string $extension = ""): mixed;
 <<__PHPStdLib>>
-function putenv($setting);
+function putenv(string $setting): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function set_magic_quotes_runtime($new_setting);
+function set_time_limit(int $seconds): HH\FIXME\MISSING_RETURN_TYPE;
+function set_pre_timeout_handler(
+  int $seconds,
+  (function(HH\Awaitable<mixed>): void) $callback,
+): void;
 <<__PHPStdLib>>
-function set_time_limit($seconds);
+function sys_get_temp_dir(): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function sys_get_temp_dir();
-<<__PHPStdLib, __Rx>>
-function version_compare($version1, $version2, $sop = null);
+function version_compare(
+  string $version1,
+  string $version2,
+  string $sop = "",
+)[]: HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function gc_enabled();
+function gc_enabled(): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function gc_enable();
+function gc_enable(): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function gc_disable();
+function gc_disable(): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function gc_collect_cycles();
+function gc_collect_cycles()[leak_safe]: HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function gc_mem_caches();
+function gc_mem_caches(): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function gc_check_heap();
-<<__PHPStdLib>>
-function zend_logo_guid();
-<<__PHPStdLib>>
-function zend_thread_id();
-<<__PHPStdLib>>
-function zend_version();
+function gc_check_heap(): HH\FIXME\MISSING_RETURN_TYPE;
+function get_visited_files(): keyset<string>;
+function record_visited_files(): void;
+function get_active_worker_counts(): shape(
+  "pagelet_workers" => int,
+  "xbox_workers" => int,
+  "http_workers" => int,
+  "cli_workers" => int,
+);

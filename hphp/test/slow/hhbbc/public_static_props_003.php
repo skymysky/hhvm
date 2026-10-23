@@ -1,16 +1,16 @@
-<?php
+<?hh
 
 class D {
-  function go() {
-    static::$boom = new stdclass;
+  function go() :mixed{
+    static::$boom = new stdClass;
   }
 }
 
 class Y extends D {
-  static $boom = 'heh';
+  public static $boom = 'heh';
 }
 
-function go() {
+function go() :mixed{
   var_dump(Y::$boom);
   var_dump(is_string(Y::$boom));
   (new Y)->go();
@@ -19,4 +19,8 @@ function go() {
   var_dump(is_object(Y::$boom));
 }
 
+
+<<__EntryPoint>>
+function main_public_static_props_003() :mixed{
 go();
+}

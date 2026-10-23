@@ -1,33 +1,30 @@
-<?php
+<?hh
 /* Prototype  : array array_udiff(array arr1, array arr2 [, array ...], callback data_comp_func)
- * Description: Returns the entries of arr1 that have values which are not present in any of the others arguments. Elements are compared by user supplied function. 
+ * Description: Returns the entries of arr1 that have values which are not present in any of the others arguments. Elements are compared by user supplied function.
  * Source code: ext/standard/array.c
- * Alias to functions: 
+ * Alias to functions:
  */
-
-echo "*** Testing array_udiff() : usage variation ***\n";
-
-// Initialise function arguments not being substituted (if any)
-$arr2 = array(1, 2);
-
-include('compare_function.inc');
-$data_comp_func = 'compare_function';
-
-//get an unset variable
-$unset_var = 10;
-unset ($unset_var);
 
 // define some classes
 class classWithToString
 {
-	public function __toString() {
-		return "Class A object";
-	}
+    public function __toString() :mixed{
+        return "Class A object";
+    }
 }
 
 class classWithoutToString
 {
 }
+<<__EntryPoint>> function main(): void {
+include('compare_function.inc');
+echo "*** Testing array_udiff() : usage variation ***\n";
+
+// Initialise function arguments not being substituted (if any)
+$arr2 = vec[1, 2];
+
+$data_comp_func = compare_function<>;
+
 
 // heredoc string
 $heredoc = <<<EOT
@@ -35,11 +32,11 @@ hello world
 EOT;
 
 // add arrays
-$index_array = array (1, 2, 3);
-$assoc_array = array ('one' => 1, 'two' => 2);
+$index_array = vec[1, 2, 3];
+$assoc_array = dict['one' => 1, 'two' => 2];
 
 //array of values to iterate over
-$inputs = array(
+$inputs = dict[
 
       // int data
       'int 0' => 0,
@@ -78,12 +75,8 @@ $inputs = array(
       'instance of classWithToString' => new classWithToString(),
       'instance of classWithoutToString' => new classWithoutToString(),
 
-      // undefined data
-      'undefined var' => @$undefined_var,
 
-      // unset data
-      'unset var' => @$unset_var,
-);
+];
 
 // loop through each element of the array for arr1
 
@@ -92,5 +85,5 @@ foreach($inputs as $key =>$value) {
       var_dump( array_udiff($value, $arr2, $data_comp_func) );
 };
 
-?>
-===DONE===
+echo "===DONE===\n";
+}

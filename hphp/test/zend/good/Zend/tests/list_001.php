@@ -1,6 +1,5 @@
-<?php
-
-list($a, list($b)) = array(new stdclass, array(new stdclass));
+<?hh
+<<__EntryPoint>> function main(): void {
+list($a, list($b)) = vec[new stdClass, vec[new stdClass]];
 var_dump($a, $b);
-
-?>
+}

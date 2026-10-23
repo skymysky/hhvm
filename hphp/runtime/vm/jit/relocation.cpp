@@ -15,14 +15,16 @@
 */
 
 #include "hphp/runtime/vm/jit/relocation.h"
+#ifdef __aarch64__
 #include "hphp/runtime/vm/jit/relocation-arm.h"
-#include "hphp/runtime/vm/jit/relocation-ppc64.h"
+#else
 #include "hphp/runtime/vm/jit/relocation-x64.h"
+#endif
 #include "hphp/runtime/vm/jit/asm-info.h"
 
 #include "hphp/util/arch.h"
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 
 void RelocationInfo::recordRange(TCA start, TCA end,
                                  TCA destStart, TCA destEnd) {
@@ -174,10 +176,20 @@ void adjustMetaDataForRelocation(RelocationInfo& rel,
      * But the target is an instruction, so skip over any nops
      * that might have been inserted (eg for alignment).
      */
-    if (auto const adjusted = rel.adjustedAddressAfter(ct.second)) {
-      ct.second = adjusted;
-    }
+     if (auto const adjusted = rel.adjustedAddressAfter(ct.second)) {
+       ct.second = adjusted;
+     }
   }
+
+  for (auto& is : meta.inlineStacks) {
+    /*
+     * As with fixups and catches these are return addresses.
+     */
+     if (auto const adjusted = rel.adjustedAddressBefore(is.first)) {
+       is.first = adjusted;
+     }
+   }
+
 
   for (auto& jt : meta.jmpTransIDs) {
     if (auto const adjusted = rel.adjustedAddressAfter(jt.first)) {
@@ -185,9 +197,27 @@ void adjustMetaDataForRelocation(RelocationInfo& rel,
     }
   }
 
+  for (auto& it : meta.callFuncIds) {
+    if (auto const adjusted = rel.adjustedAddressAfter(it.first)) {
+      it.first = adjusted;
+    }
+  }
+
   for (auto& r : meta.trapReasons) {
     if (auto const adjusted = rel.adjustedAddressAfter(r.first)) {
       r.first = adjusted;
+    }
+  }
+
+  for (auto& r : meta.trapFixups) {
+    if (auto const adjusted = rel.adjustedAddressAfter(r.first)) {
+      r.first = adjusted;
+    }
+  }
+
+  for (auto& it : meta.interceptTCAs) {
+    if (auto const adjusted = rel.adjustedAddressAfter(it.second)) {
+      it.second = adjusted;
     }
   }
 
@@ -216,16 +246,26 @@ void adjustMetaDataForRelocation(RelocationInfo& rel,
 
   decltype(meta.addressImmediates) updatedAI;
   for (auto addrImm : meta.addressImmediates) {
+    if (rel.isAddressImmediateInvalidToMap(addrImm)) continue;
     if (TCA adjusted = rel.adjustedAddressAfter(addrImm)) {
       updatedAI.insert(adjusted);
     } else if (TCA odd = rel.adjustedAddressAfter((TCA)~uintptr_t(addrImm))) {
-      // just for cgLdObjMethod
+      // just for LdSmashable
       updatedAI.insert((TCA)~uintptr_t(odd));
     } else {
       updatedAI.insert(addrImm);
     }
   }
   updatedAI.swap(meta.addressImmediates);
+
+  // These markers only guide the relocation that just completed.
+  meta.testBranches.clear();
+
+  if (meta.fallthru) {
+    if (TCA adjusted = rel.adjustedAddressAfter(*meta.fallthru)) {
+      meta.fallthru = adjusted;
+    }
+  }
 
   decltype(meta.alignments) updatedAF;
   for (auto af : meta.alignments) {
@@ -236,12 +276,6 @@ void adjustMetaDataForRelocation(RelocationInfo& rel,
     }
   }
   updatedAF.swap(meta.alignments);
-
-  for (auto& af : meta.reusedStubs) {
-    if (TCA adjusted = rel.adjustedAddressAfter(af)) {
-      af = adjusted;
-    }
-  }
 
   decltype(meta.smashableCallData) updatedCD;
   for (auto& cd : meta.smashableCallData) {
@@ -256,22 +290,68 @@ void adjustMetaDataForRelocation(RelocationInfo& rel,
   }
   updatedCD.swap(meta.smashableCallData);
 
-  decltype(meta.smashableJumpData) updatedJD;
-  for (auto& jd : meta.smashableJumpData) {
-    if (auto adjusted = rel.adjustedAddressAfter(jd.first)) {
-      updatedJD[adjusted] = jd.second;
+  for (auto& b : meta.smashableBinds) {
+    if (auto adjusted = rel.adjustedAddressAfter(b.smashable.toSmash())) {
       FTRACE_MOD(Trace::mcg, 3,
-                 "adjustMetaDataForRelocation(smashableJumpData): {} => {}\n",
-                 jd.first, adjusted);
-    } else {
-      updatedJD[jd.first] = jd.second;
+                 "adjustMetaDataForRelocation(smashableBinds): {} => {}\n",
+                 b.smashable.toSmash(), adjusted);
+      b.smashable.adjust(adjusted);
     }
   }
-  updatedJD.swap(meta.smashableJumpData);
 
+  for (auto& li : meta.literalAddrs) {
+    if (auto adjusted = rel.adjustedAddressAfter((TCA)li.second)) {
+      li.second = (uint64_t*)adjusted;
+    }
+  }
 
-  // Perform platform-specific metadata adjustments.
-  ARCH_SWITCH_CALL(adjustMetaDataForRelocation, rel, asmInfo, meta);
+  for (auto& v : meta.veneers) {
+    bool updated = false;
+    DEBUG_ONLY auto const before = v;
+    if (auto adjustedSource = rel.adjustedAddressAfter(v.source)) {
+      v.source = adjustedSource;
+      updated = true;
+    }
+    if (auto adjustedTarget = rel.adjustedAddressAfter(v.target)) {
+      v.target = adjustedTarget;
+      updated = true;
+    }
+    if (updated) {
+      FTRACE_MOD(Trace::mcg, 3,
+                 "adjustMetaDataForRelocation(veneers): ({}, {}) => ({}, {})\n",
+                 before.source, before.target, v.source, v.target);
+    }
+  }
+
+  decltype(meta.smashableLocations) updatedSL;
+  for (auto sl : meta.smashableLocations) {
+    if (auto adjusted = rel.adjustedAddressAfter(sl)) {
+      updatedSL.insert(adjusted);
+    } else {
+      updatedSL.insert(sl);
+    }
+  }
+  updatedSL.swap(meta.smashableLocations);
+
+  decltype(meta.codePointers) updatedCP;
+  for (auto cp : meta.codePointers) {
+    if (auto adjusted = (TCA*)rel.adjustedAddressAfter((TCA)cp)) {
+      updatedCP.emplace(adjusted);
+    } else {
+      updatedCP.emplace(cp);
+    }
+  }
+  updatedCP.swap(meta.codePointers);
+
+  decltype(meta.nativeCalls) updatedNC;
+  for (auto& nc : meta.nativeCalls) {
+    if (auto adjusted = rel.adjustedAddressAfter(nc.first)) {
+      updatedNC[adjusted] = nc.second;
+    } else {
+      updatedNC[nc.first] = nc.second;
+    }
+  }
+  updatedNC.swap(meta.nativeCalls);
 
   if (asmInfo) {
     assertx(asmInfo->validate());
@@ -297,20 +377,16 @@ void adjustForRelocation(RelocationInfo& rel, TCA srcStart, TCA srcEnd) {
 void adjustCodeForRelocation(RelocationInfo& rel, CGMeta& fixups) {
   return ARCH_SWITCH_CALL(adjustCodeForRelocation, rel, fixups);
 }
-void findFixups(TCA start, TCA end, CGMeta& fixups) {
-  return ARCH_SWITCH_CALL(findFixups, start, end, fixups);
-}
 size_t relocate(RelocationInfo& rel,
                 CodeBlock& destBlock,
                 TCA start, TCA end,
                 CodeBlock& srcBlock,
                 CGMeta& fixups,
-                TCA* exitAddr,
                 AreaIndex codeArea) {
   return ARCH_SWITCH_CALL(relocate, rel, destBlock, start, end, srcBlock,
-                          fixups, exitAddr, codeArea);
+                          fixups, codeArea);
 }
 
 //////////////////////////////////////////////////////////////////////
 
-}}
+}

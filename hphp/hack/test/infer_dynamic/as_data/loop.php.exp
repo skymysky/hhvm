@@ -1,0 +1,11 @@
+{ "function": "\\takes_int", "solutions": [] }
+{
+  "function": "\\test_while_loop",
+  "solutions": [
+    {
+      "name": "$d",
+      "pos": "File \"loop.php\", line 5, characters 34-35:",
+      "type": "int"
+    }
+  ]
+}

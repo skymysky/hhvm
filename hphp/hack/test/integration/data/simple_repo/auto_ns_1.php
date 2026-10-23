@@ -1,5 +1,9 @@
-        <?hh
-        namespace Derp\Lib\Herp;
-        function f() {
-            return 1;
-        }
+<?hh
+
+namespace Derp\Lib\Herp;
+
+type T = int;
+
+function f(): T {
+    return 1;
+}

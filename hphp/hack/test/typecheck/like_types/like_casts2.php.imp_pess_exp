@@ -1,0 +1,151 @@
+warning: Warn[12011] This `as` assertion will always succeed and hence is redundant. The expression on the left has a type `dynamic` which is a subtype of `~Cov<int>`. [1]
+
+like_casts2.php:8:3
+ 6 | 
+ 7 | function basics(dynamic $d): void {
+ 8 |   $d as ~Cov<int>;
+   |   ^^^^^^^^^^^^^^^ [1]
+ 9 |   $d as ~Contra<int>;
+10 |   $d as ~Inv<int>;
+
+warning: Warn[12011] This `as` assertion will always succeed and hence is redundant. The expression on the left has a type `dynamic` which is a subtype of `~Contra<int>`. [1]
+
+like_casts2.php:9:3
+ 7 | function basics(dynamic $d): void {
+ 8 |   $d as ~Cov<int>;
+ 9 |   $d as ~Contra<int>;
+   |   ^^^^^^^^^^^^^^^^^^ [1]
+10 |   $d as ~Inv<int>;
+11 | 
+
+warning: Warn[12011] This `as` assertion will always succeed and hence is redundant. The expression on the left has a type `dynamic` which is a subtype of `~Inv<int>`. [1]
+
+like_casts2.php:10:3
+ 8 |   $d as ~Cov<int>;
+ 9 |   $d as ~Contra<int>;
+10 |   $d as ~Inv<int>;
+   |   ^^^^^^^^^^^^^^^ [1]
+11 | 
+12 |   $d as ~shape('a' => int);
+
+warning: Warn[12011] This `as` assertion will always succeed and hence is redundant. The expression on the left has a type `dynamic` which is a subtype of `~shape('a' => int)`. [1]
+
+like_casts2.php:12:3
+10 |   $d as ~Inv<int>;
+11 | 
+12 |   $d as ~shape('a' => int);
+   |   ^^^^^^^^^^^^^^^^^^^^^^^^ [1]
+13 |   $d as ~(int, int);
+14 | 
+
+warning: Warn[12011] This `as` assertion will always succeed and hence is redundant. The expression on the left has a type `dynamic` which is a subtype of `~(int, int)`. [1]
+
+like_casts2.php:13:3
+11 | 
+12 |   $d as ~shape('a' => int);
+13 |   $d as ~(int, int);
+   |   ^^^^^^^^^^^^^^^^^ [1]
+14 | 
+15 |   $d as ~(function (int): string);
+
+warning: Warn[12011] This `as` assertion will always succeed and hence is redundant. The expression on the left has a type `dynamic` which is a subtype of `~(function(int): ~string)`. [1]
+
+like_casts2.php:15:3
+13 |   $d as ~(int, int);
+14 | 
+15 |   $d as ~(function (int): string);
+   |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ [1]
+16 | }
+17 | 
+
+warning: Warn[12011] This `as` assertion will always succeed and hence is redundant. The expression on the left has a type `dynamic` which is a subtype of `~shape('a' => vec<int>)`. [1]
+
+like_casts2.php:19:3
+17 | 
+18 | function inner_types(dynamic $d): void {
+19 |   $d as ~shape('a' => vec<int>);
+   |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ [1]
+20 | 
+21 |   $d as ~shape('a' => Vector<int>);
+
+warning: Warn[12011] This `as` assertion will always succeed and hence is redundant. The expression on the left has a type `dynamic` which is a subtype of `~shape('a' => Vector<int>)`. [1]
+
+like_casts2.php:21:3
+19 |   $d as ~shape('a' => vec<int>);
+20 | 
+21 |   $d as ~shape('a' => Vector<int>);
+   |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ [1]
+22 | }
+
+error: Typing[4195] Invalid `as` expression hint [1]
+-> The `as` operator cannot be used with a type with an erased generic type argument [2]
+
+like_casts2.php:8:9
+ 6 | 
+ 7 | function basics(dynamic $d): void {
+ 8 |   $d as ~Cov<int>;
+   |         ^^^^^^^^^ [1]
+   |          ^^^^^^^^ [2]
+ 9 |   $d as ~Contra<int>;
+10 |   $d as ~Inv<int>;
+
+error: Typing[4195] Invalid `as` expression hint [1]
+-> The `as` operator cannot be used with a type with an erased generic type argument [2]
+
+like_casts2.php:9:9
+ 7 | function basics(dynamic $d): void {
+ 8 |   $d as ~Cov<int>;
+ 9 |   $d as ~Contra<int>;
+   |         ^^^^^^^^^^^^ [1]
+   |          ^^^^^^^^^^^ [2]
+10 |   $d as ~Inv<int>;
+11 | 
+
+error: Typing[4195] Invalid `as` expression hint [1]
+-> The `as` operator cannot be used with a type with an erased generic type argument [2]
+
+like_casts2.php:10:9
+ 8 |   $d as ~Cov<int>;
+ 9 |   $d as ~Contra<int>;
+10 |   $d as ~Inv<int>;
+   |         ^^^^^^^^^ [1]
+   |          ^^^^^^^^ [2]
+11 | 
+12 |   $d as ~shape('a' => int);
+
+error: Typing[4195] Invalid `as` expression hint [1]
+-> The `as` operator cannot be used with a function type [2]
+
+like_casts2.php:15:9
+13 |   $d as ~(int, int);
+14 | 
+15 |   $d as ~(function (int): string);
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^ [1]
+   |          ^^^^^^^^^^^^^^^^^^^^^^^^ [2]
+16 | }
+17 | 
+
+error: Typing[4195] Invalid `as` expression hint [1]
+-> The `as` operator cannot be used with a type with an erased generic type argument [2]
+
+like_casts2.php:19:9
+17 | 
+18 | function inner_types(dynamic $d): void {
+19 |   $d as ~shape('a' => vec<int>);
+   |         ^^^^^^^^^^^^^^^^^^^^^^^ [1]
+   |                       ^^^^^^^^ [2]
+20 | 
+21 |   $d as ~shape('a' => Vector<int>);
+
+error: Typing[4195] Invalid `as` expression hint [1]
+-> The `as` operator cannot be used with a type with an erased generic type argument [2]
+
+like_casts2.php:21:9
+19 |   $d as ~shape('a' => vec<int>);
+20 | 
+21 |   $d as ~shape('a' => Vector<int>);
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^ [1]
+   |                       ^^^^^^^^^^^ [2]
+22 | }
+
+14 errors found

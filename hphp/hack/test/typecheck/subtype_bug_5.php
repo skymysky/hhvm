@@ -2,5 +2,5 @@
 class B {}
 class C extends B {}
 
-function foo(Pair<mixed, mixed> $x) {}
-function test(ImmMap<int, string> $x) { foo($x); }
+function foo(Pair<mixed, mixed> $x): void {}
+function test(ImmMap<int, string> $x): void { foo($x); }

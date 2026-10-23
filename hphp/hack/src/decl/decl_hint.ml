@@ -1,4 +1,4 @@
-(**
+(*
  * Copyright (c) 2015, Facebook, Inc.
  * All rights reserved.
  *
@@ -10,129 +10,490 @@
 (*****************************************************************************)
 (* Converts a type hint into a type  *)
 (*****************************************************************************)
-open Hh_core
-open Nast
+open Hh_prelude
+open Aast
 open Typing_defs
+module SN = Naming_special_names
+
+let has_splats nsi_field_map =
+  List.exists nsi_field_map ~f:(function
+      | SE_splat _ -> true
+      | SE_field _ -> false)
+
+let make_decl_ty env p ty_ =
+  mk (Typing_reason.hint (Decl_env.make_decl_pos env p), ty_)
 
 (* Unpacking a hint for typing *)
-
 let rec hint env (p, h) =
-  let h = hint_ p env h in
-  Typing_reason.Rhint p, h
+  let ty_ = hint_ p env h in
+  make_decl_ty env p ty_
 
-and shape_field_info_to_shape_field_type env { sfi_optional; sfi_hint } =
+and context_hint env (p, h) =
+  match h with
+  | Hfun_context n ->
+    make_decl_ty env p (Tgeneric (Format.sprintf "T/[ctx %s]" n))
+  | Haccess ((_, (Habstr n | Hvar n)), ids) ->
+    let name =
+      Format.sprintf
+        "T/[%s::%s]"
+        n
+        (String.concat ~sep:"::" (List.map ~f:snd ids))
+    in
+    make_decl_ty env p (Tgeneric name)
+  | _ -> hint env (p, h)
+
+and shape_field_info_to_shape_field_type
+    env { sfi_optional; sfi_hint; sfi_name = _ } =
   { sft_optional = sfi_optional; sft_ty = hint env sfi_hint }
 
+and aast_user_attribute_to_decl_user_attribute
+    env { Aast_defs.ua_name; ua_params } =
+  {
+    Typing_defs.ua_name = Decl_env.make_decl_posed env ua_name;
+    ua_params =
+      List.filter_map ua_params ~f:(function
+          | (_, _, Class_const ((_, _, CI (_, cls)), (_, name)))
+            when String.equal name SN.Members.mClass ->
+            Some (Typing_defs_core.Classname cls)
+          | (_, _, Aast.EnumClassLabel (_, s)) ->
+            Some (Typing_defs_core.EnumClassLabel s)
+          | (_, _, Aast.String s) -> Some (Typing_defs_core.String s)
+          | (_, _, Aast.Int i) -> Some (Typing_defs_core.Int i)
+          | _ -> None);
+    ua_raw_val = None;
+  }
+
+and aast_contexts_to_decl_capability env ctxs default_pos :
+    Aast.pos * decl_ty capability =
+  match ctxs with
+  | Some (pos, hl) ->
+    let dtys = List.map ~f:(context_hint env) hl in
+    (* For coeffect contexts, in general we do not simplify empty or singleton
+     * intersection, we keep them as is, so we don't use Typing_make_type
+     * on purpose.
+     * However the direct decl parser removes the intersection when the
+     * context was a single Hfun_context. Let's do the same here
+     *)
+    let reason = Reason.hint (Decl_env.make_decl_pos env pos) in
+    let dty =
+      match dtys with
+      | [dty] -> begin
+        match get_node dty with
+        | Tgeneric _ -> dty
+        | _ -> mk (reason, Tintersection dtys)
+      end
+      | _ -> mk (reason, Tintersection dtys)
+    in
+    (pos, CapTy dty)
+  | None -> (default_pos, CapDefaults (Decl_env.make_decl_pos env default_pos))
+
+and aast_tparam_to_decl_tparam env t =
+  {
+    tp_variance = t.Aast.tp_variance;
+    tp_name = Decl_env.make_decl_posed env t.Aast.tp_name;
+    tp_constraints =
+      List.map ~f:(Tuple.T2.map_snd ~f:(hint env)) t.Aast.tp_constraints;
+    tp_reified = t.Aast.tp_reified;
+    tp_user_attributes =
+      List.map
+        ~f:(aast_user_attribute_to_decl_user_attribute env)
+        t.Aast.tp_user_attributes;
+  }
+
 and hint_ p env = function
-  | Hany -> Tany
   | Hmixed -> Tmixed
+  | Hwildcard -> Twildcard
   | Hnonnull -> Tnonnull
   | Hthis -> Tthis
-  | Hdynamic -> Tdynamic
-  | Harray (h1, h2) ->
-    if env.Decl_env.mode = FileInfo.Mstrict && h1 = None
-    then Errors.generic_array_strict p;
-    let h1 = Option.map h1 (hint env) in
-    let h2 = Option.map h2 (hint env) in
-    Tarray (h1, h2)
-  | Hdarray (h1, h2) ->
-    Tdarray (hint env h1, hint env h2)
-  | Hvarray (h) ->
-    Tvarray (hint env h)
-  | Hvarray_or_darray h ->
-    Tvarray_or_darray (hint env h)
+  | Hdynamic -> Tdynamic None
+  | Hnothing -> Tunion []
+  | Hvec_or_dict (h1, h2) ->
+    let t1 =
+      match h1 with
+      | Some h -> hint env h
+      | None ->
+        mk
+          ( Typing_reason.vec_or_dict_key (Decl_env.make_decl_pos env p),
+            Tprim Aast.Tarraykey )
+    in
+    Tvec_or_dict (t1, hint env h2)
   | Hprim p -> Tprim p
-  | Habstr x ->
-    Tgeneric x
-  | Hoption (_, Hprim Tvoid) ->
-    if TypecheckerOptions.experimental_feature_enabled
-         env.Decl_env.decl_tcopt
-         TypecheckerOptions.experimental_void_is_type_of_null
-    then Errors.option_void p
-    else Errors.option_return_only_typehint p `void;
-    Terr
-  | Hoption (_, Hprim Tnoreturn) ->
-    Errors.option_return_only_typehint p `noreturn;
-    Terr
-  | Hoption (_, Hmixed) ->
-    Errors.option_mixed p;
-    Terr
+  | Habstr x -> Tgeneric x
+  | Hclass_ptr (k, h) ->
+    let h =
+      match k with
+      | CKclass -> h
+      | CKenum -> (p, Happly ((p, SN.Classes.cHH_BuiltinEnum), [h]))
+    in
+    Tclass_ptr (hint env h)
   | Hoption h ->
     let h = hint env h in
     Toption h
-  | Hfun (reactivity, is_coroutine, hl, kl, vh, h) ->
-    let make_param ((p, _ as x), k) =
-      { fp_pos = p;
-        fp_name = None;
+  | Hlike h -> Tlike (hint env h)
+  | Hfun
+      {
+        hf_tparams;
+        hf_is_readonly = ro;
+        hf_param_tys = hl;
+        hf_param_info = pil;
+        hf_variadic_ty = vh;
+        hf_named_variadic_ty = nvh;
+        hf_ctxs = ctxs;
+        hf_return_ty = h;
+        hf_is_readonly_return = readonly_ret;
+      } ->
+    let make_param ((p, _) as x) param_info =
+      let (is_optional, readonly, splat, kind, named_param_name) =
+        match param_info with
+        | Some p ->
+          let readonly =
+            match p.hfparam_readonlyness with
+            | Some Ast_defs.Readonly -> true
+            | _ -> false
+          in
+          let is_optional =
+            match p.hfparam_optional with
+            | Some Ast_defs.Optional -> true
+            | _ -> false
+          in
+          let splat =
+            match p.hfparam_splat with
+            | Some Ast_defs.Splat -> true
+            | _ -> false
+          in
+          let param_kind = get_param_mode p.hfparam_kind in
+          (is_optional, readonly, splat, param_kind, p.hfparam_named)
+        | None -> (false, false, false, FPnormal, None)
+      in
+      {
+        fp_pos = Decl_env.make_decl_pos env p;
+        fp_name =
+          named_param_name
+          (* Here `is_some fp_name` iff the param is a named parameter (type-relevant)
+             * Note that in a later pass this field can become populated for unnamed params (not type-relevant)
+          *);
         fp_type = hint env x;
-        fp_kind = get_param_mode ~is_ref:false k;
-        fp_accept_disposable = false;
-        fp_mutability = None;
-        fp_rx_condition = None;
+        fp_flags =
+          make_fp_flags
+            ~mode:kind
+            ~accept_disposable:false
+            ~is_optional
+            ~readonly
+            ~ignore_readonly_error:false
+            ~splat
+            ~named:(Option.is_some named_param_name);
+        fp_def_value = None;
       }
     in
-    let paraml = List.map (List.zip_exn hl kl) make_param in
-    let ret = hint env h in
-    let arity_min = List.length paraml in
-    let arity = match vh with
-      | Hvariadic Some(t) -> Fvariadic (arity_min, make_param (t, None))
-      | Hvariadic None -> Fvariadic (arity_min, make_param ((p, Hany), None))
-      | Hnon_variadic -> Fstandard (arity_min, arity_min)
+    let readonly_opt ro =
+      match ro with
+      | Some Ast_defs.Readonly -> true
+      | None -> false
     in
-    let reactivity = match reactivity with
-    | FReactive -> Reactive None
-    | FShallow -> Shallow None
-    | FLocal -> Local None
-    | FNonreactive -> Nonreactive in
-    Tfun {
-      ft_pos = p;
-      ft_deprecated = None;
-      ft_abstract = false;
-      ft_is_coroutine = is_coroutine;
-      ft_arity = arity;
-      ft_tparams = [];
-      ft_where_constraints = [];
-      ft_params = paraml;
-      ft_ret = ret;
-      ft_ret_by_ref = false;
-      ft_reactive = reactivity;
-      ft_return_disposable = false;
-      ft_mutability = None;
-      ft_returns_mutable = false;
-      ft_decl_errors = None;
-      ft_returns_void_to_rx = false;
-    }
-  | Happly ((p, "\\Tuple"), _)
-  | Happly ((p, "\\tuple"), _) ->
-    Errors.tuple_syntax p;
-    Terr
-  | Happly (((_p, c) as id), argl) ->
-    Decl_env.add_wclass env c;
-    let argl = List.map argl (hint env) in
+    let paraml = List.map2_exn hl pil ~f:make_param in
+    let implicit_params =
+      let (_pos, capability) = aast_contexts_to_decl_capability env ctxs p in
+      { capability }
+    in
+    let ret = hint env h in
+    (* Handle positional variadic *)
+    let (variadic, paraml) =
+      match vh with
+      | Some t -> (true, paraml @ [make_param t None])
+      | None -> (false, paraml)
+    in
+    (* Handle named variadic - create a param with named=true *)
+    let named_variadic_param_info =
+      Some
+        {
+          Aast.hfparam_kind = Ast_defs.Pnormal;
+          hfparam_readonlyness = None;
+          hfparam_optional = None;
+          hfparam_splat = None;
+          hfparam_named = Some "...";
+        }
+    in
+    let (named_variadic, paraml) =
+      match nvh with
+      | Some t -> (true, paraml @ [make_param t named_variadic_param_info])
+      | None -> (false, paraml)
+    in
+    let everything_sdt =
+      Typechecker_options.everything_sdt (Decl_env.tcopt env)
+    in
+    let ft_tparams =
+      List.map
+        hf_tparams
+        ~f:(fun { htp_name; htp_constraints; htp_user_attributes } ->
+          let tp_name =
+            let (pos, id) = htp_name in
+            (Pos_or_decl.of_raw_pos pos, id)
+          in
+          let tp_constraints =
+            List.map htp_constraints ~f:(fun (cstr_kind, cstr_hint) ->
+                (cstr_kind, hint env cstr_hint))
+          in
+
+          let tp_user_attributes =
+            List.map htp_user_attributes ~f:(fun (pos, id) ->
+                let ua_name = (Pos_or_decl.of_raw_pos pos, id) in
+                Typing_defs_core.{ ua_name; ua_params = []; ua_raw_val = None })
+          in
+          (* Add an implicit upper-bound if we are decling under implicit pessimisation
+             and `NoAutoBound` isn't set *)
+          let tp_constraints =
+            if
+              everything_sdt
+              && not
+                   (List.exists htp_user_attributes ~f:(fun (_, id) ->
+                        String.equal
+                          id
+                          Naming_special_names.UserAttributes.uaNoAutoBound))
+            then
+              let pos = fst tp_name in
+              let reason = Typing_reason.witness_from_decl pos in
+              let ub =
+                mk
+                  ( reason,
+                    Tapply
+                      ( (pos, Naming_special_names.Classes.cSupportDyn),
+                        [mk (reason, Tmixed)] ) )
+              in
+              (Ast_defs.Constraint_as, ub) :: tp_constraints
+            else
+              tp_constraints
+          in
+
+          Typing_defs_core.
+            {
+              tp_variance = Ast_defs.Invariant (* Meaningless here *);
+              tp_name;
+              tp_constraints;
+              tp_reified = Erased;
+              tp_user_attributes;
+            })
+    in
+    Tfun
+      {
+        ft_tparams;
+        ft_where_constraints = [];
+        ft_params = paraml;
+        ft_implicit_params = implicit_params;
+        ft_ret = ret;
+        ft_flags =
+          Typing_defs_flags.Fun.make
+            Ast_defs.FSync
+            ~return_disposable:false
+            ~returns_readonly:(readonly_opt readonly_ret)
+            ~readonly_this:(readonly_opt ro)
+            ~support_dynamic_type:false
+            ~is_memoized:false
+            ~variadic
+            ~named_variadic;
+        ft_instantiated = List.is_empty ft_tparams;
+      }
+  | Happly (id, argl) ->
+    let id = Decl_env.make_decl_posed env id in
+    let argl = List.map argl ~f:(hint env) in
     Tapply (id, argl)
   | Haccess (root_ty, ids) ->
+    let root_ty = hint_ p env (snd root_ty) in
+    let rec translate res ids =
+      match ids with
+      | [] -> res
+      | id :: ids ->
+        translate
+          (Taccess
+             ( mk (Typing_reason.hint (Decl_env.make_decl_pos env p), res),
+               Decl_env.make_decl_posed env id ))
+          ids
+    in
+    translate root_ty ids
+  | Hrefinement (root_ty, members) ->
     let root_ty = hint env root_ty in
-    Taccess (root_ty, ids)
-  | Htuple hl ->
-    let tyl = List.map hl (hint env) in
-    Ttuple tyl
-  | Hshape { nsi_allows_unknown_fields; nsi_field_map } ->
-    let optional_shape_fields_enabled =
-      not @@
-        TypecheckerOptions.experimental_feature_enabled
-          env.Decl_env.decl_tcopt
-          TypecheckerOptions.experimental_disable_optional_and_unknown_shape_fields in
-    let shape_fields_known =
-      match optional_shape_fields_enabled, nsi_allows_unknown_fields with
-        | _, true
-        | false, false ->
-          (* Fields are only partially known, because this shape type comes from
-           * type hint - shapes that contain listed fields can be passed here,
-           * but due to structural subtyping they can also contain other fields,
-           * that we don't know about. *)
-          FieldsPartiallyKnown ShapeMap.empty
-        | true, false ->
-          FieldsFullyKnown in
+    let class_ref =
+      (* We do not err on duplicate refinements as the parser will
+       * already have *)
+      List.fold
+        members
+        ~init:{ cr_consts = S_map.empty }
+        ~f:(fun { cr_consts } r ->
+          let (id, rc) =
+            match r with
+            | Rctx ((_, id), CRexact h) ->
+              (id, { rc_bound = TRexact (context_hint env h); rc_is_ctx = true })
+            | Rctx (((_, id) as _pos), CRloose { cr_lower; cr_upper }) ->
+              let decl_bounds h =
+                Option.map ~f:(context_hint env) h |> Option.to_list
+              in
+              let tr_lower = decl_bounds cr_lower in
+              let tr_upper = decl_bounds cr_upper in
+              ( id,
+                { rc_bound = TRloose { tr_lower; tr_upper }; rc_is_ctx = true }
+              )
+            | Rtype ((_, id), TRexact h) ->
+              (id, { rc_bound = TRexact (hint env h); rc_is_ctx = false })
+            | Rtype ((_, id), TRloose { tr_lower; tr_upper }) ->
+              let decl_bounds = List.map ~f:(hint env) in
+              let tr_lower = decl_bounds tr_lower in
+              let tr_upper = decl_bounds tr_upper in
+              ( id,
+                { rc_bound = TRloose { tr_lower; tr_upper }; rc_is_ctx = false }
+              )
+          in
+          { cr_consts = S_map.add id rc cr_consts })
+    in
+    Trefinement (root_ty, class_ref)
+  | Htuple { tup_required; tup_extra } ->
+    let t_required = List.map tup_required ~f:(hint env) in
+    let (t_optional, t_extra) =
+      match tup_extra with
+      | Hextra { tup_optional; tup_variadic } ->
+        let t_optional = List.map tup_optional ~f:(hint env) in
+        let t_variadic =
+          match tup_variadic with
+          | None -> hint env (p, Hnothing)
+          | Some t -> hint env t
+        in
+        (t_optional, Tvariadic t_variadic)
+      | Hsplat tup_splat -> ([], Tsplat (hint env tup_splat))
+    in
+    Ttuple { t_required; t_optional; t_extra }
+  | Hunion hl ->
+    let tyl = List.map hl ~f:(hint env) in
+    Tunion tyl
+  | Hintersection hl ->
+    let tyl = List.map hl ~f:(hint env) in
+    Tintersection tyl
+  | Hshape { nsi_allows_unknown_fields; nsi_field_map; nsi_unknown_fields_type }
+    when has_splats nsi_field_map ->
+    (* The shape's openness: a typed open (`T...`) contributes its type, a bare
+       `...` contributes `mixed`, and a closed shape contributes nothing. *)
+    let open_unknown =
+      if nsi_allows_unknown_fields then
+        match nsi_unknown_fields_type with
+        | Some type_hint -> Some (hint env type_hint)
+        | None -> Some (hint env (p, Hmixed))
+      else
+        None
+    in
+    (* A field-run, a sequence of contiguous fields, carries the openness itself
+       so its own explicit fields keep their declared types i.e.
+       `shape(..., 'y' => string, ...)`
+       means
+       `shape(..., ...shape('y' => string, ...))`.
+       A closed shape uses `nothing`. *)
+    let field_run_kind =
+      match open_unknown with
+      | Some ty -> ty
+      | None -> hint env (p, Hnothing)
+    in
+    (* In a shape with fields and splats, adjacent fields not interspersed with
+       splats are sugar for a simple shape *)
+    let make_simple_from_fields fields =
+      let fdm =
+        List.fold_left
+          ~f:(fun acc i ->
+            TShapeMap.add
+              (TShapeField.of_ast (Decl_env.make_decl_pos env) i.sfi_name)
+              (shape_field_info_to_shape_field_type env i)
+              acc)
+          ~init:TShapeMap.empty
+          fields
+      in
+      make_decl_ty
+        env
+        p
+        (Tshape
+           (Shape_simple
+              {
+                s_origin = Missing_origin;
+                s_unknown_value = field_run_kind;
+                s_fields = fdm;
+              }))
+    in
+    (* Fold over the elements and accumulate fields; when we encounter a splat
+       we lift the fields into a simple shape. [made_field_run] records whether
+       any field-run was created, i.e. whether the openness has been captured. *)
+    let (elems, pending_fields, made_field_run) =
+      List.fold_left
+        nsi_field_map
+        ~init:([], [], false)
+        ~f:(fun (elems, pending, made_field_run) -> function
+        | SE_field sfi -> (elems, sfi :: pending, made_field_run)
+        | SE_splat h ->
+          let (elems, made_field_run) =
+            if List.is_empty pending then
+              (elems, made_field_run)
+            else
+              (make_simple_from_fields (List.rev pending) :: elems, true)
+          in
+          let splat_ty = hint env h in
+          (splat_ty :: elems, [], made_field_run))
+    in
+    let (elems, made_field_run) =
+      if List.is_empty pending_fields then
+        (elems, made_field_run)
+      else
+        (make_simple_from_fields (List.rev pending_fields) :: elems, true)
+    in
+    (* If the shape is open but no field-run captured the openness (it consists
+       only of splats, e.g. `shape(...Base, ...)`), the trailing `...` / `T...`
+       would otherwise be lost. Represent it as a standalone open-empty element
+       (i.e. `shape(...Base, ...shape(...))`), placed rightmost. *)
+    let elems =
+      match open_unknown with
+      | Some unknown_value when not made_field_run ->
+        let open_empty =
+          make_decl_ty
+            env
+            p
+            (Tshape
+               (Shape_simple
+                  {
+                    s_origin = Missing_origin;
+                    s_unknown_value = unknown_value;
+                    s_fields = TShapeMap.empty;
+                  }))
+        in
+        open_empty :: elems
+      | _ -> elems
+    in
+    Tshape (Shape_splat { ss_elems = List.rev elems })
+  | Hshape { nsi_allows_unknown_fields; nsi_field_map; nsi_unknown_fields_type }
+    ->
+    let shape_kind =
+      if nsi_allows_unknown_fields then
+        match nsi_unknown_fields_type with
+        | Some type_hint -> hint env type_hint
+        | None -> hint env (p, Hmixed)
+      else
+        hint env (p, Hnothing)
+    in
+    let fields =
+      List.filter_map nsi_field_map ~f:(function
+          | SE_field sfi -> Some sfi
+          | SE_splat _ -> None)
+    in
     let fdm =
-      ShapeMap.map (shape_field_info_to_shape_field_type env) nsi_field_map in
-    Tshape (shape_fields_known, fdm)
+      List.fold_left
+        ~f:(fun acc i ->
+          TShapeMap.add
+            (TShapeField.of_ast (Decl_env.make_decl_pos env) i.sfi_name)
+            (shape_field_info_to_shape_field_type env i)
+            acc)
+        ~init:TShapeMap.empty
+        fields
+    in
+    Tshape
+      (Shape_simple
+         {
+           s_origin = Missing_origin;
+           s_unknown_value = shape_kind;
+           s_fields = fdm;
+         })
+  | Hsoft (p, h_) -> hint_ p env h_
+  | Hfun_context _
+  | Hvar _ ->
+    Diagnostics.internal_error p "Unexpected context hint";
+    Tunion []

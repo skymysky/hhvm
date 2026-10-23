@@ -1,6 +1,6 @@
-<?php
-
-require_once(dirname(__FILE__) . '/new_db.inc');
+<?hh
+<<__EntryPoint>> function test(): void {
+$db = new SQLite3(':memory:');
 
 echo "Creating Table\n";
 var_dump($db->exec('CREATE TABLE foobar (id INTEGER, name STRING, city STRING)'));
@@ -17,11 +17,11 @@ echo "SELECTING results\n";
 $stmt = $db->prepare($query);
 
 echo "paramCount with wrong number of arguments\n";
-var_dump($stmt->paramCount('foobar'));
+try { var_dump($stmt->paramcount('foobar')); } catch (Exception $e) { echo "\n".'Warning: '.$e->getMessage().' in '.__FILE__.' on line '.__LINE__."\n"; }
 $result = $stmt->execute();
 echo "Closing database\n";
 $stmt = null;
 $result = null;
 var_dump($db->close());
 echo "Done\n";
-?>
+}

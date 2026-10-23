@@ -1,5 +1,5 @@
-<?php
-$dom = new DomDocument;
+<?hh <<__EntryPoint>> function main(): void {
+$dom = new DOMDocument;
 $frag = $dom->createDocumentFragment();
 $frag->appendChild(new DOMElement('root'));
 $dom->appendChild($frag);
@@ -15,7 +15,7 @@ $node = $dom->createElement('newfirst');
 $frag->appendChild($node);
 $root->replaceChild($frag, $root->firstChild);
 
-unset($frag);
+$frag = null;
 $frag = $dom->createDocumentFragment();
 
 $frag->appendChild(new DOMElement('newsecond'));
@@ -64,5 +64,4 @@ $root = $dom->documentElement;
 $root->replaceChild($frag, $root->firstChild);
 
 echo $dom->saveXML();
-
-?>
+}

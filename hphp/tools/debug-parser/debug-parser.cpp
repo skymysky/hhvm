@@ -16,13 +16,25 @@
 
 #include "hphp/tools/debug-parser/debug-parser.h"
 
-#include <folly/Format.h>
+#include "hphp/util/assertions.h"
+
+#include <fmt/core.h>
 
 namespace debug_parser {
 
 ////////////////////////////////////////////////////////////////////////////////
 
 VoidType Type::s_void_type;
+
+const char* show(ObjectTypeName::Linkage linkage) {
+  switch (linkage) {
+    case ObjectTypeName::Linkage::external: return "external";
+    case ObjectTypeName::Linkage::internal: return "internal";
+    case ObjectTypeName::Linkage::none:     return "none";
+    case ObjectTypeName::Linkage::pseudo:   return "pseudo";
+  }
+  not_reached();
+}
 
 Type::~Type() {
   // Normally a Type can't have an empty DiscriminatedPtr, but it can happen
@@ -52,14 +64,14 @@ std::string Type::toString() const {
   // else to have them be separate concepts.
   const auto handle_func = [](const FuncType& func, bool add_ptr) {
     std::string base = add_ptr ?
-      folly::sformat("{}(*)", func.ret.toString()) :
+      fmt::format("{}(*)", func.ret.toString()) :
       func.ret.toString();
 
     std::string args = "(";
     for (std::size_t i = 0; i < func.args.size(); ++i) {
       args = (i != func.args.size()-1) ?
-        folly::sformat("{}{},", args, func.args[i].toString()) :
-        folly::sformat("{}{})", args, func.args[i].toString());
+        fmt::format("{}{},", args, func.args[i].toString()) :
+        fmt::format("{}{})", args, func.args[i].toString());
     }
     return base + args;
   };
@@ -71,32 +83,32 @@ std::string Type::toString() const {
       if (auto func = p->pointee.asFunc()) {
         return handle_func(*func, true);
       } else {
-        return folly::sformat("{}*", p->pointee.toString());
+        return fmt::format("{}*", p->pointee.toString());
       }
     },
     [&](const RefType* p) {
-      return folly::sformat("{}&", p->referenced.toString());
+      return fmt::format("{}&", p->referenced.toString());
     },
     [&](const RValueRefType* p) {
-      return folly::sformat("{}&&", p->referenced.toString());
+      return fmt::format("{}&&", p->referenced.toString());
     },
     [&](const ArrType* p) {
       return p->count ?
-        folly::sformat("{}[{}]", p->element.toString(), *p->count) :
-        folly::sformat("{}[]", p->element.toString());
+        fmt::format("{}[{}]", p->element.toString(), *p->count) :
+        fmt::format("{}[]", p->element.toString());
     },
     [&](const MemberType* p) {
-      return folly::sformat("{} {}::", p->member.toString(), p->obj.name.name);
+      return fmt::format("{} {}::", p->member.toString(), p->obj.name.name);
     },
     [&](const ObjectType* p) { return p->name.name; },
     [&](const ConstType* p) {
-      return folly::sformat("{} const", p->modified.toString());
+      return fmt::format("{} const", p->modified.toString());
     },
     [&](const VolatileType* p) {
-      return folly::sformat("{} volatile", p->modified.toString());
+      return fmt::format("{} volatile", p->modified.toString());
     },
     [&](const RestrictType* p) {
-      return folly::sformat("{} restrict", p->modified.toString());
+      return fmt::format("{} restrict", p->modified.toString());
     }
   );
 }
@@ -106,17 +118,19 @@ std::string Type::toString() const {
  * control which implementation gets returned.
  */
 
-std::unique_ptr<TypeParser> TypeParser::make(const std::string& filename) {
-#if defined(__linux__) || defined(__FreeBSD__)
-  std::unique_ptr<TypeParser> make_dwarf_type_parser(const std::string&);
-  return make_dwarf_type_parser(filename);
+std::unique_ptr<TypeParser> TypeParser::make(const std::string& filename,
+                                             int num_threads) {
+#if defined(__linux__)
+  std::unique_ptr<TypeParser> make_dwarf_type_parser(const std::string&,
+                                                     int);
+  return make_dwarf_type_parser(filename, num_threads);
 #else
   return nullptr;
 #endif
 }
 
 std::unique_ptr<Printer> Printer::make(const std::string& filename) {
-#if defined(__linux__) || defined(__FreeBSD__)
+#if defined(__linux__)
   std::unique_ptr<Printer> make_dwarf_printer(const std::string&);
   return make_dwarf_printer(filename);
 #else

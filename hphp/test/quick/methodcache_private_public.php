@@ -1,12 +1,12 @@
 <?hh
 
 class one {
-  public function doit($o) {
+  public function doit($o) :mixed{
     // Method cache should still dispatch to one::heh for $o :: two
     $o->heh();
   }
 
-  private function heh() {
+  private function heh() :mixed{
     echo "one\n";
   }
 }
@@ -14,12 +14,12 @@ class one {
 class two extends one {
   // You can override a private function with a public one in php.
   // (But you can't change it to static.)
-  public function heh() {
+  public function heh() :mixed{
     echo "two\n";
   }
 }
 
-function main() {
+<<__EntryPoint>> function main(): void {
   $one = new one;
   $two = new two;
   $one->doit($one);
@@ -30,4 +30,3 @@ function main() {
   $one->doit($two);
   $one->doit($two);
 }
-main();

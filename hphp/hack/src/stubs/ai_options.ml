@@ -1,4 +1,4 @@
-(**
+(*
  * Copyright (c) 2015, Facebook, Inc.
  * All rights reserved.
  *
@@ -7,7 +7,13 @@
  *
  *)
 
-type t = unit
+type t = {
+  analyses: string list;
+  unittest_hack_root: Path.t option;
+}
 
-let prepare ~server:_ _ = ()
-let set_json_mode opt _ = opt
+let prepare ~server:_ _ = { analyses = []; unittest_hack_root = None }
+
+let merge_for_unit_tests (options : t) (_ : t) = options
+
+let modify_shared_mem _options config = config

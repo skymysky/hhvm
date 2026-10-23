@@ -14,15 +14,14 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_JIT_ALIGN_X64_H_
-#define incl_HPHP_JIT_ALIGN_X64_H_
+#pragma once
 
 #include "hphp/runtime/vm/jit/types.h"
 #include "hphp/runtime/vm/jit/alignment.h"
 
 #include "hphp/util/data-block.h"
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 
 struct CGMeta;
 
@@ -48,6 +47,5 @@ const AlignInfo& alignment_info(Alignment alignment);
 
 ///////////////////////////////////////////////////////////////////////////////
 
-}}}
+}}
 
-#endif

@@ -1,24 +1,30 @@
-<?php
+<?hh
 
-trait T {
- private $x = 0;
+trait T2 {
+  require implements I2;
 }
-class X {
- use T;
- function x() {
- return ++$this->x;
- }
- }
-class Y extends X {
- use T;
- function y() {
- return ++$this->x;
- }
- }
-class Z extends Y {
- function z() {
- return ++$this->x;
- }
- }
-$a = new Z();
-echo join(" ", array($a->x(), $a->x(), $a->y(), $a->y(), $a->z(), $a->z())), "\n";
+
+trait T implements I2 {
+  use T2;
+  private static ?self::TVal $override = null;
+}
+
+interface I2 {
+  abstract const type TVal;
+}
+
+interface I1 extends I2 {
+  const type TVal = darray<string, string>;
+}
+
+trait T1 implements I1 {}
+
+abstract final class C {
+  use T;
+  use T1;
+}
+
+<<__EntryPoint>>
+function main() :mixed{
+  var_dump(type_structure(C::class, 'TVal'));
+}

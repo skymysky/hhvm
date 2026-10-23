@@ -36,12 +36,12 @@ usage() {
 }
 
 set_hhbc() {
-  HHBC=`grep hhvm.repo.central.path "$INI" | sed 's/[^=]*=\s*\(.*\)/\1/'`
+  HHBC=`grep hhvm.repo.path "$INI" | sed 's/[^=]*=\s*\(.*\)/\1/'`
   if [ "x$HHBC" = "x" ]; then
     mkdir -p /var/cache/hhvm
     USER=`stat -c "%U" "/var/run/hhvm"`
     chown -R "$USER" "/var/cache/hhvm"
-    echo "hhvm.repo.central.path = /var/cache/hhvm/hhvm.hhbc" >> "$INI"
+    echo "hhvm.repo.path = /var/cache/hhvm/hhvm.hhbc" >> "$INI"
     HHBC="/var/cache/hhvm/hhvm.hhbc"
   fi
 }
@@ -51,7 +51,7 @@ repo_enable() {
   find "$1" -type f > "$FILE_LIST"
 
   OUT_DIR=`dirname "$HHBC"`
-  hhvm --hphp --target hhbc --output-dir "$OUT_DIR" --input-list "$FILE_LIST" -l3 -v AllVolatile=true
+  hhvm --hphp --output-dir "$OUT_DIR" --input-list "$FILE_LIST" -l3
 
   OUT_DIR_USER=`stat -c "%U" "$OUT_DIR"`
   HHBC_USER=`stat -c "%U" "$HHBC"`

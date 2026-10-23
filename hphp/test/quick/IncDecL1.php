@@ -1,21 +1,46 @@
 <?hh
 
-function postInc($x) {
-  return $x++;
+function error_boundary((function(): mixed) $fn) :mixed{
+  try {
+    return $fn();
+  } catch (Exception $e) {
+    print("Error: ".$e->getMessage()."\n");
+    return null;
+  }
 }
 
-function preInc($x) {
-  return ++$x;
+function postInc(mixed $x) :mixed{
+  $x = HH\FIXME\UNSAFE_CAST<mixed, dynamic>(
+    $x,
+    'The test intentionally applies increment or decrement to legacy values',
+  );
+  return error_boundary(() ==> { $r = $x; $x++; return $r; });
 }
 
-function postDec($x) {
-  return $x--;
+function preInc(mixed $x) :mixed{
+  $x = HH\FIXME\UNSAFE_CAST<mixed, dynamic>(
+    $x,
+    'The test intentionally applies increment or decrement to legacy values',
+  );
+  return error_boundary(() ==> { ++$x; return $x; });
 }
 
-function preDec($x) {
-  return --$x;
+function postDec(mixed $x) :mixed{
+  $x = HH\FIXME\UNSAFE_CAST<mixed, dynamic>(
+    $x,
+    'The test intentionally applies increment or decrement to legacy values',
+  );
+  return error_boundary(() ==> { $r = $x; $x--; return $r; });
 }
 
+function preDec(mixed $x) :mixed{
+  $x = HH\FIXME\UNSAFE_CAST<mixed, dynamic>(
+    $x,
+    'The test intentionally applies increment or decrement to legacy values',
+  );
+  return error_boundary(() ==> { --$x; return $x; });
+}
+<<__EntryPoint>> function main(): void {
 var_dump(postInc(2));
 var_dump(preInc(2));
 var_dump(postDec(2));
@@ -40,3 +65,4 @@ var_dump(postInc(null));
 var_dump(preInc(null));
 var_dump(postDec(null));
 var_dump(preDec(null));
+}

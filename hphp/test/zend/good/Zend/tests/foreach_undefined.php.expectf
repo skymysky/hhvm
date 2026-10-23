@@ -1,5 +1,3 @@
-
-Notice: %s
-
-Warning: %s
-Done
+Fatal error: Uncaught exception '%s' with message '%s' in %s/foreach_undefined.php:3
+Stack trace:
+%A

@@ -16,17 +16,14 @@
 
 #include "hphp/runtime/vm/jit/irlower-internal.h"
 
+#include "hphp/runtime/base/implicit-context.h"
 #include "hphp/runtime/base/memory-manager.h"
-#include "hphp/runtime/base/ref-data.h"
 
-#include "hphp/runtime/vm/runtime.h"
 #include "hphp/runtime/vm/jit/abi.h"
-#include "hphp/runtime/vm/jit/analysis.h"
 #include "hphp/runtime/vm/jit/arg-group.h"
 #include "hphp/runtime/vm/jit/call-spec.h"
 #include "hphp/runtime/vm/jit/code-gen-cf.h"
 #include "hphp/runtime/vm/jit/code-gen-helpers.h"
-#include "hphp/runtime/vm/jit/dce.h"
 #include "hphp/runtime/vm/jit/extra-data.h"
 #include "hphp/runtime/vm/jit/ir-instruction.h"
 #include "hphp/runtime/vm/jit/ir-opcode.h"
@@ -38,18 +35,59 @@
 #include "hphp/runtime/vm/jit/vasm-reg.h"
 
 #include "hphp/util/asm-x64.h"
+#include "hphp/util/configs/hhir.h"
 #include "hphp/util/trace.h"
 
-namespace HPHP { namespace jit { namespace irlower {
+namespace HPHP::jit::irlower {
 
-TRACE_SET_MOD(irlower);
+TRACE_SET_MOD(irlower)
 
 ///////////////////////////////////////////////////////////////////////////////
+
+void cgKillActRec(IRLS& env, const IRInstruction* inst) {
+  auto& v = vmain(env);
+  v << killeffects{};
+  if (!emitDebugCode()) return;
+
+  auto const fp = srcLoc(env, inst, 0).reg();
+  trashBytes(v, fp[0], sizeof(ActRec), kActRecTrashFill);
+}
+
+void cgKillLoc(IRLS& env, const IRInstruction* inst) {
+  auto& v = vmain(env);
+  v << killeffects{};
+  if (!emitDebugCode()) return;
+
+  auto const fp = srcLoc(env, inst, 0).reg();
+  auto const offset = localOffset(inst->extra<KillLoc>()->locId);
+  trashBytes(v, fp[offset], sizeof(TypedValue), kLocalTrashFill);
+}
 
 void cgLdLoc(IRLS& env, const IRInstruction* inst) {
   auto const fp = srcLoc(env, inst, 0).reg();
   auto const off = localOffset(inst->extra<LdLoc>()->locId);
-  loadTV(vmain(env), inst->dst(), dstLoc(env, inst, 0), fp[off]);
+
+  // For ARM, if we need to load the type, then request 'aux' too -- even though
+  // the value is unneeded, it allows for the type and the value to be merged
+  // into a single loadpair.
+  const bool loadAux = arch::any<arch::ARM>() && inst->dst()->type().needsReg();
+
+  loadTV(vmain(env), inst->dst(), dstLoc(env, inst, 0), fp[off], loadAux);
+}
+
+void cgLdLocForeign(IRLS& env, const IRInstruction* inst) {
+  auto const fp = srcLoc(env, inst, 0).reg();
+  auto const locId = srcLoc(env, inst, 1).reg();
+  auto& v = vmain(env);
+  auto const off = v.makeReg();
+  auto const shifted = v.makeReg();
+  auto const negated = v.makeReg();
+  // calculate offset: (locId + 1) * sizeof(TypedValue)
+  v << addqi{1, locId, off, v.makeReg()};
+  static_assert(sizeof(TypedValue) == 16, "");
+  v << shlqi{4, off, shifted, v.makeReg()};
+  v << neg{shifted, negated, v.makeReg()};
+  loadTV(vmain(env), inst->dst(), dstLoc(env, inst, 0), fp[negated]);
 }
 
 void cgLdLocAddr(IRLS& env, const IRInstruction* inst) {
@@ -63,8 +101,17 @@ void cgLdLocAddr(IRLS& env, const IRInstruction* inst) {
 void cgStLoc(IRLS& env, const IRInstruction* inst) {
   auto const fp = srcLoc(env, inst, 0).reg();
   auto const off = localOffset(inst->extra<StLoc>()->locId);
-  storeTV(vmain(env), fp[off], srcLoc(env, inst, 1), inst->src(1));
+
+  // For ARM, we request the `aux' field to be stored too.  That's unused, but
+  // having a wider store for the type allows it to be merged with the store of
+  // the value into a single storepair instruction.
+  const bool storeAux = arch::any<arch::ARM>();
+
+  storeTV(vmain(env), fp[off], srcLoc(env, inst, 1), inst->src(1),
+          TBottom, storeAux);
 }
+
+void cgStLocMeta(IRLS&, const IRInstruction*) {}
 
 void cgStLocRange(IRLS& env, const IRInstruction* inst) {
   auto const range = inst->extra<StLocRange>();
@@ -76,22 +123,25 @@ void cgStLocRange(IRLS& env, const IRInstruction* inst) {
   auto const val = inst->src(1);
   auto& v = vmain(env);
 
-  auto ireg = v.makeReg();
-  auto nreg = v.makeReg();
+  auto const typePtr = v.makeReg();
+  auto const dataPtr = v.makeReg();
+  v << lea{ptrToLocalType(fp, range->start), typePtr};
+  v << lea{ptrToLocalData(fp, range->start), dataPtr};
 
-  v << lea{fp[localOffset(range->start)], ireg};
-  v << lea{fp[localOffset(range->end)], nreg};
-
-  doWhile(v, CC_NE, {ireg},
-    [&] (const VregList& in, const VregList& out) {
-      auto const i = in[0];
-      auto const res = out[0];
-      auto const sf = v.makeReg();
-
-      storeTV(v, i[0], loc, val);
-      v << subqi{int32_t{sizeof(Cell)}, i, res, v.makeReg()};
-      v << cmpq{res, nreg, sf};
-      return sf;
+  forLoopUnroll(v, range->end - range->start, {typePtr, dataPtr},
+    [&] (Vout& vo, const VregList& in, int iter) {
+      auto const offset = -safe_cast<int32_t>(iter * sizeof(TypedValue));
+      auto const typeIn = in[0];
+      auto const dataIn = in[1];
+      storeTV(vo, val->type(), loc, typeIn[offset], dataIn[offset]);
+    },
+    [&] (Vout& vo, const VregList& in, const VregList& out,
+         unsigned iterations) {
+      auto const typeIn = in[0];
+      auto const dataIn = in[1];
+      auto const typeOut = out[0];
+      auto const dataOut = out[1];
+      nextLocal(vo, typeIn, dataIn, typeOut, dataOut, iterations);
     }
   );
 }
@@ -100,26 +150,8 @@ void cgDbgTrashFrame(IRLS& env, const IRInstruction* inst) {
   auto const fp = srcLoc(env, inst, 0).reg();
   auto const off = cellsToBytes(inst->extra<DbgTrashFrame>()->offset.offset);
   for (auto i = 0; i < kNumActRecCells; ++i) {
-    trashTV(vmain(env), fp, off + cellsToBytes(i), kTVTrashJITFrame);
+    trashFullTV(vmain(env), fp[off + cellsToBytes(i)], kTVTrashJITFrame);
   }
-}
-
-///////////////////////////////////////////////////////////////////////////////
-
-void cgLdLocPseudoMain(IRLS& env, const IRInstruction* inst) {
-  auto const fp = srcLoc(env, inst, 0).reg();
-  auto const off = localOffset(inst->extra<LdLocPseudoMain>()->locId);
-  auto& v = vmain(env);
-
-  irlower::emitTypeCheck(v, env, inst->typeParam(), fp[off + TVOFF(m_type)],
-                         fp[off + TVOFF(m_data)], inst->taken());
-  loadTV(v, inst->dst(), dstLoc(env, inst, 0), fp[off]);
-}
-
-void cgStLocPseudoMain(IRLS& env, const IRInstruction* inst) {
-  auto const fp = srcLoc(env, inst, 0).reg();
-  auto const off = localOffset(inst->extra<StLocPseudoMain>()->locId);
-  storeTV(vmain(env), fp[off], srcLoc(env, inst, 1), inst->src(1));
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -127,7 +159,13 @@ void cgStLocPseudoMain(IRLS& env, const IRInstruction* inst) {
 void cgLdStk(IRLS& env, const IRInstruction* inst) {
   auto const sp = srcLoc(env, inst, 0).reg();
   auto const off = cellsToBytes(inst->extra<LdStk>()->offset.offset);
-  loadTV(vmain(env), inst->dst(), dstLoc(env, inst, 0), sp[off]);
+
+  // For ARM, if we need to load the type, then request 'aux' too -- even though
+  // the value is unneeded, it allows for the type and the value to be merged
+  // into a single loadpair.
+  const bool loadAux = arch::any<arch::ARM>() && inst->dst()->type().needsReg();
+
+  loadTV(vmain(env), inst->dst(), dstLoc(env, inst, 0), sp[off], loadAux);
 }
 
 void cgLdStkAddr(IRLS& env, const IRInstruction* inst) {
@@ -139,7 +177,59 @@ void cgLdStkAddr(IRLS& env, const IRInstruction* inst) {
 void cgStStk(IRLS& env, const IRInstruction* inst) {
   auto const sp = srcLoc(env, inst, 0).reg();
   auto const off = cellsToBytes(inst->extra<StStk>()->offset.offset);
-  storeTV(vmain(env), sp[off], srcLoc(env, inst, 1), inst->src(1));
+
+  auto const type = inst->hasTypeParam()
+    ? inst->typeParam()
+    : inst->src(1)->type();
+
+  // For ARM, we request the `aux' field to be stored too.  That's unused, but
+  // having a wider store for the type allows it to be merged with the store of
+  // the value into a single storepair instruction.
+  const bool storeAux = arch::any<arch::ARM>();
+
+  storeTV(vmain(env), sp[off], srcLoc(env, inst, 1), inst->src(1), type,
+          storeAux);
+}
+
+void cgStStkMeta(IRLS&, const IRInstruction*) {}
+
+void cgStStkRange(IRLS& env, const IRInstruction* inst) {
+  auto const range = inst->extra<StackRange>();
+  auto const count = range->count;
+  if (count == 0) return;
+
+  auto const startOff = range->start.offset;
+  auto const sp = srcLoc(env, inst, 0).reg();
+  auto const val = inst->src(1);
+  auto const valType = val->type();
+  auto const valSrcLoc = srcLoc(env, inst, 1);
+  auto& v = vmain(env);
+
+  auto const typePtr = v.makeReg();
+  auto const dataPtr = v.makeReg();
+  v << lea{sp[cellsToBytes(startOff) + TVOFF(m_type)], typePtr};
+  v << lea{sp[cellsToBytes(startOff) + TVOFF(m_data)], dataPtr};
+
+  auto const tvSize = safe_cast<int32_t>(sizeof(TypedValue));
+
+  forLoopUnroll(v, count, {typePtr, dataPtr},
+    [&] (Vout& vo, const VregList& in, int iter) {
+      auto const offset = safe_cast<int32_t>(iter * tvSize);
+      auto const typeIn = in[0];
+      auto const dataIn = in[1];
+      storeTV(vo, valType, valSrcLoc, typeIn[offset], dataIn[offset]);
+    },
+    [&] (Vout& vo, const VregList& in, const VregList& out,
+         unsigned iterations) {
+      auto const typeIn = in[0];
+      auto const dataIn = in[1];
+      auto const typeOut = out[0];
+      auto const dataOut = out[1];
+      auto const increment = safe_cast<int32_t>(tvSize * iterations);
+      vo << addqi{increment, typeIn, typeOut, vo.makeReg()};
+      vo << addqi{increment, dataIn, dataOut, vo.makeReg()};
+    }
+  );
 }
 
 void cgStOutValue(IRLS& env, const IRInstruction* inst) {
@@ -150,180 +240,241 @@ void cgStOutValue(IRLS& env, const IRInstruction* inst) {
   storeTV(vmain(env), fp[off], srcLoc(env, inst, 1), inst->src(1));
 }
 
+void cgLdOutAddr(IRLS& env, const IRInstruction* inst) {
+  auto const fp = srcLoc(env, inst, 0).reg();
+  auto const off = cellsToBytes(
+    inst->extra<LdOutAddr>()->index + kNumActRecCells
+  );
+  vmain(env) << lea{fp[off], dstLoc(env, inst, 0).reg()};
+}
+
 void cgDbgTrashStk(IRLS& env, const IRInstruction* inst) {
   auto const sp = srcLoc(env, inst, 0).reg();
   auto const off = cellsToBytes(inst->extra<DbgTrashStk>()->offset.offset);
-  trashTV(vmain(env), sp, off, kTVTrashJITStk);
+  trashFullTV(vmain(env), sp[off],  kTVTrashJITStk);
 }
-
-///////////////////////////////////////////////////////////////////////////////
-
-namespace {
-
-const Func* funcFromFp(const SSATmp* fp) {
-  fp = canonical(fp);
-  auto inst = fp->inst();
-  if (UNLIKELY(inst->is(DefLabel))) {
-    inst = resolveFpDefLabel(fp);
-    assertx(inst);
-  }
-  assertx(inst->is(DefFP, DefInlineFP));
-  if (inst->is(DefFP)) return inst->marker().func();
-  if (inst->is(DefInlineFP)) return inst->extra<DefInlineFP>()->target;
-  always_assert(false);
-}
-
-}
-
-void cgLdClsRef(IRLS& env, const IRInstruction* inst) {
-  auto const fp = srcLoc(env, inst, 0).reg();
-  auto const dst = dstLoc(env, inst, 0).reg();
-  auto const off = frame_clsref_offset(
-    funcFromFp(inst->src(0)),
-    inst->extra<ClsRefSlotData>()->slot
-  );
-  emitLdLowPtr(vmain(env), fp[off], dst, sizeof(LowPtr<Class>));
-}
-
-void cgStClsRef(IRLS& env, const IRInstruction* inst) {
-  auto const fp = srcLoc(env, inst, 0).reg();
-  auto const src = srcLoc(env, inst, 1).reg();
-  auto const off = frame_clsref_offset(
-    funcFromFp(inst->src(0)),
-    inst->extra<ClsRefSlotData>()->slot
-  );
-  emitStLowPtr(vmain(env), src, fp[off], sizeof(LowPtr<Class>));
-}
-
-void cgKillClsRef(IRLS& env, const IRInstruction* inst) {
-  if (!debug) return;
-
-  auto& v = vmain(env);
-  auto const fp = srcLoc(env, inst, 0).reg();
-  auto const off = frame_clsref_offset(
-    funcFromFp(inst->src(0)),
-    inst->extra<ClsRefSlotData>()->slot
-  );
-
-  LowPtr<Class> trash;
-  memset(&trash, kTrashClsRef, sizeof(trash));
-  Immed64 immed(trash.get());
-
-  if (sizeof(trash) == 4) {
-    v << storeli{immed.l(), fp[off]};
-  } else if (sizeof(trash) == 8) {
-    if (immed.fits(sz::dword)) {
-      v << storeqi{immed.l(), fp[off]};
-    } else {
-      v << store{v.cns(immed.q()), fp[off]};
-    }
-  } else {
-    not_implemented();
-  }
-}
-
-///////////////////////////////////////////////////////////////////////////////
 
 void cgLdMem(IRLS& env, const IRInstruction* inst) {
-  auto const ptr = srcLoc(env, inst, 0).reg();
-  loadTV(vmain(env), inst->dst(), dstLoc(env, inst, 0), *ptr);
+  auto const ptr    = inst->src(0);
+  auto const ptrLoc = tmpLoc(env, ptr);
+  auto const dstLoc = tmpLoc(env, inst->dst());
+
+  loadTV(vmain(env), inst->dst()->type(), dstLoc,
+         memTVTypePtr(ptr, ptrLoc), memTVValPtr(ptr, ptrLoc));
 }
 
 void cgStMem(IRLS& env, const IRInstruction* inst) {
-  auto const ptr = srcLoc(env, inst, 0).reg();
-  storeTV(vmain(env), *ptr, srcLoc(env, inst, 1), inst->src(1));
+  auto const ptr    = inst->src(0);
+  auto const ptrLoc = tmpLoc(env, ptr);
+  auto const src    = inst->src(1);
+  auto const srcLoc = tmpLoc(env, src);
+
+  auto const type   = inst->hasTypeParam() ? inst->typeParam() : src->type();
+
+  storeTV(vmain(env), type, srcLoc,
+          memTVTypePtr(ptr, ptrLoc), memTVValPtr(ptr, ptrLoc));
+}
+
+void cgStMemMeta(IRLS&, const IRInstruction*) {}
+
+void cgLdImplicitContext(IRLS& env, const IRInstruction* inst) {
+  auto& v = vmain(env);
+  markRDSAccess(v, ImplicitContext::activeCtx.handle());
+
+  auto const dst = dstLoc(env, inst, 0);
+  v << load{rvmtl()[ImplicitContext::activeCtx.handle()], dst.reg(0)};
+}
+
+void cgLdImplicitContextMemoKey(IRLS& env, const IRInstruction* inst) {
+  auto const obj = srcLoc(env, inst, 0).reg();
+  auto const dst = dstLoc(env, inst, 0).reg();
+
+  auto& v = vmain(env);
+  v << load{
+    obj[Native::dataOffset<ImplicitContext>() + ImplicitContext::memoKeyOffset()],
+    dst
+  };
+}
+
+void cgLdMemoAgnosticIC(IRLS& env, const IRInstruction* inst) {
+  auto const obj = srcLoc(env, inst, 0).reg();
+  auto const dst = dstLoc(env, inst, 0).reg();
+  auto& v = vmain(env);
+  v << load{
+    obj[Native::dataOffset<ImplicitContext>() + ImplicitContext::memoAgnosticOffset()],
+    dst
+  };
+}
+
+void cgStImplicitContext(IRLS& env, const IRInstruction* inst) {
+  auto& v = vmain(env);
+  assertx(inst->src(0)->isA(TObj));
+
+  auto const data = srcLoc(env, inst, 0).reg(0);
+  markRDSAccess(v, ImplicitContext::activeCtx.handle());
+
+  v << store{data, rvmtl()[ImplicitContext::activeCtx.handle()]};
 }
 
 void cgDbgTrashMem(IRLS& env, const IRInstruction* inst) {
-  auto const ptr = srcLoc(env, inst, 0).reg();
-  trashTV(vmain(env), ptr, 0, kTVTrashJITHeap);
+  auto const ptr    = inst->src(0);
+  auto const ptrLoc = tmpLoc(env, ptr);
+  trashTV(vmain(env), memTVTypePtr(ptr, ptrLoc), memTVValPtr(ptr, ptrLoc),
+          kTVTrashJITHeap);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 
-void cgLdRef(IRLS& env, const IRInstruction* inst) {
-  auto const ptr = srcLoc(env, inst, 0).reg();
-  loadTV(vmain(env), inst->dst(), dstLoc(env, inst, 0),
-         ptr[RefData::tvOffset()]);
-}
-
-void cgStRef(IRLS& env, const IRInstruction* inst) {
-  auto const ptr = srcLoc(env, inst, 0).reg();
-  auto const valLoc = srcLoc(env, inst, 1);
-  always_assert(!srcLoc(env, inst, 1).isFullSIMD());
-
-  storeTV(vmain(env), ptr[RefData::tvOffset()], valLoc, inst->src(1));
-}
-
-///////////////////////////////////////////////////////////////////////////////
-
-void cgLdElem(IRLS& env, const IRInstruction* inst) {
-  auto const rbase = srcLoc(env, inst, 0).reg();
-  auto const ridx = srcLoc(env, inst, 1).reg();
-  auto const idx = inst->src(1);
+void cgLdClsInitElem(IRLS& env, const IRInstruction* inst) {
+  auto const base = srcLoc(env, inst, 0).reg();
+  auto const idx = inst->extra<IndexData>()->index;
   auto& v = vmain(env);
 
-  if (idx->hasConstVal() && deltaFits(idx->intVal(), sz::dword)) {
-    loadTV(v, inst->dst(), dstLoc(env, inst, 0), rbase[idx->intVal()]);
-  } else {
-    loadTV(v, inst->dst(), dstLoc(env, inst, 0), rbase[ridx]);
-  }
+  auto const lval_offset = ObjectProps::offsetOf(idx);
+
+  loadTV(v, inst->dst()->type(), dstLoc(env, inst, 0),
+         base[lval_offset.typeOffset()],
+         base[lval_offset.dataOffset()]);
 }
 
-void cgStElem(IRLS& env, const IRInstruction* inst) {
-  auto const rbase = srcLoc(env, inst, 0).reg();
-  auto const ridx = srcLoc(env, inst, 1).reg();
-  auto const idx = inst->src(1);
+void cgStClsInitElem(IRLS& env, const IRInstruction* inst) {
+  auto const base = srcLoc(env, inst, 0).reg();
+  auto const idx = inst->extra<IndexData>()->index;
   auto& v = vmain(env);
 
-  if (idx->hasConstVal() && deltaFits(idx->intVal(), sz::dword)) {
-    storeTV(v, rbase[idx->intVal()], srcLoc(env, inst, 2), inst->src(2));
-  } else {
-    storeTV(v, rbase[ridx], srcLoc(env, inst, 2), inst->src(2));
-  }
+  auto const lval_offset = ObjectProps::offsetOf(idx);
+
+  storeTV(v, inst->src(1)->type(),
+          srcLoc(env, inst, 1),
+          base[lval_offset.typeOffset()],
+          base[lval_offset.dataOffset()]);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 
-void cgLdMIStateAddr(IRLS& env, const IRInstruction* inst) {
-  auto const off = rds::kVmMInstrStateOff + inst->src(0)->intVal();
+void cgLdMIStateTempBaseAddr(IRLS& env, const IRInstruction* inst) {
+  auto const off = rds::kVmMInstrStateOff + offsetof(MInstrState, tvTempBase);
   vmain(env) << lea{rvmtl()[off], dstLoc(env, inst, 0).reg()};
 }
 
 void cgLdMBase(IRLS& env, const IRInstruction* inst) {
   auto const off = rds::kVmMInstrStateOff + offsetof(MInstrState, base);
-  vmain(env) << load{rvmtl()[off], dstLoc(env, inst, 0).reg()};
+  auto const dstLoc = irlower::dstLoc(env, inst, 0);
+  vmain(env) << load{rvmtl()[off], dstLoc.reg(0)};
+  vmain(env) << load{rvmtl()[off + sizeof(intptr_t)], dstLoc.reg(1)};
 }
 
 void cgStMBase(IRLS& env, const IRInstruction* inst) {
   auto const off = rds::kVmMInstrStateOff + offsetof(MInstrState, base);
-  vmain(env) << store{srcLoc(env, inst, 0).reg(), rvmtl()[off]};
+  auto const srcLoc = irlower::srcLoc(env, inst, 0);
+  vmain(env) << store{srcLoc.reg(0), rvmtl()[off]};
+  vmain(env) << store{srcLoc.reg(1), rvmtl()[off + sizeof(intptr_t)]};
+}
+
+void cgCheckMROProp(IRLS& env, const IRInstruction* inst) {
+  auto const off = rds::kVmMInstrStateOff + offsetof(MInstrState, roProp);
+  auto& v = vmain(env);
+  auto const sf = v.makeReg();
+  v << cmpbim{0, rvmtl()[off], sf};
+  v << jcc{CC_Z, sf, {label(env, inst->next()), label(env, inst->taken())}};
+}
+
+void cgStMROProp(IRLS& env, const IRInstruction* inst) {
+  auto const off = rds::kVmMInstrStateOff + offsetof(MInstrState, roProp);
+  auto const srcLoc = irlower::srcLoc(env, inst, 0);
+  vmain(env) << storeb{srcLoc.reg(0), rvmtl()[off]};
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 
-static TypedValue* ldGblAddrHelper(const StringData* name) {
-  return g_context->m_globalVarEnv->lookup(name);
+static tv_lval ldGblAddrHelper(const StringData* name) {
+  return g_context->m_globalNVTable->lookup(name);
 }
 
 void cgLdGblAddr(IRLS& env, const IRInstruction* inst) {
-  auto const dst = dstLoc(env, inst, 0).reg();
   auto& v = vmain(env);
+  cgCallHelper(v, env, CallSpec::direct(ldGblAddrHelper),
+               callDest(env, inst),
+               SyncOptions::Sync, argGroup(env, inst).ssa(0));
+}
 
-  cgCallHelper(v, env, CallSpec::direct(ldGblAddrHelper), callDest(dst),
-               SyncOptions::None, argGroup(env, inst).ssa(0));
-
-  auto const sf = v.makeReg();
-  v << testq{dst, dst, sf};
-  v << jcc{CC_Z, sf, {label(env, inst->next()), label(env, inst->taken())}};
+void cgProfileGlobal(IRLS& env, const IRInstruction* inst) {
+  auto& v = vmain(env);
+  cgCallHelper(v, env, CallSpec::direct(profileGlobal),
+               kVoidDest, SyncOptions::None,
+               argGroup(env, inst).ssa(0));
 }
 
 IMPL_OPCODE_CALL(LdGblAddrDef)
 
+///////////////////////////////////////////////////////////////////////////////
+
+void cgDeserializeLazyProp(IRLS& env, const IRInstruction* inst) {
+  auto const src = srcLoc(env, inst, 0).reg();
+  auto const val = Immed(static_cast<int8_t>(kInvalidDataType));
+  auto const index = inst->extra<DeserializeLazyProp>()->index;
+  auto const offset = ObjectProps::offsetOf(index).shift(sizeof(ObjectData));
+
+  auto& v = vmain(env);
+  auto const sf = v.makeReg();
+  v << cmpbim{val, src[offset.typeOffset()], sf};
+
+  ifThen(v, CC_Z, sf, [&](Vout& v) {
+    auto const type = v.makeReg();
+    auto const data = v.makeReg();
+    v << lea{src[offset.typeOffset()], type};
+    v << lea{src[offset.dataOffset()], data};
+    auto const args = argGroup(env, inst).reg(type).reg(data);
+    cgCallHelper(v, env, CallSpec::direct(ObjectData::deserializeLazyProp),
+                 kVoidDest, SyncOptions::None, args);
+  });
+}
+
+void cgLdClosureArg(IRLS& env, const IRInstruction* inst) {
+  auto const src = srcLoc(env, inst, 0).reg();
+  auto const offs = ObjectProps::offsetOf(inst->extra<LdClosureArg>()->index)
+    .shift(sizeof(ObjectData));
+  loadTV(vmain(env), 
+         inst->dst()->type(), 
+         dstLoc(env, inst, 0), 
+         src[offs.typeOffset()], 
+         src[offs.dataOffset()]);
+}
+
+
 void cgLdPropAddr(IRLS& env, const IRInstruction* inst) {
-  auto const dst = dstLoc(env, inst, 0).reg();
+  auto& v = vmain(env);
+  auto const dstLoc = irlower::dstLoc(env, inst, 0);
+  auto const valReg = dstLoc.reg(tv_lval::val_idx);
+
+  auto const src = srcLoc(env, inst, 0).reg();
+  auto const offs = ObjectProps::offsetOf(inst->extra<LdPropAddr>()->index)
+    .shift(sizeof(ObjectData));
+
+  v << lea{src[offs.dataOffset()], valReg};
+  static_assert(TVOFF(m_data) == 0, "");
+  v << lea{src[offs.typeOffset()], dstLoc.reg(tv_lval::type_idx)};
+}
+
+void cgLdInitPropAddr(IRLS& env, const IRInstruction* inst) {
+  auto const dstLoc = irlower::dstLoc(env, inst, 0);
   auto const obj = srcLoc(env, inst, 0).reg();
-  vmain(env) << lea{obj[inst->extra<LdPropAddr>()->offsetBytes], dst};
+  auto& v = vmain(env);
+
+  auto const offs = ObjectProps::offsetOf(inst->extra<LdInitPropAddr>()->index)
+    .shift(sizeof(ObjectData));
+
+  if (dstLoc.hasReg(tv_lval::val_idx)) {
+    v << lea{obj[offs.dataOffset()], dstLoc.reg(tv_lval::val_idx)};
+  }
+  if (dstLoc.hasReg(tv_lval::type_idx)) {
+    static_assert(TVOFF(m_data) == 0, "");
+    v << lea{obj[offs.typeOffset()], dstLoc.reg(tv_lval::type_idx)};
+  }
+
+  auto const sf = v.makeReg();
+  emitCmpTVType(v, sf, KindOfUninit, obj[offs.typeOffset()]);
+  v << jcc{CC_Z, sf, {label(env, inst->next()), label(env, inst->taken())}};
 }
 
 IMPL_OPCODE_CALL(LdClsPropAddrOrNull)
@@ -331,17 +482,128 @@ IMPL_OPCODE_CALL(LdClsPropAddrOrRaise)
 
 ///////////////////////////////////////////////////////////////////////////////
 
-void cgLdRDSAddr(IRLS& env, const IRInstruction* inst) {
-  auto const handle = inst->extra<LdRDSAddr>()->handle;
+void cgCheckRDSInitialized(IRLS& env, const IRInstruction* inst) {
+  auto const handle = inst->extra<CheckRDSInitialized>()->handle;
+  auto& v = vmain(env);
+
+  if (rds::isNormalHandle(handle)) {
+    auto const sf = checkRDSHandleInitialized(v, handle);
+    v << jcc{CC_NE, sf, {label(env, inst->next()), label(env, inst->taken())}};
+  } else {
+    // Always initialized; just fall through to inst->next().
+    assertx(rds::isPersistentHandle(handle));
+    DEBUG_ONLY bool initialized =
+      rds::handleToRef<bool, rds::Mode::Persistent>(handle);
+    assertx(initialized);
+  }
+}
+
+void cgMarkRDSInitialized(IRLS& env, const IRInstruction* inst) {
+  auto const handle = inst->extra<MarkRDSInitialized>()->handle;
+  if (rds::isNormalHandle(handle)) markRDSHandleInitialized(vmain(env), handle);
+}
+
+void cgMarkRDSAccess(IRLS& env, const IRInstruction* inst) {
+  assertx(rds::shouldProfileAccesses());
+  markRDSAccess(vmain(env), inst->extra<MarkRDSAccess>()->handle);
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
+namespace {
+
+void ldRDSAddrImpl(Vout& v, rds::Handle handle, Vreg dst) {
   if (rds::isPersistentHandle(handle)) {
     // Persistent RDS handles are not relative to RDS base.
     auto const addr = rds::handleToPtr<void, rds::Mode::Persistent>(handle);
-    auto& v = vmain(env);
-    v << copy{v.cns(addr), dstLoc(env, inst, 0).reg()};
+    v << copy{v.cns(addr), dst};
   } else {
-    vmain(env) << lea{rvmtl()[handle], dstLoc(env, inst, 0).reg()};
+    v << lea{rvmtl()[handle], dst};
   }
 }
+
+}
+
+void cgLdRDSAddr(IRLS& env, const IRInstruction* inst) {
+  ldRDSAddrImpl(
+    vmain(env),
+    inst->extra<LdRDSAddr>()->handle,
+    dstLoc(env, inst, 0).reg()
+  );
+}
+
+void cgLdInitRDSAddr(IRLS& env, const IRInstruction* inst) {
+  auto const dst = dstLoc(env, inst, 0).reg();
+  auto& v = vmain(env);
+
+  ldRDSAddrImpl(v, inst->extra<LdInitRDSAddr>()->handle, dst);
+
+  auto const sf = v.makeReg();
+  emitCmpTVType(v, sf, KindOfUninit, dst[TVOFF(m_type)]);
+  v << jcc{CC_Z, sf, {label(env, inst->next()), label(env, inst->taken())}};
+}
+
+void cgLdTVFromRDS(IRLS& env, const IRInstruction* inst) {
+  auto& v = vmain(env);
+  auto const extra = inst->extra<LdTVFromRDS>();
+  loadTV(
+    v,
+    inst->dst(),
+    dstLoc(env, inst, 0),
+    rvmtl()[extra->handle],
+    extra->includeAux
+  );
+}
+
+void cgStTVInRDS(IRLS& env, const IRInstruction* inst) {
+  auto& v = vmain(env);
+  auto const extra = inst->extra<StTVInRDS>();
+  storeTV(
+    v,
+    rvmtl()[extra->handle],
+    srcLoc(env, inst, 0),
+    inst->src(0),
+    TBottom,
+    extra->includeAux
+  );
+}
+
+void cgCheckFuncNeedsCoverage(IRLS& env, const IRInstruction* inst) {
+  auto& v = vmain(env);
+
+  auto const indexHandle = Func::GetCoverageIndex();
+  auto const flagHandle = inst->extra<FuncData>()->func->getCoverageHandle();
+
+  auto const index = v.makeReg();
+  auto const flag = v.makeReg();
+  auto const sf1 = v.makeReg();
+  auto const sf2 = v.makeReg();
+
+  v << loadw{rvmtl()[indexHandle], index};
+  v << testw{index, index, sf1};
+  ifThen(v, CC_NZ, sf1, [&] (Vout& v) {
+    v << loadw{rvmtl()[flagHandle], flag};
+    v << cmpw{index, flag, sf2};
+    v << jcc{CC_NE, sf2, {label(env, inst->next()), label(env, inst->taken())}};
+  });
+}
+
+void cgRecordFuncCall(IRLS& env, const IRInstruction* inst) {
+  auto const indexHandle = Func::GetCoverageIndex();
+  auto const flagHandle = inst->extra<FuncData>()->func->getCoverageHandle();
+
+  auto& v = vmain(env);
+  auto const index = v.makeReg();
+
+  v << loadw{rvmtl()[indexHandle], index};
+  v << storew{index, rvmtl()[flagHandle]};
+
+  cgCallHelper(v, env, CallSpec::method(&Func::recordCallNoCheck), kVoidDest,
+               SyncOptions::None,
+               argGroup(env, inst).immPtr(inst->extra<FuncData>()->func));
+}
+
+///////////////////////////////////////////////////////////////////////////////
 
 void cgLdTVAux(IRLS& env, const IRInstruction* inst) {
   auto const dst = dstLoc(env, inst, 0).reg();
@@ -353,7 +615,7 @@ void cgLdTVAux(IRLS& env, const IRInstruction* inst) {
   auto& v = vmain(env);
   v << shrqi{32, type, dst, v.makeReg()};
 
-  if (RuntimeOption::EvalHHIRGenerateAsserts) {
+  if (Cfg::HHIR::GenerateAsserts) {
     auto const extra = inst->extra<LdTVAux>();
     auto const mask = -extra->valid - 1;
 
@@ -361,7 +623,7 @@ void cgLdTVAux(IRLS& env, const IRInstruction* inst) {
       auto const sf = v.makeReg();
       v << testqi{mask, dst, sf};
       ifThen(v, CC_NZ, sf, [](Vout& v) {
-        v << trap{TRAP_REASON};
+        v << trap{TRAP_REASON, Fixup::none()};
       });
     }
   }
@@ -369,4 +631,4 @@ void cgLdTVAux(IRLS& env, const IRInstruction* inst) {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-}}}
+}

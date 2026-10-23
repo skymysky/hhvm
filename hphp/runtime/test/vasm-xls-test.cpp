@@ -14,50 +14,38 @@
    +----------------------------------------------------------------------+
 */
 
+#include "hphp/runtime/base/datatype-macros.h"
+#include "hphp/runtime/test/vasm-regalloc-test-helpers.h"
 #include "hphp/runtime/vm/jit/abi.h"
+#ifdef __aarch64__
 #include "hphp/runtime/vm/jit/abi-arm.h"
+#else
 #include "hphp/runtime/vm/jit/abi-x64.h"
+#endif
 #include "hphp/runtime/vm/jit/containers.h"
 #include "hphp/runtime/vm/jit/vasm.h"
 #include "hphp/runtime/vm/jit/vasm-emit.h"
 #include "hphp/runtime/vm/jit/vasm-gen.h"
 #include "hphp/runtime/vm/jit/vasm-instr.h"
-#include "hphp/runtime/vm/jit/vasm-print.h"
 #include "hphp/runtime/vm/jit/vasm-text.h"
 #include "hphp/runtime/vm/jit/vasm-unit.h"
 
 #include <folly/portability/GTest.h>
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 using namespace reg;
 
 template<class T> uint64_t test_const(T val) {
   using testfunc = double (*)();
-  static const Abi test_abi_arm = {
-    .gpUnreserved = RegSet{},
-    .gpReserved = arm::abi().gp(),
-    .simdUnreserved = RegSet{vixl::d0},
-    .simdReserved = arm::abi().simd() - RegSet{vixl::d0},
-    .calleeSaved = arm::abi().calleeSaved,
-    .sf = arm::abi().sf
-  };
-  static const Abi test_abi_x64 = {
-    .gpUnreserved = RegSet{},
-    .gpReserved = x64::abi().gp(),
-    .simdUnreserved = RegSet{xmm0},
-    .simdReserved = x64::abi().simd() - RegSet{xmm0},
-    .calleeSaved = x64::abi().calleeSaved,
-    .sf = x64::abi().sf
-  };
 
-  constexpr auto blockSize = 4096;
+  auto blockSize = 4096;
   auto code = static_cast<uint8_t*>(mmap(nullptr, blockSize,
                                          PROT_READ | PROT_WRITE | PROT_EXEC,
                                          MAP_PRIVATE | MAP_ANONYMOUS, -1, 0));
   SCOPE_EXIT { munmap(code, blockSize); };
 
-  constexpr auto dataSize = 100;
-  constexpr auto codeSize = blockSize - dataSize;
+  auto const dataSize = 100;
+  auto const codeSize = blockSize - dataSize;
   // None of these tests should use much data.
   auto data_buffer = code + codeSize;
 
@@ -77,13 +65,32 @@ template<class T> uint64_t test_const(T val) {
   v << ret{RegSet{xmm0}};
 
   CGMeta meta;
-  if (arch() == Arch::ARM) {
-    optimizeARM(vasm.unit(), test_abi_arm, true /* regalloc */);
-    emitARM(unit, text, meta, nullptr);
-  } else if (arch() == Arch::X64) {
-    optimizeX64(vasm.unit(), test_abi_x64, true /* regalloc */);
-    emitX64(unit, text, meta, nullptr);
-  }
+  Abi abi = ARCH_MATCH(
+    ([](arch::X64) {
+      return Abi {
+        .gpUnreserved = RegSet{},
+        .gpReserved = x64::abi().gp(),
+        .simdUnreserved = RegSet{xmm0},
+        .simdReserved = x64::abi().simd() - RegSet{xmm0},
+        .calleeSaved = x64::abi().calleeSaved,
+        .sf = x64::abi().sf
+      };
+    }),
+    ([](arch::ARM) {
+      return Abi {
+        .gpUnreserved = RegSet{},
+        .gpReserved = arm::abi().gp(),
+        .simdUnreserved = RegSet{vixl::d0},
+        .simdReserved = arm::abi().simd() - RegSet{vixl::d0},
+        .calleeSaved = arm::abi().calleeSaved,
+        .sf = arm::abi().sf
+      };
+    })
+  );
+
+  optimize(vasm.unit(), abi, true /* regalloc */);
+  emit(unit, text, meta, nullptr);
+
   // The above code might use meta.literalAddrs but shouldn't use anything else.
   meta.literalAddrs.clear();
   EXPECT_TRUE(meta.empty());
@@ -98,8 +105,9 @@ TEST(Vasm, XlsByteXmm) {
   EXPECT_EQ(test_const(true), 1);
   // DataType is actually mapped to uint64_t constants, for some reason,
   // but if that changes we still want to test them as bytes here.
-  EXPECT_EQ(test_const(KindOfUninit), 0);
-  EXPECT_EQ(static_cast<DataType>(test_const(KindOfArray)), KindOfArray);
+  EXPECT_EQ(test_const(kExtraInvalidDataType), 0);
+  EXPECT_EQ(test_const(KindOfUninit), UNINIT_DT_VALUE);
+  EXPECT_EQ(static_cast<DataType>(test_const(KindOfDict)), KindOfDict);
 }
 
 TEST(Vasm, XlsIntXmm) {
@@ -110,4 +118,13 @@ TEST(Vasm, XlsIntXmm) {
   EXPECT_EQ(test_const(uint32_t(0x80000000)), 0x80000000l);
 }
 
-}}
+TEST(Vasm, XlsHandlesLdimm128CopyToStore) {
+  Vunit unit;
+  emitLdimm128CopyToStore(unit);
+
+  allocateRegistersWithXLS(unit, regAllocTestAbi());
+
+  expectLdimm128CopyToStoreAllocated(unit);
+}
+
+}

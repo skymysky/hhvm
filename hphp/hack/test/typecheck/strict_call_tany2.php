@@ -1,4 +1,3 @@
-//// partial.php
 <?hh
 /**
  * Copyright (c) 2014, Facebook, Inc.
@@ -11,11 +10,8 @@
  */
 
 class C {
-  public function any() {}
+  public function any() /* : TAny */ {}
 }
-
-//// strict.php
-<?hh // strict
 
 function f(): void {
   $c = new C();

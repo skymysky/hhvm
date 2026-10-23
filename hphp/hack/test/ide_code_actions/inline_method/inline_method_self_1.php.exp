@@ -1,0 +1,56 @@
+Code actions available:
+------------------------------------------
+Inline method (CodeActionKind: "refactor") SELECTED
+Devmate Quick Fix - Typing error (CodeActionKind: "quickfix")
+Devmate Agent Fix - Typing error (CodeActionKind: "quickfix")
+
+JSON for selected code action:
+------------------------------------------
+{
+  "title": "Inline method",
+  "kind": "refactor",
+  "diagnostics": [],
+  "edit": {
+    "changes": {
+      "FILE.php": [
+        {
+          "range": {
+            "start": { "line": 3, "character": 0 },
+            "end": { "line": 6, "character": 3 }
+          },
+          "newText": ""
+        },
+        {
+          "range": {
+            "start": { "line": 9, "character": 4 },
+            "end": { "line": 9, "character": 4 }
+          },
+          "newText": "$i = 1;\n    $z = 2;\n    $res = $i + $z;\n    "
+        },
+        {
+          "range": {
+            "start": { "line": 9, "character": 8 },
+            "end": { "line": 9, "character": 54 }
+          },
+          "newText": "$res"
+        }
+      ]
+    }
+  }
+}
+
+Applied edit for code action:
+------------------------------------------
+<?hh
+
+class A {
+
+
+  public static function foo(): void {
+    $i = 1;
+    $z = 2;
+    $res = $i + $z;
+    1 + $res;
+  }
+}
+

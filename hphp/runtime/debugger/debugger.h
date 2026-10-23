@@ -14,8 +14,7 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_EVAL_DEBUGGER_H_
-#define incl_HPHP_EVAL_DEBUGGER_H_
+#pragma once
 
 #include <set>
 #include <vector>
@@ -27,10 +26,10 @@
 #include "hphp/util/lock.h"
 
 namespace HPHP {
-struct ThreadInfo;
+struct RequestInfo;
 }
 
-namespace HPHP { namespace Eval {
+namespace HPHP::Eval {
 ///////////////////////////////////////////////////////////////////////////////
 
 struct CmdInterrupt;
@@ -56,7 +55,7 @@ struct Debugger {
 
   // Add a new sandbox a debugger can connect to.
   static void RegisterSandbox(const DSandboxInfo &sandbox);
-  static void UnregisterSandbox(const String& id);
+  static void UnregisterSandbox(const OptString& id);
 
   // Add/remove/change DebuggerProxy.
   static DebuggerProxyPtr CreateProxy(req::ptr<Socket> socket, bool local);
@@ -93,8 +92,8 @@ struct Debugger {
 
   // Surround text with color, if set.
   static void SetTextColors();
-  static String ColorStdout(const String& s);
-  static String ColorStderr(const String& s);
+  static OptString ColorStdout(const OptString& s);
+  static OptString ColorStderr(const OptString& s);
 
   // Log debugging state when we're shutting the server down.
   enum ShutdownKind {
@@ -102,10 +101,13 @@ struct Debugger {
     Abnormal
   };
 
+  static bool getDisableJit();
+  static void setDisableJit(bool disableJit);
   static void LogShutdown(ShutdownKind shutdownKind);
 
   // Usage logging
   static void SetUsageLogger(DebuggerUsageLogger *usageLogger);
+  static DebuggerUsageLogger* GetUsageLogger();
   static void InitUsageLogging();
   static void UsageLog(const std::string &mode,
                        const std::string &sandboxId,
@@ -118,6 +120,7 @@ struct Debugger {
 private:
 
   static bool s_clientStarted;
+  static bool s_disableJit;
 
   static Debugger& get();
 
@@ -156,7 +159,7 @@ private:
   SandboxMap m_sandboxMap;
 
   // Map of "sandbox id"->"set of threads executing requests in the sandbox".
-  using ThreadInfoSet = std::set<ThreadInfo*>;
+  using ThreadInfoSet = std::set<RequestInfo*>;
   using SandboxThreadInfoMap = tbb::concurrent_hash_map<
     const StringData*,
     ThreadInfoSet,
@@ -166,7 +169,7 @@ private:
 
   // "thread id"->"thread info". Each thread which is being debugged is
   // added to this map.
-  using ThreadInfoMap = tbb::concurrent_hash_map<int64_t, ThreadInfo*>;
+  using ThreadInfoMap = tbb::concurrent_hash_map<int64_t, RequestInfo*>;
   ThreadInfoMap m_threadInfos;
 
   using RetiredProxyQueue = tbb::concurrent_queue<DebuggerProxyPtr>;
@@ -181,7 +184,7 @@ private:
   void unregisterSandbox(const StringData* sandboxId);
 
   void getSandboxThreads(const DSandboxInfo &sandbox,
-                         std::set<ThreadInfo*>& set);
+                         std::set<RequestInfo*>& set);
 
   void requestInterrupt(DebuggerProxyPtr proxy);
   void setDebuggerFlag(const StringData* sandboxId, bool flag);
@@ -189,7 +192,7 @@ private:
   DebuggerProxyPtr createProxy(req::ptr<Socket> socket, bool local);
   void removeProxy(DebuggerProxyPtr proxy);
   DebuggerProxyPtr findProxy(const StringData* sandboxId);
-  int countConnectedProxy() { return m_proxyMap.size(); } ;
+  int countConnectedProxy() { return m_proxyMap.size(); }
 
   void updateProxySandbox(DebuggerProxyPtr proxy,
                           const StringData* sandboxId);
@@ -224,6 +227,4 @@ private:
 };
 
 ///////////////////////////////////////////////////////////////////////////////
-}}
-
-#endif // incl_HPHP_EVAL_DEBUGGER_H_
+}

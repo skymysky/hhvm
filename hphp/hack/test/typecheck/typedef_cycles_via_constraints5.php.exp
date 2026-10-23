@@ -1,0 +1,57 @@
+error: Typing[4014] Cyclic type definition [1]
+-> Cyclic use is here [2]
+
+typedef_cycles_via_constraints5.php--defs.php:3:9
+1 | <?hh
+2 | 
+3 | newtype A<T> as B<A<T>> = T;
+  |         ^ [1]
+  |                   ^^^^ [2]
+4 | newtype B<T> as C<B<T>> = T;
+5 | newtype C<T> as T = T;
+
+error: Typing[4014] Cyclic type definition [1]
+-> Cyclic use is here [2]
+
+typedef_cycles_via_constraints5.php--defs.php:4:9
+2 | 
+3 | newtype A<T> as B<A<T>> = T;
+4 | newtype B<T> as C<B<T>> = T;
+  |         ^ [1]
+  |                   ^^^^ [2]
+5 | newtype C<T> as T = T;
+6 | 
+
+error: Typing[4110] Invalid argument [1]
+-> Expected `string` [2]
+-> But got `mixed` [3]
+->   by the definition of `A` [4]
+->   by the definition of `B` [5]
+->   by the definition of `C`. Using `mixed` instead of B because this is an illegal recursive use of B in the definition of B [6]
+->   via this generic `T` [7]
+
+typedef_cycles_via_constraints5.php--uses.php:6:17
+1 | <?hh
+2 | 
+3 | function expect_string(string $x): void {}
+  |                        ^^^^^^ [2]
+4 | 
+5 | function test(A<int> $a): void {
+  |               ^^^^^^ [3]
+6 |   expect_string($a);
+  |                 ^^ [1]
+7 | }
+
+typedef_cycles_via_constraints5.php--defs.php:3:17
+1 | <?hh
+2 | 
+3 | newtype A<T> as B<A<T>> = T;
+  |                 ^^^^^^^ [4]
+4 | newtype B<T> as C<B<T>> = T;
+  |                 ^^^^^^^ [5]
+  |                   ^^^^ [6]
+5 | newtype C<T> as T = T;
+  |                 ^ [7]
+6 | 
+
+3 errors found

@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 /**
  * Copyright (c) 2014, Facebook, Inc.
  * All rights reserved.
@@ -9,8 +9,8 @@
  *
  */
 
-function f((function(T): T) $g, T $x): T {
-  return call_user_func($g, $x);
+function f<T>((function(T): T) $g, T $x): T {
+  return ($g)($x);
 }
 
 function test(): void {

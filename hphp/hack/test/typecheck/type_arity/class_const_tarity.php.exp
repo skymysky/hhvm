@@ -1,0 +1,17 @@
+error: Typing[4101] Wrong number of type arguments (expected 1, got 0) [1]
+-> Definition is here [2]
+
+class_const_tarity.php:8:9
+1 | <?hh
+2 | 
+3 | type Bar<T> = shape(
+  |      ^^^ [2]
+4 |   'hello' => T,
+5 | );
+6 | 
+7 | final class Foo {
+8 |   const Bar BAZ = shape('hello' => 1);
+  |         ^^^ [1]
+9 | }
+
+1 error found

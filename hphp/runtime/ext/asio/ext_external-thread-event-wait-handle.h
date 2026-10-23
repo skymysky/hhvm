@@ -31,9 +31,12 @@ namespace HPHP {
  * See asio-external-thread-event.h for more details.
  */
 struct AsioExternalThreadEvent;
-struct c_ExternalThreadEventWaitHandle final : c_WaitableWaitHandle {
-  WAITHANDLE_CLASSOF(ExternalThreadEventWaitHandle);
-  WAITHANDLE_DTOR(ExternalThreadEventWaitHandle);
+struct c_ExternalThreadEventWaitHandle final :
+    c_WaitableWaitHandle,
+    SystemLib::ClassLoader<"HH\\ExternalThreadEventWaitHandle"> {
+  using SystemLib::ClassLoader<"HH\\ExternalThreadEventWaitHandle">::classof;
+  using SystemLib::ClassLoader<"HH\\ExternalThreadEventWaitHandle">::className;
+  WAITHANDLE_DTOR(ExternalThreadEventWaitHandle)
   void sweep();
 
   explicit c_ExternalThreadEventWaitHandle()
@@ -42,8 +45,7 @@ struct c_ExternalThreadEventWaitHandle final : c_WaitableWaitHandle {
   ~c_ExternalThreadEventWaitHandle() {}
 
  public:
-  static req::ptr<c_ExternalThreadEventWaitHandle>
-    Create(AsioExternalThreadEvent* event, ObjectData* priv_data);
+  void initialize(AsioExternalThreadEvent* event, ObjectData* priv_data);
 
   c_ExternalThreadEventWaitHandle* getNextToProcess() {
     assertx(getState() == STATE_WAITING);
@@ -58,14 +60,13 @@ struct c_ExternalThreadEventWaitHandle final : c_WaitableWaitHandle {
   void abandon(bool sweeping);
   bool cancel(const Object& exception);
   void process();
-  String getName();
-  void exitContext(context_idx_t ctx_idx);
+  OptString getName();
+  void exitContext(ContextIndex contextIdx);
   void registerToContext();
   void unregisterFromContext();
 
  private:
   void setState(uint8_t s) { setKindState(Kind::ExternalThreadEvent, s); }
-  void initialize(AsioExternalThreadEvent* event, ObjectData* priv_data);
   void destroyEvent(bool sweeping = false);
 
  private:
@@ -73,7 +74,7 @@ struct c_ExternalThreadEventWaitHandle final : c_WaitableWaitHandle {
   // owned by AsioExternalThreadEventQueue::m_received.
   c_ExternalThreadEventWaitHandle* m_nextToProcess;
 
-  // The i/o thread-lowned event object, one per ETEWH
+  // The i/o thread-owned event object, one per ETEWH
   AsioExternalThreadEvent* m_event;
 
   Object m_privData;
@@ -84,16 +85,10 @@ struct c_ExternalThreadEventWaitHandle final : c_WaitableWaitHandle {
   SweepableMember<c_ExternalThreadEventWaitHandle> m_sweepable;
  public:
   static const uint8_t STATE_WAITING = 2;
+  static const uint8_t STATE_PROCESSING = 3;
 
   friend struct SweepableMember<c_ExternalThreadEventWaitHandle>;
 };
-
-void HHVM_STATIC_METHOD(ExternalThreadEventWaitHandle, setOnCreateCallback,
-                        const Variant& callback);
-void HHVM_STATIC_METHOD(ExternalThreadEventWaitHandle, setOnSuccessCallback,
-                        const Variant& callback);
-void HHVM_STATIC_METHOD(ExternalThreadEventWaitHandle, setOnFailCallback,
-                        const Variant& callback);
 
 inline c_ExternalThreadEventWaitHandle* c_Awaitable::asExternalThreadEvent() {
   assertx(getKind() == Kind::ExternalThreadEvent);

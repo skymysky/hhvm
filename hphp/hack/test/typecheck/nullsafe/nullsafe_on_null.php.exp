@@ -1,0 +1,11 @@
+warning: Warn[12030] You are using the `?->` operator but this value is always null. It's likely you did not intend this value to be always null. [1]
+
+nullsafe_on_null.php:10:5
+ 8 |   $a?->value; // OK
+ 9 |   if ($a is null) {
+10 |     $a?->value; // Not OK since $a is known to be null
+   |     ^^^^^^^^^^ [1]
+11 |   }
+12 | }
+
+1 error found

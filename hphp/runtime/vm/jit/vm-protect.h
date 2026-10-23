@@ -18,7 +18,7 @@
 
 #include "hphp/runtime/vm/vm-regs.h"
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 
 /*
  * RAII assertion guard that ensures VM state (specifically, all of RDS,
@@ -36,6 +36,7 @@ struct VMProtect {
 #ifndef NDEBUG
     Pause();
     ~Pause();
+    bool m_active = true;
 #else
     Pause() {}
 #endif
@@ -49,10 +50,9 @@ struct VMProtect {
 
 private:
   void* m_oldBase;
-  VMRegState m_oldState;
 #else
   VMProtect() {}
 #endif
 };
 
-}}
+}

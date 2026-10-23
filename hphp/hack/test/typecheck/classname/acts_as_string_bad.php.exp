@@ -1,6 +1,17 @@
-File "acts_as_string_bad.php", line 15, characters 10-17:
-Invalid return type (Typing[4110])
-File "acts_as_string_bad.php", line 14, characters 15-17:
-This is an int
-File "hhi_lib__srcs/classname.hhi", line 9, characters 25-30:
-It is incompatible with a string
+error: Typing[4110] Invalid return type [1]
+-> Expected `int` [2]
+-> But got `class<C>`; implicitly defined constant `::class` is a reference to class `C` [3]
+
+acts_as_string_bad.php:15:10
+10 |  */
+11 | 
+12 | class C {}
+   |       ^ [3]
+13 | 
+14 | function f(): int {
+   |               ^^^ [2]
+15 |   return C::class;
+   |          ^^^^^^^^ [1]
+16 | }
+
+1 error found

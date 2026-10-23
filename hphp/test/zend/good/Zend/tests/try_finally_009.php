@@ -1,5 +1,5 @@
-<?php
-function foo () {
+<?hh
+function foo () :mixed{
     for($i = 0; $i < 5; $i++) {
         do {
             try {
@@ -13,6 +13,6 @@ function foo () {
         } while (0);
     }
 }
-
+<<__EntryPoint>> function main(): void {
 foo();
-?>
+}

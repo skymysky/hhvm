@@ -1,16 +1,20 @@
-<?php
+<?hh
 
 namespace {
-  function foo() {
- var_dump(__NAMESPACE__);
-}
-}
-namespace B {
-  function foo() {
- var_dump(__NAMESPACE__);
-}
+  <<__DynamicallyCallable>>
+  function foo() :mixed{
+    \var_dump(__NAMESPACE__);
+  }
 }
 namespace B {
-  $a = 'foo';
-  $a();
+  <<__DynamicallyCallable>>
+  function foo() :mixed{
+    \var_dump(__NAMESPACE__);
+  }
+}
+namespace B {
+  <<__EntryPoint>> function main(): void {
+    $a = 'foo';
+    \HH\dynamic_fun($a)();
+  }
 }

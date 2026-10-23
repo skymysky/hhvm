@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 
 function opt<T>(T $x): ?T {
   return $x;
@@ -12,5 +12,5 @@ function f(): void {
   $v[] = opt($x);
 
   $x = $v[0];
-  if ($x) {}
+  if ($x !== null) {}
 }

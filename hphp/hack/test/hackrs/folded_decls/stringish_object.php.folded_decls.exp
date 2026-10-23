@@ -1,0 +1,148 @@
+FoldedClass {
+    name: "\\A",
+    kind: Cclass(
+        Concrete,
+    ),
+    ancestors: {
+        "\\XHPChild": XHPChild,
+        "\\Stringish": Stringish,
+        "\\StringishObject": StringishObject,
+    },
+    methods: {
+        "__toString": FoldedElement {
+            flags: ClassEltFlags(
+                0,
+            ),
+            origin: "\\A",
+            visibility: Public,
+            deprecated: None,
+            sealed_allowlist: None,
+            overlapping_tparams: None,
+            package_requirement: Some(
+                RPNormal,
+            ),
+        },
+    },
+    consts: {
+        "class": ClassConst {
+            is_synthesized: true,
+            kind: CCConcrete,
+            pos: NPos,
+            ty: class<this>,
+            origin: "\\A",
+            refs: [],
+            is_shape_key: false,
+            value: CVAbsent,
+        },
+    },
+}
+FoldedClass {
+    name: "\\B",
+    kind: Cclass(
+        Abstract,
+    ),
+    ancestors: {
+        "\\XHPChild": XHPChild,
+        "\\Stringish": Stringish,
+        "\\StringishObject": StringishObject,
+    },
+    methods: {
+        "__toString": FoldedElement {
+            flags: ClassEltFlags(
+                1,
+            ),
+            origin: "\\B",
+            visibility: Public,
+            deprecated: None,
+            sealed_allowlist: None,
+            overlapping_tparams: None,
+            package_requirement: Some(
+                RPNormal,
+            ),
+        },
+    },
+    consts: {
+        "class": ClassConst {
+            is_synthesized: true,
+            kind: CCConcrete,
+            pos: NPos,
+            ty: class<this>,
+            origin: "\\B",
+            refs: [],
+            is_shape_key: false,
+            value: CVAbsent,
+        },
+    },
+}
+FoldedClass {
+    name: "\\SomeOtherC",
+    kind: Cinterface,
+    ancestors: {
+        "\\XHPChild": XHPChild,
+        "\\Stringish": Stringish,
+        "\\StringishObject": StringishObject,
+    },
+    methods: {
+        "__toString": FoldedElement {
+            flags: ClassEltFlags(
+                1,
+            ),
+            origin: "\\SomeOtherC",
+            visibility: Public,
+            deprecated: None,
+            sealed_allowlist: None,
+            overlapping_tparams: None,
+            package_requirement: Some(
+                RPNormal,
+            ),
+        },
+    },
+    consts: {
+        "class": ClassConst {
+            is_synthesized: true,
+            kind: CCConcrete,
+            pos: NPos,
+            ty: class<this>,
+            origin: "\\SomeOtherC",
+            refs: [],
+            is_shape_key: false,
+            value: CVAbsent,
+        },
+    },
+}
+FoldedClass {
+    name: "\\TA",
+    kind: Ctrait,
+    ancestors: {
+        "\\XHPChild": XHPChild,
+        "\\Stringish": Stringish,
+        "\\StringishObject": StringishObject,
+    },
+    methods: {
+        "__toString": FoldedElement {
+            flags: ClassEltFlags(
+                0,
+            ),
+            origin: "\\TA",
+            visibility: Public,
+            deprecated: None,
+            sealed_allowlist: None,
+            overlapping_tparams: None,
+            package_requirement: Some(
+                RPNormal,
+            ),
+        },
+    },
+    consts: {
+        "class": ClassConst {
+            is_synthesized: true,
+            kind: CCConcrete,
+            pos: NPos,
+            ty: class<this>,
+            origin: "\\TA",
+            refs: [],
+            is_shape_key: false,
+            value: CVAbsent,
+        },
+    },
+}

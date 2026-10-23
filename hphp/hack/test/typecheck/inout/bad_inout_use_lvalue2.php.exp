@@ -1,2 +1,20 @@
-File "bad_inout_use_lvalue2.php", line 8, characters 5-19:
-You cannot decorate a constant as inout (Parsing[1002])
+error: Parsing[1002] You cannot use this syntax with `inout`. [1]
+
+bad_inout_use_lvalue2.php:8:11
+6 | 
+7 | function test(): void {
+8 |   f(inout SOME_CONST);
+  |           ^^^^^^^^^^ [1]
+9 | }
+
+error: Naming[2001] Please add a type hint `const SomeType SOME_CONST` [1]
+
+bad_inout_use_lvalue2.php:3:7
+1 | <?hh
+2 | 
+3 | const SOME_CONST = 'FOO';
+  |       ^^^^^^^^^^ [1]
+4 | 
+5 | function f(inout string $i): void {}
+
+2 errors found

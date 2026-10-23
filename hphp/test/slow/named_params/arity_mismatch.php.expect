@@ -1,0 +1,10 @@
+Caught RuntimeException: Call to foo() has no argument matching required named parameter b
+Caught RuntimeException: Call to foo() has no argument matching required named parameter a
+Caught RuntimeException: Named argument x does not match any named parameter in call to foo
+Caught RuntimeException: Call to foo() has no argument matching required named parameter b
+Caught RuntimeException: foo() expects exactly 2 positional parameters, 1 given
+Caught RuntimeException: Call to takes_one_named() has no argument matching required named parameter x
+Caught RuntimeException: Call to takes_one_named() has no argument matching required named parameter x
+Caught RuntimeException: Call to takes_one_named() has no argument matching required named parameter x
+Caught RuntimeException: Call to takes_one_named_one_named_optional() has no argument matching required named parameter x
+Caught RuntimeException: Call to takes_one_named_one_named_optional() has no argument matching required named parameter x

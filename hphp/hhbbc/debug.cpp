@@ -18,24 +18,26 @@
 #include <string>
 #include <utility>
 #include <cstdlib>
-#include <iostream>
+#include <fstream>
 
-#include <boost/filesystem/path.hpp>
-#include <boost/filesystem/operations.hpp>
-#include <boost/filesystem/fstream.hpp>
 #include <algorithm>
+#include <filesystem>
 #include <memory>
 #include <vector>
 
 #include <folly/portability/Stdlib.h>
+#include <fmt/core.h>
 
 #include "hphp/hhbbc/class-util.h"
+#include "hphp/hhbbc/func-util.h"
+#include "hphp/hhbbc/index.h"
 #include "hphp/hhbbc/misc.h"
 #include "hphp/hhbbc/parallel.h"
+#include "hphp/hhbbc/parse.h"
 
-namespace HPHP { namespace HHBBC {
+namespace HPHP::HHBBC {
 
-namespace fs = boost::filesystem;
+namespace fs = std::filesystem;
 
 //////////////////////////////////////////////////////////////////////
 
@@ -44,11 +46,16 @@ namespace {
 const StaticString s_invoke("__invoke");
 
 template<class Operation>
-void with_file(fs::path dir, borrowed_ptr<const php::Unit> u, Operation op) {
-  auto const file = dir / fs::path(u->filename->data());
+void with_file(fs::path dir, const std::string& unitPath, Operation op) {
+  // Paths for systemlib units start with /, which gets interpreted as
+  // an absolute path, so strip it.
+  auto filename = unitPath.data();
+  if (filename[0] == '/') ++filename;
+
+  auto const file = dir / fs::path(filename);
   fs::create_directories(fs::path(file).remove_filename());
 
-  fs::ofstream out(file);
+  std::ofstream out(file);
   if (!out.is_open()) {
     throw std::runtime_error(std::string("failed to open file ") +
       file.string());
@@ -62,18 +69,7 @@ void with_file(fs::path dir, borrowed_ptr<const php::Unit> u, Operation op) {
   }
 }
 
-void dump_representation(fs::path dir, const php::Program& program) {
-  parallel::for_each(
-    program.units,
-    [&] (const std::unique_ptr<php::Unit>& u) {
-      with_file(dir, borrow(u), [&] (std::ostream& out) {
-        out << show(*u);
-      });
-    }
-  );
-}
-
-using NameTy = std::pair<SString,Type>;
+using NameTy = std::pair<SString,PropStateElem>;
 std::vector<NameTy> sorted_prop_state(const PropState& ps) {
   std::vector<NameTy> ret(begin(ps), end(ps));
   std::sort(
@@ -84,97 +80,126 @@ std::vector<NameTy> sorted_prop_state(const PropState& ps) {
 }
 
 void dump_class_state(std::ostream& out,
-                      const Index& index,
-                      borrowed_ptr<const php::Class> c) {
+                      const IIndex& index,
+                      const php::Class* c) {
+  auto const clsName = c->name->toCppString();
+
+  auto const add_attrs = [&] (Attr attrs) {
+    if (!(attrs & AttrInitialSatisfiesTC)) out << " (no-satisfies-tc)";
+    if (attrs & AttrDeepInit) out << " (deep-init)";
+  };
+
+  if (auto const s = index.lookup_iface_vtable_slot(c); s != kInvalidSlot) {
+    out << clsName << " vtable slot #" << s << '\n';
+  }
+
+  if (c->attrs & AttrNoOverride) {
+    out << "AttrNoOverride\n";
+  } else if (c->attrs & AttrNoOverrideRegular) {
+    out << "AttrNoOverrideRegular\n";
+  }
+
   if (is_closure(*c)) {
     auto const invoke = find_method(c, s_invoke.get());
-    auto const useVars = index.lookup_closure_use_vars(invoke);
+    auto const useVars = index.lookup_closure_use_vars(*invoke);
     for (auto i = size_t{0}; i < useVars.size(); ++i) {
-      out << c->name->data() << "->" << c->properties[i].name->data() << " :: "
+      out << clsName << "->" << c->properties[i].name->data() << " :: "
           << show(useVars[i]) << '\n';
     }
   } else {
-    auto const pprops = sorted_prop_state(
+     auto const pprops = sorted_prop_state(
       index.lookup_private_props(c)
     );
     for (auto const& kv : pprops) {
-      out << c->name->data() << "->" << kv.first->data() << " :: "
-          << show(kv.second) << '\n';
+      out << clsName << "->" << kv.first->data() << " :: "
+          << show(kv.second.ty);
+      add_attrs(kv.second.attrs);
+      out << '\n';
     }
 
-    auto const sprops = sorted_prop_state(
+    auto const private_sprops = sorted_prop_state(
       index.lookup_private_statics(c)
     );
-    for (auto const& kv : sprops) {
-      out << c->name->data() << "::$" << kv.first->data() << " :: "
-          << show(kv.second) << '\n';
+    for (auto const& kv : private_sprops) {
+      out << clsName << "::$" << kv.first->data() << " :: "
+          << show(kv.second.ty);
+      if (!kv.second.everModified) out << " (persistent)";
+      add_attrs(kv.second.attrs);
+      out << '\n';
+    }
+
+    auto const public_sprops = sorted_prop_state(
+      index.lookup_public_statics(c)
+    );
+    for (auto const& kv : public_sprops) {
+      out << clsName << "::$" << kv.first->data() << " :: "
+          << show(kv.second.ty);
+      if (!kv.second.everModified) out << " (persistent)";
+      add_attrs(kv.second.attrs);
+      out << '\n';
     }
   }
 
+  std::vector<const php::Const*> constants;
+  constants.reserve(c->constants.size());
   for (auto const& constant : c->constants) {
-    if (constant.val) {
-      auto const ty = from_cell(*constant.val);
-      out << c->name->data() << "::" << constant.name->data() << " :: "
-          << (ty.subtypeOf(BUninit) ? "<dynamic>" : show(ty)) << '\n';
+    constants.emplace_back(&constant);
+  }
+  std::sort(
+    begin(constants), end(constants),
+    [] (const php::Const* a, const php::Const* b) {
+      return string_data_lt{}(a->name, b->name);
+    }
+  );
+
+  for (auto const constant : constants) {
+    if (constant->val) {
+      auto const ty = from_cell(*constant->val);
+      out << clsName << "::" << constant->name->data() << " :: "
+          << (ty.subtypeOf(BUninit) ? "<dynamic>" : show(ty));
+      if (constant->kind == ConstModifierFlags::Kind::Type) {
+        if (constant->resolvedTypeStructure) {
+          out << " (" << show(dict_val(constant->resolvedTypeStructure)) << ")";
+          switch ((php::Const::Invariance)constant->invariance) {
+            case php::Const::Invariance::None:
+              break;
+            case php::Const::Invariance::Present:
+              out << " <present>";
+              break;
+            case php::Const::Invariance::ClassnamePresent:
+              out << " <classname>";
+              break;
+            case php::Const::Invariance::Same:
+              out << " <same>";
+              break;
+          }
+        } else {
+          out << " <unresolved>";
+        }
+      }
+      out << '\n';
     }
   }
 }
 
 void dump_func_state(std::ostream& out,
-                     const Index& index,
-                     borrowed_ptr<const php::Func> f) {
-  if (f->unit->pseudomain.get() == f) return;
-
-  auto const name = f->cls
-    ? folly::sformat("{}::{}()", f->cls->name->data(), f->name->data())
-    : folly::sformat("{}()", f->name->toCppString());
-
-  auto const retTy = index.lookup_return_type_raw(f);
-  out << name << " :: " << show(retTy) << '\n';
-
-  auto const localStatics = index.lookup_local_static_types(f);
-  for (auto i = size_t{0}; i < localStatics.size(); ++i) {
-    if (localStatics[i].subtypeOf(BBottom)) continue;
-    out << name << "::" << local_string(*f, i)
-        << " :: " << show(localStatics[i]) << '\n';
-  }
-}
-
-void dump_index(fs::path dir,
-                const Index& index,
-                const php::Program& program) {
-  parallel::for_each(
-    program.units,
-    [&] (const std::unique_ptr<php::Unit>& u) {
-      if (!*u->filename->data()) {
-        // The native systemlibs: for now just skip.
-        return;
-      }
-
-      with_file(dir, borrow(u), [&] (std::ostream& out) {
-        for (auto& c : u->classes) {
-          dump_class_state(out, index, borrow(c));
-          for (auto& m : c->methods) {
-            dump_func_state(out, index, borrow(m));
-          }
-        }
-
-        for (auto& f : u->funcs) {
-          dump_func_state(out, index, borrow(f));
-        }
-      });
-    }
-  );
+                     const IIndex& index,
+                     const php::Func& f) {
+  auto const [retTy, effectFree, canSuspend] =
+    index.lookup_return_type_raw(&f).first;
+  out << func_fullname(f) << "() :: " << show(retTy);
+  if (effectFree) out << " (effect-free)";
+  out << " (can-suspend: " << (canSuspend ? "yes" : "no") << ")";
+  if (f.attrs & AttrNoOverride) out << " (no-override)";
+  out << '\n';
 }
 
 }
 
 //////////////////////////////////////////////////////////////////////
 
-void debug_dump_program(const Index& index, const php::Program& program) {
-  if (!Trace::moduleEnabledRelease(Trace::hhbbc_dump, 1)) return;
-
-  trace_time tracer("debug dump");
+std::string debug_dump_to() {
+  if (!Trace::moduleEnabledRelease(Trace::hhbbc_dump, 1)) return "";
 
   auto dir = [&]{
     if (auto const dumpDir = getenv("HHBBC_DUMP_DIR")) {
@@ -192,21 +217,278 @@ void debug_dump_program(const Index& index, const php::Program& program) {
   }();
   fs::create_directory(dir);
 
-  FTRACE_MOD(Trace::hhbbc_dump, 1, "debug dump going to {}\n", dir.string());
+  Trace::ftraceRelease("debug dump going to {}\n", dir.string());
+  return dir.string();
+}
 
-  if (Trace::moduleEnabledRelease(Trace::hhbbc_dump, 2)) {
-    trace_time tracer2("debug dump: representation");
-    dump_representation(dir / "representation", program);
+void write_representation_dump(const std::string& dir,
+                               const std::string& unitPath,
+                               const std::string& dump) {
+  auto const rep_dir = fs::path{dir} / "representation";
+  with_file(rep_dir, unitPath, [&] (std::ostream& out) { out << dump; });
+}
+
+void write_index_dump(const std::string& dir,
+                      const std::string& unitPath,
+                      const std::string& dump) {
+  auto const rep_dir = fs::path{dir} / "index";
+  with_file(rep_dir, unitPath, [&] (std::ostream& out) { out << dump; });
+}
+
+std::string dump_representation(const IIndex& index,
+                                const php::Unit& unit) {
+  ContextPusher _{index, Context{ unit.filename, nullptr, nullptr }};
+  return show(unit, index);
+}
+
+std::string dump_index(const IIndex& index, const php::Unit& unit) {
+  if (!*unit.filename->data()) {
+    // The native systemlibs: for now just skip.
+    return "";
   }
 
-  {
-    trace_time tracer2("debug dump: index");
-    dump_index(dir / "index", index, program);
+  ContextPusher _{index, Context{ unit.filename, nullptr, nullptr }};
+
+  std::vector<const php::Class*> classes;
+  index.for_each_unit_class(
+    unit,
+    [&] (const php::Class& c) { classes.emplace_back(&c); }
+  );
+  std::sort(
+    begin(classes), end(classes),
+    [] (const php::Class* a, const php::Class* b) {
+      return string_data_lt_type{}(a->name, b->name);
+    }
+  );
+
+  std::ostringstream out;
+  for (auto const c : classes) {
+    dump_class_state(out, index, c);
+
+    std::vector<const php::Func*> funcs;
+    funcs.reserve(c->methods.size());
+    for (auto const& m : c->methods) {
+      if (!m) continue;
+      funcs.emplace_back(m.get());
+    }
+    std::sort(
+      begin(funcs), end(funcs),
+      [] (const php::Func* a, const php::Func* b) {
+        return string_data_lt{}(a->name, b->name);
+      }
+    );
+    for (auto const f : funcs) dump_func_state(out, index, *f);
   }
 
-  FTRACE_MOD(Trace::hhbbc_dump, 1, "debug dump done\n");
+  std::vector<const php::Func*> funcs;
+  index.for_each_unit_func(
+    unit,
+    [&] (const php::Func& f) { funcs.emplace_back(&f); }
+  );
+  std::sort(
+    begin(funcs), end(funcs),
+    [] (const php::Func* a, const php::Func* b) {
+      return string_data_lt{}(a->name, b->name);
+    }
+  );
+  for (auto const f : funcs) dump_func_state(out, index, *f);
+
+  return out.str();
 }
 
 //////////////////////////////////////////////////////////////////////
 
-}}
+void state_after(const char* when,
+                 const php::Unit& u,
+                 const IIndex& index) {
+  TRACE_SET_MOD(hhbbc)
+  auto const UNUSED bump = trace_bump(u, Trace::hhbbc);
+  FTRACE(4, "{:-^70}\n{}{:-^70}\n", when, show(u, index), "");
+}
+
+void state_after(const char* when, const ParsedUnit& parsed) {
+  TRACE_SET_MOD(hhbbc)
+  auto const UNUSED bump = trace_bump(*parsed.unit, Trace::hhbbc);
+
+  std::vector<const php::Func*> funcs;
+  std::vector<const php::Class*> classes;
+  for (auto const& f : parsed.funcs) {
+    funcs.emplace_back(f.get());
+  }
+  for (auto const& c : parsed.classes) {
+    classes.emplace_back(c.get());
+  }
+
+  FTRACE(
+    4,
+    "{:-^70}\n{}{:-^70}\n",
+    when,
+    show(*parsed.unit, classes, funcs),
+    ""
+  );
+}
+
+//////////////////////////////////////////////////////////////////////
+
+std::string format_bytes(size_t bytes) {
+  auto s = folly::prettyPrint(
+    bytes,
+    folly::PRETTY_BYTES
+  );
+  // prettyPrint sometimes inserts a trailing blank space
+  if (!s.empty() && s[s.size()-1] == ' ') s.resize(s.size()-1);
+  return s;
+}
+
+std::string format_duration(std::chrono::microseconds usecs) {
+  auto s = prettyPrint(
+    double(usecs.count()) / 1000000.0,
+    folly::PRETTY_TIME_HMS,
+    false
+  );
+  if (!s.empty() && s[s.size()-1] == ' ') s.resize(s.size()-1);
+  return s;
+}
+
+//////////////////////////////////////////////////////////////////////
+
+namespace {
+
+template <typename Clock>
+std::string ts(typename Clock::time_point t) {
+  char snow[64];
+  auto tm = Clock::to_time_t(t);
+  ctime_r(&tm, snow);
+  // Eliminate trailing newline from ctime_r.
+  snow[24] = '\0';
+  return snow;
+}
+
+std::string client_stats(const extern_worker::Client::Stats& stats) {
+  auto const pct = [] (size_t a, size_t b) -> std::string {
+    if (!b) return "--";
+    return fmt::format("{:.2f}%", double(a) / b * 100.0);
+  };
+
+  auto const execWorkItems = stats.execWorkItems.load();
+  auto const allocatedCores = stats.execAllocatedCores.load();
+  auto const cpuUsecs = stats.execCpuUsec.load();
+  auto const execCalls = stats.execCalls.load();
+  auto const storeCalls = stats.storeCalls.load();
+  auto const loadCalls = stats.loadCalls.load();
+
+  return fmt::format(
+    "  Execs: {} ({}) total, {} cache-hits ({})\n"
+    "  Workers: {} usage, {} cores ({}/core), {} max used, {} reserved\n"
+    "  Blobs: {} total, {} uploaded ({})\n"
+    "  {} downloads ({}), {} throttles, (E: {} S: {} L: {}) avg latency\n",
+    execCalls,
+    execWorkItems,
+    stats.execCacheHits.load(),
+    pct(stats.execCacheHits.load(), execCalls),
+    format_duration(std::chrono::microseconds{cpuUsecs}),
+    allocatedCores,
+    format_duration(
+      std::chrono::microseconds{allocatedCores ? (cpuUsecs / allocatedCores) : 0}
+    ),
+    format_bytes(stats.execMaxUsedMem.load()),
+    format_bytes(stats.execReservedMem.load()),
+    stats.blobs.load(),
+    stats.blobsUploaded.load(),
+    format_bytes(stats.blobBytesUploaded.load()),
+    stats.downloads.load(),
+    format_bytes(stats.bytesDownloaded.load()),
+    stats.throttles.load(),
+    format_duration(
+      std::chrono::microseconds{execCalls ? (stats.execLatencyUsec.load() / execCalls) : 0}
+    ),
+    format_duration(
+      std::chrono::microseconds{storeCalls ? (stats.storeLatencyUsec.load() / storeCalls) : 0}
+    ),
+    format_duration(
+      std::chrono::microseconds{loadCalls ? (stats.loadLatencyUsec.load() / loadCalls) : 0}
+    )
+  );
+}
+
+extern_worker::Client::Stats::Ptr g_clientStats;
+
+}
+
+trace_time::trace_time(const char* what,
+                       std::string extra_,
+                       StructuredLogEntry* logEntry)
+  : what{what}
+  , start(clock::now())
+  , extra{std::move(extra_)}
+  , logEntry{logEntry}
+  , beforeRss{Process::GetMemUsageMb() * 1024 * 1024}
+{
+  if (g_clientStats) clientBefore = g_clientStats->copy();
+
+  profile_memory(what, "start", extra);
+  if (!Trace::moduleEnabledRelease(Trace::hhbbc_time, 1)) return;
+  Trace::ftraceRelease(
+    "{}: {}: start{}\n"
+    "  RSS: {}\n",
+    ts<clock>(start),
+    what,
+    !extra.empty() ? fmt::format(" ({})", extra) : extra,
+    format_bytes(Process::GetMemUsageMb() * 1024 * 1024)
+  );
+}
+
+trace_time::~trace_time() {
+  namespace C = std::chrono;
+  auto const end = clock::now();
+  auto const elapsed = C::duration_cast<C::milliseconds>(
+    end - start
+  );
+
+  auto const clientDiff = (g_clientStats && clientBefore)
+    ? (*g_clientStats - *clientBefore)
+    : nullptr;
+
+  profile_memory(what, "end", extra);
+
+  auto const afterRss = Process::GetMemUsageMb() * 1024 * 1024;
+
+  if (logEntry) {
+    auto phase = fmt::format("hhbbc_{}", what);
+    while (true) {
+      auto const pos = phase.find_first_of(" :\"'");
+      if (pos == std::string::npos) break;
+      phase[pos] = '_';
+    }
+
+    logEntry->setInt(
+      phase + "_micros",
+      C::duration_cast<C::microseconds>(elapsed).count()
+    );
+    logEntry->setInt(phase + "_before_rss_bytes", beforeRss);
+    logEntry->setInt(phase + "_after_rss_bytes", afterRss);
+    logEntry->setInt(phase + "_rss_delta_bytes", afterRss - beforeRss);
+    if (clientDiff) clientDiff->logSample(phase, *logEntry);
+  }
+
+  if (!Trace::moduleEnabledRelease(Trace::hhbbc_time, 1)) return;
+  Trace::ftraceRelease(
+    "{}: {}: {} elapsed\n"
+    "  RSS: {}\n{}",
+    ts<clock>(end), what, format_duration(elapsed),
+    format_bytes(afterRss),
+    clientDiff ? client_stats(*clientDiff) : ""
+  );
+}
+
+void trace_time::ignore_client_stats() {
+  clientBefore.reset();
+}
+
+void trace_time::register_client_stats(extern_worker::Client::Stats::Ptr p) {
+  g_clientStats = std::move(p);
+}
+
+//////////////////////////////////////////////////////////////////////
+
+}

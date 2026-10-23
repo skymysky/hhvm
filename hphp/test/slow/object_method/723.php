@@ -1,18 +1,22 @@
-<?php
+<?hh
 
 class A {
- function test() {
+ function test() :mixed{
  print 'A';
 }
- function foo() {
+ function foo() :mixed{
  $this->test();
 }
 }
  class B extends A {
- function test() {
+ function test() :mixed{
  print 'B';
 }
 }
- $obj = new A();
+
+ <<__EntryPoint>>
+function main_723() :mixed{
+$obj = new A();
  $obj = new B();
  $obj->foo();
+}

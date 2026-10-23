@@ -1,28 +1,32 @@
-<?php
+<?hh
 
-function a() {
-  $array1 = array(
+function a() :mixed{
+  $array1 = dict[
     "a" => "green",
     "b" => "brown",
     "c" => "blue",
-    "red"
-  );
-  $array2 = array(
+    0 => "red"
+  ];
+  $array2 = dict[
     "a" => "green",
-    "yellow",
-    "red"
-  );
+    0 => "yellow",
+    1 => "red"
+  ];
 
   $result = array_diff_assoc($array1, $array2);
   var_dump($result);
 }
 
-function b() {
-  $array1 = array(0, 1, 2);
-  $array2 = array("00", "01", "2");
+function b() :mixed{
+  $array1 = vec[0, 1, 2];
+  $array2 = vec["00", "01", "2"];
   $result = array_diff_assoc($array1, $array2);
   var_dump($result);
 }
 
+
+<<__EntryPoint>>
+function main_array_diff_assoc() :mixed{
 a();
 b();
+}

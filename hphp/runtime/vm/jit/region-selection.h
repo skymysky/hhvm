@@ -14,8 +14,7 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_JIT_REGION_SELECTION_H_
-#define incl_HPHP_JIT_REGION_SELECTION_H_
+#pragma once
 
 #include <memory>
 #include <utility>
@@ -26,7 +25,6 @@
 
 #include <folly/Format.h>
 #include <folly/Hash.h>
-#include <folly/Optional.h>
 
 #include "hphp/runtime/vm/jit/containers.h"
 #include "hphp/runtime/vm/jit/location.h"
@@ -38,7 +36,7 @@
 #include "hphp/runtime/vm/resumable.h"
 #include "hphp/runtime/vm/srckey.h"
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 
 struct ProfData;
 struct TransCFG;
@@ -108,6 +106,19 @@ struct RegionDesc {
   void sortBlocks();
 
   /*
+   * Initialize reverse post order indices.
+   */
+  void initRpoIds();
+
+  /*
+   * Compute a dominating block for each block and save this information into
+   * this RegionDesc.
+   *
+   * Requires blocks to be sorted in a reverse post order (see sortBlocks()).
+   */
+  void findDominators();
+
+  /*
    * Returns the last BC offset in the region that corresponds to the
    * function where the region starts.  This will normally be the offset
    * of the last instruction in the last block, except if the function
@@ -126,9 +137,11 @@ struct RegionDesc {
    * counts of these other blocks as well.
    */
   int64_t           blockProfCount(BlockId bid) const;
+  double            blockProfCountScale(BlockId bid) const;
 
-  Block*            addBlock(SrcKey sk, int length, FPInvOffset spOffset);
+  Block*            addBlock(SrcKey sk, int length, SBInvOffset spOffset);
   void              addBlock(BlockPtr newBlock);
+  bool              hasBlock(BlockId id) const;
   void              replaceBlock(BlockId bid, BlockPtr newBlock);
   void              deleteBlock(BlockId bid);
   BlockVec::iterator deleteBlock(RegionDesc::BlockVec::iterator it);
@@ -136,16 +149,22 @@ struct RegionDesc {
   void              addArc(BlockId src, BlockId dst);
   void              removeArc(BlockId src, BlockId dst);
   void              addMerged(BlockId fromId, BlockId intoId);
-  folly::Optional<BlockId> prevRetrans(BlockId id) const;
-  folly::Optional<BlockId> nextRetrans(BlockId id) const;
+  Optional<BlockId> idom(BlockId id) const;
+  uint32_t          rpoId(BlockId id) const;
+  Optional<BlockId> prevRetrans(BlockId id) const;
+  Optional<BlockId> nextRetrans(BlockId id) const;
   void              clearPrevRetrans(BlockId id);
   void              clearNextRetrans(BlockId id);
   void              setNextRetrans(BlockId id, BlockId next);
   void              append(const RegionDesc&  other);
   void              prepend(const RegionDesc& other);
   void              chainRetransBlocks();
+  void              setBlockProfCountScale(BlockId, double);
   uint32_t          instrSize() const;
   std::string       toString() const;
+
+  void setHotWeight(uint64_t weight) { m_hotWeight = weight; }
+  Optional<uint64_t> getHotWeight() const { return m_hotWeight; }
 
   const std::vector<Type>& inlineInputTypes() const {
     return m_inlineInputTypes;
@@ -168,11 +187,13 @@ private:
     BlockIdSet               merged; // other blocks that got merged into this
     BlockId                  prevRetransId{kInvalidTransID};
     BlockId                  nextRetransId{kInvalidTransID};
+    BlockId                  idom{kInvalidTransID};
+    uint32_t                 rpoId{std::numeric_limits<uint32_t>::max()};
+    double                   profCountScale{1.0};
     bool                     hasIncoming{false};
     explicit BlockData(BlockPtr b = nullptr) : block(b) {}
   };
 
-  bool       hasBlock(BlockId id) const;
   BlockData& data(BlockId id);
   const BlockData& data(BlockId id) const {
     return const_cast<RegionDesc*>(this)->data(id);
@@ -186,6 +207,10 @@ private:
 
   std::vector<BlockPtr>             m_blocks;
   hphp_hash_map<BlockId, BlockData> m_data;
+
+  // When optimizing, we may know what a "hot weight" for this region would be
+  // relative to other regions. Pass this information down to vasm-layout.
+  Optional<uint64_t> m_hotWeight;
 
   // For regions selected for inlining, track the types of input arguments
   std::vector<Type> m_inlineInputTypes;
@@ -257,24 +282,21 @@ inline bool operator==(const RegionDesc::GuardedLocation& a,
  *     corresponding translation, typically due to type checks or
  *     asserts.
  */
-using TypedLocations = std::vector<RegionDesc::TypedLocation>;
+using TypedLocations   = jit::vector<RegionDesc::TypedLocation>;
+using GuardedLocations = jit::vector<RegionDesc::GuardedLocation>;
 
 struct PostConditions {
   TypedLocations changed;
   TypedLocations refined;
+  PostConditions& operator|=(const PostConditions& other);
 };
 
 /*
- * A basic block in the region, with type predictions for conditions
- * at various execution points, including at entry to the block.
+ * A basic block in the region.
  */
 struct RegionDesc::Block {
-  using TypedLocVec   = jit::vector<TypedLocation>;
-  using GuardedLocVec = jit::vector<GuardedLocation>;
-  using KnownFuncMap  = boost::container::flat_map<SrcKey,const Func*>;
 
-  Block(BlockId id, const Func* func, ResumeMode resumeMode, bool hasThis,
-        Offset start, int length, FPInvOffset initSpOff);
+  Block(BlockId id, SrcKey start, int length, SBInvOffset initSpOff);
 
   Block& operator=(const Block&) = delete;
 
@@ -283,23 +305,18 @@ struct RegionDesc::Block {
    * starting SrcKey of this Block.
    */
   BlockId     id()                const { return m_id; }
-  const Unit* unit()              const { return m_func->unit(); }
-  const Func* func()              const { return m_func; }
-  SrcKey      start()             const {
-    return SrcKey { m_func, m_start, m_resumeMode, m_hasThis };
-  }
-  SrcKey      last()              const {
-    return SrcKey { m_func, m_last, m_resumeMode, m_hasThis };
-  }
+  const Unit* unit()              const { return m_start.unit(); }
+  const Func* func()              const { return m_start.func(); }
+  SrcKey      start()             const { return m_start; }
+  SrcKey      last()              const { return m_last; }
   int         length()            const { return m_length; }
   bool        empty()             const { return length() == 0; }
-  bool        contains(SrcKey sk) const;
-  FPInvOffset initialSpOffset()   const { return m_initialSpOffset; }
+  SBInvOffset initialSpOffset()   const { return m_initialSpOffset; }
   TransID     profTransID()       const { return m_profTransID; }
 
   void setID(BlockId id)                  { m_id = id; }
   void setProfTransID(TransID ptid)       { m_profTransID = ptid; }
-  void setInitialSpOffset(FPInvOffset sp) { m_initialSpOffset = sp; }
+  void setInitialSpOffset(SBInvOffset sp) { m_initialSpOffset = sp; }
 
   /*
    * Increase the length of the Block by 1.
@@ -312,25 +329,12 @@ struct RegionDesc::Block {
   void truncateAfter(SrcKey sk);
 
   /*
-   * Add a predicted type to this block.  Multiple calls to this method should
-   * be made in sorted order of the TypeLocation parameter.
-   */
-  void addPredicted(TypedLocation);
-
-  /*
    * Add a precondition type to this block. Preconditions have no effects on
    * correctness, but entering a block with a known type that violates a
    * precondition is likely to result in a side exit after little to no
    * forward progress.
    */
   void addPreCondition(const GuardedLocation&);
-
-  /*
-   * Update the statically known Func*. It remains active until another is
-   * specified, so pass nullptr to indicate that there is no longer a known
-   * Func*.
-   */
-  void setKnownFunc(SrcKey, const Func*);
 
   /*
    * Set the post-conditions for this Block.
@@ -348,29 +352,26 @@ struct RegionDesc::Block {
    * iterate over the information is using a MapWalker, since they're all
    * backed by a sorted map.
    */
-  const TypedLocVec&    typePredictions()   const { return m_typePredictions;  }
-  const GuardedLocVec&  typePreConditions() const { return m_typePreConditions;}
-  const KnownFuncMap&   knownFuncs()        const { return m_knownFuncs;       }
-  const PostConditions& postConds()         const { return m_postConds;        }
+  const GuardedLocations& typePreConditions() const {
+    return m_typePreConditions;
+  }
+  const PostConditions& postConds() const {
+    return m_postConds;
+  }
 
 private:
   void checkInstructions() const;
-  void checkInstruction(Op op) const;
+  void checkInstruction(SrcKey sk) const;
   void checkMetadata() const;
 
 private:
+  const SrcKey     m_start;
+  SrcKey           m_last;
   BlockId          m_id;
-  const Func*      m_func;
-  const ResumeMode m_resumeMode;
-  const bool       m_hasThis;
-  const Offset     m_start;
-  Offset           m_last;
   int              m_length;
-  FPInvOffset      m_initialSpOffset;
+  SBInvOffset      m_initialSpOffset;
   TransID          m_profTransID;
-  TypedLocVec      m_typePredictions;
-  GuardedLocVec    m_typePreConditions;
-  KnownFuncMap     m_knownFuncs;
+  GuardedLocations m_typePreConditions;
   PostConditions   m_postConds;
 };
 
@@ -379,32 +380,20 @@ private:
 /*
  * Information about the context in which we are selecting a region.
  *
- * Right now this is a source location, plus information about the
- * live types that we need to be compiling for.  There is no
- * implication that the region selected will necessarily specialize
- * for those types.
+ * Right now this is a source location, plus information about the live
+ * types that we need to be compiling for. There is no implication that
+ * the region selected will necessarily be specialized for those types.
  */
+
+using LiveTypesVec = jit::small_vector<RegionDesc::TypedLocation, 10>;
+
 struct RegionContext {
-  struct LiveType;
+  RegionContext(SrcKey sk, SBInvOffset spOff)
+    : sk(sk), spOffset(spOff) {}
 
-  RegionContext(const Func* f, Offset bcOff, FPInvOffset spOff,
-                ResumeMode rm, bool ht) :
-      func(f), bcOffset(bcOff), spOffset(spOff), resumeMode(rm), hasThis(ht) {}
-
-  const Func* func;
-  Offset bcOffset;
-  FPInvOffset spOffset;
-  ResumeMode resumeMode;
-  bool hasThis;
-  jit::vector<LiveType> liveTypes;
-};
-
-/*
- * Live information about the type of a local or stack slot.
- */
-struct RegionContext::LiveType {
-  Location location;
-  Type type;
+  SrcKey sk;
+  LiveTypesVec liveTypes;
+  SBInvOffset spOffset;
 };
 
 //////////////////////////////////////////////////////////////////////
@@ -421,10 +410,61 @@ void RegionDesc::forEachArc(Work w) const {
 
 //////////////////////////////////////////////////////////////////////
 
+/**
+ * A key struct that uniquely identifies a single translation that can be
+ * published at any point in time.  This includes both the SrcKey for the start
+ * of the translation and the list of its entry guards.
+ */
+struct RegionEntryKey {
+
+  RegionEntryKey(SrcKey srcKey, const GuardedLocations& guards)
+    : m_srcKey(srcKey)
+    , m_guards(guards)
+  { }
+
+  explicit RegionEntryKey(const RegionDesc& region)
+    : m_srcKey(region.entry()->start())
+    , m_guards(region.entry()->typePreConditions())
+  { }
+
+  SrcKey                  srcKey() const { return m_srcKey; }
+  const GuardedLocations& guards() const { return m_guards; }
+
+  struct Eq {
+    bool operator()(const RegionEntryKey& key1,
+                    const RegionEntryKey& key2) const {
+      return key1.m_srcKey == key2.m_srcKey &&
+             key1.m_guards == key2.m_guards;
+    }
+  };
+
+  struct Hash {
+    size_t operator()(const RegionEntryKey& key) const {
+      size_t h = key.m_srcKey.toAtomicInt();
+      Location::Hash lochash;
+      using data_category_t = std::underlying_type<DataTypeCategory>::type;
+      for (auto& guard : key.m_guards) {
+        h = folly::hash::hash_combine(
+          h, lochash(guard.location),
+          guard.type.hash(),
+          static_cast<data_category_t>(guard.category)
+        );
+      }
+      return h;
+    }
+  };
+
+ private:
+  SrcKey           m_srcKey;
+  GuardedLocations m_guards;
+};
+
+//////////////////////////////////////////////////////////////////////
+
 /*
  * Select a compilation region corresponding to the given context.
  * The shape of the region selected is controlled by
- * RuntimeOption::EvalJitRegionSelector.
+ * Cfg::Jit::RegionSelector.
  *
  * This function may return nullptr.
  *
@@ -434,12 +474,6 @@ void RegionDesc::forEachArc(Work w) const {
  */
 RegionDescPtr selectRegion(const RegionContext& context, TransKind kind);
 
-/*
- * Select a compilation region based on profiling information.  This
- * is used in JitPGO mode.  Argument transId specifies the profiling
- * translation that triggered the profiling-based region selection.
- */
-RegionDescPtr selectHotRegion(TransID transId);
 
 /*
  * Select a compilation region as long as possible using the given context.
@@ -452,13 +486,13 @@ RegionDescPtr selectHotRegion(TransID transId);
  * information to translate at least one instruction.
  *
  * The `allowInlining' flag should be disabled when we are selecting a tracelet
- * whose shape will be analyzed by the InliningDecider.
+ * whose shape will be analyzed by the inlining decider.
  */
 RegionDescPtr selectTracelet(const RegionContext& ctx, TransKind kind,
                              int32_t maxBCInstrs, bool inlining = false);
 
 struct HotTransContext {
-  TransID tid;
+  TransIDSet entries;
   TransCFG* cfg;
   const ProfData* profData;
   int32_t maxBCInstrs;
@@ -475,11 +509,13 @@ RegionDescPtr selectHotTrace(HotTransContext& ctx);
  * Create a region with the given context ctx (starting at ctx.tid) that
  * includes as much of the TransCFG as possible (in "wholecfg" mode), but that
  * can be pruned to eliminate cold/unlikely code as well (in "hotcfg" mode).
+ * Returns in *truncated whether or not the region had to be truncated due to
+ * the maximum bytecode limit.
  */
-RegionDescPtr selectHotCFG(HotTransContext& ctx);
+RegionDescPtr selectHotCFG(HotTransContext& ctx, bool* truncated = nullptr);
 
 /*
- * Checks whether the type predictions at the beginning of block
+ * Checks whether the type pre-conditions at the beginning of block
  * satisfy the post-conditions in prevPostConds.
  */
 bool preCondsAreSatisfied(const RegionDesc::BlockPtr& block,
@@ -504,15 +540,9 @@ RegionVec regionizeFunc(const Func* func, std::string& transCFGAnnot);
 void optimizeProfiledGuards(RegionDesc& region, const ProfData& profData);
 
 /*
- * Optimize the guards of `region', optionally in `simple' mode (where
- * guards are only relaxed if they can be relaxed all the way to TGen).
- */
-void optimizeGuards(RegionDesc& region, bool simple);
-
-/*
  * Returns the PGO region selector to be used for the given `func'.
- * This depends on the values of RuntimeOption::EvalJitPGORegionSelector
- * and RuntimeOption::EvalJitPGOCFGHotFuncOnly and the given `func'.
+ * This depends on the value of Cfg::Jit::PGORegionSelector
+ * and the given `func'.
  */
 PGORegionMode pgoRegionMode(const Func& func);
 
@@ -533,15 +563,12 @@ bool check(const RegionDesc& region, std::string& error);
  */
 std::string show(RegionDesc::TypedLocation);
 std::string show(const RegionDesc::GuardedLocation&);
-std::string show(const RegionDesc::Block::GuardedLocVec&);
+std::string show(const GuardedLocations&);
 std::string show(const PostConditions&);
-std::string show(RegionContext::LiveType);
 std::string show(const RegionContext&);
 std::string show(const RegionDesc::Block&);
 std::string show(const RegionDesc&);
 
 //////////////////////////////////////////////////////////////////////
 
-}}
-
-#endif
+}

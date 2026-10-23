@@ -1,19 +1,19 @@
-<?php
-$bases = array(23,
-				-23,
-				23.1,
-				-23.1,
-				2.345e1,
-				-2.345e1,
-				0x17,
-				027,
-				"23",
-				"23.45",
-				"2.345e1",	
-				PHP_INT_MAX,
-				-PHP_INT_MAX - 1);				
+<?hh <<__EntryPoint>> function main(): void {
+$bases = vec[23,
+                -23,
+                23.1,
+                -23.1,
+                2.345e1,
+                -2.345e1,
+                0x17,
+                027,
+                "23",
+                "23.45",
+                "2.345e1",
+                PHP_INT_MAX,
+                -PHP_INT_MAX - 1];
 
-$exponents = array(0,
+$exponents = vec[0,
                1,
                -1,
                2,
@@ -25,16 +25,18 @@ $exponents = array(0,
                500,
                -500,
                2147483647,
-			   -2147483648); 				
-					
+               -2147483648];
+
 foreach($bases as $base) {
-	echo "\n\nBase = $base";
-	foreach($exponents as $exponent) {
-		echo "\n..... Exponent = $exponent Result = ";
-		$res = pow($base, $exponent);
-		echo $res;
-	}
-	echo "\n\n";
+    $base__str = (string)($base);
+    echo "\n\nBase = $base__str";
+    foreach($exponents as $exponent) {
+        $exponent__str = (string)($exponent);
+        echo "\n..... Exponent = $exponent__str Result = ";
+        $res = pow(HH\Lib\Legacy_FIXME\cast_for_exponent($base), HH\Lib\Legacy_FIXME\cast_for_exponent($exponent));
+        echo $res;
+    }
+    echo "\n\n";
 }
-?>
-===Done===
+echo "===Done===";
+}

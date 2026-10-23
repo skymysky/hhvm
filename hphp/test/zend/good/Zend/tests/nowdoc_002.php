@@ -1,17 +1,15 @@
-<?php
+<?hh
 
-require_once 'nowdoc.inc';
-
-print b<<<'ENDOFNOWDOC'
+<<__EntryPoint>> function main(): void {
+print <<<'ENDOFNOWDOC'
 This is a nowdoc test.
 
 ENDOFNOWDOC;
 
-$x = b<<<'ENDOFNOWDOC'
+$x = <<<'ENDOFNOWDOC'
 This is another nowdoc test.
 
 ENDOFNOWDOC;
 
 print "{$x}";
-
-?>
+}

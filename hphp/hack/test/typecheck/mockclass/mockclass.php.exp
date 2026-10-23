@@ -1,0 +1,18 @@
+error: Typing[4035] You cannot extend final class `MyParent` [1]
+-> Declaration is here [2]
+
+mockclass.php:8:13
+ 1 | <?hh
+ 2 | 
+ 3 | final class MyParent {
+   |             ^^^^^^^^ [2]
+ 4 |   public function foo(): void { echo "myparent\n"; }
+ 5 | }
+ 6 | 
+ 7 | <<__MockClass>>
+ 8 | final class MyChild extends MyParent {
+   |             ^^^^^^^ [1]
+ 9 |   public function foo(): void { echo "mychild\n"; }
+10 | }
+
+1 error found

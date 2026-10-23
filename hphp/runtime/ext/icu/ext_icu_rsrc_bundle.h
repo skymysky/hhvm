@@ -1,5 +1,4 @@
-#ifndef incl_HPHP_ICU_RSRC_BUNDLE_H
-#define incl_HPHP_ICU_RSRC_BUNDLE_H
+#pragma once
 
 #include "hphp/runtime/ext/extension.h"
 #include "hphp/runtime/ext/icu/icu.h"
@@ -7,11 +6,10 @@
 #include <unicode/ures.h>
 #include <unicode/resbund.h>
 
-namespace HPHP { namespace Intl {
+namespace HPHP::Intl {
 /////////////////////////////////////////////////////////////////////////////
-extern const StaticString s_ResourceBundle;
 
-struct ResourceBundle : IntlError {
+struct ResourceBundle : IntlError, SystemLib::ClassLoader<"ResourceBundle"> {
   ResourceBundle() {}
   ResourceBundle(const ResourceBundle&) = delete;
   ResourceBundle& operator=(const ResourceBundle& src) {
@@ -27,15 +25,11 @@ struct ResourceBundle : IntlError {
   }
 
   static ResourceBundle* Get(ObjectData* obj) {
-    return GetData<ResourceBundle>(obj, s_ResourceBundle);
+    return GetData<ResourceBundle>(obj, className());
   }
 
   static Object newInstance(icu::ResourceBundle* bundle) {
-    if (!c_ResourceBundle) {
-      c_ResourceBundle = Unit::lookupClass(s_ResourceBundle.get());
-      assertx(c_ResourceBundle);
-    }
-    Object obj{c_ResourceBundle};
+    Object obj{ classof() };
     auto data = Native::data<ResourceBundle>(obj);
     data->setResource(bundle);
     return obj;
@@ -69,7 +63,7 @@ struct ResourceBundle : IntlError {
     if (m_isTable) {
       UErrorCode error = U_ZERO_ERROR;
       auto key = m_rsrc->get(m_iterIndex, error).getKey();
-      return String(key, CopyString);
+      return OptString(key, CopyString);
     }
     return m_iterIndex;
   }
@@ -79,11 +73,8 @@ private:
   icu::ResourceBundle* m_rsrc{nullptr};
   bool m_isTable{false};
   int32_t m_iterIndex{0}, m_size{0};
-
-  static Class* c_ResourceBundle;
 };
 
 /////////////////////////////////////////////////////////////////////////////
-}} // namespace HPHP::Intl
+} // namespace HPHP::Intl
 
-#endif // incl_HPHP_ICU_RSRC_BUNDLE_H

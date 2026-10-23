@@ -1,9 +1,9 @@
 <?hh
 
 class MyClass {
-  private $x = array(1,2,3);
+  private $x = vec[1,2,3];
 
-  public function closure_fun() {
+  public function closure_fun() :mixed{
     $z = () ==> {
       $foo = () ==> {
         return () ==> {
@@ -17,10 +17,10 @@ class MyClass {
     return $z;
   }
 
-  public function getter() { return $this->x; }
+  public function getter() :mixed{ return $this->x; }
 }
 
-function main() {
+function main() :mixed{
   $my = new MyClass;
   var_dump($my->getter());
   $fun = $my->closure_fun();
@@ -28,4 +28,8 @@ function main() {
   var_dump($my->getter());
 }
 
+
+<<__EntryPoint>>
+function main_closure_context_001() :mixed{
 main();
+}

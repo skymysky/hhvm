@@ -24,7 +24,7 @@ class Reflection {
    *                     export is returned as a string, otherwise NULL is
    *                     returned.
    */
-  public static function export(Reflector $refl, $return = false) {
+  public static function export(Reflector $refl, bool $return = false): mixed {
     $s = $refl->__toString();
     if ($return) {
       return $s;
@@ -44,19 +44,19 @@ class Reflection {
    *
    * @return     mixed   An array of modifier names.
    */
-  public static function getModifierNames($modifiers) {
-    $ret = array();
+  public static function getModifierNames(int $modifiers)[]: vec<string> {
+    $ret = vec[];
 
     $abstract = ReflectionMethod::IS_ABSTRACT |
                 ReflectionClass::IS_EXPLICIT_ABSTRACT;
     $final = ReflectionMethod::IS_FINAL | ReflectionClass::IS_FINAL;
     $implicit_public = 4096;
 
-    $map = array(
+    $map = dict[
       $abstract => 'abstract',
       $final => 'final',
       $implicit_public => 'public'
-    );
+    ];
 
     $ppp_mask = ReflectionMethod::IS_PUBLIC |
                 ReflectionMethod::IS_PRIVATE |
@@ -72,6 +72,7 @@ class Reflection {
       case ReflectionMethod::IS_PUBLIC:     $ret[] = 'public'; break;
       case ReflectionMethod::IS_PRIVATE:    $ret[] = 'private'; break;
       case ReflectionMethod::IS_PROTECTED:  $ret[] = 'protected'; break;
+      default: break;
     }
     if ($modifiers & ReflectionMethod::IS_STATIC) {
       $ret[] = 'static';

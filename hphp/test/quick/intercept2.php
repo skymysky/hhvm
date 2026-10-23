@@ -5,42 +5,40 @@
  * pre-intercept function.
  */
 
-function foo() {
+function foo(mixed $i = 10) :void{
   var_dump(__METHOD__);
 }
 
-function bar() {
+<<__DynamicallyCallable>> function bar(mixed $_1, mixed $_2, inout mixed $_3) :mixed{
   var_dump(__METHOD__);
+  return shape('value' => null);
 }
 
-function test() {
+function test() :void{
   foo();
 }
 
 class C {
-  function __call($name, $args) {
-    var_dump(__METHOD__, $name, $args);
+  public function snoot() :void{
+    var_dump(__METHOD__);
   }
 }
 
 
-function swizzle($name, $obj, $args, $data, &$done) {
-  var_dump($name, $obj, $args, $data, $done);
-  $done = false;
+<<__DynamicallyCallable>> function swizzle(mixed $name, mixed $obj, inout mixed $args) :mixed{
+  var_dump($name, $obj, $args);
+  return shape();
 }
 
-function main() {
+<<__EntryPoint>> function main(): void {
   $c = new C();
   for ($i = 0; $i < 3; $i++) {
     test();
     foo();
     $c->snoot();
     if ($i == 1) {
-      fb_intercept('foo', 'bar', false);
-      fb_intercept('C::__call', 'swizzle');
+      fb_intercept2('foo', HH\dynamic_fun('bar'));
+      fb_intercept2('C::snoot', HH\dynamic_fun('swizzle'));
     }
   }
 }
-
-main();
-

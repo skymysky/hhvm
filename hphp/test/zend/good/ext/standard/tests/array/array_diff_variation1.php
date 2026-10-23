@@ -1,7 +1,7 @@
-<?php
+<?hh
 /* Prototype  : array array_diff(array $arr1, array $arr2 [, array ...])
- * Description: Returns the entries of $arr1 that have values which are not 
- * present in any of the others arguments. 
+ * Description: Returns the entries of $arr1 that have values which are not
+ * present in any of the others arguments.
  * Source code: ext/standard/array.c
  */
 
@@ -9,21 +9,18 @@
  * Test array_diff by passing non array values in place of $arr1
  */
 
-echo "*** Testing array_diff() : usage variations ***\n";
-
-$array = array(1, 2, 3);
-
-//get an unset variable
-$unset_var = 10;
-unset ($unset_var);
-
 // get a class
 class classA
 {
-  public function __toString() {
+  public function __toString() :mixed{
     return "Class A object";
   }
 }
+<<__EntryPoint>> function main(): void {
+echo "*** Testing array_diff() : usage variations ***\n";
+
+$array = vec[1, 2, 3];
+
 
 // heredoc string
 $heredoc = <<<EOT
@@ -34,7 +31,7 @@ EOT;
 $fp = fopen(__FILE__, "r");
 
 // unexpected values to be passed to $input argument
-$inputs = array(
+$inputs = vec[
 
        // int data
 /*1*/  0,
@@ -58,7 +55,7 @@ $inputs = array(
        false,
        TRUE,
        FALSE,
-       
+
        // empty data
 /*16*/ "",
        '',
@@ -67,23 +64,19 @@ $inputs = array(
 /*18*/ "string",
        'string',
        $heredoc,
-       
+
        // binary data
-/*21*/ b"binary",
-	   (binary)"binary",
-	   
+/*21*/ "binary",
+       (string)"binary",
+
        // object data
 /*23*/ new classA(),
 
-       // undefined data
-/*24*/ @$undefined_var,
 
-       // unset data
-/*25*/ @$unset_var,
 
        // resource variable
-/*26*/ $fp
-);
+/*24*/ $fp
+];
 
 // loop through each element of $inputs to check the behavior of array_diff
 $iterator = 1;
@@ -95,4 +88,4 @@ foreach($inputs as $input) {
 
 fclose($fp);
 echo "Done";
-?>
+}

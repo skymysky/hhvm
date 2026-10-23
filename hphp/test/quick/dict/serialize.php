@@ -1,40 +1,30 @@
-<?php
+<?hh
 // Copyright 2004-present Facebook. All Rights Reserved.
 
 class NoisyClass {
-  function __sleep() {
+  function __sleep() :mixed{
     echo "NoisyClass::__sleep()\n";
-    return [];
+    return vec[];
   }
-  function __wakeup() {
+  function __wakeup() :mixed{
     echo "NoisyClass::__wakeup()\n";
     $this->val = dict["abcd" => 12345];
   }
 }
 
 class SleepThrow {
-  function __sleep() {
+  function __sleep() :mixed{
     throw new Exception("Sleep exception");
   }
 }
 
 class WakeupThrow {
-  function __wakeup() {
+  function __wakeup() :mixed{
     throw new Exception("Wakeup exception");
   }
 }
 
-class Dtor {
-  public $id;
-  function __construct($id) {
-    $this->id = $id;
-  }
-  function __destruct() {
-    echo "Dtor::__destruct(): " . $this->id . "\n";
-  }
-}
-
-function roundtrip($d) {
+function roundtrip($d) :mixed{
   echo "====================================================\n";
   var_dump($d);
   $str = serialize($d);
@@ -43,7 +33,7 @@ function roundtrip($d) {
   var_dump($d2);
 }
 
-function try_serialize($val) {
+function try_serialize($val) :mixed{
   try {
     echo "====================================================\n";
     var_dump($val);
@@ -53,7 +43,7 @@ function try_serialize($val) {
   }
 }
 
-function try_unserialize($val) {
+function try_unserialize($val) :mixed{
   try {
     echo "====================================================\n";
     var_dump($val);
@@ -63,11 +53,11 @@ function try_unserialize($val) {
   }
 }
 
-function main() {
+<<__EntryPoint>> function main(): void {
   roundtrip(dict[]);
   roundtrip(dict[1 => 'a', 2 => 'b', 3 => 'c']);
   roundtrip(dict['a' => 1, 'b' => 2, 'c' => 3]);
-  roundtrip(dict['abc' => new stdclass, 'def' => true,
+  roundtrip(dict['abc' => new stdClass, 'def' => true,
                  123 => 1.23, 456 => null,
                  789 => dict['a' => 1, 'b' => 2],
                  'ghi' => keyset[123, "abc"],
@@ -81,11 +71,10 @@ function main() {
 
   // Duplicate keys
   try_unserialize("D:2:{i:1;i:123;i:1;i:456;}");
-  try_unserialize("D:2:{i:1;O:4:\"Dtor\":1:{s:2:\"id\";i:1;}i:1;i:456;}");
 
   // Recursive data structures
   try_unserialize("D:1:{i:1;O:8:\"stdClass\":1:{s:3:\"val\";a:1:{i:1;r:2;}}}");
-  $recursive_obj = new stdclass;
+  $recursive_obj = new stdClass;
   $recursive_dict = dict[1 => $recursive_obj];
   $recursive_obj->val = $recursive_dict;
   roundtrip($recursive_obj);
@@ -110,10 +99,4 @@ function main() {
 
   try_serialize(dict[1 => new SleepThrow]);
   try_unserialize("D:1:{i:123;O:11:\"WakeupThrow\":0:{}}");
-
-  // Ensure propert dtors run
-  try_unserialize("D:3:{i:1;O:4:\"Dtor\":1:{s:2:\"id\";i:1;}i:2;O:11:\"WakeupThrow\":0:{}i:3;O:4:\"Dtor\":1:{s:2:\"id\";i:2;}}");
-  try_unserialize("D:3:{i:1;O:4:\"Dtor\":1:{s:2:\"id\";i:1;}b:0;s:3:\"abc\";i:3;O:4:\"Dtor\":1:{s:2:\"id\";i:2;}}");
 }
-
-main();

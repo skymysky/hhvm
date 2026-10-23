@@ -1,26 +1,35 @@
-<?php
+<?hh
 
-abstract class Base {
-  public function foo(&$x) {
-    $this->implFoo($x);
-  }
+interface I {}
 
-  public function implFoo(&$x = null, $y = false) {}
+class A implements I {
+  public function foo() :mixed{ return 1; }
+}
+class B implements I {
+  public function foo() :mixed{ return 2; }
+}
+class C implements I {
+  public function foo() :mixed{ return 3; }
 }
 
-abstract class Derived extends Base {
+interface I2 {}
+
+class A2 implements I2 {
+  public function foo() :mixed{ return 1; }
 }
 
-class D2 extends Derived {
-  public function implFoo() {
-    echo "hi\n";
-  }
+class P1 {
+  private function foo() :mixed{ return 4; }
 }
 
-function main() {
-  $x = new D2;
-  $y = 'ok';
-  $x->foo($y);
+class B2 extends P1 implements I2 {
+  public function foo() :mixed{ return 2; }
+}
+class C2 implements I2 {
+  public function foo() :mixed{ return 3; }
 }
 
-main();
+<<__EntryPoint>>
+function main() :mixed{
+  echo "Done\n";
+}

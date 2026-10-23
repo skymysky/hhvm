@@ -13,8 +13,7 @@
    | license@php.net so we can mail you a copy immediately.               |
    +----------------------------------------------------------------------+
 */
-#ifndef incl_HPHP_VM_RUNTIME_H_
-#define incl_HPHP_VM_RUNTIME_H_
+#pragma once
 
 #include "hphp/runtime/ext/generator/ext_generator.h"
 #include "hphp/runtime/ext/asio/ext_async-function-wait-handle.h"
@@ -23,16 +22,24 @@
 #include "hphp/runtime/vm/act-rec.h"
 #include "hphp/runtime/vm/event-hook.h"
 #include "hphp/runtime/vm/func.h"
+#include "hphp/runtime/vm/reified-generics.h"
 #include "hphp/runtime/vm/resumable.h"
 #include "hphp/runtime/base/builtin-functions.h"
+#include "hphp/runtime/base/execution-context.h"
 #include "hphp/runtime/base/object-data.h"
 #include "hphp/runtime/base/stats.h"
 #include "hphp/runtime/base/tv-refcount.h"
+#include "hphp/runtime/base/tv-val.h"
 
 namespace HPHP {
 
+extern RDS_LOCAL_NO_CHECK(uint64_t, rl_num_coeffect_violations);
+
 struct HhbcExtFuncInfo;
 struct HhbcExtClassInfo;
+
+constexpr Id kReadonlyReturnId = -1;
+constexpr Id kReadonlyThisId = -2;
 
 StringData* concat_is(int64_t v1, StringData* v2);
 StringData* concat_si(StringData* v1, int64_t v2);
@@ -46,44 +53,83 @@ void print_int(int64_t i);
 void print_boolean(bool val);
 
 void raiseWarning(const StringData* sd);
-void raiseNotice(const StringData* sd);
-void raiseArrayIndexNotice(int64_t index, bool isInOut);
-void raiseArrayKeyNotice(const StringData* key, bool isInOut);
-std::string formatParamRefMismatch(const char* fname, uint32_t index,
-                                   bool funcByRef);
-void raiseParamRefMismatchForFuncName(const StringData* fname, uint32_t index,
-                                      bool funcByRef);
-void raiseParamRefMismatchForFunc(const Func* func, uint32_t index);
+void raiseNotice(uint32_t sampleRate, const StringData* sd);
+[[noreturn]] void throwArrayIndexException(const ArrayData *ad, int64_t index);
+[[noreturn]] void throwArrayKeyException(const ArrayData *ad, const StringData* key);
+std::string formatParamInOutMismatch(const char* fname, uint32_t index,
+                                     bool funcByRef);
+void checkInOutMismatch(const Func* func, uint32_t numArgs,
+                        const uint8_t* inoutArgs);
+Optional<uint32_t> readonlyMismatch(const Func* func, uint32_t numArgs,
+                                    const uint8_t* readonlyArgs,
+                                    const ArrayData* namedArgNames);
+void checkReadonlyMismatch(const Func* func, uint32_t numArgs,
+                           const uint8_t* readonlyArgs,
+                           const ArrayData* namedArgNames);
+[[noreturn]] void throwParamInOutMismatch(const Func* func, uint32_t index);
+[[noreturn]] void throwReadonlyMismatch(const Func* func, int32_t index);
+[[noreturn]] void throwInvalidUnpackArgs();
+[[noreturn]] void throwMissingPositionalArgument(const Func* func, int got);
+[[noreturn]] void throwUnexpectedNamedArguments(const Func* func);
+[[noreturn]] void throwMissingNamedParam(const Func* func, const StringData* paramName);
+[[noreturn]] void throwNamedArgumentNameMismatch(const Func* func, const StringData* argName);
+[[noreturn]] void throwOrWarnLocalMustBeValueTypeException(const StringData* locName);
+[[noreturn]] void throwMustBeEnclosedInReadonlyException(const Class* cls,
+                                                         const StringData* propName);
+[[noreturn]] void throwMustBeMutableException(const Class* cls,
+                                              const StringData* propName);
+[[noreturn]] void throwMustBeReadonlyException(const Class* cls,
+                                               const StringData* propName);
+[[noreturn]] void throwMustBeValueTypeException(const Class* cls,
+                                                const StringData* propName);
+void raiseTooManyArguments(const Func* func, int got);
+void raiseTooManyArgumentsPrologue(const Func* func, ArrayData* unpackArgs);
 
-inline intptr_t frame_clsref_offset(const Func* f, uint32_t slot) {
-  return
-    -((f->numLocals() + f->numIterators() * kNumIterCells) * sizeof(Cell) +
-      (slot + 1) * sizeof(LowPtr<Class>));
-}
+void raiseCoeffectsCallViolation(const Func* callee,
+                                 RuntimeCoeffects provided,
+                                 RuntimeCoeffects required);
 
-inline LowPtr<Class>*
-frame_clsref_slot(const ActRec* fp, uint32_t slot) {
-  return (LowPtr<Class>*)(
-    uintptr_t(fp) + frame_clsref_offset(fp->m_func, slot)
-  );
-}
+void raiseCoeffectsFunParamTypeViolation(TypedValue, int32_t);
+void raiseCoeffectsFunParamCoeffectRulesViolation(const Func*);
+
+void raiseModuleBoundaryViolation(const Class* ctx,
+                                  const Func* callee,
+                                  const StringData* callerModule);
+void raiseModuleBoundaryViolation(const Class* cls,
+                                  const StringData* callerModule,
+                                  const Class* callerCls);
+
+void raiseModulePropertyViolation(const Class* cls,
+                                  const StringData* prop,
+                                  const StringData* callerModule,
+                                  bool is_static);
+
+/**
+ * We enter this function if a class is loaded from a string and missing
+ * AttrDynamicallyReferenced. This attr is set by hackc if the
+ * <<__DynamicallyReferenced>> attribute is present and has no arguments.
+ * If we pass an int argument to the attribute, we treat it as "soft" missing
+ * and go down the slow path; then we look up the user attributes on the
+ * resolved Class* at runtime to determine the sample rate for the notice.
+ */
+void raiseMissingDynamicallyReferenced(const Class* cls);
+void checkStrictPackageDynamicReference(const Class* cls);
 
 inline Iter*
 frame_iter(const ActRec* fp, int i) {
   return (Iter*)(uintptr_t(fp)
-          - uintptr_t(fp->m_func->numLocals() * sizeof(TypedValue))
+          - uintptr_t(fp->func()->numLocals() * sizeof(TypedValue))
           - uintptr_t((i+1) * sizeof(Iter)));
 }
 
 inline TypedValue*
 frame_local(const ActRec* fp, int n) {
-  return (TypedValue*)(uintptr_t(fp) -
-    uintptr_t((n+1) * sizeof(TypedValue)));
+  return (TypedValue*)(uintptr_t(fp) - uintptr_t((n+1) * sizeof(TypedValue)));
 }
 
 inline Resumable*
 frame_resumable(const ActRec* fp) {
-  assertx(fp->resumed());
+  assertx(isResumed(fp));
   return (Resumable*)((char*)fp - Resumable::arOff());
 }
 
@@ -114,33 +160,19 @@ frame_async_generator(const ActRec* fp) {
 
 void ALWAYS_INLINE
 frame_free_locals_helper_inl(ActRec* fp, int numLocals) {
-  assertx(numLocals == fp->m_func->numLocals());
-  // Check if the frame has a VarEnv or if it has extraArgs
-  if (UNLIKELY(fp->func()->attrs() & AttrMayUseVV) &&
-      UNLIKELY(fp->m_varEnv != nullptr)) {
-    if (fp->hasVarEnv()) {
-      // If there is a VarEnv, free the locals and the VarEnv
-      // by calling the detach method.
-      fp->m_varEnv->exitFP(fp);
-      return;
-    }
-    // Free extra args
-    assertx(fp->hasExtraArgs());
-    ExtraArgs* ea = fp->getExtraArgs();
-    int numExtra = fp->numArgs() - fp->m_func->numNonVariadicParams();
-    ExtraArgs::deallocate(ea, numExtra);
-  }
+  assertx(numLocals <= fp->func()->numLocals());
   // Free locals
   for (int i = numLocals - 1; i >= 0; --i) {
     TRACE_MOD(Trace::runtime, 5,
               "RetC: freeing %d'th local of %d\n", i,
-              fp->m_func->numLocals());
+              fp->func()->numLocals());
     tvDecRefGen(*frame_local(fp, i));
   }
 }
 
 void ALWAYS_INLINE
-frame_free_locals_inl_no_hook(ActRec* fp, int numLocals) {
+frame_free_locals_inl_no_hook(ActRec* fp,
+                              int numLocals) {
   frame_free_locals_helper_inl(fp, numLocals);
   if (fp->func()->cls() && fp->hasThis()) {
     decRefObj(fp->getThis());
@@ -148,33 +180,23 @@ frame_free_locals_inl_no_hook(ActRec* fp, int numLocals) {
 }
 
 void ALWAYS_INLINE
-frame_free_locals_inl(ActRec* fp, int numLocals, TypedValue* rv) {
+frame_free_locals_inl(ActRec* fp,
+                      int numLocals,
+                      TypedValue* rv,
+                      EventHook::Source sourceType) {
+  assertx(numLocals == fp->func()->numLocals());
   frame_free_locals_inl_no_hook(fp, numLocals);
-  EventHook::FunctionReturn(fp, *rv);
+  EventHook::FunctionReturn(fp, *rv, sourceType);
 }
 
 void ALWAYS_INLINE
-frame_free_inl(ActRec* fp, TypedValue* rv) { // For frames with no locals
-  assertx(0 == fp->m_func->numLocals());
-  assertx(fp->m_varEnv == nullptr);
-  assertx(fp->hasThis());
-  decRefObj(fp->getThis());
-  EventHook::FunctionReturn(fp, *rv);
-}
-
-void ALWAYS_INLINE
-frame_free_locals_unwind(ActRec* fp, int numLocals, ObjectData* phpException) {
-  fp->setLocalsDecRefd();
-  frame_free_locals_inl_no_hook(fp, numLocals);
-  fp->trashThis();
-  fp->trashVarEnv();
-  EventHook::FunctionUnwind(fp, phpException);
-}
-
-void ALWAYS_INLINE
-frame_free_locals_no_this_inl(ActRec* fp, int numLocals, TypedValue* rv) {
+frame_free_locals_no_this_inl(ActRec* fp,
+                              int numLocals,
+                              TypedValue* rv,
+                              EventHook::Source sourceType) {
+  assertx(numLocals == fp->func()->numLocals());
   frame_free_locals_helper_inl(fp, numLocals);
-  EventHook::FunctionReturn(fp, *rv);
+  EventHook::FunctionReturn(fp, *rv, sourceType);
 }
 
 // Helper for iopFCallBuiltin.
@@ -183,27 +205,4 @@ frame_free_args(TypedValue* args, int count) {
   for (auto i = count; i--; ) tvDecRefGen(*(args - i));
 }
 
-// Create a new class instance, and register it in the live object table if
-// necessary. The initial ref-count of the instance will be greater than zero.
-inline ObjectData*
-newInstance(Class* cls) {
-  assertx(cls);
-  auto* inst = ObjectData::newInstance(cls);
-  assertx(inst->checkCount());
-  Stats::inc(cls->getDtor() ? Stats::ObjectData_new_dtor_yes
-                            : Stats::ObjectData_new_dtor_no);
-
-  if (UNLIKELY(RuntimeOption::EnableObjDestructCall && cls->getDtor())) {
-    g_context->m_liveBCObjs.insert(inst);
-  }
-  return inst;
 }
-
-// returns the number of things it put on sp
-int init_closure(ActRec* ar, TypedValue* sp);
-
-int64_t zero_error_level();
-void restore_error_level(int64_t oldLevel);
-
-}
-#endif

@@ -1,10 +1,17 @@
 <?hh
 
-function one() {
+function one() :mixed{
   return 1;
 }
 
-function main() {
+function main() :mixed{
   var_dump(one() % 0);
 }
-main();
+
+<<__EntryPoint>> function main_entry(): void {
+try {
+  main();
+} catch (DivisionByZeroException $e) {
+  echo $e->getMessage(), "\n";
+}
+}

@@ -1,3 +1,5 @@
 <?hh
 
-const X = $x instanceof A;
+class A {}
+
+const A X = $x is A;

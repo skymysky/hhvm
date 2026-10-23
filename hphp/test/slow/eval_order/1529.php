@@ -1,7 +1,14 @@
-<?php
+<?hh
 
-function test($x) {
-  $a = array($a => $x[$a = 'foo']);
+function test($x) :mixed{
+  $a = 'foo';
+  $v = $x[$a];
+  $k = $a;
+  $a = dict[$k => $v];
   return $a;
 }
-var_dump(test(array('foo' => 5)));
+
+<<__EntryPoint>>
+function main_1529() :mixed{
+var_dump(test(dict['foo' => 5]));
+}

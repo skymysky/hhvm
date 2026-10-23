@@ -16,7 +16,7 @@
 
 #include "hphp/runtime/base/stack-logger.h"
 
-#ifndef FACEBOOK
+#ifndef HHVM_FACEBOOK
 
 // folly::symbolizer isn't supported on all the platforms that HHVM is, so we
 // deliberately exclude it in our CMake setup, which makes this feature FB-only
@@ -28,8 +28,8 @@ void log_native_stack(const char* msg) {}
 
 #else // FACEBOOK
 
-#include <folly/experimental/symbolizer/StackTrace.h>
-#include <folly/experimental/symbolizer/Symbolizer.h>
+#include <folly/debugging/symbolizer/StackTrace.h>
+#include <folly/debugging/symbolizer/Symbolizer.h>
 
 #include "hphp/util/logger.h"
 
@@ -48,7 +48,7 @@ void log_native_stack(const char* msg) {
   symbolizer.symbolize(addresses, frames.data(), nframes);
 
   StringSymbolizePrinter printer;
-  printer.println(addresses, frames.data(), nframes);
+  printer.println(frames.data(), nframes);
   Logger::Error("%s\n\nC++ stack:\n%s",
                 msg,
                 printer.str().c_str());

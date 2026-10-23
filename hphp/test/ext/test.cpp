@@ -15,10 +15,11 @@
 */
 
 #include "hphp/test/ext/test.h"
+
 #include "hphp/runtime/base/array-init.h"
-#include "hphp/runtime/base/apc-file-storage.h"
 #include "hphp/runtime/base/comparisons.h"
-#include "hphp/compiler/option.h"
+
+#include <fmt/format.h>
 #include <folly/Format.h>
 
 using namespace HPHP;
@@ -36,9 +37,21 @@ TestLogger Test::logger;
 
 ///////////////////////////////////////////////////////////////////////////////
 
+#if FOLLY_HAVE_WEAK_SYMBOLS
+// RunTestsImpl is generally expected to be defined by a separate module that
+// will be supplied at link time.  However, since that module will depend on us
+// as a library we need to supply a default implementation here to avoid link
+// errors.
+FOLLY_ATTR_WEAK void Test::RunTestsImpl(bool& allPassed, std::string& suite,
+                                        std::string& which, std::string&
+                                        /*set*/) {
+  printf("RunTestsImpl was not overridden when attempting to "
+         "run test suite: %s\n", suite.c_str());
+}
+#endif
+
 bool Test::RunTests(std::string &suite, std::string &which, std::string &set) {
   bool allPassed = true;
-  Option::Load();
 
   size_t pos = suite.find("::");
   if (pos != std::string::npos) {
@@ -81,27 +94,27 @@ bool Test::logTestResults(std::string name, std::string details, int pass,
   long useconds = finish.tv_usec - start.tv_usec;
   long mseconds = ((seconds) * 1000 + useconds / 1000.0) + 0.5; // round up
 
-  auto summary = folly::sformat("PASSED ({})", pass);
+  auto summary = fmt::format("PASSED ({})", pass);
   const char* status = "passed";
 
   if (skip > 0) {
-    summary += folly::sformat(",SKIPPED ({})", skip);
+    summary += fmt::format(",SKIPPED ({})", skip);
   }
 
   if (fail > 0) {
     status = "failed";
-    summary += folly::sformat("FAILED ({})", fail);
+    summary += fmt::format("FAILED ({})", fail);
   }
 
-  ArrayInit data(8, ArrayInit::Map{});
-  data.set(String("type"),         "hphp");
-  data.set(String("name"),         name);
-  data.set(String("contacts"),     null_array);
-  data.set(String("endedTime"),    time(nullptr));
-  data.set(String("durationSecs"), mseconds / 1000.0);
-  data.set(String("status"),       status);
-  data.set(String("summary"),      std::string(summary));
-  data.set(String("details"),      details);
+  DictInit data(8);
+  data.set(OptString("type"),         "hphp");
+  data.set(OptString("name"),         name);
+  data.set(OptString("contacts"),     null_array);
+  data.set(OptString("endedTime"),    time(nullptr));
+  data.set(OptString("durationSecs"), mseconds / 1000.0);
+  data.set(OptString("status"),       status);
+  data.set(OptString("summary"),      std::string(summary));
+  data.set(OptString("details"),      details);
 
   if (!logger.logTest(data.toArray())) {
     printf("WARNING: Logging %s failed\n", name.c_str());

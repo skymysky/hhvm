@@ -6,7 +6,7 @@
  *
  * http://icu-project.org/apiref/icu4c/ucsdet_8h.html
  */
-<<__NativeData("EncodingDetector")>>
+<<__NativeData>>
 class EncodingDetector {
   /**
    * Creates an encoding detector.
@@ -49,13 +49,13 @@ class EncodingDetector {
    *                                guesses of the encoding of the byte array
    */
   <<__Native>>
-  public function detectAll(): array<EncodingMatch>;
+  public function detectAll(): varray<EncodingMatch>;
 }
 
 /**
   * Result of detecting the encoding of an array of bytes
   */
-<<__NativeData("EncodingMatch")>>
+<<__NativeData>>
 class EncodingMatch {
   /**
    * Internal only: Creates an encoding match.
@@ -76,7 +76,7 @@ class EncodingMatch {
    * @return string - The name of the detected encoding
    */
   <<__Native>>
-  public function getEncoding(): string;
+  public function getEncoding(): ?string;
 
   /**
    * Gets the confidence number of the encoding match
@@ -93,7 +93,7 @@ class EncodingMatch {
    * @return string - A rough guess at the language of the encoded bytes
    */
   <<__Native>>
-  public function getLanguage(): string;
+  public function getLanguage(): ?string;
 
   /**
    * Gets the UTF-8 encoded version of the encoded byte array
@@ -102,5 +102,5 @@ class EncodingMatch {
    *                  with the detected encoding
    */
   <<__Native>>
-  public function getUTF8(): string;
+  public function getUTF8(): ?string;
 }

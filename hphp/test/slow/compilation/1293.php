@@ -1,24 +1,24 @@
-<?php
-
-$data = new stdclass;
-$type = 'OCI-Lob';
-if ($data instanceof $type) {
-  echo 'true';
-}
+<?hh
 class X {
-  static $foo;
+  public static $foo;
 }
-;
-function test() {
+function test() :mixed{
   $x = new X;
   $foo = 'foo';
-  if (isset($x->$foo) || empty($x->$foo) ||      isset($x->{
+  if (isset($x->$foo) || !($x->$foo ?? false) ||      isset($x->{
 'bar'}
 )) {
-    unset($x->$foo);
-    unset($x->{
-'bar'}
-);
     echo true;
   }
+}
+
+
+<<__EntryPoint>>
+function main_1293() :mixed{
+$data = new stdClass;
+$type = 'OCI-Lob';
+if (is_a($data, $type)) {
+  echo 'true';
+}
+;
 }

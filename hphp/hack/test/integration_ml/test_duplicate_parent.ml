@@ -5,62 +5,77 @@
   redeclaring Bar with the remaining parent class.
 *)
 open Integration_test_base_types
-open ServerEnv
-
+open Server_env
+open Hh_prelude
 module Test = Integration_test_base
 
 let foo_contents = "<?hh
     class Foo {
-        public static $x;
+        public static ?int $x;
     }
 "
 
-let qux_contents = "<?hh
-function h(): string {
-    return 'a';
+let qux_contents =
+  "<?hh
+function h(): int {
+    return 1;
 }
 
 class Foo {}
 
-function setUpClass() {
+function setUpClass(): void {
     new Foo();
     h();
 }
 "
 
-let bar_contents = "<?hh
+let bar_contents =
+  "<?hh
       class Bar extends Foo {}
 
-      function main(Bar $a) {
-          return $a::$y;
+      function main(Bar $a): void {
+          $a::$y;
       }
 "
 
-let () =
+let test () =
   let env = Test.setup_server () in
-  let env, loop_output = Test.(run_loop_once env { default_loop_input with
-    disk_changes = [
-      "foo.php", foo_contents;
-      "qux.php", qux_contents;
-      "bar.php", bar_contents;
-    ];
-  }) in
-
+  let (env, loop_output) =
+    Test.(
+      run_loop_once
+        env
+        {
+          default_loop_input with
+          disk_changes =
+            [
+              ("foo.php", foo_contents);
+              ("qux.php", qux_contents);
+              ("bar.php", bar_contents);
+            ];
+        })
+  in
   if not loop_output.did_read_disk_changes then
     Test.fail "Expected the server to process disk updates";
   let bar_error =
-    "File \"/bar.php\", line 5, characters 22-23:\n" ^
-  "Could not find class variable $y in type Bar (Typing[4090])\n" ^
-  "File \"/bar.php\", line 2, characters 13-15:\n" ^
-  "Declaration of Bar is here\n" in
+    "ERROR: File \"/bar.php\", line 5, characters 15-16:\n"
+    ^ "No class variable `$y` in `Bar` (Typing[4090])\n"
+    ^ "  File \"/foo.php\", line 3, characters 23-26:\n"
+    ^ "  Did you mean `$x` instead?\n"
+    ^ "  File \"/bar.php\", line 2, characters 13-15:\n"
+    ^ "  Declaration of `Bar` is here\n"
+  in
   let qux_error =
-    "File \"/qux.php\", line 6, characters 7-9:\n" ^
-  "Name already bound: Foo (Naming[2012])\n" ^
-  "File \"/foo.php\", line 2, characters 11-13:\n" ^
-  "Previous definition is here\n" in
-
+    "ERROR: File \"/qux.php\", line 6, characters 7-9:\n"
+    ^ "Name already bound: `Foo` (Naming[2012])\n"
+    ^ "  File \"/foo.php\", line 2, characters 11-13:\n"
+    ^ "  Previous definition is here\n"
+  in
   (* We should get exactly these two errors *)
-  match (Errors.get_error_list env.errorl)  with
-  | [x; y;] -> Test.assertSingleError qux_error [y];
-    Test.assertSingleError bar_error [x];
-  | _ -> Test.fail "Expected exactly two errors"
+  match Diagnostics.get_diagnostic_list env.diagnostics with
+  | [x; y] ->
+    Test.assertSingleDiagnostic qux_error [y];
+    Test.assertSingleDiagnostic bar_error [x]
+  | errs ->
+    Test.fail
+    @@ "Expected exactly two errors, but got:\n"
+    ^ String.concat ~sep:"\n" (Test.diagnostic_strings errs)

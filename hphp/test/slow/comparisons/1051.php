@@ -1,20 +1,30 @@
-<?php
+<?hh
 
-function foo($p) {
+function foo($p) :mixed{
   if ($p) {
     $a = 'foo';
   }
-  if ('' < $a) {
-    echo 'yes';
+  try {
+    if ('' < $a) {
+      echo 'yes';
+    } else {
+      echo 'no';
+    }
+  } catch (UndefinedVariableException $e) {
+    var_dump($e->getMessage());
   }
- else {
-    echo 'no';
-  }
-  if ($a > '') {
-    echo 'yes';
-  }
- else {
-    echo 'no';
+  try {
+    if ($a > '') {
+      echo 'yes';
+    } else {
+      echo 'no';
+    }
+  } catch (UndefinedVariableException $e) {
+    var_dump($e->getMessage());
   }
 }
-foo(false);
+
+<<__EntryPoint>>
+function main_1051() :mixed{
+  foo(false);
+}

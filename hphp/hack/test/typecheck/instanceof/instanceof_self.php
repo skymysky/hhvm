@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 
 class D {
   public function g(): void {
@@ -13,7 +13,7 @@ class C extends D {
   }
 
   public static function test(mixed $x): void {
-    if ($x instanceof self) {
+    if ($x is self) {
       hh_show($x);
       $x->g();
     }

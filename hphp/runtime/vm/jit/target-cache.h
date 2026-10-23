@@ -13,22 +13,23 @@
    | license@php.net so we can mail you a copy immediately.               |
    +----------------------------------------------------------------------+
 */
-#ifndef incl_HPHP_RUNTIME_VM_JIT_TARGETCACHE_H_
-#define incl_HPHP_RUNTIME_VM_JIT_TARGETCACHE_H_
+#pragma once
 
 #include "hphp/runtime/base/rds.h"
 #include "hphp/runtime/vm/jit/types.h"
 
 namespace HPHP {
-struct Func;
 struct ActRec;
+struct ArrayData;
+struct Class;
+struct Func;
+struct NamedType;
+struct PackageInfo;
 struct StringData;
 struct TypedValue;
-struct Class;
-struct NamedEntity;
 }
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 
 //////////////////////////////////////////////////////////////////////
 
@@ -45,7 +46,7 @@ struct FuncCache {
   };
 
   static rds::Handle alloc();
-  static void lookup(rds::Handle, StringData* lookup, ActRec* ar, ActRec* fp);
+  static const Func* lookup(rds::Handle, StringData* lookup);
 
   Pair m_pairs[kNumLines];
 };
@@ -72,34 +73,57 @@ struct ClassCache {
   };
 
   static rds::Handle alloc();
-  static const Class* lookup(rds::Handle, StringData* lookup);
+  static const Class* lookup(rds::Handle, StringData* lookup, LdClsFallback);
+  static void loadFail(const StringData* name, const LdClsFallback fallback);
 
   Pair m_pairs[kNumLines];
 };
 
 //////////////////////////////////////////////////////////////////////
 
+/*
+ * Per-callsite dynamic type structure class lookups (where the type structure
+ * isn't known at translation time).  4-way cache.
+ */
+struct TSClassCache {
+  static constexpr uint32_t kNumLines = 4;
+
+  struct Pair {
+    ArrayData*  m_key;
+    PackedPtr<const Class> m_value;
+  };
+
+  static const Class* write(rds::Handle, ArrayData* lookup);
+
+  Pair m_pairs[kNumLines];
+};
+
+
+//////////////////////////////////////////////////////////////////////
+
 struct StaticMethodCache {
-  LowPtr<const Func> m_func;
-  LowPtr<const Class> m_cls;
+  PackedPtr<const Func> m_func;
+  PackedPtr<const Class> m_cls;
 
   static rds::Handle alloc(const StringData* cls,
                       const StringData* meth,
-                      const char* ctxName);
+                      const StringData* ctxName);
   static const Func* lookup(rds::Handle chand,
-                            const NamedEntity* ne, const StringData* cls,
-                            const StringData* meth, TypedValue* vmfp);
+                            const NamedType* ne, const StringData* cls,
+                            const StringData* meth, const Class* ctx,
+                            const Func* callerFunc);
 };
 
 struct StaticMethodFCache {
-  LowPtr<const Func> m_func;
+  PackedPtr<const Func> m_func;
   int m_static;
 
   static rds::Handle alloc(const StringData* cls,
                       const StringData* meth,
-                      const char* ctxName);
+                      const StringData* ctxName);
   static const Func* lookup(rds::Handle chand, const Class* cls,
-                            const StringData* meth, TypedValue* vmfp);
+                            const StringData* meth, const Class* ctx,
+                            const Func* callerFunc);
 };
 
 //////////////////////////////////////////////////////////////////////
@@ -110,36 +134,33 @@ namespace MethodCache {
  * One-way request-local cache for object method lookups.
  *
  * MethodCache entries cache the dispatch target for an object method call.
- * Each line consists of a Class* key (stored as a uintptr_t) and a Func*.  We
- * also pack bits into the key---the low bit is set if the function is a magic
- * call (in which case the cached Func* is, and the second lowest bit is set if
- * the cached Func has AttrStatic.
+ * Each line consists of a Class* key and a Func*.
+ *
+ * We store a lot of these in Normal RDS so the space these take up is
+ * sizeof(Entry) + alignof(Entry). So be aware of that if you change it.
  */
 struct Entry {
-  uintptr_t m_key;
-  const Func* m_value;
+  PackedPtr<const Class> m_key;
+  PackedPtr<const Func> m_value;
 };
 
-template<bool fatal>
-void handlePrimeCacheInit(rds::Handle mce_handle,
-                          ActRec* ar,
-                          StringData* name,
-                          Class* cls,
-                          Class* ctx,
-                          uintptr_t rawTarget);
+static_assert(sizeof(Entry) == sizeof(Entry::m_key) + sizeof(Entry::m_value));
+static_assert(alignof(Entry) == sizeof(Entry::m_key));
 
-template<bool fatal>
-void handleSlowPath(rds::Handle mce_handle,
-                    ActRec* ar,
-                    StringData* name,
-                    Class* cls,
-                    Class* ctx,
-                    uintptr_t mcePrime);
+const Func* handleDynamicCall(const Class* cls,
+                              const StringData* name,
+                              const Class* ctx,
+                              const Func* callerFunc);
+
+const Func* handleStaticCall(const Class* cls,
+                             const StringData* name,
+                             const Class* ctx,
+                             const Func* callerFunc,
+                             rds::Handle mce_handle,
+                             uintptr_t mcePrime);
 
 } // namespace MethodCache
 
 //////////////////////////////////////////////////////////////////////
 
-}}
-
-#endif
+}

@@ -15,14 +15,8 @@
 */
 
 #include "hphp/util/synchronizable-multi.h"
-#include "hphp/util/compatibility.h"
 #include "hphp/util/lock.h"
 #include "hphp/util/rank.h"
-#include "hphp/util/timer.h"
-
-#ifndef _MSC_VER
-#include <sys/errno.h>
-#endif
 
 namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
@@ -33,7 +27,9 @@ SynchronizableMulti::SynchronizableMulti(int size) :
 }
 
 inline
-bool SynchronizableMulti::waitImpl(int id, int q, Priority pri, timespec *ts) {
+bool SynchronizableMulti::waitImpl(
+    int id, int q, Priority pri,
+    std::optional<std::chrono::steady_clock::time_point> deadline) {
   assert(id >= 0 && id < m_conds.size());
   auto& cond = m_conds[id];
 
@@ -46,36 +42,26 @@ bool SynchronizableMulti::waitImpl(int id, int q, Priority pri, timespec *ts) {
 
   cond_list.push(cond, pri);
 
-  int ret;
-  if (ts) {
-    ret = pthread_cond_timedwait(cond, &m_mutex.getRaw(), ts);
+  if (deadline) {
+    auto status = cond.m_cond.wait_until(m_mutex, *deadline);
+    if (status == std::cv_status::timeout) {
+      cond.unlink();
+      return false;
+    }
   } else {
-    ret = pthread_cond_wait(cond, &m_mutex.getRaw());
-  }
-  assert(ret != EPERM); // did you lock the mutex?
-
-  if (ret) {
-    cond.unlink();
+    cond.m_cond.wait(m_mutex);
   }
 
-  return ret != ETIMEDOUT;
+  return true;
 }
 
 void SynchronizableMulti::wait(int id, int q, Priority pri) {
-  waitImpl(id, q, pri, nullptr);
+  waitImpl(id, q, pri, std::nullopt);
 }
 
-bool SynchronizableMulti::wait(int id, int q, Priority pri, long seconds) {
-  return wait(id, q, pri, seconds, 0);
-}
-
-bool SynchronizableMulti::wait(int id, int q, Priority pri, long seconds,
-                               long long nanosecs) {
-  struct timespec ts;
-  Timer::GetRealtimeTime(ts);
-  ts.tv_sec += seconds;
-  ts.tv_nsec += nanosecs;
-  return waitImpl(id, q, pri, &ts);
+bool SynchronizableMulti::wait(int id, int q, Priority pri,
+                               std::chrono::steady_clock::time_point deadline) {
+  return waitImpl(id, q, pri, deadline);
 }
 
 void SynchronizableMulti::setNumGroups(int num_groups) {
@@ -86,14 +72,20 @@ void SynchronizableMulti::setNumGroups(int num_groups) {
   }
 }
 
+void SynchronizableMulti::notifySpecific(int id) {
+  assert(id >= 0 && id < m_conds.size());
+  auto& cond = m_conds[id];
+  cond.m_cond.notify_one();
+  cond.unlink();
+}
+
 void SynchronizableMulti::notify() {
   for (int i = 0, s = m_cond_list_vec.size(); i < s; i++) {
     assert(m_group < s);
     auto& cond_list = m_cond_list_vec[m_group++];
     if (m_group == s) m_group = 0;
     if (!cond_list.empty()) {
-      auto& cond = cond_list.front();
-      pthread_cond_signal(cond);
+      cond_list.front().m_cond.notify_one();
       cond_list.pop_front();
       break;
     }
@@ -103,7 +95,7 @@ void SynchronizableMulti::notify() {
 void SynchronizableMulti::notifyAll() {
   for (auto& cond_list : m_cond_list_vec) {
     while (!cond_list.empty()) {
-      pthread_cond_signal(cond_list.front());
+      cond_list.front().m_cond.notify_one();
       cond_list.pop_front();
     }
   }

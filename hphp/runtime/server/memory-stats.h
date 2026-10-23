@@ -14,29 +14,57 @@
    +----------------------------------------------------------------------+
 */
 
+#pragma once
 
-#ifndef incl_HPHP_MEMORYSTATS_H_
-#define incl_HPHP_MEMORYSTATS_H_
-
-#include <iostream>
-#include <mutex>
+#include <array>
+#include <atomic>
 #include <memory>
+#include <string>
 
 #include "hphp/runtime/server/writer.h"
 
 namespace HPHP {
 
-struct MemoryStats {
-  void ReportMemory(std::string &out, Writer::Format format);
-  static MemoryStats* GetInstance();
-  void ResetStaticStringSize();
-  void LogStaticStringAlloc(size_t bytes);
+enum class AllocKind {
+  StaticString,
+  StaticArray,
+  Unit,
+  Class,
+  Func,
+  NumKinds
+};
 
-private:
-  size_t GetStaticStringSize();
-  std::atomic<size_t> m_staticStringSize;
+struct MemoryStats {
+  static void ReportMemory(std::string &out, Writer::Format format);
+
+  static void ResetStaticStringSize() {
+    s_allocCounts[static_cast<unsigned>(AllocKind::StaticString)]
+      .store(0, std::memory_order_release);
+    s_allocSizes[static_cast<unsigned>(AllocKind::StaticString)]
+      .store(0, std::memory_order_release);
+  }
+
+  static void LogAlloc(AllocKind kind, size_t bytes) {
+    s_allocCounts[static_cast<unsigned>(kind)]
+      .fetch_add(1, std::memory_order_acq_rel);
+    s_allocSizes[static_cast<unsigned>(kind)]
+      .fetch_add(bytes, std::memory_order_acq_rel);
+  }
+
+  static auto Count(AllocKind kind) {
+    return s_allocCounts[static_cast<unsigned>(kind)]
+      .load(std::memory_order_acquire);
+  }
+
+  static size_t TotalSize(AllocKind kind) {
+    return s_allocSizes[static_cast<unsigned>(kind)]
+      .load(std::memory_order_acquire);
+  }
+
+ private:
+  static auto constexpr N = static_cast<unsigned>(AllocKind::NumKinds);
+  static std::array<std::atomic_uint32_t, N> s_allocCounts;
+  static std::array<std::atomic_size_t, N> s_allocSizes;
 };
 
 }
-
-#endif //incl_HPHP_MEMORYSTATS_H_

@@ -1,7 +1,7 @@
 <?hh
 
 trait t {
-  public static function f() {
+  public static function f() :mixed{
     a::priv();
   }
 }
@@ -9,13 +9,12 @@ trait t {
 class a {
   use t;
 
-  private static function priv() {
+  private static function priv() :mixed{
     echo "Private in a\n";
   }
 }
 
-function main() {
+<<__EntryPoint>> function main(): void {
   a::f();
   t::f();
 }
-main();

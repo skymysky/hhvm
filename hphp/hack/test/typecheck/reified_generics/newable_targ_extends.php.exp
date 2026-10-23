@@ -1,0 +1,18 @@
+error: Typing[4307] A newable type argument must be a concrete class or a newable type parameter. [1]
+-> Type parameter `T` was declared `__Newable` here [2]
+
+newable_targ_extends.php:13:21
+ 5 | class Concrete extends Top {}
+ 6 | 
+ 7 | class C<<<__Newable>> reify T as Top> {
+   |                             ^ [2]
+ 8 |   public function f(): void {
+ 9 |     new T();
+10 |   }
+11 | }
+12 | 
+13 | class Bad extends C<Top> {}
+   |                     ^^^ [1]
+14 | class Good extends C<Concrete> {}
+
+1 error found

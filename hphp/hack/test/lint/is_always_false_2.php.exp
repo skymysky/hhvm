@@ -1,0 +1,6 @@
+warning: Lint[5610] This `is` check is always `false`. The expression on the left has type `A` which shares no values with `I`.
+   --> is_always_false_2.php
+ 12 |   if ($a is I) {
+    |       ^^^^^^^
+
+

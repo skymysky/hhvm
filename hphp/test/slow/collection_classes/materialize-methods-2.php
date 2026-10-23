@@ -1,5 +1,5 @@
 <?hh
-function main() {
+function main() :mixed{
   $x = Map {123 => 'abc'};
   var_dump($x->lazy()->toVector());
   var_dump($x->lazy()->toImmVector());
@@ -15,4 +15,8 @@ function main() {
   var_dump($x->lazy()->map($fn)->toSet());
   var_dump($x->lazy()->map($fn)->toImmSet());
 }
+
+<<__EntryPoint>>
+function main_materialize_methods_2() :mixed{
 main();
+}

@@ -1,4 +1,4 @@
-(**
+(*
  * Copyright (c) 2015, Facebook, Inc.
  * All rights reserved.
  *
@@ -7,28 +7,41 @@
  *
  *)
 
- (* An implementation of a set of types, using ty_compare for a total order.
-  * Typing-rule-equivalent types may get duplicated, as the equality induced
-  * by ty_compare does not expand Tvars and type aliases.
+(* An implementation of a set of types, using compare_locl_ty for a total order.
+ * Typing-rule-equivalent types may get duplicated, as the equality induced
+ * by compare_locl_ty does not expand Tvars and type aliases.
  *)
+open Hh_prelude
 open Typing_defs
+
 module Ty_ = struct
-  type t = locl ty
-  let compare r1 r2 = ty_compare r1 r2
+  type t = locl_ty [@@deriving hash, show]
+
+  let compare r1 r2 = Typing_defs.compare_locl_ty r1 r2
 end
 
-include Set.Make(Ty_)
+include Stdlib.Set.Make (Ty_)
 
 let pp fmt t =
   Format.fprintf fmt "@[<hv 2>{";
   ignore
     (List.fold_left
-      (fun sep ty ->
-        if sep then Format.fprintf fmt ";@ ";
-        Pp_type.pp_ty fmt ty;
-        true)
-      false
-      (elements t));
+       ~f:(fun sep ty ->
+         if sep then Format.fprintf fmt ";@ ";
+         Ty_.pp fmt ty;
+         true)
+       ~init:false
+       (elements t));
   Format.fprintf fmt "@,}@]"
 
 let show = Format.asprintf "%a" pp
+
+let hash_fold_t state x =
+  hash_fold_list
+    Ty_.hash_fold_t
+    state
+    (elements x |> List.sort ~compare:Ty_.compare)
+
+let hash = Hash.of_fold hash_fold_t
+
+let force_lazy_values t = map Type_force_lazy_values.locl_ty t

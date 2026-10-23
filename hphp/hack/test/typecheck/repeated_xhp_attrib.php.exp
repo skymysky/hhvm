@@ -1,0 +1,60 @@
+error: Parsing[1007] Cannot redeclare foo [1]
+
+repeated_xhp_attrib.php:6:23
+4 | 
+5 | function foo(): mixed {
+6 |   return <div foo="a" foo="b">stuff</div>;
+  |                       ^^^ [1]
+7 | }
+
+error: Typing[4053] No property `:foo` in `:div` [1]
+-> Did you mean `_filename` instead? [2]
+-> This is why I think it is an object of type :div [3]
+-> Declaration of `:div` is here [4]
+
+repeated_xhp_attrib.php:6:15
+1 | <?hh
+2 | 
+3 | class :div extends XHPTest {}
+  |       ^^^^ [4]
+4 | 
+5 | function foo(): mixed {
+6 |   return <div foo="a" foo="b">stuff</div>;
+  |           ^^^ [3]
+  |               ^^^ [1]
+7 | }
+
+XHPTest.hhi:7:12
+5 |     public darray<string,mixed> $_attributes,
+6 |     public varray<mixed> $_children,
+7 |     public string $_filename,
+  |            ^^^^^^ [2]
+8 |     public int $_line_number,
+9 |   );
+
+error: Typing[4053] No property `:foo` in `:div` [1]
+-> Did you mean `_filename` instead? [2]
+-> This is why I think it is an object of type :div [3]
+-> Declaration of `:div` is here [4]
+
+repeated_xhp_attrib.php:6:23
+1 | <?hh
+2 | 
+3 | class :div extends XHPTest {}
+  |       ^^^^ [4]
+4 | 
+5 | function foo(): mixed {
+6 |   return <div foo="a" foo="b">stuff</div>;
+  |           ^^^ [3]
+  |                       ^^^ [1]
+7 | }
+
+XHPTest.hhi:7:12
+5 |     public darray<string,mixed> $_attributes,
+6 |     public varray<mixed> $_children,
+7 |     public string $_filename,
+  |            ^^^^^^ [2]
+8 |     public int $_line_number,
+9 |   );
+
+3 errors found

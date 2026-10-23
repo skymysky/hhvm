@@ -1,19 +1,17 @@
-<?php
+<?hh
 
-function alpha() {
+function alpha() :mixed{
   throw new Error('Foo');
 }
 
-function beta() {
+function beta() :mixed{
   alpha();
 }
 
-function gamma() {
+function gamma() :mixed{
   beta();
 }
-
-function main() {
+<<__EntryPoint>>
+function main() :mixed{
   gamma();
 }
-
-main();

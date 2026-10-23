@@ -1,0 +1,104 @@
+#####test()#####
+===0===
+getName: string(3) "nix"
+isPassedByReference: bool(false)
+getDeclaringClass: NULL
+allowsNull: bool(true)
+isOptional: bool(false)
+isDefaultValueAvailable: bool(false)
+===1===
+getName: string(2) "ar"
+isPassedByReference: bool(false)
+getDeclaringClass: NULL
+allowsNull: bool(false)
+isOptional: bool(false)
+isDefaultValueAvailable: bool(false)
+===2===
+getName: string(3) "ref"
+isPassedByReference: bool(true)
+getDeclaringClass: NULL
+allowsNull: bool(true)
+isOptional: bool(false)
+isDefaultValueAvailable: bool(false)
+===3===
+getName: string(3) "std"
+isPassedByReference: bool(false)
+getDeclaringClass: NULL
+allowsNull: bool(false)
+isOptional: bool(false)
+isDefaultValueAvailable: bool(false)
+===4===
+getName: string(2) "na"
+isPassedByReference: bool(false)
+getDeclaringClass: NULL
+allowsNull: bool(false)
+isOptional: bool(false)
+isDefaultValueAvailable: bool(false)
+===5===
+getName: string(3) "opt"
+isPassedByReference: bool(true)
+getDeclaringClass: NULL
+allowsNull: bool(false)
+isOptional: bool(false)
+isDefaultValueAvailable: bool(false)
+===6===
+getName: string(3) "def"
+isPassedByReference: bool(false)
+getDeclaringClass: NULL
+allowsNull: bool(true)
+isOptional: bool(true)
+isDefaultValueAvailable: bool(true)
+getDefaultValue: string(6) "FooBar"
+#####test::test()#####
+===0===
+getName: string(3) "nix"
+isPassedByReference: bool(false)
+getDeclaringClass: test
+allowsNull: bool(true)
+isOptional: bool(false)
+isDefaultValueAvailable: bool(false)
+===1===
+getName: string(2) "ar"
+isPassedByReference: bool(false)
+getDeclaringClass: test
+allowsNull: bool(false)
+isOptional: bool(false)
+isDefaultValueAvailable: bool(false)
+===2===
+getName: string(3) "ref"
+isPassedByReference: bool(false)
+getDeclaringClass: test
+allowsNull: bool(true)
+isOptional: bool(false)
+isDefaultValueAvailable: bool(false)
+===3===
+getName: string(3) "std"
+isPassedByReference: bool(false)
+getDeclaringClass: test
+allowsNull: bool(false)
+isOptional: bool(false)
+isDefaultValueAvailable: bool(false)
+===4===
+getName: string(2) "na"
+isPassedByReference: bool(false)
+getDeclaringClass: test
+allowsNull: bool(false)
+isOptional: bool(false)
+isDefaultValueAvailable: bool(false)
+===5===
+getName: string(3) "opt"
+isPassedByReference: bool(false)
+getDeclaringClass: test
+allowsNull: bool(true)
+isOptional: bool(true)
+isDefaultValueAvailable: bool(true)
+getDefaultValue: NULL
+===6===
+getName: string(3) "def"
+isPassedByReference: bool(false)
+getDeclaringClass: test
+allowsNull: bool(true)
+isOptional: bool(true)
+isDefaultValueAvailable: bool(true)
+getDefaultValue: string(6) "FooBar"
+===DONE===

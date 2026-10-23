@@ -1,4 +1,4 @@
-(**
+(*
  * Copyright (c) 2015, Facebook, Inc.
  * All rights reserved.
  *
@@ -7,16 +7,19 @@
  *
  *)
 
-open Hh_core
+open Hh_prelude
+open Common
 open Typing_defs
-open Typing_dependent_type
-open Utils
-
+open Typing_env_types
 module Env = Typing_env
 module TUtils = Typing_utils
 module TGenConstraint = Typing_generic_constraint
 module Subst = Decl_subst
-module ShapeMap = Nast.ShapeMap
+module MakeType = Typing_make_type
+module Cls = Folded_class
+module KindDefs = Typing_kinding_defs
+module TIntegrity = Typing_type_integrity
+module SN = Naming_special_names
 
 (* Here is the general problem the delayed application of the phase solves.
  * Let's say you have a function that you want to operate generically across
@@ -73,18 +76,150 @@ module ShapeMap = Nast.ShapeMap
  * converts into the 'phase_ty' when we need to hop into phase specific code.
  *)
 let decl ty = DeclTy ty
+
 let locl ty = LoclTy ty
 
-type env = expand_env
+type method_instantiation = {
+  use_pos: Pos.t;
+  use_name: string;
+  explicit_targs: Tast.targ list;
+}
 
-let env_with_self env =
-  {
-    type_expansions = [];
-    substs = SMap.empty;
-    this_ty = Reason.none, TUtils.this_of (Env.get_self env);
-    from_class = None;
-    validate_dty = None;
-  }
+(*****************************************************************************)
+(* Localization caching.                                                     *)
+(*****************************************************************************)
+
+module type CACHESETTINGS = sig
+  val capacity : int
+
+  val node_count_threshold : int
+end
+
+module MakeTyCache (Settings : CACHESETTINGS) : sig
+  val add : env -> string -> locl_ty -> unit
+
+  val get : env -> string -> locl_ty option
+end = struct
+  include
+    Lru.M.Make
+      (String)
+      (struct
+        type t = locl_ty
+
+        let weight _ = 1
+      end)
+
+  let cache = create Settings.capacity
+
+  let should_cache_type lty =
+    let exception NodeLimitReached in
+    let size_visitor =
+      object
+        inherit [int] Type_visitor.locl_type_visitor as super
+
+        method! on_type acc ty =
+          if acc >= Settings.node_count_threshold then raise NodeLimitReached;
+          super#on_type (acc + 1) ty
+      end
+    in
+    match size_visitor#on_type 0 lty with
+    | _count -> false
+    | exception NodeLimitReached -> true
+
+  let clear () =
+    (* The only reliable way to empty the LRU cache. *)
+    resize 0 cache;
+    trim cache;
+    resize Settings.capacity cache;
+    assert (is_empty cache)
+
+  let active_context = ref (Relative_path.default, None)
+
+  (* We invalidate the cache as soon as we are processing a new file or
+   * module because those affect how types are expanded (e.g., newtypes
+   * are unfolded only in the file that defines them). *)
+  let maybe_invalidate env =
+    let context = (Env.get_file env, Env.get_current_module env) in
+    let valid =
+      [%eq: Relative_path.t * string option] !active_context context
+    in
+    if not valid then begin
+      active_context := context;
+      clear ()
+    end
+
+  let add env alias lty =
+    let () = maybe_invalidate env in
+    if should_cache_type lty then begin
+      add alias lty cache;
+      trim cache
+    end
+
+  let get env alias =
+    let () = maybe_invalidate env in
+    promote alias cache;
+    find alias cache
+end
+
+module Log = struct
+  let should_log_localize env =
+    Typing_log.should_log env ~category:"localize" ~level:1
+
+  let log_localize env ety_env (decl_ty : decl_ty) =
+    Typing_log.log_function
+      (get_pos decl_ty)
+      ~function_name:"Typing_phase.localize"
+      ~arguments:
+        (("decl ty", Typing_print.debug_decl env decl_ty)
+        :: Typing_env.Log.expand_env env ety_env)
+      ~result:(fun ((env, _, _), ty) ->
+        let (env, ty) = Typing_env.expand_type env ty in
+        Some (Typing_print.debug env ty))
+
+  let should_log_check_tparams_constraints env =
+    Typing_log.should_log env ~category:"generics" ~level:1
+
+  let log_check_tparams_constraints env use_pos cstr_ty ty =
+    Typing_log.log_function
+      (Pos_or_decl.of_raw_pos use_pos)
+      ~function_name:"Typing_phase.check_tparams_constraints"
+      ~arguments:
+        [
+          ("cstr_ty", Typing_print.debug env cstr_ty);
+          ("ty", Typing_print.debug env ty);
+        ]
+      ~result:(fun (_env, err) ->
+        Some (Printf.sprintf "%d error(s)" (List.length err)))
+
+  let log_tparam_instantiation = Typing_log.log_tparam_instantiation
+end
+
+(* Since the typechecker options defining the cache parameters will be
+ * available only when we have an environment, the add/get functions are
+ * stored in references initially set to stubs that update themselves
+ * during their first call. *)
+let rec locl_cache_add =
+  ref (fun env ->
+      setup_cache env;
+      !locl_cache_add env)
+
+and locl_cache_get =
+  ref (fun env ->
+      setup_cache env;
+      !locl_cache_get env)
+
+and setup_cache env =
+  let tcopts = Env.get_tcopt env in
+  let module Settings = struct
+    let capacity = Typechecker_options.locl_cache_capacity tcopts
+
+    let node_count_threshold =
+      Typechecker_options.locl_cache_node_threshold tcopts
+  end in
+  let module Cache = MakeTyCache (Settings) in
+  locl_cache_add := Cache.add;
+  locl_cache_get := Cache.get
+
 (*****************************************************************************)
 (* Transforms a declaration phase type into a localized type. This performs
  * common operations that are necessary for this operation, specifically:
@@ -98,260 +233,1062 @@ let env_with_self env =
  *)
 (*****************************************************************************)
 
-let rec localize_with_env ~ety_env env (dty: decl ty) =
-  Option.iter ety_env.validate_dty (fun validate_dty -> validate_dty dty);
-  match dty with
-  | r, Terr ->
-      env, (ety_env, (r, TUtils.terr env))
-  | r, Tany ->
-      env, (ety_env, (r, TUtils.tany env))
-  | _, (Tnonnull | Tprim _ | Tdynamic) as x ->
-      env, (ety_env, x)
-  | r, Tmixed ->
-      env, (ety_env, (r, TUtils.desugar_mixed r))
-  | r, Tthis ->
-      let ty = match ety_env.this_ty with
-        | Reason.Rnone, ty -> r, ty
-        | Reason.Rexpr_dep_type (_, pos, s), ty ->
-            Reason.Rexpr_dep_type (r, pos, s), ty
-        | reason, ty when ety_env.from_class <> None -> reason, ty
-        | reason, ty ->
-            Reason.Rinstantiate (reason, SN.Typehints.this, r), ty in
-      let env, ty =
-        match ety_env.from_class with
-        | Some cid -> ExprDepTy.make env cid ty
-        | _ -> env, ty in
-      env, (ety_env, ty)
-  | r, Tarray (ty1, ty2) ->
-      let env, ty = match ty1, ty2 with
-        | None, None -> env, Tarraykind AKany
-        | Some tv, None ->
-            let env, tv = localize ~ety_env env tv in
-            env, Tarraykind (AKvec tv)
-        | Some tk, Some tv ->
-            let env, tk = localize ~ety_env env tk in
-            let env, tv = localize ~ety_env env tv in
-            env, Tarraykind (AKmap (tk, tv))
-        | None, Some _ ->
-            failwith "Invalid array declaration type" in
-      env, (ety_env, (r, ty))
-  | r, Tdarray (tk, tv) ->
-      let env, tk = localize ~ety_env env tk in
-      let env, tv = localize ~ety_env env tv in
-      let ty = Tarraykind (AKdarray (tk, tv)) in
-      env, (ety_env, (r, ty))
-  | r, Tvarray tv ->
-      let env, tv = localize ~ety_env env tv in
-      let ty = Tarraykind (AKvarray tv) in
-      env, (ety_env, (r, ty))
-  | r, Tvarray_or_darray tv ->
-      let env, tv = localize ~ety_env env tv in
-      let ty = Tarraykind (AKvarray_or_darray tv) in
-      env, (ety_env, (r, ty))
-  | r, Tgeneric x ->
-      begin match SMap.get x ety_env.substs with
-      | Some x_ty ->
-        env, (ety_env, (Reason.Rinstantiate (fst x_ty, x, r), snd x_ty))
-      | None ->
-        env, (ety_env, (r, Tabstract (AKgeneric x, None)))
-    end
-  | r, Toption ty ->
-       let env, ty = localize ~ety_env env ty in
-       let ty_ =
-         if TUtils.is_option env ty then
-           snd ty
-         else
-           Toption ty in
-       env, (ety_env, (r, ty_))
-  | r, Tfun ft ->
-      let env, ft = localize_ft ~use_pos:ft.ft_pos ~ety_env env ft in
-      env, (ety_env, (r, Tfun ft))
-  | r, Tapply ((_, x), argl) when Env.is_typedef x ->
-      let env, argl = List.map_env env argl (localize ~ety_env) in
-      TUtils.expand_typedef ety_env env r x argl
-  | r, Tapply ((p, x), _argl) when Env.is_enum env x ->
-      (* if argl <> [], nastInitCheck would have raised an error *)
-      if Typing_defs.has_expanded ety_env x then begin
-        Errors.cyclic_enum_constraint p;
-        env, (ety_env, (r, Typing_utils.tany env))
-      end else begin
-        let type_expansions = (p, x) :: ety_env.type_expansions in
-        let ety_env = {ety_env with type_expansions} in
-        let env, cstr =
-          opt (localize ~ety_env) env (Env.get_enum_constraint env x) in
-        env, (ety_env, (r, Tabstract (AKenum x, cstr)))
-      end
-  | r, Tapply ((_, cid) as cls, tyl) ->
-      let env, tyl =
-        if not (tyl_contains_wildcard tyl)
-        then List.map_env env tyl (localize ~ety_env)
-        else match Env.get_class env cid with
-          | None ->
-            List.map_env env tyl (localize ~ety_env)
-          | Some class_info ->
-            let tparams = class_info.tc_tparams in
-            localize_tparams ~ety_env env (Reason.to_pos r) tyl tparams
+let list_map_env_err_cycles env list ~combine_ty_errs ~f =
+  let (((env, cycles), ty_err), list) =
+    List.map_env_ty_err_opt
+      (env, [])
+      list
+      ~f:(fun (env, cycles_acc) ty ->
+        let ((env, ty_err, cycles), ty) = f env ty in
+        (((env, cycles @ cycles_acc), ty_err), ty))
+      ~combine_ty_errs
+  in
+  ((env, ty_err, cycles), list)
+
+let rec localize ~(ety_env : expand_env) env (dty : decl_ty) =
+  if Log.should_log_localize env then
+    Log.log_localize env ety_env dty @@ fun () -> localize_ ~ety_env env dty
+  else
+    (* This path should be fast, so we make sure not to create a closure unlike the other path. *)
+    localize_ ~ety_env env dty
+
+and localize_ ~(ety_env : expand_env) env (dty : decl_ty) :
+    (env * Typing_error.t option * Type_expansions.cycle_reporter list)
+    * locl_phase ty =
+  let rec find_origin dty =
+    match get_node dty with
+    | Taccess (root_ty, (_pos, id)) ->
+      Option.map ~f:(fun orig -> orig ^ "::" ^ id) (find_origin root_ty)
+    | Tapply ((_pos, cid), []) -> Some cid
+    | _ -> None
+  in
+  let set_origin_and_cache origin_opt final_env ty_err_opt lty decl_pos_opt =
+    (* When the type resulting from the localize call originates from a
+     * decl type with a succinct unambiguous form (e.g., Cls or Cls::T) we
+     * store a serialized version of the decl alias in an *origin* field
+     * of the locl type returned. Currently, only shape types have an
+     * origin field. *)
+    let cache_result () =
+      (* Under the following conditions we may cache the localized
+       * type:
+       *
+       *   1/ We did not encounter cycles during expansion,
+       *   2/ localization was error-free,
+       *   3/ we are expanding under regular assumptions (local
+       *      newtypes are visible), and
+       *   4/ the expansion has not created new global type params.
+       *
+       * Case 4 happens when we bogusly create type params for
+       * abstract type constants.
+       * Cycles are not reported systematically as errors, so we
+       * track them separately with a reference in ety_env. *)
+      let no_new_global_type_params =
+        Type_parameter_env.size final_env.tpenv
+        <= Type_parameter_env.size env.tpenv
       in
-      env, (ety_env, (r, Tclass (cls, tyl)))
-  | r, Ttuple tyl ->
-      let env, tyl = List.map_env env tyl (localize ~ety_env) in
-      env, (ety_env, (r, Ttuple tyl))
-  | r, Taccess (root_ty, ids) ->
-      let env, root_ty = localize ~ety_env env root_ty in
-      TUtils.expand_typeconst ety_env env r root_ty ids
-  | r, Tshape (fields_known, tym) ->
-      let env, tym = ShapeFieldMap.map_env (localize ~ety_env) env tym in
-      env, (ety_env, (r, Tshape (fields_known, tym)))
-
-and localize_tparams ~ety_env env pos tyl tparams =
-  let length = min (List.length tyl) (List.length tparams) in
-  let tyl, tparams = List.take tyl length, List.take tparams length in
-  let ety_env = { ety_env with validate_dty = None; } in
-  let (env, _), tyl = List.map2_env (env, ety_env) tyl tparams (localize_tparam pos) in
-  env, tyl
-
-and localize_tparam pos (env, ety_env) ty (_, (_, name), cstrl, _) =
-  match ty with
-    | r, Tapply ((_, x), _argl) when x = SN.Typehints.wildcard ->
-      let env, new_name = Env.add_fresh_generic_parameter env name in
-      let ty_fresh = (r, Tabstract (AKgeneric new_name, None)) in
-      let env = List.fold_left cstrl ~init:env ~f:(fun env (ck, ty) ->
-        let env, ty = localize ~ety_env env ty in
-        TUtils.add_constraint pos env ck ty_fresh ty) in
-      (* Substitute fresh type parameters for original formals in constraint *)
-      let substs = SMap.add name ty_fresh ety_env.substs in
-      let ety_env = { ety_env with substs; } in
-      (env, ety_env), ty_fresh
-    | _ ->
-      let env, ty = localize ~ety_env env ty in
-      (env, ety_env), ty
-
-and tyl_contains_wildcard tyl =
-  List.exists tyl begin function
-    | _, Tapply ((_, x), _) -> x = SN.Typehints.wildcard
-    | _ -> false
+      (not (Typing_defs.cyclic_expansion ety_env))
+      && Option.is_none ty_err_opt
+      && is_default_visibility_behaviour ety_env.visibility_behavior
+      && ety_env.make_internal_opaque
+      && no_new_global_type_params
+    in
+    match deref lty with
+    | ( r,
+        Tshape
+          (Shape_simple
+            {
+              s_origin = _;
+              s_unknown_value = shape_kind;
+              s_fields = shape_fields;
+            }) ) -> begin
+      match origin_opt with
+      | None -> lty
+      | Some origin ->
+        let lty =
+          mk
+            ( r,
+              Tshape
+                (Shape_simple
+                   {
+                     s_origin = From_alias (origin, decl_pos_opt);
+                     s_unknown_value = shape_kind;
+                     s_fields = shape_fields;
+                   }) )
+        in
+        if cache_result () then !locl_cache_add env origin lty;
+        lty
+    end
+    | _ -> lty
+  in
+  let push_supportdyn_into_shape env lty =
+    let (is_supportdyn, env, stripped_lty) = TUtils.strip_supportdyn env lty in
+    match deref stripped_lty with
+    | ( r,
+        Tshape
+          (Shape_simple
+            { s_origin = origin; s_unknown_value = ty; s_fields = shape_fields })
+      )
+      when is_supportdyn ->
+      let (env, ty) = TUtils.make_supportdyn r env ty in
+      ( env,
+        MakeType.supportdyn
+          r
+          (mk
+             ( r,
+               Tshape
+                 (Shape_simple
+                    {
+                      s_origin = origin;
+                      s_unknown_value = ty;
+                      s_fields = shape_fields;
+                    }) )) )
+    | _ -> (env, lty)
+  in
+  let r = get_reason dty |> Typing_reason.localize in
+  match get_node dty with
+  | Trefinement (root, cr) ->
+    let ((env, err, cycles), ty) = localize_refinement ~ety_env env r root cr in
+    ((env, err, cycles), ty)
+  | (Tnonnull | Tprim _ | Tdynamic _ | Tany _) as x ->
+    ((env, None, []), mk (r, x))
+  | Tmixed -> ((env, None, []), MakeType.mixed r)
+  | Tthis ->
+    let ty =
+      map_reason ety_env.this_ty ~f:(function reason ->
+          if Reason.Predicates.is_none reason then
+            r
+          else (
+            match Reason.Predicates.unpack_expr_dep_type_opt reason with
+            | Some (_, pos, s) -> Reason.expr_dep_type (r, pos, s)
+            | None -> Reason.instantiate ~type_:reason SN.Typehints.this ~var:r
+          ))
+    in
+    (* When refining `as this`, insert a like type for generic or non-final
+     * classes, because generics are not checked at runtime *)
+    let ty =
+      if ety_env.ish_weakening then
+        match Env.get_self_class env with
+        | Decl_entry.Found tc ->
+          if Cls.final tc && List.is_empty (Cls.tparams tc) then
+            ty
+          else
+            MakeType.locl_like (Reason.pessimised_this (Reason.to_pos r)) ty
+        | _ -> ty
+      else
+        ty
+    in
+    ((env, None, []), ty)
+  | Tvec_or_dict (tk, tv) ->
+    let ety_env_targ = { ety_env with under_type_constructor = true } in
+    let tk =
+      match ety_env.wildcard_action with
+      | Wildcard_fresh_generic -> mk (get_reason tk, Twildcard)
+      | _ -> tk
+    in
+    let ((env, e1, cycles1), tk) = localize ~ety_env:ety_env_targ env tk in
+    let ((env, e2, cycles2), tv) = localize ~ety_env:ety_env_targ env tv in
+    let ty = Tvec_or_dict (tk, tv) in
+    let ty_err_opt = Option.merge e1 e2 ~f:Typing_error.both in
+    ((env, ty_err_opt, cycles1 @ cycles2), mk (r, ty))
+  | Tgeneric nm when S_set.mem nm ety_env.no_substs ->
+    (* For polymorphic lambda we want to retain generics bound in the lambda signature *)
+    ((env, None, []), mk (r, Tgeneric nm))
+  | Tgeneric x -> begin
+    match S_map.find_opt x ety_env.substs with
+    | Some x_ty ->
+      let (env, x_ty) = Env.expand_type env x_ty in
+      let r_inst =
+        let rp = get_reason x_ty in
+        Reason.instantiate ~type_:rp x ~var:r
+      in
+      let ty_ = get_node x_ty in
+      ((env, None, []), mk (r_inst, ty_))
+    | None -> ((env, None, []), mk (r, Tgeneric x))
   end
+  | Toption ty ->
+    let ((env, ty_err_opt, cycles), ty) = localize ~ety_env env ty in
+    (* Calling into the union module here would cost 2% perf regression on a full init,
+     * so we use this lightweight version instead. *)
+    let union_null env ty =
+      let rec null_is_subtype_of ty =
+        match get_node ty with
+        | Toption _
+        | Tprim Aast.Tnull ->
+          true
+        | Tunion tyl -> List.exists tyl ~f:null_is_subtype_of
+        | Tintersection tyl -> List.for_all tyl ~f:null_is_subtype_of
+        | Tnewtype (n, [inner], _) when String.equal n SN.Classes.cSupportDyn ->
+          null_is_subtype_of inner
+        | _ -> false
+      in
+      if null_is_subtype_of ty then
+        (env, ty)
+      else
+        MakeType.nullable r ty |> TUtils.wrap_union_inter_ty_in_var env r
+    in
+    let (env, ty) = union_null env ty in
+    ((env, ty_err_opt, cycles), ty)
+  | Tlike ty ->
+    let ((env, ty_err_opt, cycles), ty) = localize ~ety_env env ty in
+    let lty = MakeType.locl_like r ty in
+    ((env, ty_err_opt, cycles), lty)
+  | Tfun ft ->
+    let pos = Reason.to_pos r in
+    let (env, ft) =
+      localize_ft
+        ~ety_env:{ ety_env with under_type_constructor = true }
+        ~def_pos:pos
+        env
+        ft
+    in
+    (env, mk (r, Tfun ft))
+  | Tapply ((_, x), [arg]) when String.equal x SN.HH.FIXME.tPoisonMarker ->
+    let decl_ty = mk (get_reason dty, Tlike arg) in
+    localize ~ety_env env decl_ty
+  | Twildcard -> begin
+    match ety_env.wildcard_action with
+    (* Generate a fresh type variable *)
+    | Wildcard_fresh_tyvar ->
+      let (env, ty) =
+        Env.fresh_type env (Pos_or_decl.unsafe_to_raw_pos (Reason.to_pos r))
+      in
+      ((env, None, []), ty)
+    (* Produce an error: wildcard is not allowed in this position *)
+    | Wildcard_require_explicit tparam ->
+      let (decl_pos, param_name) = tparam.tp_name in
+      let err_opt =
+        Some
+          Typing_error.(
+            primary
+            @@ Primary.Require_generic_explicit
+                 {
+                   decl_pos;
+                   param_name;
+                   pos = Pos_or_decl.unsafe_to_raw_pos (Reason.to_pos r);
+                 })
+      in
+      let (env, ty) =
+        Env.fresh_type_error
+          env
+          (Pos_or_decl.unsafe_to_raw_pos (Reason.to_pos r))
+      in
+      ((env, err_opt, []), ty)
+    (* All should have been dealt with already:
+     * (1) Wildcard_fresh_generic and Wildcard_fresh_generic_type_argument, in localize_targ_constrain_wildcard.
+     * (2) Wildcard_illegal, in the naming phase.
+     * (3) Wildcard_higher_kinded_placeholder, in Typing_type_integrity.ml
+     *)
+    | Wildcard_fresh_generic
+    | Wildcard_illegal
+    | Wildcard_higher_kinded_placeholder ->
+      let (env, ty) =
+        Env.fresh_type_error
+          env
+          (Pos_or_decl.unsafe_to_raw_pos (Reason.to_pos r))
+      in
+      ((env, None, []), ty)
+  end
+  | Tapply (((_p, cid) as cls), argl) ->
+    let ((env, ty_err_opt, cycles), lty) =
+      match Env.get_class_or_typedef env cid with
+      | Decl_entry.Found (Env.ClassResult class_info) ->
+        localize_class_instantiation ~ety_env env r cls argl (Some class_info)
+      | Decl_entry.Found (Env.TypedefResult typedef_info) ->
+        let origin_opt = find_origin dty in
+        let ((env, ty_err_opt, cycles), lty) =
+          match Option.bind origin_opt ~f:(!locl_cache_get env) with
+          | Some lty -> ((env, None, []), with_reason lty r)
+          | None ->
+            localize_typedef_instantiation
+              ~ety_env
+              env
+              r
+              cid
+              argl
+              (Some typedef_info)
+        in
 
-and localize ~ety_env env ty =
-  let env, (_, ty) = localize_with_env ~ety_env env ty in
-  env, ty
+        let shp_def_pos =
+          match typedef_info.td_type_assignment with
+          | SimpleTypeDef (_, hint)
+          | CaseType ((hint, _), []) ->
+            Reason.to_pos @@ Typing_defs.get_reason hint
+          | CaseType ((first_hint, _wcs), rest) ->
+            (match List.last rest with
+            | None -> Reason.to_pos @@ Typing_defs.get_reason first_hint
+            | Some (last_hint, _wcs) ->
+              let first_pos =
+                Reason.to_pos @@ Typing_defs.get_reason first_hint
+              in
+              let last_pos =
+                Reason.to_pos @@ Typing_defs.get_reason last_hint
+              in
+              Pos_or_decl.btw first_pos last_pos)
+        in
+        let lty =
+          set_origin_and_cache origin_opt env ty_err_opt lty (Some shp_def_pos)
+        in
+        let lty =
+          Typing_env.update_reason env lty ~f:(fun r ->
+              Typing_reason.(definition shp_def_pos r))
+        in
+        ((env, ty_err_opt, cycles), lty)
+      | Decl_entry.DoesNotExist
+      | Decl_entry.NotYetAvailable ->
+        localize_class_instantiation ~ety_env env r cls argl None
+    in
+    let (env, lty) =
+      (* If we have supportdyn<t> then push supportdyn into open shape fields *)
+      if String.equal cid SN.Classes.cSupportDyn then
+        push_supportdyn_into_shape env lty
+      else
+        (env, lty)
+    in
+    ((env, ty_err_opt, cycles), lty)
+  | Ttuple { t_required; t_optional; t_extra } ->
+    let ety_env_targ = { ety_env with under_type_constructor = true } in
+    let ((env, ty_err_opt1, cycles1), t_required) =
+      list_map_env_err_cycles
+        env
+        t_required
+        ~f:(localize ~ety_env:ety_env_targ)
+        ~combine_ty_errs:Typing_error.multiple_opt
+    in
+    let ((env, ty_err_opt2, cycles2), t_optional) =
+      list_map_env_err_cycles
+        env
+        t_optional
+        ~f:(localize ~ety_env:ety_env_targ)
+        ~combine_ty_errs:Typing_error.multiple_opt
+    in
+    let ((env, ty_err_opt3, cycles3), t_extra) =
+      localize_tuple_extra ~ety_env:ety_env_targ env t_extra
+    in
+    let ty_err_opt =
+      Option.merge
+        (Option.merge ty_err_opt1 ty_err_opt2 ~f:Typing_error.both)
+        ty_err_opt3
+        ~f:Typing_error.both
+    in
+    ( (env, ty_err_opt, cycles1 @ cycles2 @ cycles3),
+      mk (r, Ttuple { t_required; t_optional; t_extra }) )
+  | Tunion tyl ->
+    let ((env, ty_err_opt, cycles), tyl) =
+      list_map_env_err_cycles
+        env
+        tyl
+        ~f:(localize ~ety_env)
+        ~combine_ty_errs:Typing_error.union_opt
+    in
+    let (env, ty) = Typing_union.union_list env r tyl in
+    ((env, ty_err_opt, cycles), ty)
+  | Tintersection tyl ->
+    let ((env, ty_err_opt, cycles), tyl) =
+      list_map_env_err_cycles
+        env
+        tyl
+        ~f:(localize ~ety_env)
+        ~combine_ty_errs:Typing_error.multiple_opt
+    in
+    let (env, ty) =
+      if ety_env.simplify_intersections then
+        Typing_intersection.intersect_list env r tyl
+      else
+        (env, MakeType.intersection r tyl)
+    in
+    ((env, ty_err_opt, cycles), ty)
+  | Taccess (root_ty, id) ->
+    let origin_opt = find_origin dty in
+    (match Option.bind origin_opt ~f:(!locl_cache_get env) with
+    | Some lty -> ((env, None, []), with_reason lty r)
+    | None ->
+      let rec allow_abstract_tconst ty =
+        match get_node ty with
+        | Tthis
+        | Tgeneric _ ->
+          (*
+           * When the root of an access is 'this', abstract type constants
+           * are allowed and localized as rigid type variables (Tgeneric).
+           * This happens when typing generic code in an abstract class
+           * that deals with data whose type is going to be set later in
+           * derived classes.
+           *
+           * In case the root is a generic, we also accept accesses to
+           * abstract constant to type check the dangerous and ubiquitous
+           * pattern:
+           *
+           *   function get<TBox as Box, T>(TBox $foo) : T where T = TBox::T
+           *                                                         ^^^^^^^
+           *)
+          true
+        | Taccess (ty, _) -> allow_abstract_tconst ty
+        | _ -> false
+      in
+      let allow_abstract_tconst = allow_abstract_tconst root_ty in
+      let ((env, e1, cycles_root), root_ty) =
+        (* We don't want to put `~` on this::TC, so set ish_weakening to false *)
+        localize ~ety_env:{ ety_env with ish_weakening = false } env root_ty
+      in
+      let ((env, e2, cycles_tconst), ty) =
+        TUtils.expand_typeconst ety_env env root_ty id ~allow_abstract_tconst
+      in
+      (* Elaborate reason with information about expression dependent types and
+       * the original location of the Taccess type
+       *)
+      let ty_err_opt = Option.merge e1 e2 ~f:Typing_error.both in
+      let ty = set_origin_and_cache origin_opt env ty_err_opt ty None in
+      let elaborate_reason expand_reason =
+        let taccess_string =
+          lazy
+            (Typing_print.full_strip_ns ~hide_internals:true env root_ty
+            ^ "::"
+            ^ snd id)
+        in
+        (* If the root is an expression dependent type, change the primary
+         * reason to be for the full Taccess type to preserve the position where
+         * the expression dependent type was derived from.
+         *)
+        let reason =
+          match
+            Reason.Predicates.unpack_expr_dep_type_opt (get_reason root_ty)
+          with
+          | Some (_, p, e) -> Reason.expr_dep_type (r, p, e)
+          | None -> r
+        in
+        Reason.type_access (expand_reason, [(reason, taccess_string)])
+      in
+      let ty = map_reason ty ~f:elaborate_reason in
+      ((env, ty_err_opt, cycles_root @ cycles_tconst), ty))
+  | Tshape
+      (Shape_simple
+        { s_origin = _; s_unknown_value = shape_kind; s_fields = tym }) ->
+    let ety_env_targ = { ety_env with under_type_constructor = true } in
+    let (((env, cycles_shape), ty_err_opt1), tym) =
+      ShapeFieldMap.map_env_ty_err_opt
+        (fun (env, cycles_acc) ty ->
+          let ((env, err, cycles), ty) =
+            localize ~ety_env:ety_env_targ env ty
+          in
+          (((env, cycles @ cycles_acc), err), ty))
+        (env, [])
+        tym
+        ~combine_ty_errs:Typing_error.multiple_opt
+    in
+    let ((env, ty_err_opt2, cycles_unknown_value), shape_kind) =
+      localize ~ety_env:ety_env_targ env shape_kind
+    in
+    let ty_err_opt =
+      Option.merge ty_err_opt1 ty_err_opt2 ~f:Typing_error.both
+    in
+    ( (env, ty_err_opt, cycles_shape @ cycles_unknown_value),
+      mk
+        ( r,
+          Tshape
+            (Shape_simple
+               {
+                 s_origin = Missing_origin;
+                 s_unknown_value = shape_kind;
+                 s_fields = tym;
+               }) ) )
+  | Tshape (Shape_splat { ss_elems }) ->
+    let ety_env_targ = { ety_env with under_type_constructor = true } in
+    let ((env, ty_err_opt, all_cycles), localized_elems) =
+      List.fold_left
+        ss_elems
+        ~init:((env, None, []), [])
+        ~f:(fun ((env, ty_err_acc, cycles_acc), acc) elem ->
+          let ((env, ty_err_opt, cycles), elem_ty) =
+            localize ~ety_env:ety_env_targ env elem
+          in
+          let ty_err_acc =
+            Option.merge ty_err_acc ty_err_opt ~f:Typing_error.both
+          in
+          ((env, ty_err_acc, List.rev_append cycles cycles_acc), elem_ty :: acc))
+    in
+    let localized_elems = List.rev localized_elems in
+    let (env, norm_err_opt, normalized) =
+      Typing_shape_normalize.merge
+        ~on_error:ety_env.on_error
+        localized_elems
+        env
+    in
+    let ty_err_opt =
+      match (ty_err_opt, norm_err_opt) with
+      | (Some t1, Some t2) -> Some (Typing_error.both t1 t2)
+      | (Some t, _)
+      | (_, Some t) ->
+        Some t
+      | _ -> None
+    in
+    let (env, ty, sd) =
+      match normalized with
+      | Full (ty, sd) -> (env, ty, sd)
+      | Empty_shape sd ->
+        let shape =
+          {
+            s_origin = Missing_origin;
+            s_unknown_value = MakeType.nothing r;
+            s_fields = TShapeMap.empty;
+          }
+        in
+        (env, mk (r, Tshape (Shape_simple shape)), sd)
+      (* A splat of one element and nothing else IS that element, so lift it out
+         rather than leaving a singleton [Shape_splat] wrapper: `shape(...T)` is
+         `T`. Without this the wrapper hides the element behind the splat
+         machinery and reading a field off a `shape(...T)` parameter would go via
+         the corner's bound projection rather than the ordinary rules for `T`. *)
+      | Partial ([elem], sd) -> (env, elem, sd)
+      | Partial (ss_elems, sd) ->
+        (env, mk (r, Tshape (Shape_splat { ss_elems })), sd)
+      | Union tys ->
+        (* Union operand distributed: members are already finalised (supportdyn
+           applied per member), so union them and mark sd already-applied. *)
+        let (env, ty) = Typing_union.union_list env r tys in
+        (env, ty, false)
+      | Intersection tys ->
+        let (env, ty) = Typing_intersection.intersect_list env r tys in
+        (env, ty, false)
+    in
+    (* If any element was [supportdyn<...>] (e.g. an open shape under sound
+       dynamic), the stripped, normalized result must be re-wrapped to stay
+       sound. [supportdyn] is idempotent so this is a no-op otherwise. *)
+    let ty =
+      if sd then
+        MakeType.supportdyn (get_reason ty) ty
+      else
+        ty
+    in
+    ((env, ty_err_opt, all_cycles), ty)
+  | Tclass_ptr ty ->
+    let ((env, ty_err_opt, cycles), ty) =
+      localize ~ety_env:{ ety_env with under_type_constructor = true } env ty
+    in
+    ((env, ty_err_opt, cycles), mk (r, Tclass_ptr ty))
+
+and localize_tuple_extra ~ety_env env e =
+  match e with
+  | Tvariadic t_variadic ->
+    let ((env, ty_err_opt, cycles), t_variadic) =
+      localize ~ety_env env t_variadic
+    in
+    ((env, ty_err_opt, cycles), Tvariadic t_variadic)
+  | Tsplat t_splat ->
+    let ((env, ty_err_opt, cycles), t_splat) = localize ~ety_env env t_splat in
+    ((env, ty_err_opt, cycles), Tsplat t_splat)
+
+(* Localize type arguments using localize_targ_constrain_wildcard.
+   Discards tyargs for which we have no corresponding tparam.
+   Ignores superfluous tparams as well as superfluus tparams. *)
+and localize_targs_constrain_wildcards
+    ~ety_env
+    env
+    (tyargs : decl_ty list)
+    (tparams : decl_tparam list)
+      (* (nkinds : KindDefs.Simple.named_kind list) *) =
+  let exp_len = List.length tparams in
+  let act_len = List.length tyargs in
+  let length = min exp_len act_len in
+  let (tyargs, tparams) = (List.take tyargs length, List.take tparams length) in
+  let ((env, ty_errs, _, cycles), tyl) =
+    List.map2_env
+      (env, [], ety_env, [])
+      tyargs
+      tparams
+      ~f:(fun (env, ty_errs, ety_env, cycles_acc) x y ->
+        let ((env, ety_env, ty_err_opt, cycles), res) =
+          localize_targ_constrain_wildcard (env, ety_env) x y
+        in
+        let ty_errs =
+          Option.value_map ty_err_opt ~default:ty_errs ~f:(fun e ->
+              e :: ty_errs)
+        in
+        ((env, ty_errs, ety_env, cycles @ cycles_acc), res))
+  in
+  let ty_err_opt = Typing_error.multiple_opt ty_errs in
+  (* Note that we removed superfluous type arguments, because we don't have a kind to localize
+     them against.
+     It would also be useful to fill in Terr for missing type arguments, but this breaks some
+     checks on built-in collections that check the number of type arguments *after* localization. *)
+  ((env, ty_err_opt, cycles), tyl)
+
+(* Localizes a type argument. If it's a wildcard, turn into fresh generic with bounds according to tparam *)
+and localize_targ_constrain_wildcard (env, ety_env) ty (tparam : decl_tparam) :
+    (env
+    * expand_env
+    * Typing_error.t option
+    * Type_expansions.cycle_reporter list)
+    * locl_phase ty =
+  match (get_node ty, ety_env.wildcard_action) with
+  | (Twildcard, Wildcard_fresh_generic) ->
+    let r = get_reason ty in
+    let pos = get_pos ty in
+    let r = Typing_reason.localize r in
+    let name = tparam.tp_name in
+    let kind_without_bounds = KindDefs.kind_of_decl_tparam_no_bounds tparam in
+    let (env, new_name) =
+      (* add without bounds, because we need to substitute inside them first,
+         as done below *)
+      Env.add_fresh_generic_parameter_by_kind
+        env
+        pos
+        (snd name)
+        kind_without_bounds
+    in
+    let ty_fresh = mk (r, Tgeneric new_name) in
+    (* Substitute fresh type parameters for original formals in constraint *)
+    let substs = S_map.add (snd name) ty_fresh ety_env.substs in
+    let ety_env = { ety_env with substs } in
+    let (env, ty_errs, cycles) =
+      List.fold_left
+        tparam.tp_constraints
+        ~init:(env, [], [])
+        ~f:(fun (env, ty_errs, cycles_acc) (ck, ty) ->
+          let ((env, ty_err_opt, cycles), ty) = localize ~ety_env env ty in
+          let ty_errs =
+            Option.value_map
+              ~default:ty_errs
+              ~f:(fun e -> e :: ty_errs)
+              ty_err_opt
+          in
+          let env = TUtils.add_constraint env ck ty_fresh ty ety_env.on_error in
+          (env, ty_errs, cycles @ cycles_acc))
+    in
+    let ty_err_opt = Typing_error.multiple_opt ty_errs in
+    ((env, ety_env, ty_err_opt, cycles), ty_fresh)
+  | _ ->
+    let ((env, ty_err_opt, cycles), ty) = localize ~ety_env env ty in
+    ((env, ety_env, ty_err_opt, cycles), ty)
+
+and localize_class_instantiation
+    ~ety_env env r sid tyargs (class_info : _ option) :
+    (env * Typing_error.t option * Type_expansions.cycle_reporter list)
+    * locl_ty =
+  let (pos, name) = sid in
+  match class_info with
+  | None ->
+    (* Without class info, we don't know the kinds of the arguments.
+       We assume they are non-HK types. *)
+    let ((env, err, cycles), tyl) =
+      list_map_env_err_cycles
+        env
+        tyargs
+        ~f:
+          (localize
+             ~ety_env:
+               {
+                 ety_env with
+                 visibility_behavior = default_visibility_behaviour;
+               })
+        ~combine_ty_errs:Typing_error.multiple_opt
+    in
+    ((env, err, cycles), mk (r, Tclass (sid, nonexact, tyl)))
+  | Some class_info ->
+    if Option.is_some (Cls.enum_type class_info) then
+      match
+        Typing_defs.add_type_expansion_check_cycles
+          ety_env
+          {
+            Type_expansions.name = Type_expansions.Expandable.Enum name;
+            use_pos = pos;
+            def_pos = None;
+          }
+      with
+      | Error cycle ->
+        let (env, ty) =
+          Env.fresh_type_error env (Pos_or_decl.unsafe_to_raw_pos pos)
+        in
+        ((env, None, [cycle]), ty)
+      | Ok ety_env ->
+        if Ast_defs.is_c_enum_class (Cls.kind class_info) then
+          (* Enum classes no longer has the ambiguity between the type of
+           * the enum set and the type of elements, so the enum class
+           * itself is seen as a Tclass
+           *)
+          ((env, None, []), mk (r, Tclass (sid, nonexact, [])))
+        else
+          let ((env, err, cycles), cstr) =
+            match Env.get_enum_constraint env name with
+            (* If not specified, default bound is arraykey *)
+            | Decl_entry.DoesNotExist
+            | Decl_entry.NotYetAvailable
+            | Decl_entry.Found None ->
+              ( (env, None, []),
+                MakeType.arraykey
+                  (Reason.implicit_upper_bound (pos, "arraykey")) )
+            | Decl_entry.Found (Some ty) -> localize ~ety_env env ty
+          in
+          let enum_ty = mk (r, Tnewtype (name, [], cstr)) in
+          let r_dyn = r in
+          let enum_ty =
+            if ety_env.ish_weakening then
+              MakeType.intersection
+                r_dyn
+                [MakeType.locl_like r_dyn enum_ty; MakeType.arraykey r_dyn]
+            else
+              enum_ty
+          in
+          ((env, err, cycles), enum_ty)
+    else
+      let tparams = Cls.tparams class_info in
+      let ((env, err, cycles), tyl) =
+        localize_targs_constrain_wildcards
+          ~ety_env:{ ety_env with under_type_constructor = true }
+          env
+          tyargs
+          tparams
+      in
+      (* Hide the class type if its internal and outside of the module *)
+      if
+        (not ety_env.make_internal_opaque)
+        || Typing_modules.is_class_visible env class_info
+      then
+        let r = Typing_reason.(definition (Folded_class.pos class_info) r) in
+        ((env, err, cycles), mk (r, Tclass (sid, nonexact, tyl)))
+      else
+        let callee_module =
+          match Cls.get_module class_info with
+          | Some m -> m
+          | None ->
+            failwith
+              "Internal error: module must exist for class to be not visible"
+        in
+        let new_r =
+          Reason.opaque_type_from_module (Cls.pos class_info, callee_module, r)
+        in
+        let cstr = MakeType.mixed new_r in
+        (* If the class supports dynamic, reveal this in the newtype *)
+        let cstr =
+          if Cls.get_support_dynamic_type class_info then
+            MakeType.supportdyn new_r cstr
+          else
+            cstr
+        in
+        ((env, err, cycles), mk (new_r, Tnewtype (name, tyl, cstr)))
+
+and localize_typedef_instantiation
+    ~ety_env env (r : Reason.t) type_name tyargs (typedef_info : _ option) =
+  match typedef_info with
+  | Some typedef_info ->
+    let tparams = typedef_info.Typing_defs.td_tparams in
+    (* Localize type args, handling wildcards *)
+    let ((env, e1, cycles_tyargs), tyargs_locl) =
+      localize_targs_constrain_wildcards
+        ~ety_env:
+          {
+            ety_env with
+            visibility_behavior = default_visibility_behaviour;
+            under_type_constructor = true;
+          }
+        env
+        tyargs
+        tparams
+    in
+    (* Expand the typedef at decl level. Substitution is handled by the
+       caller (via ety_env.substs during localization) to preserve wildcard
+       identity — decl-level substitution would duplicate Twildcard nodes. *)
+    let Typing_tdef.{ ety_env = result_ety_env; cycles = cycles_td; expansion }
+        =
+      Typing_tdef.expand_typedef ety_env env r type_name
+    in
+    let cycles = cycles_td @ cycles_tyargs in
+    let arity_ok td_tparams =
+      List.length tyargs_locl = List.length td_tparams
+    in
+    (* Localize a typedef constraint. For supportdyn<T>, we use the
+       localized arg directly to avoid supportdynamic.hhi leaking into
+       reasons. *)
+    let localize_cstr ety_env_inner cstr =
+      if String.equal type_name SN.Classes.cSupportDyn then
+        ((env, None, []), List.hd_exn tyargs_locl)
+      else
+        (* Disable intersection simplification when localizing the upper
+           bound constraint. Simplifying intersections during localization
+           calls Typing_intersection.intersect_list, which depends on
+           typing_subtype, which depends on typing_phase — creating a cycle
+           that can loop forever on recursive case type bounds. *)
+        let ety_env_cstr =
+          { ety_env_inner with simplify_intersections = false }
+        in
+        localize ~ety_env:ety_env_cstr env cstr
+    in
+    (* Build the ety_env for localizing the typedef body/constraint *)
+    let make_ety_env_inner td_tparams =
+      let substs = Subst.make_locl td_tparams tyargs_locl in
+      { result_ety_env with substs; under_type_constructor = false }
+    in
+    let arity_error () =
+      let (env, ty) =
+        Env.fresh_type_error
+          env
+          (Pos_or_decl.unsafe_to_raw_pos (Reason.to_pos r))
+      in
+      ((env, e1, cycles), ty)
+    in
+    (match expansion with
+    | Typing_tdef.Expanded { tparams = td_tparams; body; cstr } ->
+      if not (arity_ok td_tparams) then
+        arity_error ()
+      else
+        let ety_env_inner = make_ety_env_inner td_tparams in
+        (* TODO(T207369421): Cycle detection through constraints should be a
+           well-formedness check in typing_type_wellformedness.ml, not a
+           side effect of localization. We localize the constraint here even
+           though we discard the localized value because localizing expands
+           any typedefs referenced in the constraint, which triggers
+           add_type_expansion_check_cycles and detects constraint cycles
+           like `newtype A as B` / `newtype B as A`. *)
+        let ((env, cstr_err, cstr_cycles), _cstr) =
+          localize_cstr ety_env_inner cstr
+        in
+        let ((env, rhs_err, rhs_cycles), lty) =
+          localize ~ety_env:ety_env_inner env body
+        in
+        let ty_err_opt = Option.merge e1 cstr_err ~f:Typing_error.both in
+        let ty_err_opt = Option.merge ty_err_opt rhs_err ~f:Typing_error.both in
+        let lty = with_reason lty r in
+        ((env, ty_err_opt, cycles @ cstr_cycles @ rhs_cycles), lty)
+    | Typing_tdef.Opaque { tparams = td_tparams; cstr } ->
+      if not (arity_ok td_tparams) then
+        arity_error ()
+      else
+        let ety_env_inner = make_ety_env_inner td_tparams in
+        let ((env, cstr_err, cstr_cycles), cstr) =
+          localize_cstr ety_env_inner cstr
+        in
+        let lty = mk (r, Tnewtype (type_name, tyargs_locl, cstr)) in
+        let ty_err_opt = Option.merge e1 cstr_err ~f:Typing_error.both in
+        ((env, ty_err_opt, cycles @ cstr_cycles), lty)
+    | Typing_tdef.Cyclic { td_type_assignment } ->
+      if not (arity_ok tparams) then
+        arity_error ()
+      else
+        (* Cycle detected — produce a fallback type. *)
+        let cycle_r =
+          Typing_reason.illegal_recursive_type (Reason.to_pos r) type_name
+        in
+        let td_as_constraint = typedef_info.Typing_defs.td_as_constraint in
+        let mixed =
+          match td_as_constraint with
+          | Some ty ->
+            (match get_node ty with
+            | Tapply ((_pos, sdt), [_])
+              when String.equal sdt SN.Classes.cSupportDyn ->
+              MakeType.supportdyn_mixed cycle_r
+            | _ -> MakeType.mixed cycle_r)
+          | _ -> MakeType.mixed cycle_r
+        in
+        let lty =
+          if ety_env.under_type_constructor then
+            match td_type_assignment with
+            | CaseType _ ->
+              mk (cycle_r, Tnewtype (type_name, tyargs_locl, mixed))
+            | SimpleTypeDef _ -> mixed
+          else
+            match ety_env.visibility_behavior with
+            | Always_expand_newtype ->
+              mk (cycle_r, Tnewtype (type_name, tyargs_locl, mixed))
+            | Resolve_type_structure _
+            | Never_expand_newtype
+            | Expand_visible_newtype_only ->
+              mixed
+        in
+        ((env, e1, cycles), lty))
+  | None ->
+    let (env, ty) =
+      Env.fresh_type_error env (Pos_or_decl.unsafe_to_raw_pos (Reason.to_pos r))
+    in
+    ((env, None, []), ty)
+
+and localize_cstr_ty ~ety_env env ty tp_name =
+  let (env, ty) = localize ~ety_env env ty in
+  let ty =
+    map_reason ty ~f:(fun r ->
+        Reason.cstr_on_generics (Reason.to_pos r, tp_name))
+  in
+  (env, ty)
 
 (* For the majority of cases when we localize a function type we instantiate
- * the function's type parameters to be a Tunresolved wrapped in a Tvar so the
- * type can grow. There are two cases where we do not do this.
+ * the function's type parameters to Tvars. There are two cases where we do not do this.
 
  * 1) In Typing_subtype.subtype_method. See the comment for that function for why
  * this is necessary.
  * 2) When the type arguments are explicitly specified, in which case we instantiate
  * the type parameters to the provided types.
  *)
-and localize_ft ~use_pos ?(instantiate_tparams=true) ?(explicit_tparams=[]) ~ety_env env ft =
-  (* If no explicit type parameters are provided, set the instantiated type parameter to
-   * initially point to unresolved, so that it can grow and eventually be a subtype of
-   * something like "mixed".
-   * If explicit type parameters are provided, just instantiate tvarl to them.
-   *)
-  let env, substs =
-    if instantiate_tparams
-    then
-      let default () = List.map_env env ft.ft_tparams TUtils.unresolved_tparam in
-      let env, tvarl =
-        if List.length explicit_tparams = 0
-        then default ()
-        else if List.length explicit_tparams <> List.length ft.ft_tparams
-        then begin
-          Errors.expected_tparam ft.ft_pos (List.length ft.ft_tparams);
-          default ()
-        end
+and localize_ft
+    ?(instantiation : method_instantiation option)
+    ~ety_env
+    ~def_pos
+    env
+    (ft : decl_ty fun_type) =
+  let ((env, arity_ty_err_opt), substs) =
+    match instantiation with
+    | Some { explicit_targs; use_name = _; use_pos } ->
+      let ty_err_opt =
+        if
+          (not (List.is_empty explicit_targs))
+          && Int.( <> ) (List.length explicit_targs) (List.length ft.ft_tparams)
+        then
+          Some
+            Typing_error.(
+              primary
+              @@ Primary.Expected_tparam
+                   {
+                     decl_pos = def_pos;
+                     pos = use_pos;
+                     n = List.length ft.ft_tparams;
+                   })
         else
-          let type_argument env hint =
-            match hint with
-            | (pos, Nast.Happly ((_, id), [])) when id = SN.Typehints.wildcard ->
-              let reason = Reason.Rwitness pos in
-              TUtils.in_var env (reason, Tunresolved [])
-            | _ -> hint_locl env hint in
-          List.map_env env explicit_tparams type_argument
+          None
       in
-      let ft_subst = Subst.make ft.ft_tparams tvarl in
-      env, SMap.union ft_subst ety_env.substs
-    else
-      env, List.fold_left ft.ft_tparams ~f:begin fun subst (_, (_, x), _, _) ->
-        SMap.remove x subst
-      end ~init:ety_env.substs
+      let tvarl = List.map ~f:fst explicit_targs in
+      let ft_subst =
+        if List.is_empty explicit_targs then
+          S_map.empty
+        else
+          Subst.make_locl ft.ft_tparams tvarl
+      in
+      ((env, ty_err_opt), S_map.union ft_subst ety_env.substs)
+    | None -> ((env, None), ety_env.substs)
   in
-  let ety_env = {ety_env with substs = substs} in
-  let env, params = List.map_env env ft.ft_params begin fun env param ->
-    let env, ty = localize ~ety_env env param.fp_type in
-    env, { param with fp_type = ty }
-  end in
-
+  let ety_env = { ety_env with substs } in
   (* Localize the constraints for a type parameter declaration *)
-  let localize_tparam env (var, name, cstrl, reified) =
-    let env, cstrl = List.map_env env cstrl begin fun env (ck, ty) ->
-      let env, ty = localize ~ety_env env ty in
-      let name_str = snd name in
-      (* In order to access type constants on generics on where clauses,
-        we need to add the constraints from the type parameters into the
-        environment before localizing the where clauses with them. Temporarily
-        add them to the environment here, and reset the environment later.
-      *)
-      let env = match ck with
-      | Ast.Constraint_as ->
-        Env.add_upper_bound env name_str ty
-      | Ast.Constraint_super ->
-        Env.add_lower_bound env name_str ty
-      | Ast.Constraint_eq ->
-        Env.add_upper_bound (Env.add_lower_bound env name_str ty) name_str ty in
-      env, (ck, ty)
-    end in
-    env, (var, name, cstrl, reified)
+  let localize_tparam (env, cycles) t =
+    let (((env, cycles), ty_err_opt), cstrl) =
+      List.map_env_ty_err_opt
+        (env, cycles)
+        t.tp_constraints
+        ~combine_ty_errs:Typing_error.multiple_opt
+        ~f:(fun (env, cycles_acc) (ck, ty) ->
+          let ((env, ty_err_opt, cycles), ty) =
+            localize_cstr_ty ~ety_env env ty t.tp_name
+          in
+          let name_str = snd t.tp_name in
+          (* In order to access type constants on generics on where clauses,
+             we need to add the constraints from the type parameters into the
+             environment before localizing the where clauses with them. Temporarily
+             add them to the environment here, and reset the environment later. *)
+          let env =
+            match ck with
+            | Ast_defs.Constraint_as -> Env.add_upper_bound env name_str ty
+            | Ast_defs.Constraint_super -> Env.add_lower_bound env name_str ty
+            | Ast_defs.Constraint_eq ->
+              Env.add_upper_bound
+                (Env.add_lower_bound env name_str ty)
+                name_str
+                ty
+          in
+          (((env, cycles @ cycles_acc), ty_err_opt), (ck, ty)))
+    in
+    (((env, cycles), ty_err_opt), { t with tp_constraints = cstrl })
   in
-
-  let localize_where_constraint env (ty1, ck, ty2) =
-    let env, ty1 = localize ~ety_env env ty1 in
-    let env, ty2 = localize ~ety_env env ty2 in
-    env, (ty1, ck, ty2)
+  let localize_where_constraint (env, cycles) (ty1, ck, ty2) =
+    let ((env, e1, cycles1), ty1) = localize ~ety_env env ty1 in
+    let ((env, e2, cycles2), ty2) = localize ~ety_env env ty2 in
+    let ty_err_opt = Option.merge e1 e2 ~f:Typing_error.both in
+    (((env, cycles1 @ cycles2 @ cycles), ty_err_opt), (ty1, ck, ty2))
   in
-
   (* Grab and store the old tpenvs *)
-  let old_tpenv = env.Env.lenv.Env.tpenv in
-  let old_global_tpenv = env.Env.global_tpenv in
-
-  (* If we're instantiating the generic parameters then remove them
-   * from the result. Otherwise localize them *)
-  let env, tparams =
-    if instantiate_tparams then env, []
-    else List.map_env env ft.ft_tparams localize_tparam in
-
+  let old_tpenv = Env.get_tpenv env in
+  let old_global_tpenv = env.tpenv in
+  (* Always localize tparams so they are available for later Tast check *)
+  let (((env, cycles_tparams), tparam_ty_err_opt), tparams) =
+    List.map_env_ty_err_opt
+      (env, [])
+      ft.ft_tparams
+      ~f:localize_tparam
+      ~combine_ty_errs:Typing_error.multiple_opt
+  in
   (* Localize the 'where' constraints *)
-  let env, where_constraints =
-    List.map_env env ft.ft_where_constraints localize_where_constraint in
-
+  let ( ((env, cycles_where_constraints), where_cstr_ty_err_opt),
+        where_constraints ) =
+    List.map_env_ty_err_opt
+      (env, [])
+      ft.ft_where_constraints
+      ~f:localize_where_constraint
+      ~combine_ty_errs:Typing_error.multiple_opt
+  in
   (* Remove the constraints we added for localizing where constraints  *)
   let env = Env.env_with_tpenv env old_tpenv in
   let env = Env.env_with_global_tpenv env old_global_tpenv in
-
   (* If we're instantiating the generic parameters then add a deferred
    * check that constraints are satisfied under the
    * substitution [ety_env.substs].
    *)
-  let env =
-    if instantiate_tparams then
-      let env = check_tparams_constraints ~use_pos ~ety_env env ft.ft_tparams in
-      let env = check_where_constraints ~use_pos ~definition_pos:ft.ft_pos ~ety_env env
-                  ft.ft_where_constraints in
-      env
-    else env in
-
-  let env, arity = match ft.ft_arity with
-    | Fvariadic (min, ({ fp_type = var_ty; _ } as param)) ->
-       let env, var_ty = localize ~ety_env env var_ty in
-       env, Fvariadic (min, { param with fp_type = var_ty })
-    | Fellipsis _ | Fstandard (_, _) as x -> env, x in
-  let env, ret = localize ~ety_env env ft.ft_ret in
-  env, { ft with ft_arity = arity; ft_params = params;
-                 ft_ret = ret; ft_tparams = tparams;
-                 ft_where_constraints = where_constraints }
+  let (env, gen_param_ty_err_opt, cycles_constraints) =
+    match instantiation with
+    | Some { use_pos; _ } ->
+      let (env, e1, cycles_tparams) =
+        check_tparams_constraints ~use_pos ~ety_env env ft.ft_tparams
+      in
+      let (env, e2, cycles_where_constraints) =
+        check_where_constraints
+          ~in_class:false
+          ~use_pos
+          ~definition_pos:def_pos
+          ~ety_env
+          env
+          ft.ft_where_constraints
+      in
+      let ty_err_opt = Option.merge e1 e2 ~f:Typing_error.both in
+      (env, ty_err_opt, cycles_tparams @ cycles_where_constraints)
+    | None -> (env, None, [])
+  in
+  let (((env, cycles_params, _), variadic_params_ty_err_opt), params) =
+    List.map_env_ty_err_opt
+      (env, [], 0)
+      ft.ft_params
+      ~f:(fun (env, cycles_acc, i) param ->
+        let ((env, ty_err_opt, cycles), ty) =
+          localize ~ety_env env param.fp_type
+        in
+        ( ((env, cycles @ cycles_acc, i + 1), ty_err_opt),
+          { param with fp_type = ty } ))
+      ~combine_ty_errs:Typing_error.multiple_opt
+  in
+  let ((env, implicit_params_ty_err_opt, cycles_impl_param), implicit_params) =
+    let (x, capability) =
+      match ft.ft_implicit_params.capability with
+      | CapTy c ->
+        let ((env, err, cycles), ty) = localize ~ety_env env c in
+        ((env, err, cycles), CapTy ty)
+      | CapDefaults p -> ((env, None, []), CapDefaults p)
+    in
+    (x, { capability })
+  in
+  let ((env, ret_ty_err_opt, cycles_ret), ret) =
+    localize ~ety_env env ft.ft_ret
+  in
+  let ty_err_opt =
+    Typing_error.multiple_opt
+    @@ List.filter_map
+         ~f:Fn.id
+         [
+           arity_ty_err_opt;
+           tparam_ty_err_opt;
+           where_cstr_ty_err_opt;
+           gen_param_ty_err_opt;
+           variadic_params_ty_err_opt;
+           implicit_params_ty_err_opt;
+           ret_ty_err_opt;
+         ]
+  in
+  ( ( env,
+      ty_err_opt,
+      cycles_tparams
+      @ cycles_where_constraints
+      @ cycles_constraints
+      @ cycles_params
+      @ cycles_impl_param
+      @ cycles_ret ),
+    {
+      ft with
+      ft_params = params;
+      ft_implicit_params = implicit_params;
+      ft_ret = ret;
+      ft_tparams = tparams;
+      ft_where_constraints = where_constraints;
+    } )
 
 (* Given a list of generic parameters [tparams] and a substitution
  * in [ety_env.substs] whose domain is at least these generic parameters,
@@ -369,101 +1306,686 @@ and localize_ft ~use_pos ?(instantiate_tparams=true) ?(explicit_tparams=[]) ~ety
  * Then the constraints are satisfied, because
  *   C is a subtype of MyContravariant<C>
  *   I is a supertype of C
- *
- * In fact, the constraint checking isn't done immediately, but rather pushed
- * onto the env.todo list. Typically we haven't resolved types sufficiently
- * (e.g. we have completely unresolved type variables) and so the actual
- * constraint checking is deferred until we have finished checking a
- * function's body.
  *)
 and check_tparams_constraints ~use_pos ~ety_env env tparams =
-  let check_tparam_constraints env (_variance, id, cstrl, _) =
-    List.fold_left cstrl ~init:env ~f:begin fun env (ck, ty) ->
-      let env, ty = localize ~ety_env env ty in
-      match SMap.get (snd id) ety_env.substs with
-      | Some x_ty ->
-        begin
-          Typing_log.log_types 1 use_pos env
-          [Typing_log.Log_sub ("check_tparams_constraints: add_check_constraint_todo",
-            [Typing_log.Log_type ("ty", ty);
-            Typing_log.Log_type ("x_ty", x_ty)])];
-          TGenConstraint.add_check_constraint_todo env ~use_pos id ck ty x_ty
-        end
-      | None ->
-        env
-    end in
-  List.fold_left tparams ~init:env ~f:check_tparam_constraints
+  let check_tparam_constraint (env, ty_errs) (ck, cstr_ty) ty =
+    let (env, e2) =
+      TGenConstraint.check_tparams_constraint env ~use_pos ck ~cstr_ty ty
+    in
+    let ty_errs =
+      Option.value_map ~default:ty_errs ~f:(fun e -> e :: ty_errs) e2
+    in
+    (env, ty_errs)
+  in
+  let check_tparam_constraint (env, ty_errs) (ck, cstr_ty) ty =
+    if Log.should_log_check_tparams_constraints env then
+      Log.log_check_tparams_constraints env use_pos cstr_ty ty @@ fun () ->
+      check_tparam_constraint (env, ty_errs) (ck, cstr_ty) ty
+    else
+      check_tparam_constraint (env, ty_errs) (ck, cstr_ty) ty
+  in
+  let check_tparam_constraints (env, ty_errs, cycles_acc) t =
+    let nm = snd t.tp_name in
+    if S_set.mem nm ety_env.no_substs then
+      (env, ty_errs, cycles_acc)
+    else
+      match S_map.find_opt (snd t.tp_name) ety_env.substs with
+      | Some ty ->
+        List.fold_left
+          t.tp_constraints
+          ~init:(env, ty_errs, cycles_acc)
+          ~f:(fun (env, ty_errs, cycles_acc) (ck, cstr_ty) ->
+            let ((env, e1, cycles1), cstr_ty) =
+              localize_cstr_ty ~ety_env env cstr_ty t.tp_name
+            in
+            let ty_errs =
+              Option.value_map ~default:ty_errs ~f:(fun e -> e :: ty_errs) e1
+            in
+            let (env, ty_errs) =
+              check_tparam_constraint (env, ty_errs) (ck, cstr_ty) ty
+            in
+            (env, ty_errs, cycles1 @ cycles_acc))
+      | None -> (env, ty_errs, cycles_acc)
+  in
+  let (env, ty_errs, cycles) =
+    List.fold_left tparams ~init:(env, [], []) ~f:check_tparam_constraints
+  in
+  (env, Typing_error.multiple_opt ty_errs, cycles)
 
-and check_where_constraints ~use_pos ~ety_env ~definition_pos env cstrl =
-  List.fold_left cstrl ~init:env ~f:begin fun env (ty1, ck, ty2) ->
-      let contains_type_access =
-        match ty1, ty2 with
-        | (_, Taccess ((_, Tgeneric _), _)), _
-        | _, (_, Taccess ((_, Tgeneric _), _)) -> true
-        | _ -> false in
-      if contains_type_access then
-      let ty_from_env = localize ~ety_env in
-      TGenConstraint.add_check_tconst_where_constraint_todo
-        env
-        ~use_pos
-        ~definition_pos
-        ck
-        ty_from_env
-        ty2
-        ty1
+and check_where_constraints
+    ~in_class ~use_pos ~ety_env ~definition_pos env cstrl =
+  let cycles_acc = [] in
+  let ety_env =
+    let on_error =
+      Some
+        (Typing_error.Reasons_callback.explain_where_constraint
+           use_pos
+           ~in_class
+           ~decl_pos:definition_pos)
+    in
+    { ety_env with on_error }
+  in
+  let (env, ty_errs, cycles_acc) =
+    List.fold_left
+      cstrl
+      ~init:(env, [], cycles_acc)
+      ~f:(fun (env, ty_errs, cycles_acc) (ty, ck, cstr_ty) ->
+        let ((env, e1, cycles1), ty) = localize ~ety_env env ty in
+        let ((env, e2, cycles2), cstr_ty) = localize ~ety_env env cstr_ty in
+        let (env, e3) =
+          TGenConstraint.check_where_constraint
+            ~in_class
+            env
+            ~use_pos
+            ~definition_pos
+            ck
+            ~cstr_ty
+            ty
+        in
+        let ty_err_opt =
+          Typing_error.multiple_opt @@ List.filter_map ~f:Fn.id [e1; e2; e3]
+        in
+        let ty_errs =
+          Option.value_map
+            ~default:ty_errs
+            ~f:(fun e -> e :: ty_errs)
+            ty_err_opt
+        in
+        (env, ty_errs, cycles1 @ cycles2 @ cycles_acc))
+  in
+  (env, Typing_error.multiple_opt ty_errs, cycles_acc)
+
+and localize_refinement ~ety_env env r root decl_cr =
+  let mk_unsupported_err () =
+    let pos = Reason.to_pos r in
+    Option.map ety_env.on_error ~f:(fun on_error ->
+        Typing_error.(
+          apply_reasons ~on_error (Secondary.Unsupported_refinement pos)))
+  in
+  let both_err e1 e2 = Option.merge e1 e2 ~f:Typing_error.both in
+  let ((env, err_opt, cycles_root), root) = localize ~ety_env env root in
+  let ((env, err_refinements, cycles_refinements), ty) =
+    match get_node root with
+    | Tclass (cid, Nonexact cr, tyl) ->
+      let ((env, ty_err_opt, cycles_refinements), cr) =
+        Class_refinement.fold_refined_consts
+          ~f:
+            (fun id { rc_bound; rc_is_ctx } ((env, ty_err_opt, cycles_acc), cr) ->
+            let ((env, ty_err_opt', cycles_rc_bound), rc_bound) =
+              match rc_bound with
+              | TRexact ty ->
+                let (env_err_cy, ty) = localize ~ety_env env ty in
+                (env_err_cy, TRexact ty)
+              | TRloose { tr_lower; tr_upper } ->
+                let localize_list env tyl =
+                  List.map_env
+                    (env, None, [])
+                    tyl
+                    ~f:(fun (env, ty_err_opt, cycles_acc) ty ->
+                      let ((env, ty_err_opt', cycles), ty) =
+                        localize ~ety_env env ty
+                      in
+                      ( ( env,
+                          both_err ty_err_opt ty_err_opt',
+                          cycles @ cycles_acc ),
+                        ty ))
+                in
+                let ((env, ty_err_opt1, cycles_lower), tr_lower) =
+                  localize_list env tr_lower
+                in
+                let ((env, ty_err_opt2, cycles_upper), tr_upper) =
+                  localize_list env tr_upper
+                in
+                ( ( env,
+                    both_err ty_err_opt1 ty_err_opt2,
+                    cycles_lower @ cycles_upper ),
+                  TRloose { tr_lower; tr_upper } )
+            in
+            let cr =
+              Class_refinement.add_refined_const id { rc_bound; rc_is_ctx } cr
+            in
+            ( ( env,
+                both_err ty_err_opt ty_err_opt',
+                cycles_rc_bound @ cycles_acc ),
+              cr ))
+          ~init:((env, None, []), cr)
+          decl_cr
+      in
+      ( (env, ty_err_opt, cycles_refinements),
+        mk (r, Tclass (cid, Nonexact cr, tyl)) )
+    | _ ->
+      let (env, ty) = Env.fresh_type_error env Pos.none in
+      ((env, mk_unsupported_err (), []), ty)
+  in
+  let err = both_err err_opt err_refinements in
+  let cycles = cycles_root @ cycles_refinements in
+  ((env, err, cycles), ty)
+
+(** Localize an explicit type argument to a constructor or function. We
+    support the use of wildcards at the top level only *)
+let localize_targ ?tparam ~check_type_integrity env hint =
+  (* For explicit type arguments we support a wildcard syntax `_` for which
+   * Hack will generate a fresh type variable *)
+  match hint with
+  | (p, Aast.Hwildcard) ->
+    let (env, ty) = Env.fresh_type env p in
+    ((env, None, []), (ty, hint))
+  | (hint_pos, _) ->
+    let ty = Decl_hint.hint env.decl_env hint in
+    let in_reified =
+      Option.value_map ~default:false tparam ~f:(fun tparam ->
+          not @@ Aast.is_erased tparam.tp_reified)
+    in
+    let should_check_package_boundary =
+      let open Typing_error.Primary.Package in
+      if in_reified then
+        `Yes Reified_generic
+      else if Option.is_some tparam then
+        `Yes Generic
       else
-      let env, ty1 = localize ~ety_env env ty1 in
-      let env, ty2 = localize ~ety_env env ty2 in
-      TGenConstraint.add_check_where_constraint_todo
+        `No
+    in
+    if check_type_integrity then
+      TIntegrity.check_type_integrity
+        ~in_signature:false
+        ~should_check_package_boundary
         env
-        ~use_pos
-        ~definition_pos
-        ck
-        ty2
-        ty1
-    end
+        ty;
+    let ety_env =
+      empty_expand_env_with_on_error
+        (Typing_error.Reasons_callback.invalid_type_hint hint_pos)
+    in
+    let ety_env =
+      match tparam with
+      | Some tp
+        when Attributes.mem SN.UserAttributes.uaExplicit tp.tp_user_attributes
+        ->
+        { ety_env with wildcard_action = Wildcard_require_explicit tp }
+      | _ -> ety_env
+    in
+    let (env, ty) = localize ~ety_env env ty in
+    (env, (ty, hint))
 
+let localize_targs
+    ~check_type_integrity
+    ~is_method
+    ~def_pos
+    ~use_pos
+    ~use_name
+    ?(check_explicit_targs = true)
+    env
+    tparaml
+    targl =
+  let targ_count = List.length targl in
+  let generated_tparam_count =
+    List.count
+      ~f:(fun t -> SN.Coeffects.is_generated_generic (snd t.tp_name))
+      tparaml
+  in
+  let tparam_count = List.length tparaml in
+  let explicit_tparam_count = tparam_count - generated_tparam_count in
 
+  let checking_rewritten_call () =
+    (* Typing_phase expands the case of targl=[] to a list of wildcards matching the
+     * length of tparaml, but some `if` condition checks retype already typed
+     * expressions, so we get the generated list instead of what the user wrote
+     * TODO(coeffects) attempt to remove Tast.to_nast_expr calls *)
+    generated_tparam_count > 0
+    && targ_count = tparam_count
+    && List.for_all ~f:Aast_defs.is_wildcard_hint targl
+  in
+  (* If there are explicit type arguments but too few or too many then
+   * report an error *)
+  let arity_ty_err_opt =
+    if
+      not
+        Int.(
+          targ_count = 0
+          || targ_count = explicit_tparam_count
+          || checking_rewritten_call ())
+    then
+      if is_method then
+        Some
+          Typing_error.(
+            primary
+            @@ Primary.Expected_tparam
+                 {
+                   decl_pos = def_pos;
+                   pos = use_pos;
+                   n = explicit_tparam_count;
+                 })
+      else
+        Some
+          Typing_error.(
+            primary
+            @@ Primary.Type_arity_mismatch
+                 {
+                   pos = use_pos;
+                   decl_pos = def_pos;
+                   expected = tparam_count;
+                   actual = targ_count;
+                 })
+    else
+      None
+  in
+
+  (* Declare and localize the explicit type arguments *)
+  let (targ_tparaml, _) = List.zip_with_remainder targl tparaml in
+  let ((env, ty_errs, _cycles_targs), explicit_targs) =
+    List.map_env
+      (env, [], [])
+      targ_tparaml
+      ~f:(fun (env, ty_errs, cycles_acc) (targ, tparam) ->
+        let ((env, ty_err_opt, cycles), res) =
+          localize_targ ~tparam ~check_type_integrity env targ
+        in
+        let ty_errs =
+          Option.value_map ty_err_opt ~default:ty_errs ~f:(fun e ->
+              e :: ty_errs)
+        in
+        ((env, ty_errs, cycles @ cycles_acc), res))
+  in
+  let explicit_targ_ty_err_opt = Typing_error.multiple_opt ty_errs in
+  (* Generate fresh type variables for the remainder *)
+  let ((env, implicit_targ_ty_err_opt), implicit_targs) =
+    let mk_implicit_targ env tparam =
+      let wildcard_hint = (use_pos, Aast.Hwildcard) in
+      let name = tparam.tp_name in
+      let (env, tvar) =
+        Env.fresh_type_reason
+          env
+          use_pos
+          (Reason.type_variable_generics (use_pos, snd name, use_name))
+      in
+      Log.log_tparam_instantiation env use_pos (snd name) tvar;
+      ((env, None), (tvar, wildcard_hint))
+    in
+    List.map_env_ty_err_opt
+      env
+      (List.drop tparaml targ_count)
+      ~f:mk_implicit_targ
+      ~combine_ty_errs:Typing_error.multiple_opt
+  in
+
+  let check_for_explicit_user_attribute tparam (_, hint) =
+    if
+      Attributes.mem SN.UserAttributes.uaExplicit tparam.tp_user_attributes
+      && Aast_defs.is_wildcard_hint hint
+    then
+      let (decl_pos, param_name) = tparam.tp_name in
+      Some
+        Typing_error.(
+          primary
+          @@ Primary.Require_generic_explicit
+               { decl_pos; param_name; pos = fst hint })
+    else
+      None
+  in
+
+  let ua_ty_err_opt =
+    if check_explicit_targs then
+      Typing_error.multiple_opt
+      @@ List.fold2_exn
+           tparaml
+           (explicit_targs @ implicit_targs)
+           ~init:[]
+           ~f:(fun ty_errs tp targ ->
+             Option.value_map ~default:ty_errs ~f:(fun e -> e :: ty_errs)
+             @@ check_for_explicit_user_attribute tp targ)
+    else
+      None
+  in
+  let ty_err_opt =
+    Typing_error.multiple_opt
+    @@ List.filter_map
+         ~f:Fn.id
+         [
+           arity_ty_err_opt;
+           explicit_targ_ty_err_opt;
+           implicit_targ_ty_err_opt;
+           ua_ty_err_opt;
+         ]
+  in
+  ((env, ty_err_opt), explicit_targs @ implicit_targs)
+
+(** Localize a type that we know to be a union of disjoint types. *)
+let localize_disjoint_union ~(ety_env : expand_env) env (dty : decl_ty) =
+  let r = get_reason dty |> Typing_reason.localize in
+  match get_node dty with
+  | Tunion tyl ->
+    let ((env, ty_err_opt, _cycles), tyl) =
+      list_map_env_err_cycles
+        env
+        tyl
+        ~f:(localize ~ety_env)
+        ~combine_ty_errs:Typing_error.union_opt
+    in
+    (* We know the types to be disjoint, so we don't simplify the union *)
+    let ty = MakeType.union r tyl in
+    ((env, ty_err_opt), ty)
+  | _ ->
+    let ((env, err, _cycles), ty) = localize ~ety_env env dty in
+    ((env, err), ty)
 
 (* Performs no substitutions of generics and initializes Tthis to
  * Env.get_self env
  *)
-and localize_with_self env ty =
-  localize env ty ~ety_env:(env_with_self env)
+let localize_no_subst_
+    env ~wildcard_action ~ish_weakening ~on_error ?report_cycle ty :
+    (env * Typing_error.t option * Type_expansions.cycle_reporter list)
+    * locl_ty =
+  let ety_env =
+    {
+      empty_expand_env with
+      type_expansions = Type_expansions.empty_w_cycle_report ~report_cycle;
+      on_error;
+      wildcard_action;
+      ish_weakening;
+    }
+  in
+  localize env ty ~ety_env
 
-and localize_with_dty_validator env ty validate_dty =
-  let ety_env = {(env_with_self env) with validate_dty = Some validate_dty;} in
-  localize ~ety_env env ty
+let localize_no_subst_no_cycles env ~wildcard_action ~ish_weakening ~on_error ty
+    =
+  let ((env, err, _cycles), ty) =
+    localize_no_subst_ ~wildcard_action ~ish_weakening ~on_error env ty
+  in
+  ((env, err), ty)
 
-and hint_locl env h =
-  let h = Decl_hint.hint env.Env.decl_env h in
-  localize_with_self env h
+let localize_hint_no_subst_report_cycles_ env ~ignore_errors ?report_cycle h =
+  let (pos, _) = h in
+  let h = Decl_hint.hint env.decl_env h in
+  localize_no_subst_
+    env
+    ~on_error:
+      (if ignore_errors then
+        None
+      else
+        Some (Typing_error.Reasons_callback.invalid_type_hint pos))
+    ~wildcard_action:Wildcard_illegal
+    ~ish_weakening:false
+    ?report_cycle
+    h
+
+let localize_typedef_structure env ~ignore_errors ~report_cycle name h =
+  let (pos, _) = h in
+  let ty = Decl_hint.hint env.decl_env h in
+  let ety_env =
+    {
+      empty_expand_env with
+      visibility_behavior = Resolve_type_structure name;
+      type_expansions =
+        Type_expansions.empty_w_cycle_report ~report_cycle:(Some report_cycle);
+      on_error =
+        (if ignore_errors then
+          None
+        else
+          Some (Typing_error.Reasons_callback.invalid_type_hint pos));
+      wildcard_action = Wildcard_illegal;
+      ish_weakening = false;
+    }
+  in
+  localize env ty ~ety_env
+
+let localize_hint_no_subst env ~ignore_errors h =
+  let ((env, err, _cycles), ty) =
+    localize_hint_no_subst_report_cycles_ env ~ignore_errors h
+  in
+  ((env, err), ty)
+
+let localize_hint_no_subst_report_cycles env ~ignore_errors ~report_cycle h =
+  localize_hint_no_subst_report_cycles_ env ~ignore_errors ~report_cycle h
+
+let localize_hint_for_refinement env hint =
+  let (pos, _) = hint in
+  let h = Decl_hint.hint env.decl_env hint in
+  localize_no_subst_no_cycles
+    env
+    ~on_error:(Some (Typing_error.Reasons_callback.invalid_type_hint pos))
+    ~wildcard_action:Wildcard_fresh_generic
+    ~ish_weakening:(Env.get_tcopt env |> Typechecker_options.pessimise_builtins)
+    h
+
+let localize_hint_for_lambda env h =
+  let (pos, _) = h in
+  let h = Decl_hint.hint env.decl_env h in
+  localize_no_subst_no_cycles
+    env
+    ~on_error:(Some (Typing_error.Reasons_callback.invalid_type_hint pos))
+    ~wildcard_action:Wildcard_fresh_tyvar
+    ~ish_weakening:false
+    h
+
+let localize_no_subst_ env ~ignore_errors ?report_cycle ty =
+  localize_no_subst_
+    env
+    ~on_error:
+      (if ignore_errors then
+        None
+      else
+        Some
+          (Typing_error.Reasons_callback.invalid_type_hint
+             (Pos_or_decl.unsafe_to_raw_pos @@ get_pos ty)))
+    ~wildcard_action:Wildcard_illegal
+    ~ish_weakening:false
+    ?report_cycle
+    ty
+
+let localize_no_subst env ~ignore_errors ty =
+  let ((env, err, _cycles), ty) = localize_no_subst_ env ~ignore_errors ty in
+  ((env, err), ty)
+
+let localize_fun_type_no_subst fun_type ~env ~ignore_errors =
+  let (env_err, ty) =
+    localize_no_subst
+      env
+      ~ignore_errors
+      (mk (Typing_reason.none, Tfun fun_type))
+  in
+  match get_node ty with
+  | Tfun fun_type -> (env_err, fun_type)
+  | _ -> failwith "localize_fun_type_no_subst: expected a function type"
+
+let localize_no_subst_report_cycles env ~ignore_errors ~report_cycle ty =
+  localize_no_subst_ env ~report_cycle ~ignore_errors ty
+
+let localize_targs_and_check_constraints
+    ~exact
+    ~check_type_integrity
+    ~def_pos
+    ~use_pos
+    ?(check_explicit_targs = true)
+    env
+    class_id
+    r
+    tparaml
+    hintl =
+  let ((env, e1), type_argl) =
+    localize_targs
+      ~check_type_integrity
+      ~is_method:false
+      ~def_pos
+      ~use_pos
+      ~use_name:(Utils.strip_ns (snd class_id))
+      ~check_explicit_targs
+      env
+      tparaml
+      hintl
+  in
+  let targs_tys = List.map ~f:fst type_argl in
+  let this_ty =
+    mk (r, Tclass (Positioned.of_raw_positioned class_id, exact, targs_tys))
+  in
+  let ety_env =
+    {
+      empty_expand_env with
+      this_ty;
+      substs = Subst.make_locl tparaml targs_tys;
+      on_error = Some (Typing_error.Reasons_callback.unify_error_at use_pos);
+    }
+  in
+  let (env, e2, _cycles) =
+    check_tparams_constraints ~use_pos ~ety_env env tparaml
+  in
+  let ty_err_opt = Option.merge e1 e2 ~f:Typing_error.both in
+  ((env, ty_err_opt), this_ty, type_argl)
 
 (* Add generic parameters to the environment, localize their bounds, and
  * transform these into a flat list of constraints of the form (ty1,ck,ty2)
  * where ck is as, super or =
  *)
-let localize_generic_parameters_with_bounds
-    ~ety_env (env:Env.env) (tparams:Nast.tparam list) =
+let localize_and_add_generic_parameters_with_bounds
+    ~ety_env (env : env) (tparams : decl_tparam list) =
   let env = Env.add_generic_parameters env tparams in
-  let localize_bound env ((_var, (pos,name), cstrl, _): Nast.tparam) =
-    let tparam_ty = (Reason.Rwitness pos, Tabstract(AKgeneric name, None)) in
-    List.map_env env cstrl (fun env (ck, h) ->
-      let env, ty = localize env (Decl_hint.hint env.Env.decl_env h) ~ety_env in
-      env, (tparam_ty, ck, ty)) in
-  let env, cstrss = List.map_env env tparams localize_bound in
-  env, List.concat cstrss
+  let localize_bound
+      (env, cycle_acc)
+      ({ tp_name = (pos, name); tp_constraints = cstrl; _ } : decl_tparam) =
+    let tparam_ty = mk (Reason.witness_from_decl pos, Tgeneric name) in
+    List.map_env_ty_err_opt
+      (env, cycle_acc)
+      cstrl
+      ~f:(fun (env, cycle_acc) (ck, cstr) ->
+        let ((env, err, cycle), ty) = localize env cstr ~ety_env in
+        (((env, cycle @ cycle_acc), err), (tparam_ty, ck, ty)))
+      ~combine_ty_errs:Typing_error.multiple_opt
+  in
+  let (((env, cycles_tparams), ty_err_opt), cstrss) =
+    List.map_env_ty_err_opt
+      (env, [])
+      tparams
+      ~f:localize_bound
+      ~combine_ty_errs:Typing_error.multiple_opt
+  in
+  let add_constraint env (ty1, ck, ty2) =
+    TUtils.add_constraint env ck ty1 ty2 ety_env.on_error
+  in
+  let env = List.fold_left (List.concat cstrss) ~f:add_constraint ~init:env in
+  (env, ty_err_opt, cycles_tparams)
+
+let localize_and_add_where_constraints ~ety_env (env : env) where_constraints =
+  let localize_and_add_constraint (env, ty_errs, cycles_acc) (ty1, ck, ty2) =
+    let ((env, e1, cycles1), ty1) = localize env ty1 ~ety_env in
+    let ((env, e2, cycles2), ty2) = localize env ty2 ~ety_env in
+    let env = TUtils.add_constraint env ck ty1 ty2 ety_env.on_error in
+    let ty_errs =
+      Option.(
+        value_map ~default:ty_errs ~f:(fun e -> e :: ty_errs)
+        @@ merge e1 e2 ~f:Typing_error.both)
+    in
+    (env, ty_errs, cycles1 @ cycles2 @ cycles_acc)
+  in
+  let (env, ty_errs, cycles_where_constraints) =
+    List.fold_left
+      where_constraints
+      ~f:localize_and_add_constraint
+      ~init:(env, [], [])
+  in
+  (env, Typing_error.multiple_opt ty_errs, cycles_where_constraints)
 
 (* Helper functions *)
 
-(* Ensure that types are equivalent i.e. subtypes of each other *)
-let unify_decl env ty1 ty2 =
-  let env, ty1 = localize_with_self env ty1 in
-  let env, ty2 = localize_with_self env ty2 in
-  ignore (TUtils.sub_type env ty2 ty1);
-  ignore (TUtils.sub_type env ty1 ty2)
+let sub_type_decl env ty1 ty2 on_error =
+  let ((env, e1), ty1) = localize_no_subst env ~ignore_errors:true ty1 in
+  let ((env, e2), ty2) = localize_no_subst env ~ignore_errors:true ty2 in
+  let (env, e3) = TUtils.sub_type env ty1 ty2 on_error in
+  let ty_err_opt =
+    Typing_error.multiple_opt @@ List.filter_map ~f:Fn.id [e1; e2; e3]
+  in
+  (env, ty_err_opt)
 
-let sub_type_decl env ty1 ty2 =
-  let env, ty1 = localize_with_self env ty1 in
-  let env, ty2 = localize_with_self env ty2 in
-  ignore (TUtils.sub_type env ty1 ty2)
+let is_sub_type_decl ?is_dynamic_aware env ty1 ty2 =
+  let ((env, e1), ty1) = localize_no_subst env ~ignore_errors:true ty1 in
+  let ((env, e2), ty2) = localize_no_subst env ~ignore_errors:true ty2 in
+  let (_env, e3) =
+    TUtils.sub_type
+      ?is_dynamic_aware
+      env
+      ty1
+      ty2
+      (Some (Typing_error.Reasons_callback.unify_error_at Pos.none))
+  in
+  Option.is_none e1 && Option.is_none e2 && Option.is_none e3
+
+let localize_and_add_generic_parameters_and_where_constraints
+    ~ety_env env tparams where_constraints =
+  let (env, e1, _cycles) =
+    localize_and_add_generic_parameters_with_bounds env tparams ~ety_env
+  in
+  let (env, e2, _cycles) =
+    localize_and_add_where_constraints env where_constraints ~ety_env
+  in
+  (env, Option.merge e1 e2 ~f:Typing_error.both)
+
+let localize_and_add_ast_generic_parameters_and_where_constraints
+    env
+    ~ignore_errors
+    (tparams : Nast.tparam list)
+    (where_constraints : Aast_defs.where_constraint_hint list) =
+  let tparams : decl_tparam list =
+    List.map tparams ~f:(Decl_hint.aast_tparam_to_decl_tparam env.decl_env)
+  in
+  let where_constraints : decl_where_constraint list =
+    List.map where_constraints ~f:(fun (h1, ck, h2) ->
+        (Decl_hint.hint env.decl_env h1, ck, Decl_hint.hint env.decl_env h2))
+  in
+  let ety_env =
+    if ignore_errors then
+      empty_expand_env
+    else
+      empty_expand_env_with_on_error
+        (Env.invalid_type_hint_assert_primary_pos_in_current_decl env)
+  in
+  localize_and_add_generic_parameters_and_where_constraints
+    ~ety_env
+    env
+    tparams
+    where_constraints
+
+let localize_and_add_where_constraints
+    env
+    ~ignore_errors
+    (where_constraints : Aast_defs.where_constraint_hint list) =
+  localize_and_add_ast_generic_parameters_and_where_constraints
+    env
+    ~ignore_errors
+    []
+    where_constraints
+
+let ignore_cycles ((env, err, _cycles), res) = ((env, err), res)
+
+let ignore_cycles_ (env, err, _cycles) = (env, err)
+
+let localize_rec = localize
+
+let localize ~ety_env env ty = ignore_cycles @@ localize ~ety_env env ty
+
+let localize_ft
+    ?(instantiation : method_instantiation option)
+    ~ety_env
+    ~def_pos
+    env
+    (ft : decl_ty fun_type) =
+  ignore_cycles @@ localize_ft ?instantiation ~ety_env ~def_pos env ft
+
+let localize_targ ?tparam ~check_type_integrity env hint =
+  ignore_cycles @@ localize_targ ?tparam ~check_type_integrity env hint
+
+let check_tparams_constraints ~use_pos ~ety_env env tparams =
+  ignore_cycles_ @@ check_tparams_constraints ~use_pos ~ety_env env tparams
+
+let check_where_constraints
+    ~in_class ~use_pos ~ety_env ~definition_pos env cstrl =
+  ignore_cycles_
+  @@ check_where_constraints
+       ~in_class
+       ~use_pos
+       ~ety_env
+       ~definition_pos
+       env
+       cstrl
+
+let () = TUtils.localize_no_subst_ref := localize_no_subst
+
+let () = TUtils.localize_ref := localize
+
+let () = TUtils.localize_disjoint_union_ref := localize_disjoint_union

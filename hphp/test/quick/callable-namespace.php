@@ -1,24 +1,28 @@
 <?hh
 
 namespace M {
-  function call(callable $fn) { $fn(); }
+  function call(callable $fn) :mixed{ $fn(); }
 }
 
 namespace N {
   use M;
-
-  function sayHi() { echo "Hi\n"; }
+  <<__DynamicallyCallable>>
+  function sayHi() :mixed{ echo "Hi\n"; }
 
   class C {
-    public static function sm() { echo "Hello\n"; }
-    public function m() { echo "Salutations\n"; }
+    <<__DynamicallyCallable>>
+    public static function sm() :mixed{ echo "Hello\n"; }
+    <<__DynamicallyCallable>>
+    public function m() :mixed{ echo "Salutations\n"; }
   }
 
   class D extends C { }
 
+<<__EntryPoint>> function main(): void {
   $c = new C;
 
-  M\call('N\sayHi');
-  M\call(array('N\C', 'sm'));
-  M\call(array($c, 'm'));
+  M\call(\HH\dynamic_fun('N\sayHi'));
+  M\call(vec['N\C', 'sm']);
+  M\call(vec[$c, 'm']);
+}
 }

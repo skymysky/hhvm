@@ -1,0 +1,24 @@
+abstract
+  INSERT abstract
+  keyword
+async
+  INSERT async
+  keyword
+final
+  INSERT final
+  keyword
+function
+  INSERT function
+  keyword
+private
+  INSERT private
+  keyword
+protected
+  INSERT protected
+  keyword
+public
+  INSERT public
+  keyword
+static
+  INSERT static
+  keyword

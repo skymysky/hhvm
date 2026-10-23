@@ -1,7 +1,4 @@
-<?php
-ini_set("soap.wsdl_cache_enabled",0);
-$timestamp = "2011-07-30T03:25:00-05:00";
-$wsdl = dirname(__FILE__)."/bug55323.wsdl";
+<?hh
 
 class TestSoapClient extends SoapClient {
 
@@ -9,7 +6,7 @@ class TestSoapClient extends SoapClient {
     parent::__construct($wsdl, $options);
   }
 
-  function __doRequest($request, $location, $action, $version, $one_way = 0) {
+  function __dorequest($request, $location, $action, $version, $one_way = 0) :mixed{
     return <<<EOF
 <SOAP-ENV:Envelope SOAP-ENV:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/" xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ns1="http://test.com/soap/v3/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:SOAP-ENC="http://schemas.xmlsoap.org/soap/encoding/">
    <SOAP-ENV:Body>
@@ -25,9 +22,14 @@ EOF;
   }
 
 }
+<<__EntryPoint>>
+function main_entry(): void {
+  ini_set("soap.wsdl_cache_enabled",0);
+  $timestamp = "2011-07-30T03:25:00-05:00";
+  $wsdl = dirname(__FILE__)."/bug55323.wsdl";
 
-$soapClient = new TestSoapClient($wsdl,
-        array('trace' => 1, 'exceptions' => 0));
-$result = $soapClient->getObject();
-var_dump($result);
-?>
+  $soapClient = new TestSoapClient($wsdl,
+          dict['trace' => 1, 'exceptions' => 0]);
+  $result = $soapClient->__soapcall('getObject', vec[]);
+  var_dump($result);
+}

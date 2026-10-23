@@ -16,9 +16,9 @@
 
 #include "hphp/tools/hfsort/hfutil.h"
 
-#include <folly/Format.h>
+#include <fmt/core.h>
 
-namespace HPHP { namespace hfsort {
+namespace HPHP::hfsort {
 
 bool CallGraph::addFunc(
   std::string name,
@@ -32,6 +32,8 @@ bool CallGraph::addFunc(
     auto& base = funcs[it->second];
     auto& baseTarget = targets[it->second];
     base.mangledNames.push_back(name);
+    // Store the same id for different symbol name with same start address
+    func2TargetId[name] = it->second;
     if (size > baseTarget.size) baseTarget.size = size;
     HFTRACE(2, "Func: adding '%s' to (%u)\n", name.c_str(), it->second);
     return true;
@@ -67,9 +69,9 @@ TargetId CallGraph::funcToTargetId(const std::string &func) const {
 }
 
 std::string CallGraph::toString(TargetId id) const {
-  return folly::sformat("func = {:5} : samples = {:6} : size = {:6} : {}\n",
+  return fmt::format("func = {:5} : samples = {:6} : size = {:6} : {}\n",
                         id, targets[id].samples, targets[id].size,
                         funcs[id].mangledNames[0]);
 }
 
-}}
+}

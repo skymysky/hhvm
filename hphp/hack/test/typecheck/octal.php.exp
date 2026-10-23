@@ -1,0 +1,10 @@
+error: Parsing[1002] Invalid digit for octal integers [1]
+
+octal.php:13:10
+11 | 
+12 | function foo(): int {
+13 |   return 0190;
+   |          ^^^^ [1]
+14 | }
+
+1 error found

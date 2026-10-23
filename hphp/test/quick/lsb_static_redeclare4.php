@@ -7,3 +7,8 @@ class A {
 class B extends A {
     public static string $x;
 }
+
+<<__EntryPoint>>
+function main(): void {
+  echo "Done.\n";
+}

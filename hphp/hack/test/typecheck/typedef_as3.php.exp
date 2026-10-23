@@ -1,6 +1,13 @@
-File "typedef_as3.php", line 15, characters 9-12:
-Invalid constraint on newtype (Typing[4110])
-File "typedef_as3.php", line 15, characters 17-17:
-This is an object of type B
-File "typedef_as3.php", line 15, characters 21-21:
-It is incompatible with an object of type A
+error: Typing[4332] Invalid constraint on `newtype` [1]
+-> Expected `B` [2]
+-> But got `A` [3]
+
+typedef_as3.php:15:9
+13 | class B extends A {}
+14 | 
+15 | newtype fbid as B = A;
+   |         ^^^^ [1]
+   |                 ^ [2]
+   |                     ^ [3]
+
+1 error found

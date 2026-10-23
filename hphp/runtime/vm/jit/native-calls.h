@@ -14,8 +14,7 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_VM_TRANSL_HOPT_NATIVECALLS_H_
-#define incl_HPHP_VM_TRANSL_HOPT_NATIVECALLS_H_
+#pragma once
 
 #include "hphp/runtime/vm/jit/types.h"
 #include "hphp/runtime/vm/jit/arg-group.h"
@@ -28,7 +27,7 @@
 #include <initializer_list>
 #include <vector>
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 
 struct IRInstruction;
 
@@ -56,21 +55,6 @@ struct FuncPtr {
   /* implicit */ FuncPtr(Ret (Cls::*fp)(Args...) const)
     : call(CallSpec::method(fp))
   {}
-
-  /*
-   * Create FuncPtrs to array data "rotated" vtables.  For example, in
-   * native-calls.cpp:
-   *
-   *   {NvGetInt, &g_array_funcs.nvGetInt, DSSA, SNone, {{SSA, 0}, {SSA, 1}}},
-   *
-   */
-  template<class Ret, class... Args>
-  /* implicit */ FuncPtr(Ret (*const (*p)[ArrayData::kNumKinds])(Args...))
-    : call(CallSpec::array(p))
-  {
-    always_assert(0 && "This code needs to be conditional on "
-                       "deltaFits(p, sz::dword) before using it");
-  }
 
   union { CallSpec call; };
 };
@@ -108,8 +92,8 @@ struct CallInfo {
   std::vector<Arg> args;
 };
 
-typedef std::initializer_list<CallInfo> CallInfoList;
-typedef hphp_hash_map<Opcode, CallInfo, std::hash<Opcode>> CallInfoMap;
+using CallInfoList = std::initializer_list<CallInfo>;
+using CallInfoMap = hphp_hash_map<Opcode, CallInfo, std::hash<Opcode>>;
 
 struct CallMap {
   explicit CallMap(CallInfoList infos);
@@ -121,6 +105,5 @@ private:
   CallInfoMap m_map;
 };
 
-}}}
+}}
 
-#endif

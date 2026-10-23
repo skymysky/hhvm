@@ -1,0 +1,342 @@
+(*
+ * Copyright (c) 2019, Facebook, Inc.
+ * All rights reserved.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the "hack" directory of this source tree.
+ *
+ *)
+
+open Hh_prelude
+
+module Initialize_from_saved_state = struct
+  type naming_table_load_info = {
+    path: Path.t;
+    test_delay: float;  (** artificial delay in seconds, for test purposes *)
+  }
+
+  type t = {
+    root: Path.t;
+    naming_table_load_info: naming_table_load_info option;
+    warnings_saved_state_path: Path.t option;
+    config: (string * string) list;
+    ignore_hh_version: bool;
+    open_files: Path.t list;
+  }
+end
+
+module Completion_resolve = struct
+  type request = {
+    fullname: string;
+    kind: File_info.si_kind;
+  }
+
+  type result = {
+    docblock: Docblock_service.result;
+    signature: string option;
+  }
+end
+
+type document = {
+  file_path: Path.t;
+  file_contents: string;
+}
+
+type fullname = Full_name of string
+
+type find_refs_result =
+  | Invalid_symbol
+  | Find_refs_success of {
+      full_name: string;  (** from [SymbolDefinition.full_name] *)
+      action: Server_command_types.Find_refs.action option;
+          (** if true, then clientLsp should shell out to hh_server to collect more positions;
+          this action will specifiy what hh_server shoud look for. *)
+      hint_suffixes: string list;
+          (** in case of a shell-out, we will suggest hh_server to look in these root-relative paths first. *)
+      open_file_results: Search_types.Find_refs.absolute list Lsp.UriMap.t;
+          (** All references that were found in all open files in clientIdeDaemon. *)
+    }
+
+type rename_result =
+  | Not_renameable_position
+  | Rename_success of {
+      shellout:
+        (Relative_path.t Symbol_definition.t
+        * Server_command_types.Find_refs.action)
+        option;
+      local: Server_rename_types.patch list;
+    }
+
+type go_to_impl_result =
+  | Invalid_symbol_impl
+  | Go_to_impl_success of
+      (string
+      * Server_command_types.Find_refs.action
+      * Pos.absolute list Lsp.UriMap.t)
+
+type completion_request = { is_manually_invoked: bool }
+
+(** Currently, a diagnostic is always an error with (optionally) a list
+of locations where a "hint" should be displayed for that error. *)
+type diagnostic = {
+  diagnostic_error: Diagnostics.finalized_diagnostic;
+  diagnostic_hash: int;
+  diagnostic_related_hints: Pos.absolute list;
+      (** Note that these will be displayed in the IDE, so this field
+          only gets set when diagnostics are computed by clientIdeDaemon, and
+          not when  they are computed by hh_server.
+
+          This is fine because:
+          (1) When a file is open in the IDE, we ignore hh_server signal
+          (2) When a file is closed in the IDE, we use hh_server signal, but we
+              can't show hint locations anyways!
+      *)
+}
+[@@deriving show]
+
+let diagnostic_of_finalized_error_without_related_hints
+    (diagnostic_error, diagnostic_hash) =
+  { diagnostic_error; diagnostic_related_hints = []; diagnostic_hash }
+
+(* GADT for request/response types. See [ServerCommandTypes] for a discussion on
+   using GADTs in this way. *)
+type _ t =
+  | Initialize_from_saved_state : Initialize_from_saved_state.t -> unit t
+      (** Invariant: the client sends no messages to the daemon before
+      Initialize_from_state. And the daemon sends no messages before
+      it has responded. *)
+  | Shutdown : unit -> unit t
+  | Did_change_watched_files : Relative_path.Set.t -> unit t
+      (** This might include deleted files. The caller is responsible for filtering,
+      and resolving symlinks (even resolving root symlink for a deleted file...) *)
+  | Did_open_or_change : document -> unit t
+      (** Lets ClientIdeDaemon know that the document is open, so we should start caching it. *)
+  | Did_close : Path.t -> diagnostic list t
+      (** Lets ClientIdeDaemon know the document is closed, so we no longer cache it.
+
+      This returns diagnostics for the file as it is on disk.
+      This is to serve the following scenario: (1) file was open with
+      modified contents and squiggles appropriate to the modified contents,
+      (2) user closes file without saving. In this scenario we must
+      restore squiggles to what would be appropriate for the file on disk.
+      It'd be possible to return an [Diagnostics.t option], and only return [Some]
+      if the file had been closed while modified, if perf here is ever a concern. *)
+  | Diagnostics : document -> diagnostic list t
+      (** Obtains latest diagnostics for file. *)
+  | Verbose_to_file : bool -> unit t
+  | Hover : document * File_content.Position.t -> Hover_service.result t
+  | Definition :
+      document * File_content.Position.t
+      -> Server_command_types.Go_to_definition.result t
+  | Completion :
+      document * File_content.Position.t * completion_request
+      -> Autocomplete_types.ide_result t
+      (** Handles "textDocument/completion" LSP messages *)
+  | Completion_resolve_location :
+      Path.t * fullname * File_content.Position.t * File_info.si_kind
+      -> Completion_resolve.result t
+      (** "completionItem/resolve" LSP messages - if we have file/line/column.
+      The scenario is that VSCode requests textDocument/completion in A.PHP line 5 col 6,
+      and we responded with a completion item that points to a class defined in B.PHP line 10 col 5,
+      and now VSCode requests completionItem/resolve [(B.PHP, {line=10; column=5;}, class)],
+      and this method will look up B.PHP to find the docblock for that class and return it.
+      Typically B.PHP won't even be open. That's why we only provide it as Path.t *)
+  | Completion_resolve :
+      Completion_resolve.request
+      -> Completion_resolve.result t
+      (** "completionItem/resolve" LSP messages - if we have symbol name, and [Completion_resolve_location] failed *)
+  | Document_highlight :
+      document * File_content.Position.t
+      -> Ide_api_types.range list t
+      (** Handles "textDocument/documentHighlight" LSP messages *)
+  | Document_symbol : document -> File_outline.outline t
+      (** Handles "textDocument/documentSymbol" LSP messages *)
+  | Workspace_symbol : string -> Search_utils.result t
+  | Go_to_implementation :
+      document * File_content.Position.t * document list
+      -> go_to_impl_result t
+  | Find_references :
+      document * File_content.Position.t * document list
+      -> find_refs_result t
+  | Rename :
+      document * File_content.Position.t * string * document list
+      -> rename_result t
+      (** The result of Rename is one of:
+       - Not_renameable_position, indicating an attempt to rename something that isn't a valid symbol
+       - Rename_success, where we return a record containing two fields:
+           - [shellout], an optional tuple of (SymbolDefinition.full_name * Find_refs.action)
+             to indicate that ClientIdeDaemon could not satisfy all of the rename (the non-localvar case)
+           - [local], a [Server_rename_types.patch list], a list of rename patches for each open file supplied
+            in the input document list
+          *)
+  | Type_definition :
+      document * File_content.Position.t
+      -> Server_command_types.Go_to_type_definition.result t
+      (** Handles "textDocument/typeDefinition" LSP messages *)
+  | Signature_help :
+      document * File_content.Position.t
+      -> Lsp.SignatureHelp.result t
+      (** Handles "textDocument/signatureHelp" LSP messages *)
+  | Top_level_def_name_at_pos :
+      document * File_content.Position.t
+      -> Lsp.TopLevelDefNameAtPos.result t
+  | Code_action :
+      document * Ide_api_types.range
+      -> (Lsp.CodeAction.command_or_action list
+         * Diagnostics.finalized_diagnostic list option)
+         t
+      (** Handles "textDocument/codeActions" LSP messages.
+
+      Also, we take this as a handy opportunity to send updated [Diagnostics.t]
+      to clientLsp so it can publish them. We return [None] if the TAST+errors
+      haven't changed since they were last sent to clientLsp (through didOpen,
+      didChange, didClose or an earlier codeAction), and [Some] if they have
+      been changed.
+
+      Why send errors in code-action? It's for the scenario where file A.PHP
+      is open, file B.PHP changes on disk (e.g. due to user saving it), which
+      invalidates the TAST+errors of A.PHP, and we might therefore need to send
+      updated errors. For efficiency we chose to do this lazily when the user
+      interacts with A.PHP or switches tab to it, rather than doing every single
+      open file up-front. We could have sent updated errors on every single action,
+      e.g. hover and go-to-def. But settled for now on only doing it for codeAction
+      because this is called so frequently by VSCode (when you switch tab, and every
+      time the caret moves) in the hope that this will be a good balance of simple
+      code and decent experience. *)
+  | Code_action_resolve : {
+      document: document;
+      range: Ide_api_types.range;
+      resolve_title: string;
+      use_snippet_edits: bool;
+    }
+      -> Lsp.CodeActionResolve.result t
+  | AutoClose : document * File_content.Position.t -> string option t
+
+let t_to_string : type a. a t -> string = function
+  | Initialize_from_saved_state _ -> "Initialize_from_saved_state"
+  | Shutdown () -> "Shutdown"
+  | Did_change_watched_files paths ->
+    let paths =
+      paths |> Relative_path.Set.elements |> List.map ~f:Relative_path.suffix
+    in
+    let (files, remainder) = List.split_n paths 10 in
+    let remainder =
+      if List.is_empty remainder then
+        ""
+      else
+        ",..."
+    in
+    Printf.sprintf
+      "Did_change_watched_files(%s%s)"
+      (String.concat files)
+      remainder
+  | Did_open_or_change { file_path; _ } ->
+    Printf.sprintf "Did_open_or_change(%s)" (Path.to_string file_path)
+  | Did_close file_path ->
+    Printf.sprintf "Ide_file_closed(%s)" (Path.to_string file_path)
+  | Diagnostics { file_path; _ } ->
+    Printf.sprintf "Diagnostics(%s)" (Path.to_string file_path)
+  | Verbose_to_file verbose -> Printf.sprintf "Verbose_to_file(%b)" verbose
+  | Hover ({ file_path; _ }, _) ->
+    Printf.sprintf "Hover(%s)" (Path.to_string file_path)
+  | Definition ({ file_path; _ }, _) ->
+    Printf.sprintf "Definition(%s)" (Path.to_string file_path)
+  | Completion ({ file_path; _ }, _, _) ->
+    Printf.sprintf "Completion(%s)" (Path.to_string file_path)
+  | Completion_resolve Completion_resolve.{ fullname; kind = _ } ->
+    Printf.sprintf "Completion_resolve(%s)" fullname
+  | Completion_resolve_location (file_path, _, _, _) ->
+    Printf.sprintf "Completion_resolve_location(%s)" (Path.to_string file_path)
+  | Document_highlight ({ file_path; _ }, _) ->
+    Printf.sprintf "Document_highlight(%s)" (Path.to_string file_path)
+  | Document_symbol { file_path; _ } ->
+    Printf.sprintf "Document_symbol(%s)" (Path.to_string file_path)
+  | Workspace_symbol query -> Printf.sprintf "Workspace_symbol(%s)" query
+  | Type_definition ({ file_path; _ }, _) ->
+    Printf.sprintf "Type_definition(%s)" (Path.to_string file_path)
+  | Signature_help ({ file_path; _ }, _) ->
+    Printf.sprintf "Signature_help(%s)" (Path.to_string file_path)
+  | Top_level_def_name_at_pos ({ file_path; _ }, _) ->
+    Printf.sprintf "Top_level_def_name_at_pos(%s)" (Path.to_string file_path)
+  | Code_action ({ file_path; _ }, _) ->
+    Printf.sprintf "Code_action(%s)" (Path.to_string file_path)
+  | Code_action_resolve { document = { file_path; _ }; resolve_title; _ } ->
+    Printf.sprintf
+      "Code_action_resolve(%s, %s)"
+      (Path.to_string file_path)
+      resolve_title
+  | Go_to_implementation ({ file_path; _ }, _, _) ->
+    Printf.sprintf "Go_to_implementation(%s)" (Path.to_string file_path)
+  | Find_references ({ file_path; _ }, _, _) ->
+    Printf.sprintf "Find_references(%s)" (Path.to_string file_path)
+  | Rename ({ file_path; _ }, _, _, _) ->
+    Printf.sprintf "Rename(%s)" (Path.to_string file_path)
+  | AutoClose ({ file_path; _ }, _) ->
+    Printf.sprintf "AutoClose(%s)" (Path.to_string file_path)
+
+type 'a tracked_t = {
+  tracking_id: string;
+  message: 'a t;
+}
+
+let tracked_t_to_string : type a. a tracked_t -> string =
+ fun { tracking_id; message } ->
+  Printf.sprintf "#%s: %s" tracking_id (t_to_string message)
+
+module Processing_files = struct
+  type t = {
+    processed: int;
+    total: int;
+  }
+
+  let to_string (t : t) : string = Printf.sprintf "%d/%d" t.processed t.total
+end
+
+(** This can be used for user-facing messages as well as LSP error responses. *)
+type rich_error = {
+  short_user_message: string;
+      (** max 20 chars, for status bar. Will be prepended by "Hack:" *)
+  medium_user_message: string;
+      (** max 10 words, for tooltip and alert. Will be postpended by " See <log>" *)
+  is_actionable: bool;
+      (** used to decide if we hould show window/showMessage, i.e. an alert *)
+  long_user_message: string;
+      (** max 5 lines, for window/logMessage, i.e. Output>Hack window. Will be postpended by "\nDetails: <url>" *)
+  category: string;  (** used in LSP Error message and telemetry *)
+  data: Yojson.Safe.t option;  (** used in LSP Error message and telemetry *)
+}
+
+type notification = Done_init of (unit, rich_error) result
+
+let notification_to_string (n : notification) : string =
+  match n with
+  | Done_init (Ok ()) -> Printf.sprintf "Done_init."
+  | Done_init (Error edata) ->
+    Printf.sprintf "Done_init failed - %s" edata.medium_user_message
+
+type 'a timed_response = {
+  unblocked_time: float;
+  tracking_id: string;
+  response: ('a, Lsp.Error.t) result;
+}
+
+type message_from_daemon =
+  | Notification of notification
+  | Response : 'a timed_response -> message_from_daemon
+
+let message_from_daemon_to_string (m : message_from_daemon) : string =
+  match m with
+  | Notification n -> notification_to_string n
+  | Response { response = Error { Lsp.Error.message; _ }; tracking_id; _ } ->
+    Printf.sprintf "#%s: Response_error(%s)" tracking_id message
+  | Response { response = Ok _; tracking_id; _ } ->
+    Printf.sprintf "#%s: Response_ok" tracking_id
+
+type daemon_args = {
+  init_id: string;
+  verbose_to_stderr: bool;
+  verbose_to_file: bool;
+  shm_handle: Shared_mem.handle;
+  client_lsp_log_fn: string;
+  error_filter: Filter_diagnostics.Filter.t;
+}

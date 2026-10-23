@@ -16,232 +16,295 @@
 
 #include "hphp/runtime/vm/jit/normalized-instruction.h"
 
+#include "hphp/runtime/vm/class-meth-data-ref.h"
 #include "hphp/runtime/vm/jit/cls-cns-profile.h"
+#include "hphp/runtime/vm/jit/irgen-call.h"
 #include "hphp/runtime/vm/jit/irgen-exit.h"
 #include "hphp/runtime/vm/jit/irgen-internal.h"
 #include "hphp/runtime/vm/jit/irgen-interpone.h"
 #include "hphp/runtime/vm/jit/target-profile.h"
 
-namespace HPHP { namespace jit { namespace irgen {
+#include "hphp/util/configs/eval.h"
+#include "hphp/util/configs/sandbox.h"
+
+namespace HPHP::jit::irgen {
+
+///////////////////////////////////////////////////////////////////////////////
+
+void emitCnsE(IRGS& env, const StringData* name) {
+  if (auto const tv = Constant::lookupPersistent(name)) {
+    if (tv->m_type == KindOfUninit) {
+      // KindOfUninit is a dynamic system constant. always a slow
+      // lookup.
+      push(env, gen(env, LookupCnsE, cns(env, name)));
+      return;
+    }
+
+    if (auto const val = Type::tryCns(*tv)) {
+      push(env, cns(env, *val));
+      return;
+    }
+  }
+
+  auto const v = cond(
+    env,
+    [&] (Block* taken) {
+      return gen(env, LdCns, taken, cns(env, name));
+    },
+    [&] (SSATmp* v) {
+      gen(env, IncRef, v);
+      return v;
+    },
+    [&] {
+      hint(env, Block::Hint::Unlikely);
+      return gen(env, LookupCnsE, cns(env, name));
+    }
+  );
+  push(env, v);
+}
 
 namespace {
 
 //////////////////////////////////////////////////////////////////////
 
-// Return a constant SSATmp representing a static value held in a TypedValue.
-// The TypedValue may be a non-scalar, but it must have a static value.
-SSATmp* staticTVCns(IRGS& env, const TypedValue* tv) {
-  switch (tv->m_type) {
-    case KindOfNull:          return cns(env, TInitNull);
-    case KindOfBoolean:       return cns(env, !!tv->m_data.num);
-    case KindOfInt64:         return cns(env, tv->m_data.num);
-    case KindOfDouble:        return cns(env, tv->m_data.dbl);
-    case KindOfPersistentString:
-    case KindOfString:        return cns(env, tv->m_data.pstr);
-    case KindOfPersistentVec:
-    case KindOfVec:
-    case KindOfPersistentDict:
-    case KindOfDict:
-    case KindOfPersistentKeyset:
-    case KindOfKeyset:
-    case KindOfPersistentArray:
-    case KindOfArray:         return cns(env, tv->m_data.parr);
-
-    case KindOfUninit:
-    case KindOfObject:
-    case KindOfResource:
-    case KindOfRef:
-    // TODO (T29639296)
-    case KindOfFunc:
-      break;
-  }
-  always_assert(false);
-}
-
-void implCns(IRGS& env,
-             const StringData* name,
-             const StringData* fallbackName,
-             bool error) {
-  assertx(fallbackName == nullptr || !error);
-  auto const cnsNameTmp = cns(env, name);
-  auto const tv = Unit::lookupPersistentCns(name);
-  SSATmp* result = nullptr;
-
-  SSATmp* fallbackNameTmp = nullptr;
-  if (fallbackName != nullptr) {
-    fallbackNameTmp = cns(env, fallbackName);
-  }
-  if (tv) {
-    if (tv->m_type == KindOfUninit) {
-      // KindOfUninit is a dynamic system constant. always a slow
-      // lookup.
-      assertx(!fallbackNameTmp);
-      if (error) {
-        result = gen(env, LookupCnsE, cnsNameTmp);
-      } else {
-        result = gen(env, LookupCns, cnsNameTmp);
-      }
-    } else {
-      result = staticTVCns(env, tv);
-    }
-  } else {
-    result = cond(
-      env,
-      [&] (Block* taken) { // branch
-        return gen(env, LdCns, taken, cnsNameTmp);
-      },
-      [&] (SSATmp* cns) { // Next: LdCns hit in TC
-        gen(env, IncRef, cns);
-        return cns;
-      },
-      [&] { // Taken: miss in TC, do lookup & init
-        hint(env, Block::Hint::Unlikely);
-
-        if (fallbackNameTmp) {
-          return gen(env,
-                     LookupCnsU,
-                     cnsNameTmp,
-                     fallbackNameTmp);
-        }
-        if (error) {
-          return gen(env, LookupCnsE, cnsNameTmp);
-        }
-        return gen(env, LookupCns, cnsNameTmp);
-      }
-    );
-  }
-  push(env, result);
-}
-
-void implClsCns(IRGS& env,
+void exactClsCns(IRGS& env,
                 const Class* cls,
                 const StringData* cnsNameStr,
                 const StringData* clsNameStr) {
   auto const clsCnsName = ClsCnsName { clsNameStr, cnsNameStr };
-
-  // If the class is already defined in this request, the class is persistent
-  // or a parent of the current context, and this constant is a scalar
-  // constant, we can just compile it to a literal.
-  if (cls) {
-    Slot ignore;
-    auto const tv = cls->cnsNameToTV(cnsNameStr, ignore);
-    if (tv && tv->m_type != KindOfUninit &&
-        classIsPersistentOrCtxParent(env, cls)) {
-      push(env, staticTVCns(env, tv));
-      return;
+  // If we passed in a Class*, this means we have better information
+  // about what the Class* must be since this information is local and
+  // comes from inspecting the top of the stack to see if we have an
+  // exact type.
+  auto const lookup = [&]() {
+    if (cls != nullptr) {
+      return Class::ClassLookup { Class::ClassLookupResult::Exact, cls };
+    } else {
+      return lookupKnownMaybe(env, clsNameStr);
     }
+  }();
+
+  if (lookup.cls &&
+      will_symbol_raise_module_boundary_violation(lookup.cls, curFunc(env))) {
+    auto const cns = gen(env, InitClsCns, TInitCell, clsCnsName);
+    pushIncRef(env, cns);
+    return;
   }
 
-  // Otherwise, load the constant out of RDS.  Right now we always guard that
-  // it is at least uncounted (this means a constant set to STDIN or something
-  // will always side exit here).
-  cond(
-    env,
-    [&] (Block* taken) {
-      auto const prds = gen(env, LdClsCns, clsCnsName, taken);
-      gen(env, CheckTypeMem, TUncountedInit, taken, prds);
-      return prds;
-    },
-    [&] (SSATmp* prds) {
-      auto const val = gen(env, LdMem, TUncountedInit, prds);
-      push(env, val);
-      return nullptr;
-    },
-    [&] () -> SSATmp* {
-      // Make progress through this instruction before side-exiting to the next
-      // instruction, by doing a slower lookup.
-      hint(env, Block::Hint::Unlikely);
-      auto const val = gen(env, InitClsCns, clsCnsName);
-      push(env, val);
-      gen(env, Jmp, makeExit(env, nextBcOff(env)));
-      return nullptr;
+  // If we can't prove we know the Class* at jit-time, we need to
+  // load the constant out of out RDS.
+  auto const getCnsWithType = [&](jit::Type ty) {
+    auto const cns = cond(
+      env,
+      [&] (Block* taken) {
+        return gen(env, LdClsCns, ty, clsCnsName, taken);
+      },
+      [&] (SSATmp* cns) { return cns; },
+      [&] {
+        hint(env, Block::Hint::Unlikely);
+        return gen(env, InitClsCns, ty, clsCnsName);
+      }
+    );
+    pushIncRef(env, cns);
+  };
+
+  auto const data = [&](uint32_t id, bool success) {
+    return LoggingSpeculateData {
+      clsNameStr,
+      curClass(env) ? curClass(env)->name() : nullptr,
+      cnsNameStr,
+      Op::ClsCnsD,
+      id,
+      success,
+    };
+  };
+
+  switch (lookup.tag) {
+    case Class::ClassLookupResult::Exact: {
+      Slot ignore;
+      auto cnsType = TInitCell;
+      if (auto const tv = lookup.cls->cnsNameToTV(cnsNameStr, ignore)) {
+        if (type(tv) != KindOfUninit) {
+          // If the class is known and this constant is a scalar constant,
+          // we can just compile it to a literal.
+          if (auto const val = Type::tryCns(*tv)) {
+            push(env, cns(env, *val));
+            return;
+          }
+          cnsType = typeFromTV(tv, curClass(env));
+        }
+      }
+      getCnsWithType(TInitCell);
+      return;
     }
-  );
+    case Class::ClassLookupResult::None: {
+      if (Cfg::Sandbox::Speculate) {
+        if (Cfg::Eval::LogClsSpeculation) {
+          gen(env, LogClsSpeculation, data(ClassId::Invalid, false));
+        }
+        gen(env, LdClsCached, LdClsFallbackData::Fatal(), cns(env, clsNameStr));
+        gen(env, Jmp, makeExit(env));
+        return;
+      } else {
+        getCnsWithType(TInitCell);
+        return;
+      }
+    }
+    case Class::ClassLookupResult::Maybe: {
+      // TODO: Remove after fixing modules
+      // I believe the above case where we push a literal is broken, in
+      // sandbox mode since when we push a constant, we just trust
+      // that the class doesn't violate the module boundary.
+      // This was probably fine so far, since in sandbox mode, we usually
+      // don't know the exact Class*, especially one that is in a different
+      // file/module. Therefore, in practice we probably always do a InitClsCns
+      // before accessing a constant. That is about to change as sandbox
+      // mode becomes more performant, and we emit cheap runtime-checks
+      // and if our runtime Class* matches the jit-time Class*, we may
+      // be able to push the literal directly, without doing the boundary
+      // check in InitClsCns.
+      if (Cfg::Eval::EnforceModules) return getCnsWithType(TInitCell);
+
+      // If we have a Class* at jit-time, but cannot trust it, we can emit
+      // a check to confirm the runtime Class* matches and then use the
+      // constant we burned in at jit-time.
+      Slot ignore;
+      if (auto const tv = lookup.cls->cnsNameToTV(cnsNameStr, ignore)) {
+        if (type(tv) != KindOfUninit) {
+          if (auto const val = Type::tryCns(*tv)) {
+            gen(env, LdClsCached, LdClsFallbackData::Fatal(), cns(env, clsNameStr));
+            auto const isEqual = gen(env, EqClassId, ClassIdData(lookup.cls));
+            ifThenElse(
+              env,
+              [&] (Block* taken) {
+                gen(env, JmpZero, taken, isEqual);
+              },
+              [&] {
+                if (Cfg::Eval::LogClsSpeculation) {
+                  gen(env, LogClsSpeculation, data(lookup.cls->classId().id(), true));
+                }
+                push(env, cns(env, *val));
+              },
+              [&] {
+                hint(env, Block::Hint::Unlikely);
+                if (Cfg::Eval::LogClsSpeculation) {
+                  gen(env, LogClsSpeculation, data(lookup.cls->classId().id(), false));
+                }
+                getCnsWithType(TInitCell);
+                gen(env, Jmp, makeExit(env, nextSrcKey(env)));
+              }
+            );
+            return;
+          }
+        }
+      }
+      getCnsWithType(TInitCell);
+      break;
+    }
+    not_reached();
+  };
+
 }
 
 StaticString clsCnsProfileKey { "ClsCnsProfile" };
 
-void clsCnsHelper(IRGS& env, SSATmp* ptv, uint32_t clsRefSlot,
-                      Block* exit = nullptr) {
-  if (!exit) exit = makeExitSlow(env);
-  gen(env, CheckTypeMem, TUncountedInit, exit, ptv);
-  killClsRef(env, clsRefSlot);
-  auto const val = gen(env, LdMem, TUncountedInit, ptv);
-  push(env, val);
-}
-
 //////////////////////////////////////////////////////////////////////
 
-}
-
-void emitCns(IRGS& env, const StringData* name) {
-  implCns(env, name, nullptr, false);
-}
-
-void emitCnsE(IRGS& env, const StringData* name) {
-  implCns(env, name, nullptr, true);
-}
-
-void emitCnsU(IRGS& env,
-              const StringData* name,
-              const StringData* fallback) {
-  implCns(env, name, fallback, false);
-}
+} // namespace
 
 void emitClsCnsD(IRGS& env,
                  const StringData* cnsNameStr,
                  const StringData* clsNameStr) {
-  implClsCns(env, Unit::lookupClass(clsNameStr), cnsNameStr, clsNameStr);
+  exactClsCns(env, nullptr, cnsNameStr, clsNameStr);
 }
 
-void emitClsCns(IRGS& env, const StringData* cnsNameStr, uint32_t clsRefSlot) {
-  auto const clsTmp = peekClsRef(env, clsRefSlot);
+void emitClsCns(IRGS& env, const StringData* cnsNameStr) {
+  auto const clsTmp = topC(env);
   auto const clsTy = clsTmp->type();
+
+  if (!(clsTy <= TCls)) PUNT(ClsCns-NotClass);
+
+  auto const loadSlot = [&] (Slot slot) {
+    auto const data = ClsCnsSlotData { cnsNameStr, slot };
+    auto const cns = cond(
+      env,
+      [&] (Block* taken) {
+        auto const slotVal = gen(env, LdSubClsCns, data, clsTmp);
+        return gen(env, CheckType, TUncountedInit, taken, slotVal);
+      },
+      [&] (SSATmp* val) { return val; },
+      [&] {
+        hint(env, Block::Hint::Unlikely);
+        auto const cns = gen(env, InitSubClsCns, data, clsTmp);
+        // The value may be ref-counted if we take the slow path
+        gen(env, IncRef, cns);
+        return cns;
+      }
+    );
+    discard(env);
+    push(env, cns);
+  };
+
   if (!clsTy.clsSpec() || !isNormalClass(clsTy.clsSpec().cls())) {
-    if (RuntimeOption::RepoAuthoritative) {
-      TargetProfile<ClsCnsProfile> profile(env.context, env.irb->curMarker(),
-                                           clsCnsProfileKey.get());
-      if (profile.profiling()) {
-        auto const data = ProfileSubClsCnsData { cnsNameStr, profile.handle() };
-        clsCnsHelper(env, gen(env, ProfileSubClsCns, data, clsTmp), clsRefSlot);
-        return;
-      }
-      if (profile.optimizing()) {
-        auto const slot = profile.data().getSlot();
-        if (slot != kInvalidSlot) {
-          auto const exit = makeExitSlow(env);
-          auto const len = gen(env, LdClsCnsVecLen, clsTmp);
-          auto const cmp = gen(env, LteInt, len, cns(env, slot));
-          gen(env, JmpNZero, exit, cmp);
-          auto const data = LdSubClsCnsData { cnsNameStr, slot };
-          gen(env, CheckSubClsCns, data, exit, clsTmp);
-          clsCnsHelper(env, gen(env, LdSubClsCns, data, clsTmp),
-                       clsRefSlot, exit);
-          return;
-        }
-      }
-    }
-    interpOne(env, *env.currentNormalizedInstruction);
-    return;
-  }
-  auto const cls = clsTy.clsSpec().cls();
-  if (clsTy.clsSpec().exact()) {
-    killClsRef(env, clsRefSlot);
-    implClsCns(env, cls, cnsNameStr, cls->name());
-  } else {
-    Slot cnsSlot;
-    auto const tv = cls->cnsNameToTV(cnsNameStr, cnsSlot, true);
-    if (cnsSlot != kInvalidSlot &&
-        (!tv ||
-         !static_cast<const TypedValueAux*>(tv)->constModifiers().isType)) {
-      auto const data = LdSubClsCnsData { cnsNameStr, cnsSlot };
-      clsCnsHelper(env, gen(env, LdSubClsCns, data, clsTmp), clsRefSlot);
+    TargetProfile<ClsCnsProfile> profile(env.context,
+                                         env.irb->curMarker(),
+                                         clsCnsProfileKey.get());
+    if (profile.profiling()) {
+      auto const data = ProfileSubClsCnsData { cnsNameStr, profile.handle() };
+      auto const cns = gen(
+        env,
+        CheckType,
+        TInitCell,
+        makeExitSlow(env),
+        gen(env, ProfileSubClsCns, data, clsTmp)
+      );
+      discard(env);
+      pushIncRef(env, cns);
       return;
     }
-    interpOne(env, *env.currentNormalizedInstruction);
+
+    if (profile.optimizing()) {
+      auto const slot = profile.data().getSlot();
+      if (slot != kInvalidSlot) {
+        auto const exit = makeExitSlow(env);
+        auto const len = gen(env, LdClsCnsVecLen, clsTmp);
+        auto const cmp = gen(env, LteInt, len, cns(env, slot));
+        gen(env, JmpNZero, exit, cmp);
+        auto const data = ClsCnsSlotData { cnsNameStr, slot };
+        gen(env, CheckSubClsCns, data, exit, clsTmp);
+        return loadSlot(slot);
+      }
+    }
+
+    return interpOne(env);
+  }
+
+  auto const cls = clsTy.clsSpec().cls();
+  if (clsTy.clsSpec().exact()) {
+    discard(env);
+    exactClsCns(env, cls, cnsNameStr, cls->name());
+  } else {
+    auto const slot =
+      cls->clsCnsSlot(cnsNameStr, ConstModifierFlags::Kind::Value, true);
+    if (slot == kInvalidSlot) return interpOne(env);
+    loadSlot(slot);
+  }
+}
+
+void emitClsCnsL(IRGS& env, int32_t id) {
+  auto const cls = topC(env);
+  if (!cls->isA(TCls)) PUNT(ClsCns-NotClass);
+  auto const cnsName = ldLoc(env, id, DataTypeSpecific);
+  if (!cnsName->isA(TStr)) PUNT(ClsCns-NotStr);
+  if (cnsName->hasConstVal(TStr)) {
+    emitClsCns(env, cnsName->strVal());
+  } else {
+    auto const cns = gen(env, LookupClsCns, cls, cnsName);
+    popDecRef(env);
+    pushIncRef(env, cns);
   }
 }
 
 //////////////////////////////////////////////////////////////////////
 
-}}}
+}

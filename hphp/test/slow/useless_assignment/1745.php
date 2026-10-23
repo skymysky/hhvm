@@ -1,6 +1,6 @@
-<?php
+<?hh
 
-function bug( $flag ) {
+function bug( $flag ) :mixed{
   $tag = '';
   if ($flag) {
     $tag .= 'x';
@@ -9,4 +9,8 @@ function bug( $flag ) {
   if ( $flag ) ;
  else var_dump($tag);
 }
+
+<<__EntryPoint>>
+function main_1745() :mixed{
 bug(false);
+}

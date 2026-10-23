@@ -1,9 +1,5 @@
-<?php
-
-$global = B::CLASS_CONSTANT;
- $another = test2($global);
- define('CONSTANT', test2('defining'));
- function test2($a) {
+<?hh
+ function test2($a) :mixed{
  var_dump($a);
  return 12345;
 }
@@ -13,3 +9,9 @@ $global = B::CLASS_CONSTANT;
  const CLASS_CONSTANT = 1;
 }
 
+
+<<__EntryPoint>>
+function main_1274() :mixed{
+$global = B::CLASS_CONSTANT;
+ $another = test2($global);
+}

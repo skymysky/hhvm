@@ -1,0 +1,19 @@
+error: Parsing[1002] `__Const` properties may not also be `__LateInit` [1]
+
+single_const_late_init.php:4:3
+2 | 
+3 | class A {
+4 |   <<__Const, __LateInit>> public static int $a = 5;
+  |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ [1]
+5 | }
+
+error: Typing[4277] A late-initialized property cannot have a default value [1]
+
+single_const_late_init.php:4:45
+2 | 
+3 | class A {
+4 |   <<__Const, __LateInit>> public static int $a = 5;
+  |                                             ^^ [1]
+5 | }
+
+2 errors found

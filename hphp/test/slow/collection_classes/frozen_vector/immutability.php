@@ -2,7 +2,7 @@
 
 // Test that ImmVector is immutable.
 
-function main() {
+function main() :mixed{
 
   $callWithExc = function ($f) {
     try {
@@ -33,4 +33,8 @@ function main() {
   }
 }
 
+
+<<__EntryPoint>>
+function main_immutability() :mixed{
 main();
+}

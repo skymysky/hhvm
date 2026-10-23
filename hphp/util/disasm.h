@@ -13,14 +13,15 @@
    | license@php.net so we can mail you a copy immediately.               |
    +----------------------------------------------------------------------+
 */
-#ifndef incl_HPHP_UTIL_DISASM_H_
-#define incl_HPHP_UTIL_DISASM_H_
+#pragma once
 
-#ifdef HAVE_LIBXED
+#include <cstdint>
+
+#if defined(__x86_64__)
 extern "C" {
 #include <xed-interface.h>
 }
-#endif // HAVE_LIBXED
+#endif // __x86_64__
 
 #include <ostream>
 
@@ -85,16 +86,14 @@ struct Disasm {
   /* Disassemble instructions. start should be the first byte of the region to
    * disassemble and end should be the first byte past the region to
    * disassemble. */
-  void disasm(std::ostream& out, uint8_t* start, uint8_t* end);
+  void disasm(std::ostream& out, uint8_t* start, uint8_t* end, uint64_t adjust);
 
   static void ExcludedAddressRange(void* low, size_t len);
  private:
-#ifdef HAVE_LIBXED
+#if defined(__x86_64__)
   xed_state_t m_xedState;
-#endif // HAVE_LIBXED
+#endif // __x86_64__
   const Options m_opts;
 };
 
 } // namespace HPHP
-
-#endif

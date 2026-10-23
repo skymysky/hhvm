@@ -1,4 +1,4 @@
-<?php
+<?hh
 
 trait T1 {
   public $x = 3;
@@ -11,10 +11,11 @@ trait T3 {
 }
 class C {
   use T2, T3;
-  public function printProps() {
+  public function printProps() :mixed{
     var_dump($this->x);
   }
 }
+<<__EntryPoint>> function main(): void {
 $o = new C;
 $o->printProps();
-?>
+}

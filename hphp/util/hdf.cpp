@@ -17,10 +17,8 @@
 #include "hphp/util/hdf.h"
 
 #include <mutex>
-
-#include <folly/portability/String.h>
-
-#include <boost/algorithm/string/predicate.hpp>
+#include <cstring>
+#include <assert.h>
 
 namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
@@ -135,10 +133,25 @@ void Hdf::open(const char *filename) {
   append(filename);
 }
 
+namespace {
+
+bool str_contains(const char* haystack, const char* needle) {
+  return strstr(haystack, needle) != nullptr;
+}
+
+bool str_ends_with(const char* haystack, const char* needle) {
+  size_t hs_len = strlen(haystack);
+  size_t n_len = strlen(needle);
+  return (hs_len >= n_len) && (memcmp(&haystack[hs_len - n_len], needle, n_len) == 0);
+}
+
+}
+
+
 void Hdf::append(const char *filename) {
   assert(filename && *filename);
-  if (!(boost::contains(filename, ".hdf")
-    || boost::ends_with(filename, ".hphp"))) {
+  if (!(str_contains(filename, ".hdf")
+    || str_ends_with(filename, ".hphp"))) {
     return;
   }
   CheckNeoError(hdf_read_file(getRaw(), (char*)filename));
@@ -240,7 +253,9 @@ void Hdf::setVisited(bool visited /* = true */) {
 
 const char *Hdf::configGet(const char *defValue /* = NULL */) const {
   HDF *hdf = getRaw();
-  const char *v = hdf_obj_value(hdf);
+  auto err = STATUS_OK;
+  const char *v = hdf_obj_value(hdf, &err);
+  CheckNeoError(err);
   hdf_set_visited(hdf, 1);
   return v ? v : defValue;
 }
@@ -329,10 +344,10 @@ double Hdf::configGetDouble(double defValue /* = 0 */) const {
   return n;
 }
 
-void Hdf::configGet(std::vector<uint32_t> &values) const {
+void Hdf::configGet(std::vector<int32_t> &values) const {
   values.clear();
   for (Hdf hdf = firstChild(); hdf.exists(); hdf = hdf.next()) {
-    values.push_back(hdf.configGetUInt32(0));
+    values.push_back(hdf.configGetInt32(0));
   }
 }
 
@@ -350,13 +365,6 @@ void Hdf::configGet(std::set<std::string> &values) const {
   }
 }
 
-void Hdf::configGet(boost::container::flat_set<std::string> &values) const {
-  values.clear();
-  for (Hdf hdf = firstChild(); hdf.exists(); hdf = hdf.next()) {
-    values.insert(hdf.configGetString(""));
-  }
-}
-
 void Hdf::configGet(std::unordered_map<std::string, int> &values) const {
   values.clear();
   for (Hdf hdf = firstChild(); hdf.exists(); hdf = hdf.next()) {
@@ -364,29 +372,7 @@ void Hdf::configGet(std::unordered_map<std::string, int> &values) const {
   }
 }
 
-void Hdf::configGet(std::set<std::string, stdltistr> &values) const {
-  values.clear();
-  for (Hdf hdf = firstChild(); hdf.exists(); hdf = hdf.next()) {
-    values.insert(hdf.configGetString(""));
-  }
-}
-
 void Hdf::configGet(std::map<std::string, std::string> &values) const {
-  values.clear();
-  for (Hdf hdf = firstChild(); hdf.exists(); hdf = hdf.next()) {
-    values[hdf.getName()] = hdf.configGetString("");
-  }
-}
-
-void Hdf::configGet(std::map<std::string, std::string,
-                    stdltistr> &values) const {
-  values.clear();
-  for (Hdf hdf = firstChild(); hdf.exists(); hdf = hdf.next()) {
-    values[hdf.getName()] = hdf.configGetString("");
-  }
-}
-
-void Hdf::configGet(hphp_string_imap<std::string> &values) const {
   values.clear();
   for (Hdf hdf = firstChild(); hdf.exists(); hdf = hdf.next()) {
     values[hdf.getName()] = hdf.configGetString("");
@@ -496,6 +482,10 @@ void Hdf::set(const char *value) {
   CheckNeoError(hdf_set_value(getRaw(), nullptr, (char*)value));
 }
 
+void Hdf::set(const char *name, const char *value) {
+  CheckNeoError(hdf_set_value(getRaw(), (char*)name, (char*)value));
+}
+
 void Hdf::set(int64_t value) {
   char buf[24];
   snprintf(buf, sizeof(buf), "%lld", (long long)value);
@@ -522,6 +512,18 @@ std::string Hdf::getName(bool markVisited /* = true */) const {
   char *name = hdf_obj_name(hdf);
   if (markVisited) hdf_set_visited(hdf, 1);
   return name ? name : "";
+}
+
+std::string Hdf::getFileName(bool markVisited /* = true */) const {
+  HDF *hdf = getRaw();
+  char *file_name = hdf_obj_file_name(hdf);
+  if (markVisited) hdf_set_visited(hdf, 1);
+  return file_name ? file_name : "";
+}
+
+bool Hdf::isWildcardName() const {
+  HDF *hdf = getRaw();
+  return hdf_is_wildcard(hdf) != 0;
 }
 
 std::string Hdf::getFullPath() const {
@@ -568,7 +570,7 @@ Hdf Hdf::parent() {
 
 const Hdf Hdf::operator[](int name) const {
   char buf[12];
-  sprintf(buf, "%d", name);
+  snprintf(buf, sizeof(buf), "%d", name);
   return operator[](buf);
 }
 
@@ -582,7 +584,7 @@ const Hdf Hdf::operator[](const std::string &name) const {
 
 Hdf Hdf::operator[](int name) {
   char buf[12];
-  sprintf(buf, "%d", name);
+  snprintf(buf, sizeof(buf), "%d", name);
   return operator[](buf);
 }
 
@@ -603,12 +605,16 @@ bool Hdf::exists() const {
   if (fullpath.empty()) {
     return true;
   }
-  return hdf_get_obj(m_rawp->m_hdf, fullpath.c_str());
+
+  auto err = STATUS_OK;
+  auto const result = hdf_get_obj(m_rawp->m_hdf, fullpath.c_str(), &err);
+  CheckNeoError(err);
+  return result;
 }
 
 bool Hdf::exists(int name) const {
   char buf[12];
-  sprintf(buf, "%d", name);
+  snprintf(buf, sizeof(buf), "%d", name);
   return exists(buf);
 }
 
@@ -618,10 +624,16 @@ bool Hdf::exists(const char *name) const {
     std::string fullpath = getFullPath();
     hdf = m_rawp->m_hdf;
     if (!fullpath.empty()) {
-      hdf = hdf_get_obj(hdf, fullpath.c_str());
+      auto err = STATUS_OK;
+      hdf = hdf_get_obj(hdf, fullpath.c_str(), &err);
+      CheckNeoError(err);
     }
   }
-  return hdf && hdf_get_obj(hdf, name);
+  if (!hdf) return false;
+  auto err = STATUS_OK;
+  if (hdf_get_obj(hdf, name, &err)) return true;
+  CheckNeoError(err);
+  return false;
 }
 
 bool Hdf::exists(const std::string &name) const {
@@ -630,7 +642,7 @@ bool Hdf::exists(const std::string &name) const {
 
 void Hdf::remove(int name) const {
   char buf[12];
-  sprintf(buf, "%d", name);
+  snprintf(buf, sizeof(buf), "%d", name);
   remove(buf);
 }
 
@@ -649,7 +661,10 @@ void Hdf::remove(const std::string &name) const {
 Hdf Hdf::firstChild(bool markVisited /* = true */) const {
   HDF *hdf = getRaw();
   if (markVisited) hdf_set_visited(hdf, 1);
-  Hdf ret(hdf_obj_child(hdf));
+  auto err = STATUS_OK;
+  auto child = hdf_obj_child(hdf, &err);
+  CheckNeoError(err);
+  Hdf ret(child);
   ret.m_path = getFullPath();
   ret.m_name = ret.getName(markVisited);
   return ret;
@@ -699,7 +714,7 @@ HDF *Hdf::getRaw() const {
   if (fullpath.empty()) {
     ret = m_rawp->m_hdf;
   } else {
-    hdf_get_node(m_rawp->m_hdf, (char*)fullpath.c_str(), &ret);
+    CheckNeoError(hdf_get_node(m_rawp->m_hdf, (char*)fullpath.c_str(), &ret));
   }
   m_hdf = ret;
   return ret;

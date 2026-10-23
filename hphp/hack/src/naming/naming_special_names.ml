@@ -1,4 +1,4 @@
-(**
+(*
  * Copyright (c) 2015, Facebook, Inc.
  * All rights reserved.
  *
@@ -7,400 +7,1538 @@
  *
  *)
 
-open Hh_core
+open Hh_prelude
 
 (** Module consisting of the special names known to the typechecker *)
 
 module Classes = struct
-
   let cParent = "parent"
-  let cStatic = "static"
-  let cSelf   = "self"
-  let cUnknown = "\\*Unknown*" (* Used for dynamic classnames, e.g. new $foo(); *)
 
-  let cAwaitable = "\\Awaitable"
+  let cStatic = "static"
+
+  let cSelf = "self"
+
+  let cUnknown = "\\*Unknown*"
+
+  (* Used for dynamic classnames, e.g. new $foo(); *)
+
+  let cAwaitable = "\\HH\\Awaitable"
+
   let cGenerator = "\\Generator"
-  let cAsyncGenerator = "\\AsyncGenerator"
-  let is_format_string x = match x with
-    "\\FormatString" | "\\HH\\FormatString" -> true
-    | _ -> false
+
+  let cAsyncGenerator = "\\HH\\AsyncGenerator"
+
+  let cHHFormatString = "\\HH\\FormatString"
+
+  let cHHTypedFormatString = "\\HH\\TypedFormatString"
+
+  let is_format_string x = String.equal x cHHFormatString
+
+  let is_typed_format_string x = String.equal x cHHTypedFormatString
 
   let cHH_BuiltinEnum = "\\HH\\BuiltinEnum"
 
-  let cThrowable= "\\Throwable"
+  let cHH_BuiltinEnumClass = "\\HH\\BuiltinEnumClass"
+
+  let cHH_BuiltinAbstractEnumClass = "\\HH\\BuiltinAbstractEnumClass"
+
+  (** The base class for all lambda values *)
+  let cClosure = "\\Closure"
+
+  let cThrowable = "\\Throwable"
+
   let cStdClass = "\\stdClass"
+
   let cDateTime = "\\DateTime"
+
   let cDateTimeImmutable = "\\DateTimeImmutable"
 
-  let cAsyncIterator = "\\AsyncIterator"
-  let cAsyncKeyedIterator = "\\AsyncKeyedIterator"
+  let cAsyncIterator = "\\HH\\AsyncIterator"
+
+  let cAsyncKeyedIterator = "\\HH\\AsyncKeyedIterator"
 
   let cStringish = "\\Stringish"
+
+  let cStringishObject = "\\StringishObject"
+
   let cXHPChild = "\\XHPChild"
-  let cIMemoizeParam = "\\IMemoizeParam"
-  let cClassname = "\\classname"
-  let cTypename = "\\typename"
+
+  let cIMemoizeParam = "\\HH\\IMemoizeParam"
+
+  let cUNSAFESingletonMemoizeParam = "\\HH\\UNSAFESingletonMemoizeParam"
+
+  let cClassname = "\\HH\\classname"
+
+  let cClassOrClassname = "\\HH\\class_or_classname"
+
+  let cConcrete = "\\HH\\concrete"
+
+  let cTypename = "\\HH\\typename"
 
   let cIDisposable = "\\IDisposable"
+
   let cIAsyncDisposable = "\\IAsyncDisposable"
+
+  let cMemberOf = "\\HH\\MemberOf"
+
+  let cEnumClassLabel = "\\HH\\EnumClass\\Label"
+
+  (* Classes that can be spliced into ExpressionTrees *)
+  let cSpliceable = "\\Spliceable"
+
+  let cSupportDyn = "\\HH\\supportdyn"
+
+  let cFunctionRef = "\\HH\\FunctionRef"
+
+  let cRepresentableAs = "\\HH\\Runtime\\RepresentableAs"
+
+  let cString = "\\HH\\string"
 end
 
 module Collections = struct
-
   (* concrete classes *)
-  let cVector    = "\\Vector"
-  let cImmVector = "\\ImmVector"
-  let cSet       = "\\Set"
-  let cImmSet    = "\\ImmSet"
-  let cMap       = "\\Map"
-  let cStableMap = "\\StableMap"
-  let cImmMap    = "\\ImmMap"
-  let cPair      = "\\Pair"
+  let cVector = "\\HH\\Vector"
+
+  let cMutableVector = "\\MutableVector"
+
+  let cImmVector = "\\HH\\ImmVector"
+
+  let cSet = "\\HH\\Set"
+
+  let cConstSet = "\\ConstSet"
+
+  let cMutableSet = "\\MutableSet"
+
+  let cImmSet = "\\HH\\ImmSet"
+
+  let cMap = "\\HH\\Map"
+
+  let cMutableMap = "\\MutableMap"
+
+  let cImmMap = "\\HH\\ImmMap"
+
+  let cPair = "\\HH\\Pair"
 
   (* interfaces *)
-  let cContainer        = "\\Container"
-  let cKeyedContainer   = "\\KeyedContainer"
-  let cTraversable      = "\\Traversable"
-  let cKeyedTraversable = "\\KeyedTraversable"
-  let cIndexish         = "\\Indexish"
+  let cContainer = "\\HH\\Container"
 
-  let cConstVector      = "\\ConstVector"
-  let cConstMap         = "\\ConstMap"
-  let cDict             = "\\dict"
-  let cVec              = "\\vec"
-  let cKeyset           = "\\keyset"
+  let cKeyedContainer = "\\HH\\KeyedContainer"
 
+  let cTraversable = "\\HH\\Traversable"
+
+  let cKeyedTraversable = "\\HH\\KeyedTraversable"
+
+  let cCollection = "\\Collection"
+
+  let cConstVector = "\\ConstVector"
+
+  let cConstMap = "\\ConstMap"
+
+  let cConstCollection = "\\ConstCollection"
+
+  let cAnyArray = "\\HH\\AnyArray"
+
+  let cDict = "\\HH\\dict"
+
+  let cVec = "\\HH\\vec"
+
+  let cKeyset = "\\HH\\keyset"
 end
 
 module Members = struct
+  let mGetInstanceKey = "getInstanceKey"
 
-  let mClass       = "class"
+  let mClass = "class"
 
-  let __construct  = "__construct"
-  let __destruct   = "__destruct"
-  let __call       = "__call"
+  let __construct = "__construct"
+
+  let __destruct = "__destruct"
+
+  let __call = "__call"
+
   let __callStatic = "__callStatic"
-  let __clone      = "__clone"
-  let __debugInfo  = "__debugInfo"
-  let __dispose    = "__dispose"
-  let __disposeAsync = "__disposeAsync"
-  let __get        = "__get"
-  let __invoke     = "__invoke"
-  let __isset      = "__isset"
-  let __set        = "__set"
-  let __set_state  = "__set_state"
-  let __sleep      = "__sleep"
-  let __toString   = "__toString"
-  let __unset      = "__unset"
-  let __wakeup     = "__wakeup"
 
-  let as_set = List.fold_right ~f:SSet.add ~init:SSet.empty
-    [
-      __construct; __destruct; __call; __callStatic; __clone; __debugInfo;
-      __dispose; __disposeAsync;
-      __get; __invoke; __isset; __set; __set_state; __sleep; __toString;
-      __unset; __wakeup;
-    ]
-  let as_lowercase_set = SSet.map String.lowercase_ascii as_set
+  let __clone = "__clone"
+
+  let __debugInfo = "__debugInfo"
+
+  let __dispose = "__dispose"
+
+  let __disposeAsync = "__disposeAsync"
+
+  let __get = "__get"
+
+  let __invoke = "__invoke"
+
+  let __isset = "__isset"
+
+  let __set = "__set"
+
+  let __set_state = "__set_state"
+
+  let __sleep = "__sleep"
+
+  let __toString = "__toString"
+
+  let __unset = "__unset"
+
+  let __wakeup = "__wakeup"
+
+  let as_set =
+    List.fold_right
+      ~f:S_set.add
+      ~init:S_set.empty
+      [
+        __construct;
+        __destruct;
+        __call;
+        __callStatic;
+        __clone;
+        __debugInfo;
+        __dispose;
+        __disposeAsync;
+        __get;
+        __invoke;
+        __isset;
+        __set;
+        __set_state;
+        __sleep;
+        __toString;
+        __unset;
+        __wakeup;
+      ]
+
+  let as_lowercase_set = S_set.map String.lowercase as_set
 
   (* Any data- or aria- attribute is always valid, even if it is not declared
    * for a given XHP element *)
   let is_special_xhp_attribute s =
-    (String_utils.string_starts_with s ":data-") ||
-    (String_utils.string_starts_with s ":aria-")
-end
-
-module UserAttributes = struct
-
-  let uaOverride            = "__Override"
-  let uaConsistentConstruct = "__ConsistentConstruct"
-  let uaConst               = "__Const"
-  let uaUnsafeConstruct     = "__UNSAFE_Construct"
-  let uaDeprecated          = "__Deprecated"
-  let uaMemoize             = "__Memoize"
-  let uaMemoizeLSB          = "__MemoizeLSB"
-  let uaPHPStdLib           = "__PHPStdLib"
-  let uaHipHopSpecific      = "__HipHopSpecific"
-  let uaAcceptDisposable    = "__AcceptDisposable"
-  let uaReturnDisposable    = "__ReturnDisposable"
-  let uaReactive            = "__Rx"
-  let uaLocalReactive       = "__RxLocal"
-  let uaShallowReactive     = "__RxShallow"
-  let uaMutable             = "__Mutable"
-  let uaMutableReturn       = "__MutableReturn"
-  let uaOptionalDestruct    = "__OptionalDestruct"
-  let uaOnlyRxIfImpl        = "__OnlyRxIfImpl"
-  let uaProbabilisticModel  = "__PPL"
-  let uaOnlyRxIfRxFunc      = "__OnlyRxIfRxFunc"
-  let uaOnlyRxIfArgs        = "__OnlyRxIfArgs"
-  let uaSealed              = "__Sealed"
-  let uaReturnsVoidToRx     = "__ReturnsVoidToRx"
-  let uaMaybeMutable        = "__MaybeMutable"
-  let uaRxOfScope           = "__RxOfScope"
-
-  let as_set = List.fold_right ~f:SSet.add ~init:SSet.empty
-    [
-      uaOverride;
-      uaConsistentConstruct;
-      uaConst;
-      uaUnsafeConstruct;
-      uaDeprecated;
-      uaMemoize;
-      uaMemoizeLSB;
-      uaPHPStdLib;
-      uaHipHopSpecific;
-      uaAcceptDisposable;
-      uaReturnDisposable;
-      uaReactive;
-      uaLocalReactive;
-      uaMutable;
-      uaMutableReturn;
-      uaShallowReactive;
-      uaOptionalDestruct;
-      uaOnlyRxIfImpl;
-      uaProbabilisticModel;
-      uaOnlyRxIfRxFunc;
-      uaOnlyRxIfArgs;
-      uaSealed;
-      uaReturnsVoidToRx;
-      uaMaybeMutable;
-      uaRxOfScope;
-    ]
+    String.is_prefix s ~prefix:":data-" || String.is_prefix s ~prefix:":aria-"
 end
 
 module AttributeKinds = struct
   let cls = "\\HH\\ClassAttribute"
+
+  let clscst = "\\HH\\ClassConstantAttribute"
+
   let enum = "\\HH\\EnumAttribute"
 
   let typealias = "\\HH\\TypeAliasAttribute"
 
   let fn = "\\HH\\FunctionAttribute"
+
   let mthd = "\\HH\\MethodAttribute"
 
   let instProperty = "\\HH\\InstancePropertyAttribute"
+
   let staticProperty = "\\HH\\StaticPropertyAttribute"
 
   let parameter = "\\HH\\ParameterAttribute"
 
+  let typeparam = "\\HH\\TypeParameterAttribute"
+
+  let file = "\\HH\\FileAttribute"
+
+  let typeconst = "\\HH\\TypeConstantAttribute"
+
+  let lambda = "\\HH\\LambdaAttribute"
+
+  let enumcls = "\\HH\\EnumClassAttribute"
+
+  let module_ = "\\HH\\ModuleAttribute"
+
   let plain_english_map =
-    List.fold_left ~init:SMap.empty ~f:(fun acc (k, v) -> SMap.add k v acc)
-      [ (cls, "a class")
-      ; (enum, "an enum")
-      ; (typealias, "a typealias")
-      ; (fn, "a function")
-      ; (mthd, "a method")
-      ; (instProperty, "an instance property")
-      ; (staticProperty, "a static property")
-      ; (parameter, "a parameter")
+    List.fold_left
+      ~init:S_map.empty
+      ~f:(fun acc (k, v) -> S_map.add k v acc)
+      [
+        (cls, "a class");
+        (clscst, "a constant of a class");
+        (enum, "an enum");
+        (typealias, "a typealias");
+        (fn, "a function");
+        (mthd, "a method");
+        (instProperty, "an instance property");
+        (staticProperty, "a static property");
+        (parameter, "a parameter");
+        (typeparam, "a type parameter");
+        (file, "a file");
+        (typeconst, "a type constant");
+        (lambda, "a lambda expression");
+        (enumcls, "an enum class");
+        (module_, "a module");
       ]
 end
 
+module UserAttributes = struct
+  let uaOverride = "__Override"
+
+  let uaNeedsConcrete = "__NeedsConcrete"
+
+  let uaConsistentConstruct = "__ConsistentConstruct"
+
+  let uaConst = "__Const"
+
+  let uaDeprecated = "__Deprecated"
+
+  let uaDocs = "__Docs"
+
+  let uaEntryPoint = "__EntryPoint"
+
+  let uaMemoize = "__Memoize"
+
+  let uaMemoizeLSB = "__MemoizeLSB"
+
+  let uaPHPStdLib = "__PHPStdLib"
+
+  let uaAcceptDisposable = "__AcceptDisposable"
+
+  let uaReturnDisposable = "__ReturnDisposable"
+
+  let uaIgnoreReadonlyError = "__IgnoreReadonlyError"
+
+  let uaLSB = "__LSB"
+
+  let uaSealed = "__Sealed"
+
+  let uaLateInit = "__LateInit"
+
+  let uaNewable = "__Newable"
+
+  let uaEnforceable = "__Enforceable"
+
+  let uaExplicit = "__Explicit"
+
+  let uaNoDisjointUnion = "__NoDisjointUnion"
+
+  let uaDisjointShapeSplat = "__DisjointShapeSplat"
+
+  let uaNonDisjoint = "__NonDisjoint"
+
+  let uaOverlapping = "__Overlapping"
+
+  let uaSoft = "__Soft"
+
+  let uaWarn = "__Warn"
+
+  let uaMockClass = "__MockClass"
+
+  let uaTestsBypassVisibility = "__TestsBypassVisibility"
+
+  let uaProvenanceSkipFrame = "__ProvenanceSkipFrame"
+
+  let uaDynamicallyCallable = "__DynamicallyCallable"
+
+  let uaDynamicallyConstructible = "__DynamicallyConstructible"
+
+  let uaDynamicallyReferenced = "__DynamicallyReferenced"
+
+  let uaReifiable = "__Reifiable"
+
+  let uaNeverInline = "__NEVER_INLINE"
+
+  let uaDisableTypecheckerInternal = "__DisableTypecheckerInternal"
+
+  let uaHasTopLevelCode = "__HasTopLevelCode"
+
+  let uaIsFoldable = "__IsFoldable"
+
+  let uaNative = "__Native"
+
+  let uaNativeData = "__NativeData"
+
+  let uaEagerVMSync = "__EagerVMSync"
+
+  let uaOutOnly = "__OutOnly"
+
+  let uaAlwaysInline = "__ALWAYS_INLINE"
+
+  let uaEnableUnstableFeatures = "__EnableUnstableFeatures"
+
+  let uaEnumClass = "__EnumClass"
+
+  let uaPolicied = "__Policied"
+
+  let uaInferFlows = "__InferFlows"
+
+  let uaExternal = "__External"
+
+  let uaCanCall = "__CanCall"
+
+  let uaSupportDynamicType = "__SupportDynamicType"
+
+  let uaNoSupportDynamicType = "__NoSupportDynamicType"
+
+  let uaNoAutoDynamic = "__NoAutoDynamic"
+
+  let uaNoAutoLikes = "__NoAutoLikes"
+
+  let uaNoAutoBound = "__NoAutoBound"
+
+  let uaRequireDynamic = "__RequireDynamic"
+
+  let uaEnableMethodTraitDiamond = "__EnableMethodTraitDiamond"
+
+  let uaIgnoreReadonlyLocalErrors = "__IgnoreReadonlyLocalErrors"
+
+  let uaIgnoreCoeffectLocalErrors = "__IgnoreCoeffectLocalErrors"
+
+  let uaReified = "__Reified"
+
+  let uaHasReifiedParent = "__HasReifiedParent"
+
+  let uaSoftInternal = "__SoftInternal"
+
+  let uaNoFlatten = "__NoFlatten"
+
+  let uaRequirePackage = "__RequirePackage"
+
+  let uaSoftRequirePackage = "__SoftRequirePackage"
+
+  (* <<__SafeForGlobalAccessCheck>> marks global variables as safe from mutations.
+     This attribute merely ensures that the global_access_check does NOT raise
+     errors/warnings from writing to the annotated global variable, and it
+     has NO runtime/semantic implication. *)
+  let uaSafeGlobalVariable = "__SafeForGlobalAccessCheck"
+
+  let uaModuleLevelTrait = "__ModuleLevelTrait"
+
+  let uaStrictSwitch = "__StrictSwitch"
+
+  let uaUnsafeAllowMultipleInstantiations =
+    "__UNSAFE_AllowMultipleInstantiations"
+
+  let uaPackageOverride = "__PackageOverride"
+
+  let uaSimpliHack = "__SimpliHack"
+
+  let uaAsioLowPri = "__AsioLowPri"
+
+  let uaImplementedBy = "__ImplementedBy"
+
+  let uaGatedByFeatureFlag = "__GatedByFeatureFlag"
+
+  let uaAllowUncheckedEnumValues = "__AllowUncheckedEnumValues"
+
+  let uaShapeKey = "__ShapeKey"
+
+  type attr_info = {
+    contexts: string list;
+    doc: string;
+    autocomplete: bool;
+  }
+
+  let as_map : attr_info S_map.t =
+    AttributeKinds.(
+      S_map.of_list
+        [
+          ( uaUnsafeAllowMultipleInstantiations,
+            {
+              contexts = [cls];
+              autocomplete = true;
+              doc =
+                "CLOWNY. Allows implementing this interface with multiple instantiations, e.g. `implements I<int>, I<string>`.";
+            } );
+          ( uaOverride,
+            {
+              contexts = [mthd];
+              autocomplete = true;
+              doc = "Ensures there's a parent method being overridden.";
+            } );
+          ( uaConsistentConstruct,
+            {
+              contexts = [cls];
+              autocomplete = true;
+              doc =
+                "Requires all child classes to have the same constructor signature. "
+                ^ " This allows `new static(...)` and `new $the_class_name(...)`.";
+            } );
+          ( uaConst,
+            {
+              contexts = [cls; instProperty; parameter; staticProperty];
+              autocomplete = false;
+              doc =
+                "Marks a class or property as immutable."
+                ^ " When applied to a class, all the properties are considered `__Const`."
+                ^ " `__Const` properties can only be set in the constructor.";
+            } );
+          ( uaDeprecated,
+            {
+              contexts = [fn; mthd];
+              autocomplete = true;
+              doc =
+                "Mark a function/method as deprecated. "
+                ^ " The type checker will show an error at call sites, and a runtime notice is raised if this function/method is called."
+                ^ "\n\nThe optional second argument specifies a sampling rate for raising notices at runtime."
+                ^ " If the sampling rate is 100, a notice is only raised every 1/100 calls. If omitted, the default sampling rate is 1 (i.e. all calls raise notices)."
+                ^ " To disable runtime notices, use a sampling rate of 0.";
+            } );
+          ( uaDocs,
+            {
+              contexts = [cls; enum; enumcls; typealias];
+              autocomplete = true;
+              doc = "Shows the linked URL when hovering over this type.";
+            } );
+          ( uaAllowUncheckedEnumValues,
+            {
+              contexts = [enum];
+              autocomplete = true;
+              doc =
+                "Opts this enum out of the enum-value check, allowing members to share a value or to have values that cannot be statically checked.";
+            } );
+          ( uaShapeKey,
+            {
+              contexts = [clscst];
+              autocomplete = false;
+              doc =
+                "Marks a class constant whose value may be used as a shape key.";
+            } );
+          ( uaEntryPoint,
+            {
+              contexts = [fn];
+              autocomplete = true;
+              doc =
+                "Execution of the program will start here."
+                ^ Printf.sprintf
+                    " This only applies in the first file executed, `%s` in required or autoloaded files has no effect."
+                    uaEntryPoint;
+            } );
+          ( uaMemoize,
+            {
+              contexts = [fn; mthd];
+              autocomplete = true;
+              doc =
+                "Cache the return values from this function/method."
+                ^ " Calls with the same arguments will return the cached value."
+                ^ "\n\nCaching is per-request and shared between subclasses (see also `__MemoizeLSB`).";
+            } );
+          ( uaMemoizeLSB,
+            {
+              contexts = [mthd];
+              autocomplete = true;
+              doc =
+                "Cache the return values from this method."
+                ^ " Calls with the same arguments will return the cached value."
+                ^ "\n\nCaching is per-request and has Late Static Binding, so subclasses do not share the cache.";
+            } );
+          ( uaPHPStdLib,
+            {
+              contexts = [cls; fn; mthd];
+              autocomplete = false;
+              doc =
+                "Ignore this built-in function or class, so the type checker errors if code uses it."
+                ^ " This only applies to code in .hhi files by default, but can apply everywhere with `deregister_php_stdlib`.";
+            } );
+          ( uaAcceptDisposable,
+            {
+              contexts = [parameter];
+              autocomplete = true;
+              doc =
+                "Allows passing values that implement `IDisposable` or `IAsyncDisposable`."
+                ^ " Normally these values cannot be passed to functions."
+                ^ "\n\nYou cannot save references to `__AcceptDisposable` parameters, to ensure they are disposed at the end of their using block.";
+            } );
+          ( uaIgnoreReadonlyError,
+            {
+              contexts = [parameter];
+              autocomplete = false;
+              doc =
+                "Allows passing function values that are non-readonly even if a readonly function is expected.";
+            } );
+          ( uaReturnDisposable,
+            {
+              contexts = [fn; mthd; lambda];
+              autocomplete = true;
+              doc =
+                "Allows a function/method to return a value that implements `IDisposable` or `IAsyncDisposable`."
+                ^ " The function must return a fresh disposable value by either instantiating a class or "
+                ^ " returning a value from another method/function marked `__ReturnDisposable`.";
+            } );
+          ( uaLSB,
+            {
+              contexts = [staticProperty];
+              autocomplete = true;
+              doc =
+                "Marks this property as implicitly redeclared on all subclasses."
+                ^ " This ensures each subclass has its own value for the property.";
+            } );
+          ( uaSealed,
+            {
+              contexts = [cls; enumcls; enum; mthd];
+              autocomplete = true;
+              doc =
+                "Only the named classes can extend this class or interface, or override this method."
+                ^ " Child classes may still be extended unless they are marked `final`.";
+            } );
+          ( uaLateInit,
+            {
+              contexts = [instProperty; staticProperty];
+              autocomplete = true;
+              doc =
+                "Marks a property as late initialized."
+                ^ " Normally properties are required to be initialized in the constructor.";
+            } );
+          ( uaNewable,
+            {
+              contexts = [typeparam];
+              autocomplete = true;
+              doc =
+                "Ensures the class can be constructed."
+                ^ "\n\nThis forbids abstract classes, and ensures that the constructor has a consistent signature."
+                ^ " Classes must use `__ConsistentConstruct` or be final.";
+            } );
+          ( uaEnforceable,
+            {
+              contexts = [typeconst; typeparam];
+              autocomplete = true;
+              doc =
+                "Ensures that this type is enforceable."
+                ^ " Enforceable types can be used with `is` and `as`."
+                ^ " This forbids usage of function types and erased (not reified) generics.";
+            } );
+          ( uaExplicit,
+            {
+              contexts = [typeparam];
+              autocomplete = true;
+              doc =
+                "Requires callers to explicitly specify this type."
+                ^ "\n\nNormally Hack allows generics to be inferred at the call site.";
+            } );
+          ( uaSoft,
+            {
+              contexts = [instProperty; parameter; staticProperty; typeparam];
+              autocomplete = true;
+              doc =
+                "A runtime type mismatch on this parameter/property will not throw a TypeError/Error."
+                ^ " This is useful for migrating partial code where you're unsure about the type."
+                ^ "\n\nThe type checker will ignore this attribute, so your code will still get type checked."
+                ^ " If the type is wrong at runtime, a warning will be logged and code execution will continue.";
+            } );
+          ( uaWarn,
+            {
+              contexts = [typeparam];
+              autocomplete = true;
+              doc =
+                "Ensures that incorrect reified types are a warning rather than error."
+                ^ "\n\nThis is intended to help gradually migrate code to reified types.";
+            } );
+          ( uaMockClass,
+            {
+              contexts = [cls];
+              autocomplete = false;
+              doc =
+                "Allows subclasses of final classes and overriding of final methods."
+                ^ " This is useful for writing mock classes."
+                ^ "\n\nYou cannot use this to subclass `vec`, `keyset`, `dict`, `Vector`, `Map` or `Set`.";
+            } );
+          ( uaTestsBypassVisibility,
+            {
+              contexts = [cls; mthd; instProperty; staticProperty];
+              autocomplete = true;
+              doc =
+                "Allows this member to be accessed as public from test contexts."
+                ^ " When applied to an internal class, the class becomes visible from test contexts.";
+            } );
+          ( uaProvenanceSkipFrame,
+            {
+              contexts = [fn; mthd; lambda];
+              autocomplete = false;
+              doc =
+                "Don't track Hack arrays created by this function."
+                ^ " This is useful when migrating code from PHP arrays to Hack arrays.";
+            } );
+          ( uaDynamicallyCallable,
+            {
+              contexts = [fn; mthd];
+              autocomplete = true;
+              doc =
+                "Allows this function/method to be called dynamically, based on a string of its name. "
+                ^ " HHVM will warn or error (depending on settings) on dynamic calls to functions without this attribute."
+                ^ "\n\nSee also `HH\\dynamic_fun()` and `HH\\dynamic_class_meth()`.";
+            } );
+          ( uaDynamicallyConstructible,
+            {
+              contexts = [cls];
+              autocomplete = true;
+              doc =
+                "Allows this class to be instantiated dynamically, based on a string of its name."
+                ^ " HHVM will warn or error (depending on settings) on dynamic instantiations without this attribute.";
+            } );
+          ( uaDynamicallyReferenced,
+            {
+              contexts = [cls];
+              autocomplete = true;
+              doc =
+                "Allows a user to get a pointer to this class from a string using `HH\\classname_to_class()`."
+                ^ " HHVM will raise a notice if this attribute is not present. For migration, this can also be"
+                ^ " set to soft logging by passing an integer sample rate (1 of N) as an argument.";
+            } );
+          ( uaReifiable,
+            {
+              contexts = [typeconst];
+              autocomplete = true;
+              doc =
+                "Requires this type to be reifiable."
+                ^ " This bans PHP arrays (varray and darray).";
+            } );
+          ( uaNeverInline,
+            {
+              contexts = [fn; mthd];
+              autocomplete = false;
+              doc =
+                "Instructs HHVM to never inline this function."
+                ^ " Only used for testing HHVM."
+                ^ "\n\nSee also `__ALWAYS_INLINE`.";
+            } );
+          ( uaReified,
+            {
+              contexts = [];
+              autocomplete = false;
+              doc =
+                "Marks a function as taking reified generics."
+                ^ " This is an internal attribute used for byte compilation, and is banned in user code.";
+            } );
+          ( uaHasReifiedParent,
+            {
+              contexts = [];
+              autocomplete = false;
+              doc =
+                "Marks a class as extending a class that uses reified generics."
+                ^ " This is an internal attribute used for byte compilation, and is banned in user code.";
+            } );
+          ( uaNoFlatten,
+            {
+              contexts = [];
+              autocomplete = false;
+              doc =
+                "Instructs hhbbc to never inline this trait into classes that use it."
+                ^ " Used for testing hhbbc optimizations.";
+            } );
+          ( uaNativeData,
+            {
+              contexts = [cls];
+              autocomplete = false;
+              doc =
+                "Associates this class with a native data type (usually a C++ class)."
+                ^ " When instantiating this class, the corresponding native object will also be allocated.";
+            } );
+          ( uaNoDisjointUnion,
+            {
+              contexts = [typeparam];
+              autocomplete = true;
+              doc =
+                "Requires this type parameter to NOT have a union type where the types in the union are disjoint from each other, e.g., `(int | string)`."
+                ^ " This prevents Hack from inferring completely unrelated types.";
+            } );
+          ( uaDisjointShapeSplat,
+            {
+              contexts = [typealias];
+              autocomplete = false;
+              doc =
+                "Requires the fields of this type alias's shape splats to be disjoint.";
+            } );
+          ( uaNonDisjoint,
+            {
+              contexts = [typeparam];
+              autocomplete = true;
+              doc =
+                "Requires this type parameter to have some overlap with the other `<<__NonDisjoint>>` type parameters."
+                ^ "\n\nThis prevents Hack inferring completely unrelated types."
+                ^ " For example, this allows the typechecker to warn on `C\\contains(vec[1], \"foo\")`.";
+            } );
+          ( uaOverlapping,
+            {
+              contexts = [fn; mthd];
+              autocomplete = true;
+              doc =
+                "Requires these type parameters to have some overlap with each other."
+                ^ "\n\nThis prevents Hack inferring completely unrelated types."
+                ^ " For example, this allows the typechecker to warn on `C\\contains(vec[1], \"foo\")`.";
+            } );
+          ( uaDisableTypecheckerInternal,
+            {
+              contexts = [fn; mthd];
+              autocomplete = false;
+              doc =
+                "Disables type checking of a function body or method. This is only useful for debugging typechecker performance."
+                ^ " The typechecker will discard the body and immediately report an internal error.";
+            } );
+          ( uaEnableUnstableFeatures,
+            {
+              contexts = [file];
+              autocomplete = true;
+              doc =
+                "Enables unstable or preview features of Hack."
+                ^ "\n\nUnstable features can only run when HHVM has `Hack.Lang.AllowUnstableFeatures` set. This allows local experimentation without using the feature in production."
+                ^ "\n\nWhen a feature enters preview, `__EnableUnstableFeatures` is still required but HHVM will allow the code to run.";
+            } );
+          ( uaEnumClass,
+            {
+              contexts = [cls; enumcls];
+              autocomplete = false;
+              doc =
+                "Allows initializing class constants with class instances (not just constant expressions). Used when desugaring `enum class`.";
+            } );
+          ( uaSupportDynamicType,
+            {
+              contexts = [fn; cls; mthd; lambda; enumcls];
+              autocomplete = false;
+              doc =
+                "Marks methods and functions that can be called on a receiver of type `dynamic` with `dynamic` arguments.";
+            } );
+          ( uaNoSupportDynamicType,
+            {
+              contexts = [fn; cls; mthd; lambda; enumcls];
+              autocomplete = false;
+              doc = "Disable implicit SupportDynamicType for this declaration";
+            } );
+          ( uaNoAutoDynamic,
+            {
+              contexts = [fn; cls; mthd; typealias];
+              autocomplete = false;
+              doc = "Locally disable implicit pessimisation.";
+            } );
+          ( uaNoAutoLikes,
+            {
+              contexts =
+                [fn; mthd; staticProperty; instProperty; parameter; lambda];
+              autocomplete = false;
+              doc = "Locally disable addition of ~ types.";
+            } );
+          ( uaNoAutoBound,
+            {
+              contexts = [typeparam];
+              autocomplete = false;
+              doc = "Locally disable addition of supportdyn<mixed> bound.";
+            } );
+          ( uaRequireDynamic,
+            {
+              contexts = [typeparam];
+              autocomplete = false;
+              doc = "Marks this type parameter as required to be `dynamic`.";
+            } );
+          ( uaEnableMethodTraitDiamond,
+            {
+              contexts = [cls];
+              autocomplete = true;
+              doc =
+                "Allows a trait to be `use`d more than once. "
+                ^ "This is useful in large class hierarchies, where you can end up using the same trait on via multiple paths, producing 'diamond inheritance'."
+                ^ "\n\nThis requires methods to unambiguous: each method definition must occur in exactly one trait.";
+            } );
+          ( uaSafeGlobalVariable,
+            {
+              contexts = [staticProperty];
+              autocomplete = false;
+              doc =
+                "Marks this global variable as safe from mutation."
+                ^ " This ensures the global_access_check does NOT raise errors/warnings from writing to this global variable.";
+            } );
+          ( uaModuleLevelTrait,
+            {
+              contexts = [cls];
+              autocomplete = false;
+              doc =
+                "Consider the trait to belong to the module where it is defined, "
+                ^ "rather than to the module of the class that uses it.";
+            } );
+          ( uaSoftInternal,
+            {
+              (* Parameters are for constructor promotion: if someone tries to use it on a
+                 parameter without internal, they'll encounter a nast check error *)
+              contexts =
+                [
+                  fn;
+                  cls;
+                  mthd;
+                  instProperty;
+                  staticProperty;
+                  parameter;
+                  enum;
+                  enumcls;
+                ];
+              autocomplete = false;
+              doc =
+                "Instead of throwing an exception upon a module boundary violation at this symbol, logs a warning instead.";
+            } );
+          ( uaRequirePackage,
+            {
+              contexts = [fn; mthd];
+              autocomplete = true;
+              doc =
+                "This function will only execute if the target package is loaded in the current deployment (invariant_violation otherwise)."
+                ^ " Hack will enforce this constraint on callers by raising an error unless the caller has this package.";
+            } );
+          ( uaSoftRequirePackage,
+            {
+              contexts = [fn; mthd];
+              autocomplete = true;
+              doc =
+                "Migration attribute for `__RequirePackage`. Raises a notice with optional sample rate if the target package is not loaded."
+                ^ " Does not allow this function to call other functions from the target package.";
+            } );
+          ( uaStrictSwitch,
+            {
+              contexts = [fn; mthd];
+              autocomplete = true;
+              doc =
+                "Enables strict switch checking for all switches in function or method.";
+            } );
+          ( uaPackageOverride,
+            {
+              contexts = [file];
+              autocomplete = true;
+              doc =
+                "Overrides the PACKAGES.toml declaration, grouping the file into the specified package.";
+            } );
+          ( uaNeedsConcrete,
+            {
+              contexts = [mthd];
+              autocomplete =
+                false
+                (* TODO(T213971384): set to `true` when safe abstract features are ready for WWW devs to use *);
+              doc =
+                "Indicates that the method can only be called on concrete classes. Inside the method, `static` refers to a concrete class.";
+            } );
+          ( uaSimpliHack,
+            {
+              contexts = S_map.keys @@ AttributeKinds.plain_english_map;
+              (* We want this to be able to attached to any valid location for an attribute *)
+              autocomplete = false;
+              doc = "Demo for SimpliHack";
+            } );
+          ( uaAsioLowPri,
+            {
+              contexts = [fn; mthd];
+              autocomplete = false;
+              doc =
+                "Marks the function as low priority. Will suspend eager execution into a low priority awaitable.";
+            } );
+          ( uaImplementedBy,
+            {
+              contexts = [mthd];
+              autocomplete = true;
+              doc =
+                "Specifies that this method is implemented by a specific top-level function. Only valid in .hhi files.";
+            } );
+          ( uaGatedByFeatureFlag,
+            {
+              contexts = [cls; typealias; fn];
+              autocomplete = false;
+              doc =
+                "Gates this declaration behind an unstable feature flag. Users must enable the feature to reference this declaration.";
+            } );
+        ])
+
+  (* These are names which are allowed in the systemlib but not in normal programs *)
+  let systemlib_map =
+    AttributeKinds.(
+      S_map.of_list
+        [
+          ( uaAlwaysInline,
+            {
+              contexts = [fn; mthd];
+              autocomplete = false;
+              doc =
+                "Instructs HHVM to always inline this function."
+                ^ " Only used for testing HHVM."
+                ^ "\n\nSee also `__NEVER_INLINE`.";
+            } );
+          ( uaIsFoldable,
+            {
+              contexts = [fn; mthd];
+              autocomplete = false;
+              doc =
+                "Marks that this function can be constant-folded if all arguments are constants."
+                ^ " Used by hhbbc.";
+            } );
+          ( uaNative,
+            {
+              contexts = [fn; mthd];
+              autocomplete = false;
+              doc =
+                "Declares a native function."
+                ^ " This declares the signature, the implementation will be in an HHVM extension (usually C++).";
+            } );
+          ( uaEagerVMSync,
+            {
+              contexts = [fn; mthd];
+              autocomplete = false;
+              doc =
+                "Declares that runtime will eagerly sync vm registers for this function.";
+            } );
+          ( uaOutOnly,
+            {
+              contexts = [parameter];
+              autocomplete = false;
+              doc =
+                "Declares that an `inout` parameter is written but never read.";
+            } );
+          ( uaIgnoreReadonlyLocalErrors,
+            {
+              contexts = [fn; mthd];
+              autocomplete = false;
+              doc = "Disables `readonly` compiler checks (systemlib only).";
+            } );
+          ( uaIgnoreCoeffectLocalErrors,
+            {
+              contexts = [fn; mthd];
+              autocomplete = false;
+              doc =
+                "Disables context/capability runtime checks (systemlib only).";
+            } );
+        ])
+
+  let is_reserved name = String.is_prefix name ~prefix:"__"
+end
+
 (* Tested before \\-prepending name-canonicalization *)
-module SpecialFunctions = struct
+module PreNamespacedFunctions = struct
+  let echo = "echo" (* pseudo-function *)
 
-  let tuple          = "tuple"          (* pseudo-function *)
-  let echo           = "echo"           (* pseudo-function *)
-  let assert_        = "assert"
+  let is_pre_namespaced_function =
+    let all_special_functions = HashSet.of_list [echo] in
+    (fun x -> HashSet.mem all_special_functions x)
+end
 
-  let invariant      = "invariant"
-  let invariant_violation = "invariant_violation"
+(* There are a number of functions that are automatically imported into the
+ * namespace. The full list can be found in hh_autoimport.ml.
+ *)
+module AutoimportedFunctions = struct
+  let invariant_violation = "\\HH\\invariant_violation"
 
-  let fun_           = "fun"
-  let inst_meth      = "inst_meth"
-  let class_meth     = "class_meth"
-  let meth_caller    = "meth_caller"
+  let invariant = "\\HH\\invariant"
 
-  let call_user_func = "call_user_func"
-  let autoload       = "__autoload"
-  let clone          = "__clone"
+  let meth_caller = "\\HH\\meth_caller"
 end
 
 module SpecialIdents = struct
-
   let this = "$this"
+
   let placeholder = "$_"
+
   let dollardollar = "$$"
 
+  let prosecco_tap = "$prosecco_tap"
+
+  (* Intentionally using an invalid variable name to ensure it's translated *)
+  let tmp_var_prefix = "__tmp$"
+
+  let is_tmp_var name =
+    String.length name > 6 && String.(sub name ~pos:0 ~len:6 = tmp_var_prefix)
+
+  let assert_tmp_var name = assert (is_tmp_var name)
 end
 
+(* PseudoFunctions are functions (or items that are parsed like functions)
+ * that are treated like builtins that do not have a public HHI or interface.
+ *)
 module PseudoFunctions = struct
-
-  let empty = "\\empty"
   let isset = "\\isset"
+
   let unset = "\\unset"
+
   let hh_show = "\\hh_show"
+
+  let hh_expect = "\\hh_expect"
+
+  let hh_expect_equivalent = "\\hh_expect_equivalent"
+
   let hh_show_env = "\\hh_show_env"
+
   let hh_log_level = "\\hh_log_level"
+
+  let hh_force_solve = "\\hh_force_solve"
+
   let hh_loop_forever = "\\hh_loop_forever"
 
+  let hh_time = "\\hh_time"
+
+  let hh_sleep = "\\hh_sleep"
+
+  let echo = "\\echo"
+
+  let empty = "\\empty"
+
+  let exit = "\\exit"
+
+  let unsafe_cast = "\\HH\\FIXME\\UNSAFE_CAST"
+
+  let unsafe_nonnull_cast = "\\HH\\FIXME\\UNSAFE_NONNULL_CAST"
+
+  let enforced_cast = "\\HH\\FIXME\\ENFORCED_CAST"
+
+  let all_pseudo_functions =
+    HashSet.of_list
+      [
+        isset;
+        unset;
+        hh_show;
+        hh_expect;
+        hh_expect_equivalent;
+        hh_show_env;
+        hh_log_level;
+        hh_force_solve;
+        hh_loop_forever;
+        hh_sleep;
+        echo;
+        empty;
+        exit;
+        unsafe_cast;
+        unsafe_nonnull_cast;
+      ]
+
+  let is_pseudo_function x = HashSet.mem all_pseudo_functions x
+end
+
+(* This is slightly different but related to pseudo-functions; these functions
+ * may be defined in HHIs, so we don't want to restrict looking them up, but
+ * do not have runtime definitions -- the emitter transforms them to special
+ * bytecode sequences instead of FCalls. So, they are not valid for use as
+ * function pointers.
+ *
+ * Should be kept in sync with emit_expression::emit_special_function for cases
+ * that are declared in HHI.
+ *)
+module SpecialFunctions = struct
+  let classname_to_class = "\\HH\\classname_to_class"
+
+  let classname_to_class_strict_isolation_backdoor =
+    "\\HH\\classname_to_class_strict_isolation_backdoor"
+
+  let exit = PseudoFunctions.exit
+
+  let get_class_from_type = "\\HH\\ReifiedGenerics\\get_class_from_type"
+
+  let global_get = "\\HH\\global_get"
+
+  let global_set = "\\HH\\global_set"
+
+  let global_unset = "\\HH\\global_set"
+
+  let tag_provenance_here = "\\HH\\tag_provenance_here"
+
+  let unsafe_cast = PseudoFunctions.unsafe_cast
+
+  let unsafe_nonnull_cast = PseudoFunctions.unsafe_nonnull_cast
+
+  let all_special_functions =
+    HashSet.of_list
+      [
+        classname_to_class;
+        classname_to_class_strict_isolation_backdoor;
+        exit;
+        get_class_from_type;
+        global_get;
+        global_set;
+        global_unset;
+        tag_provenance_here;
+        unsafe_cast;
+        unsafe_nonnull_cast;
+      ]
+
+  let is_special_function = HashSet.mem all_special_functions
 end
 
 module StdlibFunctions = struct
-
-  let is_int      = "\\is_int"
-  let is_bool     = "\\is_bool"
-  let is_array    = "\\is_array"
-  let is_vec      = "\\is_vec"
-  let is_dict     = "\\is_dict"
-  let is_keyset   = "\\is_keyset"
-  let is_float    = "\\is_float"
-  let is_string   = "\\is_string"
-  let is_null     = "\\is_null"
-  let is_resource = "\\is_resource"
-
   let get_class = "\\get_class"
-  let get_called_class = "\\get_called_class" (* treated as static::class *)
 
-  let array_filter = "\\array_filter"
-  let array_map = "\\array_map"
+  let type_structure = "\\HH\\type_structure"
 
-  let type_structure = "\\type_structure"
+  let type_structure_classname = "\\HH\\type_structure_classname"
+
+  let type_structure_class = "\\HH\\type_structure_class"
+
+  let array_mark_legacy = "\\HH\\array_mark_legacy"
+
+  let array_unmark_legacy = "\\HH\\array_unmark_legacy"
+
+  let is_any_array = "\\HH\\is_any_array"
+
+  let get_class_from_type = "\\HH\\ReifiedGenerics\\get_class_from_type"
+
+  (* All Id funcions that Typing.dispatch_call handles specially *)
+  let special_dispatch =
+    String.Hash_set.of_list
+      ~growth_allowed:false
+      [
+        PreNamespacedFunctions.echo;
+        PseudoFunctions.isset;
+        PseudoFunctions.unset;
+        type_structure;
+        type_structure_classname;
+        type_structure_class;
+        PseudoFunctions.unsafe_cast;
+        PseudoFunctions.unsafe_nonnull_cast;
+      ]
+
+  let needs_special_dispatch x = Hash_set.mem special_dispatch x
 end
 
 module Typehints = struct
+  let null = "null"
 
-  let void     = "void"
+  let void = "void"
+
   let resource = "resource"
-  let num      = "num"
+
+  let num = "num"
+
   let arraykey = "arraykey"
+
   let noreturn = "noreturn"
-  let mixed    = "mixed"
-  let nonnull  = "nonnull"
-  let this     = "this"
-  let dynamic  = "dynamic"
 
-  let int     = "int"
-  let bool    = "bool"
-  let float   = "float"
-  let string  = "string"
-  let array   = "array"
-  let darray  = "darray"
-  let varray  = "varray"
+  let mixed = "mixed"
+
+  let nonnull = "nonnull"
+
+  let this = "this"
+
+  let dynamic = "dynamic"
+
+  let nothing = "nothing"
+
+  let int = "int"
+
+  let bool = "bool"
+
+  let float = "float"
+
+  let darray = "darray"
+
+  let varray = "varray"
+
   let varray_or_darray = "varray_or_darray"
-  let integer = "integer"
-  let boolean = "boolean"
-  let double  = "double"
-  let real    = "real"
-  let callable = "callable"
 
-  let object_cast = "object"
-  let unset_cast = "unset"
+  let vec_or_dict = "vec_or_dict"
+
+  let callable = "callable"
 
   let wildcard = "_"
 
+  let is_reserved_type_hint =
+    let reserved_typehints =
+      HashSet.of_list
+        [
+          null;
+          void;
+          resource;
+          num;
+          arraykey;
+          noreturn;
+          mixed;
+          nonnull;
+          this;
+          dynamic;
+          nothing;
+          int;
+          bool;
+          float;
+          darray;
+          varray;
+          varray_or_darray;
+          vec_or_dict;
+          callable;
+          wildcard;
+        ]
+    in
+    (fun x -> HashSet.mem reserved_typehints x)
+
   let is_reserved_global_name x =
-    let x = String.lowercase_ascii x in
-    x = array    || x = callable || x = Classes.cSelf || x = Classes.cParent
+    String.equal x callable
+    || String.equal x Classes.cSelf
+    || String.equal x Classes.cParent
 
   let is_reserved_hh_name x =
-    let x = String.lowercase_ascii x in
-    x = void     || x = noreturn || x = int      || x = bool     || x = float ||
-    x = num      || x = string   || x = resource || x = mixed    || x = array ||
-    x = arraykey || x = integer  || x = boolean  || x = double   || x = real  ||
-    x = dynamic  || x = wildcard
+    String.equal x void
+    || String.equal x noreturn
+    || String.equal x int
+    || String.equal x bool
+    || String.equal x float
+    || String.equal x num
+    || String.equal x resource
+    || String.equal x mixed
+    || String.equal x arraykey
+    || String.equal x dynamic
+    || String.equal x wildcard
+    || String.equal x null
+    || String.equal x nonnull
+    || String.equal x nothing
+    || String.equal x this
 
   let is_namespace_with_reserved_hh_name x =
     let unqualify qualified_name =
       let as_list = Str.split (Str.regexp "\\") qualified_name in
-      let as_list = List.filter as_list ~f:(fun s -> s != "") in
+      let as_list = List.filter as_list ~f:(fun s -> not (String.equal s "")) in
       match List.rev as_list with
-      | name :: qualifiers -> List.rev qualifiers, name
-      | [] -> [], qualified_name in
+      | name :: qualifiers -> (List.rev qualifiers, name)
+      | [] -> ([], qualified_name)
+    in
     let is_HH qualifier =
       match qualifier with
-      | [qual] -> qual = "HH"
-      | _ -> false in
-    let qualifier, name = unqualify x in
+      | [qual] -> String.equal qual "HH"
+      | _ -> false
+    in
+    let (qualifier, name) = unqualify x in
     name |> is_reserved_hh_name
-    && not (List.is_empty qualifier)
+    && (not (List.is_empty qualifier))
     && not (qualifier |> is_HH)
-
 end
 
 module PseudoConsts = struct
+  let g__LINE__ = "\\__LINE__"
 
-  let g__LINE__      = "\\__LINE__"
-  let g__CLASS__     = "\\__CLASS__"
-  let g__TRAIT__     = "\\__TRAIT__"
-  let g__FILE__      = "\\__FILE__"
-  let g__DIR__       = "\\__DIR__"
-  let g__FUNCTION__  = "\\__FUNCTION__"
-  let g__METHOD__    = "\\__METHOD__"
+  let g__CLASS__ = "\\__CLASS__"
+
+  let g__TRAIT__ = "\\__TRAIT__"
+
+  let g__FILE__ = "\\__FILE__"
+
+  let g__DIR__ = "\\__DIR__"
+
+  let g__FUNCTION__ = "\\__FUNCTION__"
+
+  let g__METHOD__ = "\\__METHOD__"
+
   let g__NAMESPACE__ = "\\__NAMESPACE__"
+
   let g__COMPILER_FRONTEND__ = "\\__COMPILER_FRONTEND__"
 
-  let all_pseudo_consts = [
-    g__LINE__; g__CLASS__; g__TRAIT__; g__FILE__; g__DIR__;
-    g__FUNCTION__; g__METHOD__; g__NAMESPACE__; g__COMPILER_FRONTEND__
-  ]
-  let is_pseudo_const =
-    let h = HashSet.create 23 in
-    List.iter all_pseudo_consts (HashSet.add h);
-    fun x -> HashSet.mem h x
+  let g__FUNCTION_CREDENTIAL__ = "\\__FUNCTION_CREDENTIAL__"
 
+  (* exit is not a pseudo consts, but it is currently parsed as such.
+   * Would be more correct to parse it as special statement like return
+   *)
+  let exit = "\\exit"
+
+  let all_pseudo_consts =
+    HashSet.of_list
+      [
+        g__LINE__;
+        g__CLASS__;
+        g__TRAIT__;
+        g__FILE__;
+        g__DIR__;
+        g__FUNCTION__;
+        g__METHOD__;
+        g__NAMESPACE__;
+        g__COMPILER_FRONTEND__;
+        g__FUNCTION_CREDENTIAL__;
+        exit;
+      ]
+
+  let is_pseudo_const x = HashSet.mem all_pseudo_consts x
 end
 
 module FB = struct
+  let cEnum = "\\Enum"
 
-  let cEnum                  = "\\Enum"
-  let cUncheckedEnum         = "\\UncheckedEnum"
+  let tInner = "TInner"
 
-  let fgena                  = "\\gena"
-  let fgenva                 = "\\genva"
-  let fgen_array_rec         = "\\gen_array_rec"
+  let idx = "\\HH\\idx"
 
-  let idx                    = "\\idx"
-
-  let cTypeStructure         = "\\TypeStructure"
-
+  let cTypeStructure = "\\HH\\TypeStructure"
 end
 
 module HH = struct
+  let memoizeOption = "\\HH\\MemoizeOption"
 
-  let asio_va                = "\\HH\\Asio\\va"
-  let lib_tuple_from_async   = "\\HH\\Lib\\Tuple\\from_async"
-  let lib_tuple_gen          = "\\HH\\Lib\\Tuple\\gen"
+  let contains = "\\HH\\Lib\\C\\contains"
 
-end
+  let contains_key = "\\HH\\Lib\\C\\contains_key"
 
-module Rx = struct
-  let freeze = "\\HH\\Rx\\freeze"
-  let mutable_ = "\\HH\\Rx\\mutable"
-  let cTraversable = "\\HH\\Rx\\Traversable"
-  let is_enabled = "\\HH\\Rx\\IS_ENABLED"
-  let cKeyedTraversable = "\\HH\\Rx\\KeyedTraversable"
+  module FIXME = struct
+    let tPoisonMarker = "\\HH\\FIXME\\POISON_MARKER"
+  end
 end
 
 module Shapes = struct
-  let cShapes                = "\\Shapes"
-  let idx                    = "idx"
-  let keyExists              = "keyExists"
-  let removeKey              = "removeKey"
-  let toArray                = "toArray"
+  let cShapes = "\\HH\\Shapes"
+
+  let cReadonlyShapes = "\\HH\\Readonly\\Shapes"
+
+  let idx = "idx"
+
+  let at = "at"
+
+  let keyExists = "keyExists"
+
+  let removeKey = "removeKey"
+
+  let toArray = "toArray"
+
+  let toDict = "toDict"
+
+  let put = "put"
 end
 
-module Superglobals = struct
-  let globals = "$GLOBALS"
-
-  let all_superglobals =
-    [globals ; "$_SERVER"; "$_GET"; "$_POST"; "$_FILES";
-     "$_COOKIE"; "$_SESSION"; "$_REQUEST"; "$_ENV"
-    ]
-
-  let is_superglobal =
-    let h = HashSet.create 23 in
-    List.iter all_superglobals (HashSet.add h);
-    fun x -> HashSet.mem h x
+module Hips = struct
+  let inspect = "\\inspect"
 end
 
-module PPLFunctions = struct
-  let all_reserved =
-    [ "sample"; "\\sample"; "factor"; "\\factor";
-      "observe"; "\\observe"; "condition"; "\\condition"
-    ]
+module Regex = struct
+  let tPattern = "\\HH\\Lib\\Regex\\Pattern"
+end
 
-  let is_reserved =
-    let h = HashSet.create 23 in
-    List.iter all_reserved (HashSet.add h);
-    fun name -> HashSet.mem h name
+module XHP = struct
+  let pcdata = "pcdata"
+
+  let any = "any"
+
+  let empty = "empty"
+
+  let is_reserved name =
+    String.equal name pcdata || String.equal name any || String.equal name empty
+
+  let is_xhp_category name = String.is_prefix name ~prefix:"%"
+end
+
+(* This should be a subset of rust_parser_errors::UnstableFeatures that is relevant
+ * to the typechecker *)
+module UnstableFeatures = struct
+  let coeffects_provisional = "coeffects_provisional"
+
+  let readonly = "readonly"
+
+  let expression_trees = "expression_trees"
+
+  let recursive_case_types = "recursive_case_types"
+
+  let representable_as = "representable_as"
+
+  let named_parameters_meth_caller = "named_parameters_meth_caller"
+end
+
+module Coeffects = struct
+  let capability = "$#capability"
+
+  let local_capability = "$#local_capability"
+
+  let contexts = "\\HH\\Contexts"
+
+  let unsafe_contexts = contexts ^ "\\Unsafe"
+
+  let generated_generic_prefix = "T/"
+
+  let is_generated_generic = String.is_prefix ~prefix:generated_generic_prefix
+
+  (** "T/[ctx $foo]" to "ctx $foo". *)
+  let unwrap_generated_generic name =
+    name
+    |> String.chop_prefix_if_exists ~prefix:"T/["
+    |> String.chop_suffix_if_exists ~suffix:"]"
+end
+
+module Readonly = struct
+  let prefix = "\\HH\\Readonly\\"
+
+  let idx = "\\HH\\idx_readonly"
+
+  let as_mut = prefix ^ "as_mut"
+end
+
+module Modules = struct
+  let default = "default"
+end
+
+module Capabilities = struct
+  let defaults = Coeffects.contexts ^ "\\defaults"
+
+  let write_props = Coeffects.contexts ^ "\\write_props"
+
+  let prefix = "\\HH\\Capabilities\\"
+
+  let writeProperty = prefix ^ "WriteProperty"
+
+  let accessGlobals = prefix ^ "AccessGlobals"
+
+  let readGlobals = prefix ^ "ReadGlobals"
+
+  let systemLocal = prefix ^ "SystemLocal"
+
+  let implicitPolicy = prefix ^ "ImplicitPolicy"
+
+  let implicitPolicyLocal = prefix ^ "ImplicitPolicyLocal"
+
+  let io = prefix ^ "IO"
+
+  let rx = prefix ^ "Rx"
+
+  let rxLocal = rx ^ "Local"
+end
+
+module ExpressionTrees = struct
+  let makeTree = "makeTree"
+
+  let intType = "intType"
+
+  let floatType = "floatType"
+
+  let boolType = "boolType"
+
+  let stringType = "stringType"
+
+  let voidType = "voidType"
+
+  let symbolType = "symbolType"
+
+  let visitInt = "visitInt"
+
+  let visitFloat = "visitFloat"
+
+  let visitBool = "visitBool"
+
+  let visitString = "visitString"
+
+  let visitNull = "visitNull"
+
+  let visitBinop = "visitBinop"
+
+  let visitUnop = "visitUnop"
+
+  let visitLocal = "visitLocal"
+
+  let visitLambda = "visitLambda"
+
+  let visitGlobalFunction = "visitGlobalFunction"
+
+  let visitStaticMethod = "visitStaticMethod"
+
+  let visitCall = "visitCall"
+
+  let visitAssign = "visitAssign"
+
+  let visitTernary = "visitTernary"
+
+  let visitIf = "visitIf"
+
+  let visitWhile = "visitWhile"
+
+  let visitReturn = "visitReturn"
+
+  let visitFor = "visitFor"
+
+  let visitBreak = "visitBreak"
+
+  let visitContinue = "visitContinue"
+
+  let splice = "splice"
+
+  let dollardollarTmpVar = "$0dollardollar"
+end
+
+module SimpliHack = struct
+  let prefix = "\\HH\\SimpliHack\\"
+
+  let file = prefix ^ "file"
+
+  let constructor = prefix ^ "constructor"
+
+  let methods = prefix ^ "methods"
+
+  let static_methods = prefix ^ "static_methods"
+
+  let fields = prefix ^ "fields"
+
+  let static_fields = prefix ^ "static_fields"
 end

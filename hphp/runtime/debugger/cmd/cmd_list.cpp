@@ -16,20 +16,23 @@
 
 #include "hphp/runtime/debugger/cmd/cmd_list.h"
 
-#include <sys/types.h>
 #include <sys/stat.h>
 
+#include "hphp/runtime/base/array-iterator.h"
 #include "hphp/runtime/base/file.h"
+#include "hphp/runtime/base/file-util.h"
 #include "hphp/runtime/debugger/cmd/cmd_info.h"
 #include "hphp/runtime/debugger/debugger_client.h"
 #include "hphp/runtime/ext/std/ext_std_file.h"
 
+#include "hphp/util/configs/errorhandling.h"
+
 #include <folly/portability/Unistd.h>
 
-namespace HPHP { namespace Eval {
+namespace HPHP::Eval {
 ///////////////////////////////////////////////////////////////////////////////
 
-TRACE_SET_MOD(debugger);
+TRACE_SET_MOD(debugger)
 
 // Always called from send and implements specific
 // logic for serializing a list command to send via Thrift.
@@ -96,7 +99,7 @@ void CmdList::help(DebuggerClient &client) {
 // The current location is initially determined by the location
 // where execution was interrupted to hand control back to
 // the debugger client and can thereafter be modified by list
-// commands and by switching the the stack frame.
+// commands and by switching the stack frame.
 //
 // The lineFocus and charFocus parameters
 // are non zero only when the source location comes from a breakpoint.
@@ -187,14 +190,14 @@ bool CmdList::listFunctionOrClass(DebuggerClient &client) {
   ArrayIter iter(info);
   Array funcInfo = iter.second().toArray();
   if (!subsymbol.empty()) {
-    String key = CmdInfo::FindSubSymbol(funcInfo[s_methods].toArray(),
-                                        subsymbol);
+    OptString key = CmdInfo::FindSubSymbol(funcInfo[s_methods].toArray(),
+                                           subsymbol);
     if (key.isNull()) return false;
     funcInfo = funcInfo[s_methods].toArray()[key].toArray();
   }
-  String file = funcInfo[s_file].toString();
-  int line1 = funcInfo[s_line1].toInt32();
-  int line2 = funcInfo[s_line2].toInt32();
+  OptString file = funcInfo[s_file].toString();
+  auto line1 = (int)funcInfo[s_line1].toInt64();
+  auto line2 = (int)funcInfo[s_line2].toInt64();
   int line = line1 ? line1 : line2;
   if (file.empty() || !line) return false;
   client.setListLocation(file.data(), line - 1, false);
@@ -342,8 +345,8 @@ void CmdList::onClient(DebuggerClient &client) {
 // The function returns false if the reply to the client fails during the
 // sending process.
 bool CmdList::onServer(DebuggerProxy &proxy) {
-  auto savedWarningFrequency = RuntimeOption::WarningFrequency;
-  RuntimeOption::WarningFrequency = 0;
+  auto savedWarningFrequency = Cfg::ErrorHandling::WarningFrequency;
+  Cfg::ErrorHandling::WarningFrequency = 0;
   m_code = HHVM_FN(file_get_contents)(m_file.c_str());
   if (!proxy.isLocal() && !m_code.toBoolean() && m_file[0] != '/') {
     DSandboxInfo info = proxy.getSandbox();
@@ -355,9 +358,8 @@ bool CmdList::onServer(DebuggerProxy &proxy) {
       m_code = HHVM_FN(file_get_contents)(full_path.c_str());
     }
   }
-  RuntimeOption::WarningFrequency = savedWarningFrequency;
-  if (!m_code.toBoolean() &&
-    m_file.find("/:systemlib.php") == m_file.length() - 15) {
+  Cfg::ErrorHandling::WarningFrequency = savedWarningFrequency;
+  if (!m_code.toBoolean() && FileUtil::isSystemName(m_file)) {
     m_code = SystemLib::s_source;
   }
   return proxy.sendToClient((DebuggerCommand*)this);
@@ -375,4 +377,4 @@ Variant CmdList::GetSourceFile(DebuggerClient &client,
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-}}
+}

@@ -1,1 +1,34 @@
-No errors
+error: Typing[4052] A shape field name must be an `int` or `string` [1]
+-> Not a value of type FooType [2]
+
+shapes_cc_10.php--use.php:4:22
+2 | 
+3 | // Reject: type of keys is opaque
+4 | type myshape = shape(X::X1 => int, X::X2 => bool);
+  |                      ^^^^^ [1]
+
+shapes_cc_10.php--def.php:5:9
+3 | newtype FooType = int;
+4 | class X {
+5 |   const FooType X1 = 0;
+  |         ^^^^^^^ [2]
+6 |   const FooType X2 = 1;
+7 | }
+
+error: Typing[4052] A shape field name must be an `int` or `string` [1]
+-> Not a value of type FooType [2]
+
+shapes_cc_10.php--use.php:4:36
+2 | 
+3 | // Reject: type of keys is opaque
+4 | type myshape = shape(X::X1 => int, X::X2 => bool);
+  |                                    ^^^^^ [1]
+
+shapes_cc_10.php--def.php:6:9
+4 | class X {
+5 |   const FooType X1 = 0;
+6 |   const FooType X2 = 1;
+  |         ^^^^^^^ [2]
+7 | }
+
+2 errors found

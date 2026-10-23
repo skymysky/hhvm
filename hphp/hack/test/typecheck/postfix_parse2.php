@@ -1,5 +1,5 @@
 <?hh
 
-function f(string $a) {
+function f(string $a): void {
   $a++;
 }

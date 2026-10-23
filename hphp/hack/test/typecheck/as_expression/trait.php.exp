@@ -1,0 +1,25 @@
+error: Typing[4195] Invalid `as` expression hint [1]
+-> The `as` operator cannot be used with a trait name [1]
+
+trait.php:6:9
+4 | 
+5 | function f(mixed $x): void {
+6 |   $x as TFoo;
+  |         ^^^^ [1]
+7 | }
+
+error: Typing[4002] `TFoo` is uninstantiable [1]
+-> Declaration is here [2]
+
+trait.php:6:9
+1 | <?hh
+2 | 
+3 | trait TFoo {}
+  |       ^^^^ [2]
+4 | 
+5 | function f(mixed $x): void {
+6 |   $x as TFoo;
+  |         ^^^^ [1]
+7 | }
+
+2 errors found

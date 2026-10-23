@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 /**
  * Copyright (c) 2014, Facebook, Inc.
  * All rights reserved.
@@ -29,7 +29,7 @@ class Unrelated {
   }
 
   public async function genFooAsA(): Awaitable<A> {
-    if (!($this->foo instanceof A)) {
+    if (!($this->foo is A)) {
       $this->foo = new A();
     }
     await Z::genNotFoo();

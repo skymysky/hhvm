@@ -1,6 +1,6 @@
-<?php
+<?hh
 
-function main() {
+function main() :mixed{
   $uri = realpath(__DIR__.'/xinclude-1.xml');
   $xml = file_get_contents($uri);
   $doc = new DOMDocument();
@@ -10,4 +10,8 @@ function main() {
   var_dump($doc->saveXML());
 }
 
+
+<<__EntryPoint>>
+function main_xinclude() :mixed{
 main();
+}

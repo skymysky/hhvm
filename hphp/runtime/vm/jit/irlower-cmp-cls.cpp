@@ -19,15 +19,17 @@
 #include "hphp/runtime/vm/class.h"
 #include "hphp/runtime/vm/instance-bits.h"
 
-#include "hphp/runtime/vm/jit/types.h"
+#include "hphp/runtime/vm/jit/abi.h"
 #include "hphp/runtime/vm/jit/arg-group.h"
 #include "hphp/runtime/vm/jit/call-spec.h"
 #include "hphp/runtime/vm/jit/code-gen-cf.h"
 #include "hphp/runtime/vm/jit/code-gen-helpers.h"
+#include "hphp/runtime/vm/jit/coeffect-fun-param-profile.h"
 #include "hphp/runtime/vm/jit/extra-data.h"
 #include "hphp/runtime/vm/jit/ir-instruction.h"
 #include "hphp/runtime/vm/jit/ir-opcode.h"
 #include "hphp/runtime/vm/jit/ssa-tmp.h"
+#include "hphp/runtime/vm/jit/target-cache.h"
 #include "hphp/runtime/vm/jit/type.h"
 #include "hphp/runtime/vm/jit/vasm-gen.h"
 #include "hphp/runtime/vm/jit/vasm-instr.h"
@@ -36,9 +38,9 @@
 #include "hphp/util/asm-x64.h"
 #include "hphp/util/trace.h"
 
-namespace HPHP { namespace jit { namespace irlower {
+namespace HPHP::jit::irlower {
 
-TRACE_SET_MOD(irlower);
+TRACE_SET_MOD(irlower)
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -49,7 +51,18 @@ void cgEqCls(IRLS& env, const IRInstruction* inst) {
   auto& v = vmain(env);
 
   auto const sf = v.makeReg();
-  emitCmpLowPtr<Class>(v, sf, src2, src1);
+  v << cmpq{src2, src1, sf};
+  v << setcc{CC_E, sf, dst};
+}
+
+void cgEqLazyCls(IRLS& env, const IRInstruction* inst) {
+  auto const dst  = dstLoc(env, inst, 0).reg();
+  auto const src1 = srcLoc(env, inst, 0).reg();
+  auto const src2 = srcLoc(env, inst, 1).reg();
+  auto& v = vmain(env);
+
+  auto const sf = v.makeReg();
+  v << cmpq{src2, src1, sf};
   v << setcc{CC_E, sf, dst};
 }
 
@@ -58,10 +71,10 @@ void cgEqCls(IRLS& env, const IRInstruction* inst) {
 template <typename Cls, typename Len>
 Vreg check_clsvec(Vout& v, Vreg d, Vreg lhs, Cls rhs, Len rhsVecLen) {
   // If it's a subclass, rhs must be at the appropriate index.
-  auto const vecOffset = rhsVecLen * static_cast<int>(sizeof(LowPtr<Class>)) +
-    (Class::classVecOff() - sizeof(LowPtr<Class>));
+  auto const vecOffset = rhsVecLen * static_cast<int>(sizeof(PackedPtr<Class>)) +
+    (Class::classVecOff() - sizeof(PackedPtr<Class>));
   auto const sf = v.makeReg();
-  emitCmpLowPtr<Class>(v, sf, rhs, lhs[vecOffset]);
+  emitCmpPackedPtr(v, sf, rhs, lhs[vecOffset]);
   v << setcc{CC_E, sf, d};
   return d;
 }
@@ -76,6 +89,18 @@ Vreg check_subcls(Vout& v, Vreg sf, Vreg d, Vreg lhs, Cls rhs, Len rhsVecLen) {
        },
        [&] (Vout& v) { return v.cns(false); }
       );
+}
+
+void emitClassofNonIFace(Vout& v, Vreg lhs, Vreg rhs, Vreg dst) {
+  // This essentially inlines Class::classofNonIFace
+  auto const rhsTmp = v.makeReg();
+  auto const rhsLen = v.makeReg();
+  auto const sf = v.makeReg();
+  static_assert(sizeof(Class::classVecLen_t) == 2);
+  v << loadw{rhs[Class::classVecLenOff()], rhsTmp};
+  v << movzwq{rhsTmp, rhsLen};
+  v << cmpwm{rhsTmp, lhs[Class::classVecLenOff()], sf};
+  check_subcls(v, sf, dst, lhs, rhs, rhsLen);
 }
 
 void cgInstanceOf(IRLS& env, const IRInstruction* inst) {
@@ -106,24 +131,8 @@ void cgInstanceOf(IRLS& env, const IRInstruction* inst) {
     return;
   }
 
-  // This essentially inlines Class::classofNonIFace
   auto const lhs = srcLoc(env, inst, 0).reg();
-  auto const rhsTmp = v.makeReg();
-  auto const rhsLen = v.makeReg();
-  auto const sfVecLen = v.makeReg();
-  if (sizeof(Class::veclen_t) == 2) {
-    v << loadw{rhs[Class::classVecLenOff()], rhsTmp};
-    v << movzwq{rhsTmp, rhsLen};
-    v << cmpwm{rhsTmp, lhs[Class::classVecLenOff()], sfVecLen};
-  } else if (sizeof(Class::veclen_t) == 4) {
-    v << loadl{rhs[Class::classVecLenOff()], rhsTmp};
-    v << movzlq{rhsTmp, rhsLen};
-    v << cmplm{rhsTmp, lhs[Class::classVecLenOff()], sfVecLen};
-  } else {
-    not_implemented();
-  }
-
-  check_subcls(v, sfVecLen, dst, lhs, rhs, rhsLen);
+  emitClassofNonIFace(v, lhs, rhs, dst);
 }
 
 IMPL_OPCODE_CALL(InstanceOfIface)
@@ -137,19 +146,18 @@ void cgInstanceOfIfaceVtable(IRLS& env, const IRInstruction* inst) {
   auto& v = vmain(env);
 
   auto const sf = v.makeReg();
-  emitCmpVecLen(v, sf, static_cast<int32_t>(slot),
-                rcls[Class::vtableVecLenOff()]);
+  static_assert(sizeof(Class::vtableVecLen_t) == 2);
+  v << cmpwim{static_cast<int32_t>(slot), rcls[Class::vtableVecLenOff()], sf};
+
   cond(
     v, CC_A, sf, dst,
     [&] (Vout& v) {
       auto const vtableVec = v.makeReg();
-      emitLdLowPtr(v, rcls[Class::vtableVecOff()], vtableVec,
-                   sizeof(LowPtr<Class::VtableVecSlot>));
-
+      v << load{rcls[Class::vtableVecOff()], vtableVec};
       auto const ifaceOff = slot * sizeof(Class::VtableVecSlot) +
                             offsetof(Class::VtableVecSlot, iface);
       auto const sf = v.makeReg();
-      emitCmpLowPtr<Class>(v, sf, iface, vtableVec[ifaceOff]);
+      emitCmpPackedPtr(v, sf, iface, vtableVec[ifaceOff]);
 
       auto tmp = v.makeReg();
       v << setcc{CC_E, sf, tmp};
@@ -184,8 +192,9 @@ void cgExtendsClass(IRLS& env, const IRInstruction* inst) {
     // Check the length of the class vectors.  If the candidate's is at least
     // as long as the potential base (`rhsCls'), it might be a subclass.
     auto const sf = v.makeReg();
-    emitCmpVecLen(v, sf, static_cast<int32_t>(rhsCls->classVecLen()),
-                  lhs[Class::classVecLenOff()]);
+    static_assert(sizeof(Class::classVecLen_t) == 2);
+    v << cmpwim{static_cast<int32_t>(rhsCls->classVecLen()),
+                lhs[Class::classVecLenOff()], sf};
     return check_subcls(v, sf, d, lhs, rhsCls, rhsCls->classVecLen());
   };
 
@@ -200,7 +209,7 @@ void cgExtendsClass(IRLS& env, const IRInstruction* inst) {
   // Test if it is the exact same class.
   // TODO(#2044801): We should be doing this control flow at the IR level.
   auto const sf = v.makeReg();
-  emitCmpLowPtr<Class>(v, sf, v.cns(rhsCls), lhs);
+  emitCmpPackedPtr(v, sf, rhsCls, lhs);
 
   if (rhsCls->attrs() & AttrNoOverride) {
     // If the test class cannot be extended, we only need to do the same-class
@@ -233,7 +242,7 @@ static void implInstanceOfBitmask(IRLS& env, const IRInstruction* inst,
   int offset;
   uint8_t mask;
   if (!InstanceBits::getMask(rhsName, offset, mask)) {
-    always_assert(!"cgInstanceOfBitmask had no bitmask");
+    always_assert(false && "cgInstanceOfBitmask had no bitmask");
   }
 
   auto const sf = v.makeReg();
@@ -248,20 +257,119 @@ void cgNInstanceOfBitmask(IRLS& env, const IRInstruction* inst) {
   implInstanceOfBitmask(env, inst, CC_Z);
 }
 
+///////////////////////////////////////////////////////////////////////////////
+
+void cgIsTypeStructCached(IRLS& env, const IRInstruction* inst) {
+  auto& v = vmain(env);
+  auto const arr = srcLoc(env, inst, 0).reg();
+  auto const cellTy = inst->src(1)->type();
+  auto const dst = dstLoc(env, inst, 0).reg();
+  auto const branch = label(env, inst->taken());
+
+  auto const isObj = inst->src(1)->isA(TObj);
+
+  if (!isObj && cellTy.maybe(TObj)) {
+    // PUNT
+    v << jmp{label(env, inst->taken())};
+    return;
+  }
+
+  auto const pairSize = safe_cast<int32_t>(sizeof(TSClassCache::Pair));
+  auto const hash = emitHashInt64(env, inst, arr);
+  auto const offset = v.makeReg();
+
+  static_assert(folly::isPowTwo(sizeof(TSClassCache::Pair)),
+                "invalid pair size");
+
+  v << andqi{
+    ((int32_t)TSClassCache::kNumLines - 1) * pairSize,
+    hash,
+    offset,
+    v.makeReg()
+  };
+
+  auto const ch = rds::bindTSCache(inst->func());
+  markRDSAccess(v, ch.handle());
+  auto const sf = v.makeReg();
+  v << cmpqm{arr, offset[rvmtl() + ch.handle()], sf};
+  ifThen(v, CC_NE, sf, branch);
+
+  // Now that we know it is cached, we can return false
+  if (!isObj) {
+    // Definitely not object
+    v << copy{v.cns(false), dst};
+    return;
+  }
+
+  markRDSAccess(v, ch.handle());
+  auto const rhs = v.makeReg();
+  emitLdPackedPtr(v, offset[rvmtl() + ch.handle() + sizeof(ArrayData*)], rhs);
+  auto const lhs = [&] {
+    assertx(isObj);
+    if (auto const exact = cellTy.clsSpec().exactCls()) return v.cns(exact);
+    auto const lhs = v.makeReg();
+    emitLdObjClass(vmain(env), srcLoc(env, inst, 1).reg(), lhs);
+    return lhs;
+  }();
+  emitClassofNonIFace(v, lhs, rhs, dst);
+}
+
+void cgProfileIsTypeStruct(IRLS& env, const IRInstruction* inst) {
+  auto const extra = inst->extra<RDSHandleData>();
+  auto args = argGroup(env, inst)
+              .ssa(0)
+              .addr(rvmtl(), safe_cast<int32_t>(extra->handle));
+
+  cgCallHelper(
+    vmain(env),
+    env,
+    CallSpec::direct(profileIsTypeStructHelper),
+    kVoidDest,
+    SyncOptions::None,
+    args
+  );
+}
+
+void cgProfileCoeffectFunParam(IRLS& env, const IRInstruction* inst) {
+  auto const extra = inst->extra<RDSHandleData>();
+  auto args = argGroup(env, inst)
+              .typedValue(0)
+              .addr(rvmtl(), safe_cast<int32_t>(extra->handle));
+
+  cgCallHelper(
+    vmain(env),
+    env,
+    CallSpec::direct(profileCoeffectFunParamHelper),
+    kVoidDest,
+    SyncOptions::None,
+    args
+  );
+}
+
+void cgLdCoeffectFunParamNaive(IRLS& env, const IRInstruction* inst) {
+  auto const extra = inst->extra<LdCoeffectFunParamNaive>();
+  cgCallHelper(
+    vmain(env),
+    env,
+    CallSpec::direct(CoeffectRule::getFunParam),
+    callDest(env, inst),
+    SyncOptions::Sync,
+    argGroup(env, inst).typedValue(0).imm(extra->paramId)
+  );
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
 IMPL_OPCODE_CALL(ProfileInstanceCheck)
 
-IMPL_OPCODE_CALL(InterfaceSupportsArr)
-IMPL_OPCODE_CALL(InterfaceSupportsVec)
-IMPL_OPCODE_CALL(InterfaceSupportsDict)
-IMPL_OPCODE_CALL(InterfaceSupportsKeyset)
+IMPL_OPCODE_CALL(InterfaceSupportsArrLike)
 IMPL_OPCODE_CALL(InterfaceSupportsStr)
 IMPL_OPCODE_CALL(InterfaceSupportsInt)
 IMPL_OPCODE_CALL(InterfaceSupportsDbl)
 
-IMPL_OPCODE_CALL(ResolveTypeStruct)
 IMPL_OPCODE_CALL(IsTypeStruct)
-IMPL_OPCODE_CALL(AsTypeStruct)
+IMPL_OPCODE_CALL(IsTypeStructShallow)
 
 ///////////////////////////////////////////////////////////////////////////////
 
-}}}
+}

@@ -1,24 +1,24 @@
-<?php
+<?hh
 
 class TestClass {
     public $prop = 2;
 
-    public function foo() {
+    <<__DynamicallyCallable>> public function foo() :mixed{
         echo "Called foo(), property = $this->prop\n";
         var_dump($this);
         return "Return Val";
     }
 
-    public function willThrow() {
+    <<__DynamicallyCallable>> public function willThrow() :mixed{
         throw new Exception("Called willThrow()");
     }
 
-    public function methodWithArgs($a, $b) {
+    <<__DynamicallyCallable>> public function methodWithArgs($a, $b) :mixed{
         echo "Called methodWithArgs($a, $b)\n";
     }
 }
 
-
+<<__EntryPoint>> function main(): void {
 $testClassInstance = new TestClass();
 $testClassInstance->prop = "Hello";
 
@@ -29,19 +29,18 @@ $methodThatThrows = new ReflectionMethod("TestClass::willThrow");
 
 echo "Public method:\n";
 
-var_dump($foo->invokeArgs($testClassInstance, array()));
-var_dump($foo->invokeArgs($testClassInstance, array(true)));
+var_dump($foo->invokeArgs($testClassInstance, vec[]));
+var_dump($foo->invokeArgs($testClassInstance, vec[true]));
 
 echo "\nMethod with args:\n";
 
-var_dump($methodWithArgs->invokeArgs($testClassInstance, array(1, "arg2")));
-var_dump($methodWithArgs->invokeArgs($testClassInstance, array(1, "arg2", 3)));
+var_dump($methodWithArgs->invokeArgs($testClassInstance, vec[1, "arg2"]));
+var_dump($methodWithArgs->invokeArgs($testClassInstance, vec[1, "arg2", 3]));
 
 echo "\nMethod that throws an exception:\n";
 try {
-    $methodThatThrows->invokeArgs($testClassInstance, array());
+    $methodThatThrows->invokeArgs($testClassInstance, vec[]);
 } catch (Exception $e) {
     var_dump($e->getMessage());
 }
-
-?>
+}

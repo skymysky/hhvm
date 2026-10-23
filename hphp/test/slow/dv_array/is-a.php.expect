@@ -29,7 +29,7 @@ is_varray => FALSE
 is_darray => FALSE
 gettype => double
 ============= direct_test_dv_arrays ================
-value => object(stdClass)#1 (0) {
+value => object(stdClass) (0) {
 }
 is_varray => FALSE
 is_darray => FALSE
@@ -42,7 +42,7 @@ gettype => resource
 ============= direct_test_dv_arrays ================
 value => vec(0) {
 }
-is_varray => FALSE
+is_varray => TRUE
 is_darray => FALSE
 gettype => vec
 ============= direct_test_dv_arrays ================
@@ -51,14 +51,14 @@ value => vec(3) {
   int(2)
   int(3)
 }
-is_varray => FALSE
+is_varray => TRUE
 is_darray => FALSE
 gettype => vec
 ============= direct_test_dv_arrays ================
 value => dict(0) {
 }
 is_varray => FALSE
-is_darray => FALSE
+is_darray => TRUE
 gettype => dict
 ============= direct_test_dv_arrays ================
 value => dict(2) {
@@ -68,7 +68,7 @@ value => dict(2) {
   string(3) "def"
 }
 is_varray => FALSE
-is_darray => FALSE
+is_darray => TRUE
 gettype => dict
 ============= direct_test_dv_arrays ================
 value => keyset(0) {
@@ -86,61 +86,28 @@ is_varray => FALSE
 is_darray => FALSE
 gettype => keyset
 ============= direct_test_dv_arrays ================
-value => array(0) {
-}
-is_varray => FALSE
-is_darray => FALSE
-gettype => array
-============= direct_test_dv_arrays ================
-value => array(3) {
-  [0]=>
-  int(1)
-  [1]=>
-  int(2)
-  [2]=>
-  int(3)
-}
-is_varray => FALSE
-is_darray => FALSE
-gettype => array
-============= direct_test_dv_arrays ================
-value => array(3) {
-  ["a"]=>
-  int(100)
-  ["b"]=>
-  int(200)
-  ["c"]=>
-  int(300)
-}
-is_varray => FALSE
-is_darray => FALSE
-gettype => array
-============= direct_test_dv_arrays ================
-value => array(0) {
+value => vec(0) {
 }
 is_varray => TRUE
 is_darray => FALSE
-gettype => array
+gettype => vec
 ============= direct_test_dv_arrays ================
-value => array(3) {
-  [0]=>
+value => vec(3) {
   int(1)
-  [1]=>
   int(2)
-  [2]=>
   int(3)
 }
 is_varray => TRUE
 is_darray => FALSE
-gettype => array
+gettype => vec
 ============= direct_test_dv_arrays ================
-value => array(0) {
+value => dict(0) {
 }
 is_varray => FALSE
 is_darray => TRUE
-gettype => array
+gettype => dict
 ============= direct_test_dv_arrays ================
-value => array(2) {
+value => dict(2) {
   [100]=>
   string(3) "abc"
   ["def"]=>
@@ -148,9 +115,9 @@ value => array(2) {
 }
 is_varray => FALSE
 is_darray => TRUE
-gettype => array
+gettype => dict
 ============= direct_test_dv_arrays ================
-value => array(3) {
+value => dict(3) {
   [0]=>
   string(1) "a"
   [1]=>
@@ -160,21 +127,18 @@ value => array(3) {
 }
 is_varray => FALSE
 is_darray => TRUE
-gettype => array
+gettype => dict
 ============= direct_test_dv_arrays ================
-value => array(3) {
-  [0]=>
+value => vec(3) {
   string(1) "x"
-  [1]=>
   string(1) "y"
-  [2]=>
   string(1) "z"
 }
 is_varray => TRUE
 is_darray => FALSE
-gettype => array
+gettype => vec
 ============= direct_test_dv_arrays ================
-value => array(3) {
+value => dict(3) {
   [0]=>
   int(123)
   [1]=>
@@ -184,9 +148,9 @@ value => array(3) {
 }
 is_varray => FALSE
 is_darray => TRUE
-gettype => array
+gettype => dict
 ============= direct_test_dv_arrays ================
-value => array(3) {
+value => dict(3) {
   ["x"]=>
   int(123)
   ["y"]=>
@@ -196,9 +160,9 @@ value => array(3) {
 }
 is_varray => FALSE
 is_darray => TRUE
-gettype => array
+gettype => dict
 ============= direct_test_dv_arrays ================
-value => array(3) {
+value => dict(3) {
   [66]=>
   int(11)
   [55]=>
@@ -208,7 +172,7 @@ value => array(3) {
 }
 is_varray => FALSE
 is_darray => TRUE
-gettype => array
+gettype => dict
 ============= indirect_test_dv_arrays ==============
 value => NULL
 HH\is_varray => FALSE
@@ -240,7 +204,7 @@ HH\is_varray => FALSE
 HH\is_darray => FALSE
 gettype => double
 ============= indirect_test_dv_arrays ==============
-value => object(stdClass)#1 (0) {
+value => object(stdClass) (0) {
 }
 HH\is_varray => FALSE
 HH\is_darray => FALSE
@@ -253,7 +217,7 @@ gettype => resource
 ============= indirect_test_dv_arrays ==============
 value => vec(0) {
 }
-HH\is_varray => FALSE
+HH\is_varray => TRUE
 HH\is_darray => FALSE
 gettype => vec
 ============= indirect_test_dv_arrays ==============
@@ -262,14 +226,14 @@ value => vec(3) {
   int(2)
   int(3)
 }
-HH\is_varray => FALSE
+HH\is_varray => TRUE
 HH\is_darray => FALSE
 gettype => vec
 ============= indirect_test_dv_arrays ==============
 value => dict(0) {
 }
 HH\is_varray => FALSE
-HH\is_darray => FALSE
+HH\is_darray => TRUE
 gettype => dict
 ============= indirect_test_dv_arrays ==============
 value => dict(2) {
@@ -279,7 +243,7 @@ value => dict(2) {
   string(3) "def"
 }
 HH\is_varray => FALSE
-HH\is_darray => FALSE
+HH\is_darray => TRUE
 gettype => dict
 ============= indirect_test_dv_arrays ==============
 value => keyset(0) {
@@ -297,61 +261,28 @@ HH\is_varray => FALSE
 HH\is_darray => FALSE
 gettype => keyset
 ============= indirect_test_dv_arrays ==============
-value => array(0) {
-}
-HH\is_varray => FALSE
-HH\is_darray => FALSE
-gettype => array
-============= indirect_test_dv_arrays ==============
-value => array(3) {
-  [0]=>
-  int(1)
-  [1]=>
-  int(2)
-  [2]=>
-  int(3)
-}
-HH\is_varray => FALSE
-HH\is_darray => FALSE
-gettype => array
-============= indirect_test_dv_arrays ==============
-value => array(3) {
-  ["a"]=>
-  int(100)
-  ["b"]=>
-  int(200)
-  ["c"]=>
-  int(300)
-}
-HH\is_varray => FALSE
-HH\is_darray => FALSE
-gettype => array
-============= indirect_test_dv_arrays ==============
-value => array(0) {
+value => vec(0) {
 }
 HH\is_varray => TRUE
 HH\is_darray => FALSE
-gettype => array
+gettype => vec
 ============= indirect_test_dv_arrays ==============
-value => array(3) {
-  [0]=>
+value => vec(3) {
   int(1)
-  [1]=>
   int(2)
-  [2]=>
   int(3)
 }
 HH\is_varray => TRUE
 HH\is_darray => FALSE
-gettype => array
+gettype => vec
 ============= indirect_test_dv_arrays ==============
-value => array(0) {
+value => dict(0) {
 }
 HH\is_varray => FALSE
 HH\is_darray => TRUE
-gettype => array
+gettype => dict
 ============= indirect_test_dv_arrays ==============
-value => array(2) {
+value => dict(2) {
   [100]=>
   string(3) "abc"
   ["def"]=>
@@ -359,9 +290,9 @@ value => array(2) {
 }
 HH\is_varray => FALSE
 HH\is_darray => TRUE
-gettype => array
+gettype => dict
 ============= indirect_test_dv_arrays ==============
-value => array(3) {
+value => dict(3) {
   [0]=>
   string(1) "a"
   [1]=>
@@ -371,21 +302,18 @@ value => array(3) {
 }
 HH\is_varray => FALSE
 HH\is_darray => TRUE
-gettype => array
+gettype => dict
 ============= indirect_test_dv_arrays ==============
-value => array(3) {
-  [0]=>
+value => vec(3) {
   string(1) "x"
-  [1]=>
   string(1) "y"
-  [2]=>
   string(1) "z"
 }
 HH\is_varray => TRUE
 HH\is_darray => FALSE
-gettype => array
+gettype => vec
 ============= indirect_test_dv_arrays ==============
-value => array(3) {
+value => dict(3) {
   [0]=>
   int(123)
   [1]=>
@@ -395,9 +323,9 @@ value => array(3) {
 }
 HH\is_varray => FALSE
 HH\is_darray => TRUE
-gettype => array
+gettype => dict
 ============= indirect_test_dv_arrays ==============
-value => array(3) {
+value => dict(3) {
   ["x"]=>
   int(123)
   ["y"]=>
@@ -407,9 +335,9 @@ value => array(3) {
 }
 HH\is_varray => FALSE
 HH\is_darray => TRUE
-gettype => array
+gettype => dict
 ============= indirect_test_dv_arrays ==============
-value => array(3) {
+value => dict(3) {
   [66]=>
   int(11)
   [55]=>
@@ -419,9 +347,9 @@ value => array(3) {
 }
 HH\is_varray => FALSE
 HH\is_darray => TRUE
-gettype => array
+gettype => dict
 ============= direct_test_others ===================
-value => array(0) {
+value => vec(0) {
 }
 is_null => FALSE
 is_bool => FALSE
@@ -431,17 +359,14 @@ is_float => FALSE
 is_resource => FALSE
 is_object => FALSE
 is_array => TRUE
-is_vec => FALSE
+is_vec => TRUE
 is_dict => FALSE
 is_keyset => FALSE
 is_scalar => FALSE
 ============= direct_test_others ===================
-value => array(3) {
-  [0]=>
+value => vec(3) {
   int(1)
-  [1]=>
   int(2)
-  [2]=>
   int(3)
 }
 is_null => FALSE
@@ -452,12 +377,12 @@ is_float => FALSE
 is_resource => FALSE
 is_object => FALSE
 is_array => TRUE
-is_vec => FALSE
+is_vec => TRUE
 is_dict => FALSE
 is_keyset => FALSE
 is_scalar => FALSE
 ============= direct_test_others ===================
-value => array(0) {
+value => dict(0) {
 }
 is_null => FALSE
 is_bool => FALSE
@@ -468,11 +393,11 @@ is_resource => FALSE
 is_object => FALSE
 is_array => TRUE
 is_vec => FALSE
-is_dict => FALSE
+is_dict => TRUE
 is_keyset => FALSE
 is_scalar => FALSE
 ============= direct_test_others ===================
-value => array(2) {
+value => dict(2) {
   [100]=>
   string(3) "abc"
   ["def"]=>
@@ -487,11 +412,11 @@ is_resource => FALSE
 is_object => FALSE
 is_array => TRUE
 is_vec => FALSE
-is_dict => FALSE
+is_dict => TRUE
 is_keyset => FALSE
 is_scalar => FALSE
 ============= direct_test_others ===================
-value => array(3) {
+value => dict(3) {
   [0]=>
   string(1) "a"
   [1]=>
@@ -508,16 +433,13 @@ is_resource => FALSE
 is_object => FALSE
 is_array => TRUE
 is_vec => FALSE
-is_dict => FALSE
+is_dict => TRUE
 is_keyset => FALSE
 is_scalar => FALSE
 ============= direct_test_others ===================
-value => array(3) {
-  [0]=>
+value => vec(3) {
   string(1) "x"
-  [1]=>
   string(1) "y"
-  [2]=>
   string(1) "z"
 }
 is_null => FALSE
@@ -528,12 +450,12 @@ is_float => FALSE
 is_resource => FALSE
 is_object => FALSE
 is_array => TRUE
-is_vec => FALSE
+is_vec => TRUE
 is_dict => FALSE
 is_keyset => FALSE
 is_scalar => FALSE
 ============= direct_test_others ===================
-value => array(3) {
+value => dict(3) {
   [0]=>
   int(123)
   [1]=>
@@ -550,11 +472,11 @@ is_resource => FALSE
 is_object => FALSE
 is_array => TRUE
 is_vec => FALSE
-is_dict => FALSE
+is_dict => TRUE
 is_keyset => FALSE
 is_scalar => FALSE
 ============= direct_test_others ===================
-value => array(3) {
+value => dict(3) {
   ["x"]=>
   int(123)
   ["y"]=>
@@ -571,11 +493,11 @@ is_resource => FALSE
 is_object => FALSE
 is_array => TRUE
 is_vec => FALSE
-is_dict => FALSE
+is_dict => TRUE
 is_keyset => FALSE
 is_scalar => FALSE
 ============= direct_test_others ===================
-value => array(3) {
+value => dict(3) {
   [66]=>
   int(11)
   [55]=>
@@ -592,11 +514,11 @@ is_resource => FALSE
 is_object => FALSE
 is_array => TRUE
 is_vec => FALSE
-is_dict => FALSE
+is_dict => TRUE
 is_keyset => FALSE
 is_scalar => FALSE
 ============= indirect_test_others =================
-value => array(0) {
+value => vec(0) {
 }
 is_null => FALSE
 is_bool => FALSE
@@ -606,17 +528,14 @@ is_float => FALSE
 is_resource => FALSE
 is_object => FALSE
 is_array => TRUE
-HH\is_vec => FALSE
+HH\is_vec => TRUE
 HH\is_dict => FALSE
 HH\is_keyset => FALSE
 is_scalar => FALSE
 ============= indirect_test_others =================
-value => array(3) {
-  [0]=>
+value => vec(3) {
   int(1)
-  [1]=>
   int(2)
-  [2]=>
   int(3)
 }
 is_null => FALSE
@@ -627,12 +546,12 @@ is_float => FALSE
 is_resource => FALSE
 is_object => FALSE
 is_array => TRUE
-HH\is_vec => FALSE
+HH\is_vec => TRUE
 HH\is_dict => FALSE
 HH\is_keyset => FALSE
 is_scalar => FALSE
 ============= indirect_test_others =================
-value => array(0) {
+value => dict(0) {
 }
 is_null => FALSE
 is_bool => FALSE
@@ -643,11 +562,11 @@ is_resource => FALSE
 is_object => FALSE
 is_array => TRUE
 HH\is_vec => FALSE
-HH\is_dict => FALSE
+HH\is_dict => TRUE
 HH\is_keyset => FALSE
 is_scalar => FALSE
 ============= indirect_test_others =================
-value => array(2) {
+value => dict(2) {
   [100]=>
   string(3) "abc"
   ["def"]=>
@@ -662,11 +581,11 @@ is_resource => FALSE
 is_object => FALSE
 is_array => TRUE
 HH\is_vec => FALSE
-HH\is_dict => FALSE
+HH\is_dict => TRUE
 HH\is_keyset => FALSE
 is_scalar => FALSE
 ============= indirect_test_others =================
-value => array(3) {
+value => dict(3) {
   [0]=>
   string(1) "a"
   [1]=>
@@ -683,16 +602,13 @@ is_resource => FALSE
 is_object => FALSE
 is_array => TRUE
 HH\is_vec => FALSE
-HH\is_dict => FALSE
+HH\is_dict => TRUE
 HH\is_keyset => FALSE
 is_scalar => FALSE
 ============= indirect_test_others =================
-value => array(3) {
-  [0]=>
+value => vec(3) {
   string(1) "x"
-  [1]=>
   string(1) "y"
-  [2]=>
   string(1) "z"
 }
 is_null => FALSE
@@ -703,12 +619,12 @@ is_float => FALSE
 is_resource => FALSE
 is_object => FALSE
 is_array => TRUE
-HH\is_vec => FALSE
+HH\is_vec => TRUE
 HH\is_dict => FALSE
 HH\is_keyset => FALSE
 is_scalar => FALSE
 ============= indirect_test_others =================
-value => array(3) {
+value => dict(3) {
   [0]=>
   int(123)
   [1]=>
@@ -725,11 +641,11 @@ is_resource => FALSE
 is_object => FALSE
 is_array => TRUE
 HH\is_vec => FALSE
-HH\is_dict => FALSE
+HH\is_dict => TRUE
 HH\is_keyset => FALSE
 is_scalar => FALSE
 ============= indirect_test_others =================
-value => array(3) {
+value => dict(3) {
   ["x"]=>
   int(123)
   ["y"]=>
@@ -746,11 +662,11 @@ is_resource => FALSE
 is_object => FALSE
 is_array => TRUE
 HH\is_vec => FALSE
-HH\is_dict => FALSE
+HH\is_dict => TRUE
 HH\is_keyset => FALSE
 is_scalar => FALSE
 ============= indirect_test_others =================
-value => array(3) {
+value => dict(3) {
   [66]=>
   int(11)
   [55]=>
@@ -767,41 +683,37 @@ is_resource => FALSE
 is_object => FALSE
 is_array => TRUE
 HH\is_vec => FALSE
-HH\is_dict => FALSE
+HH\is_dict => TRUE
 HH\is_keyset => FALSE
 is_scalar => FALSE
 ============= constant-folding ===================
 bool(false)
 bool(false)
-bool(false)
-bool(false)
-bool(false)
-bool(false)
-bool(false)
-bool(false)
-bool(false)
-bool(false)
-string(5) "array"
 bool(true)
 bool(false)
 bool(false)
 bool(true)
-bool(false)
-string(5) "array"
+string(3) "vec"
 bool(true)
-bool(false)
-bool(false)
-bool(false)
 bool(true)
-string(5) "array"
-bool(true)
-bool(false)
 bool(false)
 bool(true)
 bool(false)
-string(5) "array"
+string(4) "dict"
 bool(true)
 bool(false)
+bool(true)
 bool(false)
+bool(true)
+string(3) "vec"
+bool(true)
+bool(true)
+bool(false)
+bool(true)
+bool(false)
+string(4) "dict"
+bool(true)
+bool(false)
+bool(true)
 bool(false)
 bool(true)

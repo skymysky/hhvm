@@ -1,6 +1,6 @@
-<?php
+<?hh
 /* Prototype  : string strip_tags(string $str [, string $allowable_tags])
- * Description: Strips HTML and PHP tags from a string 
+ * Description: Strips HTML and PHP tags from a string
  * Source code: ext/standard/string.c
 */
 
@@ -8,27 +8,18 @@
  * testing functionality of strip_tags() by giving unexpected values for $allowable_tags argument
 */
 
+<<__EntryPoint>> function main(): void {
 echo "*** Testing strip_tags() : usage variations ***\n";
 
 // Initialise function argument
-$string = "<html><a>hello</a></html><p>world</p><!-- COMMENT --><?php echo hello ?>";
+$string = "<html><a>hello</a></html><p>world</p><!-- COMMENT --><?hh echo hello ?>";
 
-//get an unset variable
-$unset_var = 10;
-unset ($unset_var);
 
 //get a resource variable
 $fp = fopen(__FILE__, "r");
 
-//get a class
-class classA{
-   public function __toString(){
-     return "Class A Object";
-   }
-}
-
 //array of values to iterate over
-$values = array(
+$values = vec[
 
       // int data
       0,
@@ -44,11 +35,11 @@ $values = array(
       .5,
 
       // array data
-      array(),
-      array(0),
-      array(1),
-      array(1, 2),
-      array('color' => 'red', 'item' => 'pen'),
+      'Array',
+      'Array',
+      'Array',
+      'Array',
+      'Array',
 
       // null data
       NULL,
@@ -64,18 +55,9 @@ $values = array(
       "",
       '',
 
-      // object data
-      new classA(),
-
-      // undefined data
-      @$undefined_var,
-
-      // unset data
-      @$unset_var,
-
       // resource variable
       $fp
-);
+];
 
 // loop through each element of the array for allowable_tags
 $iterator = 1;
@@ -86,4 +68,4 @@ foreach($values as $value) {
 };
 
 echo "Done";
-?>
+}

@@ -1,1 +1,2 @@
---parser ffp --all-errors --dont-assume-php --auto-namespace-map '{"Dict": "HH\\Lib\\Dict"}'
+--auto-namespace-map '{"Dict": "HH\\Lib\\Dict"}'
+--error-format plain_highlighted

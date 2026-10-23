@@ -1,0 +1,51 @@
+error: Typing[4110] Invalid argument [1]
+-> Expected `this` [2]
+->   via this generic `this` [3]
+-> But got `?(nonnull & not this)` [4]
+
+this.php:9:26
+ 2 | 
+ 3 | class C {
+ 4 |   public static function test(mixed $x): void {
+   |                               ^^^^^ [4]
+ 5 |     if ($x is this) {
+ 6 |       static::expectThis($x);
+ 7 |       self::expectThis($x);
+ 8 |     } else {
+ 9 |       static::expectThis($x);
+   |       ^^^^^^ [2]
+   |                          ^^ [1]
+10 |       self::expectThis($x);
+11 |     }
+12 |   }
+13 | 
+14 |   protected static function expectThis(this $x): void {}
+   |                                        ^^^^ [3]
+15 | }
+
+error: Typing[4110] Invalid argument [1]
+-> Expected `this` [2]
+->   via this generic `this` [3]
+-> But got `?(nonnull & not this)` [4]
+
+this.php:10:24
+ 2 | 
+ 3 | class C {
+ 4 |   public static function test(mixed $x): void {
+   |                               ^^^^^ [4]
+ 5 |     if ($x is this) {
+ 6 |       static::expectThis($x);
+ 7 |       self::expectThis($x);
+ 8 |     } else {
+ 9 |       static::expectThis($x);
+10 |       self::expectThis($x);
+   |       ^^^^ [2]
+   |                        ^^ [1]
+11 |     }
+12 |   }
+13 | 
+14 |   protected static function expectThis(this $x): void {}
+   |                                        ^^^^ [3]
+15 | }
+
+2 errors found

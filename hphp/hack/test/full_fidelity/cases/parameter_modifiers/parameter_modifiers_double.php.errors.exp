@@ -1,0 +1,7 @@
+(4,22)-(4,30) Duplicate parameter modifier `readonly`.
+(5,32)-(5,40) Duplicate parameter modifier `optional`.
+(5,45)-(5,47) Unexpected parameter name. Only `named` parameters can have names.
+(6,13)-(6,31) Cannot use unstable feature: `named_parameters`
+(6,19)-(6,24) Duplicate parameter modifier `named`.
+(7,1)-(7,44) Cannot redeclare `f3()` (previously declared in parameter_modifiers_double.php:6)
+(7,22)-(7,30) Duplicate parameter modifier `readonly`.

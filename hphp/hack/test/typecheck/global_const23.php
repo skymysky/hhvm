@@ -1,3 +1,3 @@
 <?hh
 
-const X = !true;
+const mixed X = !true;

@@ -1,6 +1,6 @@
-<?php
+<?hh
 /* Prototype  : array array_merge(array $arr1, array $arr2 [, array $...])
- * Description: Merges elements from passed arrays into one array 
+ * Description: Merges elements from passed arrays into one array
  * Source code: ext/standard/array.c
  */
 
@@ -8,22 +8,19 @@
  * Pass different data types as $arr1 argument to test behaviour
  */
 
-echo "*** Testing array_merge() : usage variations ***\n";
-
-// Initialise function arguments not being substituted
-$arr2 = array (1, 2);
-
-//get an unset variable
-$unset_var = 10;
-unset ($unset_var);
-
 // get a class
 class classA
 {
-  public function __toString() {
+  public function __toString() :mixed{
     return "Class A object";
   }
 }
+<<__EntryPoint>> function main(): void {
+echo "*** Testing array_merge() : usage variations ***\n";
+
+// Initialise function arguments not being substituted
+$arr2 = vec[1, 2];
+
 
 // heredoc string
 $heredoc = <<<EOT
@@ -34,7 +31,7 @@ EOT;
 $fp = fopen(__FILE__, "r");
 
 // unexpected values to be passed to $arr1 argument
-$inputs = array(
+$inputs = vec[
 
        // int data
 /*1*/  0,
@@ -58,29 +55,25 @@ $inputs = array(
        false,
        TRUE,
        FALSE,
-       
+
        // empty data
 /*16*/ "",
        '',
-       array(),
+       vec[],
 
        // string data
 /*19*/ "string",
        'string',
        $heredoc,
-       
+
        // object data
 /*22*/ new classA(),
 
-       // undefined data
-/*23*/ @$undefined_var,
 
-       // unset data
-/*24*/ @$unset_var,
 
        // resource variable
-/*25*/ $fp
-);
+/*23*/ $fp
+];
 
 // loop through each element of $inputs to check the behavior of array_merge()
 $iterator = 1;
@@ -93,5 +86,4 @@ foreach($inputs as $input) {
 fclose($fp);
 
 echo "Done";
-?>
-
+}

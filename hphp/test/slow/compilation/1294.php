@@ -1,14 +1,18 @@
-<?php
+<?hh
 
 class X {
-  static function g() {
+  static function g() :mixed{
 }
 }
-;
-@X::g();
-function g($a,$b) {
+function g($a,$b) :mixed{
 }
-function f() {
+function f() :mixed{
  return 3;
  }
-@g(f(),f());
+
+<<__EntryPoint>>
+function main_1294() :mixed{
+;
+X::g();
+g(f(),f());
+}

@@ -1,0 +1,15 @@
+error: Naming[2050] Variable `$h` is undefined, or not always defined. [1]
+-> Did you mean `$_` instead? [2]
+
+using_catch.php:23:5
+19 |     throw new Exception("E");
+20 |   }
+21 |   } catch (Exception $_) {
+   |                      ^^ [2]
+22 |     // Should be an error!
+23 |     $h->bar();
+   |     ^^ [1]
+24 |   }
+25 | }
+
+1 error found

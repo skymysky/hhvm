@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 /**
  * Copyright (c) 2014, Facebook, Inc.
  * All rights reserved.
@@ -10,6 +10,7 @@
  */
 <<__ConsistentConstruct>>
 class Foo {
+  <<__NeedsConcrete>>
   public static function get(): this {
     return new static();
   }

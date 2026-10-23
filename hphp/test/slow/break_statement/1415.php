@@ -1,22 +1,30 @@
-<?php
+<?hh
 
-$arr = array('one', 'two', 'three', 'four', 'stop', 'five');
-while (list(, $val) = each($arr)) {
+
+<<__EntryPoint>>
+function main_1415() :mixed{
+$arr = vec['one', 'two', 'three', 'four', 'stop', 'five'];
+foreach ($arr as $val) {
   if ($val == 'stop') {
     break;
   }
   echo "$val\n";
 }
 $i = 0;
-while (++$i) {
+$valid = true;
+while (true) {
+    if (!$valid) break;
+    ++$i; if (!$i) break;
     switch ($i) {
     case 5:
       echo "At 5\n";
-      break 1;
+      break;
     case 10:
       echo "At 10; quitting\n";
-      break 2;
+      $valid = false;
+      break;
     default:
       break;
     }
+}
 }

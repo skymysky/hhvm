@@ -18,17 +18,17 @@
 
 #include "hphp/util/stack-trace.h"
 
-namespace HPHP { namespace StructuredLog {
+namespace HPHP::StructuredLog {
 
 void logSerDes(const char* format, const char* op,
-               const String& serialized, const Variant& value) {
+               const OptString& serialized, const Variant& value) {
   StructuredLogEntry sample;
   sample.setStr("format", format);
   sample.setStr("operation", op);
   DataType t = value.getType();
   sample.setStr("type", tname(t));
-  if (isArrayType(t)) {
-    sample.setInt("array_len", value.toCArrRef().length());
+  if (isArrayLikeType(t)) {
+    sample.setInt("array_len", value.asCArrRef().length());
   }
   if (auto sd = serialized.get()) {
     sample.setInt("length_ser", sd->size());
@@ -39,4 +39,4 @@ void logSerDes(const char* format, const char* op,
   StructuredLog::log("hhvm_serdes", sample);
 }
 
-}}
+}

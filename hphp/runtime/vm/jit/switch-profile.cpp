@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2013 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-present Facebook, Inc. (http://www.facebook.com)  |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -26,7 +26,7 @@
 #include <cstdlib>
 #include <vector>
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -47,6 +47,15 @@ sortedSwitchProfile(TargetProfile<SwitchProfile>& profile, int32_t nCases) {
   return values;
 }
 
+folly::dynamic SwitchProfile::toDynamic(uint32_t size) const {
+ folly::dynamic casesArray = folly::dynamic::array;
+ auto const nCases = size / sizeof(uint32_t);
+ for (int i = 0; i < nCases; ++i) casesArray.push_back(cases()[i]);
+
+ return folly::dynamic::object("profileType", "SwitchProfile")
+                              ("cases", casesArray);
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 
-}}
+}

@@ -1,14 +1,20 @@
 <?hh
 
-$g = array(1,2,3);
-function cmp($a, $b) {
-  global $g;
-  usort(&$g, 'cmp');
+abstract final class StackOverflow { public static $g; }
+function cmp($a, $b) :mixed{
+  $g = StackOverflow::$g;
+  usort(inout $g, cmp<>);
+  StackOverflow::$g = $g;
   fiz();
 }
 
-cmp(0, 0);
-
-function fiz() {
+function fiz() :mixed{
   var_dump(1);
+}
+<<__EntryPoint>>
+function entrypoint_stack_overflow(): void {
+
+  StackOverflow::$g = vec[1,2,3];
+
+  cmp(0, 0);
 }

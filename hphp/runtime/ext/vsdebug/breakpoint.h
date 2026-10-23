@@ -14,12 +14,12 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_VSDEBUG_BREAKPOINT_MGR_H_
-#define incl_HPHP_VSDEBUG_BREAKPOINT_MGR_H_
+#pragma once
 
 #include "hphp/runtime/ext/vsdebug/break_mode.h"
 #include "hphp/runtime/ext/vsdebug/command.h"
 
+#include <filesystem>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -30,7 +30,7 @@ namespace VSDEBUG {
 
 struct Debugger;
 struct ClientPreferences;
-struct RequestInfo;
+struct DebuggerRequestInfo;
 
 enum BreakpointType {
   Source,
@@ -64,21 +64,27 @@ struct Breakpoint {
     const std::string& hitCondition
   );
 
+  Breakpoint(const Breakpoint&) = delete;
+  virtual ~Breakpoint();
+
   void updateConditions(
     const std::string& condition,
     const std::string& hitCondition
   );
+
+  bool isRelativeBp() const;
 
   const int m_id;
   const BreakpointType m_type;
   const int m_line;
   const int m_column;
   const std::string m_path;
+  const std::filesystem::path m_filePath;
   const std::string m_function;
 
   std::string m_functionFullName;
 
-  ResolvedLocation m_resolvedLocation;
+  std::vector<ResolvedLocation> m_resolvedLocations;
   int m_hitCount;
 
   std::string getCondition() const { return m_condition; }
@@ -93,12 +99,7 @@ struct Breakpoint {
     return it == m_unitCache.end() ? nullptr : it->second;
   }
 
-  void clearCachedConditionUnit(request_id_t requestId) {
-    auto it = m_unitCache.find(requestId);
-    if (it != m_unitCache.end()) {
-      m_unitCache.erase(it);
-    }
-  }
+  void clearCachedConditionUnit(request_id_t requestId);
 
 private:
 
@@ -116,7 +117,7 @@ private:
 
 struct ExceptionBreakpointSettings {
   ExceptionBreakMode m_breakMode {ExceptionBreakMode::BreakNone};
-  const std::vector<std::string> m_filters;
+  const std::vector<std::string> m_filters{};
 };
 
 struct BreakpointManager {
@@ -142,14 +143,11 @@ struct BreakpointManager {
 
   // Returns true if the user was already sent a warning notification
   // about a breakpoint's calibration / resolve location.
-  bool warningSentForBp(
-    request_id_t requestId,
-    int bpId
-  ) const;
+  bool warningSentForBp(int bpId) const;
 
   void onFuncBreakpointResolved(
     Breakpoint& bp,
-    Func* func
+    const Func* func
   );
 
   int addSourceLineBreakpoint(
@@ -171,15 +169,14 @@ struct BreakpointManager {
   Breakpoint* getBreakpointById(int id);
 
   const std::unordered_set<int> getAllBreakpointIds() const;
-
-  const std::unordered_set<int> getBreakpointIdsByFile(
-    const std::string& sourcePath
+  const std::unordered_set<int> getBreakpointIdsForPath(
+    const std::string& unitPath
   ) const;
 
   const std::unordered_set<int> getFunctionBreakpoints() const;
 
   bool isBreakConditionSatisified(
-    RequestInfo* ri,
+    DebuggerRequestInfo* ri,
     Breakpoint* bp
   );
 
@@ -187,7 +184,17 @@ struct BreakpointManager {
 
   void onFuncIntercepted(request_id_t requestId, std::string name);
 
-  void sendMemoizeWarning(request_id_t requestId, int bpId);
+  void sendMemoizeWarning(int bpId);
+
+  ResolvedLocation bpResolvedInfoForFile(
+    const Breakpoint* bp,
+    const std::string& filePath
+  );
+
+  static bool bpMatchesPath(
+    const Breakpoint* bp,
+    const std::filesystem::path& unitPath
+  );
 
 private:
 
@@ -204,7 +211,6 @@ private:
   );
 
   void sendWarningForBp(
-    request_id_t requestId,
     int bpId,
     std::string& warningMessage
   );
@@ -225,7 +231,7 @@ private:
   ExceptionBreakpointSettings m_exceptionSettings;
 
   // The authoratative list of the current breakpoints set by the client.
-  std::unordered_map<int, Breakpoint> m_breakpoints;
+  std::unordered_map<int, Breakpoint*> m_breakpoints;
 
   // Map of source file name to list of breakpoints in that file.
   std::unordered_map<std::string, std::unordered_set<int>> m_sourceBreakpoints;
@@ -240,9 +246,7 @@ private:
 
   // Breakpoints per-request for which the user has been notified something
   // is odd.
-  std::unordered_map<
-    request_id_t,
-    std::unordered_set<int>> m_userNotifyBps;
+  std::unordered_set<int> m_userNotifyBps;
 
   // Verified breakpoints. A breakpoint is verified if at least one request
   // has resolved it in a compilation unit since it was set. This is a bit odd
@@ -257,5 +261,3 @@ private:
 
 }
 }
-
-#endif //incl_HPHP_VSDEBUG_BREAKPOINT_MGR_H_

@@ -14,14 +14,13 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_JIT_ABI_H
-#define incl_HPHP_JIT_ABI_H
+#pragma once
 
 #include "hphp/runtime/vm/jit/types.h"
 #include "hphp/runtime/vm/jit/abi-regs.h"
 #include "hphp/runtime/vm/jit/phys-reg.h"
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -104,10 +103,36 @@ RegSet arg_regs_ind_ret(size_t n);
  * Service request argument registers.
  */
 PhysReg r_svcreq_req();
+PhysReg r_svcreq_spoff();
 PhysReg r_svcreq_stub();
 PhysReg r_svcreq_sf();
 PhysReg r_svcreq_arg(size_t i);
 
+/*
+ * Prologue input registers (used by Call IR).
+ *
+ * - r_func_prologue_flags: see struct PrologueFlags
+ * - r_func_prologue_callee: the func being called
+ * - r_func_prologue_ctx: the $this/static:class context (TCtx)
+ * - r_func_prologue_num_args: the number of positional arguments being passed
+ * - r_func_prologue_named_args: the ArrayData* with named arg names
+ */
+inline PhysReg r_func_prologue_flags() { return rarg(0); }
+inline PhysReg r_func_prologue_callee() { return rarg(1); }
+inline PhysReg r_func_prologue_ctx() { return rarg(2); }
+inline PhysReg r_func_prologue_num_args() { return rarg(3); }
+inline PhysReg r_func_prologue_named_args() { return rarg(4); }
+
+/*
+ * Func entry input registers.
+ *
+ * - r_func_entry_ar_flags: the callee's ActRec::m_callOffAndFlags
+ * - r_func_entry_callee_id: the id of the func being called
+ * - r_func_entry_ctx: the $this/static::class context (TCtx)
+ */
+inline PhysReg r_func_entry_ar_flags() { return rarg(0); }
+inline PhysReg r_func_entry_callee_id() { return rarg(1); }
+inline PhysReg r_func_entry_ctx() { return rarg(2); }
 
 ///////////////////////////////////////////////////////////////////////////////
 // JIT and TC boundary ABI registers.
@@ -123,6 +148,12 @@ RegSet vm_regs_with_sp();
 RegSet vm_regs_no_sp();
 
 /*
+ * Registers that need to be preserved across enterTC. Should not
+ * include rvmfp, or anything else that is "naturally" preserved.
+ */
+RegSet cross_jit_save();
+
+/*
  * Registers that are live between tracelets, in two flavors, depending whether
  * we are between tracelets in a resumed function.
  */
@@ -130,16 +161,30 @@ inline RegSet cross_trace_regs()          { return vm_regs_no_sp(); }
 inline RegSet cross_trace_regs_resumed()  { return vm_regs_with_sp(); }
 
 /*
- * Registers that are live when we reenter the JIT from the TC (e.g., via
- * service requests).
+ * Registers that are live when calling a prologue of a VM function.
  */
-inline RegSet leave_trace_regs() { return vm_regs_with_sp(); }
+inline RegSet func_prologue_regs(bool withCtx, bool withNamedArgs) {
+  auto regs =
+    vm_regs_with_sp() |
+    r_func_prologue_flags() |
+    r_func_prologue_callee() |
+    r_func_prologue_num_args();
+  if (withCtx) regs |= r_func_prologue_ctx();
+  if (withNamedArgs) regs |= r_func_prologue_named_args();
+  return regs;
+}
 
 /*
- * Registers that are live between the caller and the callee when making a PHP
- * function call.
+ * Registers that are live when calling a func entry of a VM function.
  */
-inline RegSet php_call_regs() { return cross_trace_regs(); }
+inline RegSet func_entry_regs(bool withCtx) {
+  auto regs =
+    vm_regs_with_sp() |
+    r_func_entry_ar_flags() |
+    r_func_entry_callee_id();
+  if (withCtx) regs |= r_func_entry_ctx();
+  return regs;
+}
 
 /*
  * Registers that are live after a PHP function return.
@@ -150,13 +195,6 @@ inline RegSet php_return_regs() {
   return vm_regs_with_sp() | rret_data() | rret_type();
 }
 
-/*
- * Registers that are live on entry to fcallUnpackHelper.
- *
- * TODO(#2288359): We don't want this to include rvmsp() eventually.
- */
-inline RegSet fcall_unpack_regs() { return vm_regs_with_sp(); }
-
 ///////////////////////////////////////////////////////////////////////////////
 
 /*
@@ -166,6 +204,5 @@ Vflags required_flags(ConditionCode cc);
 
 ///////////////////////////////////////////////////////////////////////////////
 
-}}
+}
 
-#endif

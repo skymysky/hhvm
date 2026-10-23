@@ -1,0 +1,10 @@
+error: Parsing[1002] Constraints on a context constant requires it to be abstract [1]
+
+ctx_const_constraints.php:6:3
+4 |   abstract const ctx C as [];
+5 |   abstract const ctx C1 super [defaults];
+6 |   const ctx C2 as [] = []; // ERROR
+  |   ^^^^^^^^^^^^^^^^^^^^^^^^ [1]
+7 | }
+
+1 error found

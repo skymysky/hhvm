@@ -1,21 +1,24 @@
-<?php /* destructor */
+<?hh
 // Copyright 2004-present Facebook. All Rights Reserved.
 
 class Cls {
-  function func() { echo "func called\n"; }
-  function intercept1() { return false; }
-  function intercept2() {
-    var_dump(debug_backtrace());
-    return false;
+  function func() :mixed{ echo "func called\n"; }
+  static function intercept1($_1, $_2, inout $_3) :mixed{
+    return shape('value' => null);
   }
-  function intercept3() { throw new Exception("intercept3"); }
-  function __destruct() {}
+  static function intercept2($_1, $_2, inout $_3) :mixed{
+    var_dump(debug_backtrace());
+    return shape('value' => null);
+  }
+  static function intercept3($_1, $_2, inout $_3) :mixed{
+    throw new Exception("intercept3");
+  }
 }
 
-function getCls() { return new Cls; }
+function getCls() :mixed{ return new Cls; }
 
-function test($s) {
-  fb_intercept('Cls::func', "Cls::$s");
+function test($s) :mixed{
+  fb_intercept2('Cls::func', "Cls::$s");
   try {
     getCls()->func();
   } catch (Exception $e) {
@@ -23,7 +26,8 @@ function test($s) {
   }
   echo "$s DONE\n";
 }
-
-test('intercept1');
-test('intercept2');
-test('intercept3');
+<<__EntryPoint>> function main(): void {
+  test('intercept1');
+  test('intercept2');
+  test('intercept3');
+}

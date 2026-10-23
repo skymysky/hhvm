@@ -1,0 +1,55 @@
+Code actions available:
+------------------------------------------
+slog variable (CodeActionKind: "refactor")
+Extract into method (CodeActionKind: "refactor") SELECTED
+
+JSON for selected code action:
+------------------------------------------
+{
+  "title": "Extract into method",
+  "kind": "refactor",
+  "diagnostics": [],
+  "edit": {
+    "changes": {
+      "FILE.php": [
+        {
+          "range": {
+            "start": { "line": 5, "character": 0 },
+            "end": { "line": 5, "character": 0 }
+          },
+          "newText": "  private function ${0:method0}(Awaitable<void> $awaitable, int $n): int {\n    $x = $n * 2;\n    $y = $awaitable;\n    return $x;\n  }\n\n"
+        },
+        {
+          "range": {
+            "start": { "line": 8, "character": 4 },
+            "end": { "line": 9, "character": 20 }
+          },
+          "newText": "$x = $this->${0:method0}($awaitable, $n);"
+        }
+      ]
+    }
+  }
+}
+
+Applied edit for code action:
+------------------------------------------
+<?hh
+
+async function genVoid(): Awaitable<void> {}
+
+class Klass {
+  private function ${0:method0}(Awaitable<void> $awaitable, int $n): int {
+    $x = $n * 2;
+    $y = $awaitable;
+    return $x;
+  }
+
+  public function foo(int $n): void {
+    $awaitable = genVoid();
+    /*range-start*/
+    $x = $this->${0:method0}($awaitable, $n);
+    /*range-end*/
+    $x + 2;
+  }
+}
+

@@ -1,4 +1,3 @@
-//// partial.php
 <?hh
 /**
  * Copyright (c) 2014, Facebook, Inc.
@@ -10,10 +9,7 @@
  *
  */
 
-function any() {}
-
-//// strict.php
-<?hh // strict
+function any() /* : TAny */ {}
 
 function f(): void {
   $a = any();

@@ -1,89 +1,177 @@
 <?hh
 class A {
+
+  private static $oneArgMethI = 10;
   <<__Memoize>>
   public function oneArgMeth(int $a): int {
-    static $i = 10;
-    return $a + $i++;
+    $__lval_tmp_0 = self::$oneArgMethI;
+    self::$oneArgMethI++;
+    return $a + $__lval_tmp_0;
   }
+
+  private static $multiArgMethI = 20;
   <<__Memoize>>
   public function multiArgMeth(int $a, int $b, int $c): int {
-    static $i = 20;
-    return ($a * $b * $c) + $i++;
+    $__lval_tmp_1 = self::$multiArgMethI;
+    self::$multiArgMethI++;
+    return ($a * $b * $c) + $__lval_tmp_1;
   }
+
+  private static $oneArgStaticI = 30;
   <<__Memoize>>
   public static function oneArgStatic(int $a): int {
-    static $i = 30;
-    return $a + $i++;
+    $__lval_tmp_2 = self::$oneArgStaticI;
+    self::$oneArgStaticI++;
+    return $a + $__lval_tmp_2;
   }
+
+  private static $multiArgStaticI = 40;
   <<__Memoize>>
   public static function multiArgStatic(int $a, int $b, int $c): int {
-    static $i = 40;
-    return ($a * $b * $c) + $i++;
+    $__lval_tmp_3 = self::$multiArgStaticI;
+    self::$multiArgStaticI++;
+    return ($a * $b * $c) + $__lval_tmp_3;
   }
 }
 
-<<__Memoize>>
-function oneArgTopLevel(int $a): int {static $i = 50; return $a + $i++;}
-<<__Memoize>>
-function multiArgTopLevel(int $a, int $b, int $c): int {
-  static $i = 60;
-  return ($a * $b * $c) + $i++;
+abstract final class OneargtoplevelStatics {
+  public static $i = 50;
 }
 
 <<__Memoize>>
-function nullIntFn(?int $a): int {static $i = 70; return (int)$a + $i++;}
-<<__Memoize>>
-function boolFn(bool $a): int {static $i = 80; return ($a ? 42 : -42) + $i++;}
-<<__Memoize>>
-function nullBoolFn(?bool $a): int {
-  static $i = 90;
-  return ($a ? 42 : -42) + $i++;
+function oneArgTopLevel(int $a): int {
+  $__lval_tmp_4 = OneargtoplevelStatics::$i;
+  OneargtoplevelStatics::$i++;
+  return $a + $__lval_tmp_4;
+}
+
+abstract final class MultiargtoplevelStatics {
+  public static $i = 60;
 }
 <<__Memoize>>
-function stringFn(string $a): string {static $s = ''; $s = $s.$s.$a; return $s;}
+function multiArgTopLevel(int $a, int $b, int $c): int {
+  $__lval_tmp_5 = MultiargtoplevelStatics::$i;
+  MultiargtoplevelStatics::$i++;
+  return ($a * $b * $c) + $__lval_tmp_5;
+}
+
+abstract final class NullintfnStatics {
+  public static $i = 70;
+}
+
+<<__Memoize>>
+function nullIntFn(?int $a): int {
+  $__lval_tmp_6 = NullintfnStatics::$i;
+  NullintfnStatics::$i++;
+  return (int)$a + $__lval_tmp_6;
+}
+
+abstract final class BoolfnStatics {
+  public static $i = 80;
+}
+<<__Memoize>>
+function boolFn(bool $a): int {
+  $__lval_tmp_7 = BoolfnStatics::$i;
+  BoolfnStatics::$i++;
+  return ($a ? 42 : -42) + $__lval_tmp_7;
+}
+
+abstract final class NullboolfnStatics {
+  public static $i = 90;
+}
+<<__Memoize>>
+function nullBoolFn(?bool $a): int {
+  $__lval_tmp_8 = NullboolfnStatics::$i;
+  NullboolfnStatics::$i++;
+  return ($a ? 42 : -42) + $__lval_tmp_8;
+}
+
+abstract final class StringfnStatics {
+  public static $s = '';
+}
+<<__Memoize>>
+function stringFn(string $a): string {StringfnStatics::$s = StringfnStatics::$s.StringfnStatics::$s.$a; return StringfnStatics::$s;}
+
+abstract final class NullretStatics {
+  public static $i = 100;
+}
 
 <<__Memoize>>
 function nullRet(int $a): ?int {
-  static $i = 100;
   if ($a > 10) {
     return null;
   }
-  return $a + $i++;
+  $__lval_tmp_9 = NullretStatics::$i;
+  NullretStatics::$i++;
+  return $a + $__lval_tmp_9;
+}
+
+abstract final class NorettypeStatics {
+  public static $i = 110;
 }
 <<__Memoize>>
 function noRetType(int $a, int $b): ?int {
-  static $i = 110;
   if ($a * $b > 10) {
     return null;
   }
-  return ($a * $b) + $i++;
+  $__lval_tmp_10 = NorettypeStatics::$i;
+  NorettypeStatics::$i++;
+  return ($a * $b) + $__lval_tmp_10;
+}
+
+abstract final class DefaultargsStatics {
+  public static $i = 120;
 }
 
 <<__Memoize>>
-function defaultArgs(int $a, int $b = 5) {
-  static $i = 120;
-  return ($a * $b) + $i++;
+function defaultArgs(int $a, int $b = 5) :mixed{
+  $__lval_tmp_11 = DefaultargsStatics::$i;
+  DefaultargsStatics::$i++;
+  return ($a * $b) + $__lval_tmp_11;
+}
+
+abstract final class GenericsStatics {
+  public static $i = 130;
 }
 
 <<__Memoize>>
 function generics<T>(T $a, T $b): T {
-  static $i = 130;
-  return $i++ % 2 ? $a : $b;
+  $__lval_tmp_12 = GenericsStatics::$i;
+  GenericsStatics::$i++;
+  return $__lval_tmp_12 % 2 ? $a : $b;
+}
+
+abstract final class BoolnoretStatics {
+  public static $i = 140;
 }
 
 <<__Memoize>>
-function boolNoRet(bool $a) {static $i = 140; return ($a ? 42 : -42) + $i++;}
+function boolNoRet(bool $a) :mixed{
+  $__lval_tmp_13 = BoolnoretStatics::$i;
+  BoolnoretStatics::$i++;
+  return ($a ? 42 : -42) + $__lval_tmp_13;
+}
 
 interface I extends HH\IMemoizeParam {}
 
 class O implements I {
-  public function __construct(public string $a) {}
+  public function __construct(public string $a)[] {}
   public function getInstanceKey(): string { return $this->a; }
 }
 
-<<__Memoize>>
-function memoizeObj(I $obj) { static $i = 150; return $i++; }
+abstract final class MemoizeobjStatics {
+  public static $i = 150;
+}
 
+<<__Memoize>>
+function memoizeObj(I $obj) :mixed{
+  $__lval_tmp_14 = MemoizeobjStatics::$i;
+  MemoizeobjStatics::$i++;
+  return $__lval_tmp_14;
+}
+
+<<__EntryPoint>>
+function main_args() :mixed{
 echo "Test each kind of function call with one and many args\n";
 $a = new A();
 echo $a->oneArgMeth(1).' ';
@@ -180,3 +268,4 @@ echo memoizeObj(new O('a')).' ';
 echo memoizeObj(new O('a')).' ';
 echo memoizeObj(new O('b')).' ';
 echo memoizeObj(new O('b')).' ';
+}

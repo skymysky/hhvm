@@ -1,6 +1,6 @@
-<?php
+<?hh
 
-function getQueueWithLittleData() {
+function getQueueWithLittleData() :mixed{
   $q = new SplPriorityQueue();
   $q->insert('dux', 4);
   $q->insert('legati', 3);
@@ -9,16 +9,16 @@ function getQueueWithLittleData() {
   return $q;
 }
 
-function testExtractFlags() {
-  $flags = array(
-    array('SplPriorityQueue::EXTR_DATA', SplPriorityQueue::EXTR_DATA),
-    array('SplPriorityQueue::EXTR_PRIORITY', SplPriorityQueue::EXTR_PRIORITY),
-    array('SplPriorityQueue::EXTR_BOTH', SplPriorityQueue::EXTR_BOTH),
-  );
-  $sources = array(
+function testExtractFlags() :mixed{
+  $flags = vec[
+    vec['SplPriorityQueue::EXTR_DATA', SplPriorityQueue::EXTR_DATA],
+    vec['SplPriorityQueue::EXTR_PRIORITY', SplPriorityQueue::EXTR_PRIORITY],
+    vec['SplPriorityQueue::EXTR_BOTH', SplPriorityQueue::EXTR_BOTH],
+  ];
+  $sources = vec[
     getQueueWithLittleData(),
     clone getQueueWithLittleData(),
-  );
+  ];
   foreach ($sources as $queue) {
     foreach ($flags as $flagInfo) {
       list($name, $value) = $flagInfo;
@@ -27,7 +27,7 @@ function testExtractFlags() {
   }
 }
 
-function testExtractFlag($q, $flagName, $flagValue) {
+function testExtractFlag($q, $flagName, $flagValue) :mixed{
   $q->setExtractFlags($flagValue);
   echo "Get top with $flagName:\n";
   print_r($q->top());
@@ -43,10 +43,9 @@ function testExtractFlag($q, $flagName, $flagValue) {
 
   echo "\n";
 }
-testExtractFlags();
 
 
-function testCloneGivesValidCopy() {
+function testCloneGivesValidCopy() :mixed{
   $q = getQueueWithLittleData();
   $clonedQueue = clone $q;
 
@@ -55,4 +54,9 @@ function testCloneGivesValidCopy() {
   echo "Top rank (even after killing the top in a clone) is: ";
   echo $q->top() . "\n";
 }
+
+<<__EntryPoint>>
+function main_spl_priority_queue_clone() :mixed{
+testExtractFlags();
 testCloneGivesValidCopy();
+}

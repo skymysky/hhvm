@@ -15,7 +15,7 @@ namespace HH\Lib\Dict\Foo\Bar {
 namespace {
   use namespace Dict\Foo\Bar;
 
-  function main() {
+  function main(): void {
     expect_int(Bar\foo()); // ok
   }
 

@@ -14,8 +14,7 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_DATETIME_H_
-#define incl_HPHP_DATETIME_H_
+#pragma once
 
 #include <memory>
 
@@ -24,7 +23,7 @@
 #include "hphp/runtime/base/req-ptr.h"
 #include "hphp/runtime/base/timezone.h"
 #include "hphp/runtime/base/dateinterval.h"
-#include "hphp/runtime/base/request-local.h"
+#include "hphp/util/rds-local.h"
 
 namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
@@ -34,7 +33,7 @@ namespace HPHP {
  * into this one single class.
  */
 struct DateTime final : SweepableResourceData {
-  DECLARE_RESOURCE_ALLOCATION(DateTime);
+  DECLARE_RESOURCE_ALLOCATION(DateTime)
 
   /**
    * Different RFC/ISO date/time formats for toString(DateFormat).
@@ -220,9 +219,9 @@ public:
    * Returns are really in special PHP formats, and please read datetime.cpp
    * for details.
    */
-  static Array Parse(const String& datetime);
-  static Array Parse(const String& format, const String& date);
-  static Array ParseAsStrptime(const String& format, const String& date);
+  static Array Parse(const OptString& datetime);
+  static Array Parse(const OptString& format, const OptString& date);
+  static Array ParseAsStrptime(const OptString& format, const OptString& date);
 
 public:
   // constructor
@@ -231,9 +230,9 @@ public:
   explicit DateTime(int64_t timestamp, bool utc = false); // from a timestamp
   explicit DateTime(int64_t timestamp, req::ptr<TimeZone> tz);
 
-  CLASSNAME_IS("DateTime");
+  CLASSNAME_IS("DateTime")
   // overriding ResourceData
-  const String& o_getClassNameHook() const override { return classnameof(); }
+  const OptString& o_getClassNameHook() const override { return classnameof(); }
 
   // informational
   bool local() const { return m_time->is_localtime;}
@@ -245,7 +244,13 @@ public:
   int hour12() const { return (m_time->h % 12) ? (int) m_time->h % 12 : 12;}
   int minute() const { return m_time->i;}
   int second() const { return m_time->s;}
-  double fraction() const { return m_time->f;}
+  double fraction() const {
+#if TIMELIB_VERSION >= TIMELIB_MODERN
+      return m_time->us / 1000000.0;
+#else
+      return m_time->f;
+#endif
+  }
   int zoneType() const { return m_time->zone_type;}
   int beat() const;    // Swatch Beat a.k.a. Internet Time
   int dow() const;     // day of week
@@ -267,7 +272,7 @@ public:
   void setISODate(int year, int week, int day = 1);
   void setTime(int hour, int minute, int second = 0);
   void setTimezone(req::ptr<TimeZone> tz);
-  bool modify(const String& diff); // PHP's date_modify() function, muy powerful
+  bool modify(const OptString& diff); // PHP's date_modify() function, muy powerful
   void add(const req::ptr<DateInterval>& interval);
   void sub(const req::ptr<DateInterval>& interval);
 
@@ -275,11 +280,11 @@ public:
   void toTm(struct tm &ta) const;
   int64_t toTimeStamp(bool &err) const;
   int64_t toInteger(char format) const;
-  String toString(const String& format, bool stdc = false) const;
-  String toString(DateFormat format) const;
+  OptString toString(const OptString& format, bool stdc = false) const;
+  OptString toString(DateFormat format) const;
   Array toArray(ArrayFormat format) const;
   void fromTimeStamp(int64_t timestamp, bool utc = false);
-  bool fromString(const String& input, req::ptr<TimeZone> tz,
+  bool fromString(const OptString& input, req::ptr<TimeZone> tz,
                   const char* format=nullptr, bool throw_on_error = true);
 
   // comparison
@@ -315,20 +320,20 @@ private:
       m_errors = ec;
     }
     Array getLastWarnings() const {
-      if (!m_errors) return empty_array();
-      ArrayInit ret(m_errors->warning_count, ArrayInit::Map{});
+      if (!m_errors) return Array::CreateDict();
+      DictInit ret(m_errors->warning_count);
       for(int i = 0; i < m_errors->warning_count; i++) {
         timelib_error_message *em = m_errors->warning_messages + i;
-        ret.set(em->position, String(em->message, CopyString));
+        ret.set(em->position, OptString(em->message, CopyString));
       }
       return ret.toArray();
     }
     Array getLastErrors() const {
-      if (!m_errors) return empty_array();
-      ArrayInit ret(m_errors->error_count, ArrayInit::Map{});
+      if (!m_errors) return Array::CreateDict();
+      DictInit ret(m_errors->error_count);
       for(int i = 0; i < m_errors->error_count; i++) {
         timelib_error_message *em = m_errors->error_messages + i;
-        ret.set(em->position, String(em->message, CopyString));
+        ret.set(em->position, OptString(em->message, CopyString));
       }
       return ret.toArray();
     }
@@ -336,7 +341,7 @@ private:
   private:
     timelib_error_container *m_errors;
   };
-  DECLARE_STATIC_REQUEST_LOCAL(LastErrors, s_lastErrors);
+  static RDS_LOCAL(LastErrors, s_lastErrors);
 
 public:
   static void setLastErrors(timelib_error_container *ec)
@@ -352,7 +357,7 @@ private:
       timelib_time_dtor(t);
     }
   };
-  typedef std::shared_ptr<timelib_time> TimePtr;
+  using TimePtr = std::shared_ptr<timelib_time>;
 
   TimePtr m_time;
   req::ptr<TimeZone> m_tz;
@@ -361,13 +366,12 @@ private:
 
   // helpers
   static Array ParseTime(timelib_time* time,
-                         struct timelib_error_container* error);
+                        timelib_error_container* error);
+
   void update();
-  String rfcFormat(const String& format) const;
-  String stdcFormat(const String& format) const;
+  OptString rfcFormat(const OptString& format) const;
+  OptString stdcFormat(const OptString& format) const;
 };
 
 ///////////////////////////////////////////////////////////////////////////////
 }
-
-#endif // incl_HPHP_DATETIME_H_

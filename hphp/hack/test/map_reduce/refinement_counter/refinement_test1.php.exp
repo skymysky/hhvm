@@ -1,0 +1,11 @@
+Errors:
+  [9:6-7] `HH\BuiltinEnum` is an implementation internal class that cannot be used directly
+  [9:6-7] Interface `HH\BuiltinEnum` is used more than once in this declaration.
+  [9:6-7] Here is another occurrence
+{
+  "refinement_counter": {
+    "legacy_refinements": {},
+    "new_refinements": 8,
+    "total_refinements": 8
+  }
+}

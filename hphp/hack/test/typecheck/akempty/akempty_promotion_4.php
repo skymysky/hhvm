@@ -1,10 +1,10 @@
-<?hh //strict
+<?hh
 
 /**
- * Test AKempty to AKvec upgrade when inside a nested type
+ * Test AKempty to AKvarray upgrade when inside a nested type
  */
 function test(): void {
-  $a = Vector { array() };
+  $a = Vector { vec[] };
   $a[0][] = 'aaa';
   f($a);
 }

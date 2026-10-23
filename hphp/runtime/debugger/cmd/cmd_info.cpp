@@ -17,30 +17,28 @@
 #include "hphp/runtime/debugger/cmd/cmd_info.h"
 #include <vector>
 
-#include <folly/dynamic.h>
-#include <folly/json.h>
-
 #include "hphp/runtime/debugger/cmd/cmd_variable.h"
 #include "hphp/runtime/ext/reflection/ext_reflection.h"
 #include "hphp/runtime/ext/string/ext_string.h"
+#include "hphp/runtime/base/array-iterator.h"
 #include "hphp/runtime/base/comparisons.h"
 #include "hphp/runtime/base/preg.h"
 #include "hphp/runtime/vm/named-entity-defs.h"
 #include "hphp/util/logger.h"
 
-namespace HPHP { namespace Eval {
+namespace HPHP::Eval {
 ///////////////////////////////////////////////////////////////////////////////
 
 using std::string;
 
-TRACE_SET_MOD(debugger);
+TRACE_SET_MOD(debugger)
 
 const StaticString
   s_params("params"),
   s_ref("ref"),
   s_name("name"),
   s_varg("varg"),
-  s_type("type"),
+  s_type_hint("type_hint"),
   s_default("default"),
   s_msg("msg"),
   s_constants("constants"),
@@ -145,14 +143,14 @@ void CmdInfo::parseOneArg(DebuggerClient &client, std::string &subsymbol) {
   string symbol = client.argValue(1);
   size_t pos = symbol.find("::");
   if (pos != string::npos) {
-    m_symbol = String(symbol.substr(0, pos));
+    m_symbol = OptString(symbol.substr(0, pos));
     m_type = KindOfClass;
     subsymbol = symbol.substr(pos + 2);
   } else if (symbol.size() > 2 && symbol.substr(symbol.size() - 2) == "()") {
     m_symbol = symbol.substr(0, symbol.size() - 2);
     m_type = KindOfFunction;
   } else {
-    m_symbol = String(symbol);
+    m_symbol = OptString(symbol);
     m_type = KindOfUnknown;
   }
 }
@@ -186,7 +184,7 @@ void CmdInfo::onClient(DebuggerClient &client) {
   } else {
     for (ArrayIter iter(info); iter; ++iter) {
       StringBuffer sb;
-      PrintInfo(client, sb, iter.second().toArray(), subsymbol);
+      PrintInfo(&client, sb, iter.second().toArray(), subsymbol);
       client.code(sb.detach());
     }
   }
@@ -199,14 +197,14 @@ void CmdInfo::UpdateLiveLists(DebuggerClient &client) {
   client.setLiveLists(res->m_acLiveLists);
 }
 
-String CmdInfo::GetProtoType(DebuggerClient &client, const std::string &cls,
-                             const std::string &func) {
+OptString CmdInfo::GetProtoType(DebuggerClient &client, const std::string &cls,
+                                const std::string &func) {
   CmdInfo cmd;
   cmd.m_type = KindOfFunction;
   if (cls.empty()) {
-    cmd.m_symbol = String(func);
+    cmd.m_symbol = OptString(func);
   } else {
-    cmd.m_symbol = String(cls) + "::" + String(func);
+    cmd.m_symbol = OptString(cls) + "::" + OptString(func);
   }
   auto res = client.xend<CmdInfo>(&cmd);
   Array info = res->m_info;
@@ -222,7 +220,7 @@ String CmdInfo::GetProtoType(DebuggerClient &client, const std::string &cls,
       return sb.detach();
     }
   }
-  return String();
+  return OptString();
 }
 
 namespace {
@@ -238,7 +236,7 @@ void getClassSymbolNames(
   auto& clsConstants =
     liveLists->get(DebuggerClient::AutoCompleteClassConstants);
 
-  NamedEntity::foreach_cached_class([&](Class* c) {
+  NamedType::foreach_cached_class([&](Class* c) {
     if (interface ? !(c->attrs() & AttrInterface) :
         c->attrs() & (AttrInterface | AttrTrait)) {
       return; // continue
@@ -306,7 +304,7 @@ void getSymbolNames(std::shared_ptr<DebuggerClient::LiveLists>& liveLists) {
     functions.push_back(iter.second().toString().toCppString());
   }
   auto consts = lookupDefinedConstants();
-  constants.reserve(consts.size());
+  constants.reserve(consts.size() + constants.size());
   for (ArrayIter iter(consts); iter; ++iter) {
     constants.push_back(iter.first().toString().toCppString());
   }
@@ -327,8 +325,12 @@ bool CmdInfo::onServer(DebuggerProxy &proxy) {
       Logger::Error("Caught unknown exception, auto-complete lists incomplete");
     }
 
-    Array variables = g_context->getLocalDefinedVariables(0);
-    variables += CmdVariable::GetGlobalVariables();
+    // Local variables shadow global variables with the same name.
+    Array variables = CmdVariable::GetGlobalVariables();
+    auto const locals = g_context->getLocalDefinedVariablesDebugger(0);
+    IterateKV(locals.get(), [&](TypedValue key, TypedValue val) {
+      variables.set(key, val);
+    });
     auto& vars = m_acLiveLists->get(DebuggerClient::AutoCompleteVariables);
     vars.reserve(variables.size());
     for (ArrayIter iter(variables); iter; ++iter) {
@@ -361,7 +363,7 @@ bool CmdInfo::onServer(DebuggerProxy &proxy) {
 
 void CmdInfo::PrintDocComments(StringBuffer &sb, const Array& info) {
   if (info[s_doc].isString()) {
-    String doc = info[s_doc].toString();
+    OptString doc = info[s_doc].toString();
     int space1 = 0; // best guess
     int space2 = 3; // best guess
     Variant matches1, matches2;
@@ -370,20 +372,20 @@ void CmdInfo::PrintDocComments(StringBuffer &sb, const Array& info) {
     if (!same(ret1, false) && !same(ret2, false) &&
         matches1.isArray() && matches2.isArray()) {
       // we have perfect doc comment blocks, so we can re-adjust spaces
-      space1 = matches1.toCArrRef()[1].toString().size();
-      space2 = matches2.toCArrRef()[1].toString().size();
+      space1 = matches1.asCArrRef()[1].toString().size();
+      space2 = matches2.asCArrRef()[1].toString().size();
     }
-    String spaces = HHVM_FN(str_repeat)(" ", space2 - space1 - 1);
+    OptString spaces = HHVM_FN(str_repeat)(" ", space2 - space1 - 1);
     sb.printf("%s%s\n", spaces.data(), doc.data());
   }
 }
 
-void CmdInfo::PrintHeader(DebuggerClient &client, StringBuffer &sb,
+void CmdInfo::PrintHeader(DebuggerClient* client, StringBuffer &sb,
                           const Array& info) {
   if (!info[s_internal].toBoolean()) {
-    String file = info[s_file].toString();
-    int line1 = info[s_line1].toInt32();
-    int line2 = info[s_line2].toInt32();
+    OptString file = info[s_file].toString();
+    auto line1 = (int)info[s_line1].toInt64();
+    auto line2 = (int)info[s_line2].toInt64();
     if (file.empty() && line1 == 0 && line2 == 0) {
       sb.printf("// (source unknown)\n");
     } else if (line1 == 0 && line2 == 0) {
@@ -391,27 +393,32 @@ void CmdInfo::PrintHeader(DebuggerClient &client, StringBuffer &sb,
     } else if (line1 && line2 && line1 != line2) {
       sb.printf("// defined on line %d to %d of %s\n", line1, line2,
                 file.data());
-      client.setListLocation(file.data(), line1 - 1, false);
+      if (client != nullptr) {
+        client->setListLocation(file.data(), line1 - 1, false);
+      }
     } else {
       int line = line1 ? line1 : line2;
       sb.printf("// defined on line %d of %s\n", line, file.data());
-      client.setListLocation(file.data(), line - 1, false);
+      if (client != nullptr) {
+        client->setListLocation(file.data(), line - 1, false);
+      }
     }
   }
 
   PrintDocComments(sb, info);
 }
 
-String CmdInfo::GetParams(const Array& params, bool varg,
-                          bool detailed /* = false */) {
+OptString CmdInfo::GetParams(const Array& params, bool varg,
+                             bool detailed /* = false */) {
   StringBuffer args;
   for (ArrayIter iter(params); iter; ++iter) {
     if (!args.empty()) {
       args.append(", ");
     }
     Array arg = iter.second().toArray();
-    if (!arg[s_type].toString().empty()) {
-      args.append(arg[s_type].toString());
+    auto const typeHint = arg[s_type_hint].toString();
+    if (!typeHint.empty()) {
+      args.append(typeHint);
       args.append(' ');
     }
     if (arg[s_ref].toBoolean()) {
@@ -422,14 +429,14 @@ String CmdInfo::GetParams(const Array& params, bool varg,
     if (arg.exists(s_default)) {
       args.append(" = ");
       Variant defValue = arg[s_default];
-      String defText = arg[s_defaultText].toString();
+      OptString defText = arg[s_defaultText].toString();
       if (!defText.empty()) {
         args.append(defText);
       } else if (defValue.isObject()) {
         // ClassInfo was not able to serialize the value, so ext_reflection
         // prepared a stdClass error object. We should fall back to display
         // the original PHP text, if there.
-        Object obj{defValue.asCell()->m_data.pobj};
+        Object obj{defValue.asTypedValue()->m_data.pobj};
         args.append(obj->o_get(s_msg).toString());
       } else if (detailed) {
         args.append(DebuggerClient::FormatVariable(arg[s_default]));
@@ -447,26 +454,26 @@ String CmdInfo::GetParams(const Array& params, bool varg,
   return args.detach();
 }
 
-String CmdInfo::GetModifier(const Array& info, const String& name) {
+OptString CmdInfo::GetModifier(const Array& info, const OptString& name) {
   if (info[name].toBoolean()) {
     return name + " ";
   }
-  return empty_string();
+  return String::Empty();
 }
 
-String CmdInfo::FindSubSymbol(const Array& symbols, const std::string &symbol) {
+OptString CmdInfo::FindSubSymbol(const Array& symbols, const std::string &symbol) {
   for (ArrayIter iter(symbols); iter; ++iter) {
-    String key = iter.first().toString();
+    OptString key = iter.first().toString();
     if (strcasecmp(key.data(), symbol.c_str()) == 0) {
       return key;
     }
   }
-  return String();
+  return OptString();
 }
 
 bool CmdInfo::TryConstant(StringBuffer &sb, const Array& info,
                           const std::string &subsymbol) {
-  String key = FindSubSymbol(info[s_constants].toArray(), subsymbol);
+  OptString key = FindSubSymbol(info[s_constants].toArray(), subsymbol);
   if (!key.isNull()) {
     sb.printf(
       "  const %s = %s;\n",
@@ -480,9 +487,9 @@ bool CmdInfo::TryConstant(StringBuffer &sb, const Array& info,
 
 bool CmdInfo::TryProperty(StringBuffer &sb, const Array& info,
                           const std::string &subsymbol) {
-  String key = FindSubSymbol(info[s_properties].toArray(),
-                             subsymbol[0] == '$' ?
-                             subsymbol.substr(1) : subsymbol);
+  OptString key = FindSubSymbol(info[s_properties].toArray(),
+                                subsymbol[0] == '$' ?
+                                subsymbol.substr(1) : subsymbol);
   if (!key.isNull()) {
     Array prop = info[s_properties].toArray()[key].toArray();
     PrintDocComments(sb, prop);
@@ -506,13 +513,13 @@ bool CmdInfo::TryProperty(StringBuffer &sb, const Array& info,
   return false;
 }
 
-bool CmdInfo::TryMethod(DebuggerClient &client, StringBuffer &sb, const Array& info,
-                        std::string subsymbol) {
+bool CmdInfo::TryMethod(DebuggerClient* client, StringBuffer &sb,
+                         const Array& info, std::string subsymbol) {
   if (subsymbol.size() > 2 && subsymbol.substr(subsymbol.size() - 2) == "()") {
     subsymbol = subsymbol.substr(0, subsymbol.size() - 2);
   }
 
-  String key = FindSubSymbol(info[s_methods].toArray(), subsymbol);
+  OptString key = FindSubSymbol(info[s_methods].toArray(), subsymbol);
   if (!key.isNull()) {
     Array func = info[s_methods].toArray()[key].toArray();
     PrintHeader(client, sb, func);
@@ -536,7 +543,7 @@ bool CmdInfo::TryMethod(DebuggerClient &client, StringBuffer &sb, const Array& i
   return false;
 }
 
-String CmdInfo::GetParam(const Array& params, int index) {
+OptString CmdInfo::GetParam(const Array& params, int index) {
   StringBuffer param;
   Array arg = params[index].toArray();
   if (arg[s_ref].toBoolean()) {
@@ -547,7 +554,7 @@ String CmdInfo::GetParam(const Array& params, int index) {
   return param.detach();
 }
 
-String CmdInfo::GetTypeProfilingInfo(const Array& profilingArray, const Array& params) {
+OptString CmdInfo::GetTypeProfilingInfo(const Array& profilingArray, const Array& params) {
   StringBuffer profile;
   int index = 0;
   StringBuffer args;
@@ -563,7 +570,7 @@ String CmdInfo::GetTypeProfilingInfo(const Array& profilingArray, const Array& p
     int type_number = 0;
     for (ArrayIter type_count(param); type_count; ++type_count) {
       profile.append("    ");
-      String type = type_count.first().toString();
+      OptString type = type_count.first().toString();
       profile.printf("%s: %f", type.data(),
                      type_count.second().toDouble()* 100);
       profile.append("%\n");
@@ -578,8 +585,8 @@ String CmdInfo::GetTypeProfilingInfo(const Array& profilingArray, const Array& p
   return profile.detach();
 }
 
-void CmdInfo::PrintInfo(DebuggerClient &client, StringBuffer &sb, const Array& info,
-                        const std::string &subsymbol) {
+void CmdInfo::PrintInfo(DebuggerClient* client, StringBuffer &sb,
+                        const Array& info, const std::string &subsymbol) {
   if (info.exists(s_params)) {
     PrintHeader(client, sb, info);
     sb.printf("function %s%s(%s);\n",
@@ -601,13 +608,15 @@ void CmdInfo::PrintInfo(DebuggerClient &client, StringBuffer &sb, const Array& i
     if (TryProperty(sb, info, subsymbol)) found = true;
     if (TryMethod(client, sb, info, subsymbol)) found = true;
     if (found) return;
-    client.info("Specified symbol cannot be found. Here the whole class:\n");
+    if (client != nullptr) {
+      client->info("Specified symbol cannot be found. Here the whole class:\n");
+    }
   }
 
   PrintHeader(client, sb, info);
 
   StringBuffer parents;
-  String parent = info[s_parent].toString();
+  OptString parent = info[s_parent].toString();
   if (!parent.empty()) {
     parents.append("extends ");
     parents.append(parent);
@@ -687,4 +696,4 @@ void CmdInfo::PrintInfo(DebuggerClient &client, StringBuffer &sb, const Array& i
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-}}
+}

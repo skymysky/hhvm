@@ -1,0 +1,101 @@
+--- ocaml
++++ rupro
+@@ -1,94 +1,94 @@
+ FoldedClass {
+     name: "\\T1",
+     pos: Pos(root|trait_require_class.php, 4:7-9),
+     kind: Ctrait,
+     consts: {
+         "class": ClassConst {
+             is_synthesized: true,
+             kind: CCConcrete,
+             pos: Pos(root|trait_require_class.php, 4:7-9),
+             ty: class<this>,
+             origin: "\\T1",
+             refs: [],
+             is_shape_key: false,
+             value: CVAbsent,
+         },
+     },
+     req_constraints_ancestors: [
+         CREqual(
+             Requirement(
+                 Pos(root|trait_require_class.php, 5:17-18),
+                 C,
+             ),
+         ),
+     ],
+ }
+ FoldedClass {
+     name: "\\T2",
+     pos: Pos(root|trait_require_class.php, 8:7-9),
+     kind: Ctrait,
+     consts: {
+         "class": ClassConst {
+             is_synthesized: true,
+             kind: CCConcrete,
+             pos: Pos(root|trait_require_class.php, 8:7-9),
+             ty: class<this>,
+             origin: "\\T2",
+             refs: [],
+             is_shape_key: false,
+             value: CVAbsent,
+         },
+     },
+     req_constraints_ancestors: [
+         CREqual(
+             Requirement(
+-                Pos(root|trait_require_class.php, 10:17-18),
+-                D,
++                Pos(root|trait_require_class.php, 9:17-18),
++                C,
+             ),
+         ),
+         CREqual(
+             Requirement(
+-                Pos(root|trait_require_class.php, 9:17-18),
+-                C,
++                Pos(root|trait_require_class.php, 10:17-18),
++                D,
+             ),
+         ),
+     ],
+ }
+ FoldedClass {
+     name: "\\C",
+     pos: Pos(root|trait_require_class.php, 13:7-8),
+     kind: Cclass(
+         Concrete,
+     ),
+     consts: {
+         "class": ClassConst {
+             is_synthesized: true,
+             kind: CCConcrete,
+             pos: Pos(root|trait_require_class.php, 13:7-8),
+             ty: class<this>,
+             origin: "\\C",
+             refs: [],
+             is_shape_key: false,
+             value: CVAbsent,
+         },
+     },
+ }
+ FoldedClass {
+     name: "\\D",
+     pos: Pos(root|trait_require_class.php, 14:7-8),
+     kind: Cclass(
+         Concrete,
+     ),
+     consts: {
+         "class": ClassConst {
+             is_synthesized: true,
+             kind: CCConcrete,
+             pos: Pos(root|trait_require_class.php, 14:7-8),
+             ty: class<this>,
+             origin: "\\D",
+             refs: [],
+             is_shape_key: false,
+             value: CVAbsent,
+         },
+     },
+ }

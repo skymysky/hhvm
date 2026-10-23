@@ -1,4 +1,4 @@
-<?hh     /* -*- php -*- */
+<?hh /* -*- php -*- */
 /**
  * Copyright (c) 2014, Facebook, Inc.
  * All rights reserved.
@@ -9,16 +9,26 @@
  */
 
 class SpoofChecker {
-  const SINGLE_SCRIPT_CONFUSABLE = 0;
-  const MIXED_SCRIPT_CONFUSABLE = 0;
-  const WHOLE_SCRIPT_CONFUSABLE = 0;
-  const ANY_CASE = 0;
-  const SINGLE_SCRIPT = 0;
-  const INVISIBLE = 0;
-  const CHAR_LIMIT = 0;
-  public function __construct() { }
-  public function isSuspicious($text, &$issuesFound = null) { }
-  public function areConfusable($s1, $s2, &$issuesFound = null) { }
-  public function setAllowedLocales($localesList) { }
-  public function setChecks($checks) { }
+  const int SINGLE_SCRIPT_CONFUSABLE;
+  const int MIXED_SCRIPT_CONFUSABLE;
+  const int WHOLE_SCRIPT_CONFUSABLE;
+  const int ANY_CASE;
+  const int SINGLE_SCRIPT;
+  const int INVISIBLE;
+  const int CHAR_LIMIT;
+
+  public function __construct();
+  public function isSuspicious(
+    string $text,
+    inout int $issuesFound,
+  ): bool;
+  public function areConfusable(
+    string $s1,
+    string $s2,
+    inout int $issuesFound,
+  ): bool;
+  public function setAllowedLocales(
+    string $localesList,
+  ): void;
+  public function setChecks(int $checks): void;
 }

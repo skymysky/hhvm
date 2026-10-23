@@ -1,16 +1,19 @@
-<?php
+<?hh
 
-class C { function heh() { echo "heh\n"; } }
-function foo() {
-  return mt_rand() ? array(new C, new C) : array(new C, new C, new C);
+class C { function heh() :mixed{ echo "heh\n"; } }
+function foo() :mixed{
+  return mt_rand() ? vec[new C, new C] : vec[new C, new C, new C];
 }
-function bar() {
+function bar() :mixed{
   $x = foo();
-  $x['a'] = new C;
+  $x[] = new C;
   return $x['nothere'];
 }
-function main() {
-  $x = bar();
+<<__EntryPoint>>
+function main() :mixed{
+  try { $x = bar(); } catch (Exception $e) {
+    echo $e->getMessage()."\n";
+    $x = null;
+  }
   if ($x) $x->heh();
 }
-main();

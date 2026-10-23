@@ -1,17 +1,21 @@
-<?php
+<?hh
 
 class Dtor {
-  public function __destruct() { echo "dtor\n"; }
 }
 
-class Foo { public $bug; };
+class Foo { public $bug; }
 
-function main() {
+function main() :mixed{
   $x = new Foo;
   $x->bug = new Dtor;
-  $x->bug += 12;
+  try {
+    $x->bug += 12;
+  } catch (Exception $e) {
+    var_dump($e->getMessage());
+  }
   var_dump($x);
 }
-
+<<__EntryPoint>> function main_entry() :mixed{
 main();
 echo "done\n";
+}

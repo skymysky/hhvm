@@ -1,14 +1,19 @@
-<?php
+<?hh
 
 class foo {
-  static function ioo($y, &$x) {
+  static function ioo($y, inout $x) :mixed{
     return new self(1);
   }
   function __construct($a, $b) {
 }
 }
-function t() {
+function t() :mixed{
   $x = 1;
-  foo::ioo($x, $y);
+  $y = null;
+  foo::ioo($x, inout $y);
 }
+
+<<__EntryPoint>>
+function main_782() :mixed{
 t();
+}

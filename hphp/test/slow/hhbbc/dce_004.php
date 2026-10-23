@@ -1,12 +1,12 @@
-<?php
+<?hh
 
 class str {}
-class str1 extends str { public function __toString() { return "a"; } }
+class str1 extends str { public function __toString()[] :mixed{ return "a"; } }
 class str2 extends str {
-  public function __toString() { throw new Exception('a'); }
+  public function __toString()[] :mixed{ throw new Exception('a'); }
 }
 
-function bar(str $k) {
+function bar(str $k) :mixed{
   $tmp = 54;
   try {
     $y = $k->__toString();
@@ -17,6 +17,10 @@ function bar(str $k) {
   var_dump($tmp);
 }
 
+
+
+<<__EntryPoint>>
+function main_dce_004() :mixed{
 bar(new str1);
 bar(new str2);
-
+}

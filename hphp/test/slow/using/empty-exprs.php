@@ -1,6 +1,7 @@
 <?hh
 
-function main() {
+function main() :mixed{
   using () {
   }
 }
+

@@ -14,13 +14,14 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_JIT_IRGEN_INCDEC_H
-#define incl_HPHP_JIT_IRGEN_INCDEC_H
+#pragma once
 
 #include "hphp/runtime/vm/jit/irgen-exit.h"
 #include "hphp/runtime/vm/jit/irgen-internal.h"
 
-namespace HPHP { namespace jit { namespace irgen {
+#include "hphp/util/configs/eval.h"
+
+namespace HPHP::jit::irgen {
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -29,14 +30,18 @@ namespace HPHP { namespace jit { namespace irgen {
  * support irgen for the given source's type.
  */
 inline SSATmp* incDec(IRGS& env, IncDecOp op, SSATmp* src) {
-  if (src->isA(TNull)) {
-    return isInc(op) ? cns(env, 1) : src;
-  }
+  // Old behavior handles non int/double types.  New behavior warns/fatals for
+  // non int/double types.
+  if (Cfg::Eval::WarnOnIncDecInvalidType == 0) {
+    if (src->isA(TNull)) {
+      if (isInc(op)) PUNT(Inc-Null);
+      return src;
+    }
 
-  if (src->type().subtypeOfAny(TBool, TArrLike, TObj, TRes)) {
-    return src;
+    if (src->type().subtypeOfAny(TBool, TArrLike, TObj, TRes)) {
+      return src;
+    }
   }
-
   if (!src->type().subtypeOfAny(TInt, TDbl)) {
     return nullptr;
   }
@@ -44,22 +49,16 @@ inline SSATmp* incDec(IRGS& env, IncDecOp op, SSATmp* src) {
   Opcode opc;
   if (src->isA(TDbl)) {
     opc = isInc(op) ? AddDbl : SubDbl;
-  } else if (!isIncDecO(op)) {
-    opc = isInc(op) ? AddInt : SubInt;
   } else {
-    opc = isInc(op) ? AddIntO : SubIntO;
+    opc = isInc(op) ? AddInt : SubInt;
   }
 
   auto const one = src->isA(TInt) ? cns(env, 1) : cns(env, 1.0);
-  auto const result = opc == AddIntO || opc == SubIntO
-    ? gen(env, opc, makeExitSlow(env), src, one)
-    : gen(env, opc, src, one);
+  auto const result = gen(env, opc, src, one);
 
   return result;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
-}}}
-
-#endif
+}

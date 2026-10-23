@@ -9,10 +9,14 @@
  *
  */
 
-function foo(array<int> $arr): ?array<int> {
+function foo(varray<int> $arr): ?varray<int> {
   $x = null;
   if (coin_flip()) {
     $x = $arr;
   }
   return $x;
+}
+
+function coin_flip(): bool {
+  return true;
 }

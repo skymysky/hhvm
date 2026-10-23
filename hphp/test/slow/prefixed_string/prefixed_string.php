@@ -1,7 +1,6 @@
-<?hh // strict
+<?hh
 
-function f(): void {
-  $x = re"blah blah\n";
+function f(string $x = re"blah blah\n"): void {
   echo($x);
   $s1 = "Be";
   $s2 = "diff";
@@ -9,4 +8,8 @@ function f(): void {
   echo($s);
 }
 
+
+<<__EntryPoint>>
+function main_prefixed_string() :mixed{
 f();
+}

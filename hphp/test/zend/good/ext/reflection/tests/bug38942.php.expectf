@@ -1,5 +1,5 @@
 Class [ <user> class bar extends foo ] {
-  @@ %sbug38942.php 6-7
+  @@ %s/bug38942.php %d-%d
 
   - Constants [0] {
   }
@@ -14,8 +14,8 @@ Class [ <user> class bar extends foo ] {
   }
 
   - Methods [1] {
-    Method [ <user, inherits foo, ctor> public method foo ] {
-      @@ %sbug38942.php 3 - 3
+    Method [ <user, inherits foo, ctor> public method __construct ] {
+      @@ %s/bug38942.php %d - %d
     }
   }
 }

@@ -15,27 +15,37 @@
 */
 #include "hphp/runtime/vm/jit/irgen-control.h"
 
-#include "hphp/runtime/vm/resumable.h"
+#include "hphp/runtime/vm/unwind.h"
 
-#include "hphp/runtime/vm/jit/normalized-instruction.h"
 #include "hphp/runtime/vm/jit/switch-profile.h"
 #include "hphp/runtime/vm/jit/target-profile.h"
 
 #include "hphp/runtime/vm/jit/irgen-exit.h"
+#include "hphp/runtime/vm/jit/irgen-inlining.h"
 #include "hphp/runtime/vm/jit/irgen-internal.h"
+#include "hphp/runtime/vm/jit/irgen-interpone.h"
 
-namespace HPHP { namespace jit { namespace irgen {
+#include "hphp/util/configs/debugger.h"
+#include "hphp/util/text-util.h"
+
+namespace HPHP::jit::irgen {
+
+TRACE_SET_MOD(hhir)
 
 void surpriseCheck(IRGS& env) {
-  auto const ptr = resumeMode(env) != ResumeMode::None ? sp(env) : fp(env);
   auto const exit = makeExitSlow(env);
-  gen(env, CheckSurpriseFlags, exit, ptr);
+  gen(env, CheckSurpriseFlags, exit, anyStackRegister(env));
 }
 
 void surpriseCheck(IRGS& env, Offset relOffset) {
-  if (relOffset <= 0) {
+  if (relOffset <= 0 && !env.skipSurpriseCheck) {
     surpriseCheck(env);
   }
+}
+
+void surpriseCheckWithTarget(IRGS& env, Offset targetBcOff) {
+  auto const exit = makeExitSurprise(env, SrcKey{curSrcKey(env), targetBcOff});
+  gen(env, CheckSurpriseFlags, exit, anyStackRegister(env));
 }
 
 /*
@@ -43,29 +53,36 @@ void surpriseCheck(IRGS& env, Offset relOffset) {
  * may be a side exit or a normal IR block, depending on whether or not the
  * offset is in the current RegionDesc.
  */
-Block* getBlock(IRGS& env, Offset offset) {
-  SrcKey sk(curSrcKey(env), offset);
+Block* getBlock(IRGS& env, SrcKey sk) {
   // If hasBlock returns true, then IRUnit already has a block for that offset
   // and makeBlock will just return it.  This will be the proper successor
   // block set by setSuccIRBlocks.  Otherwise, the given offset doesn't belong
   // to the region, so we just create an exit block.
-  if (!env.irb->hasBlock(sk)) return makeExit(env, offset);
+  if (!env.irb->hasBlock(sk)) return makeExit(env, sk);
 
   return env.irb->makeBlock(sk, curProfCount(env));
 }
 
+Block* getBlock(IRGS& env, Offset offset) {
+  return getBlock(env, SrcKey{curSrcKey(env), offset});
+}
+
 //////////////////////////////////////////////////////////////////////
 
-void jmpImpl(IRGS& env, Offset offset) {
-  auto target = getBlock(env, offset);
+void jmpImpl(IRGS& env, SrcKey sk) {
+  auto target = getBlock(env, sk);
   assertx(target != nullptr);
   gen(env, Jmp, target);
+}
+
+void jmpImpl(IRGS& env, Offset offset) {
+  return jmpImpl(env, SrcKey{curSrcKey(env), offset});
 }
 
 void implCondJmp(IRGS& env, Offset taken, bool negate, SSATmp* src) {
   auto const target = getBlock(env, taken);
   assertx(target != nullptr);
-  auto const boolSrc = gen(env, ConvCellToBool, src);
+  auto const boolSrc = gen(env, ConvTVToBool, src);
   decRef(env, src);
   gen(env, negate ? JmpZero : JmpNZero, target, boolSrc);
 }
@@ -73,20 +90,18 @@ void implCondJmp(IRGS& env, Offset taken, bool negate, SSATmp* src) {
 //////////////////////////////////////////////////////////////////////
 
 void emitJmp(IRGS& env, Offset relOffset) {
-  auto const offset = bcOff(env) + relOffset;
-  jmpImpl(env, offset);
-}
-
-void emitJmpNS(IRGS& env, Offset relOffset) {
+  surpriseCheck(env, relOffset);
   jmpImpl(env, bcOff(env) + relOffset);
 }
 
 void emitJmpZ(IRGS& env, Offset relOffset) {
+  surpriseCheck(env, relOffset);
   auto const takenOff = bcOff(env) + relOffset;
   implCondJmp(env, takenOff, true, popC(env));
 }
 
 void emitJmpNZ(IRGS& env, Offset relOffset) {
+  surpriseCheck(env, relOffset);
   auto const takenOff = bcOff(env) + relOffset;
   implCondJmp(env, takenOff, false, popC(env));
 }
@@ -104,59 +119,19 @@ void emitSwitch(IRGS& env, SwitchKind kind, int64_t base,
   Type type = switchVal->type();
   assertx(IMPLIES(!(type <= TInt), bounded));
   assertx(IMPLIES(bounded, iv.size() > 2));
-  SSATmp* index;
-  SSATmp* ssabase = cns(env, base);
-  SSATmp* ssatargets = cns(env, nTargets);
+  SSATmp* index = switchVal;
 
   Offset defaultOff = bcOff(env) + iv.vec32()[iv.size() - 1];
-  Offset zeroOff = 0;
-  if (base <= 0 && (base + nTargets) > 0) {
-    zeroOff = bcOff(env) + iv.vec32()[0 - base];
-  } else {
-    zeroOff = defaultOff;
-  }
 
-  if (type <= TNull) {
-    gen(env, Jmp, getBlock(env, zeroOff));
-    return;
-  }
-  if (type <= TBool) {
-    Offset nonZeroOff = bcOff(env) + iv.vec32()[iv.size() - 2];
-    gen(env, JmpNZero, getBlock(env, nonZeroOff), switchVal);
-    gen(env, Jmp, getBlock(env, zeroOff));
-    return;
-  }
-  if (type <= TArrLike) {
-    decRef(env, switchVal);
+  if (UNLIKELY(!(type <= TInt))) {
+    if (type <= TArrLike) decRef(env, switchVal);
     gen(env, Jmp, getBlock(env, defaultOff));
     return;
   }
 
-  if (type <= TInt) {
-    // No special treatment needed
-    index = switchVal;
-  } else if (type <= TDbl) {
-    // switch(Double|String|Obj)Helper do bounds-checking for us, so we need to
-    // make sure the default case is in the jump table, and don't emit our own
-    // bounds-checking code.
-    bounded = false;
-    index = gen(env, LdSwitchDblIndex, switchVal, ssabase, ssatargets);
-  } else if (type <= TStr) {
-    bounded = false;
-    index = gen(env, LdSwitchStrIndex, switchVal, ssabase, ssatargets);
-  } else if (type <= TObj) {
-    // switchObjHelper can throw exceptions and reenter the VM so we use the
-    // catch block here.
-    bounded = false;
-    index = gen(env, LdSwitchObjIndex, switchVal, ssabase, ssatargets);
-  } else {
-    PUNT(Switch-UnknownType);
-  }
-
   auto const dataSize = SwitchProfile::extraSize(iv.size());
   TargetProfile<SwitchProfile> profile(
-    env.unit.context(), env.irb->curMarker(), s_switchProfile.get(),
-    dataSize
+    env.context, env.irb->curMarker(), s_switchProfile.get(), dataSize
   );
 
   auto checkBounds = [&] {
@@ -166,10 +141,10 @@ void emitSwitch(IRGS& env, SwitchKind kind, int64_t base,
     gen(env, JmpZero, getBlock(env, defaultOff), ok);
     bounded = false;
   };
-  auto const offsets = iv.range32();
 
   // We lower Switch to a series of comparisons if any of the successors are in
   // included in the region.
+  auto const offsets = iv.range32();
   auto const shouldLower =
     std::any_of(offsets.begin(), offsets.end(), [&](Offset o) {
       SrcKey sk(curSrcKey(env), bcOff(env) + o);
@@ -185,7 +160,7 @@ void emitSwitch(IRGS& env, SwitchKind kind, int64_t base,
     // Emit conditional checks for all successors in this region, in descending
     // order of hotness. We rely on the region selector to decide which arcs
     // are appropriate to include in the region. Fall through to the
-    // fully-generic JmpSwitchDest at the end if nothing matches.
+    // fully-generic LdSwitchDest at the end if nothing matches.
     for (auto const& val : values) {
       auto targetOff = bcOff(env) + offsets[val.caseIdx];
       SrcKey sk(curSrcKey(env), targetOff);
@@ -222,34 +197,44 @@ void emitSwitch(IRGS& env, SwitchKind kind, int64_t base,
     targets.emplace_back(SrcKey{curSrcKey(env), bcOff(env) + offset});
   }
 
-  auto data = JmpSwitchData{};
+  auto data = LdSwitchData{};
   data.cases = iv.size();
   data.targets = &targets[0];
-  data.spOffBCFromFP = spOffBCFromFP(env);
-  data.spOffBCFromIRSP = spOffBCFromIRSP(env);
+  data.spOffBCFromStackBase = spOffBCFromStackBase(env);
 
-  gen(env, JmpSwitchDest, data, index, sp(env), fp(env));
+  auto const target = gen(env, LdSwitchDest, data, index);
+  if (isInlining(env)) {
+    sideExitFromInlined(env, target);
+  } else {
+    auto const jmpData = IRSPRelOffsetData { spOffBCFromIRSP(env) };
+    gen(env, JmpExit, jmpData, target, sp(env), fp(env));
+  }
 }
 
 void emitSSwitch(IRGS& env, const ImmVector& iv) {
   const int numCases = iv.size() - 1;
+  auto testVal = popC(env);
+  auto const defaultOff = bcOff(env) + iv.strvec()[numCases].dest;
 
-  /*
-   * We use a fast path translation with a hashtable if none of the
-   * cases are numeric strings and if the input is actually a string.
-   *
-   * Otherwise we do a linear search through the cases calling string
-   * conversion routines.
-   */
-  const bool fastPath =
-    topC(env)->isA(TStr) &&
-    std::none_of(iv.strvec(), iv.strvec() + numCases,
-      [&](const StrVecItem& item) {
-        return curUnit(env)->lookupLitstrId(item.str)->isNumeric();
-      }
-    );
+ if (UNLIKELY(testVal->isA(TCls) || testVal->isA(TLazyCls))) {
+    if (Cfg::Eval::RaiseClassConversionNoticeSampleRate > 0) {
+      std::string msg;
+      // TODO(vmladenov) appears untested
+      string_printf(msg, Strings::CLASS_TO_STRING_IMPLICIT, "string switch");
+      gen(env,
+        RaiseNotice,
+        SampleRateData { Cfg::Eval::RaiseClassConversionNoticeSampleRate },
+        cns(env, makeStaticString(msg)));
+    }
+    testVal = gen(env, testVal->isA(TCls) ? LdClsName : LdLazyClsName, testVal);
+  }
 
-  auto const testVal = popC(env);
+  if (UNLIKELY(!testVal->isA(TStr))) {
+    // straight to the default
+    decRef(env, testVal);
+    gen(env, Jmp, getBlock(env, defaultOff));
+    return;
+  }
 
   std::vector<LdSSwitchData::Elm> cases(numCases);
   for (int i = 0; i < numCases; ++i) {
@@ -261,45 +246,282 @@ void emitSSwitch(IRGS& env, const ImmVector& iv) {
   LdSSwitchData data;
   data.numCases   = numCases;
   data.cases      = &cases[0];
-  data.defaultSk  = SrcKey{curSrcKey(env),
-                           bcOff(env) + iv.strvec()[iv.size() - 1].dest};
-  data.bcSPOff    = spOffBCFromFP(env);
+  data.defaultSk  = SrcKey{curSrcKey(env), defaultOff};
+  data.bcSPOff    = spOffBCFromStackBase(env);
 
-  auto const dest = gen(env,
-                        fastPath ? LdSSwitchDestFast
-                                 : LdSSwitchDestSlow,
-                        data,
-                        testVal);
+  auto const target = gen(env, LdSSwitchDest, data, testVal);
   decRef(env, testVal);
-  gen(
-    env,
-    JmpSSwitchDest,
-    IRSPRelOffsetData { spOffBCFromIRSP(env) },
-    dest,
-    sp(env),
-    fp(env)
-  );
+  if (isInlining(env)) {
+    sideExitFromInlined(env, target);
+  } else {
+    auto const jmpData = IRSPRelOffsetData { spOffBCFromIRSP(env) };
+    gen(env, JmpExit, jmpData, target, sp(env), fp(env));
+  }
+}
+
+void emitThrowNonExhaustiveSwitch(IRGS& env) {
+  interpOne(env);
+}
+
+void emitRaiseClassStringConversionNotice(IRGS& env) {
+  if (Cfg::Eval::RaiseClassConversionNoticeSampleRate > 0) {
+    std::string msg;
+    string_printf(msg, Strings::CLASS_TO_STRING_IMPLICIT, "bytecode");
+    gen(env,
+        RaiseNotice,
+        SampleRateData { Cfg::Eval::RaiseClassConversionNoticeSampleRate },
+        cns(env, makeStaticString(msg)));
+  }
 }
 
 //////////////////////////////////////////////////////////////////////
 
 void emitSelect(IRGS& env) {
   auto const condSrc = popC(env);
-  auto const boolSrc = gen(env, ConvCellToBool, condSrc);
+  auto const boolSrc = gen(env, ConvTVToBool, condSrc);
   decRef(env, condSrc);
 
   ifThenElse(
     env,
     [&] (Block* taken) { gen(env, JmpZero, taken, boolSrc); },
     [&] { // True case
-      auto const val = popC(env, DataTypeCountness);
-      popDecRef(env, DataTypeCountness);
+      auto const val = popC(env, DataTypeGeneric);
+      popDecRef(env, DecRefProfileId::SelectIfBranch, DataTypeGeneric);
       push(env, val);
     },
-    [&] { popDecRef(env, DataTypeCountness); } // False case
+    [&] { // False case
+      popDecRef(env, DecRefProfileId::SelectElseBranch, DataTypeGeneric);
+    }
   );
 }
 
 //////////////////////////////////////////////////////////////////////
 
-}}}
+namespace {
+
+void endCatchImpl(IRGS& env, EndCatchData::CatchMode mode, SSATmp* exc,
+                  Optional<IRSPRelOffset> vmspOffset) {
+  // If we are unwinding from an inlined function, route the exception
+  // to the shared sink.
+  if (isInlining(env)) {
+    endCatchFromInlined(env, mode, exc);
+    return;
+  }
+
+  auto const teardown = mode == EndCatchData::CatchMode::LocalsDecRefd
+    ? EndCatchData::Teardown::None
+    : EndCatchData::Teardown::Full;
+  auto const data = EndCatchData {
+    spOffBCFromIRSP(env),
+    mode,
+    EndCatchData::FrameMode::Phplogue,
+    teardown,
+    vmspOffset
+  };
+  gen(env, EndCatch, data, fp(env), sp(env), exc);
+}
+
+void emitExceptionHandler(IRGS& env, Offset ehOffset, SSATmp* exc) {
+  int locId = 0;
+
+  // Forget all frame state information that can't be shared between EHs.
+  env.irb->fs().clearForEH();
+
+  // Pop stack items on the top of the stack with unknown values. We don't
+  // share DecRefs of these values, as they might be unrelated to each other.
+  while (true) {
+    auto const curStackPos = spOffBCFromStackBase(env);
+    if (curStackPos == spOffEmpty(env)) break;
+    if (env.irb->fs().valueOf(Location::Stack{curStackPos}) != nullptr) break;
+
+    popDecRef(env, static_cast<DecRefProfileId>(locId++));
+    updateStackOffsetAndExceptionBoundary(env);
+  }
+
+  std::vector<Block*> ehBlocks;
+
+  auto const ehSrcKey = SrcKey{curSrcKey(env), ehOffset};
+  if (auto const block = env.irb->getEHBlock(ehSrcKey)) {
+    ehBlocks.push_back(block);
+  } else {
+    auto const newBlock = defBlock(env, Block::Hint::Unused);
+    env.irb->setEHBlock(ehSrcKey, newBlock);
+    ehBlocks.push_back(newBlock);
+  }
+
+  for (auto i = spOffEmpty(env) + 1; i <= spOffBCFromStackBase(env); ++i) {
+    auto const prev = ehBlocks.back();
+    auto const value = env.irb->fs().valueOf(Location::Stack{i});
+    if (auto const block = env.irb->getEHDecRefBlock(prev, value)) {
+      ehBlocks.push_back(block);
+    } else {
+      auto const newBlock = defBlock(env, Block::Hint::Unused);
+      env.irb->setEHDecRefBlock(prev, value, newBlock);
+      ehBlocks.push_back(newBlock);
+    }
+  }
+
+  auto const startBlock = [&](Block* block) {
+    env.irb->appendBlock(block);
+    auto const label = env.unit.defLabel(1, block, env.irb->nextBCContext());
+    exc = label->dst(0);
+    exc->setType(Type::SubObj(SystemLib::getThrowableClass()) | TNullptr);
+  };
+
+  // Pop the remaining stack items via shared blocks.
+  while (true) {
+    auto const curStackPos = spOffBCFromStackBase(env);
+    if (curStackPos == spOffEmpty(env)) break;
+
+    assertx(!ehBlocks.empty());
+    auto const decRefBlock = ehBlocks.back();
+    ehBlocks.pop_back();
+
+    gen(env, Jmp, decRefBlock, exc);
+    if (!decRefBlock->empty()) return;
+
+    startBlock(decRefBlock);
+    popDecRef(env, static_cast<DecRefProfileId>(locId++));
+    updateStackOffsetAndExceptionBoundary(env);
+  }
+
+  assertx(spOffBCFromStackBase(env) == spOffEmpty(env));
+  assertx(ehBlocks.size() == 1);
+  auto const ehBlock = ehBlocks[0];
+
+  gen(env, Jmp, ehBlock, exc);
+  if (!ehBlock->empty()) return;
+
+  startBlock(ehBlock);
+
+  cond(
+    env,
+    [&](Block* taken) {
+      return gen(env, CheckNonNull, taken, exc);
+    },
+    [&](SSATmp* exception) {
+      // Route Hack exceptions to the exception handler.
+      push(env, exception);
+      jmpImpl(env, ehSrcKey);
+      return nullptr;
+    },
+    [&] {
+      // We are throwing a C++ exception, bypassing catch handlers, which would
+      // normally clean up iterators. Kill them here, so that once we reach
+      // LeaveInlineFrame, it won't trigger assertions in load-elim.
+      auto const numIterators = curFunc(env)->numIterators();
+      for (auto i = 0U; i < numIterators; ++i) {
+        gen(env, KillIter, IterId{i}, fp(env));
+      }
+
+      // Route C++ exceptions to the frame unwinder.
+      auto constexpr mode = EndCatchData::CatchMode::UnwindOnly;
+      endCatchImpl(env, mode, cns(env, nullptr), std::nullopt);
+      return nullptr;
+    }
+  );
+}
+
+}
+
+void emitHandleException(IRGS& env, EndCatchData::CatchMode mode, SSATmp* exc,
+                         Optional<IRSPRelOffset> vmspOffset, bool sideEntry) {
+  // Stublogues lack proper frames and need special configuration.
+  if (env.irb->fs().stublogue()) {
+    assertx(!isInlining(env));
+    assertx(mode == EndCatchData::CatchMode::UnwindOnly);
+    assertx(!sideEntry);
+    auto const data = EndCatchData {
+      spOffBCFromIRSP(env),
+      EndCatchData::CatchMode::UnwindOnly,
+      EndCatchData::FrameMode::Stublogue,
+      EndCatchData::Teardown::NA,
+      std::nullopt
+    };
+    gen(env, EndCatch, data, fp(env), sp(env), exc);
+    return;
+  }
+
+  // Teardown::None can't be used without an empty stack.
+  assertx(IMPLIES(mode == EndCatchData::CatchMode::LocalsDecRefd,
+                  spOffBCFromStackBase(env) == spOffEmpty(env)));
+  assertx(IMPLIES(sideEntry, exc->isA(TObj)));
+
+  if (mode == EndCatchData::CatchMode::UnwindOnly) {
+    auto const ehOffset = findExceptionHandler(curFunc(env), bcOff(env));
+    if (ehOffset != kInvalidOffset) {
+      return emitExceptionHandler(env, ehOffset, exc);
+    }
+  }
+
+  if (sideEntry) {
+    gen(env, StUnwinderExn, exc);
+    gen(env, StVMFP, fixupFP(env));
+    gen(env, StVMPC, cns(env, uintptr_t(env.irb->curMarker().fixupSk().pc())));
+    gen(env, StVMReturnAddr, cns(env, 0));
+  }
+  endCatchImpl(env, mode, exc, std::move(vmspOffset));
+}
+
+//////////////////////////////////////////////////////////////////////
+
+void emitThrow(IRGS& env) {
+  auto const srcTy = topC(env)->type();
+  auto const excTy = Type::SubObj(SystemLib::getExceptionClass());
+  auto const errTy = Type::SubObj(SystemLib::getErrorClass());
+  auto const maybeThrowable = srcTy.maybe(excTy) || srcTy.maybe(errTy);
+
+  if (!maybeThrowable) return interpOne(env);
+
+  auto slowExit = makeExitSlow(env);
+  if (Cfg::Debugger::EnableVSDebugger && Cfg::Eval::EmitDebuggerIntrCheck) {
+    irgen::checkDebuggerExceptionIntr(env, slowExit);
+  }
+
+  auto const handleException = [&] (SSATmp* exc) {
+    popC(env);
+    updateMarker(env);
+
+    auto constexpr mode = EndCatchData::CatchMode::UnwindOnly;
+    emitHandleException(env, mode, exc, std::nullopt, true /* sideEntry */);
+  };
+
+  if (srcTy <= Type::SubObj(SystemLib::getThrowableClass())) {
+    return handleException(topC(env));
+  }
+
+  handleException(cond(
+    env,
+    [&] (Block* taken) { return gen(env, CheckType, TObj, taken, topC(env)); },
+    [&] (SSATmp* obj) {
+      auto const cls = gen(env, LdObjClass, obj);
+      return cond(
+        env,
+        [&] (Block* taken) {
+          auto const ecd = ExtendsClassData { SystemLib::getExceptionClass() };
+          gen(env, JmpZero, taken, gen(env, ExtendsClass, ecd, cls));
+          return gen(env, AssertType, excTy, obj);
+        },
+        [&] (SSATmp* exc) { return exc; },
+        [&] (Block* taken) {
+          auto const ecd = ExtendsClassData { SystemLib::getErrorClass() };
+          gen(env, JmpZero, taken, gen(env, ExtendsClass, ecd, cls));
+          return gen(env, AssertType, errTy, obj);
+        },
+        [&] (SSATmp* exc) { return exc; },
+        [&] {
+          gen(env, Jmp, slowExit);
+          return cns(env, TBottom);
+        }
+      );
+    },
+    [&] {
+      gen(env, Jmp, slowExit);
+      return cns(env, TBottom);
+    }
+  ));
+}
+
+//////////////////////////////////////////////////////////////////////
+
+}

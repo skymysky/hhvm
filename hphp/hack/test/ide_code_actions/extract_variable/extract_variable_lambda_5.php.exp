@@ -1,0 +1,41 @@
+Code actions available:
+------------------------------------------
+Extract into variable (CodeActionKind: "refactor") SELECTED
+
+JSON for selected code action:
+------------------------------------------
+{
+  "title": "Extract into variable",
+  "kind": "refactor",
+  "diagnostics": [],
+  "edit": {
+    "changes": {
+      "FILE.php": [
+        {
+          "range": {
+            "start": { "line": 8, "character": 4 },
+            "end": { "line": 8, "character": 47 }
+          },
+          "newText": "$${0:placeholder0} = $item + 1;\n    $y = /*range-start*/$${0:placeholder0}/*range-end*/;"
+        }
+      ]
+    }
+  }
+}
+
+Applied edit for code action:
+------------------------------------------
+<?hh
+
+function map<T>(vec<T> $v, (function(T): T) $f): vec<T> {
+  return vec[];
+}
+
+function main(): void {
+  () ==> map(vec[], function($item) {
+    $${0:placeholder0} = $item + 1;
+    $y = /*range-start*/$${0:placeholder0}/*range-end*/;
+    return $y;
+  });
+}
+

@@ -1,6 +1,9 @@
-<?php
+<?hh
 
-$tempfile = tempnam('/tmp', 'vmextfiletest');
+
+<<__EntryPoint>>
+function main_fscanf() :mixed{
+$tempfile = tempnam(sys_get_temp_dir(), 'vmextfiletest');
 
 $f = fopen($tempfile, 'w');
 fputs($f, "testing fscanf");
@@ -11,3 +14,4 @@ $res = fscanf($f, "%s %s");
 var_dump($res);
 
 unlink($tempfile);
+}

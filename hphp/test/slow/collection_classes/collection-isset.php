@@ -1,5 +1,5 @@
 <?hh
-function main() {
+function main() :mixed{
   $containers = Vector {
     Pair {Vector {}, Vector {Vector {}}},
     Pair {ImmVector {}, ImmVector {ImmVector {}}},
@@ -43,4 +43,8 @@ function main() {
     echo "\n";
   }
 }
+
+<<__EntryPoint>>
+function main_collection_isset() :mixed{
 main();
+}

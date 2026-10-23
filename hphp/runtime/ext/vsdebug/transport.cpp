@@ -66,8 +66,11 @@ void DebugTransport::shutdownOutputThread() {
   // message thread so that it exits.
   std::unique_lock<std::mutex> lock(m_outgoingMsgLock);
   m_terminating = true;
-  m_outgoingMessages.clear();
   m_outgoingMsgCondition.notify_all();
+}
+
+void DebugTransport::cleanupFd(int fd) {
+  close(fd);
 }
 
 void DebugTransport::shutdown() {
@@ -89,7 +92,7 @@ void DebugTransport::shutdown() {
   // Cleanup all fds.
   {
     Lock lock(m_mutex);
-    close(m_transportFd);
+    cleanupFd(m_transportFd);
     m_transportFd = -1;
   }
 }
@@ -108,11 +111,13 @@ const std::string DebugTransport::wrapOutgoingMessage(
 }
 
 void DebugTransport::enqueueOutgoingUserMessage(
+  request_id_t threadId,
   const char* message,
   const char* level
 ) {
   folly::dynamic userMessage = folly::dynamic::object;
 
+  userMessage["threadId"] = threadId;
   userMessage["category"] = level;
   userMessage["output"] = message;
   enqueueOutgoingEventMessage(userMessage, EventTypeOutput);
@@ -132,6 +137,8 @@ void DebugTransport::enqueueOutgoingMessageForClient(
   folly::dynamic& message,
   const char* messageType
 ) {
+  message["seq"] = m_responseSeqId++;
+
   if (!clientConnected()) {
     VSDebugLogger::Log(
       VSDebugLogger::LogLevelWarning,
@@ -140,6 +147,12 @@ void DebugTransport::enqueueOutgoingMessageForClient(
     );
     return;
   }
+
+  VSDebugLogger::Log(
+    VSDebugLogger::LogLevelVerbose,
+    "Enqueueing outgoing message: %s\n",
+    folly::toJson(message).c_str()
+  );
 
   const auto wrapped = wrapOutgoingMessage(message, messageType);
 
@@ -174,11 +187,13 @@ void DebugTransport::processOutgoingMessages() {
 
   pollFds[abortIdx] = {0};
   pollFds[abortIdx].fd = m_abortPipeFd[0];
-  pollFds[abortIdx].events = POLLIN | POLLERR | POLLHUP;
+  pollFds[abortIdx].events =
+    POLLIN | POLLERR | POLLHUP | g_platformPollFlags;
 
   pollFds[transportIdx] = {0};
   pollFds[transportIdx].fd = fd;
-  pollFds[transportIdx].events = POLLOUT | POLLERR | POLLHUP;
+  pollFds[transportIdx].events =
+    POLLOUT | POLLERR | POLLHUP | g_platformPollFlags;
 
   while (true) {
     std::list<std::string> messagesToSend;
@@ -186,12 +201,12 @@ void DebugTransport::processOutgoingMessages() {
       // Take a local copy of any messages waiting to be sent under the
       // lock and clear the queue.
       std::unique_lock<std::mutex> lock(m_outgoingMsgLock);
-      while (!m_terminating && m_outgoingMessages.size() == 0) {
-        m_outgoingMsgCondition.wait(lock);
-      }
-
       if (m_terminating) {
         return;
+      }
+
+      while (!m_terminating && m_outgoingMessages.size() == 0) {
+        m_outgoingMsgCondition.wait(lock);
       }
 
       messagesToSend = std::list<std::string>(m_outgoingMessages);
@@ -206,6 +221,12 @@ void DebugTransport::processOutgoingMessages() {
       // Write out the entire string, *including* its terminating NULL char.
       const char* output = it->c_str();
       size_t bytesToSend = strlen(output) + 1;
+
+      VSDebugLogger::Log(
+        VSDebugLogger::LogLevelVerbose,
+        "Sending outgoing message: %s\n",
+        output
+      );
 
       while (bytesToSend > 0) {
         int ret = poll(pollFds.data(), 2, -1);
@@ -252,7 +273,8 @@ void DebugTransport::processOutgoingMessages() {
           return;
         } else {
           // TransportFD hangup or error.
-          assert((pollFds[transportIdx].revents & (POLLERR | POLLHUP)) != 0);
+          assertx((pollFds[transportIdx].revents &
+                  (POLLERR | POLLHUP | g_platformPollFlags)) != 0);
           VSDebugLogger::Log(
             VSDebugLogger::LogLevelInfo,
             "Transport write thread: error event on fd."
@@ -283,7 +305,8 @@ void DebugTransport::processIncomingMessages() {
   // Wait for data to be available, or a termination event to occur.
   constexpr int abortIdx = 0;
   constexpr int transportIdx = 1;
-  int eventMask = POLLIN | POLLERR | POLLHUP;
+
+  int eventMask = POLLIN | POLLERR | POLLHUP | g_platformPollFlags;
   struct pollfd pollFds[2];
   memset(pollFds, 0, sizeof(pollFds));
   pollFds[abortIdx].fd = m_abortPipeFd[0];

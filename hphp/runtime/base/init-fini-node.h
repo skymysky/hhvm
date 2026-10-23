@@ -14,8 +14,7 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_THREAD_INIT_FINI_H_
-#define incl_HPHP_THREAD_INIT_FINI_H_
+#pragma once
 
 #include "hphp/util/portability.h"
 #include "hphp/util/assertions.h"
@@ -37,23 +36,21 @@ template <> struct WorkerInfo<IFJob> {
 struct InitFiniNode {
   enum class When {
     RequestStart,            // before executing PHP code in a request
-      RequestFini,
-      ThreadInit,
-      ThreadFini,
-      // ProcessInitConcurrent should only be used for thread-safe code with few
-      // dependencies (e.g., runtime options, logging).
-      PostRuntimeOptions,    // after runtime options are set, single-threaded
-      ProcessPreInit,        // after pthread initialization and config parsing
-      ProcessInit,           // after PreInit
-      ProcessInitConcurrent, // after PreInit, concurrently with Init and others
-      ProcessExit,           // after Init and InitConcurrent
-      ServerPreInit,
-      ServerInit,
-      WarmupConcurrent,      // concurrent with OS file cache warmup, optional
-      ServerExit,
-      GlobalsInit,
-
-      Sentinel
+    RequestFini,
+    ThreadInit,
+    ThreadFini,
+    // ProcessInitConcurrent should only be used for thread-safe code with few
+    // dependencies (e.g., runtime options, logging).
+    PostRuntimeOptions,    // after runtime options are set, single-threaded
+    ProcessPreInit,        // after pthread initialization and config parsing
+    ProcessInit,           // after PreInit
+    ProcessInitConcurrent, // after PreInit, concurrently with Init and others
+    ProcessExit,           // after Init and InitConcurrent
+    ServerPreInit,
+    ServerInit,
+    WarmupConcurrent,      // concurrent with OS file cache warmup, optional
+    ServerExit,
+    Sentinel
   };
 
   const static unsigned NumNodes = static_cast<unsigned>(When::Sentinel);
@@ -84,7 +81,6 @@ struct InitFiniNode {
   static void WarmupConcurrentStart(uint32_t maxWorkers);
   static void WarmupConcurrentWaitForEnd(); // No-op if not started.
   static void ServerFini()     { iterate(When::ServerExit);     }
-  static void GlobalsInit()    { iterate(When::GlobalsInit);    }
 
   struct IFWorker {
     void onThreadEnter() {}
@@ -119,5 +115,3 @@ struct InitFiniNode {
 
 ///////////////////////////////////////////////////////////////////////////////
 }
-
-#endif // incl_HPHP_THREAD_INIT_FINI_H_

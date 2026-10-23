@@ -21,10 +21,49 @@
 #include "hphp/runtime/ext/extension.h"
 #include "hphp/runtime/ext/asio/ext_resumable-wait-handle.h"
 #include "hphp/runtime/vm/bytecode.h"
-#include "hphp/runtime/vm/resumable.h"
 #include "hphp/runtime/vm/jit/types.h"
+#include "hphp/runtime/vm/resumable.h"
+#include "hphp/runtime/vm/srckey.h"
 
 namespace HPHP {
+///////////////////////////////////////////////////////////////////////////////
+// Tail frames embedded in AFWH
+
+// NOTE: We use the physical values of these IDs in several places. A diagram
+// will help a bit. We use 16 bits for an AsyncFrameId and store up to 4 IDs
+// in a packed 64-bit quadword. Consider this field as four 16-bit words:
+//
+// m_packedTailFrameIds: (higher) ..w3..|..w2..|..w1..|..w0.. (lower)
+//       m_tailFrameIds: (higher) .tf0..|.tf1..|.tf2..|.tf3.. (lower)
+//
+// Pushing tail frames into this list is the hot path; we only need to read it
+// if the Awaitable results in an exception, which is rare. We can JIT faster
+// code for the push operation if we push the last frame into the lowest bits,
+// using bit operations - just a shift and an or. That's why the tail frame
+// indices are reversed from the physical layout.
+//
+// As a example, if we've pushed one tail frames into this list, it'll be in
+// tf3 == w0. When we push another frame, that first ID will be in tf2 == w1,
+// and the second one in tf3 == w0. Any unused IDs will equal the invalid ID.
+//
+// We place the following on the valid and invalid ranges of these IDs:
+//   1. The invalid ID is 0xffff - that is, it's all 1s in binary.
+//   2. Valid IDs are in the range [1, 0x7fff] (both ends inclusive).
+//
+// Using these restrictions, we can initialize these IDs to all-invalid by
+// setting the quadword to -1. We can test "does an AFWH have any tail frames?"
+// by checking that w0 is not the invalid ID. We can also test "does an AFWH
+// have room for more tail frames?" by checking that w3 is the invalid ID.
+//
+using AsyncFrameId = uint16_t;
+constexpr AsyncFrameId kInvalidAsyncFrameId =
+  std::numeric_limits<AsyncFrameId>::max();
+constexpr AsyncFrameId kMaxAsyncFrameId = kInvalidAsyncFrameId >> 1;
+
+// Will return kInvalidAsyncFrameId if we've run out of IDs.
+AsyncFrameId getAsyncFrameId(SrcKey sk);
+SrcKey getAsyncFrame(AsyncFrameId id);
+
 ///////////////////////////////////////////////////////////////////////////////
 // class AsyncFunctionWaitHandle
 
@@ -33,8 +72,12 @@ namespace HPHP {
  * execution. A dependency on another wait handle is set up by awaiting such
  * wait handle, giving control of the execution back to the asio framework.
  */
-struct c_AsyncFunctionWaitHandle final : c_ResumableWaitHandle {
-  WAITHANDLE_CLASSOF(AsyncFunctionWaitHandle);
+struct c_AsyncFunctionWaitHandle final :
+    c_ResumableWaitHandle,
+    SystemLib::ClassLoader<"HH\\AsyncFunctionWaitHandle"> {
+  using SystemLib::ClassLoader<"HH\\AsyncFunctionWaitHandle">::classof;
+  using SystemLib::ClassLoader<"HH\\AsyncFunctionWaitHandle">::className;
+
   static void instanceDtor(ObjectData* obj, const Class*) {
     auto wh = wait_handle<c_AsyncFunctionWaitHandle>(obj);
     Resumable::Destroy(wh->resumable()->size(), wh);
@@ -48,6 +91,7 @@ struct c_AsyncFunctionWaitHandle final : c_ResumableWaitHandle {
       return offsetof(Node, m_blockable);
     }
 
+    template <bool lowPri>
     void setChild(c_WaitableWaitHandle* child);
     c_WaitableWaitHandle* getChild() const;
     bool isFirstUnfinishedChild() const;
@@ -73,34 +117,35 @@ struct c_AsyncFunctionWaitHandle final : c_ResumableWaitHandle {
   static constexpr ptrdiff_t resumeAddrOff() {
     return resumableOff() + Resumable::resumeAddrOff();
   }
-  static constexpr ptrdiff_t resumeOffsetOff() {
-    return resumableOff() + Resumable::resumeOffsetOff();
-  }
   static constexpr ptrdiff_t childrenOff() {
     return offsetof(c_AsyncFunctionWaitHandle, m_children);
   }
-  template <bool mayUseVV>
+  static constexpr ptrdiff_t tailFramesOff() {
+    return offsetof(c_AsyncFunctionWaitHandle, m_tailFrameIds);
+  }
+
+  template <bool lowPri>
   static c_AsyncFunctionWaitHandle* Create(
     const ActRec* origFp,
     size_t numSlots,
     jit::TCA resumeAddr,
-    Offset resumeOffset,
+    Offset suspendOffset,
     c_WaitableWaitHandle* child
   ); // nothrow
+
   static void PrepareChild(const ActRec* fp, c_WaitableWaitHandle* child);
   void onUnblocked();
   void resume();
-  void await(Offset resumeOffset, req::ptr<c_WaitableWaitHandle>&& child);
-  void ret(Cell& result);
+  void await(Offset suspendOffset, req::ptr<c_WaitableWaitHandle>&& child);
+  void ret(TypedValue& result);
   void fail(ObjectData* exception);
   void failCpp();
-  String getName();
+  OptString getName();
   c_WaitableWaitHandle* getChild();
-  void exitContext(context_idx_t ctx_idx);
+  void exitContext(ContextIndex contextIdx);
   bool isRunning() { return getState() == STATE_RUNNING; }
-  String getFileName();
+  OptString getFilename();
   Offset getNextExecutionOffset();
-  int getLineNumber();
 
   Resumable* resumable() const {
     return reinterpret_cast<Resumable*>(
@@ -113,18 +158,35 @@ struct c_AsyncFunctionWaitHandle final : c_ResumableWaitHandle {
 
   bool isFastResumable() const {
     assertx(getState() == STATE_READY);
-    return (resumable()->resumeAddr() &&
-            m_children[0].getChild()->isSucceeded());
+    if (auto const child = m_children[0].getChild()) {
+      return resumable()->resumeAddr() && child->isSucceeded();
+    }
+    return false;
   }
+
+  // Access to merged tail frames. We optimize hard for writing these tail
+  // frames quickly, so reading them is a bit awkward - try to avoid doing so.
+  bool hasTailFrames() const;
+  size_t firstTailFrameIndex() const;
+  size_t lastTailFrameIndex() const;
+  AsyncFrameId tailFrame(size_t index) const;
+  static constexpr size_t kNumTailFrames = 4;
 
  private:
   void setState(uint8_t state) { setKindState(Kind::AsyncFunction, state); }
+
+  template <bool lowPri>
   void initialize(c_WaitableWaitHandle* child);
   void prepareChild(c_WaitableWaitHandle* child);
 
   // valid if STATE_BLOCKED || STATE_READY. For now, always 1 element.
   // May become a flexible array later.
   Node m_children[1];
+
+  union {
+    AsyncFrameId m_tailFrameIds[kNumTailFrames];
+    uint64_t m_packedTailFrameIds;
+  };
 
   TYPE_SCAN_CUSTOM_FIELD(m_children) {
     auto state = getState();

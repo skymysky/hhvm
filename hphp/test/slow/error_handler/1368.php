@@ -1,13 +1,13 @@
-<?php
-
-function handler($e) {
-   var_dump(strpos((string)$e, 'bomb') !== false);
- return true;
+<?hh
+function handler($e) :mixed{
+  var_dump(strpos($e->__toString(), 'bomb') !== false);
+  return true;
 }
- set_exception_handler('handler');
-function a() {
+function a() :mixed{
 }
- set_exception_handler('a');
-restore_exception_handler();
-throw new Exception('bomb');
-
+<<__EntryPoint>> function main(): void {
+  set_exception_handler(handler<>);
+  set_exception_handler(a<>);
+  restore_exception_handler();
+  throw new Exception('bomb');
+}

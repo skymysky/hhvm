@@ -1,7 +1,7 @@
-<?hh // strict
+<?hh
 
 function f(mixed $x): void {
-  if ($x instanceof self) {
+  if ($x is self) {
     echo 'huh?';
   }
 }

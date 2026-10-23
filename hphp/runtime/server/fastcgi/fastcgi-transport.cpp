@@ -20,13 +20,15 @@
 #include "hphp/runtime/server/http-protocol.h"
 #include "hphp/runtime/server/transport.h"
 
+#include "hphp/util/configs/server.h"
+
 #include <folly/io/Cursor.h>
+#include <fmt/core.h>
 #include <folly/io/IOBuf.h>
 #include <folly/io/IOBufQueue.h>
 
 namespace HPHP {
 
-using folly::IOBuf;
 using folly::IOBufQueue;
 using folly::io::Cursor;
 
@@ -55,7 +57,7 @@ const void *FastCGITransport::getPostData(size_t& size) {
 const void *FastCGITransport::getMorePostData(size_t& size) {
   // session will terminate the request if we don't receive data in
   // this much time
-  long maxWait = RuntimeOption::ConnectionTimeoutSeconds;
+  long maxWait = Cfg::Server::ConnectionTimeoutSeconds;
   if (maxWait <= 0) {
     maxWait = 50; // this was the default read timeout in LibEventServer
   }
@@ -96,7 +98,7 @@ std::string FastCGITransport::getHeader(const char* name) {
     key += (*p == '-') ? '_' : toupper(*p);
   }
 
-  if (m_requestParams.count(key)) {
+  if (m_requestParams.contains(key)) {
     return m_requestParams[key];
   }
 
@@ -116,13 +118,17 @@ std::string FastCGITransport::getHeader(const char* name) {
   return "";
 }
 
-void FastCGITransport::getHeaders(HeaderMap& headers) {
-  for (auto& pair : m_requestParams) {
-    auto key = unmangleHeader(pair.first);
-    if (!key.empty()) {
-      headers[key] = { pair.second };
+const HeaderMap& FastCGITransport::getHeaders() {
+  // lazily construct unmangled headers
+  if (m_unmangledRequestParams.empty()) {
+    for (auto& pair : m_requestParams) {
+      auto key = unmangleHeader(pair.first);
+      if (!key.empty()) {
+        m_unmangledRequestParams[key] = { pair.second };
+      }
     }
   }
+  return m_unmangledRequestParams;
 }
 
 void FastCGITransport::getTransportParams(HeaderMap& serverParams) {
@@ -151,12 +157,12 @@ void FastCGITransport::sendResponseHeaders(IOBufQueue& queue, int code) {
     auto info = getResponseInfo();
     auto reason = !info.empty() ? info : HttpProtocol::GetReasonString(code);
 
-    folly::format("Status: {} {}\r\n", code, reason)(appender);
+    appender(fmt::format("Status: {} {}\r\n", code, reason));
   }
 
   for (auto& header : m_responseHeaders) {
     for (auto& value : header.second) {
-      folly::format("{}: {}\r\n", header.first, value)(appender);
+      appender(fmt::format("{}: {}\r\n", header.first, value));
     }
   }
 
@@ -220,6 +226,14 @@ void FastCGITransport::onHeader(std::unique_ptr<folly::IOBuf> key_chain,
   auto value = valCur.readFixedString(value_chain->computeChainDataLength());
 
   m_requestParams[key] = value;
+
+  // if we've already built the unmangled map, add to that as well
+  if (!m_unmangledRequestParams.empty()) {
+    auto unmangledKey = unmangleHeader(key);
+    if (!unmangledKey.empty()) {
+      m_unmangledRequestParams[unmangledKey] = { value };
+    }
+  }
 }
 
 void FastCGITransport::onHeadersComplete() {
@@ -232,7 +246,7 @@ void FastCGITransport::onHeadersComplete() {
     m_docRoot += '/';
   }
 
-  if (m_scriptName.empty() || RuntimeOption::ServerFixPathInfo) {
+  if (m_scriptName.empty() || Cfg::Server::FixPathInfo) {
     // According to php-fpm, some servers don't set SCRIPT_FILENAME. In
     // this case, it uses PATH_TRANSLATED.
     // Added runtime option to change m_scriptFilename to s_pathTran

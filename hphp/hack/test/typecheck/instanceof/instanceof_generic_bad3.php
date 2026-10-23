@@ -1,5 +1,5 @@
 <?hh
 
-function T<T>($a): bool {
-  return $a instanceof T;
+function T<T>(mixed $a): bool {
+  return $a is T;
 }

@@ -1,24 +1,23 @@
 <?hh
 
-function a() {
+<<__DynamicallyCallable>> function a() :void{
   echo "Hello from a\n";
 }
 
-function b() {
+<<__DynamicallyCallable>> function b() :void{
   echo "I am b\n";
 }
 
-function callfns($name, $name2) {
+function callfns(string $name, string $name2) :void{
   echo "Calling $name\n";
-  $name();
+  HH\dynamic_fun($name)();
   echo "Calling $name2\n";
-  $name2();
+  HH\dynamic_fun($name2)();
 }
-
+<<__EntryPoint>> function main(): void {
 callfns('a', 'b');
 fb_rename_function('a', 'old_a');
 fb_rename_function('b', 'a');
 fb_rename_function('old_a', 'b');
 callfns('a', 'b');
-fb_rename_function('extract', 'a');
-
+}

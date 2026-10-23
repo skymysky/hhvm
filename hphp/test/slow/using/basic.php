@@ -1,12 +1,10 @@
 <?hh
 
-require 'logger.inc';
-
-function thrower() {
+function thrower() :mixed{
   throw new Exception('hi');
 }
 
-function main() {
+function main() :mixed{
   echo "Starting main\n";
   using (new Logger()) {
     echo "In first using\n";
@@ -74,7 +72,7 @@ function main() {
   echo "Leaving main\n\n";
 }
 
-async function mainAsync() {
+async function mainAsync() :Awaitable<mixed>{
   echo "\nStarting mainAsync\n";
   await using (new Logger()) {
     echo "Sync create, async dispose\n";
@@ -109,6 +107,11 @@ async function mainAsync() {
   echo "Leaving mainAsync\n\n";
 }
 
+
+<<__EntryPoint>>
+function main_basic() :mixed{
+require 'logger.inc';
+
 main();
 HH\Asio\join(mainAsync());
 
@@ -117,3 +120,4 @@ using (new Logger()) {
   echo "Inside using\n";
 }
 echo "Outside using\n";
+}

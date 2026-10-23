@@ -14,12 +14,11 @@
    +----------------------------------------------------------------------+
 */
 #include "hphp/util/cronolog.h"
+#include "hphp/util/user-info.h"
 
-#include <boost/filesystem/path.hpp>
+#include <filesystem>
 
-#ifndef _MSC_VER
 #include <pwd.h>
-#endif
 
 #include <folly/portability/Fcntl.h>
 #include <folly/portability/SysStat.h>
@@ -35,7 +34,6 @@ namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
 
 using std::string;
-namespace fs = boost::filesystem;
 
 /* Open a new log file: determine the start of the current
  * period, generate the log file name from the fileTemplate,
@@ -47,7 +45,7 @@ namespace fs = boost::filesystem;
  */
 static FILE *new_log_file(const char *fileTemplate, const char *linkname,
                           mode_t linktype, const char *prevlinkname,
-                          PERIODICITY periodicity, int period_multiple,
+                          Periodicity periodicity, int period_multiple,
                           int period_delay, char *pfilename,
                           size_t pfilename_len, time_t time_now,
                           time_t *pnext_period) {
@@ -83,7 +81,6 @@ static FILE *new_log_file(const char *fileTemplate, const char *linkname,
     return nullptr;
   }
 
-#ifndef _MSC_VER
   if (linkname) {
     struct stat stat_buf;
     struct stat stat_buf2;
@@ -93,7 +90,7 @@ static FILE *new_log_file(const char *fileTemplate, const char *linkname,
         stat_buf.st_dev != stat_buf2.st_dev) {
 
       /* Create a relative symlink to logs under linkname's directory */
-      std::string dir = fs::path(linkname).parent_path().native();
+      std::string dir = std::filesystem::path(linkname).parent_path().native();
       if (dir != "/") {
         dir.append("/");
       }
@@ -107,12 +104,11 @@ static FILE *new_log_file(const char *fileTemplate, const char *linkname,
       create_link(filename.c_str(), linkname, linktype, prevlinkname);
     }
   }
-#endif
   return fdopen(log_fd, "a");
 }
 
 void Cronolog::setPeriodicity() {
-  if (m_periodicity == UNKNOWN) {
+  if (m_periodicity == Periodicity::Unknown) {
     m_periodicity = determine_periodicity((char *)m_template.c_str());
   }
 }
@@ -145,11 +141,7 @@ FILE *Cronolog::getOutputFile() {
     if (m_file == nullptr) {
       const char *linkname = m_linkName.empty() ? nullptr : m_linkName.c_str();
       m_file = new_log_file(m_template.c_str(),
-#ifdef _MSC_VER
-                            "", 0,
-#else
                             linkname, S_IFLNK,
-#endif
                             m_prevLinkName, m_periodicity, m_periodMultiple,
                             m_periodDelay, m_fileName, sizeof(m_fileName),
                             time_now, &m_nextPeriod);
@@ -159,43 +151,37 @@ FILE *Cronolog::getOutputFile() {
 }
 
 void Cronolog::changeOwner(const string &username, const string &symlink) {
-#ifdef _MSC_VER
-  return;
-#else
   if (username.empty() || symlink.empty()) {
     return;
   }
 
-  int username_length = sysconf(_SC_GETPW_R_SIZE_MAX);
-  if (username_length == -1) {
-    username_length = 512;
-  }
-
-  struct passwd user_info, *user_infop;
-  std::vector<char> username_buf(username_length);
-
-  if (getpwnam_r(username.c_str(), &user_info, &username_buf[0],
-                 username_length, &user_infop)) {
-    // invalid user
+  auto buf = PasswdBuffer{};
+  passwd* pw;
+  if (getpwnam_r(username.c_str(), &buf.ent, buf.data.get(), buf.size, &pw)) {
+    // Failed to obtain the record.
     return;
   }
 
-  if (lchown(symlink.c_str(), user_info.pw_uid, -1) < 0) {
-    fprintf(stderr, "Unable to chmod %s\n", symlink.c_str());
+  if (pw == nullptr) {
+    // Invalid user.
+    return;
+  }
+
+  if (lchown(symlink.c_str(), pw->pw_uid, -1) < 0) {
+    fprintf(stderr, "Unable to chown %s\n", symlink.c_str());
   }
 
   // using chown() isn't portable if it is a symlink
   int fd = open(symlink.c_str(), O_RDONLY | O_NONBLOCK | O_NOCTTY);
-  int success = (fd >= 0 ? fchown(fd, user_info.pw_uid, -1) : -1);
+  int success = (fd >= 0 ? fchown(fd, pw->pw_uid, -1) : -1);
 
   if (fd >= 0) {
     close(fd);
   }
 
   if (success < 0) {
-    fprintf(stderr, "Unable to chmod %s\n", symlink.c_str());
+    fprintf(stderr, "Unable to chown %s\n", symlink.c_str());
   }
-#endif
 }
 
 ///////////////////////////////////////////////////////////////////////////////

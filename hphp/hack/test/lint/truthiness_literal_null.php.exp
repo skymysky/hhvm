@@ -1,0 +1,6 @@
+warning: Lint[5622] Invalid condition: a value of type `null` will always be falsy
+   --> truthiness_literal_null.php
+  5 |   if ($x) {
+    |       ^^
+
+

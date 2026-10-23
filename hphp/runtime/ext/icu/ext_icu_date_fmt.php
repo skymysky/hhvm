@@ -7,7 +7,7 @@
  * users to display dates in a localized format or to parse strings into PHP
  * date values using pattern strings and/or canned patterns.
  */
-<<__NativeData("IntlDateFormatter")>>
+<<__NativeData>>
 class IntlDateFormatter {
   /**
    * Create a date formatter
@@ -47,9 +47,9 @@ class IntlDateFormatter {
                               mixed $timezone = NULL, mixed $calendar = NULL,
                               string $pattern = ''): void;
 
-  public static function create($locale, $datetype, $timetype,
-                                $timezone = NULL, $calendar = NULL,
-                                $pattern = ''): mixed {
+  public static function create(string $locale, int $datetype, int $timetype,
+                                mixed $timezone = NULL, mixed $calendar = NULL,
+                                string $pattern = ''): mixed {
     try {
       return new IntlDateFormatter($locale, $datetype, $timetype,
                                    $timezone, $calendar, $pattern);
@@ -68,7 +68,7 @@ class IntlDateFormatter {
    *   object is passed, its timezone is not considered. The object will be
    *   formatted using the formater's configured timezone. If one wants to
    *   use the timezone of the object to be formatted,
-   *   IntlDateFormatter::setTimeZone() must be called before with the
+   *   IntlDateFormatter::setTimezone() must be called before with the
    *   object's timezone. Alternatively, the static function
    *   IntlDateFormatter::formatObject() may be used instead.
    *
@@ -76,7 +76,7 @@ class IntlDateFormatter {
    *   FALSE.
    */
   <<__Native>>
-  public function format(mixed $value): string;
+  public function format(mixed $value): ?string;
 
   /**
    * Formats an object
@@ -88,9 +88,9 @@ class IntlDateFormatter {
    * @return string - A string with result.
    */
   <<__Native>>
-  public static function FormatObject(object $obj,
+  public static function FormatObject(\HH\object $obj,
                                       mixed $format = NULL,
-                                      ?string $locale = NULL): string;
+                                      ?string $locale = NULL): ?string;
 
   /**
    * Get the calendar type used for the IntlDateFormatter
@@ -99,7 +99,7 @@ class IntlDateFormatter {
    *   IntlDateFormatter::TRADITIONAL or IntlDateFormatter::GREGORIAN.
    */
   <<__Native>>
-  function getCalendar(): int;
+  public function getCalendar(): int;
 
   /**
    * Get the datetype used for the IntlDateFormatter
@@ -124,7 +124,7 @@ class IntlDateFormatter {
    * @return string - Description of the last error.
    */
   <<__Native>>
-  public function getErrorMessage(): string;
+  public function getErrorMessage(): ?string;
 
   /**
    * Get the locale used by formatter
@@ -134,7 +134,7 @@ class IntlDateFormatter {
    * @return string - the locale of this formatter or 'false' if error
    */
   <<__Native>>
-  public function getLocale(?int $which = null): string;
+  public function getLocale(?int $which = null): ?string;
 
   /**
    * Get the pattern used for the IntlDateFormatter
@@ -142,7 +142,7 @@ class IntlDateFormatter {
    * @return string - The pattern string being used to format/parse.
    */
   <<__Native>>
-  public function getPattern(): string;
+  public function getPattern(): ?string;
 
   /**
    * Get the timetype used for the IntlDateFormatter
@@ -159,7 +159,7 @@ class IntlDateFormatter {
    *   formatter.
    */
   <<__Native>>
-  public function getTimeZoneId(): string;
+  public function getTimezoneId(): ?string;
 
   /**
    * Get copy of formatter's calendar object
@@ -168,7 +168,7 @@ class IntlDateFormatter {
    *   by this formatter.
    */
   <<__Native>>
-  public function getCalendarObject(): object;
+  public function getCalendarObject(): IntlCalendar;
 
   /**
    * Get formatter's timezone
@@ -176,7 +176,7 @@ class IntlDateFormatter {
    * @return IntlTimeZone - The associated IntlTimeZone object.
    */
   <<__Native>>
-  public function getTimeZone(): object;
+  public function getTimezone(): IntlTimeZone;
 
   /**
    * Get the lenient used for the IntlDateFormatter
@@ -202,7 +202,7 @@ class IntlDateFormatter {
    */
   <<__Native>>
   public function localtime(string $value,
-                            mixed &$position): mixed;
+                            inout mixed $position): mixed;
 
   /**
    * Parse string to a timestamp value
@@ -218,9 +218,15 @@ class IntlDateFormatter {
    * @return int - timestamp parsed value, or FALSE if value can't be
    *   parsed.
    */
+  public function parse(string $value): mixed {
+    $position = null;
+    $result = $this->parseWithPosition($value, inout $position);
+    return $result;
+  }
+
   <<__Native>>
-  public function parse(string $value,
-                        mixed &$position = null): mixed;
+  public function parseWithPosition(string $value,
+                                    inout mixed $position): mixed;
 
   /**
    * Sets the calendar type used by the formatter
@@ -236,7 +242,7 @@ class IntlDateFormatter {
    * @return bool -
    */
   <<__Native>>
-  function setCalendar(mixed $which): bool;
+  public function setCalendar(mixed $which): bool;
 
   /**
    * Set the leniency of the parser
@@ -270,11 +276,11 @@ class IntlDateFormatter {
    *
    * @return bool -
    */
-  public function setTimeZoneId(string $zone): bool {
+  public function setTimezoneId(string $zone): bool {
     trigger_error("Use datefmt_set_timezone() instead, which also accepts ".
                   "a plain time zone identifier and for which this function ".
                   "is now an alias", E_DEPRECATED);
-    return $this->setTimeZone($zone);
+    return $this->setTimezone($zone);
   }
 
   /**
@@ -285,7 +291,7 @@ class IntlDateFormatter {
    * @return bool - Returns TRUE on success and FALSE on failure.
    */
   <<__Native>>
-  public function setTimeZone(mixed $zone): bool;
+  public function setTimezone(mixed $zone): bool;
 
 }
 
@@ -342,7 +348,7 @@ function datefmt_create($locale,
  *   passed, its timezone is not considered. The object will be formatted
  *   using the formater's configured timezone. If one wants to use the
  *   timezone of the object to be formatted,
- *   IntlDateFormatter::setTimeZone() must be called before with the
+ *   IntlDateFormatter::setTimezone() must be called before with the
  *   object's timezone. Alternatively, the static function
  *   IntlDateFormatter::formatObject() may be used instead.
  *
@@ -457,7 +463,7 @@ function datefmt_get_timetype(IntlDateFormatter $fmt): int {
  * @return string - ID string for the time zone used by this formatter.
  */
 function datefmt_get_timezone_id(IntlDateFormatter $fmt): string {
-  return $fmt->getTimeZoneId();
+  return $fmt->getTimezoneId();
 }
 
 /**
@@ -466,7 +472,7 @@ function datefmt_get_timezone_id(IntlDateFormatter $fmt): string {
  * @return IntlCalendar - A copy of the internal calendar object used by
  *   this formatter.
  */
-function datefmt_get_calendar_object(IntlDateFormatter $fmt): Object {
+function datefmt_get_calendar_object(IntlDateFormatter $fmt): IntlCalendar {
   return $fmt->getCalendarObject();
 }
 
@@ -475,8 +481,8 @@ function datefmt_get_calendar_object(IntlDateFormatter $fmt): Object {
  *
  * @return IntlTimeZone - The associated IntlTimeZone object.
  */
-function datefmt_get_timezone(IntlDateFormatter $fmt): Object {
-  return $fmt->getTimeZone();
+function datefmt_get_timezone(IntlDateFormatter $fmt): IntlTimeZone {
+  return $fmt->getTimezone();
 }
 
 /**
@@ -507,8 +513,9 @@ function datefmt_is_lenient(IntlDateFormatter $fmt): bool {
  */
 function datefmt_localtime(IntlDateFormatter $fmt,
                            $value,
-                           &$position): mixed {
-  return $fmt->localTime($value, $position);
+                           inout $position): mixed {
+  $result = $fmt->localtime($value, inout $position);
+  return $result;
 }
 
 /**
@@ -528,8 +535,9 @@ function datefmt_localtime(IntlDateFormatter $fmt,
  */
 function datefmt_parse(IntlDateFormatter $fmt,
                        $value,
-                       &$position = null): mixed {
-  return $fmt->parse($value, $position);
+                       inout $position): mixed {
+  $result = $fmt->parseWithPosition($value, inout $position);
+  return $result;
 }
 
 /**
@@ -592,7 +600,7 @@ function datefmt_set_pattern(IntlDateFormatter $fmt,
  */
 function datefmt_set_timezone_id(IntlDateFormatter $fmt,
                                  $zone): bool {
-  return $fmt->setTimeZoneId($zone);
+  return $fmt->setTimezoneId($zone);
 }
 
 /**
@@ -603,5 +611,5 @@ function datefmt_set_timezone_id(IntlDateFormatter $fmt,
  * @return bool - Returns TRUE on success and FALSE on failure.
  */
 function datefmt_set_timezone(IntlDateFormatter $fmt, $zone): bool {
-  return $fmt->setTimeZone($zone);
+  return $fmt->setTimezone($zone);
 }

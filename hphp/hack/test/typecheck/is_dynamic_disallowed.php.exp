@@ -1,0 +1,10 @@
+error: Naming[2125] dynamic typehints are not allowed in this position [1]
+
+is_dynamic_disallowed.php:4:13
+2 | 
+3 | function f(mixed $x) : void {
+4 |   if ($x is dynamic) {}
+  |             ^^^^^^^ [1]
+5 | }
+
+1 error found

@@ -21,75 +21,47 @@ namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
 
 inline SrcKey::SrcKey()
-  : m_funcID{InvalidFuncId}
-  , m_offset{0}
-  , m_hasThis{false}
-  , m_resumeModeAndPrologue{encodeResumeMode(ResumeMode::None)}
+  : m_s{FuncId::Invalid, 0, encodeResumeMode(ResumeMode::None)}
 {}
 
-inline SrcKey::SrcKey(const Func* f, Offset off, ResumeMode resumeMode,
-                      bool hasThis)
-  : m_funcID{f->getFuncId()}
-  , m_offset{(uint32_t)off}
-  , m_hasThis{hasThis}
-  , m_resumeModeAndPrologue{encodeResumeMode(resumeMode)}
+inline SrcKey::SrcKey(const Func* f, Offset off, ResumeMode resumeMode)
+  : m_s{f->getFuncId(), (uint32_t)off, encodeResumeMode(resumeMode)}
 {
-  assertx((uint32_t)off >> 31 == 0);
+  assertx((uint32_t)off >> kNumOffsetBits == 0);
 }
 
-inline SrcKey::SrcKey(const Func* f, PC pc, ResumeMode resumeMode, bool hasThis)
-  : m_funcID{f->getFuncId()}
-  , m_offset{(uint32_t)f->unit()->offsetOf(pc)}
-  , m_hasThis{hasThis}
-  , m_resumeModeAndPrologue{encodeResumeMode(resumeMode)}
+inline SrcKey::SrcKey(const Func* f, PC pc, ResumeMode resumeMode)
+  : m_s{f->getFuncId(), (uint32_t)f->offsetOf(pc), encodeResumeMode(resumeMode)}
 {
-  assertx((uint32_t)f->unit()->offsetOf(pc) >> 31 == 0);
+  assertx((uint32_t)f->offsetOf(pc) >> kNumOffsetBits == 0);
 }
 
-inline SrcKey::SrcKey(FuncId funcId, Offset off, ResumeMode resumeMode,
-                      bool hasThis)
-  : m_funcID{funcId}
-  , m_offset{(uint32_t)off}
-  , m_hasThis{hasThis}
-  , m_resumeModeAndPrologue{encodeResumeMode(resumeMode)}
+inline SrcKey::SrcKey(FuncId funcId, Offset off, ResumeMode resumeMode)
+  : m_s{funcId, (uint32_t)off, encodeResumeMode(resumeMode)}
 {
-  assertx((uint32_t)off >> 31 == 0);
+  assertx((uint32_t)off >> kNumOffsetBits == 0);
 }
 
-inline SrcKey::SrcKey(const Func* f, Offset off, PrologueTag)
-  : m_funcID{f->getFuncId()}
-  , m_offset{(uint32_t)off}
-  , m_hasThis{false}
-  , m_resumeModeAndPrologue{encodePrologue()}
+inline SrcKey::SrcKey(const Func* f, uint32_t numArgs, PrologueTag)
+  : m_s{f->getFuncId(), numArgs, encodePrologue()}
 {
-  assertx((uint32_t)off >> 31 == 0);
+  assertx(numArgs >> kNumOffsetBits == 0);
 }
 
-inline SrcKey::SrcKey(const Func* f, PC pc, PrologueTag)
-  : m_funcID{f->getFuncId()}
-  , m_offset{(uint32_t)f->unit()->offsetOf(pc)}
-  , m_hasThis{false}
-  , m_resumeModeAndPrologue{encodePrologue()}
+inline SrcKey::SrcKey(const Func* f, uint32_t numArgs, bool mayHaveUninitNamed,
+                      FuncEntryTag)
+  : m_s{f->getFuncId(), numArgs,
+        numArgs == f->numPositionalParams() && mayHaveUninitNamed
+        ? encodeNamedParamsFuncEntry()
+        : encodeFuncEntry()}
 {
-  assertx((uint32_t)f->unit()->offsetOf(pc) >> 31 == 0);
-}
-
-inline SrcKey::SrcKey(FuncId funcId, Offset off, PrologueTag)
-  : m_funcID{funcId}
-  , m_offset{(uint32_t)off}
-  , m_hasThis{false}
-  , m_resumeModeAndPrologue{encodePrologue()}
-{
-  assertx((uint32_t)off >> 31 == 0);
+  assertx(numArgs >> kNumOffsetBits == 0);
 }
 
 inline SrcKey::SrcKey(SrcKey other, Offset off)
-  : m_funcID{other.funcID()}
-  , m_offset{(uint32_t)off}
-  , m_hasThis{other.hasThis()}
-  , m_resumeModeAndPrologue{other.m_resumeModeAndPrologue}
+  : m_s{other.funcID(), (uint32_t)off, other.m_s.m_resumeModeAndTags}
 {
-  assertx((uint32_t)off >> 31 == 0);
+  assertx((uint32_t)off >> kNumOffsetBits == 0);
 }
 
 inline SrcKey::SrcKey(AtomicInt in)
@@ -97,51 +69,124 @@ inline SrcKey::SrcKey(AtomicInt in)
 {}
 
 inline SrcKey SrcKey::fromAtomicInt(AtomicInt in) {
-  return SrcKey { in };
+  return SrcKey {in};
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 
 inline bool SrcKey::valid() const {
-  return m_funcID != InvalidFuncId;
+  auto const funcID = m_s.m_funcID;
+  assertx(
+    funcID.isInvalid() || funcID.isDummy() ||
+    (prologue() && numEntryArgs() <= func()->numPositionalParams() + 1) ||
+    (funcEntry() && numEntryArgs() <= func()->numPositionalParams()) ||
+    (namedParamsFuncEntry() && numEntryArgs() == func()->numPositionalParams()) ||
+    (!prologue() && !funcEntry() && offset() < func()->bclen())
+  );
+  return !funcID.isInvalid();
 }
 
 inline SrcKey::AtomicInt SrcKey::toAtomicInt() const {
   return m_atomicInt;
 }
 
-inline FuncId SrcKey::funcID() const {
-  assertx(m_funcID != InvalidFuncId);
-  return m_funcID;
+inline size_t SrcKey::stableHash() const {
+  return folly::hash::hash_combine(
+    func()->stableHash(),
+    m_s.m_offsetOrNumArgs,
+    m_s.m_resumeModeAndTags
+  );
 }
 
-inline int SrcKey::offset() const {
-  return m_offset;
+inline FuncId SrcKey::funcID() const {
+  assertx(!m_s.m_funcID.isInvalid());
+  return m_s.m_funcID;
+}
+
+inline Offset SrcKey::offset() const {
+  assertx(!prologue() && !anyFuncEntry());
+  return m_s.m_offsetOrNumArgs;
+}
+
+inline Offset SrcKey::entryOffset() const {
+  assertx(prologue() || anyFuncEntry());
+  if (prologue()) return func()->getPrologueEntryForNumPositionals(numEntryArgs());
+  if (namedParamsFuncEntry()) {
+    return func()->getNamedParamsFuncEntry();
+  }
+  return func()->getFuncEntryForNumPositionals(numEntryArgs(), true);
+}
+
+inline uint32_t SrcKey::numEntryArgs() const {
+  assertx(prologue() || anyFuncEntry());
+  return m_s.m_offsetOrNumArgs;
+}
+
+inline std::string SrcKey::printableOffset() const {
+  auto const off = !prologue() && !anyFuncEntry() ? offset() : entryOffset();
+  return std::to_string(off);
 }
 
 inline bool SrcKey::hasThis() const {
-  return m_hasThis;
-}
-
-inline bool SrcKey::prologue() const {
-  return m_resumeModeAndPrologue == 3;
+  if (!func()->cls()) return false;
+  return prologue() ? !func()->isStaticInPrologue() : !func()->isStatic();
 }
 
 inline ResumeMode SrcKey::resumeMode() const {
-  return prologue() ? ResumeMode::None : (ResumeMode)m_resumeModeAndPrologue;
+  return m_s.m_resumeModeAndTags < 3
+    ? (ResumeMode)m_s.m_resumeModeAndTags : ResumeMode::None;
 }
 
-inline uint32_t SrcKey::encodePrologue() {
-  return 3;
+inline bool SrcKey::prologue() const {
+  return m_s.m_resumeModeAndTags == 3;
+}
+
+inline bool SrcKey::funcEntry() const {
+  return m_s.m_resumeModeAndTags == 4;
+}
+
+inline bool SrcKey::namedParamsFuncEntry() const {
+  return m_s.m_resumeModeAndTags == 5;
+}
+
+inline bool SrcKey::anyFuncEntry() const {
+  return funcEntry() || namedParamsFuncEntry();
+}
+
+inline bool SrcKey::trivialDVFuncEntry() const {
+  if (!funcEntry()) return false;
+  if (numEntryArgs() == func()->numPositionalParams()) return false;
+  assertx(numEntryArgs() >= func()->numRequiredPositionalParams());
+  return func()->params()[numEntryArgs() + func()->numNamedParams()].hasTrivialDefaultValue();
+}
+
+inline bool SrcKey::nonTrivialFuncEntry() const {
+  return anyFuncEntry() && !trivialDVFuncEntry();
 }
 
 inline uint32_t SrcKey::encodeResumeMode(ResumeMode resumeMode) {
+  assertx((uint8_t)resumeMode >> kNumModeBits == 0);
   assertx((uint8_t)resumeMode < 3);
   return (uint8_t)resumeMode;
 }
 
+inline uint32_t SrcKey::encodePrologue() {
+  assertx(3 >> kNumModeBits == 0);
+  return 3;
+}
+
+inline uint32_t SrcKey::encodeFuncEntry() {
+  assertx(4 >> kNumModeBits == 0);
+  return 4;
+}
+
+inline uint32_t SrcKey::encodeNamedParamsFuncEntry() {
+  assertx(5 >> kNumModeBits == 0);
+  return 5;
+}
+
 inline const Func* SrcKey::func() const {
-  return Func::fromFuncId(m_funcID);
+  return Func::fromFuncId(m_s.m_funcID);
 }
 
 inline const Unit* SrcKey::unit() const {
@@ -149,31 +194,75 @@ inline const Unit* SrcKey::unit() const {
 }
 
 inline Op SrcKey::op() const {
-  return unit()->getOp(offset());
+  assertx(!prologue() && !anyFuncEntry());
+  return func()->getOp(offset());
 }
 
 inline PC SrcKey::pc() const {
-  return unit()->at(offset());
+  assertx(!prologue() && !anyFuncEntry());
+  return func()->at(offset());
+}
+
+inline int SrcKey::lineNumber() const {
+  if (prologue() || anyFuncEntry()) {
+    return func()->line1();
+  }
+  return func()->getLineNumber(offset());
+}
+
+inline const PackageInfo* SrcKey::packageInfo() const {
+  if (Cfg::Repo::Authoritative) return &RepoFile::packageInfo();
+  auto const file = unit()->filepath();
+  assertx(file);
+  return &RepoOptions::forFile(file->data()).packageInfo();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 
 inline void SrcKey::setOffset(Offset o) {
-  assertx((uint32_t)o >> 31 == 0);
-  m_offset = (uint32_t)o;
+  assertx((uint32_t)o >> kNumOffsetBits == 0);
+  assertx(!prologue() && !anyFuncEntry());
+  m_s.m_offsetOrNumArgs = (uint32_t)o;
 }
 
-inline OffsetSet SrcKey::succOffsets() const {
-  return instrSuccOffsets(pc(), unit());
+inline SrcKey::Set SrcKey::succSrcKeys() const {
+  assertx(!prologue());
+  if (funcEntry()) {
+    if (trivialDVFuncEntry()) {
+      return {SrcKey{func(), numEntryArgs() + 1, true, FuncEntryTag {}}};
+    }
+    return {SrcKey{func(), entryOffset(), ResumeMode::None}};
+  }
+  if (namedParamsFuncEntry()) {
+    return {SrcKey{func(), func()->numPositionalParams(), false, FuncEntryTag {}}};
+  }
+
+  SrcKey::Set set;
+  for (auto offset : instrSuccOffsets(pc(), func())) {
+    set.emplace(SrcKey{*this, offset});
+  }
+  return set;
 }
 
-inline void SrcKey::advance(const Unit* u) {
-  m_offset += instrLen((u ? u : unit())->at(offset()));
+inline void SrcKey::advance(const Func* f) {
+  assertx(!prologue());
+  if (anyFuncEntry()) {
+    m_s.m_offsetOrNumArgs = entryOffset();
+    m_s.m_resumeModeAndTags = encodeResumeMode(ResumeMode::None);
+  } else {
+    m_s.m_offsetOrNumArgs += instrLen((f ? f : func())->at(offset()));
+  }
 }
 
-inline SrcKey SrcKey::advanced(const Unit* u) const {
+inline SrcKey SrcKey::advanced(const Func* f) const {
   auto tmp = *this;
-  tmp.advance(u);
+  tmp.advance(f);
+  return tmp;
+}
+
+inline SrcKey SrcKey::withFuncID(FuncId funcId) const {
+  auto tmp = *this;
+  tmp.m_s.m_funcID = funcId;
   return tmp;
 }
 
@@ -181,8 +270,8 @@ inline bool SrcKey::operator==(const SrcKey& r) const {
   return m_atomicInt == r.m_atomicInt;
 }
 
-inline bool SrcKey::operator<(const SrcKey& r) const {
-  return m_atomicInt < r.m_atomicInt;
+inline bool SrcKey::operator!=(const SrcKey& r) const {
+  return m_atomicInt != r.m_atomicInt;
 }
 
 ///////////////////////////////////////////////////////////////////////////////

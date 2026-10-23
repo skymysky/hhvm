@@ -1,0 +1,18 @@
+error: Typing[4323] Some type arguments violate their constraints [1]
+-> `T` is a constrained type parameter [2]
+-> This type constraint is violated [3]
+-> Expected `arraykey` [3]
+-> But got `null` [4]
+
+well_formed_where_constraints_on_functions.php:5:40
+1 | <?hh
+2 | 
+3 | class G<T as arraykey> {}
+  |         ^ [2]
+  |              ^^^^^^^^ [3]
+4 | 
+5 | function on_g<T>(T $_): void where T = G<null> {}
+  |                                        ^^^^^^^ [1]
+  |                                          ^^^^ [4]
+
+1 error found

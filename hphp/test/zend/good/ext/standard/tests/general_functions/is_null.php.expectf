@@ -7,20 +7,6 @@ bool(true)
 bool(true)
 -- Iteration 4 --
 bool(true)
--- Iteration 5 --
-bool(true)
--- Iteration 6 --
-bool(true)
--- Iteration 7 --
-bool(true)
--- Iteration 8 --
-bool(true)
--- Iteration 9 --
-bool(true)
--- Iteration 10 --
-bool(true)
--- Iteration 11 --
-bool(true)
 
 *** Testing is_bool() on non null values ***
 -- Iteration 1 --
@@ -144,9 +130,7 @@ bool(false)
 
 *** Testing error conditions ***
 
-Warning: %s
-bool(false)
+Warning: is_null() expects exactly 1 positional parameter, 0 given in %s/is_null.php on line %d
 
-Warning: %s
-bool(false)
+Warning: is_null() expects exactly 1 positional parameter, 2 given in %s/is_null.php on line %d
 Done

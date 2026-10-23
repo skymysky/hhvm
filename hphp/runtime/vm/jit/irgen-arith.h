@@ -13,15 +13,14 @@
    | license@php.net so we can mail you a copy immediately.               |
    +----------------------------------------------------------------------+
 */
-#ifndef incl_HPHP_JIT_IRGEN_ARITH_H_
-#define incl_HPHP_JIT_IRGEN_ARITH_H_
+#pragma once
 
 #include "hphp/runtime/vm/jit/ir-opcode.h"
 #include "hphp/runtime/vm/jit/type.h"
 
 #include "hphp/runtime/vm/hhbc.h"
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 
 struct SSATmp;
 
@@ -34,11 +33,6 @@ struct IRGS;
  * given types.
  */
 bool areBinaryArithTypesSupported(Op op, Type lhs, Type rhs);
-
-/*
- * If val->isA(TBool), return it converted to TInt. Otherwise, return val.
- */
-SSATmp* promoteBool(IRGS& env, SSATmp* val);
 
 /*
  * If either lhs or rhs is TDbl, make sure the other one is as well. Return the
@@ -54,6 +48,4 @@ Opcode promoteBinaryDoubles(IRGS& env, Op op, SSATmp*& lhs, SSATmp*& rhs);
 bool isBitOp(Op);
 Opcode bitOp(Op);
 
-}}}
-
-#endif
+}}

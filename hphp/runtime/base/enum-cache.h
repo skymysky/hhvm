@@ -14,8 +14,7 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_ENUM_CACHE_H_
-#define incl_HPHP_ENUM_CACHE_H_
+#pragma once
 
 #include "hphp/runtime/ext/extension.h"
 #include "hphp/runtime/vm/class.h"
@@ -62,6 +61,9 @@ struct EnumCache {
   static const EnumValues* getValues(const Class* klass, bool recurse);
   // Like above, but for first-class enums
   static const EnumValues* getValuesBuiltin(const Class* klass);
+  // Like above, but for first-class enums where the values can be computed
+  // entirely statically. Returns nullptr if that's not the case.
+  static const EnumValues* getValuesStatic(const Class* klass);
   // delete the EnumValues element in the cache for the given class.
   // If there is no entry this function is a no-op.
   static void deleteValues(const Class* klass);
@@ -95,8 +97,10 @@ private:
 
   const EnumValues* getEnumValuesIfDefined(intptr_t key,
     bool checkLocal = true) const;
-  const EnumValues* getEnumValues(const Class* klass, bool recurse);
-  const EnumValues* loadEnumValues(const Class* klass, bool recurse);
+  const EnumValues* getEnumValues(const Class* klass, bool recurse,
+                                  bool require_static = false);
+  const EnumValues* loadEnumValues(const Class* klass, bool recurse,
+                                   bool require_static = false);
   void deleteEnumValues(intptr_t key);
 
   // Map that contains associations between Enum classes and their array
@@ -106,7 +110,7 @@ private:
     const EnumValues*,
     clsCompare>;
 
-  using ReqEnumValuesMap = req::hash_map<
+  using ReqEnumValuesMap = req::fast_map<
     intptr_t,
     const EnumValues*>;
 
@@ -120,4 +124,3 @@ private:
 
 }
 
-#endif

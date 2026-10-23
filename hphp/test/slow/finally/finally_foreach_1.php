@@ -1,20 +1,24 @@
-<?php
-function foo() {
-  foreach (array(1,2,3) as $x) {
+<?hh
+function foo() :mixed{
+  foreach (vec[1,2,3] as $x) {
     try {
       echo "A\n";
       throw new Exception("c");
     } finally {
       echo "B\n";
-      foreach (array(1,2,3) as $y) { var_dump($y); }
+      foreach (vec[1,2,3] as $y) { var_dump($y); }
     }
   }
 }
-function main() {
+function main() :mixed{
   try {
     foo();
   } catch (Exception $e) {
     echo "Caught exception\n";
   }
 }
+
+<<__EntryPoint>>
+function main_finally_foreach_1() :mixed{
 main();
+}

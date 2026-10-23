@@ -1,0 +1,34 @@
+error: Typing[4472] Cannot access class constant `B1` defined in package `pkg2` which may not be available [1]
+-> `B1` is defined in cross_package_access_constant1.php--pkg2/b.php [2]
+-> `B1` belongs to package `pkg2` by this entry in the package config [3]
+-> package `pkg1` is available because the current file belongs to it by this entry in the package config [4]
+
+cross_package_access_constant1.php--a.php:5:3
+3 | 
+4 | function test(): void {
+5 |   B1::FOO;      // error
+  |   ^^^^^^^ [1]
+6 | }
+
+cross_package_access_constant1.php--pkg2/b.php:4:7
+2 | // package pkg2
+3 | 
+4 | class B1 {
+  |       ^^ [2]
+5 |   const string FOO = 'foo';
+6 | }
+
+PACKAGES.toml:7:11
+1 | [packages]
+2 | 
+3 | [packages.pkg1]
+  |           ^^^^ [4]
+4 | include_paths=["//"]
+5 | allow_deployed_packages_checking = true
+6 | 
+7 | [packages.pkg2]
+  |           ^^^^ [3]
+8 | include_paths=[
+9 |     "//cross_package_access_internal1_foo.php",
+
+1 error found

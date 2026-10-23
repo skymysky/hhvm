@@ -1,9 +1,5 @@
 <?hh
 
-function darray<Tk, Tv>(mixed $x): darray<Tk, Tv> {
-  return (array)$x;
-}
-
-function testDarray($x): darray<int, int> {
-  return darray($x);
+function testDarray(dict<int, int> $x): darray<int, int> {
+  return dict($x);
 }

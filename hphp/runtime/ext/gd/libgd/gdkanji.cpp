@@ -5,8 +5,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "gd.h"
-#include "gdhelpers.h"
+#include "hphp/runtime/ext/gd/libgd/gd.h"
+#include "hphp/runtime/ext/gd/libgd/gdhelpers.h"
 
 #include <stdarg.h>
 #include <iconv.h>
@@ -56,7 +56,7 @@
 static void
 debug (const char *format,...)
 {
-#ifdef DEBUG
+#ifndef NDEBUG
   va_list args;
 
   va_start (args, format);
@@ -173,7 +173,7 @@ DetectKanjiCode (unsigned char *str)
   }
     }
 
-#ifdef DEBUG
+#ifndef NDEBUG
   if (whatcode == ASCII)
     debug ("Kanji code not included.");
   else if (whatcode == EUCORSJIS)
@@ -227,11 +227,11 @@ DetectKanjiCode (unsigned char *str)
 static void
 SJIStoJIS (int *p1, int *p2)
 {
-  register unsigned char c1 = *p1;
-  register unsigned char c2 = *p2;
-  register int adjust = c2 < 159;
-  register int rowOffset = c1 < 160 ? 112 : 176;
-  register int cellOffset = adjust ? (31 + (c2 > 127)) : 126;
+  unsigned char c1 = *p1;
+  unsigned char c2 = *p2;
+  int adjust = c2 < 159;
+  int rowOffset = c1 < 160 ? 112 : 176;
+  int cellOffset = adjust ? (31 + (c2 > 127)) : 126;
 
   *p1 = ((c1 - rowOffset) << 1) - adjust;
   *p2 -= cellOffset;

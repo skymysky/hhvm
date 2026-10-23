@@ -1,4 +1,4 @@
-<?php
+<?hh <<__EntryPoint>> function main(): void {
 $s = fopen('php://temp/maxmemory=1024','wb+');
 
 /* force conversion of inner stream to STDIO.
@@ -10,10 +10,13 @@ $s = fopen('php://temp/maxmemory=1024','wb+');
  * prevent being double freed when it's encapsulated,
  * while STDIO streams don't. */
 $i = 0;
-while ($i++ < 5000) {
+while (true) {
+$t = $i; $i++;
+if (!($t < 5000)) break;
 fwrite($s, str_repeat('a',1024));
 }
 $handle=curl_init('http://www.example.com');
 curl_setopt($handle, CURLOPT_STDERR, $s);
 
 echo "Done.";
+}

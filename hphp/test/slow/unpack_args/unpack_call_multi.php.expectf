@@ -1,0 +1,1 @@
+Fatal error: Too many splat operators `...`. An argument list can have at most one splat operator. in %s/test/slow/unpack_args/unpack_call_multi.php on line 10

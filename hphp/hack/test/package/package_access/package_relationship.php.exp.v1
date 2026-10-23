@@ -1,0 +1,39 @@
+error: Typing[4472] Cannot access class `D` defined in package `pkg4` which may not be available [1]
+-> `D` is defined in package_relationship.php--pkg4/d.php [2]
+-> `D` belongs to package `pkg4` by this entry in the package config [3]
+-> package `pkg3` is available because the current file belongs to it by this entry in the package config [4]
+-> `pkg3` includes `pkg2` via its definition [5]
+-> `pkg3` includes `pkg2_soft` via its definition [6]
+-> `pkg3` includes `pkg1` via its definition [7]
+
+package_relationship.php--pkg3/c.php:6:13
+ 4 |    $b = new B(); // ok
+ 5 |    $a = new A(); // ok by transitive inclusion
+ 6 |    $d = new D(); // error
+   |             ^ [1]
+ 7 | }
+
+package_relationship.php--pkg4/d.php:3:7
+ 1 | <?hh
+ 2 | // package pkg4 by path
+ 3 | class D {}
+   |       ^ [2]
+
+PACKAGES.toml:26:11
+19 | allow_deployed_packages_checking = true
+20 | 
+21 | [packages.pkg3]
+   |           ^^^^ [4]
+22 | include_paths=["//pkg3/"]
+23 | includes = ["pkg2", "pkg2_soft", "pkg1"]
+   |             ^^^^^^ [5]
+   |                     ^^^^^^^^^^^ [6]
+   |                                  ^^^^^^ [7]
+24 | allow_deployed_packages_checking = true
+25 | 
+26 | [packages.pkg4]
+   |           ^^^^ [3]
+27 | include_paths=["//pkg4/"]
+28 | 
+
+1 error found

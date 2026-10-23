@@ -1,2 +1,19 @@
-File "double_argument.php", line 12, characters 14-19:
-Invalid Hack type. Using 'double' in Hack is considered an error. Use 'float' instead, to keep the codebase consistent. (Naming[2004])
+error: Naming[2123] No such type `double`, did you mean `float`? [1]
+
+double_argument.php:12:14
+10 |  */
+11 | 
+12 | function foo(double $x): void {
+   |              ^^^^^^ [1]
+13 | }
+
+error: Naming[2049] Unbound name: `double` [1]
+
+double_argument.php:12:14
+10 |  */
+11 | 
+12 | function foo(double $x): void {
+   |              ^^^^^^ [1]
+13 | }
+
+2 errors found

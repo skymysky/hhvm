@@ -1,0 +1,28 @@
+(rule
+ (alias diff)
+ (deps
+  %{exe:../../../src/hackfmt.exe}
+  %{project_root}/hack/test/verify.py
+  %{project_root}/hack/test/review.sh
+  (glob_files %{project_root}/hack/test/hackfmt/difftests/*.diff)
+  (glob_files %{project_root}/hack/test/hackfmt/difftests/*.exp)
+  (glob_files %{project_root}/hack/test/hackfmt/difftests/root/*.php))
+ (action
+  (run
+   %{project_root}/hack/test/verify.py
+   %{project_root}/hack/test/hackfmt/difftests
+   --program
+   %{exe:../../../src/hackfmt.exe}
+   --in-extension
+   .diff
+   --stdin
+   --flags
+   --test
+   --diff-dry-run
+   --root
+   root)))
+
+(alias
+ (name runtest)
+ (deps
+  (alias diff)))

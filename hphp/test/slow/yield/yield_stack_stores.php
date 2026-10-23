@@ -13,7 +13,7 @@ class Thing {
   }
 }
 
-function funny($thing) {
+function funny($thing) :mixed{
   $blah = Thing::filter($thing, $x ==> true);
 
   foreach ($blah as $k) {
@@ -21,6 +21,10 @@ function funny($thing) {
   }
 }
 
+
+<<__EntryPoint>>
+function main_yield_stack_stores() :mixed{
 for ($i = 0; $i < 10; ++$i) {
   funny(Set { 'asd', 'bsd', 'foo', 'asd' });
+}
 }

@@ -1,0 +1,24 @@
+<?hh
+
+<<file:__EnableUnstableFeatures('expression_trees')>>
+
+class Foo {
+  public static async function bar(ExampleContext $_):
+    Awaitable<ExampleExpression<ExampleFunction<(function(): noreturn)>>>
+  {
+    throw new Exception();
+  }
+}
+
+function baz(ExampleContext $_):
+  Awaitable<ExampleExpression<ExampleFunction<(function(): noreturn)>>>
+{
+  throw new Exception();
+}
+
+function test<T>(
+  ExampleExpression<ExampleFunction<(function(T): T)>> $x,
+): void {
+  ExampleDsl`${ $x }(Foo::bar())`;
+  ExampleDsl`${ $x }(baz())`;
+}

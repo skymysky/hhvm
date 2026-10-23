@@ -17,6 +17,8 @@
 #include "hphp/runtime/ext/vsdebug/session.h"
 
 #include "hphp/runtime/ext/vsdebug/debugger.h"
+#include "hphp/runtime/ext/vsdebug/debugger-request-info.h"
+#include "hphp/runtime/ext/extension-registry.h"
 
 #include "hphp/runtime/vm/treadmill.h"
 
@@ -25,6 +27,7 @@
 #include "hphp/runtime/base/php-globals.h"
 #include "hphp/runtime/base/program-functions.h"
 
+#include "hphp/util/configs/eval.h"
 #include "hphp/util/process.h"
 
 namespace HPHP {
@@ -36,8 +39,8 @@ DebuggerSession::DebuggerSession(Debugger* debugger) :
   m_debugger(debugger),
   m_breakpointMgr(new BreakpointManager(debugger)),
   m_dummyThread(this, &DebuggerSession::runDummy),
-  m_dummyStartupDoc("") {
-
+  
+  m_sessionId(folly::Random::rand32()) {
   assertx(m_debugger != nullptr);
 }
 
@@ -58,10 +61,13 @@ void DebuggerSession::startDummyRequest(
   const std::string& startupDoc,
   const std::string& sandboxUser,
   const std::string& sandboxName,
+  const std::string& debuggerSessionAuth,
   bool displayStartupMsg
 ) {
   m_sandboxUser = sandboxUser;
   m_sandboxName = sandboxName;
+  m_debuggerSessionAuth = debuggerSessionAuth;
+
   m_dummyStartupDoc = File::TranslatePath(startupDoc).data();
   m_displayStartupMsg = displayStartupMsg;
 
@@ -71,11 +77,16 @@ void DebuggerSession::startDummyRequest(
   m_dummyThread.start();
 }
 
+std::string DebuggerSession::getDebuggerSessionAuth() {
+  assertx(m_debugger->getCurrentThreadId() == Debugger::kDummyTheadId);
+  return m_debuggerSessionAuth;
+}
+
 void DebuggerSession::invokeDummyStartupDocument() {
 
   if (m_displayStartupMsg) {
     m_debugger->sendUserMessage(
-      "Preparing your Hack/PHP console. Please wait...",
+      "Preparing your Hack console. Please wait...",
       DebugTransport::OutputLevelWarning
     );
   }
@@ -94,7 +105,7 @@ void DebuggerSession::invokeDummyStartupDocument() {
                          m_dummyStartupDoc,
                          false,
                          null_array,
-                         uninit_null(),
+                         nullptr,
                          "",
                          "",
                          error,
@@ -102,7 +113,7 @@ void DebuggerSession::invokeDummyStartupDocument() {
                          true,
                          false,
                          true,
-                         RuntimeOption::EvalPreludePath);
+                         Cfg::Eval::PreludePath);
 
   if (!ret || error) {
     if (errorMsg == "") {
@@ -153,19 +164,16 @@ void DebuggerSession::runDummy() {
   // it be listed in any user-visible thread list.
   m_debugger->setDummyThreadId((int64_t)Process::GetThreadId());
 
-  // While the main thread is starting up and preparing the system lib,
-  // the code emitter tags all newly compiled functions as "built in".
-  // If we pull in the startup document while this is happening, all functions
-  // in the startup doc get erroneously tagged as builtin, which breaks
-  // our stack traces later if any breakpoint is hit in a routine pulled in
-  // by the startup document (especially true of dummy evals with bps in them).
+  // While the main thread is starting up and preparing the system lib and
+  // extensions we want to make sure that finished before we pull in the startup
+  // document and execute that.
   //
   // Unfortunately there is no signal when this is complete, so we're going to
   // have to poll here. Wait for a maximum time and then proceed anyway.
   int pollCount = 0;
   constexpr int pollTimePerIterUs = 100 * 1000;
   constexpr int pollMaxTimeUs = 3 * 1000 * 1000;
-  while (!SystemLib::s_inited &&
+  while (!ExtensionRegistry::modulesInitialised() &&
          pollCount * pollTimePerIterUs < pollMaxTimeUs) {
 
     pollCount++;
@@ -179,23 +187,33 @@ void DebuggerSession::runDummy() {
 
   VSDebugLogger::Log(
     VSDebugLogger::LogLevelInfo,
-    "Polled %d times waiting for SystemLib::s_inited to be true. "
-      "(SystemLib::s_inited = %s)",
+    "Polled %d times waiting for ExtensionRegistry::modulesInitialised() to be "
+      "true. (ExtensionRegistry::modulesInitialised() = %s)",
     pollCount,
-    SystemLib::s_inited ? "TRUE" : "FALSE"
+    ExtensionRegistry::modulesInitialised() ? "TRUE" : "FALSE"
   );
 
   bool hookAttached = false;
   hphp_session_init(Treadmill::SessionKind::Vsdebug);
-  init_command_line_globals(0, nullptr, environ, 0,
+  init_command_line_globals(0, nullptr, environ,
                             RuntimeOption::ServerVariables,
                             RuntimeOption::EnvVariables);
   SCOPE_EXIT {
-    g_context->removeStdoutHook(m_debugger->getStdoutHook());
+    g_context->onShutdownPostSend();
+    g_context->removeDebuggerStdoutHook();
     Logger::SetThreadHook(nullptr);
 
     if (hookAttached) {
       DebuggerHook::detach();
+    }
+
+    // Free any server objects allocated for the dummy.
+    auto& objs = m_dummyRequestInfo->m_serverObjects;
+    for (auto it = objs.begin(); it != objs.end();) {
+      if (it->second != nullptr) {
+        delete it->second;
+      }
+      it = objs.erase(it);
     }
 
     std::atomic_thread_fence(std::memory_order_release);
@@ -223,41 +241,52 @@ void DebuggerSession::runDummy() {
 
   // Redirect the dummy's stdout and stderr and enable implicit flushing
   // so output is sent to the client right away, instead of being buffered.
-  g_context->addStdoutHook(m_debugger->getStdoutHook());
+  g_context->addDebuggerStdoutHook(m_debugger->getStdoutHook());
   Logger::SetThreadHook(m_debugger->getStderrHook());
   g_context->obSetImplicitFlush(true);
 
   // Setup sandbox variables for dummy request context.
+  // The startup document must load inside the WithRoot scope so the
+  // autoloader initializes with the user's source root, matching hphpd.
+  auto loadStartupDoc = [&]() {
+    if (!m_dummyStartupDoc.empty()) {
+      invokeDummyStartupDocument();
+    } else {
+      VSDebugLogger::Log(
+        VSDebugLogger::LogLevelWarning,
+        "Dummy request started without a startup document."
+      );
+      m_debugger->sendUserMessage(
+        "No startup document was specified, not loading any Hack/PHP "
+          "types for the console.",
+        DebugTransport::OutputLevelInfo
+      );
+    }
+  };
+
   if (!m_sandboxUser.empty()) {
-    SourceRootInfo sourceRootInfo(m_sandboxUser, m_sandboxName);
+    SourceRootInfo::WithRoot sri(m_sandboxUser, m_sandboxName);
     auto server = php_global_exchange(s__SERVER, init_null());
-    forceToArray(server);
-    Array arr = server.toArrRef();
+    forceToDict(server);
+    Array arr = server.asArrRef();
     server.unset();
     php_global_set(
       s__SERVER,
-      sourceRootInfo.setServerVariables(std::move(arr))
+      SourceRootInfo::SetServerVariables(std::move(arr))
     );
 
-    g_context->setSandboxId(sourceRootInfo.getSandboxInfo().id());
-  }
-
-  if (!m_dummyStartupDoc.empty()) {
-    invokeDummyStartupDocument();
+    g_context->setSandboxId(SourceRootInfo::GetSandboxInfo().id());
+    loadStartupDoc();
   } else {
-    VSDebugLogger::Log(
-      VSDebugLogger::LogLevelWarning,
-      "Dummy request started without a startup document."
-    );
-    m_debugger->sendUserMessage(
-      "No startup document was specified, not loading any Hack/PHP "
-        "types for the console.",
-      DebugTransport::OutputLevelWarning
-    );
+    loadStartupDoc();
   }
 
   folly::dynamic event = folly::dynamic::object;
   m_debugger->sendEventMessage(event, "readyForEvaluations", true);
+
+  if (m_debugger->getDebuggerOptions().warnOnFileChange) {
+    m_debugger->initWatchmanClient();
+  }
 
   m_dummyRequestInfo->m_commandQueue.processCommands();
 }
@@ -286,7 +315,8 @@ unsigned int DebuggerSession::generateFrameId(
   return objectId;
 }
 
-FrameObject* DebuggerSession::getFrameObject(unsigned int objectId) {
+FrameObject* DebuggerSession::getFrameObject(int objectId) {
+  if (objectId < 0) return nullptr;
   auto object = getServerObject(objectId);
   if (object != nullptr) {
     if (object->objectType() != ServerObjectType::Frame) {
@@ -304,10 +334,20 @@ unsigned int DebuggerSession::generateScopeId(
   int depth,
   ScopeType scopeType
 ) {
-  const unsigned int objectId = ++s_nextObjectId;
-  ScopeObject* scope = new ScopeObject(objectId, requestId, depth, scopeType);
+  unsigned int objectId;
+  DebuggerRequestInfo* ri = m_debugger->getRequestInfo();
+  auto& existingScopes = ri->m_scopeIds;
+  auto it = existingScopes.find((int)scopeType);
+  if (it != existingScopes.end()) {
+    // This scope type for this request already has an ID assigned.
+    // Reuse it.
+    objectId = it->second;
+  } else {
+    objectId = ++s_nextObjectId;
+    existingScopes.emplace((int)scopeType, objectId);
+  }
 
-  assertx(requestId == m_debugger->getCurrentThreadId());
+  ScopeObject* scope = new ScopeObject(objectId, requestId, depth, scopeType);
   registerRequestObject(objectId, scope);
   return objectId;
 }
@@ -316,9 +356,8 @@ unsigned int DebuggerSession::generateVariableId(
   request_id_t requestId,
   Variant& variable
 ) {
-  const unsigned int objectId = ++s_nextObjectId;
+  const unsigned int objectId = generateOrReuseVariableId(variable);
   VariableObject* varObj = new VariableObject(objectId, requestId, variable);
-
   assertx(requestId == m_debugger->getCurrentThreadId());
   registerRequestObject(objectId, varObj);
   return objectId;
@@ -345,6 +384,49 @@ unsigned int DebuggerSession::generateVariableSubScope(
   return objectId;
 }
 
+unsigned int DebuggerSession::generateOrReuseVariableId(
+  const Variant& variable
+) {
+  // Generate a new object ID if we haven't seen this variant before. Ensure
+  // IDs are stable for variants that contain objects or arrays, based on the
+  // address of the object to which they point.
+  DebuggerRequestInfo* ri = m_debugger->getRequestInfo();
+  if (!ri) throw DebuggerCommandException("Client disconnected");
+
+  const auto options = m_debugger->getDebuggerOptions();
+
+  void* key = nullptr;
+  auto& existingVariables = ri->m_objectIds;
+  if (!options.disableUniqueVarRef) {
+    if (variable.isArray()) {
+      key = (void*)variable.getArrayDataOrNull();
+    } else if (variable.isObject()) {
+      key = (void*)variable.getObjectDataOrNull();
+    }
+
+    if (key != nullptr) {
+      const auto it = existingVariables.find(key);
+      if (it != existingVariables.end()) {
+        const unsigned int objectId = it->second;
+        return objectId;
+      }
+    }
+  }
+
+  // Allocate a new ID.
+  const unsigned int objectId = ++s_nextObjectId;
+
+  if (key != nullptr) {
+    // Remember the object ID for complex types (Objects, Arrays).
+    // Since simple types have no children, and cannot be expanded
+    // in clients' Variables/Scopes windows, it is not important
+    // that they receive the same object ID across requests.
+    existingVariables.emplace(key, objectId);
+  }
+
+  return objectId;
+}
+
 ScopeObject* DebuggerSession::getScopeObject(unsigned int objectId) {
   auto object = getServerObject(objectId);
   if (object != nullptr) {
@@ -362,10 +444,19 @@ void DebuggerSession::registerRequestObject(
   unsigned int objectId,
   ServerObject* obj
 ) {
-  RequestInfo* ri = m_debugger->getRequestInfo();
+  DebuggerRequestInfo* ri = m_debugger->getRequestInfo();
 
   // Add this object to the per-request list of objects.
-  std::unordered_map<unsigned int, ServerObject*>& objs = ri->m_serverObjects;
+  auto& objs = ri->m_serverObjects;
+  auto it = objs.find(objectId);
+  if (it != objs.end()) {
+    // Replacing server object by ID. Free the old object.
+    ServerObject* object = it->second;
+    objs.erase(it);
+    onServerObjectDestroyed(objectId);
+    delete object;
+  }
+
   objs.emplace(objectId, obj);
 
   // Add this object to the per-session global list of objects.

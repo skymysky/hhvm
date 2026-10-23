@@ -1,97 +1,99 @@
 <?hh
 // Copyright 2004-present Facebook. All Rights Reserved.
 
-function wrap($e) { echo "Exception: {$e->getMessage()}\n"; }
 
-<<__Memoize>> function func1($x) {}
-<<__Memoize, __DynamicallyCallable>> function func4($x) {}
+
+<<__Memoize>> function func1($x) :mixed{}
+<<__Memoize, __DynamicallyCallable>> function func4($x) :mixed{}
 
 class A {
-  <<__Memoize>> public function func2($x) {}
-  <<__Memoize>> public static function func3($x) {}
+  <<__Memoize>> public function func2($x) :mixed{}
+  <<__Memoize>> public static function func3($x) :mixed{}
 
-  public static function positive_tests() {
+  public static function positive_tests() :mixed{
     echo "====================== positive tests (A) ==================\n";
     $v = 123;
 
-    try { $x = 'func1'; $x($v); } catch (Exception $e) { wrap($e); }
-    try { $x = 'func1$memoize_impl'; $x($v); } catch (Exception $e) { wrap($e); }
-    try { $x = 'func4$memoize_impl'; $x($v); } catch (Exception $e) { wrap($e); }
-    try { $x = 'A::func2'; $x($v); } catch (Exception $e) { wrap($e); }
-    try { $x = 'A::func2$memoize_impl'; $x($v); } catch (Exception $e) { wrap($e); }
-    try { $x = 'A::func3'; $x($v); } catch (Exception $e) { wrap($e); }
-    try { $x = 'A::func3$memoize_impl'; $x($v); } catch (Exception $e) { wrap($e); }
+    $x = 'func1'; $x($v);
+    $x = 'func1$memoize_impl'; $x($v);
+    $x = 'func4$memoize_impl'; $x($v);
+    //$x = 'A::func2'; $x($v); // fatal
+    //$x = 'A::func2$memoize_impl'; $x($v); // fatal
+    $x = 'A::func3'; $x($v);
+    $x = 'A::func3$memoize_impl'; $x($v);
 
-    try { $x = ['A', 'func2']; $x($v); } catch (Exception $e) { wrap($e); }
-    try { $x = ['A', 'func2$memoize_impl']; $x($v); } catch (Exception $e) { wrap($e); }
-    try { $x = ['A', 'func3']; $x($v); } catch (Exception $e) { wrap($e); }
-    try { $x = ['A', 'func3$memoize_impl']; $x($v); } catch (Exception $e) { wrap($e); }
+    //$x = vec['A', 'func2']; $x($v); // fatal
+    //$x = vec['A', 'func2$memoize_impl']; $x($v); // fatal
+    $x = vec['A', 'func3']; $x($v);
+    $x = vec['A', 'func3$memoize_impl']; $x($v);
 
-    try { $x = [new A, 'func2']; $x($v); } catch (Exception $e) { wrap($e); }
-    try { $x = [new A, 'func2$memoize_impl']; $x($v); } catch (Exception $e) { wrap($e); }
-    try { $x = [new A, 'func3']; $x($v); } catch (Exception $e) { wrap($e); }
-    try { $x = [new A, 'func3$memoize_impl']; $x($v); } catch (Exception $e) { wrap($e); }
+    $x = vec[new A, 'func2']; $x($v);
+    $x = vec[new A, 'func2$memoize_impl']; $x($v);
+    $x = vec[new A, 'func3']; $x($v);
+    $x = vec[new A, 'func3$memoize_impl']; $x($v);
 
-    try { $x = 'A'; $x::func2($v); } catch (Exception $e) { wrap($e); }
-    try { $x = 'A'; $x::func3($v); } catch (Exception $e) { wrap($e); }
+    $x = 'func3'; HH\dynamic_class_meth(A::class, $x)($v);
+    $x = 'func3$memoize_impl'; HH\dynamic_class_meth(A::class, $x)($v);
 
-    try { $x = 'func2'; A::$x($v); } catch (Exception $e) { wrap($e); }
-    try { $x = 'func2$memoize_impl'; A::$x($v); } catch (Exception $e) { wrap($e); }
-    try { $x = 'func3'; A::$x($v); } catch (Exception $e) { wrap($e); }
-    try { $x = 'func3$memoize_impl'; A::$x($v); } catch (Exception $e) { wrap($e); }
+    $obj = new A; $x = 'func2'; $obj->$x($v);
+    $obj = new A; $x = 'func2$memoize_impl'; $obj->$x($v);
 
-    try { $obj = new A; $x = 'func2'; $obj->$x($v); } catch (Exception $e) { wrap($e); }
-    try { $obj = new A; $x = 'func2$memoize_impl'; $obj->$x($v); } catch (Exception $e) { wrap($e); }
-    try { $obj = new A; $x = 'func3'; $obj->$x($v); } catch (Exception $e) { wrap($e); }
-    try { $obj = new A; $x = 'func3$memoize_impl'; $obj->$x($v); } catch (Exception $e) { wrap($e); }
+  }
+
+  public static function negative_tests(): void {
+    echo "====================== negative tests (A) ==================\n";
+    $v = 123;
+    $x = 'A'; $x::func3($v);
   }
 }
 
 class B {
-  <<__Memoize, __DynamicallyCallable>> public function func5($x) {}
-  <<__Memoize, __DynamicallyCallable>> public static function func6($x) {}
+  <<__Memoize, __DynamicallyCallable>> public function func5($x) :mixed{}
+  <<__Memoize, __DynamicallyCallable>> public static function func6($x) :mixed{}
 
-  public static function positive_tests() {
+  public static function positive_tests() :mixed{
     echo "====================== positive tests (B) ==================\n";
     $v = 123;
 
-    try { $x = 'func4$memoize_impl'; $x($v); } catch (Exception $e) { wrap($e); }
-    try { $x = 'B::func6$memoize_impl'; $x($v); } catch (Exception $e) { wrap($e); }
+    $x = 'func4$memoize_impl'; $x($v);
+    $x = 'B::func6$memoize_impl'; $x($v);
 
-    try { $x = ['B', 'func5$memoize_impl']; $x($v); } catch (Exception $e) { wrap($e); }
-    try { $x = ['B', 'func6$memoize_impl']; $x($v); } catch (Exception $e) { wrap($e); }
+    //$x = vec['B', 'func5$memoize_impl']; $x($v); // fatal
+    $x = vec['B', 'func6$memoize_impl']; $x($v);
 
-    try { $x = [new B, 'func5$memoize_impl']; $x($v); } catch (Exception $e) { wrap($e); }
-    try { $x = [new B, 'func6$memoize_impl']; $x($v); } catch (Exception $e) { wrap($e); }
+    $x = vec[new B, 'func5$memoize_impl']; $x($v);
+    $x = vec[new B, 'func6$memoize_impl']; $x($v);
 
-    try { $x = 'func5$memoize_impl'; B::$x($v); } catch (Exception $e) { wrap($e); }
-    try { $x = 'func6$memoize_impl'; B::$x($v); } catch (Exception $e) { wrap($e); }
 
-    try { $obj = new B; $x = 'func5$memoize_impl'; $obj->$x($v); } catch (Exception $e) { wrap($e); }
-    try { $obj = new B; $x = 'func6$memoize_impl'; $obj->$x($v); } catch (Exception $e) { wrap($e); }
+    $x = 'func6$memoize_impl'; HH\dynamic_class_meth(B::class, $x)($v);
+
+    $obj = new B; $x = 'func5$memoize_impl'; $obj->$x($v);
+
   }
 
-  public static function negative_tests() {
-    echo "====================== negative tests ======================\n";
+  public static function negative_tests() :mixed{
+    echo "====================== negative tests (B) ==================\n";
     $v = 123;
 
     $x = 'func4'; $x($v);
     $x = 'B::func6'; $x($v);
 
-    $x = ['B', 'func6']; $x($v);
+    $x = vec['B', 'func6']; $x($v);
 
-    $x = [new B, 'func5']; $x($v);
-    $x = [new B, 'func6']; $x($v);
+    $x = vec[new B, 'func5']; $x($v);
+    $x = vec[new B, 'func6']; $x($v);
 
     $x = 'B'; $x::func6($v);
 
-    $x = 'func6'; B::$x($v);
+    $x = 'func6'; HH\dynamic_class_meth(B::class, $x)($v);
 
     $obj = new B; $x = 'func5'; $obj->$x($v);
-    $obj = new B; $x = 'func6'; $obj->$x($v);
+
   }
 }
-
+<<__EntryPoint>> function main(): void {
 A::positive_tests();
+A::negative_tests();
 B::positive_tests();
 B::negative_tests();
+}

@@ -14,21 +14,25 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_JIT_TC_INTERNAL_H_
-#define incl_HPHP_JIT_TC_INTERNAL_H_
+#pragma once
 
 #include "hphp/runtime/vm/jit/tc.h"
 
 #include "hphp/runtime/vm/jit/code-cache.h"
+#include "hphp/runtime/vm/jit/code-view.h"
 #include "hphp/runtime/vm/jit/ir-opcode.h"
 #include "hphp/runtime/vm/jit/srcdb.h"
 #include "hphp/runtime/vm/jit/trans-rec.h"
 #include "hphp/runtime/vm/jit/types.h"
 #include "hphp/util/mutex.h"
 
-#include <folly/Optional.h>
+namespace HPHP::jit::tc {
 
-namespace HPHP { namespace jit { namespace tc {
+bool tcIsFull();
+
+void setTcIsFull(pthread_t viewTid);
+
+bool threadIsFull();
 
 /*
  * Convenience class for creating TransLocs and TransRecs for new translations.
@@ -48,9 +52,6 @@ struct TransLocMaker {
     coldStart = cache.cold().frontier();
     frozenStart = cache.frozen().frontier();
     dataStart = cache.data().frontier();
-
-    cache.cold().dword(0);
-    if (&cache.cold() != &cache.frozen()) cache.frozen().dword(0);
   }
 
   TcaRange dataRange() const {
@@ -64,22 +65,43 @@ struct TransLocMaker {
   /*
    * If loc contains a valid location, reset the frontiers of all code and data
    * blocks to the positions recorded by the last call to markStart().
+   * Return the range being rolled back without writing to it.
    */
-  void rollback() {
-    if (empty()) return;
+  TransRange rollback() {
+    if (empty()) {
+      return TransRange {
+        {nullptr, nullptr},
+        {nullptr, nullptr},
+        {nullptr, nullptr},
+        {nullptr, nullptr},
+      };
+    }
 
+    // During a rollback we must be careful for cases where we failed to
+    // reserve the dword in cold and frozen that is intended to store the size.
+    // In those cases we must ensure the ranges are still valid (their end is
+    // after their beginning).
+    auto coldEnd = cache.cold().frontier();
+    auto frozenEnd = cache.frozen().frontier();
+    auto const range = TransRange{
+      {mainStart, cache.main().frontier()},
+      {coldStart, coldEnd},
+      {frozenStart, frozenEnd},
+      {dataStart, cache.data().frontier()}
+    };
     cache.main().setFrontier(mainStart);
     cache.cold().setFrontier(coldStart);
     cache.frozen().setFrontier(frozenStart);
     cache.data().setFrontier(dataStart);
+    return range;
   }
 
   TransRange range() const {
     assertx(!empty() && mainEnd && coldEnd && frozenEnd && dataEnd);
     return TransRange{
       {mainStart, mainEnd},
-      {coldStart + sizeof(uint32_t), coldEnd},
-      {frozenStart + sizeof(uint32_t), frozenEnd},
+      {coldStart, coldEnd},
+      {frozenStart, frozenEnd},
       {dataStart, dataEnd}
     };
   }
@@ -89,16 +111,10 @@ struct TransLocMaker {
    * returns a TransRange representing the translation.
    */
   TransRange markEnd() {
-    uint32_t* coldSize   = (uint32_t*)cache.cold().toDestAddress(coldStart);
-    uint32_t* frozenSize = (uint32_t*)cache.frozen().toDestAddress(frozenStart);
-    *coldSize   = cache  .cold().frontier() - coldStart;
-    *frozenSize = cache.frozen().frontier() - frozenStart;
-
     mainEnd = cache.main().frontier();
     coldEnd = cache.cold().frontier();
     frozenEnd = cache.frozen().frontier();
     dataEnd = cache.data().frontier();
-
     return range();
   }
 
@@ -110,17 +126,17 @@ struct TransLocMaker {
       SrcKey                      sk,
       TransID                     transID,
       TransKind                   kind,
+      Annotations&&               annot   = Annotations(),
       RegionDescPtr               region  = RegionDescPtr(),
       std::vector<TransBCMapping> bcmap   = std::vector<TransBCMapping>(),
-      Annotations&&               annot   = Annotations(),
       bool                        hasLoop = false) const {
     auto r = range();
     return TransRec(sk, transID, kind,
                     r.main.begin(), r.main.size(),
                     r.cold.begin(), r.cold.size(),
                     r.frozen.begin(), r.frozen.size(),
-                    std::move(region), std::move(bcmap),
-                    std::move(annot), hasLoop);
+                    std::move(annot), std::move(region),
+                    std::move(bcmap), hasLoop);
   }
 
   CodeCache::View view() const { return cache; }
@@ -169,18 +185,29 @@ private:
  */
 
 /*
- * Acquire a lock on this object's code cache.
+ * Acquire a lock on this object's code cache (the lock is deferred if
+ * lock is false).
  *
  * Must be held even if the current thread owns the global write lease.
  */
-std::unique_lock<SimpleMutex> lockCode();
+std::unique_lock<SimpleMutex> lockCode(bool lock = true);
 
 /*
- * Acquire a lock on this object's metadata tables.
+ * Acquire a lock on this object's metadata tables (the lock is
+ * deferred if lock is false).
  *
  * Must be held even if the current thread owns the global write lease.
  */
-std::unique_lock<SimpleMutex> lockMetadata();
+std::unique_lock<SimpleMutex> lockMetadata(bool lock = true);
+
+struct CodeMetaLock {
+  explicit CodeMetaLock(bool f);
+  void lock();
+  void unlock();
+private:
+  std::unique_lock<SimpleMutex> m_code;
+  std::unique_lock<SimpleMutex> m_meta;
+};
 
 /*
  * Atomically bumps the translation counter and returns true iff emitting a new
@@ -198,6 +225,12 @@ ALWAYS_INLINE CodeCache& code() {
   return *g_code;
 }
 
+ALWAYS_INLINE CodeCacheViews& codeViews() {
+  extern CodeCacheViews* g_views;
+  assertx(g_views);
+  return *g_views;
+}
+
 /*
  * Structure containing records for each SrcKey present in the TC. The metadata
  * lock must be acquired before reading or writing the srcdb.
@@ -207,18 +240,43 @@ ALWAYS_INLINE SrcDB& srcDB() {
   return g_srcDB;
 }
 
+
 /*
- * Initialize the TC recycling mechanism. Does nothing if EvalEnableReusableTC
+ * Called when we detect a change in the workload during JIT warmup, which makes
+ * the JIT less effective. This affects the reported JIT maturity.
+ */
+void recordWorkloadChange();
+
+/*
+ * Get the current maturity of the JIT. It is an integer between 0 and 100 that
+ * never decreases. When TC is filled up, the value is 100 or 99 (it will be
+ * stuck at 99 when recordWorkloadChange() happened during warmup).
+ */
+int getJitMaturity();
+
+/*
+ * Whether JIT maturity is 100, or 99 due to workload changes.
+ */
+extern int g_maxJitMaturity;
+ALWAYS_INLINE bool isMature() {
+  return getJitMaturity() >= g_maxJitMaturity;
+}
+
+/*
+ * Initialize the TC recycling mechanism. Does nothing if Eval.EnableReusableTC
  * is false.
  */
 void recycleInit();
 
 /*
- * Teardown TC recycling mechanism. Does nothing if EvalEnableReusableTC is
+ * Teardown TC recycling mechanism. Does nothing if Eval.EnableReusableTC is
  * false.
  */
 void recycleStop();
 
-}}}
-
-#endif
+/**
+ * Increment the number of live translation bytes that have been JIT to the TC for
+ * the given function.
+ */
+void incrementLiveFuncTransBytes(FuncId funcId, uint32_t bytes);
+}

@@ -1,0 +1,9 @@
+error: Naming[2049] Unbound name: `Bar\X` [1]
+
+generic_alias_with_namespace.php:3:15
+1 | <?hh
+2 | 
+3 | type Foo<T> = Bar\X<T>;
+  |               ^^^^^ [1]
+
+1 error found

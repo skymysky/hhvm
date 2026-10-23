@@ -1,42 +1,39 @@
-<?php
+<?hh
 /* Prototype  : array array_intersect_ukey(array arr1, array arr2 [, array ...], callback key_compare_func)
- * Description: Computes the intersection of arrays using a callback function on the keys for comparison. 
+ * Description: Computes the intersection of arrays using a callback function on the keys for comparison.
  * Source code: ext/standard/array.c
  */
-
-echo "*** Testing array_intersect_ukey() : usage variation ***\n";
-
-//Initialise arguments
-$array1 = array('blue'  => 1, 'red'  => 2, 'green'  => 3, 'purple' => 4);
-$array3 = array('green' => 5, 'cyan'   => 8);
-
-//Call back function
-function key_compare_func($key1, $key2)
-{
-    if ($key1 == $key2)
-        return 0;
-    else
-        return ($key1 > $key2)? 1:-1; 
-}
-
-//get an unset variable
-$unset_var = 10;
-unset ($unset_var);
-
-//resource variable
-$fp = fopen(__FILE__, "r");
 
 // define some classes
 class classWithToString
 {
-	public function __toString() {
-		return "Class A object";
-	}
+    public function __toString() :mixed{
+        return "Class A object";
+    }
 }
 
 class classWithoutToString
 {
 }
+
+//Call back function
+function key_compare_func($key1, $key2)
+:mixed{
+    if ($key1 == $key2)
+        return 0;
+    else
+        return ($key1 > $key2)? 1:-1;
+}
+<<__EntryPoint>> function main(): void {
+echo "*** Testing array_intersect_ukey() : usage variation ***\n";
+
+//Initialise arguments
+$array1 = dict['blue'  => 1, 'red'  => 2, 'green'  => 3, 'purple' => 4];
+$array3 = dict['green' => 5, 'cyan'   => 8];
+
+
+//resource variable
+$fp = fopen(__FILE__, "r");
 
 // heredoc string
 $heredoc = <<<EOT
@@ -44,7 +41,7 @@ hello world
 EOT;
 
 //array of values to iterate over
-$inputs = array(
+$inputs = dict[
 
       // int data
       'int 0' => 0,
@@ -83,24 +80,20 @@ $inputs = array(
       'instance of classWithToString' => new classWithToString(),
       'instance of classWithoutToString' => new classWithoutToString(),
 
-      // undefined data
-      'undefined var' => @$undefined_var,
 
-      // unset data
-      'unset var' => @$unset_var,
 
       // resource data
       'resource var' => $fp,
-);
+];
 
 // loop through each element of the array for arr2
 
 foreach($inputs as $key =>$value) {
       echo "\n--$key--\n";
-      var_dump( array_intersect_ukey($array1, $value, 'key_compare_func') );
-      var_dump( array_intersect_ukey($array1, $value, $array3, 'key_compare_func') );
+      var_dump( array_intersect_ukey($array1, $value, key_compare_func<>) );
+      var_dump( array_intersect_ukey($array1, $value, $array3, key_compare_func<>) );
 };
 
 fclose($fp);
-?>
-===DONE===
+echo "===DONE===\n";
+}

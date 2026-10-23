@@ -1,17 +1,5 @@
 Check invalid params:
 
-Warning: %s
-NULL
+Warning: ReflectionClass::hasConstant() expects exactly 1 positional parameter, 0 given in %s/test/zend/good/ext/reflection/tests/ReflectionClass_hasConstant_002.php on line 8
 
-Warning: %s
-NULL
-bool(false)
-bool(false)
-bool(false)
-bool(false)
-
-Warning: %s
-NULL
-
-Warning: %s
-NULL
+Warning: ReflectionClass::hasConstant() expects exactly 1 positional parameter, 2 given in %s/test/zend/good/ext/reflection/tests/ReflectionClass_hasConstant_002.php on line 9

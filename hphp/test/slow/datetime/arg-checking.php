@@ -1,17 +1,32 @@
-<?php
+<?hh
 
-class X{};
+class X {}
 
-$utc = new \DateTimeZone('UTC');
-$amsterdam = new \DateTimeZone('Europe/Amsterdam');
-$date = new \DateTime("2012-10-10");
+function test($fn) {
+  try {
+    var_dump($fn());
+  } catch (Exception $e) {
+    echo "Warning: ".$e->getMessage()."\n";
+  }
+}
 
-var_dump(DateTime::createFromFormat('j-M-Y', '15-Feb-2009', new X()));
-var_dump($date->setTimezone(new X()));
-var_dump($amsterdam->getOffset($utc));
-var_dump($amsterdam->getOffset($date));
-var_dump($date->add($utc));
-var_dump($date->sub($utc));
-var_dump($date->diff(new X()));
-var_dump(date_format(new X(), "Y"));
-var_dump(date_create("2012-10-10", new X()));
+<<__EntryPoint>>
+function main_arg_checking(): void {
+  set_error_handler(($errno, $errstr, ...$_rest)==> {
+    throw new Exception($errstr);
+  });
+
+  $utc = new \DateTimeZone('UTC');
+  $amsterdam = new \DateTimeZone('Europe/Amsterdam');
+  $date = new \DateTime("2012-10-10");
+
+  test(() ==> DateTime::createFromFormat('j-M-Y', '15-Feb-2009', new X()));
+  test(() ==> $date->setTimezone(new X()));
+  test(() ==> $amsterdam->getOffset($utc));
+  test(() ==> $amsterdam->getOffset($date));
+  test(() ==> $date->add($utc));
+  test(() ==> $date->sub($utc));
+  test(() ==> $date->diff(new X()));
+  test(() ==> date_format(new X(), "Y"));
+  test(() ==> date_create("2012-10-10", new X()));
+}

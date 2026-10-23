@@ -20,7 +20,7 @@ abstract class CParent implements IParent {
 }
 
 abstract class Kid extends CParent {
-  protected function bar() {}
+  protected function bar(): void {}
 }
 
 trait KidTrait {
@@ -31,7 +31,6 @@ trait KidTrait {
     takes_parent($this);
     takes_iparent($this);
     takes_kid($this);
-    takes_kt($this);
     parent::bar();
     return 'wrapped('.parent::foo().')';
   }

@@ -1,22 +1,22 @@
-<?php
+<?hh
 /* Prototype  : array parse_ini_file(string filename [, bool process_sections])
  * Description: Parse configuration file 
  * Source code: ext/standard/basic_functions.c
  * Alias to functions: 
  */
-
+<<__EntryPoint>> function main(): void {
 echo "*** Testing parse_ini_file() : variation ***\n";
+chdir(sys_get_temp_dir());
 $mainDir = "parseIniFileVar6.dir";
 $subDir = "parseIniFileVar6Sub";
-$absMainDir = dirname(__FILE__)."/".$mainDir;
+$absMainDir = sys_get_temp_dir().'/'.$mainDir;
 mkdir($absMainDir);
 $absSubDir = $absMainDir."/".$subDir;
 mkdir($absSubDir);
 
-$old_dir_path = getcwd();
-chdir(dirname(__FILE__));
 
-$allDirs = array(
+
+$allDirs = vec[
   // absolute paths
   "$absSubDir/",
   "$absSubDir/../".$subDir,
@@ -32,7 +32,7 @@ $allDirs = array(
   "./".$mainDir."/../".$mainDir."/".$subDir,
   "BADDIR",  
   
-);
+];
 
 $filename = 'ParseIniFileVar6.ini';
 $content="a=test";
@@ -49,9 +49,8 @@ for($i = 0; $i<count($allDirs); $i++) {
 }
 
 unlink($absFile);
-chdir($old_dir_path);
 rmdir($absSubDir);
 rmdir($absMainDir);
 
 echo "\n*** Done ***\n";
-?>
+}

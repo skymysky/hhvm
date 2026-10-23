@@ -14,12 +14,12 @@ class A {
     return 1;
   }
 
-  public static function f2() {
-    return class_meth('A', 'f1');
+  public static function f2(): (function(string): int) {
+    return A::f1<>;
   }
 
-  public static function f3() {
-    return class_meth(A::class, 'f1');
+  public static function f3(): (function(string): int) {
+    return A::f1<>;
   }
 }
 

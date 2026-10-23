@@ -1,0 +1,12 @@
+error: Typing[4113] This member visibility is: `private` [1]
+-> `public` was expected [2]
+
+property_visibility_override_bad.php:4:33
+1 | <?hh
+2 | 
+3 | class Foo { public int $foo = 42; }
+  |                    ^^^ [2]
+4 | class Bar extends Foo { private int $foo = 13; }
+  |                                 ^^^ [1]
+
+1 error found

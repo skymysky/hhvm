@@ -2,32 +2,32 @@
 
 readonly script_dir="$(dirname "$0")"
 
-# Try to find an hhvm binary. Prefer php (if it's hhvm) or hhvm from $PATH. If
-# neither of those work, look for hhvm in a few common locations, preferring a
-# released version over a locally-built version for stability.
+# Try to find an hhvm binary. Prefer a version built from this source tree,
+# then in /usr/local, and finally from $PATH.
 function get_hhvm_bin {
     local -a candidates
     candidates=(
-        "/usr/local/hphpi/bin/hhvm"
-        "$script_dir/../../buck-out/gen/hphp/hhvm/hhvm"
+        "$script_dir/../../buck-out/gen/hphp/hhvm/hhvm/hhvm"
+        "$script_dir/../../../buck-out/v2/gen/fbcode/hphp/hhvm/out/hhvm"
         "$script_dir/../hhvm/hhvm"
+        "/usr/local/hphpi/bin/hhvm"
     )
 
-    if php --version |& grep -qF 'HipHop VM'; then
-        command -v php
-        return
-    fi
-
-    if command -v hhvm 2>/dev/null; then
-        return
+    # If HHVM_BIN is set, only consider that
+    if [[ -n "$HHVM_BIN" ]]; then
+        candidates=("${HHVM_BIN}")
     fi
 
     for binary in "${candidates[@]}"; do
-        if [[ -x "$binary" ]]; then
+        if [[ ! -d "$binary" && -x "$binary" ]]; then
             echo "$binary"
             return
         fi
     done
+
+    if command -v hhvm 2>/dev/null; then
+        return
+    fi
 
     return 1
 }
@@ -37,4 +37,25 @@ if ! hhvm_bin="$(get_hhvm_bin)"; then
     exit 1
 fi
 
-exec "$hhvm_bin" "$script_dir/run.php" "$@"
+# Try to find a cli config.
+function get_cli_config {
+  local -a candidates
+  candidates=(
+    "/usr/local/hphpi/cli.hdf"
+  )
+
+  for config in "${candidates[@]}"; do
+    if [[ ! -d "$config" && -r "$config" ]]; then
+      echo "$config"
+      return
+    fi
+  done
+
+  return 1
+}
+
+if hhvm_cfg="$(get_cli_config)"; then
+  exec "$hhvm_bin" -c "$hhvm_cfg" -vBCCache.Enabled=false -vEval.EnableLogBridge=false -vEval.PreludePath= -vEval.AllowUngatedExec=true "$script_dir/run.php" "$@"
+else
+  exec "$hhvm_bin" -vBCCache.Enabled=false -vEval.EnableLogBridge=false "$script_dir/run.php" "$@"
+fi

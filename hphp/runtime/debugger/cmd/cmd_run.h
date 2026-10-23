@@ -14,15 +14,14 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_EVAL_DEBUGGER_CMD_RUN_H_
-#define incl_HPHP_EVAL_DEBUGGER_CMD_RUN_H_
+#pragma once
 
 #include <memory>
 #include <vector>
 
 #include "hphp/runtime/debugger/debugger_command.h"
 
-namespace HPHP { namespace Eval {
+namespace HPHP::Eval {
 ///////////////////////////////////////////////////////////////////////////////
 
 struct CmdRun : DebuggerCommand {
@@ -34,6 +33,8 @@ struct CmdRun : DebuggerCommand {
   bool onServer(DebuggerProxy&) override;
   void onClient(DebuggerClient&) override;
 
+  std::string name() const override { return "run"; }
+
 protected:
   void sendImpl(DebuggerThriftBuffer&) override;
   void recvImpl(DebuggerThriftBuffer&) override;
@@ -43,6 +44,5 @@ private:
 };
 
 ///////////////////////////////////////////////////////////////////////////////
-}}
+}
 
-#endif // incl_HPHP_EVAL_DEBUGGER_CMD_RUN_H_

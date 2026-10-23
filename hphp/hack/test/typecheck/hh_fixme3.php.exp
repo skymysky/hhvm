@@ -1,2 +1,23 @@
-File "hh_fixme3.php", line 4, characters 19-24:
-HH_FIXME wrong format, expected '/* HH_FIXME[ERROR_NUMBER] */' (Parsing[1001])
+error: Parsing[1001] `HH_FIXME` wrong format, expected `/* HH_FIXME[ERROR_NUMBER] */` [1]
+
+hh_fixme3.php:4:19
+2 | 
+3 | function test(): int {
+4 |   /* HH_FIXME] */ return 'foo';
+  |                   ^^^^^^ [1]
+5 | }
+
+error: Typing[4110] Invalid return type [1]
+-> Expected `int` [2]
+-> But got `string` [1]
+
+hh_fixme3.php:4:26
+1 | <?hh
+2 | 
+3 | function test(): int {
+  |                  ^^^ [2]
+4 |   /* HH_FIXME] */ return 'foo';
+  |                          ^^^^^ [1]
+5 | }
+
+2 errors found

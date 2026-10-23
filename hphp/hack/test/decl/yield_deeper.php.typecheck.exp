@@ -1,0 +1,23 @@
+error: Typing[4110] `await` can only operate on an `Awaitable` [1]
+-> Expected `Awaitable<nothing>` [1]
+-> But got `AsyncGenerator<null, int, mixed>` (result of `async function` containing a `yield`) [2]
+
+yield_deeper.php:20:3
+18 | 
+19 | async function i(): Awaitable<void> {
+20 |   await async {
+   |   ^^^^^^^^^^^^^ [1]
+   |         ^^^^^^^ [2]
+21 |     yield 0;
+   |     ^^^^^^^^ [1]
+   |     ^^^^^^^^ [2]
+22 |     yield 1;
+   |     ^^^^^^^^ [1]
+   |     ^^^^^^^^ [2]
+23 |   };
+   |   ^ [1]
+   |   ^ [2]
+24 | }
+25 | 
+
+1 error found

@@ -1,12 +1,13 @@
-<?php
+<?hh
 
 class X {
-  function foo() {
+  function foo() :mixed{
     return function() {
       return $this->bar();
     }
 ;
   }
-  function bar() {
+  function bar() :mixed{
 }
 }
+<<__EntryPoint>> function main(): void { echo "Done.\n"; }

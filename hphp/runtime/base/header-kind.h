@@ -14,9 +14,9 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_HEADER_KIND_H_
-#define incl_HPHP_HEADER_KIND_H_
+#pragma once
 
+#include "hphp/runtime/base/header-kind-shared.h"
 #include "hphp/util/compilation-flags.h"
 
 #include <array>
@@ -27,15 +27,6 @@
 
 namespace HPHP {
 
-#define COLLECTION_TYPES              \
-  COL(Vector)                         \
-  COL(Map)                            \
-  COL(Set)                            \
-  COL(Pair)                           \
-  COL(ImmVector)                      \
-  COL(ImmMap)                         \
-  COL(ImmSet)
-
 /*
  * every request-allocated object has a 1-byte kind field in its
  * header, from this enum. If you update the enum, be sure to
@@ -43,16 +34,17 @@ namespace HPHP {
  * HHVM_REPO_SCHEMA, because kind values are used in HHBC.
  */
 enum class HeaderKind : uint8_t {
-  // ArrayKind aliases
-  Packed, Mixed, Empty, Apc, Globals,
-  // Hack arrays
-  Dict, VecArray, Keyset,
+  // Array-like header kinds. They must match up with ArrayData::ArrayKind.
+  // "vanilla" kinds must be odd and "bespoke" kinds must be even.
+  Vec, BespokeVec, Dict, BespokeDict, Keyset, BespokeKeyset,
+
   // Other ordinary refcounted heap objects
-  String, Resource, Ref,
+  String, Resource, ClsMeth, RClsMeth, RFunc,
 
   // Valid kinds for an ObjectData; all but Object and NativeObject are
   // isCppBuiltin()
-  Object, NativeObject, WaitHandle, AsyncFuncWH, AwaitAllWH, Closure,
+  Object, NativeObject, WaitHandle, AsyncFuncWH, AwaitAllWH, ConcurrentWH,
+  Closure,
   // Collections. Vector and ImmSet are used for range checks; be careful
   // when adding new collection kinds.
   Vector, Map, Set, Pair, ImmVector, ImmMap, ImmSet,
@@ -70,11 +62,19 @@ enum class HeaderKind : uint8_t {
   Slab, // header for a contiguous "slab" of small objects
 };
 const unsigned NumHeaderKinds = unsigned(HeaderKind::Slab) + 1;
-extern const std::array<char*,NumHeaderKinds> header_names;
+extern const std::array<const char*,NumHeaderKinds> header_names;
 
 inline bool haveCount(HeaderKind k) {
   return uint8_t(k) < uint8_t(HeaderKind::AsyncFuncFrame);
 }
+
+static_assert((uint8_t)CollectionType::Vector == (uint8_t)HeaderKind::Vector);
+static_assert((uint8_t)CollectionType::Map == (uint8_t)HeaderKind::Map);
+static_assert((uint8_t)CollectionType::Set == (uint8_t)HeaderKind::Set);
+static_assert((uint8_t)CollectionType::Pair == (uint8_t)HeaderKind::Pair);
+static_assert((uint8_t)CollectionType::ImmVector == (uint8_t)HeaderKind::ImmVector);
+static_assert((uint8_t)CollectionType::ImmMap == (uint8_t)HeaderKind::ImmMap);
+static_assert((uint8_t)CollectionType::ImmSet == (uint8_t)HeaderKind::ImmSet);
 
 /*
  * RefCount type for m_count field in refcounted objects.
@@ -82,47 +82,25 @@ inline bool haveCount(HeaderKind k) {
  * The sign bit flags a reference count as persistent. If a reference count is
  * persistent, it means we should never increment or decrement it: the object
  * lives across requests and may be accessed by multiple threads. Persistent
- * objects can be static or uncounted; static objects have process lifetime,
- * while uncounted objects are freed using the treadmill. Using 8-bit values
+ * objects can be static or shared; static objects have process lifetime,
+ * while shared objects are freed using the treadmill. Using 8-bit values
  * generates shorter cmp instructions while still being far enough from 0 to be
  * safe.
- *
- * One-bit reference counting:
- *
- * When one_bit_refcount == true, HHVM's reference counting primitives behave
- * very differently. Reference counts are conceptually one bit, where 0 means
- * "one reference" and 1 means "many references". In practice, m_count is a
- * full byte wide, both to accommodate UncountedValue and StaticValue, and so
- * we can operate on m_count directly without any bit twiddling.
- *
- * DecRef becomes `if (m_count == 0) release();`, while IncRef becomes `m_count
- * = 1` (depending on the value of unconditional_one_bit_incref; see
- * runtime/base/countable.h). This means that any object that is ever IncRefed
- * will stick at m_count == 1 until the GC collects it or the end of the
- * request. This also causes spurious COW operations on ararys, and means
- * Object destructors aren't supported.
- *
- * None of this matters to the vast majority of runtime and JIT code. The
- * interpreter and HHIR programs should still use balanced IncRef and DecRef
- * operations as usual, regardless of the build mode. All differences in how
- * reference counts are manipulated are isolated to member functions of
- * Countable/MaybeCountable and the HHIR -> vasm lowering code for the IncRef
- * and DecRef HHIR instructions.
  */
-enum RefCount : std::conditional<one_bit_refcount, int8_t, int32_t>::type {
-  OneReference   = one_bit_refcount ? 0 : 1,
+enum RefCount : int32_t {
+  OneReference   = 1,
   // MultiReference should never be used outside of one-bit mode, so set it to
   // something above RefCountMaxRealistic to trip asserts.
-  MultiReference = one_bit_refcount ? 1 : 0x40000000,
+  MultiReference = 0x40000000,
 
-  // In one_bit_refcount builds, uncountedIncRef will count upwards
-  // from UncountedValue to -1, so it needs to be above StaticValue;
-  // in regular builds, its going to count downwards towards
-  // INT_MIN, so needs to be below StaticValue.
-  UncountedValue = one_bit_refcount ? -127 : -128,
-  StaticValue    = one_bit_refcount ? -128 : -127,
+  // Shared refcounts count down from SharedValue to INT_MIN. A count
+  // of SharedZero is not a valid count - it indicates we must release the
+  // memory of the shared object.
+  SharedValue = -128,
+  SharedZero  = -127,
+  StaticValue    = -126,
 
-  RefCountMaxRealistic = one_bit_refcount ? MultiReference : (1 << 30) - 1,
+  RefCountMaxRealistic = (1 << 30) - 1,
 };
 
 using UnsignedRefCount = std::make_unsigned<RefCount>::type;
@@ -135,16 +113,26 @@ enum class GCBits : uint8_t {};
  * Refcounted types have a 32-bit RefCount normally, or 8-bit plus 24 bits of
  * padding with ONE_BIT_REFCOUNT.
  *
- * 0       32     40      48        50  56
- * [ cnt | kind | marks | DVArray | X  | sizeClass ] Packed, VecArray
- * [ cnt | kind | marks | DVArray | X  |           ] Mixed, Dict
- * [ cnt | kind | marks |                          ] Empty, Apc, Globals, Keyset
- * [ cnt | kind | marks | sizeClass:16             ] String
+ * 0       32     40      48             56
+ * [ cnt | kind | marks | arrBits      | sizeClass ] (vanilla) Vec
+ * [ cnt | kind | marks | arrBits      | keyTypes  ] (vanilla) Dict
+ * [ cnt | kind | marks |                          ] (vanilla) Keyset
+ * [ cnt | kind | marks | arrBits      | extraData ] any BespokeArray
+ * [ cnt | kind | marks | sizeClass:16             ] String (ref-counted)
  * [ cnt | kind | marks | heapSize:16              ] Resource (ResourceHdr)
- * [ cnt | kind | marks |                          ] Ref (RefData)
  * [ cnt | kind | marks | Attribute    |           ] Object..ImmSet (ObjectData)
+ * 0       32     40      48             63
+ * [ cnt | kind | marks | color:1      | isSymbol  ] String (cnt = StaticValue | SharedValue)
  *
- * Note: X in bit 50 is the kHasApcTv flag; see array-data.h
+ * Note: arrBits includes several flags, mostly from the Hack array migration:
+ *  - 1 bit for hasAPCTypedValue
+ *  - 1 bit for isLegacyArray
+ *  - 1 bit for hasStrKeyTable
+ *  - 1 bit for isSampledArray
+ *  - 4 bits unused
+ *
+ * Now that HAM is done, we can merge the ArrayKeyTypes bitset (which also
+ * uses 4 bits) into this field, so the highest byte is always the size class.
  *
  * Note: when an ObjectData is preceded by a special header (AsyncFuncFrame,
  * NativeData, ClosureHeader, or MemoData), only the special header is marked
@@ -174,14 +162,11 @@ protected:
   union {
     struct {
       mutable RefCount m_count;
-#ifdef ONE_BIT_REFCOUNT
-      int8_t m_padding[3];
-#endif
       HeaderKind m_kind;
       mutable GCBits m_marks;
       mutable uint16_t m_aux16;
     };
-    mutable std::atomic<std::underlying_type<RefCount>::type> m_atomic_count;
+    mutable std::atomic<std::underlying_type<RefCount>::type> m_atomic_count{};
     struct {
       uint32_t m_aux32; // usable if the subclass is not refcounted
       uint32_t m_hi32;
@@ -257,15 +242,15 @@ static_assert(sizeof(HeapObject) == sizeof(uint64_t),
 constexpr auto HeaderKindOffset = HeapObject::kind_offset();
 constexpr auto HeaderAuxOffset = HeapObject::aux_offset();
 
-inline bool isObjectKind(HeaderKind k) {
+inline constexpr bool isObjectKind(HeaderKind k) {
   return k >= HeaderKind::Object && k <= HeaderKind::ImmSet;
 }
 
-inline bool isArrayKind(HeaderKind k) {
-  return k >= HeaderKind::Packed && k <= HeaderKind::Keyset;
+inline constexpr bool isArrayKind(HeaderKind k) {
+  return k >= HeaderKind::Vec && k <= HeaderKind::BespokeKeyset;
 }
 
-inline bool isFreeKind(HeaderKind k) {
+inline constexpr bool isFreeKind(HeaderKind k) {
   return k >= HeaderKind::Free;
 }
 
@@ -274,67 +259,28 @@ namespace detail {
 // pass the isCppBuiltin() predicate.
 constexpr auto FirstCppBuiltin = HeaderKind::WaitHandle;
 constexpr auto LastCppBuiltin = HeaderKind::ImmSet;
-static_assert(uint8_t(LastCppBuiltin) - uint8_t(FirstCppBuiltin) == 10,
+static_assert(uint8_t(LastCppBuiltin) - uint8_t(FirstCppBuiltin) == 11,
               "keep predicate in sync with enum");
 }
 
 // legacy CppBuiltins have custom C++ types (not plain ObjectData layouts)
 // are not considered HNI objects, and do not have NativeData headers.
-inline bool isCppBuiltin(HeaderKind k) {
+inline constexpr bool isCppBuiltin(HeaderKind k) {
   return k >= detail::FirstCppBuiltin && k <= detail::LastCppBuiltin;
 }
 
-inline bool hasInstanceDtor(HeaderKind k) {
+inline constexpr bool hasInstanceDtor(HeaderKind k) {
   static_assert(uint8_t(HeaderKind::NativeObject) + 1 ==
                 uint8_t(detail::FirstCppBuiltin), "");
   return k >= HeaderKind::NativeObject && k <= detail::LastCppBuiltin;
 }
 
-inline bool isHackArrayKind(HeaderKind k) {
-  return
-    k == HeaderKind::Dict     ||
-    k == HeaderKind::VecArray ||
-    k == HeaderKind::Keyset;
-}
-
-inline bool isWaithandleKind(HeaderKind k) {
-  return k >= HeaderKind::WaitHandle && k <= HeaderKind::AwaitAllWH;
-  static_assert((int)HeaderKind::AwaitAllWH - (int)HeaderKind::WaitHandle == 2,
-                "isWaithandleKind requires updating");
-}
-
-enum class CollectionType : uint8_t {
-#define COL(name) name = uint8_t(HeaderKind::name),
-  COLLECTION_TYPES
-#undef COL
-};
-
-inline bool isVectorCollection(CollectionType ctype) {
-  return ctype == CollectionType::Vector || ctype == CollectionType::ImmVector;
-}
-inline bool isMapCollection(CollectionType ctype) {
-  return ctype == CollectionType::Map || ctype == CollectionType::ImmMap;
-}
-inline bool isSetCollection(CollectionType ctype) {
-  return ctype == CollectionType::Set || ctype == CollectionType::ImmSet;
-}
-inline bool isValidCollection(CollectionType ctype) {
-  return uint8_t(ctype) >= uint8_t(CollectionType::Vector) &&
-         uint8_t(ctype) <= uint8_t(CollectionType::ImmSet);
-}
-inline bool isMutableCollection(CollectionType ctype) {
-  return ctype == CollectionType::Vector ||
-         ctype == CollectionType::Map ||
-         ctype == CollectionType::Set;
-}
-inline bool isImmutableCollection(CollectionType ctype) {
-  return !isMutableCollection(ctype);
-}
-
-inline bool collectionAllowsIntStringKeys(CollectionType ctype) {
-  return isSetCollection(ctype) || isMapCollection(ctype);
+inline constexpr bool isWaitHandleKind(HeaderKind k) {
+  return k >= HeaderKind::WaitHandle && k <= HeaderKind::ConcurrentWH;
+  static_assert(
+    (int)HeaderKind::ConcurrentWH - (int)HeaderKind::WaitHandle == 3,
+    "isWaitHandleKind requires updating"
+  );
 }
 
 }
-
-#endif

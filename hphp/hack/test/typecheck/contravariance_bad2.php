@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 // Copyright 2004-present Facebook. All Rights Reserved.
 
 interface I {}
@@ -6,8 +6,8 @@ class Contra<-T> {}
 
 class TestClass {
   // Return something so we can see the type that's inferred for the parameters
+  /* HH_FIXME[4110] */
   final public function testContra<T>(T $x, Contra<T> $y): T {
-    //UNSAFE
   }
   public function main(?I $ent, Contra<I> $p): void {
     // Must have following constraints

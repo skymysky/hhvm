@@ -14,18 +14,16 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_JIT_ALIGN_INTERNAL_H_
-#define incl_HPHP_JIT_ALIGN_INTERNAL_H_
+#pragma once
 
 #include "hphp/runtime/vm/jit/alignment.h"
 #include "hphp/runtime/vm/jit/cg-meta.h"
-#include "hphp/runtime/vm/jit/func-guard.h"
 #include "hphp/runtime/vm/jit/service-requests.h"
 #include "hphp/runtime/vm/jit/types.h"
 
 #include "hphp/util/data-block.h"
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -39,19 +37,18 @@ void align(CodeBlock& cb, CGMeta* meta,
 /*
  * Used in align-*.cpp to generate an AlignInfo table within an arch namespace.
  */
-#define DECLARE_ALIGN_TABLE(table)                                            \
-  constexpr AlignInfo table[] = {                                             \
+#define DECLARE_ALIGN_TABLE(table)                                           \
+  constexpr AlignInfo table[] = {                                            \
     { cache_line_size(),  cache_line_size(),      0 }, /* CacheLine */        \
     { cache_line_size(),  cache_line_size() / 2,  0 }, /* CacheLineRoundUp */ \
     { kJmpTargetAlign,    kJmpTargetAlign,        0 }, /* JmpTarget */        \
     { 8,                  8,                      0 }, /* QWord Lit */        \
-    { 0,                  funcGuardLen(),         0 }, /* FuncGuard */        \
-    { 0,                  svcreq::stub_size(),    0 }, /* EphemeralStub */    \
-    { smashableAlignTo(), smashableMovqLen(),     kSmashMovqImmOff },         \
-    { smashableAlignTo(), smashableCmpqLen(),     kSmashCmpqImmOff },         \
-    { smashableAlignTo(), smashableCallLen(),     0 },                        \
-    { smashableAlignTo(), smashableJmpLen(),      0 },                        \
-    { smashableAlignTo(), smashableJccLen(),      0 },                        \
+    { SmashableAlignTo,   smashableMovqLen(),     kSmashMovqImmOff },         \
+    { SmashableAlignTo,   smashableCmpqLen(),     kSmashCmpqImmOff },         \
+    { SmashableAlignTo,   smashableCallLen(),     0 },                        \
+    { SmashableAlignTo,   smashableJmpLen(),      0 },                        \
+    { SmashableAlignTo,   smashableJccLen(),      0 },                        \
+    { SmashableAlignTo,   smashableInterceptLen(), 0 }, /* InterceptJmp/Jcc */ \
   }
 
 #define DEFINE_ALIGN_TABLE(table) \
@@ -60,8 +57,6 @@ void align(CodeBlock& cb, CGMeta* meta,
 
 ///////////////////////////////////////////////////////////////////////////////
 
-}}
+}
 
 #include "hphp/runtime/vm/jit/align-internal-inl.h"
-
-#endif

@@ -1,12 +1,11 @@
-#include "gd.h"
+#include "hphp/runtime/ext/gd/libgd/gd.h"
 
 #include <cmath>
 #include <cstring>
 #include <cstdlib>
 
-#include "gdhelpers.h"
+#include "hphp/runtime/ext/gd/libgd/gdhelpers.h"
 
-#include "hphp/runtime/base/memory-manager.h"
 
 using std::abs;
 
@@ -185,8 +184,8 @@ gdImagePtr gdImageCreateTrueColor (int sx, int sy)
 
   // Check for OOM before doing a potentially large allocation.
   auto allocsz = sizeof(gdImage)
-    + sy * (sizeof(int *) + sizeof(unsigned char *))
-    + sx * sy * (sizeof(int) + sizeof(unsigned char));
+    + (sizeof(int *) + sizeof(unsigned char *)) * sy
+    + (sizeof(int) + sizeof(unsigned char)) * sx * sy;
   if (UNLIKELY(precheckOOM(allocsz))) {
     // Don't throw here because GD might need to do its own cleanup.
     return NULL;
@@ -321,16 +320,12 @@ int gdImageColorClosestAlpha (gdImagePtr im, int r, int g, int b, int a)
  * red always maps to 6 in this implementation. Therefore UNDEFINED can be
  * defined as 0 in situations where only unsigned numbers are desired.
  */
-typedef struct
-{
+struct RGBType {
   float R, G, B;
-}
-RGBType;
-typedef struct
-{
+};
+struct HWBType {
   float H, W, B;
-}
-HWBType;
+};
 
 static HWBType * RGB_to_HWB (RGBType RGB, HWBType * HWB)
 {
@@ -1924,7 +1919,7 @@ void gdImageFill(gdImagePtr im, int x, int y, int nc)
       if (x>x2+1) {
         FILL_PUSH(y, x2+1, x-1, -dy);
       }
-skip:     for (x++; x<=x2 && (gdImageGetPixel(im, x, y)!=oc); x++);
+skip: for (x++; x<=x2 && (gdImageGetPixel(im, x, y)!=oc); x++) {}
 
       l = x;
     } while (x<=x2);
@@ -1996,7 +1991,7 @@ static void _gdImageFillTiled(gdImagePtr im, int x, int y, int nc)
       if (x>x2+1) {
         FILL_PUSH(y, x2+1, x-1, -dy);
       }
-skip:   for(x++; x<=x2 && (pts[y][x] || gdImageGetPixel(im,x, y)!=oc); x++);
+skip: for(x++; x<=x2 && (pts[y][x] || gdImageGetPixel(im,x, y)!=oc); x++) {}
       l = x;
     } while (x<=x2);
   }
@@ -2543,7 +2538,7 @@ void gdImagePolygon (gdImagePtr im, gdPointPtr p, int n, int c)
 {
   int i;
   int lx, ly;
-  typedef void (*image_line)(gdImagePtr im, int x1, int y1, int x2, int y2, int color);
+  using image_line = void (*)(gdImagePtr im, int x1, int y1, int x2, int y2, int color);
   image_line draw_line;
 
   if (n <= 0) {

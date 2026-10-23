@@ -1,0 +1,44 @@
+------------ -dalways_populate_raw_post_data=1 --------
+NULL
+bool(true)
+dict(2) {
+  ["var"]=>
+  string(3) "GET"
+  ["get"]=>
+  string(1) "1"
+}
+dict(0) {
+}
+bool(true)
+------------ -dalways_populate_raw_post_data=1 --------
+string(15) "var=POST&post=2"
+bool(true)
+dict(2) {
+  ["var"]=>
+  string(3) "GET"
+  ["get"]=>
+  string(1) "1"
+}
+dict(2) {
+  ["var"]=>
+  string(4) "POST"
+  ["post"]=>
+  string(1) "2"
+}
+bool(true)
+------------  --------
+NULL
+bool(true)
+dict(2) {
+  ["var"]=>
+  string(3) "GET"
+  ["get"]=>
+  string(1) "1"
+}
+dict(2) {
+  ["var"]=>
+  string(4) "POST"
+  ["post"]=>
+  string(1) "2"
+}
+bool(true)

@@ -1,0 +1,25 @@
+error: Typing[4110] Wrong type hint [1]
+-> Expected `int` [1]
+-> But got `string` [2]
+
+explicit_type_collection_mismatch4.php:4:15
+2 | 
+3 | function f(): void {
+4 |   $c = keyset<int>["bar", "baz"];
+  |               ^^^ [1]
+  |                    ^^^^^ [2]
+5 | }
+
+error: Typing[4110] Wrong type hint [1]
+-> Expected `int` [1]
+-> But got `string` [2]
+
+explicit_type_collection_mismatch4.php:4:15
+2 | 
+3 | function f(): void {
+4 |   $c = keyset<int>["bar", "baz"];
+  |               ^^^ [1]
+  |                           ^^^^^ [2]
+5 | }
+
+2 errors found

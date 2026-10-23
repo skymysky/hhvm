@@ -1,12 +1,12 @@
 <?hh
 // Copyright 2004-present Facebook. All Rights Reserved.
 
-<<__Memoize>> function get($k) {
+<<__Memoize>> function get($k) :mixed{
   echo "get() called....\n";
   return $k;
 }
 
-function main() {
+function main() :mixed{
   var_dump(get(vec[]));
   var_dump(get(vec[]));
 
@@ -28,20 +28,24 @@ function main() {
   var_dump(get(vec['value2']));
   var_dump(get(vec['value2']));
 
-  var_dump(get([]));
+  var_dump(get(vec[]));
   var_dump(get(keyset[]));
   var_dump(get(dict[]));
   var_dump(get(Map{}));
   var_dump(get(Set{}));
   var_dump(get(Vector{}));
 
-  var_dump(get(['value' => 'value', 'value2' => 'value2']));
+  var_dump(get(dict['value' => 'value', 'value2' => 'value2']));
   var_dump(get(dict['value' => 'value', 'value2' => 'value2']));
   var_dump(get(Map{'value' => 'value', 'value2' => 'value2'}));
   var_dump(get(Set{'value', 'value2'}));
 
-  var_dump(get(['value', 'value2']));
+  var_dump(get(vec['value', 'value2']));
   var_dump(get(keyset['value', 'value2']));
   var_dump(get(Vector{'value', 'value2'}));
 }
+
+<<__EntryPoint>>
+function main_memoize() :mixed{
 main();
+}

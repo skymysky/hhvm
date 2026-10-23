@@ -1,19 +1,12 @@
 <?hh
 
-function foo($v) {
+function foo($v) :mixed{
   return (bool)$v;
 }
 
-var_dump(foo(null));
-var_dump(foo(true));
-var_dump(foo(1));
-var_dump(foo(1.1));
-var_dump(foo("true"));
-var_dump(foo(array(123)));
-
 class C{}
 
-function bar($i) {
+function bar($i) :mixed{
   $v1 = "undefined";
   $v2 = "undefined";
   $v3 = "undefined";
@@ -39,8 +32,8 @@ function bar($i) {
     $v7 = 1.1;
     $v8 = "false";
     $v9 = new C();
-    $v10 = array();
-    $v11 = array(1);
+    $v10 = vec[];
+    $v11 = vec[1];
 
     $empty_col_1 = Set {};
     $empty_col_2 = Map {};
@@ -82,5 +75,15 @@ function bar($i) {
   var_dump((bool) $filled_col_5);
   var_dump((bool) $filled_col_6);
 }
+<<__EntryPoint>>
+function main_entry(): void {
 
-bar(1);
+  var_dump(foo(null));
+  var_dump(foo(true));
+  var_dump(foo(1));
+  var_dump(foo(1.1));
+  var_dump(foo("true"));
+  var_dump(foo(vec[123]));
+
+  bar(1);
+}

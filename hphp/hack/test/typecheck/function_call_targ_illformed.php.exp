@@ -1,0 +1,31 @@
+error: Typing[4104] Too few positional arguments (required 1 but got 0) [1]
+-> Definition is here [2]
+
+function_call_targ_illformed.php:8:3
+3 | class Foo<T> {}
+4 | 
+5 | function foo<T>(T $x) : void {}
+  |          ^^^ [2]
+6 | 
+7 | function test() : void {
+8 |   foo<Foo>(); // bad, missing type arg on Foo
+  |   ^^^^^^^^^^ [1]
+9 | }
+
+error: Typing[4101] Wrong number of type arguments (expected 1, got 0) [1]
+-> Definition is here [2]
+
+function_call_targ_illformed.php:8:7
+1 | <?hh
+2 | 
+3 | class Foo<T> {}
+  |       ^^^ [2]
+4 | 
+5 | function foo<T>(T $x) : void {}
+6 | 
+7 | function test() : void {
+8 |   foo<Foo>(); // bad, missing type arg on Foo
+  |       ^^^ [1]
+9 | }
+
+2 errors found

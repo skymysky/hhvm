@@ -1,0 +1,10 @@
+Code actions available:
+------------------------------------------
+Extract into variable (CodeActionKind: "refactor")
+Extract into method (CodeActionKind: "refactor")
+Devmate Quick Fix - Missing required named argument: second (CodeActionKind: "quickfix")
+Devmate Agent Fix - Missing required named argument: second (CodeActionKind: "quickfix")
+Devmate Quick Fix - Duplicate named argument: first (CodeActionKind: "quickfix")
+Devmate Agent Fix - Duplicate named argument: first (CodeActionKind: "quickfix")
+
+No code action titles match prefix: Inline method

@@ -16,16 +16,19 @@
 */
 #include "hphp/runtime/ext/soap/packet.h"
 #include "hphp/runtime/ext/soap/ext_soap.h"
+
+#include "hphp/runtime/base/array-init.h"
+#include "hphp/runtime/base/array-iterator.h"
 #include "hphp/system/systemlib.h"
 #include <memory>
 
 namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
 
-static void add_soap_fault(SoapClient *client, const String& code,
-                           const String& fault) {
+static void add_soap_fault(SoapClient *client, const OptString& code,
+                           const OptString& fault) {
   client->m_soap_fault =
-    SystemLib::AllocSoapFaultObject(String(code, CopyString), fault);
+    SystemLib::AllocSoapFaultObject(OptString(code, CopyString), fault);
 }
 
 /* SOAP client calls this function to parse response from SOAP server */
@@ -204,7 +207,7 @@ bool parse_packet_soap(SoapClient* obj, const char* buffer, int buffer_size,
   fault = get_node_ex(body->children,"Fault",envelope_ns);
   if (fault != nullptr) {
     char *faultcode = nullptr;
-    String faultstring, faultactor;
+    OptString faultstring, faultactor;
     Variant details;
     xmlNodePtr tmp;
 
@@ -258,7 +261,7 @@ bool parse_packet_soap(SoapClient* obj, const char* buffer, int buffer_size,
       }
     }
     obj->m_soap_fault =
-        SystemLib::AllocSoapFaultObject(String(faultcode, CopyString),
+        SystemLib::AllocSoapFaultObject(OptString(faultcode, CopyString),
                                         faultstring,
                                         faultactor,
                                         details);
@@ -267,7 +270,7 @@ bool parse_packet_soap(SoapClient* obj, const char* buffer, int buffer_size,
   }
 
   /* Parse content of <Body> element */
-  return_value = Array::Create();
+  return_value = Array::CreateDict();
   resp = body->children;
   while (resp != nullptr && resp->type != XML_ELEMENT_NODE) {
     resp = resp->next;
@@ -349,7 +352,7 @@ bool parse_packet_soap(SoapClient* obj, const char* buffer, int buffer_size,
               tmp = master_to_zval(encodePtr(), val);
             }
           }
-          return_value.toArrRef().set(String(param->paramName), tmp);
+          return_value.asArrRef().set(OptString(param->paramName), tmp);
           param_count++;
         }
       }
@@ -365,25 +368,24 @@ bool parse_packet_soap(SoapClient* obj, const char* buffer, int buffer_size,
           if (!node_is_equal_ex(val,"result",RPC_SOAP12_NAMESPACE)) {
             Variant tmp = master_to_zval(encodePtr(), val);
             if (val->name) {
-              String key((char*)val->name, CopyString);
-              if (return_value.toCArrRef().exists(key)) {
-                auto const lval = return_value.toArrRef().lvalAt(key).unboxed();
+              OptString key((char*)val->name, CopyString);
+              if (return_value.asCArrRef().exists(key)) {
+                auto const lval = return_value.asArrRef().lval(key);
                 if (!isArrayLikeType(lval.type())) {
-                  auto const tv = make_tv<KindOfArray>(
-                    tvCastToArrayLikeData(lval.tv())
+                  auto const tv = make_array_like_tv(
+                    tvCastToArrayLikeData<IntishCast::None>(lval.tv())
                   );
-                  cellMove(tv, lval);
+                  tvMove(tv, lval);
                 }
                 asArrRef(lval).append(tmp);
               } else if (val->next && get_node(val->next, (char*)val->name)) {
-                Array arr = Array::Create();
-                arr.append(tmp);
-                return_value.toArrRef().set(key, arr);
+                Array arr = make_vec_array(tmp);
+                return_value.asArrRef().set(key, arr);
               } else {
-                return_value.toArrRef().set(key, tmp);
+                return_value.asArrRef().set(key, tmp);
               }
             } else {
-              return_value.toArrRef().append(tmp);
+              return_value.asArrRef().append(tmp);
             }
             ++param_count;
           }
@@ -421,7 +423,7 @@ bool parse_packet_soap(SoapClient* obj, const char* buffer, int buffer_size,
             enc = iter->second->encode;
           }
         }
-        soap_headers.set(String((char*)trav->name, CopyString),
+        soap_headers.set(OptString((char*)trav->name, CopyString),
                          master_to_zval(enc, trav));
       }
       trav = trav->next;

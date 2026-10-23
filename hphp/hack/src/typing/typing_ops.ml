@@ -1,4 +1,4 @@
-(**
+(*
  * Copyright (c) 2015, Facebook, Inc.
  * All rights reserved.
  *
@@ -6,148 +6,148 @@
  * LICENSE file in the "hack" directory of this source tree.
  *
  *)
+[@@@warning "-33"]
 
-open Typing_defs
+open Hh_prelude
 
-module Reason  = Typing_reason
-module TUtils  = Typing_utils
-module Env     = Typing_env
-module Inst    = Decl_instantiate
-module Unify   = Typing_unify
-module TDef    = Typing_tdef
-module SubType = Typing_subtype
-module Phase   = Typing_phase
+[@@@warning "+33"]
+
+open Typing_defs_constraints
+module Reason = Typing_reason
 
 (*****************************************************************************)
 (* Exporting. *)
 (*****************************************************************************)
 
-(* Tries to add constraint that ty_sub is subtype of ty_super in envs *)
-let sub_type p ur env ty_sub ty_super =
-  Typing_log.log_types 2 p env
-    [Typing_log.Log_sub ("Typing_ops.sub_type",
-       [Typing_log.Log_type ("ty_sub", ty_sub);
-        Typing_log.Log_type ("ty_super", ty_super)])];
+let log_sub_type env p ty_sub ty_super =
+  let level =
+    if
+      not
+        (Typing_utils.is_capability_i ty_sub
+        || Typing_utils.is_capability_i ty_super)
+    then
+      1
+    else
+      3
+  in
+  Typing_log.(
+    log_with_level env "sub" ~level (fun () ->
+        log_types
+          (Pos_or_decl.of_raw_pos p)
+          env
+          [
+            Log_head
+              ( "Typing_ops.sub_type",
+                [
+                  Log_type_i ("ty_sub", ty_sub);
+                  Log_type_i ("ty_super", ty_super);
+                ] );
+          ]))
 
-  let env = { env with Env.pos = p; Env.outer_pos = p; Env.outer_reason = ur } in
-  Errors.try_add_err p (Reason.string_of_ureason ur)
-    (fun () -> SubType.sub_type env ty_sub ty_super)
-    (fun () -> env)
+let sub_type_i_apply_reason_callback
+    ?(is_coeffect = false) ?class_sub_classname p env ty_sub ty_super callback =
+  log_sub_type env p ty_sub ty_super;
+  Typing_utils.sub_type_i ~is_coeffect ?class_sub_classname env ty_sub ty_super
+  @@ Some callback
 
-let unify p ur env ty1 ty2 =
-  let env = { env with Env.pos = p; Env.outer_pos = p; Env.outer_reason = ur } in
-  Errors.try_add_err p (Reason.string_of_ureason ur)
-    (fun () -> Unify.unify env ty1 ty2)
-    (fun () -> env, (Reason.Rwitness p, Tany))
+(** see .mli **)
+let sub_type_i
+    ?(is_coeffect = false)
+    ?class_sub_classname
+    p
+    ur
+    env
+    ty_sub
+    ty_super
+    (on_error : Typing_error.Callback.t) =
+  sub_type_i_apply_reason_callback
+    ~is_coeffect
+    ?class_sub_classname
+    p
+    env
+    ty_sub
+    ty_super
+    (Typing_error.Reasons_callback.with_claim
+       on_error
+       ~claim:(lazy (p, Reason.string_of_ureason ur)))
 
-let union p ur env ty1 ty2 =
-  let env = { env with Env.pos = p; Env.outer_pos = p; Env.outer_reason = ur } in
-  Errors.try_add_err p (Reason.string_of_ureason ur)
-    (fun () -> Unify.union env ty1 ty2)
-    (fun () -> env, (Reason.Rwitness p, Tany))
+(** Tries to add constraint that ty_sub is subtype of ty_super in envs *)
+let sub_type_i_w_err_prefix
+    ?(is_coeffect = false) p env ty_sub ty_super err_prefix =
+  sub_type_i_apply_reason_callback
+    ~is_coeffect
+    p
+    env
+    ty_sub
+    ty_super
+    (Typing_error.Reasons_callback.Prefix err_prefix)
 
-let sub_type_decl p ur env ty_sub ty_super =
-  let env, ty_super = Phase.localize_with_self env ty_super in
-  let env, ty_sub = Phase.localize_with_self env ty_sub in
-  ignore (sub_type p ur env ty_sub ty_super)
+let sub_type ?class_sub_classname p ur env ty_sub ty_super on_error =
+  sub_type_i
+    ?class_sub_classname
+    p
+    ur
+    env
+    (LoclType ty_sub)
+    (LoclType ty_super)
+    on_error
+
+let sub_type_w_err_prefix
+    ?(is_coeffect = false)
+    p
+    env
+    ty_sub
+    ty_super
+    (err_prefix : Typing_error.Primary.t) =
+  sub_type_i_w_err_prefix
+    ~is_coeffect
+    p
+    env
+    (LoclType ty_sub)
+    (LoclType ty_super)
+    err_prefix
+
+let sub_type_decl
+    ?(is_coeffect = false)
+    ?class_sub_classname
+    ~on_error
+    p
+    ur
+    env
+    ty_sub
+    ty_super =
+  let localize_no_subst = Typing_utils.localize_no_subst ~ignore_errors:true in
+  let ((env, ty_err1), ty_super) = localize_no_subst env ty_super in
+  let ((env, ty_err2), ty_sub) = localize_no_subst env ty_sub in
+  let (env, ty_err3) =
+    Typing_utils.sub_type env ~is_coeffect ?class_sub_classname ty_sub ty_super
+    @@ Some
+         (Typing_error.Reasons_callback.prepend_reason
+            on_error
+            ~reason:(lazy (p, Reason.string_of_ureason ur)))
+  in
+  let ty_err_opt =
+    Typing_error.multiple_opt
+    @@ List.filter_map ~f:Fn.id [ty_err1; ty_err2; ty_err3]
+  in
+  (env, ty_err_opt)
 
 (* Ensure that types are equivalent i.e. subtypes of each other *)
-let unify_decl p ur env ty1 ty2 =
-  let env, ty1 = Phase.localize_with_self env ty1 in
-  let env, ty2 = Phase.localize_with_self env ty2 in
-  ignore (sub_type p ur env ty2 ty1);
-  ignore (sub_type p ur env ty1 ty2)
-
-module LeastUpperBound = struct
-  open Typing_defs
-  open Nast
-
-  let prim_least_up_bound tprim1 tprim2 =
-    match tprim1, tprim2 with
-    | Tint, Tstring | Tstring, Tint -> Some Tarraykey
-    | Tint, Tfloat | Tfloat, Tint -> Some Tnum
-    | _ , _ -> None
-
-  let rec type_visitor ~f ~default ty1 ty2 =
-  let array_kind ak1 ak2 =
-      match ak1, ak2 with
-      | AKmap (ty1, ty2), AKmap (ty3, ty4) ->
-        let ty1_ = type_visitor ~f ~default ty1 ty3 in
-        let ty2_ = type_visitor ~f ~default ty2 ty4 in
-        Some (AKmap (ty1_, ty2_))
-      | AKdarray (ty1, ty2), AKdarray (ty3, ty4) ->
-        let ty1_ = type_visitor ~f ~default ty1 ty3 in
-        let ty2_ = type_visitor ~f ~default ty2 ty4 in
-        Some (AKdarray (ty1_, ty2_))
-      | AKvarray ty1, AKvarray ty2 ->
-        let ty = type_visitor ~f ~default ty1 ty2 in
-        Some (AKvarray ty)
-      | AKvec ty1, AKvec ty2 ->
-        let ty = type_visitor ~f ~default ty1 ty2 in
-        Some (AKvec ty)
-      | _ -> None
-    in
-    let (r1, ty_1), (_, ty_2) = (ty1, ty2) in
-    match ty_1, ty_2 with
-      | Ttuple tyl1, Ttuple tyl2 ->
-        begin try let tyl = List.map2 (type_visitor ~f ~default) tyl1 tyl2 in
-          r1, Ttuple tyl
-          with _ -> default
-        end
-      | Tclass ((p, id1), tyl1), Tclass((_, id2), tyl2) ->
-        if id1 = id2 then
-          begin try let tyl = List.map2 (type_visitor ~f ~default) tyl1 tyl2 in
-            r1, Tclass ((p, id1), tyl)
-            with _ -> default
-          end
-        else
-          default
-      | Tarraykind ak1, Tarraykind ak2 ->
-        begin match array_kind ak1 ak2 with
-        | None -> default
-        | Some ak -> r1, Tarraykind ak
-        end
-      | Tprim tprim1, Tprim tprim2 ->
-        begin match prim_least_up_bound tprim1 tprim2 with
-        | None -> f ty1 ty2
-        | Some ty -> r1, Tprim ty
-        end
-      | Toption ty1, Toption ty2 ->
-        let ty = type_visitor ~f ~default ty1 ty2 in r1, Toption ty
-      | Toption ty1 , ty_2 | ty_2, Toption ty1 ->
-        let ty = type_visitor ~f ~default ty1 (r1, ty_2) in r1, Toption ty
-      | _ -> f ty1 ty2
-
-  (* @TODO expand this match to refine more types*)
-  let pairwise_least_upper_bound env ~default ty1 ty2 =
-    if SubType.is_sub_type env ty1 ty2 then ty2
-    else if SubType.is_sub_type env ty2 ty1 then ty1
-    else default
-
-  let rec full env types =
-    match types with
-    | [] -> None
-    | [t] -> Some t
-    | (r, _ as ty1) :: ty2 :: ts ->
-      let default = (r, TUtils.desugar_mixed r) in
-      let ty =
-        type_visitor
-          ~f:(pairwise_least_upper_bound env ~default)
-          ~default ty1 ty2
-      in
-      full env (ty :: ts)
-
-  let rec compute types =
-    match types with
-    | [] -> None
-    | [t] ->  Some t
-    | (tenv, p, k, (r, _ as ty1)) :: (_, _, _, ty2) :: ts  ->
-      let default = (r, TUtils.desugar_mixed r) in
-      let ty =
-        type_visitor
-          ~f:(pairwise_least_upper_bound tenv ~default)
-          ~default ty1 ty2
-      in
-      compute ((tenv, p, k, ty) :: ts)
-
-  end
+let unify_decl p ur env on_error ty1 ty2 =
+  let localize_no_subst = Typing_utils.localize_no_subst ~ignore_errors:true in
+  let ((env, ty_err1), ty1) = localize_no_subst env ty1 in
+  let ((env, ty_err2), ty2) = localize_no_subst env ty2 in
+  let reason = lazy (p, Reason.string_of_ureason ur) in
+  let (env, ty_err3) =
+    Typing_utils.sub_type env ty2 ty1
+    @@ Some (Typing_error.Reasons_callback.prepend_reason on_error ~reason)
+  in
+  let (env, ty_err4) =
+    Typing_utils.sub_type env ty1 ty2
+    @@ Some (Typing_error.Reasons_callback.prepend_reason on_error ~reason)
+  in
+  let ty_err_opt =
+    Typing_error.multiple_opt
+    @@ List.filter_map ~f:Fn.id [ty_err1; ty_err2; ty_err3; ty_err4]
+  in
+  (env, ty_err_opt)

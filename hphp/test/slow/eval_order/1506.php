@@ -1,61 +1,72 @@
-<?php
-
-function x($a, $b, $c, $d) {
+<?hh
+<<__DynamicallyCallable>>
+function x($a, $b, $c, $d) :mixed{
 }
-function p($x) {
- echo $x . "
+function p($x) :mixed{
+  echo $x.
+    "
 ";
- return $x;
- }
+  return $x;
+}
 class c {
   function __construct($a, $b, $c, $d) {
+  }
+  function f($a, $b, $c, $d) :mixed{
+  }
+  <<__DynamicallyCallable>>
+  static function g($a, $b, $c, $d) :mixed{
+  }
 }
-  function f($a, $b, $c, $d) {
-}
-  static function g($a, $b, $c, $d) {
-}
-}
-function rt(&$a, $v) {
+function rt(inout $a, $v) :mixed{
   $a = $v;
 }
-function id($x) {
- return $x;
- }
-function dump($a, $b) {
+function id($x) :mixed{
+  return $x;
+}
+function dump($a, $b) :mixed{
   var_dump($a, $b);
 }
-echo "sfc
+
+<<__EntryPoint>>
+function main_1506() :mixed{
+  echo "sfc
 ";
-x(p(1), p(2), p(3), 4);
-$y = 'x';
-echo "dfc
+  x(p(1), p(2), p(3), 4);
+  $y = x<>;
+  echo "dfc
 ";
-$y(p(1), p(2), p(3), 4);
-echo "smc
+  $y(p(1), p(2), p(3), 4);
+  echo "smc
 ";
-c::g(p(1), p(2), p(3), 4);
-$y = 'g';
-echo "dsmc
+  c::g(p(1), p(2), p(3), 4);
+  $y = 'g';
+  echo "dsmc
 ";
-c::$y(p(1), p(2), p(3), 4);
-echo "occ
+  HH\dynamic_class_meth(c::class, $y)(p(1), p(2), p(3), 4);
+  echo "occ
 ";
-$q = new c(p(1), p(2), p(3), 4);
-echo "omc
+  $q = new c(p(1), p(2), p(3), 4);
+  echo "omc
 ";
-$q->f(p(1), p(2), p(3), 4);
-echo "rsfc
+  $q->f(p(1), p(2), p(3), 4);
+  echo "rsfc
 ";
-rt($a, id(10));
-var_dump($a);
-dump($v++, $v++);
-$v = 10;
-dump($v, $v = 0);
-echo "nest
+  $a = null;
+  rt(inout $a, id(10));
+  var_dump($a);
+  try {
+    $t1 = $v; $v++; $t2 = $v; $v++; dump($t1, $t2);
+  } catch (UndefinedVariableException $e) {
+    var_dump($e->getMessage());
+  }
+  $v = 10;
+  $a = $v; $v = 0; dump($a, $v);
+  echo "nest
 ";
-x(p(1), x(p(2), p(3), p(4), p(5)), p(6), x(p(7), p(8), p(9), p(10)));
-echo "arr
+  x(p(1), x(p(2), p(3), p(4), p(5)), p(6), x(p(7), p(8), p(9), p(10)));
+  echo "arr
 ";
-$z = array(p(1), p(2), x(p(3), p(4), p(5), p(6)), p(7));
-$q = 1;
-$z = array(1, 2, $q);
+  $z = vec[p(1), p(2), x(p(3), p(4), p(5), p(6)), p(7)];
+  $q = 1;
+  $z = vec[1, 2, $q];
+}

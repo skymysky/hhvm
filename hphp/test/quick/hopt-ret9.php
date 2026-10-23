@@ -1,18 +1,16 @@
-<?php
+<?hh
 
 class C {
-  function __destruct() {
-    echo "in __destruct\n";
-  }
 }
 
-function foo() {
+function foo() :mixed{
   $x = new C;
   if (!$x) {
     echo "Error\n";
   }
 }
-
+<<__EntryPoint>> function main(): void {
 foo();
 
 echo "End\n";
+}

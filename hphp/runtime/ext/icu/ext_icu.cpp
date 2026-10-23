@@ -19,7 +19,6 @@
 #include <vector>
 #include <string>
 #include <boost/scoped_ptr.hpp>
-#include <unicode/rbbi.h>
 #include <unicode/translit.h>
 #include <unicode/uregex.h>
 #include <unicode/ustring.h>
@@ -30,32 +29,37 @@
 
 using namespace U_ICU_NAMESPACE;
 
-namespace HPHP { namespace Intl {
+namespace HPHP::Intl {
 ///////////////////////////////////////////////////////////////////////////////
 // Intentionally higher in case ICU adds more constants.
 const int64_t k_UREGEX_OFFSET_CAPTURE   = 1LL<<32;
 
 ///////////////////////////////////////////////////////////////////////////////
-typedef tbb::concurrent_hash_map<const StringData*,const RegexPattern*,
-                                StringDataHashCompare> PatternStringMap;
+using PatternStringMap = tbb::concurrent_hash_map<const StringData*,
+                                                  const RegexPattern*,
+                                                  StringDataHashCompare>;
 
 static PatternStringMap s_patternCacheMap;
 
-static Variant HHVM_FUNCTION(icu_match, const String& pattern,
-                                        const String& subject,
-                                        VRefParam matches /* = null */,
-                                        int64_t flags /* = 0 */) {
+static Variant icu_match_impl(const OptString& pattern,
+                              const OptString& subject,
+                              Array* matches,
+                              int64_t flags) {
   UErrorCode status = U_ZERO_ERROR;
 
-  Array matchesArr = Array::Create();
-  SCOPE_EXIT { matches.assignIfRef(matchesArr); };
+  Array matchesArr = Array::CreateVec();
+  SCOPE_EXIT {
+    if (matches) {
+      *matches = matchesArr;
+    }
+  };
 
   // Create hash map key by concatenating pattern and flags.
   StringBuffer bpattern;
   bpattern.append(pattern);
   bpattern.append(':');
   bpattern.append(flags);
-  String spattern = bpattern.detach();
+  OptString spattern = bpattern.detach();
 
   // Find compiled pattern matcher in hash map or add it.
   PatternStringMap::accessor accessor;
@@ -92,7 +96,7 @@ static Variant HHVM_FUNCTION(icu_match, const String& pattern,
   if (matcher->find()) {
     matched = 1;
 
-    if (matches.isReferenced()) {
+    if (matches) {
       int32_t count = matcher->groupCount();
 
       for (int32_t i = 0; i <= count; i++) {
@@ -104,7 +108,7 @@ static Variant HHVM_FUNCTION(icu_match, const String& pattern,
         // Convert UnicodeString back to UTF-8.
         std::string string;
         ustring.toUTF8String(string);
-        String match = String(string);
+        OptString match = OptString(string);
 
         if (flags & k_UREGEX_OFFSET_CAPTURE) {
           // start() returns the index in UnicodeString, which
@@ -116,7 +120,7 @@ static Variant HHVM_FUNCTION(icu_match, const String& pattern,
           }
 
           start = usubject.countChar32(0, start);
-          matchesArr.append(make_packed_array(match, start));
+          matchesArr.append(make_vec_array(match, start));
         } else {
           matchesArr.append(match);
         }
@@ -127,12 +131,31 @@ static Variant HHVM_FUNCTION(icu_match, const String& pattern,
   return matched;
 }
 
+static Variant HHVM_FUNCTION(icu_match,
+                             const OptString& pattern,
+                             const OptString& subject,
+                             int64_t flags /* = 0 */) {
+  return icu_match_impl(pattern, subject, nullptr, flags);
+}
+
+static Variant HHVM_FUNCTION(icu_match_with_matches,
+                             const OptString& pattern,
+                             const OptString& subject,
+                             Array& matches,
+                             int64_t flags /* = 0 */) {
+  return icu_match_impl(pattern, subject, &matches, flags);
+}
 
 // Need to have a valid installation of the transliteration data in /lib64.
 // Initialization will be taken care of by ext_array which also uses icu.
 
 struct TransliteratorWrapper {
   void initialize() {
+    if (m_inited) {
+      return;
+    }
+    m_inited = true;
+
     UnicodeString basicID("Any-Latin ; NFKD; [:nonspacing mark:] Remove");
     UnicodeString basicIDAccent("Any-Latin ; NFKC");
     UErrorCode status = U_ZERO_ERROR;
@@ -145,13 +168,15 @@ struct TransliteratorWrapper {
     if (U_FAILURE(status)) {
       raise_warning(std::string(u_errorName(status)));
       //m_tl should be NULL if createInstance fails but better safe than sorry.
-      m_tl = NULL;
-      m_tl_accent = NULL;
+      m_tl = nullptr;
+      m_tl_accent = nullptr;
     }
   }
 
   void transliterate(UnicodeString& u_str) {
     std::lock_guard<std::mutex> lock(m_mutex);
+    initialize();
+
     if (m_tl) {
       m_tl->transliterate(u_str);
     } else {
@@ -161,6 +186,8 @@ struct TransliteratorWrapper {
 
   void transliterate_with_accents(UnicodeString& u_str) {
     std::lock_guard<std::mutex> lock(m_mutex);
+    initialize();
+
     if (m_tl_accent) {
       m_tl_accent->transliterate(u_str);
     } else {
@@ -171,13 +198,14 @@ struct TransliteratorWrapper {
 private:
   Transliterator* m_tl;
   Transliterator* m_tl_accent;
+  bool m_inited = false;
   std::mutex m_mutex;
 };
 
 static TransliteratorWrapper s_transliterator;
 
-static String HHVM_FUNCTION(icu_transliterate, const String& str,
-                                               bool remove_accents) {
+static OptString HHVM_FUNCTION(icu_transliterate, const OptString& str,
+                                                  bool remove_accents) {
   UnicodeString u_str = UnicodeString::fromUTF8(str.data());
   if (remove_accents) {
     s_transliterator.transliterate(u_str);
@@ -188,7 +216,7 @@ static String HHVM_FUNCTION(icu_transliterate, const String& str,
   // Convert UnicodeString back to UTF-8.
   std::string string;
   u_str.toUTF8String(string);
-  return String(string);
+  return OptString(string);
 }
 
 
@@ -236,10 +264,10 @@ struct LowerCaseTransliterator : ICUTransliterator {
 };
 
 
-// Thread-local globals.
-THREAD_LOCAL(SpaceMatcher, s_spaceMatcher);
-THREAD_LOCAL(NumMatcher, s_numMatcher);
-THREAD_LOCAL(LowerCaseTransliterator, s_lctranslit);
+// Request-local globals, contains internal variable of status
+RDS_LOCAL(SpaceMatcher, s_spaceMatcher);
+RDS_LOCAL(NumMatcher, s_numMatcher);
+RDS_LOCAL(LowerCaseTransliterator, s_lctranslit);
 
 
 /* Normalize a unicode string depending on its type.
@@ -297,17 +325,16 @@ void normalizeToken(struct Token& token) {
  * Other: replaced with empty string
  *
  */
-static Array HHVM_FUNCTION(icu_tokenize, const String& text) {
+static Array HHVM_FUNCTION(icu_tokenize, const OptString& text) {
   // Boundary markers that indicate the beginning and end of a token stream.
-  const String BEGIN_MARKER("_B_");
-  const String END_MARKER("_E_");
+  const OptString BEGIN_MARKER("_B_");
+  const OptString END_MARKER("_E_");
 
-  Array ret;
+  Array ret = Array::CreateVec();
   std::vector<Token> tokens;
   tokenizeString(tokens, getMaster(), UnicodeString::fromUTF8(text.data()));
 
-  int i = 0;
-  ret.set(i++, BEGIN_MARKER);
+  ret.append(BEGIN_MARKER);
   for(std::vector<Token>::iterator iter = tokens.begin();
       iter != tokens.end();
       iter++) {
@@ -315,23 +342,18 @@ static Array HHVM_FUNCTION(icu_tokenize, const String& text) {
     const UnicodeString& word = iter->value;
     // Ignore spaces and empty strings.
     if (!s_spaceMatcher->matches(word) && word.length() > 0) {
-      ret.set(i++, String(icuStringToUTF8(word)));
+      ret.append(OptString(icuStringToUTF8(word)));
     }
   }
-  ret.set(i++, END_MARKER);
+  ret.append(END_MARKER);
   return ret;
 }
 
 /////////////////////////////////////////////////////////////////////////////
 
-void IntlExtension::initICU() {
-  // We need this initialization to be done late
-  // so that ICU's dynamic initializers have had
-  // a chance to run, which is important if we've
-  // linked against a static libICU.
-  s_transliterator.initialize();
-
+void IntlExtension::registerNativeICU() {
   HHVM_FE(icu_match);
+  HHVM_FE(icu_match_with_matches);
   HHVM_FE(icu_transliterate);
   HHVM_FE(icu_tokenize);
 
@@ -341,9 +363,7 @@ void IntlExtension::initICU() {
   HHVM_RC_INT_SAME(UREGEX_MULTILINE);
   HHVM_RC_INT_SAME(UREGEX_UWORD);
   HHVM_RC_INT(UREGEX_OFFSET_CAPTURE, k_UREGEX_OFFSET_CAPTURE);
-
-  loadSystemlib("icu");
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-}} // HPHP::Intl
+} // HPHP::Intl

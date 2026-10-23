@@ -1,7 +1,7 @@
 <?hh
 
-function append_to_self(): array {
-  $a = [];
+function append_to_self(): varray {
+  $a = vec[];
   $a[] = $a;
   $a[] = $a;
   $a[] = $a;
@@ -9,7 +9,7 @@ function append_to_self(): array {
   return $a;
 }
 
-function main() {
+function main() :mixed{
   echo "---- profiling ----\n";
   var_dump(append_to_self());
   append_to_self();
@@ -17,4 +17,8 @@ function main() {
   var_dump(append_to_self());
 }
 
+
+<<__EntryPoint>>
+function main_append_to_self() :mixed{
 main();
+}

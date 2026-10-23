@@ -18,8 +18,11 @@
 #define incl_HPHP_SYSTEMLIB_H_
 
 #include "hphp/runtime/base/types.h"
+#include "hphp/runtime/base/type-string.h"
 #include "hphp/runtime/base/tv-variant.h"
 #include "hphp/util/portability.h"
+
+#include <memory>
 
 namespace HPHP {
 struct ObjectData;
@@ -27,70 +30,80 @@ struct Unit;
 struct Class;
 struct Func;
 struct Object;
+struct UnitEmitter;
 } //namespace HPHP
 
-namespace HPHP { namespace SystemLib {
+namespace HPHP::SystemLib {
 ///////////////////////////////////////////////////////////////////////////////
 
 #define SYSTEMLIB_CLASSES(x)                    \
-  x(stdclass)                                   \
-  x(Exception)                                  \
-  x(BadMethodCallException)                     \
-  x(InvalidArgumentException)                   \
-  x(TypeAssertionException)                     \
-  x(RuntimeException)                           \
-  x(OutOfBoundsException)                       \
-  x(InvalidOperationException)                  \
-  x(pinitSentinel)                              \
-  x(resource)                                   \
-  x(Directory)                                  \
-  x(SplFileInfo)                                \
-  x(SplFileObject)                              \
-  x(DateTimeInterface)                          \
-  x(DateTimeImmutable)                          \
-  x(DOMException)                               \
-  x(PDOException)                               \
-  x(SoapFault)                                  \
-  x(Serializable)                               \
-  x(ArrayAccess)                                \
-  x(ArrayObject)                                \
-  x(ArrayIterator)                              \
-  x(Iterator)                                   \
-  x(IteratorAggregate)                          \
-  x(Traversable)                                \
-  x(Countable)                                  \
-  x(LazyKVZipIterable)                          \
-  x(LazyIterableView)                           \
-  x(LazyKeyedIterableView)                      \
-  x(Phar)                                       \
-  x(CURLFile)                                   \
-  x(__PHP_Incomplete_Class)                     \
-  x(APCIterator)
+  x(stdClass,,)                                 \
+  x(Exception,,)                                \
+  x(BadMethodCallException,,)                   \
+  x(InvalidArgumentException,,)                 \
+  x(TypeAssertionException,,)                   \
+  x(RuntimeException,,)                         \
+  x(OutOfBoundsException,,)                     \
+  x(InvalidOperationException,,)                \
+  x(UnexpectedValueException,,)                 \
+  x(pinitSentinel,, __)                         \
+  x(resource,, __)                              \
+  x(Directory,,)                                \
+  x(SplFileInfo,,)                              \
+  x(SplFileObject,,)                            \
+  x(DateTimeInterface,,)                        \
+  x(DateTimeImmutable,,)                        \
+  x(DOMException,,)                             \
+  x(PDOException,,)                             \
+  x(SoapFault,,)                                \
+  x(Serializable,,)                             \
+  x(ArrayAccess,,)                              \
+  x(ArrayIterator,,)                            \
+  x(ConstMap,,)                                 \
+  x(ConstSet,,)                                 \
+  x(DirectoryIterator,,)                        \
+  x(IteratorAggregate,,)                        \
+  x(Countable,,)                                \
+  x(LazyKVZipIterable,,)                        \
+  x(LazyIterableView,,)                         \
+  x(LazyKeyedIterableView,,)                    \
+  x(CURLFile,,)                                 \
+  x(__PHP_Incomplete_Class,,)                   \
+  x(DivisionByZeroException,,)                  \
+  x(InvalidForeachArgumentException,,)          \
+  x(UndefinedPropertyException,,)               \
+  x(UndefinedVariableException,,)               \
+  x(TypecastException,,)                        \
+  x(ReadonlyViolationException,,)               \
+  x(CoeffectViolationException,,)               \
+  x(ModuleBoundaryViolationException,,)         \
+  x(DeploymentBoundaryViolationException,,)     \
+  x(Throwable,,)                                \
+  x(BaseException,, \\__SystemLib\\)            \
+  x(Error,,)                                    \
+  x(ArithmeticError,,)                          \
+  x(ArgumentCountError,,)                       \
+  x(AssertionError,,)                           \
+  x(DivisionByZeroError,,)                      \
+  x(ParseError,,)                               \
+  x(TypeError,,)                                \
+  x(MethCallerHelper,, \\__SystemLib\\)         \
+  x(DynMethCallerHelper,, \\__SystemLib\\)      \
+  x(Traversable, HH_, HH\\)                     \
+  x(Iterator, HH_, HH\\)                        \
+  x(RequestFanoutLimitExceededException,,)      \
+/* */
 
-extern bool s_inited;
 extern bool s_anyNonPersistentBuiltins;
 extern std::string s_source;
 extern Unit* s_unit;
-extern Unit* s_hhas_unit;
-extern Unit* s_nativeFuncUnit;
-extern Unit* s_nativeClassUnit;
 extern Func* s_nullFunc;
 extern Func* s_nullCtor;
 
-#define DECLARE_SYSTEMLIB_CLASS(cls)       \
-extern Class* s_ ## cls ## Class;
+#define DECLARE_SYSTEMLIB_CLASS(cls, prefix, ...)       \
+Class* get ## prefix ## cls ## Class();
   SYSTEMLIB_CLASSES(DECLARE_SYSTEMLIB_CLASS)
 #undef DECLARE_SYSTEMLIB_CLASS
-
-extern Class* s_ThrowableClass;
-extern Class* s_BaseExceptionClass;
-extern Class* s_ErrorClass;
-extern Class* s_ArithmeticErrorClass;
-extern Class* s_ArgumentCountErrorClass;
-extern Class* s_AssertionErrorClass;
-extern Class* s_DivisionByZeroErrorClass;
-extern Class* s_ParseErrorClass;
-extern Class* s_TypeErrorClass;
 
 Object AllocStdClassObject();
 Object AllocPinitSentinel();
@@ -107,7 +120,9 @@ Object AllocTypeAssertionExceptionObject(const Variant& message);
 Object AllocRuntimeExceptionObject(const Variant& message);
 Object AllocOutOfBoundsExceptionObject(const Variant& message);
 Object AllocInvalidOperationExceptionObject(const Variant& message);
+Object AllocUnexpectedValueExceptionObject(const Variant& message);
 Object AllocDOMExceptionObject(const Variant& message);
+Object AllocDivisionByZeroExceptionObject();
 Object AllocDirectoryObject();
 Object AllocPDOExceptionObject();
 Object AllocSoapFaultObject(const Variant& code,
@@ -120,6 +135,7 @@ Object AllocLazyKVZipIterableObject(const Variant& mp);
 
 Object AllocLazyIterableViewObject(const Variant& iterable);
 Object AllocLazyKeyedIterableViewObject(const Variant& iterable);
+Object AllocRequestFanoutLimitExceededExceptionObject(const Variant& message);
 
 [[noreturn]] void throwExceptionObject(const Variant& message);
 [[noreturn]] void throwErrorObject(const Variant& message);
@@ -138,7 +154,10 @@ void throwInvalidArgumentExceptionObject(const Variant& message);
 [[noreturn]]
 void throwInvalidOperationExceptionObject(const Variant& message);
 [[noreturn]]
+void throwUnexpectedValueExceptionObject(const Variant& message);
+[[noreturn]]
 void throwDOMExceptionObject(const Variant& message);
+[[noreturn]] void throwDivisionByZeroExceptionObject();
 [[noreturn]]
 void throwSoapFaultObject(const Variant& code,
                           const Variant& message,
@@ -146,7 +165,15 @@ void throwSoapFaultObject(const Variant& code,
                           const Variant& detail = uninit_variant,
                           const Variant& name = uninit_variant,
                           const Variant& header = uninit_variant);
-
+[[noreturn]] void throwInvalidForeachArgumentExceptionObject();
+[[noreturn]] void throwUndefinedPropertyExceptionObject(const Variant& message);
+[[noreturn]] void throwUndefinedVariableExceptionObject(const Variant& message);
+[[noreturn]] void throwTypecastExceptionObject(const Variant& message);
+[[noreturn]] void throwReadonlyViolationExceptionObject(const Variant& message);
+[[noreturn]] void throwCoeffectViolationExceptionObject(const Variant& message);
+[[noreturn]] void throwModuleBoundaryViolationExceptionObject(const Variant& message);
+[[noreturn]] void throwDeploymentBoundaryViolationExceptionObject(const Variant& message);
+[[noreturn]] void throwRequestFanoutLimitExceededExceptionObject(const Variant& message);
 
 /**
  * Register a persistent unit to be re-merged (in non-repo mode)
@@ -163,7 +190,55 @@ void mergePersistentUnits();
  */
 void setupNullCtor(Class* cls);
 
+/*
+ * Return a fresh 86reifiedinit method.
+ */
+Func* getNull86reifiedinit(Class* cls);
+
+Func* funcLoad(const StringData* name, Func*& cache);
+Class* classLoad(const StringData* name, Class*& cache);
+
+/*
+ * Find a systemlib unit with 'name' filepath.
+ */
+Unit* findPersistentUnit(const StringData* name);
+
 ///////////////////////////////////////////////////////////////////////////////
-}} // namespace HPHP::SystemLib
+
+/*
+ * Keep a list of unit-emitters for systemlib units. Used by HPHPc so
+ * it can put the unit-emitters into the repo.
+ */
+void keepRegisteredUnitEmitters(bool);
+
+void registerUnitEmitter(std::unique_ptr<UnitEmitter>);
+
+std::vector<std::unique_ptr<UnitEmitter>> claimRegisteredUnitEmitters();
+
+///////////////////////////////////////////////////////////////////////////////
+
+template<size_t N>
+struct StringLiteral {
+  /* implicit */ constexpr StringLiteral(const char (&str)[N]) {
+    std::copy_n(str, N, value);
+  }
+  char value[N];
+};
+
+template<StringLiteral NAME>
+struct ClassLoader {
+  static Class* classof() {
+    static Class* cls = nullptr;
+    return SystemLib::classLoad(className().get(), cls);
+  }
+
+  static const StaticString& className() {
+    static const StaticString name(NAME.value);
+    return name;
+  }
+};
+
+///////////////////////////////////////////////////////////////////////////////
+} // namespace HPHP::SystemLib
 
 #endif

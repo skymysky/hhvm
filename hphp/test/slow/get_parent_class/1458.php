@@ -1,23 +1,26 @@
-<?php
+<?hh
 
 interface i {
-  function test();
+  function test():mixed;
 }
 class foo implements i {
-  function test() {
-    var_dump(get_parent_class());
+  function test() :mixed{
+    var_dump(get_parent_class(self::class));
   }
 }
 class bar extends foo {
-  function test_bar() {
-    var_dump(get_parent_class());
+  function test_bar() :mixed{
+    var_dump(get_parent_class(self::class));
   }
 }
 class goo extends bar {
-  function test_goo() {
-    var_dump(get_parent_class());
+  function test_goo() :mixed{
+    var_dump(get_parent_class(self::class));
   }
 }
+
+<<__EntryPoint>>
+function main_1458() :mixed{
 $bar = new bar;
 $foo = new foo;
 $goo = new goo;
@@ -37,6 +40,5 @@ var_dump(get_parent_class("i"));
 var_dump(get_parent_class(""));
 var_dump(get_parent_class("[[[["));
 var_dump(get_parent_class(" "));
-var_dump(get_parent_class(new stdclass));
-var_dump(get_parent_class(array()));
-var_dump(get_parent_class(1));
+var_dump(get_parent_class(new stdClass));
+}

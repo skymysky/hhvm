@@ -1,0 +1,27 @@
+error: Typing[4401] Accessing an enum class constant requires the capability WriteProperty, which is not provided by the context. [1]
+-> The local (enclosing) context provides the capability set {} [2]
+
+access_variant_writeprops.bad.php:9:3
+ 6 | }
+ 7 | 
+ 8 | function f(class<MyEnum> $m)[]: void {
+   |                             ^^ [2]
+ 9 |   MyEnum::AAA;
+   |   ^^^^^^^^^^^ [1]
+10 |   $m::AAA;
+11 | }
+
+error: Typing[4401] Accessing an enum class constant requires the capability WriteProperty, which is not provided by the context. [1]
+-> The local (enclosing) context provides the capability set {} [2]
+
+access_variant_writeprops.bad.php:10:3
+ 6 | }
+ 7 | 
+ 8 | function f(class<MyEnum> $m)[]: void {
+   |                             ^^ [2]
+ 9 |   MyEnum::AAA;
+10 |   $m::AAA;
+   |   ^^^^^^^ [1]
+11 | }
+
+2 errors found

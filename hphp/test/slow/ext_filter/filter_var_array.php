@@ -1,20 +1,14 @@
-<?php
+<?hh
 
-$all_filters = array(
-  'No filters' => array(),
-  'Require Scalar' => array('flags' => FILTER_REQUIRE_SCALAR),
-  'Require Array' => array('flags' => FILTER_REQUIRE_ARRAY),
-);
-
-function perform_test($name, $test_filters, $add_empty) {
-  $params = array(
+function perform_test($name, $test_filters, $add_empty) :mixed{
+  $params = dict[
     'null' => NULL,
-    'empty_array' => array(),
-    'filled_array' => array(1, 2, 3),
+    'empty_array' => vec[],
+    'filled_array' => vec[1, 2, 3],
     'int' => 1,
     'double' => 1.0,
     'string' => 'string',
-  );
+  ];
 
   if ($add_empty) {
     $name .= ', Add empty';
@@ -27,7 +21,17 @@ function perform_test($name, $test_filters, $add_empty) {
   var_dump(filter_var_array($params, $filters, $add_empty));
 }
 
+
+<<__EntryPoint>>
+function main_filter_var_array() :mixed{
+$all_filters = dict[
+  'No filters' => vec[],
+  'Require Scalar' => dict['flags' => FILTER_REQUIRE_SCALAR],
+  'Require Array' => dict['flags' => FILTER_REQUIRE_ARRAY],
+];
+
 foreach ($all_filters as $test_name => $filter) {
   perform_test($test_name, $filter, true);
   perform_test($test_name, $filter, false);
+}
 }

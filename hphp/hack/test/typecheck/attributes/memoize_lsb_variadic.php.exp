@@ -1,0 +1,11 @@
+error: NastCheck[3086] Memoized functions cannot be variadic or use the type-splat operator. [1]
+
+memoize_lsb_variadic.php:5:39
+3 | class Foo {
+4 |   <<__MemoizeLSB>>
+5 |   public static function bar(mixed ...$args): int {
+  |                                       ^^^^^ [1]
+6 |     return 42;
+7 |   }
+
+1 error found

@@ -1,0 +1,15 @@
+warning: Warn[12023] This null coalesce will always evaluate to its left-hand side. [1]
+-> The expression on the left has type `vec<int>` which can never be `null`. [2]
+
+null_coalesce_never.php:6:3
+1 | <?hh
+2 | 
+3 | type S = shape('a' => vec<int>);
+  |                       ^^^^^^^^ [2]
+4 | 
+5 | function foo(S $s): void {
+6 |   Shapes::at($s, 'a') ?? vec[];
+  |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ [1]
+7 | }
+
+1 error found

@@ -1,42 +1,43 @@
 <?hh
 
 class one {
-  public function foo() {
+  public function foo() :mixed{
     echo "one\n";
   }
 }
 
 class two {
-  public static function foo() {
+  public static function foo() :mixed{
     echo "two\n";
-    if (get_called_class() === "three") {
+    if (static::class === "three") {
       static::heh();
     }
   }
 }
 
 class three extends two {
-  public static function heh() { echo "three\n"; }
+  public static function heh() :mixed{ echo "three\n"; }
 }
 
 class doer {
-  public function junk($x) {
+  public function ijunk($x) :mixed{
     $x->foo();
+  }
+  public function sjunk($x) :mixed{
+    $x::foo();
   }
 }
 
-function main() {
+<<__EntryPoint>> function main(): void {
   $b = new one;
   $d = new two;
   $x = new doer;
-  $x->junk($b);
-  $x->junk($d);
-  $x->junk($b);
-  $x->junk($d);
-  $x->junk(new three);
-  $x->junk($b);
-  $x->junk(new three);
-  $x->junk($d);
+  $x->ijunk($b);
+  $x->sjunk($d);
+  $x->ijunk($b);
+  $x->sjunk($d);
+  $x->sjunk(new three);
+  $x->ijunk($b);
+  $x->sjunk(new three);
+  $x->sjunk($d);
 }
-
-main();

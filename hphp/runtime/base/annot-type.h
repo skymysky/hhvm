@@ -14,15 +14,16 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_ANNOT_TYPE_H_
-#define incl_HPHP_ANNOT_TYPE_H_
+#pragma once
 
 #include "hphp/runtime/base/datatype.h"
-#include "hphp/runtime/base/runtime-option.h"
+
+#include <folly/Range.h>
 
 namespace HPHP {
 
 struct StringData;
+struct TypedValue;
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -36,28 +37,28 @@ struct StringData;
 enum class AnnotMetaType : uint8_t {
   Precise = 0,
   Mixed = 1,
-  Self = 2,
-  Parent = 3,
-  Callable = 4,
-  Number = 5,
-  ArrayKey = 6,
-  This = 7,
-  VArray = 8,
-  DArray = 9,
-  VArrOrDArr = 10,
-  VecOrDict = 11,
-  ArrayLike = 12,
-  Nonnull = 13,
+  Callable = 2,
+  Number = 3,
+  ArrayKey = 4,
+  This = 5,
+  VecOrDict = 6,
+  ArrayLike = 7,
+  Nonnull = 8,
+  NoReturn = 9,
+  Nothing = 10,
+  Classname = 11,
+  SubObject = 12,
+  Unresolved = 13,
+  Class = 14,
+  ClassOrClassname = 15,
 };
 
 enum class AnnotType : uint16_t {
-  Uninit   = (uint8_t)KindOfUninit   | (uint16_t)AnnotMetaType::Precise << 8,
   Null     = (uint8_t)KindOfNull     | (uint16_t)AnnotMetaType::Precise << 8,
   Bool     = (uint8_t)KindOfBoolean  | (uint16_t)AnnotMetaType::Precise << 8,
   Int      = (uint8_t)KindOfInt64    | (uint16_t)AnnotMetaType::Precise << 8,
   Float    = (uint8_t)KindOfDouble   | (uint16_t)AnnotMetaType::Precise << 8,
   String   = (uint8_t)KindOfString   | (uint16_t)AnnotMetaType::Precise << 8,
-  Array    = (uint8_t)KindOfArray    | (uint16_t)AnnotMetaType::Precise << 8,
   Object   = (uint8_t)KindOfObject   | (uint16_t)AnnotMetaType::Precise << 8,
   Resource = (uint8_t)KindOfResource | (uint16_t)AnnotMetaType::Precise << 8,
   Dict     = (uint8_t)KindOfDict     | (uint16_t)AnnotMetaType::Precise << 8,
@@ -66,18 +67,114 @@ enum class AnnotType : uint16_t {
   // Precise is intentionally excluded
   Mixed    = (uint16_t)AnnotMetaType::Mixed << 8        | (uint8_t)KindOfUninit,
   Nonnull  = (uint16_t)AnnotMetaType::Nonnull << 8      | (uint8_t)KindOfUninit,
-  Self     = (uint16_t)AnnotMetaType::Self << 8         | (uint8_t)KindOfUninit,
-  Parent   = (uint16_t)AnnotMetaType::Parent << 8       | (uint8_t)KindOfUninit,
   Callable = (uint16_t)AnnotMetaType::Callable << 8     | (uint8_t)KindOfUninit,
   Number   = (uint16_t)AnnotMetaType::Number << 8       | (uint8_t)KindOfUninit,
   ArrayKey = (uint16_t)AnnotMetaType::ArrayKey << 8     | (uint8_t)KindOfUninit,
   This     = (uint16_t)AnnotMetaType::This << 8         | (uint8_t)KindOfUninit,
-  VArray   = (uint16_t)AnnotMetaType::VArray << 8       | (uint8_t)KindOfUninit,
-  DArray   = (uint16_t)AnnotMetaType::DArray << 8       | (uint8_t)KindOfUninit,
-  VArrOrDArr = (uint16_t)AnnotMetaType::VArrOrDArr << 8 | (uint8_t)KindOfUninit,
   VecOrDict  = (uint16_t)AnnotMetaType::VecOrDict << 8  | (uint8_t)KindOfUninit,
   ArrayLike  = (uint16_t)AnnotMetaType::ArrayLike << 8  | (uint8_t)KindOfUninit,
+  NoReturn   = (uint16_t)AnnotMetaType::NoReturn << 8   | (uint8_t)KindOfUninit,
+  Nothing    = (uint16_t)AnnotMetaType::Nothing << 8    | (uint8_t)KindOfUninit,
+  Classname  = (uint16_t)AnnotMetaType::Classname << 8  | (uint8_t)KindOfUninit,
+  SubObject  = (uint16_t)AnnotMetaType::SubObject << 8  | (uint8_t)KindOfUninit,
+  Unresolved = (uint16_t)AnnotMetaType::Unresolved << 8 | (uint8_t)KindOfUninit,
+  Class      = (uint16_t)AnnotMetaType::Class << 8      | (uint8_t)KindOfUninit,
+  ClassOrClassname = (uint16_t)AnnotMetaType::ClassOrClassname << 8
+                                                        | (uint8_t)KindOfUninit,
 };
+
+constexpr const char* kAnnotTypeVarrayStr = "HH\\varray";
+constexpr const char* kAnnotTypeDarrayStr = "HH\\darray";
+constexpr const char* kAnnotTypeVarrayOrDarrayStr = "HH\\varray_or_darray";
+
+constexpr const char* annotNullableTypeName(AnnotType ty) {
+  switch (ty) {
+    case AnnotType::ArrayKey: return "?HH\\arraykey";
+    case AnnotType::ArrayLike: return "?HH\\AnyArray";
+    case AnnotType::Bool: return "?HH\\bool";
+    case AnnotType::Callable: return "?callable";
+    case AnnotType::Class: return "?HH\\class";
+    case AnnotType::Classname: return "?HH\\classname";
+    case AnnotType::ClassOrClassname: return "?HH\\class_or_classname";
+    case AnnotType::Dict: return "?HH\\dict";
+    case AnnotType::Float: return "?HH\\float";
+    case AnnotType::Int: return "?HH\\int";
+    case AnnotType::Keyset: return "?HH\\keyset";
+    case AnnotType::Mixed: return "?HH\\mixed";
+    case AnnotType::NoReturn: return "?HH\\noreturn";
+    case AnnotType::Nonnull: return "?HH\\nonnull";
+    case AnnotType::Nothing: return "?HH\\nothing";
+    case AnnotType::Null: return "?HH\\null";
+    case AnnotType::Number: return "?HH\\num";
+    case AnnotType::Object: return "?HH\\object";
+    case AnnotType::Resource: return "?HH\\resource";
+    case AnnotType::String: return "?HH\\string";
+    case AnnotType::SubObject: not_implemented();
+    case AnnotType::This: return "?HH\\this";
+    case AnnotType::Unresolved: not_implemented();
+    case AnnotType::Vec: return "?HH\\vec";
+    case AnnotType::VecOrDict: return "?HH\\vec_or_dict";
+  }
+}
+
+// Encodes possible default values for a given AnnotType.
+enum class AnnotTypeDefault : uint8_t {
+  None                 = 0b00000000,
+  Null                 = 0b00000001,
+  ZeroInt              = 0b00000010,
+  False                = 0b00000100,
+  ZeroDouble           = 0b00001000,
+  EmptyString          = 0b00010000,
+  EmptyVec             = 0b00100000,
+  EmptyDict            = 0b01000000,
+  EmptyKeyset          = 0b10000000,
+  // The following are simply unions of the above, defined for convenience
+  AnyNonNull           = 0b11111110,
+  Any                  = 0b11111111,
+  ZeroNumber           = 0b00001010,
+  ZeroIntOrEmptyString = 0b00010010,
+  EmptyArray           = 0b11100000,
+  EmptyVecOrDict       = 0b01100000
+};
+
+constexpr AnnotTypeDefault operator&(AnnotTypeDefault a, AnnotTypeDefault b) {
+  return AnnotTypeDefault(static_cast<uint8_t>(a) & static_cast<uint8_t>(b));
+}
+
+constexpr AnnotTypeDefault operator|(AnnotTypeDefault a, AnnotTypeDefault b) {
+  return AnnotTypeDefault(static_cast<uint8_t>(a) | static_cast<uint8_t>(b));
+}
+
+constexpr AnnotTypeDefault operator~(AnnotTypeDefault a) {
+  return AnnotTypeDefault(~static_cast<uint8_t>(a));
+}
+
+constexpr bool has_flag(AnnotTypeDefault flags, AnnotTypeDefault flag) {
+  return (flags & flag) != AnnotTypeDefault::None;
+}
+
+static_assert(AnnotTypeDefault::ZeroNumber
+  == (AnnotTypeDefault::ZeroInt | AnnotTypeDefault::ZeroDouble));
+static_assert(uint8_t(AnnotTypeDefault::Any) == 0xFF);
+static_assert(uint8_t(AnnotTypeDefault::AnyNonNull)
+    == uint8_t(AnnotTypeDefault::Any & ~AnnotTypeDefault::Null));
+static_assert(AnnotTypeDefault::EmptyArray
+  == (AnnotTypeDefault::EmptyVec
+     | AnnotTypeDefault::EmptyDict
+     | AnnotTypeDefault::EmptyKeyset)
+);
+static_assert(AnnotTypeDefault::ZeroIntOrEmptyString
+  == (AnnotTypeDefault::EmptyString | AnnotTypeDefault::ZeroInt)
+);
+static_assert(AnnotTypeDefault::EmptyVecOrDict
+  == (AnnotTypeDefault::EmptyVec | AnnotTypeDefault::EmptyDict)
+);
+
+constexpr const char* annotTypeName(AnnotType ty) {
+  const char* name = annotNullableTypeName(ty);
+  assertx(*name == '?');
+  return name + 1;
+}
 
 inline AnnotMetaType getAnnotMetaType(AnnotType at) {
   return (AnnotMetaType)((uint16_t)at >> 8);
@@ -88,55 +185,64 @@ inline DataType getAnnotDataType(AnnotType at) {
   return dt;
 }
 
-inline AnnotType dataTypeToAnnotType(DataType dt) {
-  assertx(dt == KindOfUninit || dt == KindOfBoolean || dt == KindOfInt64 ||
-         dt == KindOfDouble || dt == KindOfString || dt == KindOfArray ||
-         dt == KindOfVec || dt == KindOfDict || dt == KindOfKeyset ||
-         dt == KindOfObject || dt == KindOfResource);
+inline AnnotType enumDataTypeToAnnotType(DataType dt) {
+  assertx(dt == KindOfInt64 || dt == KindOfString);
   return (AnnotType)((uint8_t)dt | (uint16_t)AnnotMetaType::Precise << 8);
 }
 
+// This is the "user name" of the AnnotType. It has no direct relation to
+// nameToAnnotType().
+const char* annotName(AnnotType);
+
 const AnnotType* nameToAnnotType(const StringData* typeName);
-const AnnotType* nameToAnnotType(const std::string& typeName);
-MaybeDataType nameToMaybeDataType(const StringData* typeName);
-MaybeDataType nameToMaybeDataType(const std::string& typeName);
 
-/*
- * Returns true if the interface with the specified name
- * supports any non-object types, false otherwise.
- */
 bool interface_supports_non_objects(const StringData* s);
-
 bool interface_supports_int(const StringData* s);
 bool interface_supports_double(const StringData* s);
 bool interface_supports_string(const StringData* s);
-bool interface_supports_array(const StringData* s);
-bool interface_supports_vec(const StringData* s);
-bool interface_supports_dict(const StringData* s);
-bool interface_supports_keyset(const StringData* s);
+bool interface_supports_arrlike(const StringData* s);
 
-bool interface_supports_int(std::string const&);
-bool interface_supports_double(std::string const&);
-bool interface_supports_string(std::string const&);
-bool interface_supports_array(std::string const&);
-bool interface_supports_vec(std::string const&);
-bool interface_supports_dict(std::string const&);
-bool interface_supports_keyset(std::string const&);
+bool interface_supports_non_objects(folly::StringPiece s);
+bool interface_supports_int(folly::StringPiece s);
+bool interface_supports_double(folly::StringPiece s);
+bool interface_supports_string(folly::StringPiece s);
+bool interface_supports_arrlike(folly::StringPiece s);
+
+TypedValue annotDefaultValue(AnnotType at);
+
+inline bool enumSupportsAnnot(AnnotType at) {
+  return
+    at == AnnotType::String ||
+    at == AnnotType::Int ||
+    at == AnnotType::ArrayKey ||
+    at == AnnotType::Classname;
+}
+
+inline bool propSupportsAnnot(AnnotType at) {
+  return
+    at != AnnotType::Callable &&
+    at != AnnotType::Nothing &&
+    at != AnnotType::NoReturn;
+}
 
 enum class AnnotAction {
   Pass,
   Fail,
+  Fallback,
+  FallbackCoerce,
   ObjectCheck,
   CallableCheck,
-  VArrayCheck,
-  DArrayCheck,
-  VArrayOrDArrayCheck,
-  NonVArrayOrDArrayCheck
+  WarnClassToString,
+  ConvertClassToString,
+  WarnLazyClassToString,
+  ConvertLazyClassToString,
+  WarnClassname,
+  WarnClass,
 };
 
 /*
  * annotCompat() takes a DataType (`dt') and tries to determine if a value
- * with DataType `dt' could be compatiable with a given AnnotType (`at')
+ * with DataType `dt' could be compatible with a given AnnotType (`at')
  * and class name (`annotClsName').  Note that this function does not have
  * access to the actual value, nor does it do any run time resolution on
  * the annotation's class name.  Here are the possible values that can be
@@ -153,6 +259,12 @@ enum class AnnotAction {
  * addition in Weak mode verifyFail may coerce certain types allowing
  * execution to continue.
  *
+ * Fallback: A recommendation to perform a full C++ check. This can happen
+ * if `at' is an unresolved reference to either (1) a real non-enum class or
+ * interface, (2) an enum, or (3) a type alias and the DataType `dt' is
+ * not KindOfObject. FallbackCoerce may require type coercion, Fallback is
+ * guaranteed to not require it.
+ *
  * CallableCheck: `at' is "callable" and a value with DataType `dt' might
  * be compatible with the annotation, but the caller needs to consult
  * is_callable() to verify the value is actually a valid callable.
@@ -160,147 +272,24 @@ enum class AnnotAction {
  * ObjectCheck: `at' is either (1) a reference to a real non-enum class or
  * interface, (2) an enum, (3) a type alias, or (4) "self" or "parent".
  * The caller needs to perform more checks to determine whether or not a
- * value with DataType `dt' is compatible with the annotation.  NOTE that
- * if dt is not KindOfObject, then we've already checked if the annotation
- * was a direct reference to a "magic" interface that supports non-object
- * types and we've already checked if the annotation was "self" / "parent",
- * but the caller still needs to check if the annotation is a type alias or
- * an enum.
+ * value with the KindOfObject DataType is compatible with the annotation.
  *
- * VArrayCheck: `dt' is an array on which the caller needs to do a varray check.
+ * (Warn|Convert)(Lazy|)ClassToString: 'at' is string, arraykey, Stringish,
+ * or XHPChild and 'dt' is a Class or LazyClass.
+ * When Cfg::Eval::ClassStringHintNoticesSampleRate > 0, a notice is raised
+ * before converison.
  *
- * DArrayCheck: `dt' is an array on which the caller needs to do a darray check.
+ * WarnClassname: 'at' is classname and 'dt' is either a Class or LazyClass
+ * and Cfg::Eval::ClassnameNoticesSampleRate is on. The 'dt' is compatible
+ * with 'at' but raises a notice at runtime.
  *
- * VArrayOrDArrayCheck: `dt' is an array on which the caller needs to do a
- * varray or darray check.
- *
- * NonVArrayOrDArrayCheck: `dt' is an array on which the caller needs to check
- * for non-dvarray-ness.
- *
+ * WarnClass: 'at' is class and 'dt' is a String and
+ * Cfg::Eval::ClassNoticesSampleRate is on. The 'dt' is compatible with 'at'
+ * but raises a notice at runtime.
  */
-inline AnnotAction
-annotCompat(DataType dt, AnnotType at, const StringData* annotClsName) {
-  assertx(!isRefType(dt));
-  assertx(IMPLIES(at == AnnotType::Object, annotClsName != nullptr));
-
-  auto const metatype = getAnnotMetaType(at);
-  switch (metatype) {
-    case AnnotMetaType::Mixed:
-      return AnnotAction::Pass;
-    case AnnotMetaType::Nonnull:
-      return (dt == KindOfNull) ? AnnotAction::Fail : AnnotAction::Pass;
-    case AnnotMetaType::Number:
-      return (isIntType(dt) || isDoubleType(dt))
-        ? AnnotAction::Pass : AnnotAction::Fail;
-    case AnnotMetaType::ArrayKey:
-      return (isIntType(dt) || isStringType(dt))
-        ? AnnotAction::Pass : AnnotAction::Fail;
-    case AnnotMetaType::Self:
-    case AnnotMetaType::Parent:
-      // For "self" and "parent", if `dt' is not an object we know
-      // it's not compatible, otherwise more checks are required
-      return (dt == KindOfObject)
-        ? AnnotAction::ObjectCheck : AnnotAction::Fail;
-    case AnnotMetaType::This:
-      return (dt == KindOfObject)
-        ? AnnotAction::ObjectCheck
-        : (RuntimeOption::EvalThisTypeHintLevel == 0)
-          ? AnnotAction::Pass : AnnotAction::Fail;
-    case AnnotMetaType::Callable:
-      // For "callable", if `dt' is not string/array/object we know
-      // it's not compatible, otherwise more checks are required
-      return (isStringType(dt) || isArrayType(dt) || isVecType(dt) ||
-              dt == KindOfObject)
-        ? AnnotAction::CallableCheck : AnnotAction::Fail;
-    case AnnotMetaType::VArray:
-      if (!isArrayType(dt)) return AnnotAction::Fail;
-      return UNLIKELY(RuntimeOption::EvalHackArrCompatTypeHintNotices)
-        ? AnnotAction::VArrayCheck
-        : AnnotAction::Pass;
-    case AnnotMetaType::DArray:
-      if (!isArrayType(dt)) return AnnotAction::Fail;
-      return UNLIKELY(RuntimeOption::EvalHackArrCompatTypeHintNotices)
-        ? AnnotAction::DArrayCheck
-        : AnnotAction::Pass;
-    case AnnotMetaType::VArrOrDArr:
-      if (!isArrayType(dt)) return AnnotAction::Fail;
-      return UNLIKELY(RuntimeOption::EvalHackArrCompatTypeHintNotices)
-        ? AnnotAction::VArrayOrDArrayCheck
-        : AnnotAction::Pass;
-    case AnnotMetaType::VecOrDict:
-      return (isVecType(dt) || isDictType(dt))
-        ? AnnotAction::Pass
-        : AnnotAction::Fail;
-    case AnnotMetaType::ArrayLike:
-      return (isArrayType(dt) || isVecType(dt) ||
-              isDictType(dt) || isKeysetType(dt))
-        ? AnnotAction::Pass
-        : AnnotAction::Fail;
-    case AnnotMetaType::Precise:
-      if (UNLIKELY(RuntimeOption::EvalHackArrCompatTypeHintNotices) &&
-          at == AnnotType::Array && isArrayType(dt)) {
-        return AnnotAction::NonVArrayOrDArrayCheck;
-      }
-      break;
-  }
-
-  assertx(metatype == AnnotMetaType::Precise);
-  if (at != AnnotType::Object) {
-    // If `at' is "bool", "int", "float", "string", "array", or "resource",
-    // then equivDataTypes() can definitively tell us whether or not `dt'
-    // is compatible.
-    return equivDataTypes(getAnnotDataType(at), dt)
-      ? AnnotAction::Pass : AnnotAction::Fail;
-  }
-
-  // If `dt' is not an object, check for "magic" interfaces that
-  // support non-object datatypes
-  if (dt != KindOfObject && interface_supports_non_objects(annotClsName)) {
-    switch (dt) {
-      case KindOfInt64:
-        return interface_supports_int(annotClsName)
-          ? AnnotAction::Pass : AnnotAction::Fail;
-      case KindOfDouble:
-        return interface_supports_double(annotClsName)
-          ? AnnotAction::Pass : AnnotAction::Fail;
-      case KindOfPersistentString:
-      case KindOfString:
-        return interface_supports_string(annotClsName)
-          ? AnnotAction::Pass : AnnotAction::Fail;
-      case KindOfPersistentArray:
-      case KindOfArray:
-        return interface_supports_array(annotClsName)
-          ? AnnotAction::Pass : AnnotAction::Fail;
-      case KindOfPersistentVec:
-      case KindOfVec:
-        return interface_supports_vec(annotClsName)
-          ? AnnotAction::Pass : AnnotAction::Fail;
-      case KindOfPersistentDict:
-      case KindOfDict:
-        return interface_supports_dict(annotClsName)
-          ? AnnotAction::Pass : AnnotAction::Fail;
-      case KindOfPersistentKeyset:
-      case KindOfKeyset:
-        return interface_supports_keyset(annotClsName)
-          ? AnnotAction::Pass : AnnotAction::Fail;
-      case KindOfUninit:
-      case KindOfNull:
-      case KindOfBoolean:
-      case KindOfResource:
-        return AnnotAction::Fail;
-      case KindOfFunc:
-      case KindOfObject:
-      case KindOfRef:
-        not_reached();
-        break;
-    }
-  }
-
-  return AnnotAction::ObjectCheck;
-}
+AnnotAction
+annotCompat(DataType dt, AnnotType at, const StringData* annotClsName);
 
 ///////////////////////////////////////////////////////////////////////////////
 
 }
-
-#endif

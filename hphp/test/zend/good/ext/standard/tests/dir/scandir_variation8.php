@@ -1,6 +1,6 @@
-<?php
+<?hh
 /* Prototype  : array scandir(string $dir [, int $sorting_order [, resource $context]])
- * Description: List files & directories inside the specified path 
+ * Description: List files & directories inside the specified path
  * Source code: ext/standard/dir.c
  */
 
@@ -8,10 +8,10 @@
  * Pass a directory containing files with different types of names to test how scandir()
  * reads them
  */
-
+<<__EntryPoint>> function main(): void {
 echo "*** Testing scandir() : usage variations ***\n";
 
-$dir_path = dirname(__FILE__) . "/scandir_variation8/";
+$dir_path = sys_get_temp_dir().'/'.'scandir_variation8' . '/';
 mkdir($dir_path);
 
 // heredoc string
@@ -19,7 +19,7 @@ $heredoc = <<<EOT
 hd_file
 EOT;
 
-$inputs = array(
+$inputs = vec[
 
        // int data
 /*1*/  0,
@@ -33,38 +33,39 @@ $inputs = array(
        12.3456789000e10,
        12.3456789000E-10,
        .5,
-       
+
        // empty data
 /*10*/ "",
-       array(),
+       'Array',
 
        // string data
 /*12*/ "double_file",
        'single_file',
        $heredoc,
-);
+];
 
 $iterator = 1;
 foreach($inputs as $key => $input) {
-	echo "\n-- Iteration $iterator --\n";
-	$handle = "fp{$iterator}";
-	var_dump( $$handle = fopen(@"$dir_path$input.tmp", 'w') );
-	fclose($$handle);
-	$iterator++;
+    echo "\n-- Iteration $iterator --\n";
+    $handle = "fp{$iterator}";
+    $handle = fopen($dir_path . (string)$input . ".tmp", 'w');
+    var_dump( $handle );
+    fclose($handle);
+    $iterator++;
 };
 
 echo "\n-- Call to scandir() --\n";
-var_dump($content = scandir($dir_path));
+$content = scandir($dir_path);
+var_dump($content);
 
 // remove all files in directory so can remove directory in CLEAN section
 foreach ($content as $file_name) {
-	// suppress errors as won't be able to remove "." and ".." entries
-	@unlink($dir_path . $file_name);
+    // suppress errors as won't be able to remove "." and ".." entries
+    error_reporting(0);
+    unlink($dir_path . $file_name);
+    error_reporting(E_ALL);
 }
-?>
-===DONE===
-<?php error_reporting(0); ?>
-<?php
-$dir_path = dirname(__FILE__) . "/scandir_variation8";
+echo "===DONE===\n";
+
 rmdir($dir_path);
-?>
+}

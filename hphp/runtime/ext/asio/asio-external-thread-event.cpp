@@ -16,7 +16,6 @@
 */
 
 #include "hphp/runtime/ext/asio/asio-external-thread-event.h"
-#include <thread>
 #include "hphp/runtime/ext/asio/asio-session.h"
 #include "hphp/runtime/ext/asio/ext_external-thread-event-wait-handle.h"
 
@@ -26,8 +25,8 @@ namespace HPHP {
 AsioExternalThreadEvent::AsioExternalThreadEvent(ObjectData* priv_data)
     : m_queue(AsioSession::Get()->getExternalThreadEventQueue()),
       m_state(Waiting) {
-  m_waitHandle =
-    c_ExternalThreadEventWaitHandle::Create(this, priv_data).detach();
+  m_waitHandle = req::make<c_ExternalThreadEventWaitHandle>().detach();
+  m_waitHandle->initialize(this, priv_data);
 }
 
 void AsioExternalThreadEvent::abandon() {

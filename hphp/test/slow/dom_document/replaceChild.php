@@ -1,6 +1,10 @@
-<?php
+<?hh
+
+<<__EntryPoint>>
+function main_replace_child() :mixed{
 $n = 32;
-while ( $n-- ) {
+while (true) {
+  $t = $n; $n--; if (!$t) break;
   $doc = new DOMDocument();
   $doc->loadHTML( '<html><body><div id="test"><img /></div></body></html>' );
 
@@ -11,3 +15,4 @@ while ( $n-- ) {
   $content->appendChild( $doc->getElementById( 'test' ) );
 }
 echo "Done\n";
+}

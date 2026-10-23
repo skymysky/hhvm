@@ -4,10 +4,12 @@
 
 class :fb:my:thing {
 
-  function doIt() {
+  public static function doIt(): void {
     echo "doing my thing\n";
   }
 }
 
-error_log('break4.php loaded');
-
+<<__EntryPoint>>
+function main(): void {
+  error_log('break4.php loaded');
+}

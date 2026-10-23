@@ -9,10 +9,10 @@
  *
  */
 
-function get_arr(): array<int> { return array(1); }
-function foo(int $x) {}
+function get_arr(): varray<int> { return vec[1]; }
+function foo(int $x): void {}
 
-function test() {
+function test(): void {
   foreach (get_arr() as $_) {
     $y = null;
     if (true) {

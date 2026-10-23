@@ -1,11 +1,13 @@
-<?php
+<?hh
 class foo {
-	function cb($param) {
-		var_dump($param);
-		return "yes!";
-	}
+  <<__DynamicallyCallable>> function cb($param) :mixed{
+    var_dump($param);
+    return "yes!";
+  }
 }
-
-var_dump(preg_replace('', array(), ''));
-var_dump(preg_replace_callback("/(ab)(cd)(e)/", array(new foo(), "cb"), 'abcde'));
-?>
+<<__EntryPoint>> function main(): void {
+error_reporting(0);
+$count = -1;
+var_dump(preg_replace('', vec[], ''));
+var_dump(preg_replace_callback("/(ab)(cd)(e)/", vec[new foo(), "cb"], 'abcde', -1, inout $count));
+}

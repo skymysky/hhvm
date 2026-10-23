@@ -73,72 +73,42 @@ int(3)
 int(3)
 
 -- Iteration 10 --
-
-Notice: %s
 Array
 int(5)
-
-Notice: %s
 Array
 int(5)
-
-Notice: %s
 Array
 int(5)
 
 -- Iteration 11 --
-
-Notice: %s
 Array
 int(5)
-
-Notice: %s
 Array
 int(5)
-
-Notice: %s
 Array
 int(5)
 
 -- Iteration 12 --
-
-Notice: %s
 Array
 int(5)
-
-Notice: %s
 Array
 int(5)
-
-Notice: %s
 Array
 int(5)
 
 -- Iteration 13 --
-
-Notice: %s
 Array
 int(5)
-
-Notice: %s
 Array
 int(5)
-
-Notice: %s
 Array
 int(5)
 
 -- Iteration 14 --
-
-Notice: %s
 Array
 int(5)
-
-Notice: %s
 Array
 int(5)
-
-Notice: %s
 Array
 int(5)
 
@@ -207,30 +177,6 @@ int(0)
 int(0)
 
 -- Iteration 23 --
-Object
-int(6)
-Object
-int(6)
-Object
-int(6)
-
--- Iteration 24 --
-
-int(0)
-
-int(0)
-
-int(0)
-
--- Iteration 25 --
-
-int(0)
-
-int(0)
-
-int(0)
-
--- Iteration 26 --
 Resource id #%d
 int(%d)
 Resource id #%d

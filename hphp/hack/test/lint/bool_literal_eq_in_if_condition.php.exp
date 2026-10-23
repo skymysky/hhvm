@@ -1,0 +1,78 @@
+warning: Lint[5643] Consider changing this statement to ($x) instead
+   --> bool_literal_eq_in_if_condition.php
+  3 |   if ($x == true) {
+    |       ^^^^^^^^^^
+
+
+warning: Lint[5643] Consider changing this statement to (!$y) instead
+   --> bool_literal_eq_in_if_condition.php
+  8 |   if ($y == false) {
+    |       ^^^^^^^^^^^
+
+
+warning: Lint[5643] Consider changing this statement to ($x) instead
+   --> bool_literal_eq_in_if_condition.php
+ 14 |   if (true == $x) {
+    |       ^^^^^^^^^^
+
+
+warning: Lint[5643] Consider changing this statement to (!$x) instead
+   --> bool_literal_eq_in_if_condition.php
+ 19 |   if (false == $x) {
+    |       ^^^^^^^^^^^
+
+
+warning: Lint[5643] Consider changing this statement to ($y) instead
+   --> bool_literal_eq_in_if_condition.php
+ 25 |   if ($y === true) {
+    |       ^^^^^^^^^^^
+
+
+warning: Lint[5643] Consider changing this statement to (!$x) instead
+   --> bool_literal_eq_in_if_condition.php
+ 30 |   if ($x === false) {
+    |       ^^^^^^^^^^^^
+
+
+warning: Lint[5643] Consider changing this statement to ($x) instead
+   --> bool_literal_eq_in_if_condition.php
+ 36 |   if (true === $x) {
+    |       ^^^^^^^^^^^
+
+
+warning: Lint[5643] Consider changing this statement to (!$x) instead
+   --> bool_literal_eq_in_if_condition.php
+ 41 |   if (false === $x) {
+    |       ^^^^^^^^^^^^
+
+
+warning: Lint[5643] Consider changing this statement to ($x) instead
+   --> bool_literal_eq_in_if_condition.php
+ 59 |   while ($x == true) {
+    |          ^^^^^^^^^^
+
+
+warning: Lint[5643] Consider changing this statement to (!$x) instead
+   --> bool_literal_eq_in_if_condition.php
+ 66 |   } while ($x == false);
+    |            ^^^^^^^^^^^
+
+
+warning: Lint[5643] Consider changing this statement to ($x) instead
+   --> bool_literal_eq_in_if_condition.php
+ 69 |   for ($j = 0; $x == true; ++$j) {
+    |                ^^^^^^^^^^
+
+
+warning: Lint[5643] Consider changing this statement to ($x) instead
+   --> bool_literal_eq_in_if_condition.php
+ 74 |   $y = $x === true;
+    |        ^^^^^^^^^^^
+
+
+warning: Lint[5643] Consider changing this statement to ($x) instead
+   --> bool_literal_eq_in_if_condition.php
+ 77 |   foo($x === true);
+    |       ^^^^^^^^^^^
+
+

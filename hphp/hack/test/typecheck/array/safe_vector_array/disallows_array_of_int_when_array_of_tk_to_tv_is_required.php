@@ -1,7 +1,7 @@
 <?hh
 
-function consumeArrayOfTkToTv<Tk, Tv>(array<Tk, Tv> $_): void {}
+function consumeArrayOfTkToTv<Tk, Tv>(darray<Tk, Tv> $_): void {}
 
-function test(array<int> $arrayOfInt): void {
+function test(varray<int> $arrayOfInt): void {
   consumeArrayOfTkToTv($arrayOfInt);
 }

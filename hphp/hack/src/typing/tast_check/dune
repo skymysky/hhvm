@@ -1,0 +1,19 @@
+(include_subdirs unqualified)
+
+(library
+ (name tast_check)
+ (wrapped false)
+ (libraries
+  ast
+  core_kernel
+  analyze_list_logger_types
+  nast
+  remove_dead_unsafe_casts
+  simplihack
+  tast_env
+  typing_deps
+  typing_pessimisation_deps
+  utils_core
+  yojson)
+ (preprocess
+  (pps ppx_deriving.std ppx_sexp_conv ppx_hash)))

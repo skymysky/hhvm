@@ -16,18 +16,17 @@
 
 #include "hphp/runtime/base/perf-mem-event.h"
 
-#include "hphp/runtime/base/apc-local-array.h"
 #include "hphp/runtime/base/array-data.h"
 #include "hphp/runtime/base/header-kind.h"
 #include "hphp/runtime/base/member-reflection.h"
+#include "hphp/runtime/base/memory-manager-defs.h"
 #include "hphp/runtime/base/memory-manager.h"
-#include "hphp/runtime/base/mixed-array.h"
-#include "hphp/runtime/base/packed-array.h"
 #include "hphp/runtime/base/string-data.h"
 #include "hphp/runtime/base/typed-value.h"
+#include "hphp/runtime/base/vanilla-dict.h"
+#include "hphp/runtime/base/vanilla-vec.h"
 #include "hphp/runtime/vm/class.h"
 #include "hphp/runtime/vm/func.h"
-#include "hphp/runtime/vm/globals-array.h"
 #include "hphp/runtime/vm/named-entity.h"
 #include "hphp/runtime/vm/reverse-data-map.h"
 #include "hphp/runtime/vm/unit.h"
@@ -47,13 +46,14 @@
 #include <boost/algorithm/string/predicate.hpp>
 
 #include <folly/ScopeGuard.h>
-#ifdef FACEBOOK
-#include <folly/experimental/symbolizer/Symbolizer.h>
+#ifdef HHVM_FACEBOOK
+#include <folly/Demangle.h>
+#include <folly/debugging/symbolizer/Symbolizer.h>
 #endif
 
 namespace HPHP {
 
-TRACE_SET_MOD(perf_mem_event);
+TRACE_SET_MOD(perf_mem_event)
 
 using namespace jit;
 
@@ -67,7 +67,7 @@ namespace {
  * Bump this whenever the log format changes, so that it's easy to filter out
  * old, incompatible results.
  */
-constexpr auto kVersion = 2;
+constexpr auto kVersion = 3;
 
 /*
  * Update `record' with the data member that `internal' is in, relative to
@@ -95,22 +95,22 @@ void fill_record(const Class* cls, const void* addr,
   record.setStr("name", cls->name()->data());
 
   if (cls->classVec() <= addr && addr < cls->mallocEnd()) {
-    auto const off = (reinterpret_cast<uintptr_t>(addr)
+    auto const idx = (reinterpret_cast<uintptr_t>(addr)
                      - reinterpret_cast<uintptr_t>(cls->classVec()))
                      / sizeof(*cls->classVec());
     record.setStr("member", "m_classVec");
-    record.setInt("offset", off);
+    record.setInt("index", idx);
   }
   // Introspect members after dealing with the variable-length terminal
   // array member.
   if (try_member(cls, addr, record)) return;
 
   if (cls->funcVec() <= addr && addr < cls) {
-    auto const off = (reinterpret_cast<uintptr_t>(cls)
+    auto const idx = (reinterpret_cast<uintptr_t>(cls)
                      - reinterpret_cast<uintptr_t>(addr))
                      / sizeof(*cls->funcVec());
     record.setStr("member", "funcVec");
-    record.setInt("offset", off);
+    record.setInt("index", idx);
   }
 }
 
@@ -121,10 +121,10 @@ void fill_record(const Func* func, const void* addr,
   auto const func_end = reinterpret_cast<const char*>(func)
                         + Func::prologueTableOff();
   if (func_end <= addr && addr < func->mallocEnd()) {
-    auto const off = (reinterpret_cast<const char*>(addr) - func_end)
-                     / sizeof(AtomicLowPtr<uint8_t>);
+    auto const idx = (reinterpret_cast<const char*>(addr) - func_end)
+                     / sizeof(AtomicLowTCA);
     record.setStr("member", "m_prologueTable");
-    record.setInt("offset", off);
+    record.setInt("index", idx);
   }
   // Introspect members after dealing with the variable-length terminal
   // array member.
@@ -133,7 +133,7 @@ void fill_record(const Func* func, const void* addr,
 
 void fill_record(const Unit* unit, const void* addr,
                  StructuredLogEntry& record) {
-  record.setStr("name", unit->filepath()->data());
+  record.setStr("name", unit->origFilepath()->data());
   try_member(unit, addr, record);
 }
 
@@ -142,34 +142,41 @@ void fill_record(const StringData* sd, const void* addr,
   record.setStr("data", sd->data());
   if (try_member(sd, addr, record)) return;
 
-  auto const off = uintptr_t(addr) - uintptr_t(sd->data());
-  record.setInt("offset", off);
+  auto const idx = uintptr_t(addr) - uintptr_t(sd->data());
+  if (idx < 0) return;
+
+  record.setInt("index", idx);
 }
 
 void fill_record(const ArrayData* arr, const void* addr,
                  StructuredLogEntry& record) {
   if (try_member(arr, addr, record)) return;
-
-  auto const tv = reinterpret_cast<const TypedValue*>(addr);
-  auto const idx = tv - packedData(arr);
+  auto const idx = VanillaVec::pointerToIndex(arr, addr);
+  if (idx < 0) return;
 
   record.setInt("ikey", idx);
 
   if (idx < arr->size()) {
-    if (auto const memb = nameof_member(tv, addr)) {
-      record.setStr("value_memb", memb);
+    auto const base = reinterpret_cast<const char*>(addr);
+    auto const rval = VanillaVec::LvalInt(const_cast<ArrayData*>(arr), idx);
+    auto const type_diff = reinterpret_cast<const char*>(&type(rval)) - base;
+    auto const data_diff = reinterpret_cast<const char*>(&val(rval)) - base;
+    if (0 <= type_diff && type_diff < sizeof(type(rval))) {
+      record.setStr("value_memb", "m_type");
+    } else if (0 <= data_diff && data_diff < sizeof(val(rval))) {
+      record.setStr("value_memb", "m_data");
     }
-    record.setStr("value_type", tname(tv->m_type));
+    record.setStr("value_type", tname(type(rval)));
   }
 }
 
-void fill_record(const MixedArray* arr, const void* addr,
+void fill_record(const VanillaDict* arr, const void* addr,
                  StructuredLogEntry& record) {
   if (try_member(arr, addr, record)) return;
 
-  auto const data = reinterpret_cast<const MixedArray::Elm*>(arr + 1);
+  auto const data = reinterpret_cast<const VanillaDict::Elm*>(arr + 1);
   auto const idx = (uintptr_t(addr) - uintptr_t(data))
-                   / sizeof(MixedArray::Elm);
+                   / sizeof(VanillaDict::Elm);
 
   if (idx < arr->iterLimit()) {
     auto const elm = &data[idx];
@@ -178,15 +185,8 @@ void fill_record(const MixedArray* arr, const void* addr,
       record.setStr("value_memb", memb);
     }
     if (elm->isTombstone()) {
-      record.setStr("skey", "<tombstone>");
       record.setStr("value_type", "<tombstone>");
     } else {
-      if (elm->hasIntKey()) {
-        record.setInt("ikey", elm->ikey);
-      } else {
-        assertx(elm->hasStrKey());
-        record.setStr("skey", elm->skey->data());
-      }
       record.setStr("value_type", tname(elm->data.m_type));
     }
   }
@@ -215,26 +215,43 @@ bool record_tc_mem_event(TCA tca, StructuredLogEntry& record) {
  */
 bool record_vm_metadata_mem_event(data_map::result res, const void* addr,
                                   StructuredLogEntry& record) {
+  auto const pos = reinterpret_cast<const char*>(addr);
+
   assertx(!res.empty());
-  match<void>(
+  match(
     res,
+    [&](const ArrayData* arr) {
+      record.setInt("offset", pos - reinterpret_cast<const char*>(arr));
+      record.setStr("kind", "Array");
+    },
     [&](const Class* cls) {
+      record.setInt("offset", pos - reinterpret_cast<const char*>(cls));
       record.setStr("kind", "Class");
       fill_record(cls, addr, record);
     },
     [&](const Func* func) {
+      record.setInt("offset", pos - reinterpret_cast<const char*>(func));
+      record.setStr("kind", "Class");
       record.setStr("kind", "Func");
       fill_record(func, addr, record);
     },
-    [&](const NamedEntity* ne) {
-      record.setStr("kind", "NamedEntity");
+    [&](const NamedType* ne) {
+      record.setInt("offset", pos - reinterpret_cast<const char*>(ne));
+      record.setStr("kind", "NamedType");
+      try_member(ne, addr, record);
+    },
+    [&](const NamedFunc* ne) {
+      record.setInt("offset", pos - reinterpret_cast<const char*>(ne));
+      record.setStr("kind", "NamedFunc");
       try_member(ne, addr, record);
     },
     [&](const StringData* sd) {
+      record.setInt("offset", pos - reinterpret_cast<const char*>(sd));
       record.setStr("kind", "StringData");
       fill_record(sd, addr, record);
     },
     [&](const Unit* unit) {
+      record.setInt("offset", pos - reinterpret_cast<const char*>(unit));
       record.setStr("kind", "Unit");
       fill_record(unit, addr, record);
     }
@@ -255,7 +272,7 @@ bool record_low_mem_event(const void* addr, StructuredLogEntry& record) {
   }
 
   // Try to symbolize `addr' if possible.
-#ifdef FACEBOOK
+#ifdef HHVM_FACEBOOK
   using namespace folly::symbolizer;
   Symbolizer symbolizer;
   SymbolizedFrame frame;
@@ -263,7 +280,7 @@ bool record_low_mem_event(const void* addr, StructuredLogEntry& record) {
   auto const iddr = reinterpret_cast<uintptr_t>(addr);
   symbolizer.symbolize(iddr, frame);
 
-  auto const name = frame.demangledName();
+  auto const name = folly::demangle(frame.name);
   if (!name.empty()) record.setStr("symbol", name);
 #endif
 
@@ -279,30 +296,30 @@ bool record_request_heap_mem_event(const void* addr,
                                    StructuredLogEntry& record) {
   record.setStr("location", "request_heap");
   record.setStr("kind", header_names[uint8_t(hdr->kind())]);
+  record.setInt("offset", reinterpret_cast<const char*>(addr) -
+                          reinterpret_cast<const char*>(hdr));
 
   switch (hdr->kind()) {
     case HeaderKind::String:
       fill_record(static_cast<const StringData*>(hdr), addr, record);
       break;
 
-    case HeaderKind::Packed:
-    case HeaderKind::VecArray:
+    case HeaderKind::Vec:
       fill_record(static_cast<const ArrayData*>(hdr), addr, record);
       break;
 
-    case HeaderKind::Mixed:
     case HeaderKind::Dict:
-    case HeaderKind::Keyset:
-      fill_record(static_cast<const MixedArray*>(hdr), addr, record);
+      fill_record(static_cast<const VanillaDict*>(hdr), addr, record);
       break;
 
-    case HeaderKind::Apc:
-      try_member(static_cast<const APCLocalArray*>(hdr), addr, record);
+    case HeaderKind::Keyset:
+      try_member(static_cast<const VanillaKeyset*>(hdr), addr, record);
       break;
-    case HeaderKind::Globals:
-      try_member(static_cast<const GlobalsArray*>(hdr), addr, record);
-      break;
-    case HeaderKind::Empty:
+
+    case HeaderKind::BespokeVec:
+    case HeaderKind::BespokeDict:
+    case HeaderKind::BespokeKeyset:
+      // TODO(kshaunak): Expose an address -> element API for bespokes.
       break;
 
     case HeaderKind::Object:
@@ -311,8 +328,10 @@ bool record_request_heap_mem_event(const void* addr,
     case HeaderKind::WaitHandle:
     case HeaderKind::AsyncFuncWH:
     case HeaderKind::AwaitAllWH:
+    case HeaderKind::ConcurrentWH:
     case HeaderKind::Resource:
-    case HeaderKind::Ref:
+    case HeaderKind::ClsMeth:
+    case HeaderKind::RClsMeth:
 
     case HeaderKind::Vector:
     case HeaderKind::Map:
@@ -326,6 +345,8 @@ bool record_request_heap_mem_event(const void* addr,
     case HeaderKind::NativeData:
     case HeaderKind::ClosureHdr:
     case HeaderKind::MemoData:
+
+    case HeaderKind::RFunc:
       break;
 
     case HeaderKind::Cpp:
@@ -398,7 +419,7 @@ void record_perf_mem_event(PerfEvent kind, const perf_event_sample* sample) {
     if (jit::mcgen::initialized() && jit::tc::code().isValidCodeAddress(tca)) {
       return record_tc_mem_event(tca, record);
     }
-    if (uintptr_t(addr) <= 0xffffffff) {
+    if (uintptr_t(addr) <= kLowArenaMaxAddr) {
       return record_low_mem_event(addr, record);
     }
     if (uintptr_t(addr) - s_stackLimit < s_stackSize) {
@@ -408,18 +429,10 @@ void record_perf_mem_event(PerfEvent kind, const perf_event_sample* sample) {
       return record_vm_stack_mem_event(addr, record);
     }
 
-    /*
-     * What we'd like to do here is:
-     *
-     * if (auto const hdr = tl_heap->find(addr)) {
-     *    return record_request_heap_mem_event(addr, hdr, record);
-     * }
-     *
-     * but what appears to be a multithreaded use-after-free bug prevents us
-     * from doing so safely.
-     */
+    if (auto const obj = tl_heap->find(addr)) {
+      return record_request_heap_mem_event(addr, obj, record);
+    }
     if (tl_heap->contains(const_cast<void*>(addr))) {
-      (void)record_request_heap_mem_event; // shoosh warnings
       record.setStr("location", "request_heap");
       return true;
     }
@@ -435,7 +448,7 @@ void record_perf_mem_event(PerfEvent kind, const perf_event_sample* sample) {
       sample->nr
     );
     auto frames = std::vector<folly::StringPiece>{};
-    folly::split("\n", st.toString(), frames);
+    folly::split('\n', st.toString(), frames);
     record.setVec("stacktrace", frames);
 
     FTRACE(1, "perf_mem_event: {}\n", show(record).c_str());

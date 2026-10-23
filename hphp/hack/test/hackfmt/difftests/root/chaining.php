@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 
 function member_and_function_call_chain(MyObject $my_object): void {
   $my_object
@@ -19,7 +19,7 @@ function member_and_function_call_chain(MyObject $my_object): void {
   $my_object
     ?->getASubObjectFromMyObject()
     ->getSomeOtherObject()
-    ->directObject
+->addedUnindented
     ?->field
     ->subField;
 

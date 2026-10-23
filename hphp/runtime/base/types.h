@@ -14,66 +14,46 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_TYPES_H_
-#define incl_HPHP_TYPES_H_
+#pragma once
+
+#include "hphp/runtime/vm/func-id.h"
+
+#include "hphp/util/blob-encoder.h"
+#include "hphp/util/ptr.h"
 
 #include <cstdint>
-#include "hphp/util/low-ptr.h"
+#include <folly/Format.h>
 
 namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
 
-struct String;
+struct OptString;
 struct StaticString;
 struct Array;
 struct Variant;
-struct VarNR;
 
 #define uninit_variant    tvAsCVarRef(&immutable_uninit_base)
 #define init_null_variant tvAsCVarRef(&immutable_null_base)
 
-extern const VarNR null_varNR;
-extern const VarNR true_varNR;
-extern const VarNR false_varNR;
-extern const VarNR INF_varNR;
-extern const VarNR NEGINF_varNR;
-extern const VarNR NAN_varNR;
-extern const String null_string;
+extern const OptString null_string;
 extern const Array null_array;
-extern const Array empty_array_ref;
-extern const StaticString array_string; // String("Array")
-extern const StaticString vec_string; // String("Vec")
-extern const StaticString dict_string; // String("Dict")
-extern const StaticString keyset_string; // String("Keyset")
 
-// Use empty_string() if you're returning String
-// Use empty_string_variant() if you're returning Variant
+// Use String::Empty() if you're returning String
+// Use empty_string_tv() if you're returning TypedValue
 // Or use these if you need to pass by const reference:
 extern const StaticString empty_string_ref; // const StaticString&
-extern const Variant empty_string_variant_ref; // const Variant&
-
-struct StringData;
-using LowStringPtr = LowPtr<const StringData>;
 
 ///////////////////////////////////////////////////////////////////////////////
 
-using VRefParam = const struct VRefParamValue&;
-using RefResult = const struct RefResultValue&;
+struct StringData;
+using PackedStringPtr = PackedPtr<const StringData>;
 
-/**
- * ref() can be used to cause strong binding.
- *
- *   a = ref(b); // strong binding: now both a and b point to the same data
- *   a = b;      // weak binding: a will copy or copy-on-write
- *
- */
-inline RefResult ref(const Variant& v) {
-  return *(RefResultValue*)&v;
-}
-
-inline RefResult ref(Variant& v) {
-  return *(RefResultValue*)&v;
-}
+template<>
+struct BlobEncoderHelper<PackedStringPtr> {
+  // Implemented in string-data.cpp
+  static void serde(BlobEncoder&, PackedStringPtr);
+  static void serde(BlobDecoder&, PackedStringPtr&);
+};
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -93,6 +73,21 @@ using PC = const uint8_t*;
  */
 using Id = int;
 constexpr Id kInvalidId = -1;
+
+
+/*
+ * Id type for local names.  Indexes into the local name table of the func.
+ */
+using LocalName = int;
+constexpr LocalName kInvalidLocalName = -1;
+
+/*
+ * A local index alongside an local name id.
+ */
+struct NamedLocal {
+  LocalName name;
+  int32_t id;
+};
 
 /*
  * Translation IDs.
@@ -134,14 +129,5 @@ constexpr Offset kInvalidOffset = std::numeric_limits<Offset>::max();
 using Slot = uint32_t;
 constexpr Slot kInvalidSlot = -1;
 
-/*
- * Unique identifier for a Func*.
- */
-using FuncId = uint32_t;
-constexpr FuncId InvalidFuncId = -1;
-constexpr FuncId DummyFuncId = -2;
-
 ///////////////////////////////////////////////////////////////////////////////
 }
-
-#endif

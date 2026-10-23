@@ -1,11 +1,16 @@
-<?php
+<?hh
 
-function test($a) {
-   $n = func_num_args();
-   var_dump($n);
-  $args = func_get_args();
+function test($a, ...$more_args) :mixed{
+  $args = vec[$a];
+  $args = array_merge($args, $more_args);
+  $n = count($args);
+  var_dump($n);
   var_dump($args);
 }
- test(1);
+
+ <<__EntryPoint>>
+function main_13() :mixed{
+test(1);
  test(1, 2);
  test(1, 2, 3);
+}

@@ -33,26 +33,34 @@ namespace {
 
 //////////////////////////////////////////////////////////////////////
 
-void fillMap(BaseMap* map, const APCArray* ar) {
-  for (auto i = uint32_t{0}; i < ar->size(); ++i) {
-    map->set(*ar->getKey(i).asTypedValue(),
-             *ar->getValue(i)->toLocal().asTypedValue());
+void fillMap(BaseMap* map, const APCArray* apc, bool pure) {
+  assertx(apc->isHashed());
+  for (auto i = uint32_t{0}; i < apc->size(); ++i) {
+    map->set(*apc->getHashedKey(i)->toLocal(true /* irrelevant for arraykey */).asTypedValue(),
+             *apc->getHashedVal(i)->toLocal(pure).asTypedValue());
   }
 }
 
-template<class T>
-void fillCollection(T* coll, const APCArray* ar) {
-  for (auto i = uint32_t{0}; i < ar->size(); ++i) {
-    coll->add(*ar->getValue(i)->toLocal().asTypedValue());
+void fillSet(BaseSet* coll, const APCArray* apc, bool pure) {
+  assertx(apc->isHashed());
+  for (auto i = uint32_t{0}; i < apc->size(); ++i) {
+    coll->add(*apc->getHashedVal(i)->toLocal(pure).asTypedValue());
+  }
+}
+
+void fillVector(BaseVector* coll, const APCArray* apc, bool pure) {
+  assertx(apc->isPacked());
+  for (auto i = uint32_t{0}; i < apc->size(); ++i) {
+    coll->add(*apc->getPackedVal(i)->toLocal(pure).asTypedValue());
   }
 }
 
 // Deserializing an array could give back a different ArrayKind than we need,
 // so we have to go with the slow case of calling a collection constructor.
 NEVER_INLINE
-Object createFromSerialized(CollectionType colType, APCHandle* handle) {
+Object createFromSerialized(CollectionType colType, APCHandle* handle, bool pure) {
   auto const col = Object::attach(collections::alloc(colType));
-  auto const arr = handle->toLocal();
+  auto const arr = handle->toLocal(pure);
   switch (colType) {
   case CollectionType::ImmVector:
   case CollectionType::Vector:
@@ -79,15 +87,17 @@ Object createFromSerialized(CollectionType colType, APCHandle* handle) {
 
 APCHandle::Pair APCCollection::Make(const ObjectData* obj,
                                     APCHandleLevel level,
-                                    bool unserializeObj) {
-  auto bail = [&] {
-    return APCString::MakeSerializedObject(
-      apc_serialize(Variant(const_cast<ObjectData*>(obj)))
-    );
-  };
+                                    bool unserializeObj,
+                                    bool pure) {
+  auto const ad = const_cast<ArrayData*>(collections::asArray(obj));
+  if (!ad) {
+    auto const ser = apc_serialize(Variant(const_cast<ObjectData*>(obj)), pure);
+    return APCString::MakeSerializedObject(ser);
+  }
 
-  auto const array = collections::asArray(obj);
-  if (!array) return bail();
+  if (auto const value = APCTypedValue::HandlePersistent(ad)) {
+    return WrapArray(value, obj->collectionType());
+  }
 
   /*
    * Create an uncounted array if we can.
@@ -98,36 +108,21 @@ APCHandle::Pair APCCollection::Make(const ObjectData* obj,
    * use a better representation.  For the OuterHandle case, we just delegate
    * to APCArray below (which will do the full DataWalker pass).
    */
-  if (level == APCHandleLevel::Inner && apcExtension::UseUncounted &&
-      !array->empty()) {
-    DataWalker walker(DataWalker::LookupFeature::HasObjectOrResource);
-    auto const features = walker.traverseData(const_cast<ArrayData*>(array));
+  if (level == APCHandleLevel::Inner && apcExtension::UseUncounted) {
+    DataWalker walker(DataWalker::LookupFeature::DetectNonPersistable);
+    auto const features = walker.traverseData(ad);
     assertx(!features.isCircular);
-    if (!features.hasObjectOrResource) {
-      auto const makeUncounted = [&] () {
-        if (isVectorCollection(obj->collectionType())) {
-          return APCArray::MakeUncountedVec(const_cast<ArrayData*>(array));
-        }
-        return APCArray::MakeUncountedDict(const_cast<ArrayData*>(array));
-      };
-      return WrapArray(
-        { makeUncounted(), getMemSize(array) + sizeof(APCTypedValue) },
-        obj->collectionType()
-      );
+    if (!features.hasNonPersistable) {
+      auto const arr = APCArray::MakeSharedArray(ad, /*PointerMap*/nullptr, nullptr);
+      auto const size = getMemSize(ad) + sizeof(APCTypedValue);
+      return WrapArray({arr, size}, obj->collectionType());
     }
   }
 
-  auto const makeShared = [&] () {
-    if (isVectorCollection(obj->collectionType())) {
-      return APCArray::MakeSharedVec(const_cast<ArrayData*>(array),
-                                     level,
-                                     unserializeObj);
-    }
-    return APCArray::MakeSharedDict(const_cast<ArrayData*>(array),
-                                    level,
-                                    unserializeObj);
-  };
-  return WrapArray(makeShared(), obj->collectionType());
+  auto const arr = isVectorCollection(obj->collectionType())
+    ? APCArray::MakeCopiedVec(ad, level, unserializeObj, pure)
+    : APCArray::MakeCopiedDict(ad, level, unserializeObj, pure);
+  return WrapArray(arr, obj->collectionType());
 }
 
 void APCCollection::Delete(APCHandle* h) {
@@ -136,7 +131,7 @@ void APCCollection::Delete(APCHandle* h) {
 }
 
 APCCollection::APCCollection()
-  : m_handle(APCKind::SharedCollection)
+  : m_handle(APCKind::CopiedCollection)
 {}
 
 APCCollection::~APCCollection() {
@@ -153,9 +148,9 @@ APCHandle::Pair APCCollection::WrapArray(APCHandle::Pair inner,
   return { &col->m_handle, inner.size + sizeof(APCCollection) };
 }
 
-Object APCCollection::createObject() const {
+Object APCCollection::createObject(bool pure) const {
   if (m_arrayHandle->isTypedValue()) {
-    Variant local(m_arrayHandle->toLocal());
+    Variant local(m_arrayHandle->toLocal(pure));
     assertx(local.isArray());
     return Object::attach(
       collections::alloc(m_colType, local.getArrayData())
@@ -164,7 +159,7 @@ Object APCCollection::createObject() const {
 
   if (UNLIKELY(m_arrayHandle->kind() == APCKind::SerializedVec ||
                m_arrayHandle->kind() == APCKind::SerializedDict)) {
-    return createFromSerialized(m_colType, m_arrayHandle);
+    return createFromSerialized(m_colType, m_arrayHandle, pure);
   }
 
   // We had a counted inner array---we need to do an O(N) copy to get the
@@ -174,21 +169,25 @@ Object APCCollection::createObject() const {
   switch (m_colType) {
   case CollectionType::ImmVector:
   case CollectionType::Vector:
-    fillCollection(static_cast<BaseVector*>(col.get()), apcArr);
+    fillVector(static_cast<BaseVector*>(col.get()), apcArr, pure);
     break;
   case CollectionType::ImmSet:
   case CollectionType::Set:
-    fillCollection(static_cast<BaseSet*>(col.get()), apcArr);
+    fillSet(static_cast<BaseSet*>(col.get()), apcArr, pure);
     break;
   case CollectionType::ImmMap:
   case CollectionType::Map:
-    fillMap(static_cast<BaseMap*>(col.get()), apcArr);
+    fillMap(static_cast<BaseMap*>(col.get()), apcArr, pure);
     break;
   case CollectionType::Pair:
     always_assert(0);
     break;
   }
   return col;
+}
+
+bool APCCollection::toLocalMayRaise() const {
+  return m_arrayHandle->toLocalMayRaise();
 }
 
 //////////////////////////////////////////////////////////////////////

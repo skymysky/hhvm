@@ -14,12 +14,12 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_TYPE_STRUCTURE_HELPERS_H_
-#define incl_HPHP_TYPE_STRUCTURE_HELPERS_H_
+#pragma once
 
 #include <string>
 
 #include "hphp/runtime/base/array-data.h"
+#include "hphp/runtime/base/req-vector.h"
 #include "hphp/runtime/base/typed-value.h"
 
 #include "hphp/runtime/vm/bytecode.h"
@@ -29,9 +29,37 @@ namespace HPHP {
 
 /*
  * Checks whether the given cell is an instance of the class referred by
- * given named entity
+ * given named type.
  */
-bool cellInstanceOf(const Cell* tv, const NamedEntity* ne);
+bool tvInstanceOf(const TypedValue* tv, const NamedType* ne);
+
+/*
+ * Checks whether the given cell is an instance of the given class.
+ */
+bool tvInstanceOf(const TypedValue* tv, const Class* cls);
+
+/*
+ * Returns true is all the generics on the type type structure are
+ * wildcards. If the type structure does not contain any generics, then
+ * returns true.
+ */
+bool isTSAllWildcards(const ArrayData* ts);
+
+/*
+ * Returns whether the typed value matches the type structure. This function
+ * checks whether the reified generics match as well.
+ * Sets the warn flag if the type parameter is denoted as soft either through
+ * an annotation at the declaration site or by soft type hint at the generic
+ * level
+ */
+bool verifyReifiedLocalType(
+  tv_rval param,
+  const ArrayData* type,
+  const Class* ctx,
+  const Func* func,
+  bool isTypeVar,
+  bool& warn
+);
 
 /*
  * Resolves the given Array as a type structure.
@@ -40,7 +68,7 @@ bool cellInstanceOf(const Cell* tv, const NamedEntity* ne);
  * type.
  * If suppress is not set, will raise an error if the type structure cannot be
  * resolved.
- * Otherwise, if suppress and RuntimeOption::EvalIsExprEnableUnresolvedWarning
+ * Otherwise, if suppress and Cfg::Eval::IsExprEnableUnresolvedWarning
  * are set, will raise a warning instead.
  *
  * Because the type structure might contain unresolved nested structures, we
@@ -48,47 +76,76 @@ bool cellInstanceOf(const Cell* tv, const NamedEntity* ne);
  *`self`, and `parent` references are resolved correctly and error messages
  * are displayed correctly.
  */
+template <bool IsOrAsOp>
 Array resolveAndVerifyTypeStructure(
   const Array& ts,
   const Class* declaringCls,
   const Class* calledCls,
+  const req::vector<Array>& tsList,
   bool suppress
 );
+
+/*
+ * Raises an error if the type hint for is/as expression contains an invalid
+ * type such as callables, erased type variables and trait type hints
+ * If dryrun is set, it does not actually raise the error
+ * If allowWildcard is set, then it does not error on wildcards
+ */
+bool errorOnIsAsExpressionInvalidTypes(const Array& ts, bool dryrun,
+                                       bool allowWildcard = false);
 
 /**
  * Returns whether the type structure may not be able to be resolved statically,
  * i.e. if it contains `this` references.
  */
-bool typeStructureCouldBeNonStatic(const Array& ts);
+bool typeStructureCouldBeNonStatic(const ArrayData* ts);
 
 /*
- * Checks whether the type of the given cell matches the type structure
- * Expects a resolved type structure
+ * Checks whether the type of the given cell matches the type structure.
+ * Expects a resolved type structure.
  */
-bool checkTypeStructureMatchesCell(const Array& ts, Cell c1);
+bool checkTypeStructureMatchesTV(const Array& ts, TypedValue c1);
+
+bool checkForVerifyTypeStructureMatchesTV(
+  const Array& ts,
+  TypedValue c1,
+  std::string& givenType,
+  std::string& expectedType,
+  std::string& errorKey);
 
 /*
- * In addition to regular checkTypeStructureMatchesCell, also populates the
+ * In addition to regular checkTypeStructureMatchesTV, also populates the
  * error paths
  */
-bool checkTypeStructureMatchesCell(
+bool checkTypeStructureMatchesTV(
   const Array& ts,
-  Cell c1,
+  TypedValue c1,
   std::string& givenType,
   std::string& expectedType,
   std::string& errorKey
 );
+
+/*
+ * In addition to regular checkTypeStructureMatchesTV, also sets the warn flag
+ * if the type parameter is denoted as soft either through an annotation at the
+ * declaration site or by soft type hint at the generic level
+ */
+bool checkTypeStructureMatchesTV(const Array& ts, TypedValue c1, bool& warn);
 
 /*
  * Throws user catchable exception that tells the user what the given type is,
  * what the expected type is and which key it failed at, if applicable
  */
-[[noreturn]] void throwTypeStructureDoesNotMatchCellException(
+[[noreturn]] void throwTypeStructureDoesNotMatchTVException(
   std::string& givenType,
   std::string& expectedType,
-  std::string& errorKey
+  std::string& errorKey,
+  bool throwFatal
 );
 
-}
+/*
+ * Checks to see whether the input type structure contains a T_Unresolved
+ */
+bool doesTypeStructureContainTUnresolved(const ArrayData* ts);
 
-#endif
+}

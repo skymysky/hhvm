@@ -1,0 +1,9 @@
+error: Typing[4312] This class or one of its ancestors is annotated with `<<__ConsistentConstruct>>`. It cannot have reified generics. [1]
+
+consistent_construct_final_parent.php:11:13
+ 9 | }
+10 | 
+11 | final class B<reify T> extends A {}
+   |             ^ [1]
+
+1 error found

@@ -1,0 +1,28 @@
+error: Typing[4498] Cyclic type definition [1]
+-> Cyclic use is here [2]
+
+case_type_cyclic_case_type2.php:4:11
+2 | <<file: __EnableUnstableFeatures('case_types')>>
+3 | 
+4 | case type Recursive = Recursive | int;
+  |           ^^^^^^^^^ [1]
+  |                       ^^^^^^^^^ [2]
+5 | 
+6 | function f(Recursive $rec): void {
+
+error: Typing[4475] Invalid case type declaration. More than one variant of `Recursive` could contain values with the same runtime tag [1]
+-> This is the type `Recursive`, which includes **ints** because it is a cyclic type [2]
+->   via this variant of the case type `Recursive` [2]
+-> It overlaps with `int`, which also includes **ints** [3]
+
+case_type_cyclic_case_type2.php:4:11
+2 | <<file: __EnableUnstableFeatures('case_types')>>
+3 | 
+4 | case type Recursive = Recursive | int;
+  |           ^^^^^^^^^ [1]
+  |                       ^^^^^^^^^ [2]
+  |                                   ^^^ [3]
+5 | 
+6 | function f(Recursive $rec): void {
+
+2 errors found

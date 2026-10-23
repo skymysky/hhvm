@@ -1,0 +1,14 @@
+error: Typing[4121] Illegal usage of a contravariant type parameter [1]
+-> This is where the parameter was declared as contravariant `-` [2]
+-> Aliased types are covariant [1]
+
+splat_variance.php:7:38
+5 | // type parameters declared as contravariant
+6 | 
+7 | type NotReallyContrav<-T> = shape(...T, 'x' => int);
+  |                        ^ [2]
+  |                                      ^ [1]
+8 | 
+9 | type ReallyCov<+T> = shape(...T, 'x' => int);
+
+1 error found

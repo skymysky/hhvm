@@ -1,9 +1,13 @@
-<?php
+<?hh
 
-function x($y, $k) {
-  var_dump($k($y));
+function x($y, $k) :mixed{
+  var_dump(HH\dynamic_fun($k)($y));
   var_dump(floor($y));
 }
 
-x(array(1,2,3,4), 'floor');
-x(array(1,2,3,4), 'ceil');
+
+<<__EntryPoint>>
+function main_floor_ceil() :mixed{
+x(vec[1,2,3,4], 'floor');
+x(vec[1,2,3,4], 'ceil');
+}

@@ -1,11 +1,10 @@
 <?hh
 
 class D {
-  function __destruct() { echo "destruct!\n"; }
 }
 
-function foo(inout int $x) {
-  foreach (array(new D) as $bar) {
+function foo(inout int $x) :mixed{
+  foreach (vec[new D] as $bar) {
     try {
       return $x;
     } finally {
@@ -14,10 +13,14 @@ function foo(inout int $x) {
   }
 }
 
-function main() {
+function main() :mixed{
   $y = 0;
   foo(inout $y);
   echo "done\n";
 }
 
+
+<<__EntryPoint>>
+function main_inout_loop_2() :mixed{
 main();
+}

@@ -1,0 +1,11 @@
+error: Typing[4087] `C` has no parent class with a method `foo` to override [1]
+
+override_attr_11.php:17:19
+15 | class C extends A {
+16 |   <<__Override>>
+17 |   public function foo(): void {}
+   |                   ^^^ [1]
+18 | }
+19 | 
+
+1 error found

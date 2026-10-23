@@ -13,14 +13,16 @@
    | license@php.net so we can mail you a copy immediately.               |
    +----------------------------------------------------------------------+
 */
-#ifndef incl_HPHP_REGION_PRUNE_ARCS_H_
-#define incl_HPHP_REGION_PRUNE_ARCS_H_
+#pragma once
+
+#include "hphp/runtime/base/types.h"
 
 #include <vector>
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 
 struct RegionDesc;
+struct TransCFG;
 struct Type;
 
 //////////////////////////////////////////////////////////////////////
@@ -32,9 +34,10 @@ struct Type;
  */
 void region_prune_arcs(RegionDesc& region, std::vector<Type>* input = nullptr);
 
+void trans_cfg_prune_arcs(TransCFG& cfg, const std::vector<TransID>& nodes);
+
 //////////////////////////////////////////////////////////////////////
 
-}}
+}
 
 
-#endif

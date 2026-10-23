@@ -1,8 +1,8 @@
-<?php
+<?hh
 /* Overrule global settings, if need be */
 
 if (false !== getenv('PDO_MYSQL_TEST_DSN')) {
-	# user set them from their shell
+  // user set them from their shell
 	$config['ENV']['PDOTEST_DSN'] = getenv('PDO_MYSQL_TEST_DSN');
 	$config['ENV']['PDOTEST_USER'] = getenv('PDO_MYSQL_TEST_USER');
 	$config['ENV']['PDOTEST_PASS'] = getenv('PDO_MYSQL_TEST_PASS');
@@ -33,12 +33,12 @@ define('PDO_MYSQL_TEST_CHARSET', (false !== getenv('PDO_MYSQL_TEST_CHARSET')) ? 
 if (!function_exists('sys_get_temp_dir')) {
 	function sys_get_temp_dir() {
 
-		if (!empty($_ENV['TMP']))
-			return realpath( $_ENV['TMP'] );
-		if (!empty($_ENV['TMPDIR']))
-			return realpath( $_ENV['TMPDIR'] );
-		if (!empty($_ENV['TEMP']))
-			return realpath( $_ENV['TEMP'] );
+		if (\HH\global_get('_ENV')['TMP'] ?? false)
+			return realpath( \HH\global_get('_ENV')['TMP'] );
+		if (\HH\global_get('_ENV')['TMPDIR'] ?? false)
+			return realpath( \HH\global_get('_ENV')['TMPDIR'] );
+		if (\HH\global_get('_ENV')['TEMP'] ?? false)
+			return realpath( \HH\global_get('_ENV')['TEMP'] );
 
 		$temp_file = tempnam(md5(uniqid(rand(), TRUE)), '');
 		if ($temp_file) {
@@ -49,4 +49,3 @@ if (!function_exists('sys_get_temp_dir')) {
 		return FALSE;
 	}
 }
-?>

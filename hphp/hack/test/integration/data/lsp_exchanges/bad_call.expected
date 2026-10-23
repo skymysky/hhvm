@@ -4,10 +4,12 @@
     "id": 1,
     "error": {
       "code": -32002,
-      "message": "Server not yet initialized",
-      "data": {
-        "stack": "[omitted for reproducibility]"
-      }
+      "message": "Server not yet initialized"
     }
+  },
+  {
+    "jsonrpc": "2.0",
+    "id": 99,
+    "result": null
   }
 ]

@@ -1,5 +1,4 @@
-#ifndef HPHP_EXT_STD_H
-#define HPHP_EXT_STD_H
+#pragma once
 
 #include "hphp/runtime/ext/extension.h"
 
@@ -7,32 +6,41 @@ namespace HPHP {
 /////////////////////////////////////////////////////////////////////////////
 
 struct StandardExtension final : Extension {
-  StandardExtension() : Extension("standard") {}
+  StandardExtension() : Extension("standard", NO_EXTENSION_VERSION_YET, "hphp_hphpi") {}
 
-  void moduleLoad(const IniSetting::Map& /*ini*/, Hdf /*config*/) override {
-    // Closure must be hoisted before anything which extends from it.
-    // So we place it in the global systemlib and bind its dependencies early.
-    loadClosure();
+  void moduleRegisterNative() override {
+    registerNativeStandard();
+    registerNativeErrorFunc();
+    registerNativeClassobj();
+    registerNativeNetwork();
+    registerNativeOptions();
+    registerNativeGc();
+    registerNativeOutput();
+    registerNativeString();
+    registerNativeVariable();
+    registerNativeFunction();
+    registerNativeMisc();
+    registerNativeFile();
+    registerNativeMath();
+    registerNativeProcess();
   }
 
-  void moduleInit() override {
-    initClosure();
-    initStandard();
-    initErrorFunc();
-    initClassobj();
-    initNetwork();
-    initOptions();
-    initGc();
-    initOutput();
-    initString();
-    initVariable();
-    initFunction();
-    initMisc();
-    initStreamUserFilters();
-    initFile();
-    initIntrinsics();
-    initMath();
-    initProcess();
+  std::vector<std::string> hackFiles() const override {
+    return {
+      "ext_std_classobj.php",
+      "ext_std_errorfunc.php",
+      "ext_std_file.php",
+      "ext_std_function.php",
+      "ext_std_gc.php",
+      "ext_std_math.php",
+      "ext_std_misc.php",
+      "ext_std_network.php",
+      "ext_std_options.php",
+      "ext_std_output.php",
+      "ext_std_process.php",
+      "ext_std_string.php",
+      "ext_std_variable.php",
+    };
   }
 
   void threadInit() override {
@@ -41,36 +49,28 @@ struct StandardExtension final : Extension {
 
   void requestInit() override {
     requestInitMath();
-    requestInitOptions();
   }
- private:
-  void loadClosure();
 
-  void initStandard();
-  void initErrorFunc();
-  void initClassobj();
-  void initClosure();
-  void initNetwork();
-  void initOptions();
-  void initGc();
-  void initOutput();
-  void initString();
-  void initVariable();
-  void initFunction();
-  void initMisc();
-  void initStreamUserFilters();
-  void initFile();
-  void initIntrinsics();
-  void initMath();
-  void initProcess();
+ private:
+  void registerNativeStandard();
+  void registerNativeErrorFunc();
+  void registerNativeClassobj();
+  void registerNativeNetwork();
+  void registerNativeOptions();
+  void registerNativeGc();
+  void registerNativeOutput();
+  void registerNativeString();
+  void registerNativeVariable();
+  void registerNativeFunction();
+  void registerNativeMisc();
+  void registerNativeFile();
+  void registerNativeMath();
+  void registerNativeProcess();
 
   void threadInitMisc();
 
   void requestInitMath();
-  void requestInitOptions();
 };
 
 /////////////////////////////////////////////////////////////////////////////
 } // namespace HPHP
-
-#endif // HPHP_EXT_STD_H

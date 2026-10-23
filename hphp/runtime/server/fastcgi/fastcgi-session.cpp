@@ -18,7 +18,6 @@
 #include "hphp/runtime/server/fastcgi/fastcgi-server.h"
 #include "hphp/util/logger.h"
 
-#include <folly/Memory.h>
 #include <folly/io/Cursor.h>
 #include <folly/io/IOBuf.h>
 
@@ -37,9 +36,9 @@ using folly::io::QueueAppender;
 namespace fcgi {
 void KVParser::reset() {
   m_phase = Phase::READ_KEY_LENGTH;
-  m_readBuf.clear();
-  m_keyBuf.clear();
-  m_valueBuf.clear();
+  m_readBuf.move();
+  m_keyBuf.move();
+  m_valueBuf.move();
 }
 
 std::tuple<
@@ -136,7 +135,7 @@ bool KVParser::parseKeyValueLength(Cursor& cursor,
     return false;
   }
   auto peeked = cursor.peek();
-  if (*peeked.first & 0x80) { // highest bit is set
+  if (*peeked.data() & 0x80) { // highest bit is set
     if (available < sizeof(uint32_t)) {
       return false;
     }
@@ -217,7 +216,7 @@ void FastCGISession::closeWhenIdle() {
   m_keepConn = false; // will shutdown when request completes
 }
 
-void FastCGISession::dropConnection() {
+void FastCGISession::dropConnection(const std::string& /* errorMsg */) {
   // Nothing else needs to be placed here. Calling closeWithReset() will cause
   // readEOF to be called immediately which will call shutdown().
   //
@@ -227,6 +226,10 @@ void FastCGISession::dropConnection() {
 }
 
 void FastCGISession::dumpConnectionState(uint8_t /*loglevel*/) { /* nop */
+}
+
+const folly::SocketAddress& FastCGISession::getPeerAddress() const noexcept {
+  return m_peerAddr;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -619,10 +622,10 @@ void FastCGISession::writeCapability(const std::string& key) {
   auto appendLength = [&] (const std::string& lenStr) {
     if (lenStr.size() > 255) {
       len += sizeof(uint32_t);
-      cursor.writeBE<uint32_t>(lenStr.size() | (0x80 << 24));
+      cursor.writeBE<uint32_t>(static_cast<uint32_t>(lenStr.size() | (0x80 << 24)));
     } else {
       len += sizeof(uint8_t);
-      cursor.writeBE<uint8_t>(lenStr.size());
+      cursor.writeBE<uint8_t>(static_cast<uint8_t>(lenStr.size()));
     }
   };
 

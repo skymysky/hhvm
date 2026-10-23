@@ -1,5 +1,9 @@
-<?php
+<?hh
 
-function test() {
+function test() :mixed{
 }
- true ? test() : 1;
+
+ <<__EntryPoint>>
+function main_1259() :mixed{
+true ? test() : 1;
+}

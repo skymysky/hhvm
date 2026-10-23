@@ -1,15 +1,30 @@
-<?php
+<?hh
 
-function foo($x) {
+class Foo {}
+function foo($x) :mixed{
   if ($x) {
-    $a = array();
+    $a = vec[];
     $s = 'hello';
-    $o = (object)null;
+    $o = new Foo();
   }
-  var_dump((array)$a, (array)$s, (array)$o);
-  var_dump((string)$a, (string)$s, (string)$o);
-  var_dump((object)$a);
-var_dump((object)$s);
-var_dump((object)$o);
+  try {
+    var_dump((string)$a);
+  } catch (UndefinedVariableException $e) {
+    var_dump($e->getMessage());
+  }
+  try {
+    var_dump((string)$s);
+  } catch (UndefinedVariableException $e) {
+    var_dump($e->getMessage());
+  }
+  try {
+    var_dump((string)$o);
+  } catch (UndefinedVariableException $e) {
+    var_dump($e->getMessage());
+  }
 }
-foo(false);
+
+<<__EntryPoint>>
+function main_1438() :mixed{
+  foo(false);
+}

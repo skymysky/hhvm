@@ -1,0 +1,10 @@
+warning: Warn[12034] Array access on type `keyset<string>` returns the key (if present) or throws an exception. Consider using `C\contains_key` to check for membership instead. [1]
+
+25-subscript-05.hack:11:3
+ 9 |   
+10 |   $k = keyset["a"];
+11 |   $k["missing"];     // OutOfBoundsException
+   |   ^^^^^^^^^^^^^ [1]
+12 | }
+
+1 error found

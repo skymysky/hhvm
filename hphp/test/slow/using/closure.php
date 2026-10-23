@@ -1,8 +1,6 @@
 <?hh
 
-require 'logger.inc';
-
-function main() {
+function main() :mixed{
   echo "Creating closure\n";
   $x = function($throw) {
     echo "Entering closure\n";
@@ -24,4 +22,10 @@ function main() {
   }
 }
 
+
+<<__EntryPoint>>
+function main_closure() :mixed{
+require 'logger.inc';
+
 main();
+}

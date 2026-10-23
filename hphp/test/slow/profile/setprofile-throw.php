@@ -1,26 +1,19 @@
 <?hh
 
-function foo($t) { echo "From $t: This shouldn't happen!\n"; }
-
-fb_setprofile(function($what, $fun) {
-    if ($what == 'exit' && $fun == 'X::foo') {
-      echo "Throwing from $fun\n";
-      throw new Exception("Surprise!");
-    }
-  });
+function foo($t) :mixed{ echo "From $t: This shouldn't happen!\n"; }
 
 class X {
-  public function foo() {
+  public static function foo() :mixed{
     try {
       return true;
     } catch (Exception $e) {
-      foo(get_class($this));
+      foo(static::class);
       return false;
     }
   }
 }
 
-function main($f) {
+function main($f) :mixed{
   try {
     // If we call X::foo directly here, hhbbc will see an effect-free
     // function call, and optimize it away.
@@ -33,4 +26,15 @@ function main($f) {
   }
 }
 
+
+<<__EntryPoint>>
+function main_setprofile_throw() :mixed{
+fb_setprofile(function($what, $fun) {
+    if ($what == 'exit' && $fun == 'X::foo') {
+      echo "Throwing from $fun\n";
+      throw new Exception("Surprise!");
+    }
+  });
+
 main('X::foo');
+}

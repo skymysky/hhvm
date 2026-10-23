@@ -1,0 +1,2 @@
+--no-strict-contexts
+--error-format plain_highlighted

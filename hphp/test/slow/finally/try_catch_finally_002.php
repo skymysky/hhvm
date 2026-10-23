@@ -1,9 +1,9 @@
-<?php
+<?hh
 
-class AE extends Exception {};
-class BE extends Exception {};
+class AE extends Exception {}
+class BE extends Exception {}
 
-function foo () {
+function foo () :mixed{
     try {
         try {
             try {
@@ -11,7 +11,7 @@ function foo () {
                    echo "1";
                    throw new Exception("try");
                 } catch (AE $e) {
-                   die("error");
+                   exit("error");
                 } finally {
                    echo "2";
                 }
@@ -19,19 +19,19 @@ function foo () {
                 echo "3";
             }
         } catch (BE $e) {
-            die("error");
+            exit("error");
         } finally {
             echo "4";
         }
     } catch (Exception $e) {
         echo "5";
     } catch (AE $e) {
-        die("error");
+        exit("error");
     } finally {
         echo "6";
     }
    return 7;
 }
-
+<<__EntryPoint>> function main(): void {
 var_dump(foo());
-?>
+}

@@ -1,0 +1,35 @@
+error: Typing[4419] Type alias marked `<<__DisjointShapeSplat>>` may contain overlapping shapes [1]
+-> Shape field `nested` is defined here [2]
+-> Shape field `nested` is also defined here [3]
+
+disjoint_attr_bad_nested.php:8:6
+ 2 | <<file:__EnableUnstableFeatures('shape_splat_concrete')>>
+ 3 | 
+ 4 | type A = shape('nested' => int);
+   |                ^^^^^^^^ [2]
+ 5 | type B = shape(...A, 'other' => bool);
+ 6 | 
+ 7 | <<__DisjointShapeSplat>>
+ 8 | type Bad = shape(...B, 'nested' => string);
+   |      ^^^ [1]
+   |                        ^^^^^^^^ [3]
+ 9 | 
+10 | // REGRESSION (previously a false negative): an outer splat must not hide an
+
+error: Typing[4419] Type alias marked `<<__DisjointShapeSplat>>` may contain overlapping shapes [1]
+-> Shape field `internal` is defined here [2]
+-> Shape field `internal` is also defined here [3]
+
+disjoint_attr_bad_nested.php:13:6
+11 | // overlap entirely within its nested shape.
+12 | <<__DisjointShapeSplat>>
+13 | type BadInternal =
+   |      ^^^^^^^^^^^ [1]
+14 |   shape(
+15 |     ...shape(...shape('internal' => int), 'internal' => string),
+   |                       ^^^^^^^^^^ [2]
+   |                                           ^^^^^^^^^^ [3]
+16 |     'outer' => bool,
+17 |   );
+
+2 errors found

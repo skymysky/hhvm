@@ -1,0 +1,6 @@
+warning: Lint[5610] This `is` check is always `false`. The expression on the left has type `C` which shares no values with `null`.
+   --> never_null.php
+  6 |   new C() is null;
+    |   ^^^^^^^^^^^^^^^
+
+

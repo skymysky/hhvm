@@ -1,0 +1,86 @@
+(*
+ * Copyright (c) 2015, Facebook, Inc.
+ * All rights reserved.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the "hack" directory of this source tree.
+ *
+ *)
+
+(*****************************************************************************)
+(* Code relative to the client/server communication *)
+(*****************************************************************************)
+
+open Hh_prelude
+open Dfind_env
+
+type msg =
+  | Ready
+  | Updates of S_set.t
+
+(*****************************************************************************)
+(* Processing an fsnotify event *)
+(*****************************************************************************)
+
+let (process_fsnotify_event :
+      Dfind_env.t -> S_set.t -> Fsnotify.event -> S_set.t) =
+ fun env dirty event ->
+  let { Fsnotify.path; wpath } = event in
+  (* Tell everybody that this file has changed *)
+  let dirty = S_set.add path dirty in
+  (* Is it a directory? Be conservative, everything we know about this
+   * directory is now "dirty"
+   *)
+  let dirty =
+    if S_map.mem path env.dirs then
+      S_set.union dirty (S_map.find path env.dirs)
+    else
+      let dir_content =
+        match S_map.find_opt wpath env.dirs with
+        | Some content -> content
+        | None -> S_set.empty
+      in
+      env.dirs <- S_map.add wpath (S_set.add path dir_content) env.dirs;
+      dirty
+  in
+  env.new_files <- S_set.empty;
+
+  (* Add the file, plus all of the sub elements if it is a directory *)
+  Dfind_add_file.path env path;
+
+  (* Add everything new we found in this directory
+     * (empty when it's a regular file)
+  *)
+  let dirty = S_set.union env.new_files dirty in
+  dirty
+
+let run_daemon (scuba_table, roots) (ic, oc) =
+  Printexc.record_backtrace true;
+  let t = Unix.gettimeofday () in
+  let infd = Daemon.descr_of_in_channel ic in
+  let outfd = Daemon.descr_of_out_channel oc in
+  let roots = List.map roots ~f:Path.to_string in
+  let env = Dfind_env.make roots in
+  List.iter roots ~f:(Dfind_add_file.path env);
+  Event_logger.dfind_ready scuba_table t;
+  Marshal_tools.to_fd_with_preamble outfd Ready |> ignore;
+  ignore @@ Hh_logger.log_duration "Initialization" t;
+  let acc = ref S_set.empty in
+  let descr_in = Daemon.descr_of_in_channel ic in
+  let fsnotify_callback events =
+    acc := List.fold_left events ~f:(process_fsnotify_event env) ~init:!acc
+  in
+  let message_in_callback () =
+    let () = Marshal_tools.from_fd_with_preamble infd in
+    let count = S_set.cardinal !acc in
+    if count > 0 then Hh_logger.log "Sending %d file updates\n%!" count;
+    Marshal_tools.to_fd_with_preamble outfd (Updates !acc) |> ignore;
+    acc := S_set.empty
+  in
+  while true do
+    let read_fdl = [(descr_in, message_in_callback)] in
+    let timeout = -1.0 in
+    Fsnotify.select env.fsnotify ~read_fdl ~timeout fsnotify_callback
+  done
+
+let entry_point = Daemon.register_entry_point "dfind" run_daemon

@@ -1,0 +1,21 @@
+warning: Warn[12043] Trait `RRTAViolationTrait` has `require this as `RRTAClassWithoutTrait`` constraint but class `RRTAClassWithoutTrait` does not use this trait. Replace `require this as` with `require extends` [1]
+
+redundant_require_this_as.php:12:19
+10 | // This SHOULD be flagged - trait has "require this as" but class doesn't use it
+11 | trait RRTAViolationTrait {
+12 |   require this as RRTAClassWithoutTrait;
+   |                   ^^^^^^^^^^^^^^^^^^^^^ [1]
+13 | }
+14 | 
+
+warning: Warn[12043] Trait `RRTATransitiveTrait` has `require this as `RRTAClassTransitiveBad`` constraint but class `RRTAClassTransitiveBad` does not use this trait. Replace `require this as` with `require extends` [1]
+
+redundant_require_this_as.php:54:19
+52 | // This SHOULD be flagged - class does NOT use RRTATransitiveTrait
+53 | trait RRTATransitiveTrait {
+54 |   require this as RRTAClassTransitiveBad;
+   |                   ^^^^^^^^^^^^^^^^^^^^^^ [1]
+55 | }
+56 | 
+
+2 errors found

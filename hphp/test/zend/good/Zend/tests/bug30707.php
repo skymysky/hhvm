@@ -1,24 +1,24 @@
-<?php
+<?hh
 class C {
-	function byePHP($plop) {
-		echo "ok\n";
-	}
+    function byePHP($plop) :mixed{
+        echo "ok\n";
+    }
 
-	function plip() {
-		try {
-			$this->plap($this->plop());
-		}	catch(Exception $e) {
-		}
-	}
+    function plip() :mixed{
+        try {
+            $this->plap($this->plop());
+        }    catch(Exception $e) {
+        }
+    }
 
-	function plap($a) {	
-	}
+    function plap($a) :mixed{
+    }
 
-	function plop() {
-		throw new Exception;
-	}
+    function plop() :mixed{
+        throw new Exception;
+    }
 }
-
+<<__EntryPoint>> function main(): void {
 $x = new C;
 $x->byePHP($x->plip());
-?>
+}

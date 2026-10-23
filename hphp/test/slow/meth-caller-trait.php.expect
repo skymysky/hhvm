@@ -1,0 +1,7 @@
+Hello, P!
+Hello, P!
+string(52) "object must be an instance of (C), instead it is (P)"
+Hello, C!
+Hello, C!
+Hello, C!
+string(52) "object must be an instance of (T), instead it is (P)"

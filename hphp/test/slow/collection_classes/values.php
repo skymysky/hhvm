@@ -1,5 +1,5 @@
 <?hh
-function main() {
+function main() :mixed{
   $fn = function($x) { return $x; };
   $x = Vector {'abc'};
   var_dump($x->values());
@@ -14,4 +14,8 @@ function main() {
   var_dump(get_class($x->lazy()->values()));
   var_dump(get_class($x->lazy()->map($fn)->values()));
 }
+
+<<__EntryPoint>>
+function main_values() :mixed{
 main();
+}

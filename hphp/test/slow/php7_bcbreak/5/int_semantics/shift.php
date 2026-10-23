@@ -1,14 +1,14 @@
-<?php
+<?hh
 
-function always_true() {
+function always_true() :mixed{
   return mt_rand(1, 2) < 10;
 }
 
-function id($x) {
+function id($x) :mixed{
   return $x;
 }
 
-function noinline($x) {
+function noinline($x) :mixed{
   if (always_true()) {
     return $x;
   } else {
@@ -16,11 +16,11 @@ function noinline($x) {
   }
 }
 
-function exn($e) {
+function exn($e) :mixed{
   echo get_class($e), ': ', $e->getMessage(), "\n";
 }
 
-function run_tests() {
+function run_tests() :mixed{
   echo 3 << 64, "\n";
   echo 3 << id(64), "\n";
   echo 3 << noinline(64), "\n";
@@ -105,8 +105,16 @@ function run_tests() {
 
   echo "-\n";
 
-  echo (new stdclass) >> 64, "\n";
-  echo (new stdclass) << 64, "\n";
+  try {
+    echo (new stdClass) >> 64, "\n";
+  } catch (Exception $e) {
+    var_dump($e->getMessage());
+  }
+  try {
+    echo (new stdClass) << 64, "\n";
+  } catch (Exception $e) {
+    var_dump($e->getMessage());
+  }
 
   echo "-\n";
 
@@ -148,5 +156,8 @@ function run_tests() {
   try {echo noinline(3) >> noinline(-1), "\n";}
     catch (\Throwable $e) {exn($e);}
 }
+<<__EntryPoint>>
+function entrypoint_shift(): void {
 
-run_tests();
+  run_tests();
+}

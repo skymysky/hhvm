@@ -13,15 +13,14 @@
    | license@php.net so we can mail you a copy immediately.               |
    +----------------------------------------------------------------------+
 */
-#ifndef incl_HPHP_RUNTIME_BASE_REQ_MEMORY_H_
-#define incl_HPHP_RUNTIME_BASE_REQ_MEMORY_H_
+#pragma once
 
 #include "hphp/runtime/base/req-malloc.h"
 #include "hphp/util/type-scan.h"
 #include <folly/Memory.h>
 #include <memory>
 
-namespace HPHP { namespace req {
+namespace HPHP::req {
 
 //////////////////////////////////////////////////////////////////////
 
@@ -192,13 +191,9 @@ struct weak_ptr final : private std::weak_ptr<T> {
     type_scan::Index m_scan_index = type_scan::kIndexUnknownNoPtrs;
 };
 
-#ifndef __APPLE__ // XXX: this affects codegen quality but not correctness
 static_assert(
   sizeof(unique_ptr<int>) == sizeof(std::unique_ptr<int>),
   "req::unique_ptr pointer should not be larger than std::unique_ptr"
 );
-#endif
 
-}}
-
-#endif
+}

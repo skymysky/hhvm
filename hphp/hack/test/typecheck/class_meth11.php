@@ -5,20 +5,20 @@ class C {
     return 'C';
   }
 
-  public function test() {
-    $f = class_meth(__CLASS__, 'aStaticMeth');
-    hh_show($f);
-    echo $f(), ' ';
-    $g = class_meth(self::class, 'aStaticMeth');
-    hh_show($g);
-    echo $g(), ' ';
-    $h = class_meth(static::class, 'aStaticMeth');
+  public function test(): string {
+    $h = static::aStaticMeth<>;
     hh_show($h);
-    echo $h(), ' ';
+    return $h() . ' ';
   }
 }
 
-class D extends C {
+final class D extends C {
+  public function test2(): string {
+    $g = self::aStaticMeth<>;
+    hh_show($g);
+    return $g() . ' ';
+  }
+
   public static function aStaticMeth(): string {
     return 'D';
   }
@@ -29,19 +29,11 @@ trait MyTr {
     return 'MyTr';
   }
 
-  public function test() {
-    // __CLASS__ is the 'use'r class at runtime
-    $f = class_meth(__CLASS__, 'aStaticMeth');
-    hh_show($f);
-    echo $f(), ' ';
-    // self::class is the 'use'r class at runtime
-    $g = class_meth(self::class, 'aStaticMeth');
-    hh_show($g);
-    echo $g(), ' ';
+  public function test(): string {
     // static::class is the 'use'r class at runtime
-    $h = class_meth(static::class, 'aStaticMeth');
+    $h = static::aStaticMeth<>;
     hh_show($h);
-    echo $h(), ' ';
+    return $h() . ' ';
   }
 }
 
@@ -49,7 +41,8 @@ class E {
   use MyTr;
 }
 
-function main() {
+<<__EntryPoint>>
+function main(): void {
   $c = new C();
   echo 'C: ', $c->test(), "\n";
   $d = new D();
@@ -57,7 +50,6 @@ function main() {
   $e = new E();
   echo 'E: ', $e->test(), "\n";
 }
-main();
 
 // Expected output when executed (without hh_show's)
 // C: C C C

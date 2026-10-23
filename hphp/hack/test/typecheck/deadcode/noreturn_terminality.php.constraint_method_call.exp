@@ -1,0 +1,14 @@
+error: Typing[4336] Invalid return type [1]
+-> Expected `noreturn` [2]
+-> But got `void` because this function does not always return a value [1]
+
+noreturn_terminality.php:17:10
+15 | }
+16 | 
+17 | function test2(A $x): noreturn {
+   |          ^^^^^ [1]
+   |                       ^^^^^^^^ [2]
+18 |   $x->foo();
+19 | }
+
+1 error found

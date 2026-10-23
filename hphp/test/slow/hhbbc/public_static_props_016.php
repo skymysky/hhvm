@@ -1,13 +1,17 @@
-<?php
+<?hh
 
 class X {
-  static $y = array();
+  public static $y = vec[];
 
-  function z() {
+  static function z() :mixed{
     self::$y[] = 2;
     return self::$y;
   }
 }
 
+
+<<__EntryPoint>>
+function main_public_static_props_016() :mixed{
 var_dump(X::z());
 var_dump(X::z());
+}

@@ -1,0 +1,34 @@
+FoldedClass {
+    name: "\\A",
+    kind: Cclass(
+        Abstract,
+    ),
+    props: {
+        "t": FoldedElement {
+            flags: ClassEltFlags(
+                8194,
+            ),
+            origin: "\\A",
+            visibility: Public,
+            deprecated: None,
+            sealed_allowlist: None,
+            overlapping_tparams: None,
+            package_requirement: None,
+        },
+    },
+    consts: {
+        "class": ClassConst {
+            is_synthesized: true,
+            kind: CCConcrete,
+            pos: NPos,
+            ty: class<this>,
+            origin: "\\A",
+            refs: [],
+            is_shape_key: false,
+            value: CVAbsent,
+        },
+    },
+    deferred_init_members: {
+        "t",
+    },
+}

@@ -1,0 +1,19 @@
+error: Typing[4110] Invalid argument [1]
+-> Expected `string` [2]
+-> But got `int` because method or function was called on dynamic or like-type [3]
+
+anon17.php:8:24
+1 | <?hh
+2 | 
+3 | function expects_vec_func_str(Vector<(function(): string)> $vec): void {}
+  |                                                   ^^^^^^ [2]
+4 | 
+5 | function test(): void {
+6 |   $funcs = Vector { () ==> 1.0, () ==> 0, () ==> '' };
+  |                                 ^^^^^^^^ [3]
+7 | 
+8 |   expects_vec_func_str($funcs);
+  |                        ^^^^^^ [1]
+9 | }
+
+1 error found

@@ -1,6 +1,6 @@
-<?php
-$server = new soapserver(null,array('uri'=>"http://testuri.org"));
-$server->addfunction(SOAP_FUNCTIONS_ALL);
+<?hh <<__EntryPoint>> function main(): void {
+$server = new SoapServer(null,dict['uri'=>"http://testuri.org"]);
+$server->addFunction(SOAP_FUNCTIONS_ALL);
 
 $HTTP_RAW_POST_DATA = <<<EOF
 <?xml version="1.0" encoding="ISO-8859-1"?>
@@ -20,4 +20,4 @@ EOF;
 
 $server->handle($HTTP_RAW_POST_DATA);
 echo "ok\n";
-?>
+}

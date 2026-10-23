@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 // Copyright 2004-present Facebook. All Rights Reserved.
 
 class C<+T> {
@@ -11,8 +11,9 @@ class D<+Td super C<Td>> extends E<Td> {
     return $this->ditem;
   }
 }
+
 function TestIt<Tt>(E<C<Tt>> $m): Tt {
-  if ($m instanceof D) {
+  if ($m is D<_>) {
     // Should have $m : D<Td#1>
     // with C<Td#1> <: Td#1
     // D<Td#1> <: E<C<Tt>>
@@ -23,5 +24,6 @@ function TestIt<Tt>(E<C<Tt>> $m): Tt {
     $i = $m->Get();
     return $i;
   }
-  //UNSAFE
+
+  throw new Exception();
 }

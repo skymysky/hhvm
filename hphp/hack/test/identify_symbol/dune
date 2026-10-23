@@ -1,0 +1,21 @@
+(rule
+ (alias identify_symbol)
+ (deps
+  %{exe:../../src/hh_single_type_check.exe}
+  %{project_root}/hack/test/verify.py
+  %{project_root}/hack/test/review.sh
+  (glob_files %{project_root}/hack/test/identify_symbol/HH_FLAGS)
+  (glob_files %{project_root}/hack/test/identify_symbol/*.flags)
+  (glob_files %{project_root}/hack/test/identify_symbol/*.php)
+  (glob_files %{project_root}/hack/test/identify_symbol/*.exp))
+ (action
+  (run
+   %{project_root}/hack/test/verify.py
+   %{project_root}/hack/test/identify_symbol
+   --program
+   %{exe:../../src/hh_single_type_check.exe})))
+
+(alias
+ (name runtest)
+ (deps
+  (alias identify_symbol)))

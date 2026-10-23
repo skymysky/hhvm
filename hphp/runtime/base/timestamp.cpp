@@ -59,7 +59,7 @@ Array TimeStamp::CurrentTime() {
   timelib_time_offset *offset =
     timelib_get_time_zone_info(tp.tv_sec, TimeZone::Current()->getTZInfo());
 
-  auto const ret = make_map_array(
+  auto const ret = make_dict_array(
     s_sec, (int)tp.tv_sec,
     s_usec, (int)tp.tv_usec,
     s_minuteswest, (int)(-offset->offset / 60),
@@ -69,12 +69,12 @@ Array TimeStamp::CurrentTime() {
   return ret;
 }
 
-String TimeStamp::CurrentMicroTime() {
+OptString TimeStamp::CurrentMicroTime() {
   struct timeval tp;
   gettimeofday(&tp, nullptr);
   char ret[100];
   snprintf(ret, 100, "%.8F %ld", (double)tp.tv_usec / 1000000, tp.tv_sec);
-  return String(ret, CopyString);
+  return OptString(ret, CopyString);
 }
 
 int64_t TimeStamp::Get(bool &error, int hou, int min, int sec, int mon, int day,

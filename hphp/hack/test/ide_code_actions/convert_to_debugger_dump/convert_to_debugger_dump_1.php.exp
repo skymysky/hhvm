@@ -1,0 +1,49 @@
+Code actions available:
+------------------------------------------
+convert to 'debugger_dump' (CodeActionKind: "quickfix") SELECTED
+Devmate Quick Fix - An expression cannot start with `=` (CodeActionKind: "quickfix")
+Devmate Agent Fix - An expression cannot start with `=` (CodeActionKind: "quickfix")
+Devmate Quick Fix - Unbound global constant (Typing) (CodeActionKind: "quickfix")
+Devmate Agent Fix - Unbound global constant (Typing) (CodeActionKind: "quickfix")
+Devmate Quick Fix - Unbound name: `=` (a global constant) (CodeActionKind: "quickfix")
+Devmate Agent Fix - Unbound name: `=` (a global constant) (CodeActionKind: "quickfix")
+
+JSON for selected code action:
+------------------------------------------
+{
+  "title": "convert to 'debugger_dump'",
+  "kind": "quickfix",
+  "diagnostics": [],
+  "edit": {
+    "changes": {
+      "FILE.php": [
+        {
+          "range": {
+            "start": { "line": 5, "character": 4 },
+            "end": { "line": 5, "character": 5 }
+          },
+          "newText": "debugger_dump("
+        },
+        {
+          "range": {
+            "start": { "line": 5, "character": 20 },
+            "end": { "line": 5, "character": 20 }
+          },
+          "newText": ")"
+        }
+      ]
+    }
+  }
+}
+
+Applied edit for code action:
+------------------------------------------
+<?hh
+
+// This tests the logic for finding relevant quickfixes for a range.
+// The tests in //hphp/hack/test/quickfixes exercise quickfixes more.
+function f(int $x): void {
+    debugger_dump($x/*range-end*/);
+  // ^ at-caret
+}
+

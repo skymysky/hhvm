@@ -1,4 +1,4 @@
-<?php
+<?hh <<__EntryPoint>> function main(): void {
 $list = new SplDoublyLinkedList();
 
 $list->push('o');
@@ -9,8 +9,10 @@ $list->setIteratorMode(SplDoublyLinkedList::IT_MODE_LIFO);
 
 $list->rewind();
 
-while ($tmp = $list->current()) {
+$tmp = $list->current();
+while ($tmp) {
   echo $tmp;
   $list->next();
+  $tmp = $list->current();
 }
-?>
+}

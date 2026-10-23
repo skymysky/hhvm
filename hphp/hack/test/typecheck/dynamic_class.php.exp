@@ -1,1 +1,23 @@
-No errors
+warning: Warn[12039] Value of type `dynamic` called as a function [1]
+-> This expression has type `dynamic` [2]
+
+dynamic_class.php:10:3
+ 6 | 
+ 7 | function f(): void {
+ 8 |   $a = 'Foo';
+   |        ^^^^^ [2]
+ 9 |   /* This is okay since we are in partial mode */
+10 |   $a::bar();
+   |   ^^^^^^^ [1]
+11 | }
+
+error: Typing[4026] Was expecting a class, but got a string [1]
+
+dynamic_class.php:10:3
+ 8 |   $a = 'Foo';
+ 9 |   /* This is okay since we are in partial mode */
+10 |   $a::bar();
+   |   ^^ [1]
+11 | }
+
+2 errors found

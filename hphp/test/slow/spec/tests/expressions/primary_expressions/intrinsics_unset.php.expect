@@ -1,0 +1,32 @@
+---------- unsetting inside a function ($GLOBALS) ------------
+bool(true)
+bool(true)
+bool(false)
+bool(false)
+---------- unsetting array elements ------------
+Dict
+(
+    [0] => 10
+    [1] => 20
+    [xx] => 30
+)
+Dict
+(
+    [0] => 10
+    [xx] => 30
+)
+Dict
+(
+    [0] => 10
+    [xx] => 30
+)
+Dict
+(
+    [0] => 10
+    [xx] => 30
+)
+---------- unsetting elements through a property ------------
+dict(0) {
+}
+dict(0) {
+}

@@ -1,0 +1,13 @@
+error: Typing[4419] Type alias marked `<<__DisjointShapeSplat>>` may contain overlapping shapes [1]
+-> Shape field `id` is defined here [2]
+-> Shape field `id` may also be provided by type parameter `T` [3]
+
+disjoint_attr_bad_generic_field.php:5:9
+3 | 
+4 | <<__DisjointShapeSplat>>
+5 | newtype Bad<T as shape(...)> = shape(...T, 'id' => int);
+  |         ^^^ [1]
+  |                                         ^ [3]
+  |                                            ^^^^ [2]
+
+1 error found

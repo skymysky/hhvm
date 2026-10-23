@@ -1,0 +1,348 @@
+warning: Lint[5646] There are multiple return statements, but they all return the same value.
+   --> branches_returning_same_value.php
+ 12 |     return 123;
+    |            ^^^
+
+
+warning: Lint[5646] There are multiple return statements, but they all return the same value.
+   --> branches_returning_same_value.php
+ 14 |     return 123; //should produce lint
+    |            ^^^
+
+
+warning: Lint[5646] There are multiple return statements, but they all return the same value.
+   --> branches_returning_same_value.php
+ 20 |     return "hello";
+    |            ^^^^^^^
+
+
+warning: Lint[5646] There are multiple return statements, but they all return the same value.
+   --> branches_returning_same_value.php
+ 22 |     return "hello"; //should produce lint
+    |            ^^^^^^^
+
+
+warning: Lint[5646] There are multiple return statements, but they all return the same value.
+   --> branches_returning_same_value.php
+ 29 |     return 1.5;
+    |            ^^^
+
+
+warning: Lint[5646] There are multiple return statements, but they all return the same value.
+   --> branches_returning_same_value.php
+ 31 |     return 1.5; //should produce lint
+    |            ^^^
+
+
+warning: Lint[5646] There are multiple return statements, but they all return the same value.
+   --> branches_returning_same_value.php
+ 38 |     return true;
+    |            ^^^^
+
+
+warning: Lint[5646] There are multiple return statements, but they all return the same value.
+   --> branches_returning_same_value.php
+ 41 |     return true; //should produce lint
+    |            ^^^^
+
+
+warning: Lint[5646] There are multiple return statements, but they all return the same value.
+   --> branches_returning_same_value.php
+ 47 |     return global_const;
+    |            ^^^^^^^^^^^^
+
+
+warning: Lint[5646] There are multiple return statements, but they all return the same value.
+   --> branches_returning_same_value.php
+ 49 |     return global_const; //should produce lint
+    |            ^^^^^^^^^^^^
+
+
+warning: Lint[5646] There are multiple return statements, but they all return the same value.
+   --> branches_returning_same_value.php
+ 55 |     return DebugFlag::ON;
+    |            ^^^^^^^^^^^^^
+
+
+warning: Lint[5646] There are multiple return statements, but they all return the same value.
+   --> branches_returning_same_value.php
+ 57 |     return DebugFlag::ON; //should produce lint
+    |            ^^^^^^^^^^^^^
+
+
+warning: Lint[5806] This expression has a type lie that makes Hack type checker think it is a different type than what it inferred. It is achieved using an `HH_FIXME` comment. This can lead to fatals or subtle and latent behaviour changes. Even if the code is correct at the moment, the type checker won't produce any signal when the prerequisites for correctness change.
+   --> branches_returning_same_value.php
+ 63 |     return return_different_string($x);
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+
+warning: Lint[5806] This expression has a type lie that makes Hack type checker think it is a different type than what it inferred. It is achieved using an `HH_FIXME` comment. This can lead to fatals or subtle and latent behaviour changes. Even if the code is correct at the moment, the type checker won't produce any signal when the prerequisites for correctness change.
+   --> branches_returning_same_value.php
+ 65 |     return return_different_string($x); // should not produce lint
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+
+warning: Lint[5646] There are multiple return statements, but they all return the same value.
+   --> branches_returning_same_value.php
+ 95 |     return 123;
+    |            ^^^
+
+
+warning: Lint[5646] There are multiple return statements, but they all return the same value.
+   --> branches_returning_same_value.php
+ 97 |   return 123;
+    |          ^^^
+
+
+warning: Lint[5646] There are multiple return statements, but they all return the same value.
+   --> branches_returning_same_value.php
+102 |     return "hello";
+    |            ^^^^^^^
+
+
+warning: Lint[5646] There are multiple return statements, but they all return the same value.
+   --> branches_returning_same_value.php
+104 |     return "hello";
+    |            ^^^^^^^
+
+
+warning: Lint[5646] There are multiple return statements, but they all return the same value.
+   --> branches_returning_same_value.php
+106 |     return "hello"; //should produce lint
+    |            ^^^^^^^
+
+
+warning: Lint[5646] There are multiple return statements, but they all return the same value.
+   --> branches_returning_same_value.php
+125 |     return "hello";
+    |            ^^^^^^^
+
+
+warning: Lint[5646] There are multiple return statements, but they all return the same value.
+   --> branches_returning_same_value.php
+130 |   return "hello"; //should produce lint
+    |          ^^^^^^^
+
+
+warning: Lint[5646] There are multiple return statements, but they all return the same value.
+   --> branches_returning_same_value.php
+136 |     return "hello";
+    |            ^^^^^^^
+
+
+warning: Lint[5646] There are multiple return statements, but they all return the same value.
+   --> branches_returning_same_value.php
+141 |   return "hello"; //should produce lint
+    |          ^^^^^^^
+
+
+warning: Lint[5646] There are multiple return statements, but they all return the same value.
+   --> branches_returning_same_value.php
+147 |       return "hello";
+    |              ^^^^^^^
+
+
+warning: Lint[5646] There are multiple return statements, but they all return the same value.
+   --> branches_returning_same_value.php
+149 |     return "hello";
+    |            ^^^^^^^
+
+
+warning: Lint[5646] There are multiple return statements, but they all return the same value.
+   --> branches_returning_same_value.php
+151 |     return "hello";
+    |            ^^^^^^^
+
+
+warning: Lint[5646] There are multiple return statements, but they all return the same value.
+   --> branches_returning_same_value.php
+153 |     return "hello"; //should produce lint
+    |            ^^^^^^^
+
+
+warning: Lint[5646] There are multiple return statements, but they all return the same value.
+   --> branches_returning_same_value.php
+175 |       return 123;
+    |              ^^^
+
+
+warning: Lint[5646] There are multiple return statements, but they all return the same value.
+   --> branches_returning_same_value.php
+177 |       return 123; //should produce lint
+    |              ^^^
+
+
+warning: Lint[5646] There are multiple return statements, but they all return the same value.
+   --> branches_returning_same_value.php
+183 |       return "hello";
+    |              ^^^^^^^
+
+
+warning: Lint[5646] There are multiple return statements, but they all return the same value.
+   --> branches_returning_same_value.php
+185 |       return "hello"; //should produce lint
+    |              ^^^^^^^
+
+
+warning: Lint[5646] There are multiple return statements, but they all return the same value.
+   --> branches_returning_same_value.php
+192 |       return 1.5;
+    |              ^^^
+
+
+warning: Lint[5646] There are multiple return statements, but they all return the same value.
+   --> branches_returning_same_value.php
+194 |       return 1.5; //should produce lint
+    |              ^^^
+
+
+warning: Lint[5646] There are multiple return statements, but they all return the same value.
+   --> branches_returning_same_value.php
+201 |       return true;
+    |              ^^^^
+
+
+warning: Lint[5646] There are multiple return statements, but they all return the same value.
+   --> branches_returning_same_value.php
+204 |       return true; //should produce lint
+    |              ^^^^
+
+
+warning: Lint[5646] There are multiple return statements, but they all return the same value.
+   --> branches_returning_same_value.php
+210 |       return global_const;
+    |              ^^^^^^^^^^^^
+
+
+warning: Lint[5646] There are multiple return statements, but they all return the same value.
+   --> branches_returning_same_value.php
+212 |       return global_const; //should produce lint
+    |              ^^^^^^^^^^^^
+
+
+warning: Lint[5646] There are multiple return statements, but they all return the same value.
+   --> branches_returning_same_value.php
+218 |       return DebugFlag::ON;
+    |              ^^^^^^^^^^^^^
+
+
+warning: Lint[5646] There are multiple return statements, but they all return the same value.
+   --> branches_returning_same_value.php
+220 |       return DebugFlag::ON; //should produce lint
+    |              ^^^^^^^^^^^^^
+
+
+warning: Lint[5806] This expression has a type lie that makes Hack type checker think it is a different type than what it inferred. It is achieved using an `HH_FIXME` comment. This can lead to fatals or subtle and latent behaviour changes. Even if the code is correct at the moment, the type checker won't produce any signal when the prerequisites for correctness change.
+   --> branches_returning_same_value.php
+226 |       return this->returnDifferentString($x);
+    |              ^^^^
+
+
+warning: Lint[5806] This expression has a type lie that makes Hack type checker think it is a different type than what it inferred. It is achieved using an `HH_FIXME` comment. This can lead to fatals or subtle and latent behaviour changes. Even if the code is correct at the moment, the type checker won't produce any signal when the prerequisites for correctness change.
+   --> branches_returning_same_value.php
+228 |       return this->returnDifferentString($x); // should not produce lint
+    |              ^^^^
+
+
+warning: Lint[5646] There are multiple return statements, but they all return the same value.
+   --> branches_returning_same_value.php
+258 |       return "hello";
+    |              ^^^^^^^
+
+
+warning: Lint[5646] There are multiple return statements, but they all return the same value.
+   --> branches_returning_same_value.php
+260 |       return "hello";
+    |              ^^^^^^^
+
+
+warning: Lint[5646] There are multiple return statements, but they all return the same value.
+   --> branches_returning_same_value.php
+262 |       return "hello"; //should produce lint
+    |              ^^^^^^^
+
+
+warning: Lint[5646] There are multiple return statements, but they all return the same value.
+   --> branches_returning_same_value.php
+281 |       return "hello";
+    |              ^^^^^^^
+
+
+warning: Lint[5646] There are multiple return statements, but they all return the same value.
+   --> branches_returning_same_value.php
+286 |     return "hello"; //should produce lint
+    |            ^^^^^^^
+
+
+warning: Lint[5646] There are multiple return statements, but they all return the same value.
+   --> branches_returning_same_value.php
+292 |       return "hello";
+    |              ^^^^^^^
+
+
+warning: Lint[5646] There are multiple return statements, but they all return the same value.
+   --> branches_returning_same_value.php
+297 |     return "hello"; //should produce lint
+    |            ^^^^^^^
+
+
+warning: Lint[5646] There are multiple return statements, but they all return the same value.
+   --> branches_returning_same_value.php
+302 |       return 123;
+    |              ^^^
+
+
+warning: Lint[5646] There are multiple return statements, but they all return the same value.
+   --> branches_returning_same_value.php
+304 |     return 123;
+    |            ^^^
+
+
+warning: Lint[5646] There are multiple return statements, but they all return the same value.
+   --> branches_returning_same_value.php
+309 |         return "hello";
+    |                ^^^^^^^
+
+
+warning: Lint[5646] There are multiple return statements, but they all return the same value.
+   --> branches_returning_same_value.php
+311 |       return "hello";
+    |              ^^^^^^^
+
+
+warning: Lint[5646] There are multiple return statements, but they all return the same value.
+   --> branches_returning_same_value.php
+313 |       return "hello";
+    |              ^^^^^^^
+
+
+warning: Lint[5646] There are multiple return statements, but they all return the same value.
+   --> branches_returning_same_value.php
+315 |       return "hello"; //should produce lint
+    |              ^^^^^^^
+
+
+warning: Lint[5646] There are multiple return statements, but they all return the same value.
+   --> branches_returning_same_value.php
+346 |       return false; //should produce lint
+    |              ^^^^^
+
+
+warning: Lint[5646] There are multiple return statements, but they all return the same value.
+   --> branches_returning_same_value.php
+351 |     return false; //should produce lint
+    |            ^^^^^
+
+
+warning: Lint[5646] There are multiple return statements, but they all return the same value.
+   --> branches_returning_same_value.php
+382 |     return false; //should produce lint
+    |            ^^^^^
+
+
+warning: Lint[5646] There are multiple return statements, but they all return the same value.
+   --> branches_returning_same_value.php
+387 |   return false; //should produce lint
+    |          ^^^^^
+
+

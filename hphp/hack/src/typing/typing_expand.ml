@@ -1,4 +1,4 @@
-(**
+(*
  * Copyright (c) 2015, Facebook, Inc.
  * All rights reserved.
  *
@@ -7,6 +7,7 @@
  *
  *)
 
+open Hh_prelude
 
 (*****************************************************************************)
 (* Gets rid of all the type variables,
@@ -17,14 +18,19 @@
  *)
 (*****************************************************************************)
 
-let visitor = object
-  inherit Type_mapper.deep_type_mapper
-  inherit! Type_mapper.tvar_expanding_type_mapper
-end
+let visitor =
+  object
+    inherit Type_mapper.tvar_expanding_type_mapper
+  end
 
 (*****************************************************************************)
 (* External API *)
 (*****************************************************************************)
 
-let fully_expand env ty =
-  snd (visitor#on_type (Type_mapper.fresh_env env) ty)
+let fully_expand env ty = snd (visitor#on_type (Type_mapper.fresh_env env) ty)
+
+let fully_expand_i env ty =
+  Typing_defs_constraints.(
+    match ty with
+    | ConstraintType _ -> ty
+    | LoclType ty -> LoclType (fully_expand env ty))

@@ -1,0 +1,53 @@
+Code actions available:
+------------------------------------------
+Extract interface (CodeActionKind: "refactor") SELECTED
+
+JSON for selected code action:
+------------------------------------------
+{
+  "title": "Extract interface",
+  "kind": "refactor",
+  "diagnostics": [],
+  "edit": {
+    "changes": {
+      "FILE.php": [
+        {
+          "range": {
+            "start": { "line": 7, "character": 16 },
+            "end": { "line": 7, "character": 16 }
+          },
+          "newText": ", Placeholder_"
+        },
+        {
+          "range": {
+            "start": { "line": 6, "character": 0 },
+            "end": { "line": 6, "character": 0 }
+          },
+          "newText": "interface Placeholder_ {\n  public function foo(): void;\n}\n\n"
+        }
+      ]
+    }
+  }
+}
+
+Applied edit for code action:
+------------------------------------------
+<?hh
+
+class TheParent {}
+
+interface I {}
+interface J {}
+interface Placeholder_ {
+  public function foo(): void;
+}
+
+class A extends TheParent
+ implements I, J, Placeholder_ {
+  /*range-start*/
+  public function foo(): void {
+    400 + 8;
+  }
+  /*range-end*/
+}
+

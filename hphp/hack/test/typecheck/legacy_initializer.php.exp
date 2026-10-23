@@ -1,0 +1,21 @@
+error: Naming[2035] Please add a type hint [1]
+
+legacy_initializer.php:22:7
+20 | ];
+21 | 
+22 | const gconstWithoutHintNested = vec[
+   |       ^^^^^^^^^^^^^^^^^^^^^^^ [1]
+23 |   HH\array_mark_legacy(vec[]),
+24 | ];
+
+error: Naming[2001] Please add a type hint `const SomeType gconstWithoutHintNested` [1]
+
+legacy_initializer.php:22:7
+20 | ];
+21 | 
+22 | const gconstWithoutHintNested = vec[
+   |       ^^^^^^^^^^^^^^^^^^^^^^^ [1]
+23 |   HH\array_mark_legacy(vec[]),
+24 | ];
+
+2 errors found

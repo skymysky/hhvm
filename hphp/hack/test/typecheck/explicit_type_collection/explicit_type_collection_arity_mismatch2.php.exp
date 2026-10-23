@@ -1,0 +1,10 @@
+error: Parsing[1002] `dict` takes exactly two type arguments [1]
+
+explicit_type_collection_arity_mismatch2.php:4:12
+2 | 
+3 | function f(): void {
+4 |   $a = dict<string>[];
+  |            ^^^^^^^^ [1]
+5 | }
+
+1 error found

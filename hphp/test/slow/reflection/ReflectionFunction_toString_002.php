@@ -1,3 +1,7 @@
-<?php
+<?hh
 
-echo (string)(new ReflectionFunction('trim'));
+
+<<__EntryPoint>>
+function main_reflection_function_to_string_002() :mixed{
+echo (new ReflectionFunction('trim'))->__toString();
+}

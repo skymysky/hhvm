@@ -1,13 +1,13 @@
-<?php
+<?hh
 class Foo {
-  function test() {
+  function test() :mixed{
     return "Hello World";
   }
 }
-
+<<__EntryPoint>> function main(): void {
 $foo = new Foo();
-$server = new soapserver(null,array('uri'=>"http://testuri.org"));
-$server->setObject($foo);
+$server = new SoapServer(null,dict['uri'=>"http://testuri.org"]);
+$server->setobject($foo);
 
 $HTTP_RAW_POST_DATA = <<<EOF
 <?xml version="1.0" encoding="ISO-8859-1"?>
@@ -25,4 +25,4 @@ EOF;
 
 $server->handle($HTTP_RAW_POST_DATA);
 echo "ok\n";
-?>
+}

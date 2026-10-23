@@ -14,13 +14,12 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_RUNTIME_BASE_REQ_HASH_MAP_H_
-#define incl_HPHP_RUNTIME_BASE_REQ_HASH_MAP_H_
+#pragma once
 
 #include "hphp/runtime/base/req-malloc.h"
 #include <folly/container/F14Map.h>
 
-namespace HPHP { namespace req {
+namespace HPHP::req {
 
 /*
  * hash_map wraps F14NodeMap, which allocates key+value indirectly,
@@ -65,11 +64,15 @@ struct value_map : folly::F14ValueMap<
   using Base = folly::F14ValueMap<
     T, U, V, W, ConservativeAllocator<std::pair<const T, U>>
   >;
+  using value_type = typename Base::value_type;
   value_map() : Base() {}
 
   TYPE_SCAN_IGNORE_BASES(Base);
   TYPE_SCAN_CUSTOM(T, U) {
-    for (const auto& pair : *this) scanner.scan(pair);
+    Base::visitContiguousRanges(
+      [&](value_type const* start, value_type const* end) {
+        scanner.scan(*start, (const char*)end - (const char*)start);
+      });
   }
 };
 
@@ -98,14 +101,15 @@ struct vector_map : folly::F14VectorMap<
   using Base = folly::F14VectorMap<
     T, U, V, W, ConservativeAllocator<std::pair<const T, U>>
   >;
+  using value_type = typename Base::value_type;
   vector_map() : Base() {}
 
   TYPE_SCAN_IGNORE_BASES(Base);
   TYPE_SCAN_CUSTOM(T, U) {
-    // use rbegin/rend to visit entries in address order within the container
-    // (see the iteration order comment for F14ValueMap in F14Map.h)
-    const auto it = Base::rbegin();
-    scanner.scan(*it, Base::size() * sizeof(*it));
+    Base::visitContiguousRanges(
+      [&](value_type const* start, value_type const* end) {
+        scanner.scan(*start, (const char*)end - (const char*)start);
+      });
   }
 };
 
@@ -133,5 +137,4 @@ struct fast_map : std::conditional_t<
   fast_map() : Super() {}
 };
 
-}}
-#endif
+}

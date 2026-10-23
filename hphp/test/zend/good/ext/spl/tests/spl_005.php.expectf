@@ -1,8 +1,4 @@
 string(32) "%s"
 
-Warning: %s
-NULL
-
-Warning: %s
-NULL
+Warning: spl_object_hash() expects exactly 1 positional parameter, 0 given in %s/spl_005.php on line 4
 ===DONE===

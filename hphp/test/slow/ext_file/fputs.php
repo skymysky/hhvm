@@ -1,6 +1,9 @@
-<?php
+<?hh
 
-$tempfile = tempnam('/tmp', 'vmextfiletest');
+
+<<__EntryPoint>>
+function main_fputs() :mixed{
+$tempfile = tempnam(sys_get_temp_dir(), 'vmextfiletest');
 
 $f = fopen($tempfile, 'w');
 fputs($f, "testing fputs\n");
@@ -10,3 +13,4 @@ $f = fopen($tempfile, "r");
 fpassthru($f);
 
 unlink($tempfile);
+}

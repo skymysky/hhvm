@@ -14,8 +14,7 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_SORT_FLAGS_H_
-#define incl_HPHP_SORT_FLAGS_H_
+#pragma once
 
 #include <stdint.h>
 #include "hphp/util/assertions.h"
@@ -57,6 +56,21 @@ enum SortFunction {
   SORTFUNC_UASORT = SORTFUNC_ASORT | _SORTFUNC_SIGNMASK
 };
 
+inline const char* sortFunctionName(SortFunction sf) {
+  switch (sf) {
+  case SORTFUNC_KSORT:  return "ksort";
+  case SORTFUNC_KRSORT: return "krsort";
+  case SORTFUNC_UKSORT: return "uksort";
+  case SORTFUNC_SORT:   return "sort";
+  case SORTFUNC_RSORT:  return "rsort";
+  case SORTFUNC_USORT:  return "usort";
+  case SORTFUNC_ASORT:  return "asort";
+  case SORTFUNC_ARSORT: return "arsort";
+  case SORTFUNC_UASORT: return "uasort";
+  }
+  always_assert(false);
+}
+
 // Return true if the sorting has a user-defined comparison function
 inline bool hasUserDefinedCmp(SortFunction s) {
   return s < 0;
@@ -77,7 +91,7 @@ inline bool isKSortFamily(SortFunction s) {
   return (uint8_t(s) & 6) == 0;
 }
 
-// Return true if result can be represented as a PackedArray
+// Return true if result can be represented as a VanillaVec
 inline bool supportedByPacked(SortFunction s) {
   // I put some static checking for encoding here.
   static_assert(SORTFUNC_USORT < 0, "");
@@ -92,17 +106,17 @@ inline bool supportedByPacked(SortFunction s) {
   static_assert(SORTFUNC_ARSORT == SORTFUNC_ASORT + 1, "");
 
   if (s == SORTFUNC_KSORT) {
-    return true;                        // ksort trivail for PackedArray
+    return true; // ksort is trivial for VanillaVecs
   }
   return isSortFamily(s);
 }
 
 inline SortFunction getSortFunction(SortFunction s, bool ascending = true) {
   assertx(!hasUserDefinedCmp(s));
+  assertx(!(s & 1));
   // ascending: LSB == 0
-  return static_cast<SortFunction>(s & ~static_cast<int>(ascending));
+  return static_cast<SortFunction>(s | static_cast<int>(!ascending));
 }
 
 }
 
-#endif // incl_HPHP_SORT_FLAGS_H_

@@ -1,5 +1,5 @@
-<?hh // strict
+<?hh
 
-function test(array<string, string> $x): string {
+function test(darray<string, string> $x): string {
   return "foo $x[bar]";
 }

@@ -1,41 +1,47 @@
 <?hh
 
-function one() {
+function one() :mixed{
   echo "one\n";
 }
 
-function three() {
+function three() :mixed{
   echo "three\n";
 }
 
-one();
-var_dump(fb_rename_function("one", "two"));
-two();
-var_dump(fb_rename_function("three", "one"));
-one();
+abstract final class MyMicrotimeStatics {
+  public static $x = 0.0;
+}
 
 // Try it with a builtin, too.
 
-function my_microtime(bool $foob = false) {
-  static $x = 0.0;
+function my_microtime(bool $foob = false) :mixed{
   echo "ca\$h m0n3y\n";
-  $x += 1.0;
+  MyMicrotimeStatics::$x += 1.0;
   if (false) {
-    return $x;
+    return MyMicrotimeStatics::$x;
   }
-  return (string)$x;
+  return (string)MyMicrotimeStatics::$x;
 }
 
-var_dump(fb_rename_function('microtime', '__dont_call_microtime'));
-var_dump(fb_rename_function('my_microtime', 'microtime'));
-echo microtime(true) . "\n";
+function my_foo() :mixed{}
 
-function my_foo() {}
-
-function bar() {
+function bar() :mixed{
   $orig = "foo";
   $new = "my_$orig";
   var_dump(fb_rename_function($new, "foo"));
 }
+<<__EntryPoint>>
+function main_entry(): void {
 
-bar();
+  one();
+  var_dump(fb_rename_function("one", "two"));
+  two();
+  var_dump(fb_rename_function("three", "one"));
+  one();
+
+  var_dump(fb_rename_function('microtime', '__dont_call_microtime'));
+  var_dump(fb_rename_function('my_microtime', 'microtime'));
+  echo microtime(true) . "\n";
+
+  bar();
+}

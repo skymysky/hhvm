@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 class C {
   public ?D $prop;
   public function foo(): D {
@@ -39,10 +39,10 @@ function test4(C $c): void {
 }
 function test5(?C $c): int {
   $x = null;
-  $c?->yar($x = 123);
+  $x = 123; $c?->yar($x);
   return $x;
 }
-function main() {
+function main() :mixed{
   $c = new C();
   echo "test1:\n";
   var_dump(test1($c));
@@ -63,4 +63,8 @@ function main() {
   var_dump(test5(null));
   echo "Done\n";
 }
+
+<<__EntryPoint>>
+function main_nullsafe_call_1() :mixed{
 main();
+}

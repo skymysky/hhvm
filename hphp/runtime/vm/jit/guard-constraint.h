@@ -14,8 +14,7 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_JIT_GUARD_CONSTRAINT_H_
-#define incl_HPHP_JIT_GUARD_CONSTRAINT_H_
+#pragma once
 
 #include "hphp/runtime/base/datatype.h"
 #include "hphp/runtime/vm/jit/type.h"
@@ -72,7 +71,9 @@ struct GuardConstraint {
   /////////////////////////////////////////////////////////////////////////////
   // Specialization.
 
-  static constexpr uint8_t kWantArrayKind = 0x1;
+  static constexpr uint8_t kWantArrayLayout = 0x1;
+  static_assert(alignof(Class*) > kWantArrayLayout,
+                "Spec bits must fit in lower bits of pointers");
 
   /*
    * Is this GuardConstraint for a specialized type?
@@ -80,12 +81,12 @@ struct GuardConstraint {
   bool isSpecialized() const;
 
   /*
-   * Set or check the kWantArrayKind bit in `m_specialized'.
+   * Constrain this type to a specialized array-like subtype.
    *
    * @requires: isSpecialized()
    */
-  GuardConstraint& setWantArrayKind();
-  bool wantArrayKind() const;
+  GuardConstraint& setArrayLayoutSensitive();
+  bool isArrayLayoutSensitive() const;
 
   /*
    * Set, check, or return the specialized Class.
@@ -99,7 +100,6 @@ struct GuardConstraint {
   GuardConstraint& setDesiredClass(const Class* cls);
   bool wantClass() const;
   const Class* desiredClass() const;
-
 
   /////////////////////////////////////////////////////////////////////////////
   // Data members.
@@ -121,7 +121,7 @@ struct GuardConstraint {
 
 private:
   /*
-   * `m_specialized' either holds a Class* or a 1 in its low bit, indicating
+   * `m_specialized' holds a Class*, or a 1 in its low bit, indicating
    * that for a DataTypeSpecialized constraint, we require the specified class
    * or an array kind, respectively.
    */
@@ -149,10 +149,9 @@ bool typeFitsConstraint(Type t, GuardConstraint gc);
  *
  * If constrainValue is called with (t24, DataTypeSpecialized), relaxConstraint
  * will be called with (DataTypeSpecialized, Obj<C>|InitNull, Obj). After a few
- * iterations it will determine that constraining Obj with
- * DataTypeBoxAndCountness will still allow the result type of the AssertType
- * instruction to satisfy DataTypeSpecialized, because relaxType(Obj,
- * DataTypeBoxAndCountness) == Obj.
+ * iterations it will determine that constraining Obj to DataTypeCountnessInit
+ * will still allow the result type of the AssertType instruction to satisfy
+ * DataTypeSpecialized, because relaxType(Obj, DataTypeCountnessInit) == Obj.
  */
 GuardConstraint relaxConstraint(GuardConstraint origGc,
                                 Type knownType, Type toRelax);
@@ -167,5 +166,3 @@ GuardConstraint applyConstraint(GuardConstraint origGc, GuardConstraint newGc);
 }}
 
 #include "hphp/runtime/vm/jit/guard-constraint-inl.h"
-
-#endif

@@ -6,6 +6,6 @@ trait X {
   }
 }
 
-function test($x): bool {
-  return $x instanceof X;
+function test(mixed $x): bool {
+  return $x is X;
 }

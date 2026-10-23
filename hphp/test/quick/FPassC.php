@@ -1,9 +1,13 @@
 <?hh
-function f(&$a) { $a++; print $a; }
-function g($a) { $a++; print $a; }
-$a = 'f';
+function f(inout $a) :mixed{ $a++; print $a; }
+function g($a) :mixed{ $a++; print $a; }
+<<__EntryPoint>> function main(): void {
+$a = f<>;
 if (0) $a(3);
-if (0) f(4);
+$val4 = 4;
+if (0) f(inout $val4);
 g(5);
 print "\n";
-f(3);
+$val3 = 3;
+f(inout $val3);
+}

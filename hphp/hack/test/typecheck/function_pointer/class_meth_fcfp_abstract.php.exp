@@ -1,0 +1,16 @@
+error: Typing[4391] Cannot create a function pointer to `Foo::bar`; it is abstract [1]
+-> Declaration is here [2]
+
+class_meth_fcfp_abstract.php:8:13
+2 | 
+3 | abstract class Foo {
+4 |   public abstract static function bar(): void;
+  |                                   ^^^ [2]
+5 | }
+6 | 
+7 | function test(): void {
+8 |   $_ = Foo::bar<>;
+  |             ^^^ [1]
+9 | }
+
+1 error found

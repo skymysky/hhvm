@@ -1,142 +1,76 @@
-<?php
+<?hh
 
-function handler($name, $obj, $args, $data, &$done) {
+<<__DynamicallyCallable>> function handler($name, $obj, inout $args) :mixed{
   echo "----HANDLER----\n";
-  var_dump($name, $obj, $args, $data, $done);
+  var_dump($name, $obj, $args);
   echo "---------------\n";
   throw new Exception;
 }
 
-function passthrough_handler($name, $obj, $args, $data, &$done) {
+<<__DynamicallyCallable>> function another_handler($name, $obj, inout $args) :mixed{
   echo "----HANDLER----\n";
-  var_dump($name, $obj, $args, $data, $done);
-  $done = false;
+  var_dump($name, $obj, $args);
   echo "---------------\n";
   throw new Exception;
 }
 
-class MagicCall {
-  public function __call($name, $args) {
-    echo "magic call! ";
-    var_dump($name, $args);
-    echo "\n";
-    throw new Exception;
-  }
-}
-
-function frap($arg) {
+function frap($arg) :mixed{
   echo "frap $arg\n";
 }
 
-// Intercept a function
-fb_intercept('frap', 'handler', 'data');
-try {
-  call_user_func('frap', 'callfunc');
-} catch (Exception $e) {
-  echo "caught call user func 1\n";
-}
-
-fb_intercept('frap', 'passthrough_handler');
-try {
-  call_user_func('frap', 'callfunc');
-} catch (Exception $e) {
-  echo "caught call user func 2\n";
-}
-
-// Replace with closure
-fb_intercept('frap', function () {
-                       echo "Closure! wooooo\n";
-                       throw new Exception;
-                     });
-try {
-  call_user_func("frap", 'claptrap');
-} catch (Exception $e) {
-  echo "caught closure 1\n";
-}
-
-// Replace with __call-having object
-$mc = new MagicCall();
-fb_intercept('frap', array($mc, 'i_dont_exist'));
-try {
-  call_user_func("frap", 'claptrap');
-} catch (Exception $e) {
-  echo "caught magic call 1\n";
-}
-
 class Blark {
-  public static function sfrap() {
+  public static function sfrap() :mixed{
     echo "static frap\n";
   }
-  public function frap() {
+  public function frap() :mixed{
     echo "non-static frap\n";
   }
 }
-$mc = new MagicCall();
+<<__EntryPoint>>
+function main_entry(): void {
 
-// Intercept static method
-fb_intercept('Blark::sfrap', 'handler');
-try {
-  call_user_func(array('Blark', 'sfrap'));
-} catch (Exception $e) {
-  echo "caught static call 1\n";
-}
+  // Intercept a function
+  fb_intercept2('frap', HH\dynamic_fun('handler'));
+  try {
+    call_user_func(frap<>, 'callfunc');
+  } catch (Exception $e) {
+    echo "caught call user func 1\n";
+  }
 
-fb_intercept('Blark::sfrap', 'passthrough_handler');
-try {
-  call_user_func(array('Blark', 'sfrap'));
-} catch (Exception $e) {
-  echo "caught static call 2\n";
-}
+  // Replace with closure
+  fb_intercept2('frap', ($_1, $_2, inout $_3) ==> {
+    echo "Closure! wooooo\n";
+    throw new Exception;
+  });
+  try {
+    call_user_func(frap<>, 'claptrap');
+  } catch (Exception $e) {
+    echo "caught closure 1\n";
+  }
 
-fb_intercept('Blark::sfrap', array($mc, 'i_dont_exist_either'));
-try {
-  call_user_func(array('Blark', 'sfrap'));
-} catch (Exception $e) {
-  echo "caught magic call 2\n";
-}
+  // Intercept static method
+  fb_intercept2('Blark::sfrap', HH\dynamic_fun('handler'));
+  try {
+    call_user_func(vec['Blark', 'sfrap']);
+  } catch (Exception $e) {
+    echo "caught static call 1\n";
+  }
 
-// Intercept non-static method
-$b = new Blark();
-fb_intercept('Blark::frap', 'handler');
-try {
-  call_user_func(array($b, 'frap'));
-} catch (Exception $e) {
-  echo "caught non-static call 1\n";
-}
+  // Intercept non-static method
+  $b = new Blark();
+  fb_intercept2('Blark::frap', HH\dynamic_fun('handler'));
+  try {
+    call_user_func(vec[$b, 'frap']);
+  } catch (Exception $e) {
+    echo "caught non-static call 1\n";
+  }
 
-fb_intercept('Blark::frap', 'passthrough_handler');
-try {
-  call_user_func(array($b, 'frap'));
-} catch (Exception $e) {
-  echo "caught non-static call 2\n";
-}
-
-fb_intercept('Blark::frap', array($mc, 'i_dont_exist_either'));
-try {
-  call_user_func(array($b, 'frap'));
-} catch (Exception $e) {
-  echo "caught magic call 3\n";
-}
-
-// MULTI-INTERCEPT!
-fb_intercept('frap', 'handler');
-fb_intercept('handler', 'passthrough_handler');
-try {
-  call_user_func("frap", 'claptrap');
-} catch (Exception $e) {
-  echo "caught double intercept 1\n";
-}
-
-// Intercept __call
-fb_intercept('MagicCall::__call', 'handler');
-try {
-  call_user_func(array($mc, "blark"), 'hi');
-} catch (Exception $e) {
-  echo "caught __call 1\n";
-}
-fb_intercept('MagicCall::__call', 'passthrough_handler');
-try {
-  call_user_func(array($mc, "blark"), 'ho');
-} catch (Exception $e) {
-  echo "caught __call 2\n";
+  // MULTI-INTERCEPT!
+  fb_intercept2('frap', HH\dynamic_fun('handler'));
+  fb_intercept2('handler', HH\dynamic_fun('another_handler'));
+  try {
+    call_user_func(frap<>, 'claptrap');
+  } catch (Exception $e) {
+    echo "caught double intercept 1\n";
+  }
 }

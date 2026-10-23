@@ -1,4 +1,4 @@
-<?hh // decl /* -*- php -*- */
+<?hh /* -*- php -*- */
 /**
  * Copyright (c) 2014, Facebook, Inc.
  * All rights reserved.
@@ -8,67 +8,97 @@
  *
  */
 
-const int ZLIB_ENCODING_RAW = 0;
-const int ZLIB_ENCODING_GZIP = 0;
-const int ZLIB_ENCODING_DEFLATE = 0;
-const int ZLIB_ENCODING_ANY = 0;
+const int ZLIB_ENCODING_RAW;
+const int ZLIB_ENCODING_GZIP;
+const int ZLIB_ENCODING_DEFLATE;
+const int ZLIB_ENCODING_ANY;
 
-const int FORCE_GZIP = 0;
-const int FORCE_DEFLATE = 0;
+const int FORCE_GZIP;
+const int FORCE_DEFLATE;
 
 <<__PHPStdLib>>
-function gzclose($zp);
-<<__PHPStdLib, __Rx>>
-function gzcompress(string $data, int $level = -1): mixed;
-<<__PHPStdLib, __Rx>>
-function gzdecode(string $data, int $length = PHP_INT_MAX): mixed;
-<<__PHPStdLib, __Rx>>
-function gzdeflate(string $data, int $level = -1): mixed;
-<<__PHPStdLib, __Rx>>
-function gzencode(string $data, int $level = -1): mixed;
+function gzclose(resource $zp): bool;
 <<__PHPStdLib>>
-function gzeof($zp);
+function gzcompress(string $data, int $level = -1)[]: mixed;
 <<__PHPStdLib>>
-function gzfile($filename, $use_include_path = false);
+function gzdecode(string $data, int $length = PHP_INT_MAX)[]: mixed;
 <<__PHPStdLib>>
-function gzgetc($zp);
+function gzdeflate(string $data, int $level = -1)[]: mixed;
 <<__PHPStdLib>>
-function gzgets($zp, $length = 1024);
+function gzencode(string $data, int $level = -1)[]: mixed;
 <<__PHPStdLib>>
-function gzgetss($zp, $length = 0, $allowable_tags = null);
-<<__PHPStdLib, __Rx>>
-function gzinflate(string $data, int $length = 0): mixed;
+function gzeof(resource $zp): bool;
 <<__PHPStdLib>>
-function gzopen($filename, $mode, $use_include_path = false);
+function gzfile(
+  string $filename,
+  int $use_include_path = 0,
+): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function gzpassthru($zp);
+function gzgetc(resource $zp): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function gzputs($zp, $str, $length = 0);
+function gzgets(resource $zp, int $length = 1024): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function gzread($zp, $length = 0);
+function gzgetss(
+  resource $zp,
+  int $length = 0,
+  string $allowable_tags = "",
+): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function gzrewind($zp);
+function gzinflate(string $data, int $length = 0)[]: mixed;
 <<__PHPStdLib>>
-function gzseek($zp, $offset, $whence = SEEK_SET);
+function gzopen(
+  string $filename,
+  string $mode,
+  int $use_include_path = 0,
+): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function gztell($zp);
+function gzpassthru(resource $zp): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function gzuncompress(string $data, int $length = 0): mixed;
+function gzputs(
+  resource $zp,
+  string $str,
+  int $length = 0,
+): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function gzwrite($zp, $str, $length = 0);
-<<__PHPStdLib, __Rx>>
-function nzcompress($uncompressed);
-<<__PHPStdLib, __Rx>>
-function nzuncompress($compressed);
+function gzread(resource $zp, int $length = 0): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function qlzcompress($data, $level = 1);
+function gzrewind(resource $zp): bool;
+<<__PHPStdLib>>
+function gzseek(
+  resource $zp,
+  int $offset,
+  int $whence = SEEK_SET,
+): HH\FIXME\MISSING_RETURN_TYPE;
+<<__PHPStdLib>>
+function gztell(resource $zp): HH\FIXME\MISSING_RETURN_TYPE;
+<<__PHPStdLib>>
+function gzuncompress(string $data, int $length = 0)[]: mixed;
+<<__PHPStdLib>>
+function gzwrite(
+  resource $zp,
+  string $str,
+  int $length = 0,
+): HH\FIXME\MISSING_RETURN_TYPE;
+<<__PHPStdLib>>
+function nzcompress(string $uncompressed)[]: HH\FIXME\MISSING_RETURN_TYPE;
+<<__PHPStdLib>>
+function nzuncompress(string $compressed)[]: HH\FIXME\MISSING_RETURN_TYPE;
+<<__PHPStdLib>>
+function qlzcompress(
+  string $data,
+  int $level = 1,
+): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
 function qlzuncompress(string $data, int $level = 1): mixed;
 <<__PHPStdLib>>
-function readgzfile($filename, $use_include_path = false);
-<<__PHPStdLib, __Rx>>
-function zlib_decode(string $data, int $max_len = 0): mixed; // string or false
-<<__PHPStdLib, __Rx>>
-function zlib_encode(string $data, int $encoding, int $level = -1): mixed;
+function readgzfile(
+  string $filename,
+  int $use_include_path = 0,
+): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function zlib_get_coding_type();
+function zlib_decode(
+  string $data,
+  int $max_len = 0,
+)[]: mixed; // string or false
+<<__PHPStdLib>>
+function zlib_encode(string $data, int $encoding, int $level = -1)[]: mixed;

@@ -15,8 +15,7 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_EXT_DOMDOCUMENT_H_
-#define incl_HPHP_EXT_DOMDOCUMENT_H_
+#pragma once
 
 #include "hphp/runtime/base/array-iterator.h"
 #include "hphp/runtime/ext/extension.h"
@@ -31,9 +30,6 @@
 namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
 
-Variant HHVM_FUNCTION(dom_import_simplexml,
-                      const Object& node);
-
 Variant php_dom_create_object(xmlNodePtr obj, req::ptr<XMLDocumentData> doc);
 
 Object newDOMDocument(bool construct = true);
@@ -41,11 +37,10 @@ Object newDOMDocument(bool construct = true);
 ///////////////////////////////////////////////////////////////////////////////
 // class DOMNode
 
-struct DOMNode {
+struct DOMNode : SystemLib::ClassLoader<"DOMNode"> {
   ~DOMNode() {
-    if (m_node) {
-      assertx(m_node->getCache() &&
-             Native::data<DOMNode>(m_node->getCache()) == this);
+    if (m_node && m_node->getCache()) {
+      assertx(Native::data<DOMNode>(m_node->getCache()) == this);
       m_node->clearCache();
     }
   }
@@ -53,7 +48,9 @@ struct DOMNode {
   // for __clone
   DOMNode& operator=(const DOMNode& copy);
 
-  req::ptr<XMLDocumentData> doc() const { return m_node->doc(); }
+  req::ptr<XMLDocumentData> doc() const {
+    return m_node ? m_node->doc() : nullptr;
+  }
   XMLNode node() const { return m_node; }
   xmlNodePtr nodep() const {
     return m_node ? m_node->nodep() : nullptr;
@@ -67,7 +64,7 @@ struct DOMNode {
   void setNode(XMLNode n) {
     if (m_node) {
       assertx(m_node->getCache() &&
-             Native::data<DOMNode>(m_node->getCache()) == this);
+              Native::data<DOMNode>(m_node->getCache()) == this);
       m_node->clearCache();
     }
 
@@ -90,7 +87,10 @@ Variant save_html_or_xml(DOMNode* obj, bool as_xml,
 ///////////////////////////////////////////////////////////////////////////////
 // class DOMElement
 
-struct DOMElement : DOMNode {
+struct DOMElement : DOMNode, SystemLib::ClassLoader<"DOMElement"> {
+  using SystemLib::ClassLoader<"DOMElement">::classof;
+  using SystemLib::ClassLoader<"DOMElement">::className;
+
   // Allow serialization, but no native data is actually serialized.
   Variant sleep() const { return init_null(); }
   void wakeup(const Variant&, ObjectData*) {}
@@ -111,15 +111,15 @@ struct DOMIterable {
   Object m_baseobj;
   int m_nodetype;
   xmlHashTable* m_ht {nullptr};
-  String m_local;
-  String m_ns;
+  OptString m_local;
+  OptString m_ns;
   Array m_baseobjptr;
 };
 
 ///////////////////////////////////////////////////////////////////////////////
 // class DOMNodeIterator
 
-struct DOMNodeIterator {
+struct DOMNodeIterator : SystemLib::ClassLoader<"DOMNodeIterator"> {
   void reset_iterator();
   void set_iterator(ObjectData* o, DOMIterable* objmap);
   void setKeyIsNamed() { m_keyIsNamed = true; }
@@ -135,7 +135,7 @@ struct DOMNodeIterator {
 ///////////////////////////////////////////////////////////////////////////////
 // class DOMXPath
 
-struct DOMXPath {
+struct DOMXPath : SystemLib::ClassLoader<"DOMXPath"> {
   ~DOMXPath() { sweep(); }
   void sweep();
   xmlXPathContextPtr m_node {nullptr};
@@ -148,4 +148,3 @@ struct DOMXPath {
 ///////////////////////////////////////////////////////////////////////////////
 }
 
-#endif // incl_HPHP_EXT_DOMDOCUMENT_H_

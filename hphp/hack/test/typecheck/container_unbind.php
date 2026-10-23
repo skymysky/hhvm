@@ -1,12 +1,12 @@
-<?hh //strict
+<?hh
 
 class MyContainer<Tv> {
   public function setPair(Pair<string, Tv> $_): void {}
   public function setTuple((string, Tv) $_): void {}
   public function setVector(Vector<Tv> $_): void {}
   public function setMap(Map<string, Tv> $_): void {}
-  public function setMapArray(array<string, Tv> $_): void {}
-  public function setVectorArray(array<Tv> $_): void {}
+  public function setMapArray(darray<string, Tv> $_): void {}
+  public function setVectorArray(varray<Tv> $_): void {}
   public function setShape(shape('x' => Tv) $_): void {}
 }
 
@@ -71,8 +71,8 @@ function testMapArray(string $key): void {
 
   $m = new MyContainer();
 
-  $m->setMapArray(array($key => $x[0]));
-  $m->setMapArray(array($key => $y[0]));
+  $m->setMapArray(dict[$key => $x[0]]);
+  $m->setMapArray(dict[$key => $y[0]]);
 
   take_int($x[0]);
 }
@@ -83,8 +83,8 @@ function testVectorArray(): void {
 
   $m = new MyContainer();
 
-  $m->setVectorArray(array($x[0]));
-  $m->setVectorArray(array($y[0]));
+  $m->setVectorArray(vec[$x[0]]);
+  $m->setVectorArray(vec[$y[0]]);
 
   take_int($x[0]);
 }
@@ -107,8 +107,8 @@ function testShapeLikeArray(): void {
 
   $m = new MyContainer();
 
-  $m->setMapArray(array('x' => $x[0]));
-  $m->setMapArray(array('x' => $y[0]));
+  $m->setMapArray(dict['x' => $x[0]]);
+  $m->setMapArray(dict['x' => $y[0]]);
 
   take_int($x[0]);
 }

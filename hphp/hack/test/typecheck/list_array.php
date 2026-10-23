@@ -10,16 +10,11 @@
  */
 
 function test(): int {
-  list($x, $y) = array(1, 2);
+  list($x, $y) = vec[1, 2];
   return $x;
 }
 
-function test2(array $x): int {
-  list($x, $y) = $x;
-  return $x;
-}
-
-function test3(array<int> $x): int {
+function test3(varray<int> $x): int {
   list($x, $y) = $x;
   return $x;
 }

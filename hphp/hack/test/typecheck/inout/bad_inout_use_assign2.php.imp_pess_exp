@@ -1,0 +1,17 @@
+error: Typing[4337] Invalid assignment to an `inout` parameter [1]
+-> Expected `string` [2]
+-> But got `arraykey` [3]
+
+bad_inout_use_assign2.php:4:11
+1 | <?hh
+2 | 
+3 | function f(inout string $s): void {
+  |                         ^^ [2]
+4 |   g(inout $s);
+  |           ^^ [1]
+5 | }
+6 | 
+7 | function g(inout arraykey $a): void {}
+  |                  ^^^^^^^^ [3]
+
+1 error found

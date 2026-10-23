@@ -1,0 +1,9 @@
+error: Naming[2049] Unbound name: `:div` [1]
+
+nullable_xhp_typehint.php:3:18
+1 | <?hh
+2 | 
+3 | type MaybeDiv = ?:div;
+  |                  ^^^^ [1]
+
+1 error found

@@ -1,42 +1,26 @@
-<?php
+<?hh
 
-function f($i) {
+function f($i) :mixed{
   $j = 1;
   var_dump($j);
   if ($i == 1) {
-    class p {
-      public $data1;
-    }
-    class c extends p {
-    }
-    function r() {
- echo "r1\n";
- }
-  }
- else {
-    class p {
-      public $data2;
-    }
-    class c extends p {
-    }
-    function r() {
- echo "r2\n";
- }
+    include '1467-1.inc';
+  } else {
+    include '1467-2.inc';
   }
 }
-if ($i == 1) {
-  class p {
-    public $data1;
+<<__EntryPoint>>
+function entrypoint_1467(): void {
+  try {
+    if ($i == 1) {
+      include '1467-3.inc';
+    }
+  } catch (UndefinedVariableException $e) {
+    var_dump($e->getMessage());
   }
-  class c extends p {
-  }
-  function r() {
- echo "r3\n";
- }
+  f(1);
+  $obj = new p();
+  var_dump($obj);
+  $obj = new c();
+  var_dump($obj);
 }
-f(1);
-$obj = new p();
-var_dump($obj);
-$obj = new c();
-var_dump($obj);
-r();

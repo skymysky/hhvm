@@ -1,4 +1,23 @@
-File "conditional.php", line 5, characters 10-11:
-The variable $x is defined (Naming[2007])
-File "conditional.php", line 4, characters 14-15:
-But in a different scope
+error: Parsing[1002] Assignments can no longer be used as expressions. Pull the assignment out into a separate statement. [1]
+
+conditional.php:4:14
+2 | 
+3 | function foo(bool $b): int {
+4 |   $y = $b ? ($x = 42) : -1;
+  |              ^^ [1]
+5 |   return $x;
+6 | }
+
+error: Naming[2050] Variable `$x` is undefined, or not always defined. [1]
+-> Did you mean `$y` instead? [2]
+
+conditional.php:5:10
+2 | 
+3 | function foo(bool $b): int {
+4 |   $y = $b ? ($x = 42) : -1;
+  |   ^^^^^^^^^^^^^^^^^^^^^^^^ [2]
+5 |   return $x;
+  |          ^^ [1]
+6 | }
+
+2 errors found

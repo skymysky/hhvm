@@ -22,7 +22,11 @@
 #include "hphp/runtime/vm/hhbc.h"
 #include "hphp/runtime/vm/debug/dwarf.h"
 
-namespace HPHP { namespace Debug {
+namespace HPHP::jit {
+struct CGMeta;
+}
+
+namespace HPHP::Debug {
 
 //////////////////////////////////////////////////////////////////////
 
@@ -30,20 +34,14 @@ struct DebugInfo {
   DebugInfo();
   ~DebugInfo();
 
-  void recordTracelet(TCRange range,
-                      const Func* func,
-                      PC instr, bool exit,
-                      bool inPrologue);
+  void recordTracelet(TCRange range, SrcKey sk);
   void recordStub(TCRange range, const std::string&);
-  void recordPerfMap(TCRange range, SrcKey sk, const Func* func, bool exit,
-                     bool inPrologue, std::string stub = "");
-  void recordBCInstr(TCRange range, uint32_t op);
+  void recordPerfMap(TCRange range, SrcKey sk, std::string stub = "",
+                     jit::CGMeta* meta = nullptr);
+  void recordBCInstr(TCRange range, uint32_t op, jit::CGMeta& meta);
 
   static void recordDataMap(const void* from, const void* to,
                             const std::string& desc);
-  void recordRelocMap(void* from, void* to, const std::string& desc);
-  FILE* getRelocMap() const { return m_relocMap; }
-  const std::string& getRelocMapName() const { return m_relocMapName; }
 
   void debugSync();
   static DebugInfo* Get();
@@ -51,6 +49,7 @@ struct DebugInfo {
     pidMapOverlayStart = from;
     pidMapOverlayEnd = to;
   }
+  std::string perfMapName() const { return m_perfMapName; }
 
  private:
   void recordPerfJitTracelet(TCRange range,
@@ -63,6 +62,7 @@ struct DebugInfo {
   int perfJitDumpTrace(const void* startAddr,
                        const unsigned int size,
                        const char* symName);
+  void writeToPidMap(uint64_t start, uint64_t size, const char* name);
 
   /* maintain separate dwarf info for a and acold, so that we
    * don't emit dwarf info for the two in the same ELF file.
@@ -77,6 +77,7 @@ struct DebugInfo {
    */
   FILE* m_perfMap{nullptr};
   std::string m_perfMapName;
+  bool m_perfMapEnabled{false};
 
   /*
    * jitdump file will store the generated code in /tmp/jit-<pid>.dump
@@ -99,13 +100,6 @@ struct DebugInfo {
   FILE* m_dataMap{nullptr};
   std::string m_dataMapName;
 
-  /*
-   * Similar to perfMap, but with enough information about each
-   * translation to relocate it.
-   */
-  FILE* m_relocMap{nullptr};
-  std::string m_relocMapName;
-
   static void* pidMapOverlayStart;
   static void* pidMapOverlayEnd;
 };
@@ -120,12 +114,11 @@ void destroyDebugInfo();
  * Gets the fake symbol name we want to use for a php function.
  */
 std::string lookupFunction(const Func* func,
-                           bool exit,
                            bool inPrologue,
                            bool pseudoWithFileName);
 
 //////////////////////////////////////////////////////////////////////
 
-}}
+}
 
 #endif

@@ -1,0 +1,319 @@
+(*
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the "hack" directory of this source tree.
+ *
+ *)
+
+open Aast
+module SN = Naming_special_names
+
+let lookup_package env p =
+  let info =
+    Provider_context.get_tcopt env.Nast_check_env.ctx
+    |> Typechecker_options.package_info
+  in
+  Package_info.get_package info p
+
+(** Get the current package information from the environment.
+    Returns (package option, package_name, package_pos, assignment_kind) *)
+let get_current_package_info env current_pkg_membership =
+  match current_pkg_membership with
+  | Aast_defs.PackageConfigAssignment pkg_name ->
+    let pkg = lookup_package env pkg_name in
+    let pos =
+      match pkg with
+      | Some p -> Package.get_package_pos p
+      | None -> Pos.none
+    in
+    (pkg, pkg_name, pos, "entry in the package config")
+  | Aast_defs.PackageOverride (pkg_pos, pkg_name) ->
+    let pkg = lookup_package env pkg_name in
+    (pkg, pkg_name, pkg_pos, "package override")
+
+(** Check package strict inclusion and emit diagnostics.
+    [~emit_error] is called with the required package's [def_pos] on failure. *)
+let check_package_strict_inclusion
+    ~required_package ~current_package ~emit_error =
+  match Package.relationship required_package current_package with
+  | Package.Includes -> ()
+  | Package.Equal
+  | Package.Unrelated
+  | Package.Soft_includes ->
+    emit_error ~def_pos:(Package.get_package_pos required_package)
+
+let override_not_allowed ~pos ~pkg_name ~attr p =
+  Diagnostics.add_diagnostic
+    Nast_check_error.(
+      to_user_diagnostic
+      @@ Override_not_allowed_for_package
+           {
+             pos;
+             pkg = pkg_name;
+             def_pos = Pos_or_decl.of_raw_pos (Package.get_package_pos p);
+             attr;
+           })
+
+let unsupported_construct ~pos ~pkg_name ~construct p =
+  Diagnostics.add_diagnostic
+    Nast_check_error.(
+      to_user_diagnostic
+      @@ Observation_not_allowed_for_package
+           {
+             pos;
+             pkg = pkg_name;
+             def_pos = Pos_or_decl.of_raw_pos (Package.get_package_pos p);
+             construct;
+           })
+
+(* Emits an error and returns [true] if [required_pkg] has not opted in to being
+   checked for, so the caller skips the ordinary strict-inclusion check. Keyed on
+   the checked package, so no [__PackageOverride] on the caller reaches around
+   it. [construct] selects the message. *)
+let error_if_not_checkable ~pos ~pkg_name ~construct required_pkg =
+  match required_pkg with
+  | Some p when not p.Package.allow_deployed_packages_checking ->
+    unsupported_construct ~pos ~pkg_name ~construct p;
+    true
+  | _ -> false
+
+let get_path_package env pos =
+  let path = Relative_path.suffix (Pos.filename pos) in
+  Package_provider.get_package_for_file env.Nast_check_env.ctx ~path
+
+let require_package_strict_inclusion env attr =
+  match
+    Naming_attributes.find2
+      SN.UserAttributes.uaRequirePackage
+      SN.UserAttributes.uaSoftRequirePackage
+      attr
+  with
+  | Some
+      {
+        (* Match the leading package-name argument and ignore any trailing
+           arguments, e.g. __SoftRequirePackage's optional integer sampling rate,
+           so those forms don't slip past the check. *)
+        ua_params = (_, _, String required_pkg_name) :: _;
+        ua_name = (name_pos, name);
+      } ->
+    let required_pkg = lookup_package env required_pkg_name in
+    if
+      error_if_not_checkable
+        ~pos:name_pos
+        ~pkg_name:required_pkg_name
+        ~construct:(Nast_check_error.Require_package_attribute name)
+        required_pkg
+    then
+      ()
+    else (
+      match (required_pkg, env.Nast_check_env.package) with
+      | (None, _) when String.equal name SN.UserAttributes.uaSoftRequirePackage
+        ->
+        (* Emit naming error for unbound package *)
+        let custom_err_config =
+          Provider_context.get_tcopt env.Nast_check_env.ctx
+          |> Typechecker_options.custom_error_config
+        in
+        Diagnostics.add_diagnostic
+          (Naming_error_utils.to_user_diagnostic
+             (Naming_error.Unbound_name
+                {
+                  pos = name_pos;
+                  name = required_pkg_name;
+                  kind = Name_context.PackageNamespace;
+                })
+             custom_err_config)
+      | (Some required_package, Some current_pkg_membership) ->
+        let ( current_pkg,
+              current_pkg_name,
+              current_pkg_pos,
+              current_package_assignment_kind ) =
+          get_current_package_info env current_pkg_membership
+        in
+        (match current_pkg with
+        | Some current_package ->
+          check_package_strict_inclusion
+            ~required_package
+            ~current_package
+            ~emit_error:(fun ~def_pos ->
+              Diagnostics.add_diagnostic
+                Nast_check_error.(
+                  to_user_diagnostic
+                  @@ Require_package_strict_inclusion
+                       {
+                         required_pos = name_pos;
+                         required = required_pkg_name;
+                         def_pos = Pos_or_decl.of_raw_pos def_pos;
+                         current = current_pkg_name;
+                         current_pos = current_pkg_pos;
+                         attribute_name = name;
+                         current_package_assignment_kind;
+                       }))
+        | None -> ())
+      | _ -> ()
+    )
+  | _ -> ()
+
+let package_expression_strict_inclusion env (pkg_pos, pkg_name) =
+  let required_pkg = lookup_package env pkg_name in
+  if
+    error_if_not_checkable
+      ~pos:pkg_pos
+      ~pkg_name
+      ~construct:Nast_check_error.Package_expression
+      required_pkg
+  then
+    ()
+  else
+    match (required_pkg, env.Nast_check_env.package) with
+    | (Some required_package, Some current_pkg_membership) ->
+      let ( current_pkg,
+            current_pkg_name,
+            current_pkg_pos,
+            current_package_assignment_kind ) =
+        get_current_package_info env current_pkg_membership
+      in
+      (match current_pkg with
+      | Some current_package ->
+        check_package_strict_inclusion
+          ~required_package
+          ~current_package
+          ~emit_error:(fun ~def_pos ->
+            Diagnostics.add_diagnostic
+              Nast_check_error.(
+                to_user_diagnostic
+                @@ Package_expression_strict_inclusion
+                     {
+                       pkg_pos;
+                       pkg = pkg_name;
+                       def_pos = Pos_or_decl.of_raw_pos def_pos;
+                       current = current_pkg_name;
+                       current_pos = current_pkg_pos;
+                       current_package_assignment_kind;
+                     }))
+      | None -> ())
+    | _ -> ()
+
+(* The __PackageOverride file attribute relocates every symbol in the file into
+   [target]. An override is only meaningful when the file's path-derived package
+   [P] includes [target]: i.e. you may only override a file down into a package
+   that its own package already depends on (e.g. an `intern` file overriding into
+   `prod`, where `intern` includes `prod`). Every other target is rejected:
+   - Equal: the override targets the file's own package (a no-op).
+   - otherwise ([target] includes [P], or the two are unrelated): [P] does not
+     depend on [target], so the override cannot be meaningful (e.g. a `prod` file
+     overriding into `intern`, or into some unrelated package).
+   A soft-include is treated like an include (still a dependency of [P]). *)
+let package_override_check env ua =
+  match ua.ua_params with
+  | (_, _, String target_name) :: _ ->
+    (match lookup_package env target_name with
+    (* An unbound override target is reported by the naming pass. *)
+    | None -> ()
+    | Some target_package ->
+      (match get_path_package env (fst ua.ua_name) with
+      (* A file with no path-derived package uses the override to opt into one,
+         so there is no inclusion relationship to enforce. *)
+      | None -> ()
+      (* The file-level isolation check reports this once. *)
+      | Some path_package when path_package.Package.is_implicit -> ()
+      | Some path_package ->
+        (match Package.relationship path_package target_package with
+        (* [path_package] includes (or soft-includes) [target]: a valid demote
+           into a package the file's own package depends on. *)
+        | Package.Includes
+        | Package.Soft_includes ->
+          ()
+        | Package.Equal ->
+          Diagnostics.add_diagnostic
+            Nast_check_error.(
+              to_user_diagnostic
+              @@ Redundant_package_override
+                   {
+                     pos = fst ua.ua_name;
+                     pkg = Package.get_package_name path_package;
+                     def_pos =
+                       Pos_or_decl.of_raw_pos
+                         (Package.get_package_pos path_package);
+                   })
+        | Package.Unrelated ->
+          Diagnostics.add_diagnostic
+            Nast_check_error.(
+              to_user_diagnostic
+              @@ Package_override_target_not_included
+                   {
+                     override_pos = fst ua.ua_name;
+                     target = target_name;
+                     path_package = Package.get_package_name path_package;
+                     path_package_pos =
+                       Pos_or_decl.of_raw_pos
+                         (Package.get_package_pos path_package);
+                   }))))
+  | _ -> ()
+
+(* Refuses [__PackageOverride] when either the file's path-derived package or
+   the override target has strict isolation. Deliberately keyed on strict
+   isolation alone: a package that merely omits
+   [allow_deployed_packages_checking] must stay joinable by attribute, since
+   that is the only way into one declaring no [include_paths]. *)
+let package_override_strict_isolation env attr =
+  match attr with
+  | { ua_params = (_, _, String pkg_name) :: _; ua_name = (name_pos, name) }
+    when String.equal name SN.UserAttributes.uaPackageOverride ->
+    if
+      match get_path_package env name_pos with
+      | Some path_package when path_package.Package.enable_strict_isolation ->
+        override_not_allowed
+          ~pos:name_pos
+          ~pkg_name:(Package.get_package_name path_package)
+          ~attr:name
+          path_package;
+        true
+      | _ -> false
+    then
+      ()
+    else (
+      match lookup_package env pkg_name with
+      | Some p when p.Package.enable_strict_isolation ->
+        override_not_allowed ~pos:name_pos ~pkg_name ~attr:name p
+      | _ -> ()
+    )
+  | _ -> ()
+
+let handler =
+  object
+    inherit Nast_visitor.handler_base
+
+    (* A file attribute, so this hook rather than a per-definition one: the
+       latter reports once per definition, and misses files whose only
+       definitions are typedefs or constants. *)
+    method! at_user_attribute env attr =
+      package_override_strict_isolation env attr
+
+    method! at_fun_def env f =
+      require_package_strict_inclusion env f.fd_fun.f_user_attributes
+
+    method! at_method_ env m =
+      require_package_strict_inclusion env m.m_user_attributes
+
+    method! at_expr env (_, _, e) =
+      match e with
+      | Package id -> package_expression_strict_inclusion env id
+      | _ -> ()
+
+    (* Driven once per definition by [Nast_visitor]'s [on_file_attribute] (see
+       the rationale there); the error engine dedups the identical diagnostics.
+       A file whose only definitions are constants or top-level statements
+       carries no file-attribute copy and is therefore not checked -- the same
+       limitation as the existing __PackageOverride handling in
+       unbound_name_check. *)
+    method! at_file_attribute env fa =
+      match
+        Naming_attributes.find
+          SN.UserAttributes.uaPackageOverride
+          fa.fa_user_attributes
+      with
+      | Some ua -> package_override_check env ua
+      | None -> ()
+  end

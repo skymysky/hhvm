@@ -14,23 +14,31 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_VM_FUNC_H_
-#define incl_HPHP_VM_FUNC_H_
+#pragma once
 
-#include "hphp/runtime/base/array-iterator.h"
-#include "hphp/runtime/base/atomic-countable.h"
 #include "hphp/runtime/base/attr.h"
 #include "hphp/runtime/base/datatype.h"
+#include "hphp/runtime/base/lazy-string-data.h"
 #include "hphp/runtime/base/rds.h"
+#include "hphp/runtime/base/tracing.h"
 #include "hphp/runtime/base/type-string.h"
 #include "hphp/runtime/base/typed-value.h"
 #include "hphp/runtime/base/user-attributes.h"
 
+#include "hphp/runtime/vm/coeffects.h"
 #include "hphp/runtime/vm/indexed-string-map.h"
+#include "hphp/runtime/vm/iter.h"
+#include "hphp/runtime/vm/jit/types.h"
+#include "hphp/runtime/vm/generics-info.h"
+#include "hphp/runtime/vm/repo-file.h"
 #include "hphp/runtime/vm/type-constraint.h"
 #include "hphp/runtime/vm/unit.h"
 
+#include "hphp/util/atomic.h"
+#include "hphp/util/atomic-countable.h"
+#include "hphp/util/check-size.h"
 #include "hphp/util/fixed-vector.h"
+#include "hphp/util/ptr.h"
 
 #include <atomic>
 #include <utility>
@@ -41,11 +49,11 @@ namespace HPHP {
 
 struct ActRec;
 struct Class;
-struct NamedEntity;
+struct NamedFunc;
 struct PreClass;
 struct StringData;
 struct StructuredLogEntry;
-template <typename T> struct AtomicVector;
+template <typename T> struct AtomicPackedPtrVector;
 
 /*
  * Signature for native functions called by the hhvm using the hhvm
@@ -62,58 +70,37 @@ using ArFunction = TypedValue* (*)(ActRec* ar);
 struct NativeArgs; // never defined
 using NativeFunction = void(*)(NativeArgs*);
 
-/*
- * Vector of pairs (param index, offset of corresponding DV funclet).
- */
-using DVFuncletsVec = std::vector<std::pair<int, Offset>>;
+using StaticCoeffectNamesMap = CompactVector<PackedStringPtr>;
 
-/*
- * Call ABI for a function parameter: input only (normal behavior), by
- * reference (RefData), or inout (desugars to multiple return values).
- */
-enum class ParamMode : uint8_t {
-  In,
-  Ref,
-  InOut,
-};
+using InheritedRetTypesMap = folly::ConcurrentHashMap<FuncId::Int, TypeIntersectionConstraint>;
 
 ///////////////////////////////////////////////////////////////////////////////
-// EH and FPI tables.
+// EH table.
 
 /*
  * Exception handler table entry.
  */
 struct EHEnt {
-  enum class Type : uint8_t {
-    Catch,
-    Fault
-  };
-
-  Type m_type;
-  bool m_itRef;
   Offset m_base;
   Offset m_past;
   int m_iterId;
   int m_parentIndex;
   Offset m_handler;
   Offset m_end;
-};
 
-/*
- * Function parameter info region table entry.
- */
-struct FPIEnt {
-  Offset m_fpushOff;
-  Offset m_fpiEndOff;
-  Offset m_fpOff; // evaluation stack depth to current frame pointer
-  int m_parentIndex;
-  int m_fpiDepth;
+  EHEnt()
+    : m_base()
+    , m_past()
+    , m_iterId()
+    , m_parentIndex()
+    , m_handler()
+    , m_end()
+  {}
 
   template<class SerDe> void serde(SerDe& sd);
 };
 
 ///////////////////////////////////////////////////////////////////////////////
-
 /*
  * Metadata about a PHP function or method.
  *
@@ -135,6 +122,7 @@ struct FPIEnt {
  */
 struct Func final {
   friend struct FuncEmitter;
+  friend struct UnitEmitter;
 
   /////////////////////////////////////////////////////////////////////////////
   // Types.
@@ -143,53 +131,67 @@ struct Func final {
    * Parameter default value info.
    */
   struct ParamInfo {
+    enum class Flags {
+      InOut,      // Is this an `inout' parameter?
+      OutOnly,    // Is this an <<__OutOnly>> parameter? Implies InOut.
+      Readonly,   // Is this a `readonly` parameter?
+      Variadic,   // Is this a `t...' parameter or a `...t` parameter?
+      Optional,   // Marked as `optional` in an abstract method
+      Splat,      // Is this a `...t` parameter? (Not set for variadic)
+      Named,      // Is this a `named` parameter?
+    };
+
+    enum class BuiltinAbi : uint8_t {
+      Value,            // HPHP::Value, non-floating point
+      FPValue,          // HPHP::Value, floating point (might need a SIMD reg)
+      ValueByRef,       // reference to HPHP::Value
+      TypedValue,       // HPHP::TypedValue
+      TypedValueByRef,  // reference to HPHP::TypedValue (equivalent to Variant)
+      InOutByRef,       // reference to HPHP::Value or HPHP::TypedValue (inout)
+    };
+
     ParamInfo();
 
     bool hasDefaultValue() const;
     bool hasScalarDefaultValue() const;
+    bool hasTrivialDefaultValue() const;
+    bool isInOut() const;
+    bool isOutOnly() const;
+    bool isReadonly() const;
     bool isVariadic() const;
+    bool isSplat() const;
+    bool isOptional() const;
+    bool isNamed() const;
+    void setFlag(Flags flag);
 
     template<class SerDe> void serde(SerDe& sd);
 
-    // Typehint for builtins.
-    MaybeDataType builtinType{folly::none};
-    // True if this is a `...' parameter.
-    bool variadic{false};
-    // Does this use a NativeArg?
-    bool nativeArg{false};
-    // Is this an inout parameter?
-    bool inout{false};
+    // Flags as defined by the Flags enum.
+    uint8_t flags{0};
+    // If this is a builtin, how to pass the value to the C++ impl.
+    BuiltinAbi builtinAbi;
     // DV initializer funclet offset.
-    Offset funcletOff{InvalidAbsoluteOffset};
+    Offset funcletOff{kInvalidOffset};
     // Set to Uninit if there is no DV, or if there's a nonscalar DV.
     TypedValue defaultValue;
     // Eval-able PHP code.
-    LowStringPtr phpCode{nullptr};
+    LazyStringData phpCode;
     // User-annotated type.
-    LowStringPtr userType{nullptr};
-
-    TypeConstraint typeConstraint;
+    LazyStringData userType;
+    TypeIntersectionConstraint typeConstraints;
     UserAttributeMap userAttributes;
   };
 
-  /*
-   * Static variable info.
-   */
-  struct SVInfo {
-    template<class SerDe> void serde(SerDe& sd) { sd(name); }
-
-    LowStringPtr name;
-  };
-
-  using ParamInfoVec = FixedVector<ParamInfo>;
-  using SVInfoVec = FixedVector<SVInfo>;
-  using EHEntVec = FixedVector<EHEnt>;
-  using FPIEntVec = FixedVector<FPIEnt, VMAllocator<FPIEnt>>;
+  using ParamInfoVec = VMFixedVector<ParamInfo>;
+  using EHEntVec = VMFixedVector<EHEnt>;
+  using CoeffectRules = VMFixedVector<CoeffectRule>;
 
   /////////////////////////////////////////////////////////////////////////////
   // Creation and destruction.
 
   Func(Unit& unit, const StringData* name, Attr attrs);
+  Func(Unit& unit, const StringData* name, Attr attrs,
+    const StringData *methCallerCls, const StringData *methCallerMeth);
   ~Func();
 
   /*
@@ -216,9 +218,7 @@ struct Func final {
    * PreClasses.
    *
    * We also clone methods from traits when we transclude the trait in its user
-   * Classes in repo mode.  Finally, we clone inherited methods that define
-   * static locals in order to instantiate new static locals for the child
-   * class's copy of the method.
+   * Classes in repo mode.
    */
   Func* clone(Class* cls, const StringData* name = nullptr) const;
 
@@ -227,7 +227,7 @@ struct Func final {
    *
    * Used to change the Class scope of a closure method.
    */
-  void rescope(Class* ctx, Attr attrs);
+  void rescope(Class* ctx);
 
   /*
    * Free up a PreFunc for re-use as a cloned Func.
@@ -235,11 +235,6 @@ struct Func final {
    * @requires: isPreFunc()
    */
   void freeClone();
-
-  /*
-   * Rename a function and reload it.
-   */
-  void rename(const StringData* name);
 
   /*
    * Verify that a Func's data is coherent.
@@ -264,15 +259,23 @@ struct Func final {
   FuncId getFuncId() const;
 
   /*
+   * Get a function ID that is guaranteed not to be reused during the lifetime
+   * of the process.
+   */
+  uint32_t getStableId() const;
+
+private:
+  /*
    * Reserve the next available FuncId for `this', and add `this' to the
    * function table.
    */
   void setNewFuncId();
 
+public:
   /*
-   * The next available FuncId.  For observation only; does not reserve.
+   * The max FuncId num.
    */
-  static FuncId nextFuncId();
+  static FuncId::Int maxFuncIdNum();
 
   /*
    * Lookup a Func* by its ID.
@@ -286,11 +289,6 @@ struct Func final {
 
   /////////////////////////////////////////////////////////////////////////////
   // Basic info.                                                        [const]
-
-  /*
-   * Whether this function was defined in a pseudomain.
-   */
-  bool top() const;
 
   /*
    * The Unit the function is defined in.
@@ -337,41 +335,44 @@ struct Func final {
    */
   Class* cls() const;
   PreClass* preClass() const;
+  bool hasBaseCls() const;
   Class* baseCls() const;
   Class* implCls() const;
+
+  int sn() const;
 
   /*
    * The function's short name (e.g., foo).
    */
   const StringData* name() const;
+  OptString nameWithClosureName() const;
   StrNR nameStr() const;
+
+  /*
+   * A hash for this func that will remain constant across process restarts.
+   */
+  size_t stableHash() const;
 
   /*
    * The function's fully class-qualified, name (e.g., C::foo).
    */
   const StringData* fullName() const;
+  OptString fullNameWithClosureName() const;
   StrNR fullNameStr() const;
-
-  /*
-   * The function's display name, which is almost always name(), except for some
-   * internal functions. In that case, return the original function's name.
-   */
-  const StringData* displayName() const;
-
-  /*
-   * The function's full display name, which is almost always fullName(), except
-   * for some internal functions. In that case, return the original function's
-   * full name.
-   */
-  const StringData* fullDisplayName() const;
 
   /*
    * The function's named entity.  Only valid for non-methods.
    *
    * @requires: shared()->m_preClass == nullptr
    */
-  NamedEntity* getNamedEntity();
-  const NamedEntity* getNamedEntity() const;
+  NamedFunc* getNamedFunc();
+  const NamedFunc* getNamedFunc() const;
+
+  /**
+   * meth_caller
+   */
+  const StringData* methCallerClsName() const;
+  const StringData* methCallerMethName() const;
 
   /////////////////////////////////////////////////////////////////////////////
   // File info.                                                         [const]
@@ -382,7 +383,7 @@ struct Func final {
    * In repo mode, we flatten traits into the classes they're used in, so we
    * need this to track the original file for backtraces and errors.
    */
-  const StringData* originalFilename() const;
+  const StringData* originalUnit() const;
 
   /*
    * The original filename if it is defined, the unit's filename otherwise.
@@ -409,14 +410,16 @@ struct Func final {
   /*
    * Get the function's main entrypoint.
    */
-  PC getEntry() const;
+  PC entry() const;
+  Offset bclen() const;
 
   /*
-   * Get the offsets of the start (base) and end (past) of the function's
-   * bytecode, relative to the start of the unit.
-   */
-  Offset base() const;
-  Offset past() const;
+  * Get a hash of the bytecode of this function. Note that this performs an
+  * order dependent hash of the actual bytes of the bytecode.
+  */
+  uint64_t bcHash() const {
+    return folly::hash::hash_range(entry(), at(bclen()));
+  }
 
   /*
    * Whether a given PC or Offset (from the beginning of the unit) is within
@@ -426,10 +429,15 @@ struct Func final {
   bool contains(Offset offset) const;
 
   /*
-   * Return a vector of pairs of (param index, corresponding DV funclet
-   * offset).
+   * Convert between PC and Offset from entry().
    */
-  DVFuncletsVec getDVFunclets() const;
+  PC at(Offset off) const;
+  Offset offsetOf(PC pc) const;
+
+  /*
+   * Get the Op at `instrOffset'.
+   */
+  Op getOp(Offset instrOffset) const;
 
   /*
    * Is there a main or default value entrypoint at the given offset?
@@ -438,45 +446,39 @@ struct Func final {
   bool isDVEntry(Offset offset) const;
 
   /*
-   * Number of params required when entering at the given offset.
-   *
-   * Return -1 if an invalid offset is provided.
+   * Has a DV func entry that is non-scalar or requires a runtime type check.
    */
-  int getEntryNumParams(Offset offset) const;
-  int getDVEntryNumParams(Offset offset) const;
+  bool hasNonTrivialDVFuncEntry() const;
 
   /*
    * Get the correct entrypoint (whether the main entry or a DV funclet) when
-   * `numArgsPassed' arguments are passed to the function.
+   * `numPositionalsPassed' arguments are passed to the prologue.
+   *
+   * This is the DV funclet offset of the
+   * `numNamedParams + numPositionalsPassed`-th parameter, or the
+   * next parameter that has a DV funclet.
+   */
+  Offset getPrologueEntryForNumPositionals(int numPositionalsPassed) const;
+  /*
+   * Get the correct entrypoint (whether the main entry or a DV funclet) when
+   * `numArgsPassed' arguments are passed to the func entry.
    *
    * This is the DV funclet offset of the numArgsPassed-th parameter, or the
    * next parameter that has a DV funclet.
+   *
+   * allNamedParamsPassed should be true only if we statically know that we
+   * passed all named args for the callee.
    */
-  Offset getEntryForNumArgs(int numArgsPassed) const;
+  Offset getFuncEntryForNumPositionals(int numPositionalsPassed,
+                                       bool allNamedParamsPassed) const;
+  /*
+   * Get the correct entrypoint (either the main entry, or the chain of named
+   * params DV funclets) for the func.
+   */
+  Offset getNamedParamsFuncEntry() const;
 
   /////////////////////////////////////////////////////////////////////////////
   // Return type.                                                       [const]
-
-  /*
-   * CPP builtin's return type. Returns folly::none if function is not a CPP
-   * builtin.
-   *
-   * There are a number of caveats regarding this value:
-   *
-   *    - If the return type is folly::none, the return is a Variant.
-   *
-   *    - If the return type is a string, array-like, object, ref, or resource
-   *      type, null may also be returned.
-   *
-   *    - If the function is marked with AttrParamCoerceModeFalse, then the
-   *      function can also return bool in addition to this type.
-   *
-   *    - Likewise, if the function is marked AttrParamCoerceModeNull, null
-   *      might also be returned.
-   *
-   *    - This list of caveats may be incorrect and/or incomplete.
-   */
-  MaybeDataType hniReturnType() const;
 
   /*
    * Return type inferred by HHBBC's static analysis. TGen if no data is
@@ -499,19 +501,44 @@ struct Func final {
   bool isReturnByValue() const;
 
   /*
-   * Whether this function returns by reference (e.g., function &foo()).
-   */
-  bool isReturnRef() const;
+   * Builtins can potentially return null when the return type is
+   * specified as a reference type. This function returns true if
+   * the builtin return type is a reference type.
+   * (e.g. ref types like String, Array, Object)
+  */
+  bool hasUntrustedReturnType() const;
 
   /*
-   * The TypeConstraint of the return.
+   * Returns a TypeIntersectionConstraint consisting of all enforced types
+   * for the given method, including any additional return types inherited
+   * from overridden methods.
    */
-  const TypeConstraint& returnTypeConstraint() const;
+  const TypeIntersectionConstraint& returnTypeConstraints() const;
 
   /*
    * The user-annotated Hack return type.
    */
   const StringData* returnUserType() const;
+
+  /**
+   * Returns whether this Func has additional return type constraints
+   * inherited from overridden methods.
+   */
+  bool hasInheritedReturnTypes() const;
+
+  /**
+   * Stores the given return types in a side-table keyed by FuncId and
+   * marks this Func as having inherited types.
+   */
+  void storeInheritedReturnTypes(TypeIntersectionConstraint&& tcs);
+
+  /**
+   * Returns true if the return type of the given function is inherently
+   * trust worthy such as:
+   *  - C++ builtins (return type inferred from type hints)
+   *  - Memoize wrappers (return type checks are performed in the impl method)
+   */
+  bool trustReturnType() const;
 
   /////////////////////////////////////////////////////////////////////////////
   // Parameters.                                                        [const]
@@ -524,9 +551,25 @@ struct Func final {
   const ParamInfoVec& params() const;
 
   /*
-   * Number of parameters (including `...') accepted by the function.
+   * Number of parameters (including `...' and named parameters) accepted by
+   * the function.
    */
   uint32_t numParams() const;
+
+  /*
+   * Number of named parameters accepted by the function.
+   */
+  uint32_t numNamedParams() const;
+
+  /**
+   * Number of positional parameters, not including `...` accepted by the function.
+   */
+  uint32_t numPositionalParams() const;
+
+  /**
+   * Number of positional parameters, including `...` if present.
+   */
+  uint32_t numPositionalParamsVariadic() const;
 
   /*
    * Number of parameters, not including `...', accepted by the function.
@@ -534,33 +577,45 @@ struct Func final {
   uint32_t numNonVariadicParams() const;
 
   /*
-   * Whether the arg-th parameter /may/ be taken by reference.
+   * Number of required named parameters.
    */
-  bool byRef(int32_t arg) const;
+  uint32_t numRequiredNamedParams() const;
 
   /*
-   * Whether any parameters /may/ be taken by reference.
+   * Number of required positional parameters.
    */
-  bool anyByRef() const;
+  uint32_t numRequiredPositionalParams() const;
 
   /*
-   * Whether the arg-th parameter /must/ be taken by reference.
-   *
-   * Some builtins take positional or variadic arguments only optionally by
-   * ref, hence the distinction.
+   * Number of required parameters, i.e. all parameters starting from
+   * the returned position have default value.
    */
-  bool mustBeRef(int32_t arg) const;
+  uint32_t numRequiredParams() const;
 
   /*
-   * Whether the function is declared with a `...' parameter.
+   * Whether the function is declared with a `...' parameter (variadic, or splat).
    */
   bool hasVariadicCaptureParam() const;
 
   /*
-   * Whether extra arguments passed at call time can be ignored because they
-   * are never used.
+   * Whether the function is declared with a `...T' parameter (splat).
    */
-  bool discardExtraArgs() const;
+   bool hasSplatParam() const;
+
+   /*
+   * Whether the arg-th parameter was declared inout.
+   */
+  bool isInOut(int32_t arg) const;
+
+  /*
+   * Return the raw m_inoutBits field.
+   */
+  uint64_t inOutBits() const;
+
+  /*
+   * Whether the arg-th parameter was declared readonly.
+   */
+  bool isReadonly(int32_t arg) const;
 
   /*
    * Whether any of the parameters to this function are inout parameters.
@@ -573,25 +628,24 @@ struct Func final {
   uint32_t numInOutParams() const;
 
   /*
-   * When isInOutWrapper() is true--
-   *
-   * If takesInOutParams() this function has inout params and wraps a function
-   * which takes parameters by reference
-   *
-   * If !takesInOutParams() this function has reference parameters and wraps a
-   * function with inout paramaters.
+   * Returns the number of inout parameters for the given number of
+   * arguments.
    */
-  bool isInOutWrapper() const;
+  uint32_t numInOutParamsForArgs(int32_t numArgs) const;
 
+   /*
+   * Whether the arg-th parameter is named.
+   */
+  bool isNamed(int32_t arg) const;
   /////////////////////////////////////////////////////////////////////////////
   // Locals, iterators, and stack.                                      [const]
 
   /*
-   * Number of locals, iterators, class-ref slots, or named locals.
+   * Number of locals, iterators, closure use locals or named locals.
    */
   int numLocals() const;
   int numIterators() const;
-  int numClsRefSlots() const;
+  uint32_t numClosureUseLocals() const;
   Id numNamedLocals() const;
 
   /*
@@ -600,16 +654,48 @@ struct Func final {
   Id lookupVarId(const StringData* name) const;
 
   /*
+   * Number of initialized locals at FuncEntry.
+   */
+  uint32_t numFuncEntryInputs() const;
+
+  /*
+   * Returns the ID of coeffects and reified generics locals.
+   * Requires hasCoeffectRules() and hasReifiedGenerics() respectively
+   */
+  uint32_t coeffectsLocalId() const;
+  uint32_t reifiedGenericsLocalId() const;
+
+  /*
+   * Returns the ID of the first closure use local.
+   */
+  uint32_t firstClosureUseLocalId() const;
+
+  /*
+   * Returns the ID of the first regular local, i.e. a first local that is not
+   * a parameter, reified generics, coeffects or closure use local.
+   */
+  uint32_t firstRegularLocalId() const;
+
+
+  /*
    * Find the name of the local with the given ID.
    */
   const StringData* localVarName(Id id) const;
 
   /*
    * Array of named locals.  Includes parameter names.
+   * May contain nullptrs for unammed locals that mixed in with named ones.
    *
    * Should not be indexed past numNamedLocals() - 1.
    */
-  LowStringPtr const* localNames() const;
+  PackedStringPtr const* localNames() const;
+
+  /*
+   * Array containing all named param names, sorted lexicographically.
+   *
+   * Should not be indexed past numNamedParams() - 1.
+   */
+  PackedStringPtr const* sortedNamedParamNames() const;
 
   /*
    * Number of stack slots used by locals and iterator cells.
@@ -620,14 +706,12 @@ struct Func final {
    * Access to the maximum stack cells this function can use.  This is
    * used for stack overflow checks.
    *
-   * The maximum cells for a function includes all its locals, all
-   * cells for its iterators, all temporary eval stack slots, and all
-   * cells it pushes for ActRecs in FPI regions.  It does not include
-   * its own ActRec, because whoever called it must have(+) included
-   * the size of the ActRec in an FPI region for itself.  The reason
-   * it must still count its parameter locals is that the caller may
-   * or may not pass any of the parameters, regardless of how many are
-   * declared.
+   * The maximum cells for a function includes all its locals, all cells
+   * for its iterators, and all temporary eval stack slots. It does not
+   * include its own ActRec, because whoever called it must have(+) included
+   * the stack slot space reserved for this ActRec.  The reason it must still
+   * count its parameter locals is that the caller may or may not pass any of
+   * the parameters, regardless of how many are declared.
    *
    *   + Except in a re-entry situation.  That must be handled
    *     specially in bytecode.cpp.
@@ -639,34 +723,13 @@ struct Func final {
    */
   bool hasForeignThis() const;
 
-  /////////////////////////////////////////////////////////////////////////////
-  // Static locals.                                                     [const]
+  void setHasForeignThis(bool);
 
-  /*
-   * Const reference to the static variable info table.
-   *
-   * SVInfo objects pulled from the table will also be const.
-   */
-  const SVInfoVec& staticVars() const;
-
-  /*
-   * Whether the function has any static locals.
-   */
-  bool hasStaticLocals() const;
-
-  /*
-   * Number of static locals declared in the function.
-   */
-  int numStaticLocals() const;
+  void registerInDataMap();
+  void deregisterInDataMap();
 
   /////////////////////////////////////////////////////////////////////////////
   // Definition context.                                                [const]
-
-  /*
-   * Is the function a pseudomain (i.e., the function implicitly defined by the
-   * text after <?php in a file)?
-   */
-  bool isPseudoMain() const;
 
   /*
    * Is this function a method defined on a class?
@@ -691,6 +754,16 @@ struct Func final {
   bool isAbstract() const;
 
   /*
+   * Is this function declared as internal to its module?
+   */
+  bool isInternal() const;
+
+  /*
+   * What module does this function belong to?
+   */
+  const StringData* moduleName() const;
+
+  /*
    * Whether a function is called non-statically. Generally this means
    * isStatic(), but eg static closures are still called with a valid
    * this pointer.
@@ -699,29 +772,12 @@ struct Func final {
 
   /*
    * Whether a method is guaranteed to have a valid this in the body.
-   * A method with AttrRequiresThis is guaranteed to be called with a
-   * valid this, but closures swap out the closure object for the
-   * closure context in the prologue, so may not have a this in the
-   * body.
+   * A method which is !isStatic() || isClosureBody() is guaranteed to
+   * be called with a valid this, but closures swap out the closure
+   * object for the closure context in the prologue, so may not have
+   * a this in the body.
    */
-  bool requiresThisInBody() const;
-
-  /*
-   * Whether the function could sometimes have this, and sometimes not
-   * depending on how it's called.
-   */
-  bool hasThisVaries() const;
-
-  /*
-   * Could this function have a valid $this?
-   *
-   * Instance methods certainly have $this, but pseudomains may as well, if
-   * they were included in the context of an instance method definition.
-   *
-   * Note that closure __invoke() methods that are scoped outside the context
-   * of a class (e.g., in a toplevel non-method function) may /not/ have $this.
-   */
-  bool mayHaveThis() const;
+  bool hasThisInBody() const;
 
   /*
    * Is this Func owned by a PreClass?
@@ -740,6 +796,24 @@ struct Func final {
    * Is this func a memoization wrapper with LSB parameter set?
    */
   bool isMemoizeWrapperLSB() const;
+
+  /*
+   * What kind of memoized function is this?
+   * NB: MemoizeICType must be a unsigned char in order to enable
+   * struct bit packing.
+   */
+  enum MemoizeICType : unsigned char {
+    NoIC = 0,
+    KeyedByIC = 1,
+    MakeICInaccessible = 2,
+    NotKeyedByICAndLeakIC = 3,
+  };
+
+  MemoizeICType memoizeICType() const;
+
+  bool isNoICMemoize() const;
+
+  bool isKeyedByImplicitContextMemoize() const;
 
   /*
    * Is this string the name of a memoize implementation.
@@ -766,6 +840,17 @@ struct Func final {
    */
   static const StringData* genMemoizeImplName(const StringData*);
 
+  /*
+   * Returns the number of local slots used for the memoization key calculation.
+   */
+  size_t numKeysForMemoize() const;
+
+  /*
+   * Given a meth_caller, return the class name or method name
+   */
+   static std::pair<const StringData*, const StringData*> getMethCallerNames(
+     const StringData* name);
+
   /////////////////////////////////////////////////////////////////////////////
   // Builtins.                                                          [const]
 
@@ -780,33 +865,6 @@ struct Func final {
    * @implies: isBuiltin()
    */
   bool isCPPBuiltin() const;
-
-  /*
-   * Can this function potentially read from the caller's frame?
-   *
-   * @implies: isBuiltin() && !isMethod()
-   */
-  bool readsCallerFrame() const;
-
-  /*
-   * Can this function potentially write to the caller's frame?
-   *
-   * @implies: isBuiltin() && !isMethod()
-   */
-  bool writesCallerFrame() const;
-
-  /*
-   * Can this function potentially read or write to the caller's frame?
-   *
-   * @implies: readsCallerFrame() || writesCallerFrame()
-   */
-  bool accessesCallerFrame() const;
-
-  /*
-   * This HNI method takes an additional "func_num_args()" value at the
-   * beginning of its signature (after Class* / ObjectData* for methods)
-   */
-  bool takesNumArgs() const;
 
   /*
    * The function returned by arFuncPtr() takes an ActRec*, unpacks it,
@@ -825,7 +883,7 @@ struct Func final {
    * The nativeFuncPtr is a type-punned function pointer to the unerlying
    * function which takes the actual argument types, and does the actual work.
    *
-   * These are the functions with names prefixed by f_ or t_.
+   * These are the functions with names prefixed by f_.
    *
    * All C++ builtins have NativeFunctions, with the ironic exception of HNI
    * functions declared with NeedsActRec.
@@ -885,6 +943,41 @@ struct Func final {
   bool isResumable() const;
 
   /////////////////////////////////////////////////////////////////////////////
+  // Coeffects.                                                        [const]
+
+  /*
+   * Returns the runtime representation of coeffects
+   */
+  RuntimeCoeffects requiredCoeffects() const;
+  RuntimeCoeffects coeffectEscapes() const;
+
+  /*
+   * Sets required coeffects
+   */
+  void setRequiredCoeffects(RuntimeCoeffects);
+
+  /*
+   * Names of the static coeffects on the function
+   * Used for reflection
+   */
+  StaticCoeffectNamesMap staticCoeffectNames() const;
+
+  /*
+   * Does this function use coeffects local to store its ambient coeffects?
+   */
+  bool hasCoeffectsLocal() const;
+
+  /*
+   * Does this function have coeffect rules?
+   */
+  bool hasCoeffectRules() const;
+
+  /*
+   * List of rules for enforcing coeffects
+   */
+  const CoeffectRules& getCoeffectRules() const;
+
+  /////////////////////////////////////////////////////////////////////////////
   // Methods.                                                           [const]
 
   /*
@@ -907,26 +1000,6 @@ struct Func final {
    * as all closures.
    */
   bool isGenerated() const;
-
-  /*
-   * Is this function __destruct()?
-   */
-  bool isDestructor() const;
-
-  /*
-   * Is this function __call()?
-   */
-  bool isMagicCallMethod() const;
-
-  /*
-   * Is this function __callStatic()?
-   */
-  bool isMagicCallStaticMethod() const;
-
-  /*
-   * Is this function any __call*()?
-   */
-  bool isMagic() const;
 
   /*
    * Is `name' the name of a special initializer function?
@@ -969,7 +1042,7 @@ struct Func final {
   // Other attributes.                                                  [const]
 
   /*
-   * Get the system attributes of the function.
+   * Get the system and coeffect attributes of the function.
    */
   Attr attrs() const;
 
@@ -977,6 +1050,11 @@ struct Func final {
    * Get the user-declared attributes of the function.
    */
   const UserAttributeMap& userAttributes() const;
+
+  /*
+   * Get a dict containing user attributes of the function.
+   */
+  Array userAttributesArray() const;
 
   /*
    * Whether to ignore this function's frame in backtraces.
@@ -990,17 +1068,26 @@ struct Func final {
   bool isSkipFrame() const;
 
   /*
+   * Whether this function's frame should be skipped with searching for a
+   * context for array provenance
+   */
+  bool isProvenanceSkipFrame() const;
+
+  /*
    * Whether the function can be constant-folded at callsites where it is
    * passed constant arguments.
    */
   bool isFoldable() const;
 
   /*
-   * Whether the function's return is coerced to the correct type.  If so, it
-   * may also return null or bool if coercion fails, depending on the coercion
-   * kind.
+   * Supports async eager return optimization?
    */
-  bool isParamCoerceMode() const;
+  bool supportsAsyncEagerReturn() const;
+
+  /*
+   * Is this async function guaranteed not to suspend?
+   */
+  bool isEagerOnly() const;
 
   /*
    * Is this func allowed to be called dynamically?
@@ -1008,34 +1095,64 @@ struct Func final {
   bool isDynamicallyCallable() const;
 
   /*
-   * Has this function been determined to be hot by profiling?
+   * If this function is called dynamically should we raise sampled warnings?
+   *
+   * N.B. When errors are enabled for dynamic calls this overrides that behavior
+   *      for functions which specify it.
    */
-  bool isHot() const;
-  void setHot();
+  Optional<int64_t> dynCallSampleRate() const;
+
+  /*
+   * Is this a meth_caller func?
+   */
+  bool isMethCaller() const;
 
   /*
    * Indicates that a function does not make any explicit calls to other PHP
    * functions.  It may still call other user-level functions via re-entry
-   * (e.g., for destructors and autoload), and it may make calls to builtins
-   * using FCallBuiltin.
+   * (e.g., for autoload), and it may make calls to builtins using FCallBuiltin.
    */
   bool isPhpLeafFn() const;
+
+  /*
+   * Does this function has reified generics?
+   */
+  bool hasReifiedGenerics() const;
+  /*
+   * Does this function have named params?
+   */
+  bool hasNamedParams() const;
+
+  /*
+   * Does this function have any non-required named parameters?
+   */
+  bool hasOptionalNamedParameters() const;
+
+  /*
+   * Returns GenericsInfo which contains information about each generic
+   * parameter defined on this class whether it is reified, or contains
+   * the soft or warn annotation.
+   *
+   * NB: This getter should only be called when this func is known to
+   * contain extended data which is where the GenericsInfo struct lives.
+   * This can be checked by testing the hasReifiedGenericsInfo flag.
+   */
+  const GenericsInfo& getGenericsInfo() const;
+
+  /*
+   * Does this function wrap a builtin?
+   */
+  Func* unwrap();
 
   /////////////////////////////////////////////////////////////////////////////
   // Unit table entries.                                                [const]
 
   const EHEntVec& ehtab() const;
-  const FPIEntVec& fpitab() const;
 
   /*
    * Find the first EHEnt that covers a given offset, or return null.
    */
   const EHEnt* findEH(Offset o) const;
-
-  /*
-   * Find the first EHEnt that covers a given handler, or return null.
-   */
-  const EHEnt* findEHbyHandler(Offset o) const;
 
   /*
    * Same as non-static findEH(), but takes as an operand any ehtab-like
@@ -1045,44 +1162,17 @@ struct Func final {
   static const typename Container::value_type*
   findEH(const Container& ehtab, Offset o);
 
-  /*
-   * Same as non-static findEHbyHandler(), but takes as an operand any
-   * ehtab-like container.
-   */
-  template<class Container>
-  static const typename Container::value_type*
-  findEHbyHandler(const Container& ehtab, Offset o);
-
-  /*
-   * Locate FPI regions by offset.
-   */
-  const FPIEnt* findFPI(Offset o) const;
-  const FPIEnt* findPrecedingFPI(Offset o) const;
-
-  /*
-   * Same as non-static findFPI(), but takes as an operand the start and end
-   * iterators of an fpitab.
-   */
-  static const FPIEnt* findFPI(const FPIEnt* b, const FPIEnt* e, Offset o);
-
-  bool shouldSampleJit() const { return m_shouldSampleJit; }
+  bool shouldSampleJit() const { return m_allFlags.m_shouldSampleJit; }
 
   /////////////////////////////////////////////////////////////////////////////
   // JIT data.
 
   /*
-   * Get the RDS handle for the function with this function's name.
-   *
-   * We can burn these into the TC even when functions are not persistent,
-   * since only a single name-to-function mapping will exist per request.
+   * Get, set and reset the function body code pointer.
    */
-  rds::Handle funcHandle() const;
-
-  /*
-   * Get and set the function body code pointer.
-   */
-  unsigned char* getFuncBody() const;
-  void setFuncBody(unsigned char* fb);
+  jit::TCA getFuncEntry() const;
+  void setFuncEntry(jit::TCA funcEntry);
+  void resetFuncEntry();
 
   /*
    * Get and set the `index'-th function prologue.
@@ -1100,17 +1190,29 @@ struct Func final {
    */
   void resetPrologue(int numParams);
 
+  /*
+   * Bump/reset JIT request count, which counts the number of times the function
+   * is being considered for compilation.
+   */
+  uint8_t incJitReqCount() const;
+  uint8_t readJitReqCount() const;
+  void resetJitReqCount() const;
+
   /////////////////////////////////////////////////////////////////////////////
   // Pretty printer.                                                    [const]
 
   struct PrintOpts {
     PrintOpts()
-      : fpi(true)
+      : name(true)
       , metadata(true)
+      , startOffset(0)
+      , stopOffset(kInvalidOffset)
+      , showLines(true)
+      , indentSize(1)
     {}
 
-    PrintOpts& noFpi() {
-      fpi = false;
+    PrintOpts& noName() {
+      name = false;
       return *this;
     }
 
@@ -1119,11 +1221,42 @@ struct Func final {
       return *this;
     }
 
-    bool fpi;
+    PrintOpts& noBytecode() {
+      startOffset = kInvalidOffset;
+      stopOffset = kInvalidOffset;
+      return *this;
+    }
+
+    PrintOpts& range(Offset start, Offset stop) {
+      startOffset = start;
+      stopOffset = stop;
+      return *this;
+    }
+
+    PrintOpts& noLineNumbers() {
+      showLines = false;
+      return *this;
+    }
+
+    PrintOpts& indent(int i) {
+      indentSize = i;
+      return *this;
+    }
+
+    bool name;
     bool metadata;
+    Offset startOffset;
+    Offset stopOffset;
+    bool showLines;
+    int indentSize;
   };
 
   void prettyPrint(std::ostream& out, const PrintOpts& = PrintOpts()) const;
+
+  /*
+   * Print function attributes to out.
+   */
+  static void print_attrs(std::ostream& out, Attr attrs);
 
 
   /////////////////////////////////////////////////////////////////////////////
@@ -1141,13 +1274,59 @@ struct Func final {
   /*
    * Intercept hook flag.
    */
-  int8_t& maybeIntercepted() const;
+  bool maybeIntercepted() const;
+  void setMaybeIntercepted();
 
   /*
-   * Access to the global vector of funcs.  This maps FuncID's back to Func*'s.
+   * When function call based coverage is enabled for the current request,
+   * records a call to `this`. The no check version asserts that function
+   * coverage has already been enabled and the function is both eligible to be
+   * covered and has not yet been seen.
    */
-  static const AtomicVector<const Func*>& getFuncVec();
+  void recordCall() const;
+  void recordCallNoCheck() const;
 
+  /*
+   * EnableCoverage enables recording of called functions for the current
+   * request.
+   */
+  static void EnableCoverage();
+
+  /*
+   * GetCoverage returns a keyset of called functions and disables further
+   * coverage for the current request until reenabled by EnableCoverage.
+   */
+  static Array GetCoverage();
+
+  /*
+   * RDS based counter (uint32_t) that when zero indicates coverage is disabled
+   * and when non-zero indicates an index which can be used to short circuit
+   * tests that functions have been covered.
+   */
+  static rds::Handle GetCoverageIndex();
+
+  /*
+   * Get an RDS counter (uint32_t) that can be compared against GetCoverageIndex
+   * to determine if the function has been covered in the current request.
+   */
+  rds::Handle getCoverageHandle() const;
+
+  /////////////////////////////////////////////////////////////////////////////
+  // Debugger.
+  /*
+   * Return an RDS handle that when initialized, indicates that this function
+   * needs to be run in the interpreter so that the debugger hooks are run.
+   * Once the handle is initialized, it is not reset
+   * for remainder of the request.
+   */
+  rds::Handle debuggerIntrSetHandle() const;
+  rds::Link<bool, rds::Mode::Normal> debuggerIntrSetLink() const;
+
+  /*
+   * The handle must be bound before inserting debugger interrupt checks
+   * in a function and before resolving any breakpoints in the function.
+   */
+  void ensureDebuggerIntrSetLinkBound() const;
 
   /////////////////////////////////////////////////////////////////////////////
   // Public setters.
@@ -1160,13 +1339,9 @@ struct Func final {
 
   void setAttrs(Attr attrs);
   void setBaseCls(Class* baseCls);
-  void setFuncHandle(rds::Link<LowPtr<Func>, rds::Mode::NonLocal> l);
   void setHasPrivateAncestor(bool b);
   void setMethodSlot(Slot s);
-
-  // Return true, and set the m_serialized flag, iff this Func hasn't
-  // been serialized yet (see prof-data-serialize.cpp).
-  bool serialize() const;
+  void setGenerated(bool b);
 
   /////////////////////////////////////////////////////////////////////////////
   // Offset accessors.                                                 [static]
@@ -1176,32 +1351,102 @@ struct Func final {
     return offsetof(Func, m_##f);       \
   }
   OFF(attrs)
-  OFF(cls)
-  OFF(fullName)
-  OFF(funcBody)
+  OFF(requiredCoeffects)
+  OFF(name)
   OFF(maxStackCells)
-  OFF(maybeIntercepted)
   OFF(paramCounts)
   OFF(prologueTable)
-  OFF(refBitVal)
+  OFF(inoutBits)
   OFF(shared)
   OFF(unit)
+  OFF(funcEntry)
+  OFF(allFlags)
 #undef OFF
 
-  static constexpr ptrdiff_t sharedBaseOff() {
-    return offsetof(SharedData, m_base);
+  static constexpr ptrdiff_t clsOff() {
+    return offsetof(Func, m_u.m_cls.m_impl);
   }
 
-  static constexpr ptrdiff_t sharedRefBitPtrOff() {
-    return offsetof(SharedData, m_refBitPtr);
+  static constexpr ptrdiff_t methCallerMethNameOff() {
+    return offsetof(Func, m_u.m_methCaller.m_methName);
   }
 
+  static constexpr ptrdiff_t methCallerClsNameOff() {
+    return offsetof(Func, m_u.m_methCaller.m_clsName);
+  }
+
+  static constexpr ptrdiff_t sharedAllFlags() {
+    return offsetof(SharedData, m_allFlags);
+  }
+
+  static constexpr ptrdiff_t extendedSharedOriginalModuleName() {
+    return offsetof(ExtendedSharedData, m_originalModuleName);
+  }
+
+  static uint32_t reifiedGenericsMask() {
+    ExtendedSharedData::Flags mask;
+    mask.m_allFlags = 0;
+    mask.m_hasReifiedGenerics = true;
+    return mask.m_allFlags;
+  }
+
+  static uint32_t hasExtendedSharedDataMask() {
+    ExtendedSharedData::Flags mask;
+    mask.m_allFlags = 0;
+    mask.m_hasExtendedSharedData = true;
+    return mask.m_allFlags;
+  }
+
+  bool hasExtendedSharedData() const {
+    return extShared();
+  }
+
+  /////////////////////////////////////////////////////////////////////////////
+  // Lookup                                                            [static]
+
+  /*
+   * Define `func' for this request by initializing its RDS handle.
+   */
+  static void def(Func* func);
+
+  /*
+   * Look up the defined Func in this request with name `name'
+   * Return nullptr if the function is not yet defined in this request.
+   */
+  static Func* lookup(const StringData* name);
+
+  /*
+   * Look up, or autoload and define, the Func in this request with name `name',
+   * or with the name mapped to the NamedFunc `ne'.
+   *
+   * @requires: NamedFunc::get(name) == ne
+   */
+  static Func* load(const NamedFunc* ne, const StringData* name);
+  static Func* load(const StringData* name);
+
+  /*
+   * Same as Func::load but also checks for module boundary violations
+   */
+  static Func* resolve(const NamedFunc* ne, const StringData* name,
+                       const Func* callerFunc);
+  static Func* resolve(const StringData* name, const Func* callerFunc);
+
+  /*
+   * Lookup the builtin in this request with name `name', or nullptr if none
+   * exists. This does not access RDS so it is safe to use from within the
+   * compiler. Note that does not mean imply that the name binding for the
+   * builtin is immutable. The builtin could be renamed or intercepted.
+   */
+  static Func* lookupBuiltin(const StringData* name);
 
   /////////////////////////////////////////////////////////////////////////////
   // SharedData.
 
 private:
-  using NamedLocalsMap = IndexedStringMap<LowStringPtr, true, Id>;
+  using NamedLocalsMap = IndexedStringMap<PackedStringPtr, Id>;
+
+  using BCPtr = TokenOrPtr<unsigned char>;
+  using LineTablePtr = TokenOrPtr<LineTable>;
 
   // Some 16-bit values in SharedData are stored as small deltas if they fit
   // under this limit.  If not, they're set to the limit value and an
@@ -1212,9 +1457,8 @@ private:
    * Properties shared by all clones of a Func.
    */
   struct SharedData : AtomicCountable {
-    SharedData(PreClass* preClass, Offset base, Offset past,
-               int line1, int line2, bool top, bool isPhpLeafFn,
-               const StringData* docComment);
+    SharedData(BCPtr bc, Offset bclen, PreClass* preClass,
+               int sn, int line1, int line2, bool isPhpLeafFn);
     ~SharedData();
 
     /*
@@ -1222,59 +1466,60 @@ private:
      */
     void atomicRelease();
 
+    Offset bclen() const;
+
     /*
      * Data fields are packed to minimize size.  Try not to add anything new
      * here or reorder anything.
      */
     // (There's a 32-bit integer in the AtomicCountable base class here.)
-    Offset m_base;
+    LockFreePtrWrapper<BCPtr> m_bc;
     PreClass* m_preClass;
-    Id m_numLocals;
-    Id m_numIterators;
     int m_line1;
-    LowStringPtr m_docComment;
-    // Bits 64 and up of the reffiness guards (the first 64 bits are in
-    // Func::m_refBitVal for faster access).
-    uint64_t* m_refBitPtr;
     ParamInfoVec m_params;
     NamedLocalsMap m_localNames;
-    SVInfoVec m_staticVars;
     EHEntVec m_ehtab;
-    FPIEntVec m_fpitab;
+    StaticCoeffectNamesMap m_staticCoeffectNames;
 
     /*
-     * Up to 32 bits.
+     * Up to 16 bits.
      */
-    bool m_top : 1;
-    bool m_isClosureBody : 1;
-    bool m_isAsync : 1;
-    bool m_isGenerator : 1;
-    bool m_isPairGenerator : 1;
-    bool m_isGenerated : 1;
-    bool m_hasExtendedSharedData : 1;
-    bool m_returnByValue : 1; // only for builtins
-    bool m_isMemoizeWrapper : 1;
-    bool m_isMemoizeWrapperLSB : 1;
-    bool m_isPhpLeafFn : 1;
-    bool m_takesNumArgs : 1;
-    // Needing more than 2 class ref slots basically doesn't happen, so just use
-    // two bits normally. If we actually need more than that, we'll store the
-    // count in ExtendedSharedData.
-    unsigned int m_numClsRefSlots : 2;
+    union Flags {
+      struct {
+        bool m_isClosureBody : 1;
+        bool m_isAsync : 1;
+        bool m_isGenerator : 1;
+        bool m_isPairGenerator : 1;
+        bool m_isGenerated : 1;
+        bool m_hasExtendedSharedData : 1;
+        bool m_returnByValue : 1; // only for builtins
+        bool m_isUntrustedReturnType : 1;  // applicable for builtins
+        bool m_isMemoizeWrapper : 1;
+        bool m_isMemoizeWrapperLSB : 1;
+        MemoizeICType m_memoizeICType : 2;
+        bool m_isPhpLeafFn : 1;
+        bool m_hasReifiedGenerics : 1;
+      };
+      uint16_t m_allFlags;
+    };
+    static_assert(sizeof(Flags) == sizeof(uint16_t));
 
-    // 19 bits of padding here in LOWPTR builds
+    Flags m_allFlags;
 
-    LowStringPtr m_retUserType;
+    uint16_t m_sn;
+
+    LazyStringData m_retUserType;
     UserAttributeMap m_userAttributes;
-    TypeConstraint m_retTypeConstraint; // NB: sizeof(TypeConstraint) == 12
-    LowStringPtr m_originalFilename;
+    // The link can be bound for const Func.
+    mutable rds::Link<bool, rds::Mode::Normal> m_funcHasDebuggerIntr;
+    PackedStringPtr m_originalUnit;
+    TypeIntersectionConstraint m_retTypeConstraints;
     RepoAuthType m_repoReturnType;
     RepoAuthType m_repoAwaitedReturnType;
 
     /*
-     * The `past' offset and `line2' are likely to be small, particularly
-     * relative to m_base and m_line1, so we encode each as a 16-bit
-     * difference.
+     * The `line2' are likely to be small, particularly relative to m_line1,
+     * so we encode each as a 16-bit difference.
      *
      * If the delta doesn't fit, we need to have an ExtendedSharedData to hold
      * the real values---in that case, the field here that overflowed is set to
@@ -1282,10 +1527,24 @@ private:
      * be valid.
      */
     uint16_t m_line2Delta;
-    uint16_t m_pastDelta;
 
-    // 32 bits free here.
+    /**
+     * bclen is likely to be small. So we encode each as a 16-bit value
+     *
+     * If the value doesn't fit, we need to have an ExtendedSharedData to hold
+     * the real values---in that case, the field here that overflowed is set to
+     * kSmallDeltaLimit and the corresponding field in ExtendedSharedData will
+     * be valid.
+     */
+    uint16_t m_bclenSmall;
+
+    uint16_t m_numLocals;
+    uint16_t m_numIterators;
+
+    mutable LockFreePtrWrapper<VMCompactVector<LineInfo>> m_lineMap;
+    mutable LockFreePtrWrapper<LineTablePtr> m_lineTable;
   };
+  static_assert(CheckSize<SharedData, 152>(), "");
 
   /*
    * If this Func represents a native function or is exceptionally large
@@ -1296,20 +1555,32 @@ private:
   struct ExtendedSharedData : SharedData {
     template<class... Args>
     explicit ExtendedSharedData(Args&&... args)
-      : SharedData(std::forward<Args>(args)...)
+    : SharedData(std::forward<Args>(args)...)
     {
-      m_hasExtendedSharedData = true;
+      m_allFlags.m_hasExtendedSharedData = true;
     }
     ExtendedSharedData(const ExtendedSharedData&) = delete;
     ExtendedSharedData(ExtendedSharedData&&) = delete;
+    ~ExtendedSharedData();
 
-    MaybeDataType m_hniReturnType;
     ArFunction m_arFuncPtr;
     NativeFunction m_nativeFuncPtr;
-    Offset m_past;  // Only read if SharedData::m_pastDelta is kSmallDeltaLimit
+    GenericsInfo m_genericsInfo;
+    CoeffectRules m_coeffectRules;
+    Offset m_bclen;  // Only read if SharedData::m_bclen is kSmallDeltaLimit
     int m_line2;    // Only read if SharedData::m_line2 is kSmallDeltaLimit
-    Id m_actualNumClsRefSlots;
+    int m_sn;       // Only read if SharedData::m_sn is kSmallDeltaLimit
+    RuntimeCoeffects m_coeffectEscapes{RuntimeCoeffects::none()};
+    // (2 bytes unused)
+    int64_t m_dynCallSampleRate;
+    PackedStringPtr m_docComment;
+    PackedStringPtr m_originalModuleName;
+    // Initialized by Func::finishedEmittingParams. Named parameter names live
+    // in the internal storage of
+    // `m_localNames[0 : m_namedParamCount - 1]`.
+    uint32_t m_namedParamCount;
   };
+  static_assert(CheckSize<ExtendedSharedData, 224>(), "");
 
   /*
    * SharedData accessors for internal use.
@@ -1323,6 +1594,39 @@ private:
   const ExtendedSharedData* extShared() const;
         ExtendedSharedData* extShared();
 
+  /*
+  * We store 'detailed' line number information on a table on the side, because
+  * in production modes for HHVM it's generally not useful (which keeps Func
+  * smaller in that case)---this stuff is only used for the debugger, where we
+  * can afford the lookup here.  The normal Func m_lineMap is capable of
+  * producing enough line number information for things needed in production
+  * modes (backtraces, warnings, etc).
+  */
+
+  struct ExtendedLineInfo {
+    SourceLocTable sourceLocTable;
+
+    /*
+    * Map from source lines to a collection of all the bytecode ranges the line
+    * encompasses.
+    *
+    * The value type of the map is a list of offset ranges, so a single line
+    * with several sub-statements may correspond to the bytecodes of all of the
+    * sub-statements.
+    *
+    * May not be initialized.  Lookups need to check if it's empty() and if so
+    * compute it from sourceLocTable.
+    */
+    LineToOffsetRangeVecMap lineToOffsetRange;
+  };
+
+  using ExtendedLineInfoCache = tbb::concurrent_hash_map<
+    const SharedData*,
+    ExtendedLineInfo,
+    pointer_hash<SharedData>
+  >;
+
+  static ExtendedLineInfoCache s_extendedLineInfo;
 
   /////////////////////////////////////////////////////////////////////////////
   // Internal methods.
@@ -1332,13 +1636,14 @@ private:
 private:
   Func(const Func&) = default;  // used for clone()
   Func& operator=(const Func&) = delete;
-  void init(int numParams);
-  void initPrologues(int numParams);
-  void setFullName(int numParams);
-  void appendParam(bool ref, const ParamInfo& info,
-                   std::vector<ParamInfo>& pBuilder);
+  void init(int numPositionalParams);
+  void initProloguesAndFuncEntry(int numPositionalParams);
+  void setFullName();
   void finishedEmittingParams(std::vector<ParamInfo>& pBuilder);
-  void setNamedEntity(const NamedEntity*);
+  void setNamedFunc(const NamedFunc*);
+  const TypeIntersectionConstraint& lookupInheritedReturnTypes() const;
+
+  PC loadBytecode();
 
   /////////////////////////////////////////////////////////////////////////////
   // Internal types.
@@ -1364,32 +1669,171 @@ private:
     explicit AtomicAttr(Attr attrs) : m_attrs{attrs} {}
 
     AtomicAttr(const AtomicAttr& o)
-      : m_attrs{o.m_attrs.load(std::memory_order_relaxed)}
+      : m_attrs{o.m_attrs.load(std::memory_order_acquire)}
     {}
 
     AtomicAttr& operator=(Attr attrs) {
-      m_attrs.store(attrs, std::memory_order_relaxed);
+      m_attrs.store(attrs, std::memory_order_release);
       return *this;
     }
 
     /* implicit */ operator Attr() const {
-      return m_attrs.load(std::memory_order_relaxed);
+      return m_attrs.load(std::memory_order_acquire);
     }
 
   private:
     std::atomic<Attr> m_attrs;
   };
 
+public:
+
+  /////////////////////////////////////////////////////////////////////////////
+  // Atomic Flags.
+
+  enum Flags : uint8_t {
+    None             = 0,
+    Optimized        = 1 << 0,
+    Locked           = 1 << 1,
+    MaybeIntercepted = 1 << 2,
+    LockedForPrologueGen = 1 << 3,
+    // A function is marked zombie before the unit or the class of the function
+    // is treadmilled for destruction.
+    Zombie = 1 << 4,
+    LockedForAsyncJit = 1 << 5,
+    WasCalled = 1 << 6,
+  };
+
+ /*
+  * Wrapper around std::atomic<uint8_t> that enables it to be
+  * copy constructable,
+  */
+  struct AtomicFlags {
+    AtomicFlags() {}
+
+    AtomicFlags(const AtomicFlags&) {}
+    AtomicFlags& operator=(const AtomicFlags&) = delete;
+
+    bool set(Flags flags) {
+      auto const prev = m_flags.fetch_or(flags, std::memory_order_acq_rel);
+      return prev & flags;
+    }
+
+    bool unset(Flags flags) {
+      auto const prev =
+        m_flags.fetch_and(~uint8_t(flags), std::memory_order_acq_rel);
+      return prev & flags;
+    }
+
+    bool check(Flags flags) const {
+      return m_flags.load(std::memory_order_acquire) & flags;
+    }
+
+    std::atomic<uint8_t> m_flags{Flags::None};
+  };
+
+  inline AtomicFlags& atomicFlags() const {
+    return m_atomicFlags;
+  }
+
+  inline AtomicFlags& atomicFlags() {
+    return m_atomicFlags;
+  }
+
+  union AllFlags {
+   struct {
+     bool m_isPreFunc : 1;
+     bool m_hasPrivateAncestor : 1;
+     bool m_shouldSampleJit : 1;
+     bool m_hasForeignThis : 1;
+     bool m_registeredInDataMap : 1;
+     bool m_hasNamedParams : 1;
+     // 2 free bits, and there are some more in AtomicFlags.
+   };
+   uint8_t m_allFlags;
+  };
+  static_assert(sizeof(AllFlags) == sizeof(uint8_t));
+
+  static uint8_t hasNamedParamsMask() {
+    AllFlags mask;
+    mask.m_allFlags = 0;
+    mask.m_hasNamedParams = true;
+    return mask.m_allFlags;
+  }
+
+  /////////////////////////////////////////////////////////////////////////////
+  // Code locations.                                                    [const]
+
+  /*
+   * Get the line number corresponding to `offset'.
+   *
+   * Return -1 if not found.
+   */
+  int getLineNumber(Offset offset) const;
+
+  /*
+   * Get the SourceLoc corresponding to `offset'.
+   *
+   * Return false if not found, else true.
+   */
+  bool getSourceLoc(Offset offset, SourceLoc& sLoc) const;
+
+  /*
+   * Get the Offset range(s) corresponding to `offset'.
+   *
+   * Return false if not found, else true.
+   */
+  bool getOffsetRange(Offset offset, OffsetRange& range) const;
+
+  void setLineTable(LineTable);
+  void setLineTable(LineTablePtr::Token);
+
+  void stashExtendedLineTable(SourceLocTable table) const;
+
+  const SourceLocTable& getLocTable() const;
+
+  LineToOffsetRangeVecMap getLineToOffsetRangeVecMap() const;
+
+  const LineTable* getLineTable() const;
+  LineTable getOrLoadLineTableCopy() const;
+
+private:
+  const LineTable& getOrLoadLineTable() const;
+
   /////////////////////////////////////////////////////////////////////////////
   // Constants.
 
 private:
-  static constexpr int kBitsPerQword = 64;
-  static const StringData* s___call;
-  static const StringData* s___callStatic;
   static constexpr int kMagic = 0xba5eba11;
+  static constexpr PackedStringPtr::storage_type kNeedsFullName =
+    std::numeric_limits<PackedStringPtr::storage_type>::max();
 
 public:
+  enum class FuncLookupResult {
+    None,
+    Exact,
+    Maybe,
+  };
+
+  struct FuncLookup {
+    FuncLookupResult tag;
+    const Func* func;
+  };
+  static const FuncLookup lookupKnownMaybe(const StringData* name, const Unit*  unit);
+  static const Func* lookupKnown(const StringData* name, const Unit* unit);
+  static const FuncLookup maybe(const Func* func) {
+    return FuncLookup { FuncLookupResult::Maybe, func };
+  }
+  static const FuncLookup exact(const Func* func) {
+    return FuncLookup { FuncLookupResult::Exact, func };
+  }
+  static const FuncLookup& none() {
+      static FuncLookup lookup { FuncLookupResult::None, nullptr };
+      return lookup;
+  }
+
+  // Use by m_inoutBits
+  static constexpr uint32_t kInoutFastCheckBits = 31;
+
   static std::atomic<bool>     s_treadmill;
   static std::atomic<uint32_t> s_totalClonedClosures;
 
@@ -1400,38 +1844,105 @@ public:
   // Do not re-order without checking perf!
 
 private:
-#ifdef DEBUG
+#ifndef NDEBUG
   // For asserts only.
   int m_magic;
 #endif
-  AtomicLowPtr<uint8_t> m_funcBody;
-  mutable rds::Link<LowPtr<Func>, rds::Mode::NonLocal> m_cachedFunc;
-  FuncId m_funcId{InvalidFuncId};
-  LowStringPtr m_fullName{nullptr};
-  LowStringPtr m_name{nullptr};
-  // The first Class in the inheritance hierarchy that declared this method.
-  // Note that this may be an abstract class that did not provide an
-  // implementation.
-  LowPtr<Class> m_baseCls{nullptr};
-  // The Class that provided this method implementation.
-  AtomicLowPtr<Class> m_cls{nullptr};
+  jit::AtomicLowTCA m_funcEntry{nullptr};
+  mutable AtomicPackedPtr<const StringData> m_fullName{nullptr};
+  PackedStringPtr m_name{nullptr};
+
+  struct ClsOrMethCaller {
+    struct Cls {
+      // The first Class in the inheritance hierarchy that declared this method.
+      // Note that this may be an abstract class that did not provide an
+      // implementation.
+      PackedPtr<Class> m_base{nullptr};
+      // Class that provided this method implementation
+      AtomicPackedPtr<Class> m_impl{nullptr};
+
+      Cls() {}
+
+      Cls(const Cls& o) {
+        m_base = o.m_base;
+        m_impl = o.m_impl;
+      }
+
+      Cls& operator=(const Cls& o) {
+        m_base = o.m_base;
+        m_impl = o.m_impl;
+        return *this;
+      }
+    };
+    struct MethCaller {
+      PackedStringPtr m_methName;
+      // Class name provided by meth_caller()
+      PackedStringPtr m_clsName;
+    };
+
+    // The first part of the union is valid if !isMethCaller
+    // and the second part is valid if isMethCaller
+    union {
+      Cls m_cls;
+      MethCaller m_methCaller;
+    };
+
+    ClsOrMethCaller() {
+      m_cls.m_base = nullptr;
+      m_cls.m_impl = nullptr;
+    }
+
+    ClsOrMethCaller(const ClsOrMethCaller& o) {
+      m_cls = o.m_cls;
+    }
+  };
+
+  ClsOrMethCaller::Cls& clsData() {
+    assertx(!isMethCaller());
+    return m_u.m_cls;
+  }
+
+  const ClsOrMethCaller::Cls& clsData() const {
+    assertx(!isMethCaller());
+    return m_u.m_cls;
+  }
+
+  ClsOrMethCaller::MethCaller& methCallerData() {
+    assertx(isMethCaller());
+    return m_u.m_methCaller;
+  }
+
+  const ClsOrMethCaller::MethCaller& methCallerData() const {
+    assertx(isMethCaller());
+    return m_u.m_methCaller;
+  }
+
+  ClsOrMethCaller m_u;
+
   union {
     Slot m_methodSlot{0};
-    LowPtr<const NamedEntity>::storage_type m_namedEntity;
+    PackedPtr<const NamedFunc> m_namedFunc;
   };
-  // Atomically-accessed intercept flag.  -1, 0, or 1.
-  // TODO(#1114385) intercept should work via invalidation.
-  mutable int8_t m_maybeIntercepted;
+
   mutable ClonedFlag m_cloned;
-  bool m_isPreFunc : 1;
-  bool m_hasPrivateAncestor : 1;
-  bool m_shouldSampleJit : 1;
-  bool m_hot : 1;
-  bool m_serialized : 1;
-  int m_maxStackCells{0};
-  uint64_t m_refBitVal{0};
+  mutable AtomicFlags m_atomicFlags;
+
+  AllFlags m_allFlags;
+
+  // Number of times the function has been considered in `shouldTranslate()`
+  // when Eval.JitLiveThreshold or Eval.JitProfileThreshold is set. The counter
+  // is reset after PGO, so count for live translation only increases when
+  // optimized code doesn't cover the function sufficiently.
+  mutable CopyableAtomic<uint8_t> m_jitReqCount{0};
+
+  RuntimeCoeffects m_requiredCoeffects{RuntimeCoeffects::none()};
+  int16_t m_maxStackCells{0};
   Unit* const m_unit;
   AtomicSharedPtr<SharedData> m_shared;
+  // The lower 31 bits represent inout-ness of the corresponding parameter. The
+  // highest bit is set if there is an inout parameter beyond the 0..31 range.
+  // Initialized by Func::finishedEmittingParams.
+  uint32_t m_inoutBits{0};
   // Initialized by Func::finishedEmittingParams.  The least significant bit is
   // 1 if the last param is not variadic; the 31 most significant bits are the
   // total number of params (including the variadic param).
@@ -1439,71 +1950,11 @@ private:
   AtomicAttr m_attrs;
   // This must be the last field declared in this structure, and the Func class
   // should not be inherited from.
-  AtomicLowPtr<uint8_t> m_prologueTable[1];
+  jit::AtomicLowTCA m_prologueTable[1];
 };
+static_assert(CheckSize<Func, debug ? 72 : 64>(), "");
 
 ///////////////////////////////////////////////////////////////////////////////
-
-/*
- * A prologue is identified by the called function and the number of arguments
- * that the prologue handles.
- */
-struct PrologueID {
-  PrologueID(FuncId funcId, uint32_t nargs)
-    : m_funcId(funcId)
-    , m_nargs(nargs)
-  { }
-
-  PrologueID(const Func* func, uint32_t nargs)
-    : m_funcId(func->getFuncId())
-    , m_nargs(nargs)
-  { }
-
-  PrologueID()
-  { }
-
-  FuncId      funcId() const { return m_funcId; }
-  uint32_t    nargs()  const { return m_nargs;  }
-  const Func* func()   const { return Func::fromFuncId(m_funcId); }
-
-  bool operator==(const PrologueID& other) const {
-    return m_funcId == other.m_funcId && m_nargs == other.m_nargs;
-  }
-
-  struct Hasher {
-    size_t operator()(PrologueID pid) const {
-      return pid.funcId() + (size_t(pid.nargs()) << 32);
-    }
-  };
-
- private:
-  FuncId   m_funcId{InvalidFuncId};
-  uint32_t m_nargs{0xffffffff};
-};
-
-///////////////////////////////////////////////////////////////////////////////
-
-/*
- * Whether dynamic calls to builtin functions that touch the caller's frame are
- * forbidden.
- */
-bool disallowDynamicVarEnvFuncs();
-
-/*
- * Could the function write or read to the locals in the environment of
- * its caller?
- *
- * This occurs, e.g., if `func' is extract().
- */
-bool funcWritesLocals(const Func*);
-bool funcReadsLocals(const Func*);
-
-/*
- * Could the function `callee` attempt to read the caller frame?
- *
- * This occurs, e.g., if `func' is is_callable().
- */
-bool funcNeedsCallerFrame(const Func*);
 
 /*
  * Log meta-information about func. Records attributes, number of locals,
@@ -1512,6 +1963,21 @@ bool funcNeedsCallerFrame(const Func*);
  */
 void logFunc(const Func* func, StructuredLogEntry& ent);
 
+inline tracing::Props traceProps(const Func* f) {
+  return tracing::Props{}.add("func_name", f->fullName());
+}
+
+/*
+ * Throw an exception that func cannot be converted to type.
+ */
+[[noreturn]] void invalidFuncConversion(const char* type);
+
+///////////////////////////////////////////////////////////////////////////////
+// Bytecode
+
+unsigned char* allocateBCRegion(const unsigned char* bc, size_t bclen);
+void freeBCRegion(const unsigned char* bc, size_t bclen);
+
 ///////////////////////////////////////////////////////////////////////////////
 
 }
@@ -1519,5 +1985,3 @@ void logFunc(const Func* func, StructuredLogEntry& ent);
 #define incl_HPHP_VM_FUNC_INL_H_
 #include "hphp/runtime/vm/func-inl.h"
 #undef incl_HPHP_VM_FUNC_INL_H_
-
-#endif // incl_HPHP_VM_FUNC_H_

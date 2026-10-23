@@ -1,6 +1,6 @@
-<?php
+<?hh
 
-function foo() {
+function foo() :mixed{
     $d = new DOMDocument;
     $e = $d->createElement('foo');
     $f = $d->createElement('bar');
@@ -8,5 +8,9 @@ function foo() {
     return $f;
 }
 
+
+<<__EntryPoint>>
+function main_append_invalid() :mixed{
 $c = new DOMDocument;
 var_dump($c->appendChild(foo()));
+}

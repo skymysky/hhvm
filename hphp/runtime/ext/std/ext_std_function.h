@@ -15,8 +15,7 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_EXT_FUNCTION_H_
-#define incl_HPHP_EXT_FUNCTION_H_
+#pragma once
 
 #include "hphp/runtime/ext/extension.h"
 #include "hphp/runtime/ext/std/ext_std.h"
@@ -24,41 +23,14 @@
 namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
 
-Array HHVM_FUNCTION(get_defined_functions);
-bool HHVM_FUNCTION(function_exists, const String& function_name,
+bool HHVM_FUNCTION(function_exists, const OptString& function_name,
   bool autoload = true);
-Variant HHVM_FUNCTION(call_user_func, const Variant& function,
-  const Array& params = null_array);
-Variant HHVM_FUNCTION(forward_static_call_array, const Variant& function,
-  const Array& params);
-Variant HHVM_FUNCTION(forward_static_call, const Variant& function,
-  const Array& params = null_array);
-String HHVM_FUNCTION(create_function, const String& args, const String& code);
 
 ///////////////////////////////////////////////////////////////////////////////
 
-Variant HHVM_FUNCTION(func_get_arg, int arg_num);
-
-Variant HHVM_FUNCTION(func_get_args);
-
-Array hhvm_get_frame_args(const ActRec* ar, int offset);
-
-/**
- * HipHop extension that allows requesting only a subset of function arguments.
- * Exposed as __SystemLib\func_slice_args.
- */
-Variant HHVM_FUNCTION(SystemLib_func_slice_args, int offset);
-
-int64_t HHVM_FUNCTION(func_num_args);
-
-///////////////////////////////////////////////////////////////////////////////
-
-void HHVM_FUNCTION(register_postsend_function,
-  const Variant& function, const Array& params = null_array);
-void HHVM_FUNCTION(register_shutdown_function,
-  const Variant& function, const Array& params = null_array);
+Array hhvm_get_frame_pos_args(const ActRec* ar);
+ArrayData* hhvm_get_frame_named_args(const ActRec* ar);
 
 ///////////////////////////////////////////////////////////////////////////////
 }
 
-#endif // incl_HPHP_EXT_FUNCTION_H_

@@ -1,10 +1,10 @@
-<?php
+<?hh
 
 // Make sure that we can tell which class was called for intercepted static
 // methods
 
 class A {
-  public function foo() {
+  public static function foo() :mixed{
     echo 'foo called';
   }
 }
@@ -12,8 +12,12 @@ class A {
 class B extends A {
  }
 
-fb_intercept('A::foo', function($_, $called_on) {
+
+<<__EntryPoint>>
+function main_1201() :mixed{
+fb_intercept2('A::foo', function($_1, $called_on, inout $_3) {
   var_dump($called_on);
+  return shape('value' => null);
 }
 );
 
@@ -24,4 +28,5 @@ B::foo();
 $class = 'B';
 $c = 'call_user_fun';
 $c .= 'c';
-$c(array($class, 'foo'));
+HH\dynamic_fun($c)(vec[$class, 'foo']);
+}

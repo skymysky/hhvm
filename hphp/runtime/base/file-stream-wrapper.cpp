@@ -24,26 +24,25 @@
 #include "hphp/runtime/base/string-util.h"
 #include "hphp/runtime/ext/stream/ext_stream.h"
 
-#include <boost/filesystem/operations.hpp>
-
-#include <memory>
-
 #include <folly/portability/Stdlib.h>
 #include <folly/portability/SysStat.h>
+
+#include <sys/xattr.h>
 
 namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
 
-req::ptr<MemFile> FileStreamWrapper::openFromCache(const String& filename,
-                                                   const String& mode) {
+FileStreamWrapper s_file_stream_wrapper;
+
+req::ptr<MemFile> FileStreamWrapper::openFromCache(const OptString& filename,
+                                                   const OptString& mode) {
   if (!StaticContentCache::TheFileCache) {
     return nullptr;
   }
 
-  String relative =
-    FileCache::GetRelativePath(File::TranslatePath(filename).c_str());
+  OptString path = File::TranslatePath(filename);
   auto file = req::make<MemFile>();
-  bool ret = file->open(relative, mode);
+  bool ret = file->open(path, mode);
   if (ret) {
     return file;
   }
@@ -51,9 +50,9 @@ req::ptr<MemFile> FileStreamWrapper::openFromCache(const String& filename,
 }
 
 req::ptr<File>
-FileStreamWrapper::open(const String& filename, const String& mode, int options,
+FileStreamWrapper::open(const OptString& filename, const OptString& mode, int options,
                         const req::ptr<StreamContext>& /*context*/) {
-  String fname;
+  OptString fname;
   if (StringUtil::IsFileUrl(filename)) {
     fname = StringUtil::DecodeFileUrl(filename);
     if (fname.empty()) {
@@ -70,7 +69,7 @@ FileStreamWrapper::open(const String& filename, const String& mode, int options,
 
   if (options & File::USE_INCLUDE_PATH) {
     struct stat s;
-    String resolved_fname = resolveVmInclude(fname.get(), "", &s);
+    OptString resolved_fname = resolveVmInclude(fname.get(), "", &s);
     if (!resolved_fname.isNull()) {
       fname = resolved_fname;
     }
@@ -85,7 +84,7 @@ FileStreamWrapper::open(const String& filename, const String& mode, int options,
   return file;
 }
 
-req::ptr<Directory> FileStreamWrapper::opendir(const String& path) {
+req::ptr<Directory> FileStreamWrapper::opendir(const OptString& path) {
   auto tpath = File::TranslatePath(path);
   if (File::IsVirtualDirectory(tpath)) {
     return req::make<CachedDirectory>(tpath);
@@ -99,7 +98,7 @@ req::ptr<Directory> FileStreamWrapper::opendir(const String& path) {
   return dir;
 }
 
-int FileStreamWrapper::unlink(const String& path) {
+int FileStreamWrapper::unlink(const OptString& path) {
   int ret = ::unlink(File::TranslatePath(path).data());
   if (ret != 0) {
     raise_warning(
@@ -112,9 +111,9 @@ int FileStreamWrapper::unlink(const String& path) {
   return ret;
 }
 
-int FileStreamWrapper::rename(const String& oldname, const String& newname) {
+int FileStreamWrapper::rename(const OptString& oldname, const OptString& newname) {
   int ret =
-    RuntimeOption::UseDirectCopy ?
+    Cfg::Server::UseDirectCopy ?
       FileUtil::directRename(File::TranslatePath(oldname).data(),
                              File::TranslatePath(newname).data())
                                  :
@@ -123,7 +122,7 @@ int FileStreamWrapper::rename(const String& oldname, const String& newname) {
   return ret;
 }
 
-int FileStreamWrapper::mkdir(const String& path, int mode, int options) {
+int FileStreamWrapper::mkdir(const OptString& path, int mode, int options) {
   if (options & k_STREAM_MKDIR_RECURSIVE) {
     ERROR_RAISE_WARNING(mkdir_recursive(path, mode));
     return ret;
@@ -132,8 +131,8 @@ int FileStreamWrapper::mkdir(const String& path, int mode, int options) {
   return ret;
 }
 
-int FileStreamWrapper::mkdir_recursive(const String& path, int mode) {
-  String fullpath = File::TranslatePath(path);
+int FileStreamWrapper::mkdir_recursive(const OptString& path, int mode) {
+  OptString fullpath = File::TranslatePath(path);
   if (fullpath.size() > PATH_MAX) {
     errno = ENAMETOOLONG;
     return -1;
@@ -152,10 +151,8 @@ int FileStreamWrapper::mkdir_recursive(const String& path, int mode) {
   for (p = dir + 1; *p; p++) {
     if (FileUtil::isDirSeparator(*p)) {
       *p = '\0';
-      if (::access(dir, F_OK) < 0) {
-        if (::mkdir(dir, mode) < 0) {
-          return -1;
-        }
+      if (::mkdir(dir, mode) < 0) {
+        if (!*(p+1) || errno != EEXIST) return -1;
       }
       *p = FileUtil::getDirSeparator();
     }
@@ -168,6 +165,26 @@ int FileStreamWrapper::mkdir_recursive(const String& path, int mode) {
   }
 
   return 0;
+}
+
+Optional<std::string> FileStreamWrapper::getxattr(const char* path,
+                                                  const char* xattr) {
+  std::string buf;
+  buf.resize(64);
+
+  while (true) {
+    auto const ret = ::getxattr(path, xattr, buf.data(), buf.size());
+    if (ret >= 0) {
+      assertx(ret <= buf.size());
+      buf.resize(ret);
+      return buf;
+    }
+    if (errno != ERANGE) break;
+    auto const actualSize = ::getxattr(path, xattr, nullptr, 0);
+    if (actualSize < 0) break;
+    buf.resize(std::max<size_t>(actualSize, buf.size()));
+  }
+  return std::nullopt;
 }
 
 ///////////////////////////////////////////////////////////////////////////////

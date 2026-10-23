@@ -14,12 +14,11 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_JIT_STRING_TAG_H_
-#define incl_HPHP_JIT_STRING_TAG_H_
+#pragma once
 
 #include <cstdint>
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -41,6 +40,5 @@ const char* string_from_tag(StringTag);
 
 ///////////////////////////////////////////////////////////////////////////////
 
-}}
+}
 
-#endif

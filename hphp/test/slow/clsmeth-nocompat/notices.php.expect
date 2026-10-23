@@ -1,0 +1,37 @@
+is_array($m): False
+HH\is_any_array($m): False
+HH\is_varray($m): False
+HH\is_darray($m): False
+$m is arraylike: False
+$m is shape(...): False
+$m is shape(str,str): False
+$m is HH\Traversable: False
+$m is Traversable: False
+$m is KeyedTraversable: False
+$m is Container: False
+$m is KeyedContainer: False
+is_a($m, HH\Traversable): False
+is_a($m, Traversable): False
+is_a($m, KeyedTraversable): False
+is_a($m, Container): False
+is_a($m, KeyedContainer): False
+is_array($m): False
+HH\is_any_array($m): False
+HH\is_varray($m): False
+HH\is_darray($m): False
+$m is arraylike: False
+$m is shape(...): False
+$m is shape(str,str): False
+$m is HH\Traversable: False
+$m is Traversable: False
+$m is KeyedTraversable: False
+$m is Container: False
+$m is KeyedContainer: False
+is_a($m, HH\Traversable): False
+is_a($m, Traversable): False
+is_a($m, KeyedTraversable): False
+is_a($m, Container): False
+is_a($m, KeyedContainer): False
+is_array($m): False
+HH\is_any_array($m): False
+HH\is_varray($m): False

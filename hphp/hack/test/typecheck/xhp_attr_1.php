@@ -1,18 +1,13 @@
-<?hh // strict
-class :blah {}
+<?hh
+class :blah extends XHPTest {}
 class GenericClass<T> {}
 class SomeClass {
   public function bar(): float {
     return 3.14;
   }
 }
-class :foo {
+class :foo extends XHPTest {
   attribute
-    // Using array without type parameters is okay for now
-    array bar-baz = array(),
-    // Using GenericClass without type parameters is okay for now
-    /* HH_FIXME[4101] */
-    GenericClass yo @required,
     // Check to make sure that "->:" parses correctly when chained
     // together in a larger expression.
     SomeClass some-obj @required,

@@ -1,6 +1,6 @@
-Log.Level = Verbose
+Log.Level = Info
 Eval {
-  JitAHotSize = 2323232
+  JitASize = 2323232
 }
 Server {
   ThreadCount = 100
@@ -52,7 +52,6 @@ Tiers {
   westcoast {
     tier = /^westcoast$/
     overwrite {
-      ResourceLimit.RSS=123456789
       Server.EnableKeepAlive = false
       Server.RequestTimeoutSeconds = 360
       Server.Upload.UploadMaxFileSize = 200MB

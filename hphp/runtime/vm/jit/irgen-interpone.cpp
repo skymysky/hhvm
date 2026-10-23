@@ -18,39 +18,28 @@
 
 #include <cstdlib>
 
+#include "hphp/runtime/vm/hhbc.h"
 #include "hphp/runtime/vm/jit/location.h"
-#include "hphp/runtime/vm/jit/minstr-effects.h"
-#include "hphp/runtime/vm/jit/normalized-instruction.h"
 
 #include "hphp/runtime/vm/jit/irgen-exit.h"
+#include "hphp/runtime/vm/jit/irgen-inlining.h"
 #include "hphp/runtime/vm/jit/irgen-internal.h"
 
-namespace HPHP { namespace jit { namespace irgen {
+namespace HPHP::jit::irgen {
+
+TRACE_SET_MOD(hhir)
 
 namespace {
 
 //////////////////////////////////////////////////////////////////////
 
 Type arithOpResult(Type t1, Type t2) {
-  if (!t1.isKnownDataType() || !t2.isKnownDataType()) {
-    return TCell;
-  }
-
+  if (!t1.isKnownDataType() || !t2.isKnownDataType()) return TCell;
+  const auto num = TDbl | TInt;
+  if (!(t1 <= num) || !(t2 <= num)) return TBottom;
   auto both = t1 | t2;
   if (both.maybe(TDbl)) return TDbl;
-  if (both.maybe(TArr)) return TArr;
-  if (both.maybe(TVec)) return TVec;
-  if (both.maybe(TDict)) return TDict;
-  if (both.maybe(TKeyset)) return TKeyset;
-  if (both.maybe(TStr)) return TCell;
   return TInt;
-}
-
-Type arithOpOverResult(Type t1, Type t2) {
-  if (t1 <= TInt && t2 <= TInt) {
-    return TInt | TDbl;
-  }
-  return arithOpResult(t1, t2);
 }
 
 Type bitOpResult(Type t1, Type t2) {
@@ -67,47 +56,33 @@ Type setOpResult(Type locType, Type valType, SetOpOp op) {
   switch (op) {
   case SetOpOp::PlusEqual:
   case SetOpOp::MinusEqual:
-  case SetOpOp::MulEqual:    return arithOpResult(locType.unbox(), valType);
-  case SetOpOp::PlusEqualO:
-  case SetOpOp::MinusEqualO:
-  case SetOpOp::MulEqualO:   return arithOpOverResult(locType.unbox(), valType);
+  case SetOpOp::MulEqual:    return arithOpResult(locType, valType);
   case SetOpOp::ConcatEqual: return TStr;
   case SetOpOp::PowEqual:
   case SetOpOp::DivEqual:
   case SetOpOp::ModEqual:    return TUncountedInit;
   case SetOpOp::AndEqual:
   case SetOpOp::OrEqual:
-  case SetOpOp::XorEqual:    return bitOpResult(locType.unbox(), valType);
+  case SetOpOp::XorEqual:    return bitOpResult(locType, valType);
   case SetOpOp::SlEqual:
   case SetOpOp::SrEqual:     return TInt;
   }
   not_reached();
 }
 
-uint32_t localInputId(const NormalizedInstruction& inst) {
-  return inst.imm[localImmIdx(inst.op())].u_LA;
-}
-
-folly::Optional<Type> interpOutputType(IRGS& env,
-                                       const NormalizedInstruction& inst,
-                                       folly::Optional<Type>& checkTypeType) {
+Optional<Type> interpOutputType(IRGS& env,
+                                       Optional<Type>& checkTypeType) {
   using namespace jit::InstrFlags;
+  auto const sk = curSrcKey(env);
   auto localType = [&]{
-    auto locId = localInputId(inst);
+    auto locId = getLocalOperand(sk);
     static_assert(std::is_unsigned<decltype(locId)>::value,
                   "locId should be unsigned");
     assertx(locId < curFunc(env)->numLocals());
     return env.irb->local(locId, DataTypeSpecific).type;
   };
 
-  auto boxed = [&] (Type t) -> Type {
-    if (t == TGen) return TBoxedInitCell;
-    assertx(t <= TCell || t <= TBoxedCell);
-    checkTypeType = t <= TBoxedCell ? t : boxType(t);
-    return TBoxedInitCell;
-  };
-
-  switch (getInstrInfo(inst.op()).type) {
+  switch (getInstrInfo(sk.op()).type) {
     case OutNull:        return TInitNull;
     case OutNullUninit:  return TUninit;
     case OutString:      return TStr;
@@ -118,8 +93,6 @@ folly::Optional<Type> interpOutputType(IRGS& env,
     case OutPredBool:
     case OutBooleanImm:  return TBool;
     case OutInt64:       return TInt;
-    case OutArray:       return TArr;
-    case OutArrayImm:    return TArr; // Should be StaticArr/Vec/Dict: t2124292
     case OutVec:         return TVec;
     case OutVecImm:      return TVec;
     case OutDict:        return TDict;
@@ -130,68 +103,63 @@ folly::Optional<Type> interpOutputType(IRGS& env,
     case OutThisObject:  return TObj;
     case OutResource:    return TRes;
 
-    case OutFDesc:       return folly::none;
+    case OutFDesc:       return std::nullopt;
     case OutCns:         return TCell;
-    case OutVUnknown:    return TBoxedInitCell;
 
     case OutSameAsInput1: return topType(env, BCSPRelOffset{0});
+    case OutSameAsInput2: return topType(env, BCSPRelOffset{1});
     case OutModifiedInput2: return topType(env, BCSPRelOffset{1}).modified();
     case OutModifiedInput3: return topType(env, BCSPRelOffset{2}).modified();
-    case OutVInput:      return boxed(topType(env, BCSPRelOffset{0}));
-    case OutVInputL:     return boxed(localType());
 
     case OutArith:
       return arithOpResult(topType(env, BCSPRelOffset{0}),
                            topType(env, BCSPRelOffset{1}));
-    case OutArithO:
-      return arithOpOverResult(topType(env, BCSPRelOffset{0}),
-                               topType(env, BCSPRelOffset{1}));
-    case OutUnknown:     return TGen;
+
+    case OutUnknown:     return TCell;
 
     case OutBitOp:
       return bitOpResult(topType(env, BCSPRelOffset{0}),
-                         inst.op() == HPHP::OpBitNot ?
+                         sk.op() == HPHP::OpBitNot ?
                             TBottom : topType(env, BCSPRelOffset{1}));
     case OutSetOp:      return setOpResult(localType(),
                           topType(env, BCSPRelOffset{0}),
-                          SetOpOp(inst.imm[1].u_OA));
+                          SetOpOp(getImm(sk.pc(), 1).u_OA));
     case OutIncDec: {
-      auto ty = localType().unbox();
+      auto ty = localType();
       return ty <= TDbl ? ty : TCell;
     }
-    case OutNone:       return folly::none;
+    case OutNone:       return std::nullopt;
 
     case OutCInput: {
-      auto ttype = topType(env, BCSPRelOffset{0});
-      if (ttype <= TCell) return ttype;
-      // All instructions that are OutCInput or OutCInputL cannot push uninit or
-      // a ref, so only specific inner types need to be checked.
-      if (ttype.unbox() < TInitCell) {
-        checkTypeType = ttype.unbox();
-      }
-      return TCell;
+      return topType(env, BCSPRelOffset{0});
     }
 
     case OutCInputL: {
       auto ltype = localType();
       if (ltype <= TCell) return ltype;
-      if (ltype.unbox() < TInitCell) {
-        checkTypeType = ltype.unbox();
+      if (ltype < TInitCell) {
+        checkTypeType = ltype;
       }
       return TCell;
     }
     case OutFunc: return TFunc;
+    case OutFuncLike: return TFuncLike;
+    case OutClass: return TCls;
+    case OutClsMeth: return TClsMeth;
+    case OutClsMethLike: return TClsMethLike;
+    case OutLazyClass: return TLazyCls;
+    case OutEnumClassLabel: return TEnumClassLabel;
   }
   not_reached();
 }
 
 jit::vector<InterpOneData::LocalType>
 interpOutputLocals(IRGS& env,
-                   const NormalizedInstruction& inst,
                    bool& smashesAllLocals,
-                   folly::Optional<Type> pushedType) {
+                   Optional<Type> pushedType) {
   using namespace jit::InstrFlags;
-  auto const& info = getInstrInfo(inst.op());
+  auto const sk = curSrcKey(env);
+  auto const& info = getInstrInfo(sk.op());
   // Anything with Local in its output or a member base input can modify a
   // local.
   if (!(info.out & Local) && !(info.in & MBase)) return {};
@@ -205,63 +173,26 @@ interpOutputLocals(IRGS& env,
   };
   auto setImmLocType = [&](uint32_t id, Type t) {
     assertx(id < kMaxHhbcImms);
-    setLocType(inst.imm[id].u_LA, t);
-  };
-  auto handleBoxiness = [&] (Type testTy, Type useTy) {
-    return testTy <= TBoxedCell ? TBoxedInitCell :
-           testTy.maybe(TBoxedCell) ? TGen :
-           useTy;
+    assertx(id == localImmIdx(sk.op()));
+    setLocType(getLocalOperand(sk), t);
   };
 
   auto const mDefine = static_cast<unsigned char>(MOpMode::Define);
 
-  switch (inst.op()) {
-    case OpSetN:
-    case OpSetOpN:
-    case OpIncDecN:
-    case OpBindN:
-    case OpVGetN:
-    case OpUnsetN:
-      smashesAllLocals = true;
-      break;
-
+  switch (sk.op()) {
     case OpSetOpL:
     case OpIncDecL: {
-      assertx(pushedType.hasValue());
-      auto locType = env.irb->local(localInputId(inst), DataTypeSpecific).type;
-      assertx(locType < TGen || curFunc(env)->isPseudoMain());
+      assertx(pushedType.has_value());
 
       auto stackType = pushedType.value();
-      setImmLocType(0, handleBoxiness(locType, stackType));
+      setImmLocType(0, stackType);
       break;
     }
-
-    case OpStaticLocInit:
-    case OpStaticLocDef:
-      setImmLocType(0, TBoxedInitCell);
-      break;
-
-    case OpStaticLocCheck:
-      setImmLocType(0, TGen);
-      break;
-
-    case OpInitThisLoc:
-      setImmLocType(0, TCell);
-      break;
 
     case OpSetL:
     case OpPopL: {
-      auto locType = env.irb->local(localInputId(inst), DataTypeSpecific).type;
       auto stackType = topType(env, BCSPRelOffset{0});
-      // [Set,Pop]L preserves reffiness of a local.
-      setImmLocType(0, handleBoxiness(locType, stackType));
-      break;
-    }
-    case OpVGetL:
-    case OpBindL: {
-      assertx(pushedType.hasValue());
-      assertx(*pushedType <= TBoxedCell);
-      setImmLocType(0, pushedType.value());
+      setImmLocType(0, stackType);
       break;
     }
 
@@ -273,131 +204,65 @@ interpOutputLocals(IRGS& env,
     // New minstrs are handled extremely conservatively.
     case OpQueryM:
     case OpMemoGet:
+    case OpMemoGetEager:
     case OpMemoSet:
+    case OpMemoSetEager:
       break;
     case OpDim:
-      if (inst.imm[0].u_OA & mDefine) smashesAllLocals = true;
+      if (getImm(sk.pc(), 0).u_OA & mDefine) smashesAllLocals = true;
       break;
-    case OpVGetM:
     case OpSetM:
     case OpIncDecM:
     case OpSetOpM:
-    case OpBindM:
+    case OpSetRangeM:
     case OpUnsetM:
-    case OpSetWithRefLML:
-    case OpSetWithRefRML:
       smashesAllLocals = true;
       break;
-
-    case OpMIterInitK:
-    case OpMIterNextK:
-      setImmLocType(3, TCell);
-      /* fallthrough */
-    case OpMIterInit:
-    case OpMIterNext:
-      setImmLocType(2, TBoxedInitCell);
-      break;
-
-    case OpIterInitK:
-    case OpWIterInitK:
-    case OpIterNextK:
-    case OpWIterNextK:
-      setImmLocType(3, TCell);
-      /* fallthrough */
-    case OpIterInit:
-    case OpWIterInit:
-    case OpIterNext:
-    case OpWIterNext:
-      setImmLocType(2, TGen);
-      break;
-
-    case OpLIterInitK:
-    case OpLIterNextK:
-      setImmLocType(4, TCell);
-      /* fallthrough */
-    case OpLIterInit:
-    case OpLIterNext:
-      setImmLocType(3, TGen);
-      break;
-
-    case OpVerifyParamType: {
-      auto locType = env.irb->local(localInputId(inst), DataTypeSpecific).type;
-      setImmLocType(0, handleBoxiness(locType, TCell));
-      break;
-    }
-
-    case OpSilence:
-      if (static_cast<SilenceOp>(inst.imm[1].u_OA) == SilenceOp::Start) {
-        setImmLocType(0, TInt);
-      }
-      break;
-
     default:
       always_assert_flog(
-        false, "Unknown local-modifying op {}", opcodeToName(inst.op())
+        false, "Unknown local-modifying op {}", opcodeToName(sk.op())
       );
   }
 
   return locals;
 }
 
-jit::vector<InterpOneData::ClsRefSlot>
-interpClsRefSlots(IRGS& /*env*/, const NormalizedInstruction& inst) {
-  jit::vector<InterpOneData::ClsRefSlot> slots;
-
-  auto const op = inst.op();
-  auto const numImmeds = numImmediates(op);
-  for (auto i = uint32_t{0}; i < numImmeds; ++i) {
-    auto const type = immType(op, i);
-    if (type == ArgType::CAR) {
-      slots.emplace_back(inst.imm[i].u_CAR, false);
-    } else if (type == ArgType::CAW) {
-      slots.emplace_back(inst.imm[i].u_CAW, true);
-    }
-  }
-
-  return slots;
-}
-
 //////////////////////////////////////////////////////////////////////
 
 }
 
-void interpOne(IRGS& env, const NormalizedInstruction& inst) {
-  folly::Optional<Type> checkTypeType;
-  auto stackType = interpOutputType(env, inst, checkTypeType);
-  auto popped = getStackPopped(inst.pc());
-  auto pushed = getStackPushed(inst.pc());
+void interpOne(IRGS& env) {
+  Optional<Type> checkTypeType;
+  auto const sk = curSrcKey(env);
+  auto stackType = interpOutputType(env, checkTypeType);
+  auto popped = getStackPopped(sk.pc());
+  auto pushed = getStackPushed(sk.pc());
   FTRACE(1, "emitting InterpOne for {}, result = {}, popped {}, pushed {}\n",
-         inst.toString(),
-         stackType.hasValue() ? stackType->toString() : "<none>",
+         instrToString(sk.pc(), sk.func()),
+         stackType.has_value() ? stackType->toString() : "<none>",
          popped, pushed);
 
   InterpOneData idata { spOffBCFromIRSP(env) };
-  auto locals = interpOutputLocals(env, inst, idata.smashesAllLocals,
-    stackType);
+  auto locals = interpOutputLocals(env, idata.smashesAllLocals, stackType);
   idata.nChangedLocals = locals.size();
   idata.changedLocals = locals.data();
 
-  auto slots = interpClsRefSlots(env, inst);
-  idata.nChangedClsRefSlots = slots.size();
-  idata.changedClsRefSlots = slots.data();
-
   interpOne(env, stackType, popped, pushed, idata);
+  if (env.irb->inUnreachableState()) return;
   if (checkTypeType) {
-    auto const out = getInstrInfo(inst.op()).out;
+    auto const out = getInstrInfo(sk.op()).out;
     auto const checkIdx = BCSPRelOffset{
       (out & InstrFlags::StackIns1) ? 1 : 0
-    }.to<FPInvOffset>(env.irb->fs().bcSPOff());
+    }.to<SBInvOffset>(env.irb->fs().bcSPOff());
 
-    checkType(env, Location::Stack { checkIdx }, *checkTypeType,
-              inst.nextSk().offset(), true /* outerOnly */);
+    auto const loc = Location::Stack { checkIdx };
+    checkType(env, loc, *checkTypeType, makeExit(env, nextSrcKey(env)));
   }
 }
 
 void interpOne(IRGS& env, int popped) {
   InterpOneData idata { spOffBCFromIRSP(env) };
-  interpOne(env, folly::none, popped, 0, idata);
+  interpOne(env, std::nullopt, popped, 0, idata);
 }
 
 void interpOne(IRGS& env, Type outType, int popped) {
@@ -406,21 +271,28 @@ void interpOne(IRGS& env, Type outType, int popped) {
 }
 
 void interpOne(IRGS& env,
-               folly::Optional<Type> outType,
+               Optional<Type> outType,
                int popped,
                int pushed,
                InterpOneData& idata) {
-  auto const unit = curUnit(env);
-  auto const op = unit->getOp(bcOff(env));
+  if (isInlining(env)) {
+    // Interp not supported in inlined context, so side exit.
+    gen(env, Jmp, makeExit(env));
+    return;
+  }
+
+  auto const func = curFunc(env);
+  auto const op = func->getOp(bcOff(env));
 
   idata.bcOff = bcOff(env);
   idata.cellsPopped = popped;
   idata.cellsPushed = pushed;
   idata.opcode = op;
 
+  auto const cf = opcodeChangesPC(idata.opcode);
   gen(
     env,
-    opcodeChangesPC(idata.opcode) ? InterpOneCF : InterpOne,
+    cf ? InterpOneCF : InterpOne,
     outType,
     idata,
     sp(env),
@@ -435,56 +307,16 @@ void interpOne(IRGS& env,
  * translated here.
  */
 
-#define INTERP interpOne(env, *env.currentNormalizedInstruction);
-
-void emitFPushObjMethod(IRGS& env, uint32_t, ObjMethodOp, const ImmVector&) {
-  INTERP
-}
-
-void emitAddElemV(IRGS& env)                  { INTERP }
-void emitAddNewElemV(IRGS& env)               { INTERP }
-void emitExit(IRGS& env)                      { INTERP }
-void emitFatal(IRGS& env, FatalOp)            { INTERP }
-void emitUnwind(IRGS& env)                    { INTERP }
-void emitThrow(IRGS& env)                     { INTERP }
-void emitCGetN(IRGS& env)                     { INTERP }
-void emitCGetQuietN(IRGS& env)                { INTERP }
-void emitVGetN(IRGS& env)                     { INTERP }
-void emitIssetN(IRGS& env)                    { INTERP }
-void emitEmptyN(IRGS& env)                    { INTERP }
-void emitSetN(IRGS& env)                      { INTERP }
-void emitSetOpN(IRGS& env, SetOpOp)           { INTERP }
-void emitSetOpG(IRGS& env, SetOpOp)           { INTERP }
-void emitSetOpS(IRGS& env, SetOpOp, uint32_t) { INTERP }
-void emitIncDecN(IRGS& env, IncDecOp)         { INTERP }
-void emitIncDecG(IRGS& env, IncDecOp)         { INTERP }
-void emitBindN(IRGS& env)                     { INTERP }
-void emitUnsetN(IRGS& env)                    { INTERP }
-void emitUnsetG(IRGS& env)                    { INTERP }
-void emitIncl(IRGS& env)                      { INTERP }
-void emitInclOnce(IRGS& env)                  { INTERP }
-void emitReq(IRGS& env)                       { INTERP }
-void emitReqDoc(IRGS& env)                    { INTERP }
-void emitReqOnce(IRGS& env)                   { INTERP }
-void emitEval(IRGS& env)                      { INTERP }
-void emitDefTypeAlias(IRGS& env, uint32_t)    { INTERP }
-void emitDefCns(IRGS& env, const StringData*) { INTERP }
-void emitDefCls(IRGS& env, uint32_t)          { INTERP }
-void emitAliasCls(IRGS& env,
-                  const StringData*,
-                  const StringData*)          { INTERP }
-void emitDefFunc(IRGS& env, uint32_t)         { INTERP }
-void emitCatch(IRGS& env)                     { INTERP }
-void emitChainFaults(IRGS& env)               { INTERP }
-void emitContGetReturn(IRGS& env)             { INTERP }
-void emitContAssignDelegate(IRGS& env, int32_t)
-                                              { INTERP }
-void emitContEnterDelegate(IRGS& env)         { INTERP }
-void emitYieldFromDelegate(IRGS& env, int32_t, int32_t)
-                                              { INTERP }
-void emitContUnsetDelegate(IRGS& env, CudOp, int32_t)
-                                              { INTERP }
-
+void emitExit(IRGS& env)                      { interpOne(env); }
+void emitFatal(IRGS& env, FatalOp)            { interpOne(env); }
+void emitUnsetG(IRGS& env)                    { interpOne(env); }
+void emitIncl(IRGS& env)                      { interpOne(env); }
+void emitInclOnce(IRGS& env)                  { interpOne(env); }
+void emitReq(IRGS& env)                       { interpOne(env); }
+void emitReqDoc(IRGS& env)                    { interpOne(env); }
+void emitReqOnce(IRGS& env)                   { interpOne(env); }
+void emitEval(IRGS& env)                      { interpOne(env); }
+void emitChainFaults(IRGS& env)               { interpOne(env); }
 //////////////////////////////////////////////////////////////////////
 
-}}}
+}

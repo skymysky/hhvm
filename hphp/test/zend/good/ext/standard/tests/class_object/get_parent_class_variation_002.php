@@ -1,27 +1,20 @@
-<?php
+<?hh
 /* Prototype  : proto string get_parent_class([mixed object])
- * Description: Retrieves the parent class name for object or class or current scope. 
+ * Description: Retrieves the parent class name for object or class or current scope.
  * Source code: Zend/zend_builtin_functions.c
- * Alias to functions: 
+ * Alias to functions:
  */
 
-function __autoload($className) {
-	echo "In __autoload($className)\n";
+function test_error_handler($err_no, $err_msg, $filename, $linenum, $vars) :mixed{
+    echo "Error: $err_no - $err_msg, $filename($linenum)\n";
 }
-
-function test_error_handler($err_no, $err_msg, $filename, $linenum, $vars) {
-	echo "Error: $err_no - $err_msg, $filename($linenum)\n";
-}
-set_error_handler('test_error_handler');
-
+<<__EntryPoint>> function get_parent_class_variation_002(): void {
+set_error_handler(test_error_handler<>);
 echo "*** Testing get_parent_class() : usage variations ***\n";
 
-//get an unset variable
-$unset_var = 10;
-unset ($unset_var);
 
 //array of values to iterate over
-$values = array(
+$values = vec[
 
       // int data
       0,
@@ -37,11 +30,11 @@ $values = array(
       .5,
 
       // array data
-      array(),
-      array(0),
-      array(1),
-      array(1, 2),
-      array('color' => 'red', 'item' => 'pen'),
+      'Array',
+      'Array',
+      'Array',
+      'Array',
+      'Array',
 
       // null data
       NULL,
@@ -62,21 +55,21 @@ $values = array(
       'String',
 
       // object data
-      new stdclass(),
+      new stdClass(),
 
-      // undefined data
-      $undefined_var,
 
-      // unset data
-      $unset_var,
-);
+];
 
 // loop through each element of the array for object
 
 foreach($values as $value) {
-      echo "\nArg value $value \n";
-      var_dump( get_parent_class($value) );
+      echo "\nArg value ".(string)$value." \n";
+      try { 
+        var_dump( get_parent_class($value) );
+      } catch (Exception $ex) {
+        var_dump($ex->getMessage());
+      }
 };
 
 echo "Done";
-?>
+}

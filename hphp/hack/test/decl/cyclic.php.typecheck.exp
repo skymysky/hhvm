@@ -1,0 +1,10 @@
+error: Typing[4013] Cyclic class definition : `B` `A`  [1]
+
+cyclic.php:3:17
+1 | <?hh
+2 | 
+3 | class A extends B {}
+  |                 ^ [1]
+4 | class B extends A {}
+
+1 error found

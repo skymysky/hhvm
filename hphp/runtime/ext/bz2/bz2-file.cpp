@@ -32,24 +32,19 @@ BZ2File::BZ2File(req::ptr<PlainFile>&& innerFile)
 }
 
 BZ2File::~BZ2File() {
-  closeImpl();
+  BZ2File::close();
 }
 
 void BZ2File::sweep() {
-  closeImpl();
+  BZ2File::close();
   File::sweep();
 }
 
-bool BZ2File::open(const String& filename, const String& mode) {
+bool BZ2File::open(const OptString& filename, const OptString& mode) {
   assertx(m_bzFile == nullptr);
 
   return m_innerFile->open(filename, mode) &&
     (m_bzFile = BZ2_bzdopen(dup(m_innerFile->fd()), mode.data()));
-}
-
-bool BZ2File::close() {
-  invokeFiltersOnClose();
-  return closeImpl();
 }
 
 int64_t BZ2File::errnu() {
@@ -59,7 +54,7 @@ int64_t BZ2File::errnu() {
   return errnum;
 }
 
-String BZ2File::errstr() {
+OptString BZ2File::errstr() {
   assertx(m_bzFile);
   int errnum;
   return BZ2_bzerror(m_bzFile, &errnum);
@@ -74,7 +69,7 @@ Array BZ2File::error() {
   int errnum;
   const char * errstr;
   errstr = BZ2_bzerror(m_bzFile, &errnum);
-  return make_map_array(s_errno, errnum, s_errstr, String(errstr));
+  return make_dict_array(s_errno, errnum, s_errstr, OptString(errstr));
 }
 
 bool BZ2File::flush() {
@@ -95,7 +90,7 @@ int64_t BZ2File::readImpl(char * buf, int64_t length) {
   if (len <= 0) {
     setEof(true);
     if (len < 0) {
-      return -1;
+      return 0;
     }
   }
   return len;
@@ -106,7 +101,7 @@ int64_t BZ2File::writeImpl(const char * buf, int64_t length) {
   return BZ2_bzwrite(m_bzFile, (char *)buf, length);
 }
 
-bool BZ2File::closeImpl() {
+bool BZ2File::close(int*) {
   if (!isClosed()) {
     if (m_bzFile) {
       BZ2_bzclose(m_bzFile);
@@ -117,7 +112,7 @@ bool BZ2File::closeImpl() {
       m_innerFile->close();
     }
   }
-  File::closeImpl();
+  File::close();
   return true;
 }
 

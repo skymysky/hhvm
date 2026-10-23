@@ -1,27 +1,27 @@
 <?hh
 
 namespace vec {
-const STUFF = 12;
-function vec() { return 0; }
-function foo() { return 1; }
+const int STUFF = 12;
+function vec() :mixed{ return 0; }
+function foo() :mixed{ return 1; }
 }
 
 namespace alpha {
-const STUFF = 12;
-function vec() { return 0; }
-function foo() { return 1; }
+const int STUFF = 12;
+function vec() :mixed{ return 0; }
+function foo() :mixed{ return 1; }
 }
 
 namespace beta\vec {
-const STUFF = 12;
-function vec() { return 0; }
-function foo() { return 1; }
+const int STUFF = 12;
+function vec() :mixed{ return 0; }
+function foo() :mixed{ return 1; }
 }
 
 namespace {
-function vecnest(vec<vec<int>> $foo) {}
-
-function main() {
+function vecnest(vec<vec<int>> $foo) :void{}
+<<__EntryPoint>>
+function main() :void{
   var_dump(\vec\vec());
   var_dump(\vec\foo());
   var_dump(\vec\STUFF);
@@ -42,5 +42,4 @@ function main() {
 
   vecnest(vec[vec[12]]);
 }
-main();
 }

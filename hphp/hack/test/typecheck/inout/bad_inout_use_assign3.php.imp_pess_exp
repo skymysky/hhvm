@@ -1,0 +1,16 @@
+error: Typing[4337] Invalid assignment to an `inout` parameter [1]
+-> Expected `string` [1]
+-> But got `float` [2]
+
+bad_inout_use_assign3.php:7:25
+ 5 | }
+ 6 | 
+ 7 | function f(inout string $s): void {
+   |                         ^^ [1]
+ 8 |   if (launder()) {
+ 9 |     $s = 3.14159;
+   |          ^^^^^^^ [2]
+10 |   } else {
+11 |     $s = 'fizzbuzz';
+
+1 error found

@@ -100,7 +100,7 @@ const StaticString s_passphrase("passphrase");
 int SSLSocket::passwdCallback(char* buf, int num, int /*verify*/, void* data) {
   /* TODO: could expand this to make a callback into PHP user-space */
   SSLSocket *stream = (SSLSocket *)data;
-  String passphrase = stream->m_context[s_passphrase].toString();
+  OptString passphrase = stream->m_context[s_passphrase].toString();
   if (!passphrase.empty() && passphrase.size() < num - 1) {
     memcpy(buf, passphrase.data(), passphrase.size() + 1);
     return passphrase.size();
@@ -124,8 +124,8 @@ SSL *SSLSocket::createSSL(SSL_CTX *ctx) {
     SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, verifyCallback);
 
     /* CA stuff */
-    String cafile = m_context[s_cafile].toString();
-    String capath = m_context[s_capath].toString();
+    OptString cafile = m_context[s_cafile].toString();
+    OptString capath = m_context[s_capath].toString();
 
     if (!FileUtil::isValidPath(cafile)) {
       raise_warning("cafile expected to be a path, string given");
@@ -161,18 +161,18 @@ SSL *SSLSocket::createSSL(SSL_CTX *ctx) {
     SSL_CTX_set_default_passwd_cb(ctx, passwdCallback);
   }
 
-  String cipherlist = m_context[s_ciphers].toString();
+  OptString cipherlist = m_context[s_ciphers].toString();
   if (cipherlist.empty()) {
     cipherlist = "DEFAULT";
   }
   SSL_CTX_set_cipher_list(ctx, cipherlist.data());
 
-  String certfile = m_context[s_local_cert].toString();
+  OptString certfile = m_context[s_local_cert].toString();
   if (!FileUtil::isValidPath(certfile)) {
     raise_warning("local_cert expected to be a path, string given");
     return nullptr;
   } else if (!certfile.empty()) {
-    String resolved_path_buff = File::TranslatePath(certfile);
+    OptString resolved_path_buff = File::TranslatePath(certfile);
     if (!resolved_path_buff.empty()) {
       /* a certificate to use for authentication */
       if (SSL_CTX_use_certificate_chain_file(ctx, resolved_path_buff.data())
@@ -244,7 +244,7 @@ SSLSocket::SSLSocket(int sockfd, int type, const req::ptr<StreamContext>& ctx,
 SSLSocket::~SSLSocket() { }
 
 void SSLSocket::sweep() {
-  SSLSocket::closeImpl();
+  File::close();
   File::sweep();
   m_data = nullptr;
 }
@@ -344,7 +344,7 @@ bool SSLSocket::handleError(int64_t nr_bytes, bool is_init) {
       }
       break;
     }
-    /* fall through */
+    [[fallthrough]];
   default:
     /* some other error */
     ecode = ERR_get_error();
@@ -482,7 +482,7 @@ bool SSLSocket::setupCrypto(SSLSocket *session /* = NULL */) {
   }
 
   if (!m_context.exists(s_verify_peer)) {
-    m_context.add(s_verify_peer, true);
+    m_context.set(s_verify_peer, true);
   }
 
   /* need to do slightly different things, based on client/server method,
@@ -499,7 +499,7 @@ bool SSLSocket::setupCrypto(SSLSocket *session /* = NULL */) {
     break;
   case CryptoMethod::ClientTLS:
     m_data->m_client = true;
-    smethod = TLSv1_client_method();
+    smethod = TLS_client_method();
     break;
   case CryptoMethod::ServerSSLv23:
     m_data->m_client = false;
@@ -522,27 +522,15 @@ bool SSLSocket::setupCrypto(SSLSocket *session /* = NULL */) {
     return false;
 #endif
 
-  /* SSLv2 protocol might be disabled in the OpenSSL library */
-#ifndef OPENSSL_NO_SSL2
-  case CryptoMethod::ClientSSLv2:
-    m_data->m_client = true;
-    smethod = SSLv2_client_method();
-    break;
-  case CryptoMethod::ServerSSLv2:
-    m_data->m_client = false;
-    smethod = SSLv2_server_method();
-    break;
-#else
   case CryptoMethod::ClientSSLv2:
   case CryptoMethod::ServerSSLv2:
     raise_warning("OpenSSL library does not support SSL2 protocol");
     return false;
   break;
-#endif
 
   case CryptoMethod::ServerTLS:
     m_data->m_client = false;
-    smethod = TLSv1_server_method();
+    smethod = TLS_server_method();
     break;
   default:
     return false;
@@ -597,6 +585,7 @@ bool SSLSocket::applyVerificationPolicy(X509 *peer) {
       break;
     }
     /* not allowed, so fall through */
+    [[fallthrough]];
   default:
     raise_warning("Could not verify peer: code:%d %s", err,
                   X509_verify_cert_error_string(err));
@@ -606,7 +595,7 @@ bool SSLSocket::applyVerificationPolicy(X509 *peer) {
   /* if the cert passed the usual checks, apply our own local policies now */
 
   /* Does the common name match ? (used primarily for https://) */
-  String cnmatch = m_context[s_CN_match].toString();
+  OptString cnmatch = m_context[s_CN_match].toString();
   if (!cnmatch.empty()) {
     X509_NAME *name = X509_get_subject_name(peer);
     char buf[1024];
@@ -799,9 +788,9 @@ IMPLEMENT_RESOURCE_ALLOCATION(Certificate)
 
 BIO *Certificate::ReadData(const Variant& var, bool *file /* = NULL */) {
   if (var.isString() || var.isObject()) {
-    String svar = var.toString();
+    OptString svar = var.toString();
     if (StringUtil::IsFileUrl(svar)) {
-      String decoded = StringUtil::DecodeFileUrl(svar);
+      OptString decoded = StringUtil::DecodeFileUrl(svar);
       if (decoded.empty()) {
         raise_warning("invalid file URL, %s", svar.data());
         return nullptr;

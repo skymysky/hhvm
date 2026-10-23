@@ -1,0 +1,141 @@
+error: Typing[4053] No instance method `imeth` in `M` [1]
+-> Did you mean `mmeth` instead? [2]
+-> This is why I think it is an object of type M [3]
+-> Declaration of `M` is here [4]
+
+this_union_intersect.php:92:7
+15 | }
+16 | interface K {
+17 |   public function get():M;
+   |                         ^ [3]
+18 | }
+19 | interface M {
+   |           ^ [4]
+20 |   public function mmeth():void;
+   |                   ^^^^^ [2]
+21 | }
+22 | interface N {
+   :
+90 |   $y = $x->get();
+91 |   //hh_show($y);
+92 |   $y->imeth();
+   |       ^^^^^ [1]
+93 |   $y->mmeth();
+94 | 
+
+error: Typing[4110] Invalid return type [1]
+-> Expected `JB` [2]
+-> But got `<expr#2>::TP where <expr#2>::TP as IA::TP, <expr#2>::TP as IC::TP` [3]
+->   where `<expr#2>` is a reference to this expression [4]
+
+this_union_intersect.php:128:10
+117 |   abstract const type TP as JC;
+118 |   public function methc():void;
+119 |   public function get():this::TP;
+    |                         ^^^^^^^^ [3]
+120 | }
+121 | 
+    :
+124 | }
+125 | 
+126 | function testcomplex2((IB & (IA | IC)) $x):(JB & (JA | JC)) {
+    |                                             ^^ [2]
+127 |   $y = $x->get();
+    |        ^^ [4]
+128 |   return $y;
+    |          ^^ [1]
+129 | }
+
+error: Typing[4110] Invalid return type [1]
+-> Expected `JB` [2]
+-> But got `IA::TP where \IA::TP super <expr#2>::TP, \IA::TP as JA` [3]
+->   where `<expr#2>` is a reference to this expression [4]
+
+this_union_intersect.php:128:10
+117 |   abstract const type TP as JC;
+118 |   public function methc():void;
+119 |   public function get():this::TP;
+    |                         ^^^^^^^^ [3]
+120 | }
+121 | 
+    :
+124 | }
+125 | 
+126 | function testcomplex2((IB & (IA | IC)) $x):(JB & (JA | JC)) {
+    |                                             ^^ [2]
+127 |   $y = $x->get();
+    |        ^^ [4]
+128 |   return $y;
+    |          ^^ [1]
+129 | }
+
+error: Typing[4110] Invalid return type [1]
+-> Expected `JB` [2]
+-> But got `IC::TP where \IC::TP super <expr#2>::TP, \IC::TP as JC` [3]
+->   where `<expr#2>` is a reference to this expression [4]
+
+this_union_intersect.php:128:10
+117 |   abstract const type TP as JC;
+118 |   public function methc():void;
+119 |   public function get():this::TP;
+    |                         ^^^^^^^^ [3]
+120 | }
+121 | 
+    :
+124 | }
+125 | 
+126 | function testcomplex2((IB & (IA | IC)) $x):(JB & (JA | JC)) {
+    |                                             ^^ [2]
+127 |   $y = $x->get();
+    |        ^^ [4]
+128 |   return $y;
+    |          ^^ [1]
+129 | }
+
+error: Typing[4110] Invalid return type [1]
+-> Expected `JB` [2]
+-> But got `JA` [3]
+->   where `<expr#2>` is a reference to this expression [4]
+
+this_union_intersect.php:128:10
+117 |   abstract const type TP as JC;
+118 |   public function methc():void;
+119 |   public function get():this::TP;
+    |                         ^^^^^^^^ [3]
+120 | }
+121 | 
+    :
+124 | }
+125 | 
+126 | function testcomplex2((IB & (IA | IC)) $x):(JB & (JA | JC)) {
+    |                                             ^^ [2]
+127 |   $y = $x->get();
+    |        ^^ [4]
+128 |   return $y;
+    |          ^^ [1]
+129 | }
+
+error: Typing[4110] Invalid return type [1]
+-> Expected `JB` [2]
+-> But got `JC` [3]
+->   where `<expr#2>` is a reference to this expression [4]
+
+this_union_intersect.php:128:10
+117 |   abstract const type TP as JC;
+118 |   public function methc():void;
+119 |   public function get():this::TP;
+    |                         ^^^^^^^^ [3]
+120 | }
+121 | 
+    :
+124 | }
+125 | 
+126 | function testcomplex2((IB & (IA | IC)) $x):(JB & (JA | JC)) {
+    |                                             ^^ [2]
+127 |   $y = $x->get();
+    |        ^^ [4]
+128 |   return $y;
+    |          ^^ [1]
+129 | }
+
+6 errors found

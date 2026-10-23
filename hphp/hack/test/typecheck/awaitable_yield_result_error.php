@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 /**
  * Copyright (c) 2014, Facebook, Inc.
  * All rights reserved.
@@ -9,6 +9,10 @@
  *
  */
 
-async function foo(): ?int {
+async function foo(): Awaitable<?int> {
+  return null;
+}
+
+async function foo_error(): ?int {
   return null;
 }

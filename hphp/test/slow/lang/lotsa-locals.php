@@ -1,6 +1,6 @@
-<?php
+<?hh
 
-function oh_come_on() {
+function oh_come_on() :mixed{
   $local0 = 0; var_dump($local0);
   $local1 = 1; var_dump($local1);
   $local2 = 2; var_dump($local2);
@@ -303,4 +303,8 @@ function oh_come_on() {
   $local299 = 299; var_dump($local299);
 }
 
+
+<<__EntryPoint>>
+function main_lotsa_locals() :mixed{
 oh_come_on();
+}

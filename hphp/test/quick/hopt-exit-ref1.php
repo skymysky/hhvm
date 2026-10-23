@@ -1,12 +1,9 @@
-<?php
+<?hh
 
 class C {
-  function __destruct() {
-    echo "__destruct!\n";
-  }
 }
 
-function foo() {
+function foo() :mixed{
   $x = new C;
   if ($x) {
     echo "not null\n";
@@ -17,4 +14,6 @@ function foo() {
   if ($x) return 1;
 }
 
+<<__EntryPoint>> function main(): void {
 foo();
+}

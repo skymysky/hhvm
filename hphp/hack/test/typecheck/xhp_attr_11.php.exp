@@ -1,2 +1,19 @@
-File "xhp_attr_11.php", line 4, characters 14-13:
-A name is expected here. (Parsing[1002])
+error: Parsing[1002] A name is expected here. [1]
+
+xhp_attr_11.php:4:14
+2 | class :foo {
+3 |   // XHP attributes cannot be declared without a type
+4 |   attribute x;
+  |              ^ [1]
+5 | }
+
+error: Naming[2049] Unbound name: `x` [1]
+
+xhp_attr_11.php:4:13
+2 | class :foo {
+3 |   // XHP attributes cannot be declared without a type
+4 |   attribute x;
+  |             ^ [1]
+5 | }
+
+2 errors found

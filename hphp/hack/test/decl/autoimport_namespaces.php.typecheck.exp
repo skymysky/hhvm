@@ -1,0 +1,39 @@
+error: Naming[2049] Unbound name: `HH\Rx\Exception` [1]
+
+autoimport_namespaces.php:3:20
+1 | <?hh
+2 | 
+3 | type RxException = Rx\Exception;
+  |                    ^^^^^^^^^^^^ [1]
+4 | 
+5 | type BackslashRxException = \Rx\Exception;
+
+error: Naming[2049] Unbound name: `Rx\Exception` [1]
+
+autoimport_namespaces.php:5:29
+3 | type RxException = Rx\Exception;
+4 | 
+5 | type BackslashRxException = \Rx\Exception;
+  |                             ^^^^^^^^^^^^^ [1]
+6 | 
+7 | type RxRxException = RxRx\Exception;
+
+error: Naming[2049] Unbound name: `RxRx\Exception` [1]
+
+autoimport_namespaces.php:7:22
+5 | type BackslashRxException = \Rx\Exception;
+6 | 
+7 | type RxRxException = RxRx\Exception;
+  |                      ^^^^^^^^^^^^^^ [1]
+8 | 
+9 | type MyRx = Rx;
+
+error: Naming[2049] Unbound name: `Rx` [1]
+
+autoimport_namespaces.php:9:13
+7 | type RxRxException = RxRx\Exception;
+8 | 
+9 | type MyRx = Rx;
+  |             ^^ [1]
+
+4 errors found

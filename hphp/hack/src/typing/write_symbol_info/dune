@@ -1,0 +1,39 @@
+(library
+ (name write_symbol_info)
+ (wrapped true)
+ (modules
+  sym_def
+  gencode_utils
+  indexable
+  file_info
+  add_fact
+  build_fact
+  xrefs
+  util
+  pretty
+  sym_hash
+  index_batch
+  index_decls
+  index_xrefs
+  indexer_options
+  entrypoint
+  predicate
+  thrift)
+ (libraries
+  glean_schema
+  ast_provider
+  naming_table
+  package_provider
+  tast_provider
+  typing
+  typing_ast
+  parser
+  procs_procs
+  server_services
+  core_unix.filename_unix
+  utils_core
+  base64
+  uutf
+  yojson)
+ (preprocess
+  (pps ppx_deriving.std)))

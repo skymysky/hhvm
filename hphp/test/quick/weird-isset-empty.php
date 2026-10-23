@@ -1,133 +1,140 @@
 <?hh
+function tst1(inout $abc) :mixed{
+  var_dump(isset($abc['foo']));
+  var_dump(!($abc['foo'] ?? false));
+  var_dump(isset($abc->foo));
+  var_dump(!($abc->foo ?? false));
+  var_dump(isset($abc['foo']['bar']));
+  var_dump(!($abc['foo']['bar'] ?? false));
+  var_dump(isset($abc['foo']->bar));
+  var_dump(!($abc['foo']->bar ?? false));
+  var_dump(isset($abc->foo['bar']));
+  var_dump(!($abc->foo['bar'] ?? false));
+  var_dump(isset($abc->foo->bar));
+  var_dump(!($abc->foo->bar ?? false));
+}
+function tst2(inout $abc) :mixed{
+  $abc->foo = dict['bar' => 'baz'];
+  var_dump(isset($abc->foo));
+  var_dump(!($abc->foo ?? false));
+  var_dump(isset($abc->foo['bar']));
+  var_dump(!($abc->foo['bar'] ?? false));
+  var_dump(isset($abc->foo->bar));
+  var_dump(!($abc->foo->bar ?? false));
+}
+function tst3(inout $abc) :mixed{
+  $abc['foo']->bar = 'baz';
+  var_dump(isset($abc['foo']));
+  var_dump(!($abc['foo'] ?? false));
+  var_dump(isset($abc->foo));
+  var_dump(!($abc->foo ?? false));
+  var_dump(isset($abc['foo']->bar));
+  var_dump(!($abc['foo']->bar ?? false));
+  var_dump(isset($abc->foo['bar']));
+  var_dump(!($abc->foo['bar'] ?? false));
+  var_dump(isset($abc->foo->bar));
+  var_dump(!($abc->foo->bar ?? false));
+}
+<<__EntryPoint>>
+function main_entry(): void {
 
-$x = array("a","b","c");
-$y = 0;
-var_dump(isset($x[$y]));
-var_dump(empty($x[$y]));
-var_dump(isset($x->$y));
-var_dump(empty($x->$y));
-var_dump($x);
+  $x = vec["a","b","c"];
+  $y = 0;
+  var_dump(isset($x[$y]));
+  var_dump(!($x[$y] ?? false));
+  var_dump(isset($x->$y));
+  var_dump(!($x->$y ?? false));
+  var_dump($x);
 
-$x = array("a","b","c");
-$y = "0";
-var_dump(isset($x[$y]));
-var_dump(empty($x[$y]));
-var_dump(isset($x->$y));
-var_dump(empty($x->$y));
-var_dump($x);
+  $x = vec["a","b","c"];
+  $y = "0";
+  var_dump(isset($x[$y]));
+  var_dump(!($x[$y] ?? false));
+  var_dump(isset($x->$y));
+  var_dump(!($x->$y ?? false));
+  var_dump($x);
 
-echo "**************************\n";
+  echo "**************************\n";
 
-$x = array(null);
-$y = 0;
-var_dump(isset($x[$y]));
-var_dump(empty($x[$y]));
-var_dump(isset($x->$y));
-var_dump(empty($x->$y));
-var_dump($x);
+  $x = vec[null];
+  $y = 0;
+  var_dump(isset($x[$y]));
+  var_dump(!($x[$y] ?? false));
+  var_dump(isset($x->$y));
+  var_dump(!($x->$y ?? false));
+  var_dump($x);
 
-$x = array(null);
-$y = "0";
-var_dump(isset($x[$y]));
-var_dump(empty($x[$y]));
-var_dump(isset($x->$y));
-var_dump(empty($x->$y));
-var_dump($x);
+  $x = vec[null];
+  $y = "0";
+  var_dump(isset($x[$y]));
+  var_dump(!($x[$y] ?? false));
+  var_dump(isset($x->$y));
+  var_dump(!($x->$y ?? false));
+  var_dump($x);
 
-echo "**************************\n";
+  echo "**************************\n";
 
-$x = "abc";
-$y = 0;
-var_dump(isset($x[$y]));
-var_dump(empty($x[$y]));
-var_dump(isset($x->$y));
-var_dump(empty($x->$y));
-var_dump($x);
+  $x = "abc";
+  $y = 0;
+  var_dump(isset($x[$y]));
+  var_dump(!($x[$y] ?? false));
+  var_dump(isset($x->$y));
+  var_dump(!($x->$y ?? false));
+  var_dump($x);
 
-$x = "abc";
-$y = "0";
-var_dump(isset($x[$y]));
-var_dump(empty($x[$y]));
-var_dump(isset($x->$y));
-var_dump(empty($x->$y));
-var_dump($x);
+  $x = "abc";
+  $y = "0";
+  var_dump(isset($x[$y]));
+  var_dump(!($x[$y] ?? false));
+  var_dump(isset($x->$y));
+  var_dump(!($x->$y ?? false));
+  var_dump($x);
 
-echo "**************************\n";
+  echo "**************************\n";
 
-$abc = array('foo' => array('bar' => 'baz'));
-$abc2 =& $abc;
-var_dump(isset($abc['foo']));
-var_dump(empty($abc['foo']));
-var_dump(isset($abc->foo));
-var_dump(empty($abc->foo));
-var_dump(isset($abc['foo']['bar']));
-var_dump(empty($abc['foo']['bar']));
-var_dump(isset($abc['foo']->bar));
-var_dump(empty($abc['foo']->bar));
-var_dump(isset($abc->foo['bar']));
-var_dump(empty($abc->foo['bar']));
-var_dump(isset($abc->foo->bar));
-var_dump(empty($abc->foo->bar));
+  $abc = dict['foo' => dict['bar' => 'baz']];
+  tst1(inout $abc);  // make $abc a Var
 
-echo "**************************\n";
+  echo "**************************\n";
 
-$abc = new stdclass;
-$abc->foo = array('bar' => 'baz');
-var_dump(isset($abc->foo));
-var_dump(empty($abc->foo));
-var_dump(isset($abc->foo['bar']));
-var_dump(empty($abc->foo['bar']));
-var_dump(isset($abc->foo->bar));
-var_dump(empty($abc->foo->bar));
-unset($abc);
+  $abc = new stdClass;
+  $abc->foo = dict['bar' => 'baz'];
+  var_dump(isset($abc->foo));
+  var_dump(!($abc->foo ?? false));
+  var_dump(isset($abc->foo['bar']));
+  var_dump(!($abc->foo['bar'] ?? false));
+  var_dump(isset($abc->foo->bar));
+  var_dump(!($abc->foo->bar ?? false));
+  $abc = null;
 
-echo "**************************\n";
+  echo "**************************\n";
 
-$abc = new stdclass;
-$abc2 =& $abc; // make $abc a Var
-$abc->foo = array('bar' => 'baz');
-var_dump(isset($abc->foo));
-var_dump(empty($abc->foo));
-var_dump(isset($abc->foo['bar']));
-var_dump(empty($abc->foo['bar']));
-var_dump(isset($abc->foo->bar));
-var_dump(empty($abc->foo->bar));
-unset($abc);
-unset($abc2);
+  $abc = new stdClass;
+  tst2(inout $abc);  // make $abc a Var
+  $abc = null;
 
-echo "**************************\n";
+  echo "**************************\n";
 
-$abc = array('foo' => new stdclass);
-$abc['foo']->bar = 'baz';
-var_dump(isset($abc['foo']));
-var_dump(empty($abc['foo']));
-var_dump(isset($abc->foo));
-var_dump(empty($abc->foo));
-var_dump(isset($abc['foo']->bar));
-var_dump(empty($abc['foo']->bar));
-var_dump(isset($abc->foo['bar']));
-var_dump(empty($abc->foo['bar']));
-var_dump(isset($abc->foo->bar));
-var_dump(empty($abc->foo->bar));
-unset($abc);
+  $abc = dict['foo' => new stdClass];
+  $abc['foo']->bar = 'baz';
+  var_dump(isset($abc['foo']));
+  var_dump(!($abc['foo'] ?? false));
+  var_dump(isset($abc->foo));
+  var_dump(!($abc->foo ?? false));
+  var_dump(isset($abc['foo']->bar));
+  var_dump(!($abc['foo']->bar ?? false));
+  var_dump(isset($abc->foo['bar']));
+  var_dump(!($abc->foo['bar'] ?? false));
+  var_dump(isset($abc->foo->bar));
+  var_dump(!($abc->foo->bar ?? false));
+  $abc = null;
 
-echo "**************************\n";
+  echo "**************************\n";
 
-$abc = array('foo' => new stdclass);
-$abc2 =& $abc; // make $abc a Var
-$abc['foo']->bar = 'baz';
-var_dump(isset($abc['foo']));
-var_dump(empty($abc['foo']));
-var_dump(isset($abc->foo));
-var_dump(empty($abc->foo));
-var_dump(isset($abc['foo']->bar));
-var_dump(empty($abc['foo']->bar));
-var_dump(isset($abc->foo['bar']));
-var_dump(empty($abc->foo['bar']));
-var_dump(isset($abc->foo->bar));
-var_dump(empty($abc->foo->bar));
-unset($abc);
-unset($abc2);
+  $abc = dict['foo' => new stdClass];
 
-echo "**************************\n";
+  tst3(inout $abc);  // make $abc a Var
+  $abc = null;
 
+  echo "**************************\n";
+}

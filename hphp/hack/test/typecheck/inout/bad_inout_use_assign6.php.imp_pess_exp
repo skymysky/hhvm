@@ -1,0 +1,18 @@
+error: Typing[4337] Invalid assignment to an `inout` parameter [1]
+-> Expected `D` [1]
+-> But got `C` [2]
+
+bad_inout_use_assign6.php:10:20
+ 8 | }
+ 9 | 
+10 | function f(inout D $s): void {
+   |                    ^^ [1]
+11 |   if (launder()) {
+12 |     $s = new D();
+13 |   } else {
+14 |     $s = new C();
+   |              ^ [2]
+15 |   }
+16 | }
+
+1 error found

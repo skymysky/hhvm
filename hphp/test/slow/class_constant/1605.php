@@ -1,4 +1,4 @@
-<?php
+<?hh
 
 class FooConstants {
   const ZERO        = 0;
@@ -17,10 +17,14 @@ class GooConstants {
   const TWENTY_FOUR = BarConstants::TWENTY_FOUR;
   const FORTY_EIGHT = BarConstants::FORTY_EIGHT;
 }
-function a_better_pickle() {
+function a_better_pickle() :mixed{
   return FooConstants::ZERO;
 }
+
+<<__EntryPoint>>
+function main_1605() :mixed{
 a_better_pickle();
 print GooConstants::ZERO;
 print FooConstants::TWENTY_FOUR2;
 print FooConstants::TWENTY_FOUR3;
+}

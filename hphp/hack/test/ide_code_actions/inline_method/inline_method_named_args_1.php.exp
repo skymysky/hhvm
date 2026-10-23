@@ -1,0 +1,62 @@
+Code actions available:
+------------------------------------------
+Extract into variable (CodeActionKind: "refactor")
+Inline method (CodeActionKind: "refactor") SELECTED
+Extract into method (CodeActionKind: "refactor")
+
+JSON for selected code action:
+------------------------------------------
+{
+  "title": "Inline method",
+  "kind": "refactor",
+  "diagnostics": [],
+  "edit": {
+    "changes": {
+      "FILE.php": [
+        {
+          "range": {
+            "start": { "line": 5, "character": 0 },
+            "end": { "line": 11, "character": 3 }
+          },
+          "newText": ""
+        },
+        {
+          "range": {
+            "start": { "line": 13, "character": 4 },
+            "end": { "line": 13, "character": 4 }
+          },
+          "newText": "$param_a = \"hello\";\n    $param_b = 2;\n    $z = $param_a;\n    if ($param_b > 1) {\n      $z = $param_a.$param_b;\n    }\n    $res = $z;\n    "
+        },
+        {
+          "range": {
+            "start": { "line": 13, "character": 11 },
+            "end": { "line": 13, "character": 83 }
+          },
+          "newText": "$res"
+        }
+      ]
+    }
+  }
+}
+
+Applied edit for code action:
+------------------------------------------
+<?hh
+//
+<<file: __EnableUnstableFeatures('named_parameters')>>
+
+class InlineNamedArgs {
+
+  public function caller(): string {
+    $param_a = "hello";
+    $param_b = 2;
+    $z = $param_a;
+    if ($param_b > 1) {
+      $z = $param_a.$param_b;
+    }
+    $res = $z;
+    return $res;
+  }
+}
+//
+

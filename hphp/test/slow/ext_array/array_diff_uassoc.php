@@ -1,26 +1,30 @@
-<?php
+<?hh
 
-function comp_func($n1,$n2) {
+function comp_func($n1,$n2) :mixed{
   $n1=(int)$n1; $n2=(int)$n2;
   return $n1 === $n2 ? 0 : ($n1 > $n2 ? 1 : -1);
 }
 
 
-function a() {
-  $array1 = array(
+function a() :mixed{
+  $array1 = dict[
     "a" => "green",
     "b" => "brown",
     "c" => "blue",
-    "red"
-  );
-  $array2 = array(
+    0 => "red"
+  ];
+  $array2 = dict[
     "a" => "green",
-    "yellow",
-    "red"
-  );
+    0 => "yellow",
+    1 => "red"
+  ];
 
-  $result = array_diff_uassoc($array1, $array2, "comp_func");
+  $result = array_diff_uassoc($array1, $array2, comp_func<>);
   var_dump($result);
 }
 
+
+<<__EntryPoint>>
+function main_array_diff_uassoc() :mixed{
 a();
+}

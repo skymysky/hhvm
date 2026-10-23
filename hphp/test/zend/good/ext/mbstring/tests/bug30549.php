@@ -1,9 +1,6 @@
-<?php
-test('ISO-8859-7',  array(0xa4 => 0x20ac, 0xa5 => 0x20af, 0xaa => 0x037a));
-test('ISO-8859-8',  array(0xaf => 0x00af, 0xfd => 0x200e, 0xfe => 0x200f));
-test('ISO-8859-10', array(0xa4 => 0x012a                                ));
+<?hh
 
-function test($enc, $map) {
+function test($enc, $map) :mixed{
 	print "$enc\n";
 
 	foreach($map as $fromc => $toc) {
@@ -12,4 +9,9 @@ function test($enc, $map) {
 		printf("0x%04x, 0x%04x\n", $toc, $unic);
 	}
 }
-?>
+<<__EntryPoint>>
+function main_entry(): void {
+  test('ISO-8859-7',  dict[0xa4 => 0x20ac, 0xa5 => 0x20af, 0xaa => 0x037a]);
+  test('ISO-8859-8',  dict[0xaf => 0x00af, 0xfd => 0x200e, 0xfe => 0x200f]);
+  test('ISO-8859-10', dict[0xa4 => 0x012a                                ]);
+}

@@ -1,0 +1,22 @@
+error: Typing[4323] Some type arguments violate their constraints [1]
+-> `T` is a constrained type parameter [2]
+-> This type constraint is violated [3]
+-> Expected `D` [4]
+->   via this generic `T` [5]
+-> But got `C` [6]
+-> This type argument to `A` must match exactly (it is invariant) [6]
+
+gen7.php:23:17
+19 | }
+20 | 
+21 | class B<T as A<C>> extends A<T> {}
+   |         ^ [2]
+   |              ^^^^ [3]
+   |                ^ [6]
+   |                              ^ [5]
+22 | 
+23 | class D extends B<D> {}
+   |                 ^^^^ [1]
+   |                   ^ [4]
+
+1 error found

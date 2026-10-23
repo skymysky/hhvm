@@ -1,9 +1,12 @@
-<?php
+<?hh
 
-function inRange($x, $a, $b) {
+function inRange($x, $a, $b) :mixed{
   return ($x >= $a && $x <= $b) ? "YES" : "NO";
 }
 
+
+<<__EntryPoint>>
+function main_touch_date() :mixed{
 $file = tempnam(sys_get_temp_dir(), 'touch_date');
 
 // No args
@@ -27,4 +30,5 @@ $fileInfo = new SplFileInfo($file);
 print($fileInfo->getMTime()."\n");
 print($fileInfo->getATime()."\n");
 
-@unlink($file);
+unlink($file);
+}

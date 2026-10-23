@@ -1,8 +1,8 @@
-array(2) {
+dict(2) {
   ["x"]=>
   bool(false)
   [0]=>
-  array(1) {
+  dict(1) {
     ["x"]=>
     bool(false)
   }

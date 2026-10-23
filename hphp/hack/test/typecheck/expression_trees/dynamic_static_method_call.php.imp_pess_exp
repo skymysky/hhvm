@@ -1,0 +1,36 @@
+warning: Warn[12039] Value of type `dynamic` called as a function [1]
+-> This expression has type `dynamic`, the result of calling a `dynamic` type as a function [1]
+
+dynamic_static_method_call.php:15:7
+13 |     $fun_call = ExampleDsl`{
+14 |       $cls = MyClass::class;
+15 |       $cls::bar("baz");
+   |       ^^^^^^^^^^^^^^^^ [1]
+16 |     }`;
+17 |   }
+
+error: Parsing[1002] Expression trees only support static method calls on `static` and named classes. [1]
+
+dynamic_static_method_call.php:15:7
+13 |     $fun_call = ExampleDsl`{
+14 |       $cls = MyClass::class;
+15 |       $cls::bar("baz");
+   |       ^^^^^^^^^^^^^^^^ [1]
+16 |     }`;
+17 |   }
+
+error: Naming[2050] Variable `$cls` is undefined, or not always defined. [1]
+-> Did you mean `$this` instead? [2]
+
+dynamic_static_method_call.php:15:7
+13 |     $fun_call = ExampleDsl`{
+14 |       $cls = MyClass::class;
+15 |       $cls::bar("baz");
+   |       ^^^^ [1]
+16 |     }`;
+17 |   }
+
+:0:0
+ 0 | No source found
+
+3 errors found

@@ -18,15 +18,15 @@
 
 #include <set>
 
-#include <folly/Format.h>
+#include <fmt/core.h>
 
 #include "hphp/util/hash.h"
 #include "hphp/util/trace.h"
 
-namespace HPHP { namespace hfsort {
+namespace HPHP::hfsort {
 namespace {
 
-TRACE_SET_MOD(hfsort);
+TRACE_SET_MOD(hfsort)
 
 #define HFTRACE(LEVEL, ...)                         \
   if (Trace::moduleEnabled(Trace::hfsort, LEVEL)) { \
@@ -54,15 +54,25 @@ constexpr uint32_t kPageSize = 2 << 20;
 }
 ////////////////////////////////////////////////////////////////////////////////
 
-TargetId TargetGraph::addTarget(uint32_t size, uint32_t samples) {
+TargetId TargetGraph::addTarget(uint32_t size, uint64_t samples) {
   auto id = targets.size();
   targets.emplace_back(size, samples);
   return id;
 }
 
-void TargetGraph::setSamples(TargetId id, uint32_t samples) {
+void TargetGraph::setSamples(TargetId id, uint64_t samples) {
   assertx(id < targets.size());
   targets[id].samples = samples;
+}
+
+void TargetGraph::addSamples(TargetId id, uint64_t samples) {
+  assertx(id < targets.size());
+  targets[id].samples += samples;
+}
+
+uint64_t TargetGraph::getSamples(TargetId id) {
+  assertx(id < targets.size());
+  return targets[id].samples;
 }
 
 const Arc& TargetGraph::incArcWeight(TargetId src, TargetId dst, double w) {
@@ -98,8 +108,21 @@ Cluster::Cluster(TargetId id, const Target& f) {
   HFTRACE(1, "new Cluster: %s\n", toString().c_str());
 }
 
+Cluster::Cluster(const std::vector<TargetId>& ids, const TargetGraph& cg) {
+  targets.reserve(ids.size());
+  size = 0;
+  samples = 0;
+  frozen = false;
+  for (TargetId id : ids) {
+    targets.push_back(id);
+    size += cg.targets[id].size;
+    samples += cg.targets[id].samples;
+  }
+  HFTRACE(1, "new Cluster: %s\n", toString().c_str());
+}
+
 std::string Cluster::toString() const {
-  return folly::sformat("funcs = [{}]", folly::join(", ", targets));
+  return fmt::format("funcs = [{}]", folly::join(", ", targets));
 }
 
 double Cluster::density() const {
@@ -124,7 +147,7 @@ void freezeClusters(const TargetGraph& cg, std::vector<Cluster>& clusters) {
     cluster.frozen = true;
     totalSize = newSize;
     auto fid = cluster.targets[0];
-    HFTRACE(1, "freezing cluster for func %d, size = %u, samples = %u)\n",
+    HFTRACE(1, "freezing cluster for func %d, size = %u, samples = %lu)\n",
             fid, cg.targets[fid].size, cg.targets[fid].samples);
   }
 }
@@ -222,7 +245,7 @@ std::vector<Cluster> clusterize(const TargetGraph& cg) {
       continue;
     }
 
-    HFTRACE(1, "merging %s -> %s: %u\n", predCluster->toString().c_str(),
+    HFTRACE(1, "merging %s -> %s: %lu\n", predCluster->toString().c_str(),
             cluster->toString().c_str(), cg.targets[fid].samples);
 
     for (auto f : cluster->targets) {
@@ -422,4 +445,4 @@ std::vector<Cluster> pettisAndHansen(const TargetGraph& cg) {
   return outClusters;
 }
 
-}}
+}

@@ -13,15 +13,16 @@
    | license@php.net so we can mail you a copy immediately.               |
    +----------------------------------------------------------------------+
 */
-#ifndef incl_HPHP_VM_EVENT_HOOK_H_
-#define incl_HPHP_VM_EVENT_HOOK_H_
+#pragma once
 
 #include "hphp/runtime/base/execution-context.h"
+#include "hphp/runtime/base/intercept.h"
 #include "hphp/runtime/base/rds-header.h"
 #include "hphp/runtime/base/rds.h"
 #include "hphp/runtime/base/surprise-flags.h"
 #include "hphp/runtime/vm/act-rec.h"
 
+#include "hphp/util/configs/eval.h"
 #include "hphp/util/ringbuffer.h"
 
 #include <atomic>
@@ -42,7 +43,6 @@ namespace HPHP {
 struct EventHook {
   enum {
     NormalFunc,
-    PseudoMain,
     Eval,
   };
   enum {
@@ -52,11 +52,23 @@ struct EventHook {
     ProfileFramePointers = 4,
     ProfileConstructors = 8,
     ProfileResumeAware = 16,
+    /* This flag enables access to $this when profiling instance methods. It
+     * is used for internal profiling tools. It *may break* in the future. */
+    ProfileThisObject = 32,
+    ProfileFileLine = 64,
   };
-
+  enum class Source {
+    Asio,
+    Interpreter,
+    Jit,
+    Native,
+    Unwinder
+  };
 
   static void Enable();
   static void Disable();
+  static void EnableInternal(ExecutionContext::InternalEventHookCallbackType);
+  static void DisableInternal();
   static void EnableAsync();
   static void DisableAsync();
   static void EnableDebug();
@@ -66,73 +78,100 @@ struct EventHook {
 
   static void DoMemoryThresholdCallback();
 
+  static inline bool checkSurpriseFlagsAndIntercept(const Func* func) {
+    if (Cfg::Eval::FastMethodIntercept) {
+      return stackLimitAndSurprise().hasSurprise() ||
+        (func->maybeIntercepted() && is_intercepted(func));
+    } else {
+      return stackLimitAndSurprise().hasSurprise();
+    }
+  }
+
   /**
    * Event hooks -- interpreter entry points.
    */
-  static inline bool FunctionCall(const ActRec* ar, int funcType) {
+  static inline bool FunctionCall(const ActRec* ar,
+                                  int funcType,
+                                  EventHook::Source sourceType) {
     ringbufferEnter(ar);
-    return UNLIKELY(checkSurpriseFlags())
-      ? onFunctionCall(ar, funcType) : true;
+    return UNLIKELY(checkSurpriseFlagsAndIntercept(ar->func()))
+      ? onFunctionCall(ar, funcType, sourceType) : true;
   }
-  static inline void FunctionResumeAwait(const ActRec* ar) {
+  static inline void FunctionResumeAwait(const ActRec* ar,
+                                         EventHook::Source sourceType) {
     ringbufferEnter(ar);
-    if (UNLIKELY(checkSurpriseFlags())) { onFunctionResumeAwait(ar); }
+    if (UNLIKELY(stackLimitAndSurprise().hasSurprise())) {
+      onFunctionResumeAwait(ar, sourceType);
+    }
   }
-  static inline void FunctionResumeYield(const ActRec* ar) {
+  static inline void FunctionResumeYield(const ActRec* ar,
+                                         EventHook::Source sourceType) {
     ringbufferEnter(ar);
-    if (UNLIKELY(checkSurpriseFlags())) { onFunctionResumeYield(ar); }
+    if (UNLIKELY(stackLimitAndSurprise().hasSurprise())) {
+      onFunctionResumeYield(ar, sourceType);
+    }
   }
   static void FunctionSuspendAwaitEF(ActRec* suspending,
-                                     const ActRec* resumableAR) {
+                                     const ActRec* resumableAR,
+                                     EventHook::Source sourceType) {
     ringbufferExit(resumableAR);
-    if (UNLIKELY(checkSurpriseFlags())) {
-      onFunctionSuspendAwaitEF(suspending, resumableAR);
+    if (UNLIKELY(stackLimitAndSurprise().hasSurprise())) {
+      onFunctionSuspendAwaitEF(suspending, resumableAR, sourceType);
     }
   }
-  static void FunctionSuspendAwaitEG(ActRec* suspending) {
+  static void FunctionSuspendAwaitEG(ActRec* suspending,
+                                     EventHook::Source sourceType) {
     ringbufferExit(suspending);
-    if (UNLIKELY(checkSurpriseFlags())) {
-      onFunctionSuspendAwaitEG(suspending);
+    if (UNLIKELY(stackLimitAndSurprise().hasSurprise())) {
+      onFunctionSuspendAwaitEG(suspending, sourceType);
     }
   }
-  static void FunctionSuspendAwaitR(ActRec* suspending, ObjectData* child) {
+  static void FunctionSuspendAwaitR(ActRec* suspending,
+                                    ObjectData* child,
+                                    EventHook::Source sourceType) {
     ringbufferExit(suspending);
-    if (UNLIKELY(checkSurpriseFlags())) {
-      onFunctionSuspendAwaitR(suspending, child);
+    if (UNLIKELY(stackLimitAndSurprise().hasSurprise())) {
+      onFunctionSuspendAwaitR(suspending, child, sourceType);
     }
   }
   static void FunctionSuspendCreateCont(ActRec* suspending,
-                                        const ActRec* resumableAR) {
+                                        const ActRec* resumableAR,
+                                        EventHook::Source sourceType) {
     ringbufferExit(resumableAR);
-    if (UNLIKELY(checkSurpriseFlags())) {
-      onFunctionSuspendCreateCont(suspending, resumableAR);
+    if (UNLIKELY(stackLimitAndSurprise().hasSurprise())) {
+      onFunctionSuspendCreateCont(suspending, resumableAR, sourceType);
     }
   }
-  static void FunctionSuspendYield(ActRec* suspending) {
+  static void FunctionSuspendYield(ActRec* suspending,
+                                   EventHook::Source sourceType) {
     ringbufferExit(suspending);
-    if (UNLIKELY(checkSurpriseFlags())) {
-      onFunctionSuspendYield(suspending);
+    if (UNLIKELY(stackLimitAndSurprise().hasSurprise())) {
+      onFunctionSuspendYield(suspending, sourceType);
     }
   }
-  static inline void FunctionReturn(ActRec* ar, TypedValue retval) {
+  static inline void FunctionReturn(ActRec* ar,
+                                    TypedValue retval,
+                                    EventHook::Source sourceType) {
     ringbufferExit(ar);
-    if (UNLIKELY(checkSurpriseFlags())) { onFunctionReturn(ar, retval); }
+    if (UNLIKELY(stackLimitAndSurprise().hasSurprise())) {
+      onFunctionReturn(ar, retval, sourceType);
+    }
   }
   static inline void FunctionUnwind(ActRec* ar, ObjectData* phpException) {
     ringbufferExit(ar);
-    if (UNLIKELY(checkSurpriseFlags())) { onFunctionUnwind(ar, phpException); }
+    if (UNLIKELY(stackLimitAndSurprise().hasSurprise())) { onFunctionUnwind(ar, phpException); }
   }
 
   /**
    * Event hooks -- JIT entry points.
    */
-  static bool onFunctionCall(const ActRec* ar, int funcType);
-  static void onFunctionSuspendAwaitEF(ActRec*, const ActRec*);
-  static void onFunctionSuspendAwaitEG(ActRec*);
-  static void onFunctionSuspendAwaitR(ActRec*, ObjectData*);
-  static void onFunctionSuspendCreateCont(ActRec*, const ActRec*);
-  static void onFunctionSuspendYield(ActRec*);
-  static void onFunctionReturn(ActRec* ar, TypedValue retval);
+  static uint64_t onFunctionCallJit(const ActRec* ar, int funcType);
+  static void onFunctionSuspendAwaitEFJit(ActRec*, const ActRec*);
+  static void onFunctionSuspendAwaitEGJit(ActRec*);
+  static void onFunctionSuspendAwaitRJit(ActRec*, ObjectData*);
+  static void onFunctionSuspendCreateContJit(ActRec*, const ActRec*);
+  static void onFunctionSuspendYieldJit(ActRec*);
+  static void onFunctionReturnJit(ActRec* ar, TypedValue retval);
 
 private:
   enum {
@@ -140,29 +179,36 @@ private:
     ProfileExit,
   };
 
-  static void onFunctionResumeAwait(const ActRec* ar);
-  static void onFunctionResumeYield(const ActRec* ar);
+  static bool onFunctionCall(const ActRec* ar, int funcType, EventHook::Source);
+  static void onFunctionSuspendAwaitEF(ActRec*, const ActRec*, EventHook::Source);
+  static void onFunctionSuspendAwaitEG(ActRec*, EventHook::Source);
+  static void onFunctionSuspendAwaitR(ActRec*, ObjectData*, EventHook::Source);
+  static void onFunctionSuspendCreateCont(ActRec*, const ActRec*, EventHook::Source);
+  static void onFunctionSuspendYield(ActRec*, EventHook::Source);
+  static void onFunctionReturn(ActRec* ar, TypedValue retval, EventHook::Source);
+
+  static void onFunctionResumeAwait(const ActRec* ar, EventHook::Source);
+  static void onFunctionResumeYield(const ActRec* ar, EventHook::Source);
   static void onFunctionUnwind(ActRec* ar, ObjectData* phpException);
 
   static void onFunctionEnter(const ActRec* ar, int funcType,
                               ssize_t flags, bool isResume);
   static void onFunctionExit(const ActRec* ar, const TypedValue* retval,
                              bool unwind, ObjectData* phpException,
-                             size_t flags, bool isSuspend);
+                             size_t flags, bool isSuspend,
+                             EventHook::Source);
 
   static bool RunInterceptHandler(ActRec* ar);
-  static const char* GetFunctionNameForProfiler(const Func* func,
-                                                int funcType);
 
   static inline void ringbufferEnter(const ActRec* ar) {
     if (Trace::moduleEnabled(Trace::ringbuffer, 1)) {
-      auto name = ar->m_func->fullName();
+      auto name = ar->func()->fullName();
       Trace::ringbufferMsg(name->data(), name->size(), Trace::RBTypeFuncEntry);
     }
   }
   static inline void ringbufferExit(const ActRec* ar) {
     if (Trace::moduleEnabled(Trace::ringbuffer, 1)) {
-      auto name = ar->m_func->fullName();
+      auto name = ar->func()->fullName();
       Trace::ringbufferMsg(name->data(), name->size(), Trace::RBTypeFuncExit);
     }
   }
@@ -171,5 +217,3 @@ private:
 //////////////////////////////////////////////////////////////////////
 
 }
-
-#endif

@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 /**
  * Copyright (c) 2014, Facebook, Inc.
  * All rights reserved.
@@ -15,5 +15,5 @@ enum SomeEnum: string as string {
 }
 
 function foo(): classname<SomeEnum> {
-  return SomeEnum::class;
+  return nameof SomeEnum;
 }

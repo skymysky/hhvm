@@ -19,14 +19,15 @@
 #include "hphp/runtime/ext/extension.h"
 #include "hphp/runtime/base/builtin-functions.h"
 #include "hphp/runtime/base/comparisons.h"
+#include "hphp/runtime/base/execution-context.h"
 #include "hphp/runtime/base/runtime-error.h"
 #include "hphp/runtime/base/string-buffer.h"
-#include "hphp/runtime/base/request-local.h"
-#include "hphp/runtime/base/zend-functions.h"
 #include "hphp/runtime/base/zend-string.h"
 #include "hphp/runtime/base/request-event-handler.h"
+#include "hphp/util/rds-local.h"
 
 #include <folly/lang/Assume.h>
+#include <fmt/core.h>
 #include <boost/algorithm/string/predicate.hpp>
 
 #define ICONV_SUPPORTS_ERRNO 1
@@ -58,12 +59,12 @@ static char _generic_superset_name[] = "UCS-4LE";
 #define PHP_ICONV_MIME_DECODE_STRICT            (1<<0)
 #define PHP_ICONV_MIME_DECODE_CONTINUE_ON_ERROR (1<<1)
 
-typedef enum _php_iconv_enc_scheme_t {
+enum php_iconv_enc_scheme_t {
   PHP_ICONV_ENC_SCHEME_BASE64,
   PHP_ICONV_ENC_SCHEME_QPRINT
-} php_iconv_enc_scheme_t;
+};
 
-typedef enum _php_iconv_err_t {
+enum php_iconv_err_t {
   PHP_ICONV_ERR_SUCCESS           = 0,
   PHP_ICONV_ERR_CONVERTER         = 1,
   PHP_ICONV_ERR_WRONG_CHARSET     = 2,
@@ -73,7 +74,7 @@ typedef enum _php_iconv_err_t {
   PHP_ICONV_ERR_UNKNOWN           = 6,
   PHP_ICONV_ERR_MALFORMED         = 7,
   PHP_ICONV_ERR_ALLOC             = 8
-} php_iconv_err_t;
+};
 
 static void _php_iconv_show_error(const char *func, php_iconv_err_t &err,
                                   const char *out_charset,
@@ -95,11 +96,9 @@ static void _php_iconv_show_error(const char *func, php_iconv_err_t &err,
                   "in input string", func);
     break;
   case PHP_ICONV_ERR_ILLEGAL_SEQ:
-    if (RuntimeOption::IconvIgnoreCorrect == HackStrictOption::ON) {
-      if (boost::ends_with(out_charset, "//IGNORE")) {
-        err = PHP_ICONV_ERR_SUCCESS;
-        break;
-      }
+    if (boost::ends_with(out_charset, "//IGNORE")) {
+      err = PHP_ICONV_ERR_SUCCESS;
+      break;
     }
     raise_notice("%s(): Detected an illegal character in input string",
                   func);
@@ -121,9 +120,9 @@ static void _php_iconv_show_error(const char *func, php_iconv_err_t &err,
 const StaticString s_ISO_8859_1("ISO-8859-1");
 
 struct ICONVGlobals final : RequestEventHandler {
-  String input_encoding;
-  String output_encoding;
-  String internal_encoding;
+  OptString input_encoding;
+  OptString output_encoding;
+  OptString internal_encoding;
 
   ICONVGlobals() {}
 
@@ -165,7 +164,7 @@ const char* munge_one(const char* chs, char** tofree,
   /* Avoid warnings about reading beyond array bounds, by indicating
    * to the compiler the relative sizes of the passed in strings.  */
   folly::assume(len + 2 <= chslen);
-  *tofree = static_cast<char*>(malloc(replen + charset_len + 1));
+  *tofree = static_cast<char*>(req::malloc_noptrs(replen + charset_len + 1));
   memcpy(*tofree, rep, replen);
   memcpy(*tofree + replen, chs + len, charset_len + 1);
   return *tofree;
@@ -197,8 +196,8 @@ iconv_t iconv_open_helper(const char* out, const char* in) {
   char* tofree2 = nullptr;
   out = munge_charset(out, &tofree2);
   auto ret = iconv_open(out, in);
-  free(tofree1);
-  free(tofree2);
+  req::free(tofree1);
+  req::free(tofree2);
   return ret;
 }
 
@@ -207,9 +206,9 @@ iconv_t iconv_open_helper(const char* out, const char* in) {
 #ifndef ICONV_CSNMAXLEN
 #define ICONV_CSNMAXLEN 64
 #endif
-static bool validate_charset(const String& charset) {
+static bool validate_charset(const OptString& charset) {
   if (charset.size() >= ICONV_CSNMAXLEN) {
-    throw_invalid_argument
+    raise_invalid_argument_warning
       ("Charset parameter exceeds the maximum allowed "
        "length of %d characters", ICONV_CSNMAXLEN);
     return false;
@@ -218,7 +217,7 @@ static bool validate_charset(const String& charset) {
 }
 
 static Variant check_charset(const Variant& charset) {
-  String charset_str = charset.isNull() ? null_string : charset.toString();
+  OptString charset_str = charset.isNull() ? null_string : charset.toString();
   if (charset_str.empty()) {
     return ICONVG(internal_encoding);
   }
@@ -239,7 +238,7 @@ static php_iconv_err_t _php_iconv_appendl(StringBuffer &d, const char *s,
 
   if (in_p != NULL) {
     while (in_left > 0) {
-      out_left = buf_growth - out_left;
+      out_left = buf_growth;
       out_p = d.appendCursor(out_left);
 
       if (iconv(cd, (ICONV_CONST char **)&in_p, &in_left, (char **)&out_p, &out_left) ==
@@ -266,7 +265,7 @@ static php_iconv_err_t _php_iconv_appendl(StringBuffer &d, const char *s,
     }
   } else {
     for (;;) {
-      out_left = buf_growth - out_left;
+      out_left = buf_growth;
       out_p = d.appendCursor(out_left);
 
       if (iconv(cd, NULL, NULL, (char **)&out_p, &out_left) == (size_t)0) {
@@ -326,24 +325,25 @@ static php_iconv_err_t php_iconv_string(const char *in_p, size_t in_len,
     return PHP_ICONV_ERR_UNKNOWN;
   }
 
-  out_buffer = (char *)malloc(out_size + 1);
+  out_buffer = (char*)req::malloc_noptrs(out_size + 1);
   out_p = out_buffer;
+  SCOPE_EXIT {
+    if (*out == nullptr) req::free(out_buffer);
+  };
 
   result = iconv(cd, (char **)&in_p, &in_size, (char **)&out_p, &out_left);
   if (result == (size_t)(-1)) {
-    free(out_buffer);
     return PHP_ICONV_ERR_UNKNOWN;
   }
 
   if (out_left < 8) {
-    out_buffer = (char *)realloc(out_buffer, out_size + 8);
+    out_buffer = (char*)req::realloc_noptrs(out_buffer, out_size + 8);
   }
 
   // flush the shift-out sequences
   result = iconv(cd, NULL, NULL, &out_p, &out_left);
 
   if (result == (size_t)(-1)) {
-    free(out_buffer);
     return PHP_ICONV_ERR_UNKNOWN;
   }
 
@@ -352,14 +352,13 @@ static php_iconv_err_t php_iconv_string(const char *in_p, size_t in_len,
   *out = out_buffer;
 
   iconv_close(cd);
-
   return PHP_ICONV_ERR_SUCCESS;
 
 #else // iconv supports errno. Handle it better way.
 
   iconv_t cd;
   size_t in_left, out_size, out_left;
-  char *out_p, *out_buf, *tmp_buf;
+  char *out_p, *out_buf;
   size_t bsz, result = 0;
   php_iconv_err_t retval = PHP_ICONV_ERR_SUCCESS;
   int ignore_ilseq = boost::ends_with(out_charset, "//IGNORE") ||
@@ -381,8 +380,11 @@ static php_iconv_err_t php_iconv_string(const char *in_p, size_t in_len,
   out_left = in_len + 32; // Avoid realloc() most cases
   out_size = 0;
   bsz = out_left;
-  out_buf = (char *)malloc(bsz + 1);
+  out_buf = (char *)req::malloc_noptrs(bsz + 1);
   out_p = out_buf;
+  SCOPE_EXIT {
+    if (*out == nullptr) req::free(out_buf);
+  };
 
   while (in_left > 0) {
     result = iconv(cd, (ICONV_CONST char **)&in_p, &in_left, (char **)&out_p, &out_left);
@@ -402,8 +404,8 @@ static php_iconv_err_t php_iconv_string(const char *in_p, size_t in_len,
         // converted string is longer than out buffer
         bsz += in_len;
 
-        tmp_buf = (char*)realloc(out_buf, bsz + 1);
-        out_p = out_buf = tmp_buf;
+        out_buf = (char*)req::realloc_noptrs(out_buf, bsz + 1);
+        out_p = out_buf;
         out_p += out_size;
         out_left = bsz - out_size;
         continue;
@@ -424,9 +426,8 @@ static php_iconv_err_t php_iconv_string(const char *in_p, size_t in_len,
 
       if (errno == E2BIG) {
         bsz += 16;
-        tmp_buf = (char *)realloc(out_buf, bsz);
-
-        out_p = out_buf = tmp_buf;
+        out_buf = (char *)req::realloc_noptrs(out_buf, bsz);
+        out_p = out_buf;
         out_p += out_size;
         out_left = bsz - out_size;
       } else {
@@ -448,7 +449,6 @@ static php_iconv_err_t php_iconv_string(const char *in_p, size_t in_len,
     default:
       // other error
       retval = PHP_ICONV_ERR_UNKNOWN;
-      free(out_buf);
       return PHP_ICONV_ERR_UNKNOWN;
     }
   }
@@ -688,7 +688,7 @@ static php_iconv_err_t _php_iconv_strpos(unsigned int *pretval,
   char *out_p;
   size_t out_left;
   unsigned int cnt;
-  char *ndl_buf;
+  char* ndl_buf = nullptr;
   const char *ndl_buf_p;
   size_t ndl_buf_len, ndl_buf_left;
   unsigned int match_ofs;
@@ -697,20 +697,15 @@ static php_iconv_err_t _php_iconv_strpos(unsigned int *pretval,
 
   err = php_iconv_string(ndl, ndl_nbytes,
                          &ndl_buf, &ndl_buf_len, GENERIC_SUPERSET_NAME, enc);
+  SCOPE_EXIT { req::free(ndl_buf); };
 
   if (err != PHP_ICONV_ERR_SUCCESS) {
-    if (ndl_buf != NULL) {
-      free(ndl_buf);
-    }
     return err;
   }
 
   cd = iconv_open_helper(GENERIC_SUPERSET_NAME, enc);
 
   if (cd == (iconv_t)(-1)) {
-    if (ndl_buf != NULL) {
-      free(ndl_buf);
-    }
 #if ICONV_SUPPORTS_ERRNO
     if (errno == EINVAL) {
       return PHP_ICONV_ERR_WRONG_CHARSET;
@@ -835,10 +830,6 @@ static php_iconv_err_t _php_iconv_strpos(unsigned int *pretval,
         }
       }
     }
-  }
-
-  if (ndl_buf) {
-    free(ndl_buf);
   }
 
   iconv_close(cd);
@@ -1144,6 +1135,7 @@ static php_iconv_err_t _php_iconv_mime_decode(StringBuffer &retval,
       } else {
         break;
       }
+      [[fallthrough]];
 
     case 9: /* choice point, seeing what to do next.*/
       switch (*p1) {
@@ -1168,10 +1160,10 @@ static php_iconv_err_t _php_iconv_mime_decode(StringBuffer &retval,
             break;
           }
         }
-        /* break is omitted intentionally */
+        [[fallthrough]];
 
       case '\r': case '\n': case ' ': case '\t': {
-        String decoded;
+        OptString decoded;
         switch (enc_scheme) {
         case PHP_ICONV_ENC_SCHEME_BASE64:
           {
@@ -1322,7 +1314,7 @@ static php_iconv_err_t _php_iconv_mime_decode(StringBuffer &retval,
           scan_stat = 1;
           break;
         }
-        /* break is omitted intentionally */
+        [[fallthrough]];
 
       default:
         _php_iconv_appendc(retval, *p1, cd_pl);
@@ -1370,20 +1362,20 @@ const StaticString
   s_line_break_chars("line-break-chars");
 
 static Variant HHVM_FUNCTION(iconv_mime_encode,
-    const String& field_name, const String& field_value,
+    const OptString& field_name, const OptString& field_value,
     const Variant& preferences /* = uninit_variant */) {
   php_iconv_enc_scheme_t scheme_id = PHP_ICONV_ENC_SCHEME_BASE64;
-  String in_charset;
-  String out_charset;
+  OptString in_charset;
+  OptString out_charset;
   long line_len = 76;
-  String lfchars = "\r\n";
+  OptString lfchars = "\r\n";
   StringBuffer ret;
   char *buf = NULL;
 
   if (!preferences.isNull()) {
     Variant scheme = preferences.toArray()[s_scheme];
     if (scheme.isString()) {
-      String s = scheme.toString();
+      OptString s = scheme.toString();
       switch (*s.data()) {
       case 'B': case 'b':
         scheme_id = PHP_ICONV_ENC_SCHEME_BASE64;
@@ -1479,7 +1471,7 @@ static Variant HHVM_FUNCTION(iconv_mime_encode,
   char *out_p;
   size_t out_left;
 
-  buf = (char*)malloc(line_len + 5);
+  buf = (char*)req::malloc_noptrs(line_len + 5);
   unsigned int char_cnt;
   char_cnt = line_len;
 
@@ -1592,7 +1584,7 @@ static Variant HHVM_FUNCTION(iconv_mime_encode,
 
 
         int encoded_len = out_size - out_left;
-        String encoded = string_base64_encode(buf, encoded_len);
+        OptString encoded = string_base64_encode(buf, encoded_len);
         if ((int)char_cnt < encoded.size()) {
           /* something went wrong! */
           err = PHP_ICONV_ERR_UNKNOWN;
@@ -1716,7 +1708,7 @@ static Variant HHVM_FUNCTION(iconv_mime_encode,
     iconv_close(cd_pl);
   }
   if (buf != NULL) {
-    free(buf);
+    req::free(buf);
   }
 
   if (err != PHP_ICONV_ERR_SUCCESS) {
@@ -1726,11 +1718,11 @@ static Variant HHVM_FUNCTION(iconv_mime_encode,
 }
 
 static Variant HHVM_FUNCTION(iconv_mime_decode,
-    const String& encoded_string, int64_t mode /* = 0 */,
+    const OptString& encoded_string, int64_t mode /* = 0 */,
     const Variant& charset /* = null_string */) {
   Variant encoded = check_charset(charset);
   if (same(encoded, false)) return false;
-  String enc = encoded.toString();
+  OptString enc = encoded.toString();
   StringBuffer retval;
   php_iconv_err_t err =
     _php_iconv_mime_decode(retval, encoded_string.data(),
@@ -1744,13 +1736,13 @@ static Variant HHVM_FUNCTION(iconv_mime_decode,
 }
 
 static Variant HHVM_FUNCTION(iconv_mime_decode_headers,
-    const String& encoded_headers,
+    const OptString& encoded_headers,
     int64_t mode /* = 0 */,
     const Variant& charset /* = null_string */) {
   Variant encoded = check_charset(charset);
   if (same(encoded, false)) return false;
-  String enc = encoded.toString();
-  Array ret;
+  OptString enc = encoded.toString();
+  Array ret = Array::CreateDict();
   php_iconv_err_t err = PHP_ICONV_ERR_SUCCESS;
   const char *encoded_str = encoded_headers.data();
   int encoded_str_len = encoded_headers.size();
@@ -1790,14 +1782,14 @@ static Variant HHVM_FUNCTION(iconv_mime_decode_headers,
     }
 
     if (header_name != NULL) {
-      String header(header_name, header_name_len, CopyString);
-      String value(header_value, header_value_len, CopyString);
+      OptString header(header_name, header_name_len, CopyString);
+      OptString value(header_value, header_value_len, CopyString);
       if (ret.exists(header)) {
         Variant elem = ret[header];
         if (!elem.isArray()) {
-          ret.set(header, make_packed_array(elem, value));
+          ret.set(header, make_vec_array(elem, value));
         } else {
-          elem.toArrRef().append(value);
+          elem.asArrRef().append(value);
           ret.set(header, elem);
         }
       } else {
@@ -1812,6 +1804,9 @@ static Variant HHVM_FUNCTION(iconv_mime_decode_headers,
     _php_iconv_show_error(__FUNCTION__+2, err, enc.data(), "???");
     return false;
   }
+  if (ret.empty()) {
+    return init_null();
+  }
   return ret;
 }
 
@@ -1823,13 +1818,13 @@ const StaticString
 
 
 static Variant HHVM_FUNCTION(iconv_get_encoding,
-    const String& type /* = "all" */) {
+    const OptString& type /* = "all" */) {
   if (type == s_all) {
-    Array ret;
-    ret.set(s_input_encoding,    ICONVG(input_encoding));
-    ret.set(s_output_encoding,   ICONVG(output_encoding));
-    ret.set(s_internal_encoding, ICONVG(internal_encoding));
-    return ret;
+    return make_dict_array(
+      s_input_encoding,    ICONVG(input_encoding),
+      s_output_encoding,   ICONVG(output_encoding),
+      s_internal_encoding, ICONVG(internal_encoding)
+    );
   }
   if (type == s_input_encoding)    return ICONVG(input_encoding);
   if (type == s_output_encoding)   return ICONVG(output_encoding);
@@ -1838,7 +1833,7 @@ static Variant HHVM_FUNCTION(iconv_get_encoding,
 }
 
 static bool HHVM_FUNCTION(iconv_set_encoding,
-    const String& type, const String& charset) {
+    const OptString& type, const OptString& charset) {
   if (!validate_charset(charset)) return false;
   if (type == s_input_encoding) {
     ICONVG(input_encoding) = charset;
@@ -1852,29 +1847,30 @@ static bool HHVM_FUNCTION(iconv_set_encoding,
   return true;
 }
 
-static Variant HHVM_FUNCTION(iconv, const String& in_charset,
-    const String& out_charset, const String& str) {
+static Variant HHVM_FUNCTION(iconv, const OptString& in_charset,
+    const OptString& out_charset, const OptString& str) {
   if (!validate_charset(in_charset)) return false;
   if (!validate_charset(out_charset)) return false;
 
-  char *out_buffer;
+  char* out_buffer = nullptr;
   size_t out_len;
   php_iconv_err_t err =
     php_iconv_string(str.data(), str.size(), &out_buffer, &out_len,
                      out_charset.data(), in_charset.data());
+  SCOPE_EXIT { req::free(out_buffer); };
   _php_iconv_show_error(__FUNCTION__+2, err,
                         out_charset.data(), in_charset.data());
   if (err == PHP_ICONV_ERR_SUCCESS && out_buffer != nullptr) {
-    return String(out_buffer, out_len, AttachString);
+    return OptString(out_buffer, out_len, CopyString);
   }
   return false;
 }
 
 static Variant HHVM_FUNCTION(iconv_strlen,
-    const String& str, const Variant& charset /* = null_string */) {
+    const OptString& str, const Variant& charset /* = null_string */) {
   Variant encoded = check_charset(charset);
   if (same(encoded, false)) return false;
-  String enc = encoded.toString();
+  OptString enc = encoded.toString();
   unsigned int retval;
   php_iconv_err_t err = _php_iconv_strlen(&retval, str.data(), str.size(),
                                           enc.data());
@@ -1886,7 +1882,7 @@ static Variant HHVM_FUNCTION(iconv_strlen,
 }
 
 static Variant HHVM_FUNCTION(iconv_strpos,
-    const String& haystack, const String& needle, int64_t offset /* = 0 */,
+    const OptString& haystack, const OptString& needle, int64_t offset /* = 0 */,
     const Variant& charset /* = null_string */) {
   if (offset < 0) {
     raise_warning("Offset not contained in string.");
@@ -1898,7 +1894,7 @@ static Variant HHVM_FUNCTION(iconv_strpos,
 
   Variant encoded = check_charset(charset);
   if (same(encoded, false)) return false;
-  String enc = encoded.toString();
+  OptString enc = encoded.toString();
   unsigned int retval;
   php_iconv_err_t err =
     _php_iconv_strpos(&retval, haystack.data(), haystack.size(),
@@ -1911,7 +1907,7 @@ static Variant HHVM_FUNCTION(iconv_strpos,
 }
 
 static Variant HHVM_FUNCTION(iconv_strrpos,
-    const String& haystack, const String& needle,
+    const OptString& haystack, const OptString& needle,
     const Variant& charset /* = null_string */) {
   if (needle.size() < 1) {
     return false;
@@ -1919,7 +1915,7 @@ static Variant HHVM_FUNCTION(iconv_strrpos,
 
   Variant encoded = check_charset(charset);
   if (same(encoded, false)) return false;
-  String enc = encoded.toString();
+  OptString enc = encoded.toString();
   unsigned int retval;
   php_iconv_err_t err =
     _php_iconv_strpos(&retval, haystack.data(), haystack.size(),
@@ -1932,11 +1928,11 @@ static Variant HHVM_FUNCTION(iconv_strrpos,
 }
 
 static Variant HHVM_FUNCTION(iconv_substr,
-    const String& str, int64_t offset, int64_t length /* = INT_MAX */,
+    const OptString& str, int64_t offset, int64_t length /* = INT_MAX */,
     const Variant& charset /* = null_string */) {
   Variant encoded = check_charset(charset);
   if (same(encoded, false)) return false;
-  String enc = encoded.toString();
+  OptString enc = encoded.toString();
   length = length <= INT32_MAX ? length : INT32_MAX;
   StringBuffer retval;
   php_iconv_err_t err = _php_iconv_substr(retval, str.data(), str.size(),
@@ -1948,21 +1944,22 @@ static Variant HHVM_FUNCTION(iconv_substr,
   return false;
 }
 
-static String
-HHVM_FUNCTION(ob_iconv_handler, const String& contents, int64_t /*status*/) {
-  String mimetype = g_context->getMimeType();
+static OptString
+HHVM_FUNCTION(ob_iconv_handler, const OptString& contents, int64_t /*status*/) {
+  OptString mimetype = g_context->getMimeType();
   if (!mimetype.empty()) {
-    char *out_buffer;
+    char* out_buffer = nullptr;
     size_t out_len;
     php_iconv_err_t err =
       php_iconv_string(contents.data(), contents.size(), &out_buffer, &out_len,
                        ICONVG(output_encoding).c_str(),
                        ICONVG(internal_encoding).c_str());
+    SCOPE_EXIT { req::free(out_buffer); };
     _php_iconv_show_error(__FUNCTION__+2, err, ICONVG(output_encoding).c_str(),
                           ICONVG(internal_encoding).c_str());
     if (out_buffer != NULL) {
       g_context->setContentType(mimetype, ICONVG(output_encoding));
-      return String(out_buffer, out_len, AttachString);
+      return OptString(out_buffer, out_len, CopyString);
     }
   }
   return contents;
@@ -1971,16 +1968,16 @@ HHVM_FUNCTION(ob_iconv_handler, const String& contents, int64_t /*status*/) {
 ///////////////////////////////////////////////////////////////////////////////
 
 #ifdef _LIBICONV_VERSION
-const char* iconv_impl() { return "libiconv"; };
+const char* iconv_impl() { return "libiconv"; }
 std::string iconv_version() {
-  return folly::sformat("{}.{}",
+  return fmt::format("{}.{}",
                         _LIBICONV_VERSION >> 8, _LIBICONV_VERSION & 255);
 }
 #else
-const char* iconv_impl() { return "glibc"; };
+const char* iconv_impl() { return "glibc"; }
 #ifdef __GLIBC__
 std::string iconv_version() {
-  return folly::sformat("{}.{}",
+  return fmt::format("{}.{}",
                         __GLIBC__, __GLIBC_MINOR__);
 }
 #else
@@ -1989,12 +1986,10 @@ const char* iconv_version() { return "2.5"; }
 #endif
 
 struct iconvExtension final : Extension {
-  iconvExtension() : Extension("iconv") {}
+  iconvExtension() : Extension("iconv", NO_EXTENSION_VERSION_YET, "hphp_hphpi") {}
 
-  void moduleInit() override {
+  void moduleRegisterNative() override {
     HHVM_RC_STR(ICONV_IMPL, iconv_impl());
-    HHVM_RC_INT(ICONV_MIME_DECODE_CONTINUE_ON_ERROR, 2);
-    HHVM_RC_INT(ICONV_MIME_DECODE_STRICT, 1);
     HHVM_RC_STR(ICONV_VERSION, iconv_version());
 
     HHVM_FE(iconv_get_encoding);
@@ -2008,8 +2003,6 @@ struct iconvExtension final : Extension {
     HHVM_FE(iconv_substr);
     HHVM_FE(iconv);
     HHVM_FE(ob_iconv_handler);
-
-    loadSystemlib();
   }
 
 } s_iconv_extension;

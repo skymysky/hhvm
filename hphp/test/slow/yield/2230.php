@@ -1,6 +1,6 @@
-<?php
+<?hh
 
-function foo() {
+function foo() :AsyncGenerator<mixed,mixed,void>{
   yield 1;
   yield 2;
   yield "abc" => 3;
@@ -9,7 +9,11 @@ function foo() {
   yield 6;
 }
 
+
+<<__EntryPoint>>
+function main_2230() :mixed{
 foreach(foo() as $k => $v) {
   var_dump($k);
   var_dump($v);
+}
 }

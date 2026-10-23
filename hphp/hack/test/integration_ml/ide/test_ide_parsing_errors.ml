@@ -1,4 +1,4 @@
-(**
+(*
  * Copyright (c) 2016, Facebook, Inc.
  * All rights reserved.
  *
@@ -13,15 +13,14 @@ module Test = Integration_test_base
 let foo_parent_name = "foo_parent.php"
 
 let foo_parent_contents1 =
-"<?hh // strict
+  "<?hh // strict
 
 class FooParent {
   public function lol() : void {}
 }
 "
 
-let foo_parent_contents2 =
-"<?hh // strict
+let foo_parent_contents2 = "<?hh // strict
 
 class FooParent {}
 "
@@ -29,7 +28,7 @@ class FooParent {}
 let foo_name = "foo.php"
 
 let foo_contents1 =
-"<?hh // strict
+  "<?hh // strict
 
 class Foo extends FooParent {
   public function bar() : void {
@@ -37,20 +36,20 @@ class Foo extends FooParent {
 }
 "
 
-let foo_contents2 =
-"<?hh // strict
+let foo_contents2 = "<?hh // strict
 
 class Fo
 "
 
-let foo_diagnostics = "
+let foo_diagnostics =
+  "
 /foo.php:
-File \"/foo.php\", line 3, characters 9-9:
-A left brace ('{') is expected here. (Parsing[1002])
+ERROR: File \"/foo.php\", line 3, characters 9-9:
+A left brace `{` is expected here. (Parsing[1002])
 "
 
 let autocomplete_contents =
-"<?hh
+  "<?hh
 
 function test(Foo $foo) {
   $foo->AUTO332
@@ -58,31 +57,38 @@ function test(Foo $foo) {
 
 "
 
-let () =
-
-  let env = Test.setup_server () in
-  let env = Test.connect_persistent_client env in
-  let env = Test.subscribe_diagnostic env in
-
-  let env = Test.open_file env foo_parent_name ~contents:foo_parent_contents1 in
-  let env = Test.open_file env foo_name ~contents:foo_contents1 in
-
-  let env = Test.wait env in
-  let env, loop_output = Test.(run_loop_once env default_loop_input) in
-  Test.assert_no_diagnostics loop_output;
+let test () =
+  Test.Client.with_env ~custom_config:None @@ fun env ->
+  let env =
+    Test.Client.setup_disk
+      env
+      [(foo_parent_name, foo_parent_contents1); (foo_name, foo_contents1)]
+  in
 
   (* Introduce an irrecoverable parsing error in Foo definition - if we would
    * proceed to try to redeclare foo.php, Foo will no longer exist *)
-  let env, _ = Test.edit_file env foo_name foo_contents2 in
-  let env = Test.wait env in
-  let env, loop_output = Test.(run_loop_once env default_loop_input) in
-  Test.assert_diagnostics loop_output foo_diagnostics;
+  let env = Test.Client.setup_disk env [(foo_name, foo_contents2)] in
+  let (env, diagnostics) = Test.Client.open_file env foo_name in
+  Test.Client.assert_diagnostics_string diagnostics foo_diagnostics;
 
   (* Change the Foo parent to trigger invalidating Foo *)
-  let env, _ = Test.edit_file env foo_parent_name foo_parent_contents2 in
-  let env = Test.wait env in
-  let env, _ = Test.(run_loop_once env default_loop_input) in
+  let env =
+    Test.Client.setup_disk env [(foo_parent_name, foo_parent_contents2)]
+  in
+  (* If Foo is irrecoverable, then it shouldn't be available for completion *)
+  let (env, _diagnostics) =
+    Test.Client.edit_file env "test.php" autocomplete_contents
+  in
+  let (env, response) =
+    Client_ide_daemon.Test.handle
+      env
+      Client_ide_message.(
+        Completion
+          ( Test.doc "test.php" autocomplete_contents,
+            File_content.Position.from_one_based 4 9,
+            { is_manually_invoked = true } ))
+  in
+  Test.assert_ide_completions response [];
 
-  (* Check that Foo definiton is still available for querying *)
-  let _, loop_output = Test.autocomplete env autocomplete_contents in
-  Test.assert_autocomplete loop_output ["bar"]
+  ignore env;
+  ()

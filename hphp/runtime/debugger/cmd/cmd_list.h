@@ -14,14 +14,13 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_EVAL_DEBUGGER_CMD_LIST_H_
-#define incl_HPHP_EVAL_DEBUGGER_CMD_LIST_H_
+#pragma once
 
 #include "hphp/runtime/base/type-variant.h"
 #include "hphp/runtime/base/req-root.h"
 #include "hphp/runtime/debugger/debugger_command.h"
 
-namespace HPHP { namespace Eval {
+namespace HPHP::Eval {
 ///////////////////////////////////////////////////////////////////////////////
 
 struct CmdList : DebuggerCommand {
@@ -33,6 +32,8 @@ struct CmdList : DebuggerCommand {
   void help(DebuggerClient&) override;
   bool onServer(DebuggerProxy&) override;
   void onClient(DebuggerClient&) override;
+
+  std::string name() const override { return "list"; }
 
 protected:
   void sendImpl(DebuggerThriftBuffer&) override;
@@ -65,6 +66,5 @@ private:
 };
 
 ///////////////////////////////////////////////////////////////////////////////
-}}
+}
 
-#endif // incl_HPHP_EVAL_DEBUGGER_CMD_LIST_H_

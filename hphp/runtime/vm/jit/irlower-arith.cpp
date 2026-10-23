@@ -17,10 +17,8 @@
 #include "hphp/runtime/vm/jit/irlower-internal.h"
 
 #include "hphp/runtime/base/tv-arith.h"
-#include "hphp/runtime/vm/hhbc.h"
 
 #include "hphp/runtime/vm/jit/call-spec.h"
-#include "hphp/runtime/vm/jit/code-gen-cf.h"
 #include "hphp/runtime/vm/jit/extra-data.h"
 #include "hphp/runtime/vm/jit/ir-instruction.h"
 #include "hphp/runtime/vm/jit/ssa-tmp.h"
@@ -31,9 +29,9 @@
 #include "hphp/util/asm-x64.h"
 #include "hphp/util/trace.h"
 
-namespace HPHP { namespace jit { namespace irlower {
+namespace HPHP::jit::irlower {
 
-TRACE_SET_MOD(irlower);
+TRACE_SET_MOD(irlower)
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -104,22 +102,21 @@ void implShift(Vout& v, IRLS& env, const IRInstruction* inst) {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-#define ARITH_OPS               \
-  AO(AddInt,  BinopSF,  addq)   \
-  AO(SubInt,  BinopSF,  subq)   \
-  AO(MulInt,  BinopSF,  imul)   \
-  AO(AddIntO, ArithO,   addq)   \
-  AO(SubIntO, ArithO,   subq)   \
-  AO(MulIntO, ArithO,   imul)   \
-  AO(AddDbl,  Binop,    addsd)  \
-  AO(SubDbl,  Binop,    subsd)  \
-  AO(MulDbl,  Binop,    mulsd)  \
-  AO(AbsDbl,  Unop,     absdbl) \
-  AO(Sqrt,    Unop,     sqrtsd) \
-  AO(AndInt,  BinopSF,  andq)   \
-  AO(OrInt,   BinopSF,  orq)    \
-  AO(XorInt,  BinopSF,  xorq)   \
-  AO(XorBool, BinopSF,  xorb)   \
+#define ARITH_OPS                  \
+  AO(AddInt,    BinopSF,  addq)    \
+  AO(AddOffset, BinopSF,  addq)    \
+  AO(SubInt,    BinopSF,  subq)    \
+  AO(MulInt,    BinopSF,  imul)    \
+  AO(MulIntO,   ArithO,   imul)    \
+  AO(AddDbl,    Binop,    addsd)   \
+  AO(SubDbl,    Binop,    subsd)   \
+  AO(MulDbl,    Binop,    mulsd)   \
+  AO(AbsDbl,    Unop,     absdbl)  \
+  AO(Sqrt,      Unop,     sqrtsd)  \
+  AO(AndInt,    BinopSF,  andq)    \
+  AO(OrInt,     BinopSF,  orq)     \
+  AO(XorInt,    BinopSF,  xorq)    \
+  AO(XorBool,   BinopSF,  xorb)    \
 
 #define AO(Inst, Impl, vinst)                           \
   void cg##Inst(IRLS& env, const IRInstruction* inst) { \
@@ -144,6 +141,9 @@ void cgShl(IRLS& env, const IRInstruction* inst) {
 }
 void cgShr(IRLS& env, const IRInstruction* inst) {
   implShift<sar,sarqi>(vmain(env), env, inst);
+}
+void cgLshr(IRLS& env, const IRInstruction* inst) {
+  implShift<shr,shrqi>(vmain(env), env, inst);
 }
 
 void cgDivDbl(IRLS& env, const IRInstruction* inst) {
@@ -175,34 +175,84 @@ void cgMod(IRLS& env, const IRInstruction* inst) {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-void cgSetOpCell(IRLS& env, const IRInstruction* inst) {
+namespace {
+
+auto setOpOpToHelper(SetOpOp op) {
+  switch (op) {
+    case SetOpOp::PlusEqual:   return tvAddEq;
+    case SetOpOp::MinusEqual:  return tvSubEq;
+    case SetOpOp::MulEqual:    return tvMulEq;
+    case SetOpOp::ConcatEqual: return tvConcatEq;
+    case SetOpOp::DivEqual:    return tvDivEq;
+    case SetOpOp::PowEqual:    return tvPowEq;
+    case SetOpOp::ModEqual:    return tvModEq;
+    case SetOpOp::AndEqual:    return tvBitAndEq;
+    case SetOpOp::OrEqual:     return tvBitOrEq;
+    case SetOpOp::XorEqual:    return tvBitXorEq;
+    case SetOpOp::SlEqual:     return tvShlEq;
+    case SetOpOp::SrEqual:     return tvShrEq;
+  }
+  not_reached();
+}
+
+}
+
+void cgSetOpTV(IRLS& env, const IRInstruction* inst) {
   auto const op = inst->extra<SetOpData>()->op;
-  auto const target = [&] {
+  auto const helper = setOpOpToHelper(op);
+  auto& v = vmain(env);
+  cgCallHelper(v, env, CallSpec::direct(helper), kVoidDest, SyncOptions::Sync,
+               argGroup(env, inst).ssa(0).typedValue(1));
+}
+
+template <SetOpOp Op>
+static TypedValue outlineSetOpImpl(TypedValue lhs, TypedValue rhs) {
+  TypedValue temp;
+  tvDup(lhs, temp);
+  SCOPE_FAIL { tvDecRefGen(&temp); };
+  setOpOpToHelper(Op)(&temp, rhs);
+  return temp;
+}
+
+void cgOutlineSetOp(IRLS& env, const IRInstruction* inst) {
+  auto const op = inst->extra<SetOpData>()->op;
+  auto& v = vmain(env);
+
+  using S = SetOpOp;
+  auto const helper = [&]{
     switch (op) {
-      case SetOpOp::PlusEqual:   return CallSpec::direct(cellAddEq);
-      case SetOpOp::MinusEqual:  return CallSpec::direct(cellSubEq);
-      case SetOpOp::MulEqual:    return CallSpec::direct(cellMulEq);
-      case SetOpOp::ConcatEqual: return CallSpec::direct(cellConcatEq);
-      case SetOpOp::DivEqual:    return CallSpec::direct(cellDivEq);
-      case SetOpOp::PowEqual:    return CallSpec::direct(cellPowEq);
-      case SetOpOp::ModEqual:    return CallSpec::direct(cellModEq);
-      case SetOpOp::AndEqual:    return CallSpec::direct(cellBitAndEq);
-      case SetOpOp::OrEqual:     return CallSpec::direct(cellBitOrEq);
-      case SetOpOp::XorEqual:    return CallSpec::direct(cellBitXorEq);
-      case SetOpOp::SlEqual:     return CallSpec::direct(cellShlEq);
-      case SetOpOp::SrEqual:     return CallSpec::direct(cellShrEq);
-      case SetOpOp::PlusEqualO:  return CallSpec::direct(cellAddEqO);
-      case SetOpOp::MinusEqualO: return CallSpec::direct(cellSubEqO);
-      case SetOpOp::MulEqualO:   return CallSpec::direct(cellMulEqO);
+      case S::PlusEqual:   return outlineSetOpImpl<S::PlusEqual>;
+      case S::MinusEqual:  return outlineSetOpImpl<S::MinusEqual>;
+      case S::MulEqual:    return outlineSetOpImpl<S::MulEqual>;
+      case S::ConcatEqual: return outlineSetOpImpl<S::ConcatEqual>;
+      case S::DivEqual:    return outlineSetOpImpl<S::DivEqual>;
+      case S::PowEqual:    return outlineSetOpImpl<S::PowEqual>;
+      case S::ModEqual:    return outlineSetOpImpl<S::ModEqual>;
+      case S::AndEqual:    return outlineSetOpImpl<S::AndEqual>;
+      case S::OrEqual:     return outlineSetOpImpl<S::OrEqual>;
+      case S::XorEqual:    return outlineSetOpImpl<S::XorEqual>;
+      case S::SlEqual:     return outlineSetOpImpl<S::SlEqual>;
+      case S::SrEqual:     return outlineSetOpImpl<S::SrEqual>;
     }
     not_reached();
   }();
 
-  auto& v = vmain(env);
-  cgCallHelper(v, env, target, kVoidDest, SyncOptions::Sync,
-               argGroup(env, inst).ssa(0).typedValue(1));
+  cgCallHelper(
+    v,
+    env,
+    CallSpec::direct(helper),
+    callDestTV(env, inst),
+    SyncOptions::Sync,
+    argGroup(env, inst)
+      .typedValue(0)
+      .typedValue(1)
+  );
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 
-}}}
+IMPL_OPCODE_CALL(PseudoRandomInt)
+
+///////////////////////////////////////////////////////////////////////////////
+
+}

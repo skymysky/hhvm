@@ -1,10 +1,13 @@
-<?php
+<?hh
 
-class abc { 
+class abc {
 }
 
 class A {
-	use abc;
+    use abc;
 }
 
-?>
+<<__EntryPoint>>
+function main(): void {
+  echo "Done.\n";
+}

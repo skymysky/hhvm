@@ -1,29 +1,14 @@
-<?php
+<?hh
 
-class MyDocument extends DOMDocument {
-  public function __get($name) {
-    return "MyDocument::__get: $name";
-  }
-}
-
-class MyElement extends DOMElement {
-  public function __get($name) {
-    return "MyElement::__get: $name";
-  }
-}
-
-// Custom doc
-
-$doc = new MyDocument();
+<<__EntryPoint>>
+function main_native_magic_props_dom() :mixed{
+$doc = new DOMDocument();
 var_dump($doc->version); // native
-var_dump($doc->nonExisting); // user
 
 // Custom Element
 
-$doc->registerNodeClass('DOMElement', 'MyElement');
 $node = $doc->appendChild($doc->createElement('Foo', 'Bar'));
 var_dump($node->nodeValue);
-var_dump($node->nonExisting);
 
 // Attr
 
@@ -49,7 +34,8 @@ var_dump($h1->item(0)->attributes->length);
 
 // XPath
 
-$xpath = new DOMXpath($doc);
+$xpath = new DOMXPath($doc);
 var_dump($xpath->document->doctype->name);
 $elements = $xpath->query("//*[@id]");
 var_dump($elements->length);
+}

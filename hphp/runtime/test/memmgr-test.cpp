@@ -21,16 +21,21 @@
 #include "hphp/runtime/base/array-init.h"
 #include "hphp/runtime/base/dummy-resource.h"
 #include "hphp/runtime/base/memory-manager.h"
-#include "hphp/runtime/base/resource-data.h"
-#include "hphp/runtime/base/thread-info.h"
+#include "hphp/runtime/base/request-info.h"
+
+#include "hphp/util/async-func.h"
+
+#include "folly/io/IOBuf.h"
 
 namespace HPHP {
 
 static void allocAndJoin(size_t size, bool free) {
   std::thread thread([&]() {
+      HPHP::rds::local::init();
+      SCOPE_EXIT { HPHP::rds::local::fini(); };
       tl_heap.getCheck();
       if (free) {
-        String str(size, ReserveString);
+        OptString str(size, ReserveString);
       } else {
         StringData::Make(size); // Leak.
       }
@@ -41,7 +46,7 @@ static void allocAndJoin(size_t size, bool free) {
 TEST(MemoryManager, OnThreadExit) {
   allocAndJoin(42, true);
   allocAndJoin(kMaxSmallSize + 1, true);
-#ifdef DEBUG
+#ifndef NDEBUG
   EXPECT_DEATH(allocAndJoin(42, false), "");
   EXPECT_DEATH(allocAndJoin(kMaxSmallSize + 1, false), "");
 #endif
@@ -174,18 +179,18 @@ TEST(MemoryManager, ContainsAnySize) {
 }
 
 static void testLeak(size_t alloc_size) {
-  RuntimeOption::EvalGCTriggerPct = 0.50;
-  RuntimeOption::EvalGCMinTrigger = 4 << 20;
+  Cfg::GC::TriggerPct = 0.50;
+  Cfg::GC::MinTrigger = 4 << 20;
 
   tl_heap->collect("testLeak");
   tl_heap->setGCEnabled(true);
-  clearSurpriseFlag(MemExceededFlag);
+  stackLimitAndSurprise().clearFlag(MemExceededFlag);
   tl_heap->setMemoryLimit(100 << 20);
 
   auto const target_alloc = int64_t{5} << 30;
   auto const vec_cap = (alloc_size - sizeof(ArrayData)) / sizeof(TypedValue);
   auto const vec = [vec_cap] {
-    VecArrayInit vec{vec_cap};
+    VecInit vec{vec_cap};
     for (int j = 0; j < vec_cap; ++j) {
       vec.append(make_tv<KindOfNull>());
     }
@@ -201,7 +206,7 @@ static void testLeak(size_t alloc_size) {
     if (tl_heap->getStatsRaw().mmAllocated() - start_alloc > target_alloc) {
       break;
     }
-    if (UNLIKELY(checkSurpriseFlags())) handle_request_surprise();
+    if (UNLIKELY(stackLimitAndSurprise().hasSurprise())) handle_request_surprise();
   }
 }
 
@@ -211,6 +216,219 @@ TEST(MemoryManager, GCLeakSmall) {
 
 TEST(MemoryManager, GCLeakBig) {
   testLeak(kMaxSmallSize * 2);
+}
+
+namespace {
+
+struct ScopedMemoryLimit {
+  explicit ScopedMemoryLimit(int64_t clearance) {
+    tl_heap->setMemoryLimit(tl_heap->getStatsCopy().usage() + clearance);
+  }
+
+  ~ScopedMemoryLimit() {
+    Cfg::GC::GraceBytes = m_grace;
+    tl_heap->setGCEnabled(m_gc_enabled);
+    tl_heap->setMemoryLimit(m_limit);
+    stackLimitAndSurprise().clearFlag(MemExceededFlag);
+    RID().clearRequestOOMFlag();
+    tl_heap->resetCouldOOM(true);
+  }
+
+ private:
+  int64_t m_grace{Cfg::GC::GraceBytes};
+  int64_t m_limit{tl_heap->getMemoryLimit()};
+  bool m_gc_enabled{tl_heap->isGCEnabled()};
+};
+
+}
+
+namespace {
+
+Array makeVec(uint32_t n) {
+  VecInit vec{n};
+  for (uint32_t j = 0; j < n; ++j) vec.append(make_tv<KindOfNull>());
+  return vec.toArray();
+}
+
+// detach() drops the reference without decrefing, so the array stays
+// allocated but unreachable -- garbage only a collection can find.
+void leakVecs(int64_t bytes) {
+  auto const before = tl_heap->getStatsCopy().usage();
+  while (tl_heap->getStatsCopy().usage() - before < bytes) {
+    makeVec(1024).detach();
+  }
+}
+
+}
+
+TEST(MemoryManager, GCGraceBytesDelaysOOM) {
+  constexpr int64_t kClearance = 16 << 20;
+  constexpr int64_t kGrace = 8 << 20;
+  ScopedMemoryLimit guard{kClearance};
+  Cfg::GC::GraceBytes = kGrace;
+
+  EXPECT_FALSE(tl_heap->preAllocOOM(kClearance / 2));
+  // Over the limit, but within the grace the next collection has to work in.
+  EXPECT_FALSE(tl_heap->preAllocOOM(kClearance + kGrace / 2));
+  // Past the grace: the ordinary OOM, unchanged.
+  EXPECT_TRUE(tl_heap->preAllocOOM(kClearance + kGrace * 2));
+}
+
+TEST(MemoryManager, GCGraceBytesWithdrawnByCollection) {
+  constexpr int64_t kClearance = 16 << 20;
+  ScopedMemoryLimit guard{kClearance};
+  Cfg::GC::GraceBytes = 64 << 20;
+  tl_heap->setGCEnabled(true);
+  auto const limit = tl_heap->getMemoryLimit();
+
+  // Over the limit but inside the grace: no OOM while allocating.
+  leakVecs(kClearance * 2);
+  ASSERT_GT(tl_heap->getStatsCopy().usage(), limit);
+  ASSERT_FALSE(RID().requestOOMFlag());
+
+  // It was garbage, so the collection puts the request back under.
+  tl_heap->collect("test-grace");
+  tl_heap->enforceMemoryLimit();
+  EXPECT_LT(tl_heap->getStatsCopy().usage(), limit);
+  EXPECT_FALSE(RID().requestOOMFlag());
+}
+
+TEST(MemoryManager, GCGraceBytesDoesNotSurviveCollection) {
+  constexpr int64_t kClearance = 16 << 20;
+  ScopedMemoryLimit guard{kClearance};
+  Cfg::GC::GraceBytes = 64 << 20;
+  tl_heap->setGCEnabled(true);
+  auto const limit = tl_heap->getMemoryLimit();
+
+  // Live data has to hang off a stack local: the C++ stack is conservatively
+  // scanned, a std::vector's buffer is not.
+  constexpr int kMaxOuter = 4096;
+  auto const live = [&] {
+    VecInit outer{kMaxOuter};
+    for (int i = 0; i < kMaxOuter; ++i) {
+      if (tl_heap->getStatsCopy().usage() > limit) break;
+      outer.append(makeVec(16 * 1024));
+    }
+    return outer.toArray();
+  }();
+  ASSERT_LT(live.size(), kMaxOuter);
+  ASSERT_GT(tl_heap->getStatsCopy().usage(), limit);
+  ASSERT_FALSE(RID().requestOOMFlag());
+
+  // Nothing to reclaim, so the grace stops applying.
+  tl_heap->collect("test-grace");
+  tl_heap->enforceMemoryLimit();
+  EXPECT_TRUE(RID().requestOOMFlag());
+}
+
+namespace {
+
+struct BgThreadFreeWorker {
+  void allocate(const OptString& s) {
+    assertx(!m_buf);
+    m_buf = folly::IOBuf::copyBuffer(s.data(), s.size());
+  }
+  void doJob() {
+    assertx(m_buf);
+    folly::IOBuf::destroy(std::move(m_buf));
+  }
+ private:
+  std::unique_ptr<folly::IOBuf> m_buf;
+};
+
+void give_memory_to_bg_thread(const OptString& payload) {
+  BgThreadFreeWorker worker;
+  {
+    /*
+     * NOTE: if you use this approach in your extension you are responsible for
+     * adding a mechanism for ensuring the server's memory cannot grow without
+     * bound (e.g. limiting the size of the queue that tasks owning memory
+     * allocated in this way on request threads can sit in, and failing to
+     * enqueue more work if this server-wide queue limit is reached).
+     *
+     * If you are passing data to a background thread in an async function
+     * consider the second approach below instead.
+     */
+    MemoryManager::MaskAlloc masker(*tl_heap);
+    worker.allocate(payload);
+  }
+  AsyncFunc<BgThreadFreeWorker>(&worker, &BgThreadFreeWorker::doJob).run();
+}
+
+void give_memory_to_bg_thread2(const OptString& payload) {
+  BgThreadFreeWorker worker;
+  uint64_t allocated = 0;
+  {
+    /*
+     * This approach is suitable when we get some feedback from the background
+     * thread that the process has completed and freed the memory, e.g. in
+     * an async function that returns an ExternalThreadEventWaitHandle (in
+     * which case you can takeCreditForFreeOnOtherThread in the unserialize
+     * method of the AsioExternalThreadEvent). This approach does not require
+     * you to implement your own memory limit, as the request is still debited
+     * for the allocation until after it has been freed.
+     */
+    MemoryManager::CountMalloc counter(*tl_heap, allocated);
+    worker.allocate(payload);
+  }
+  AsyncFunc<BgThreadFreeWorker>(&worker, &BgThreadFreeWorker::doJob).run();
+  tl_heap->takeCreditForFreeOnOtherThread(allocated);
+}
+
+struct BgThreadAllocWorker {
+  explicit BgThreadAllocWorker(const OptString& s): m_str(s) {}
+  void doJob() {
+    assertx(!m_buf);
+    m_buf = folly::IOBuf::copyBuffer(m_str.data(), m_str.size());
+  }
+  void free() {
+    assertx(m_buf);
+    folly::IOBuf::destroy(std::move(m_buf));
+  }
+ private:
+  const OptString& m_str;
+  std::unique_ptr<folly::IOBuf> m_buf;
+};
+
+void get_memory_from_bg_thread (const OptString& payload) {
+  BgThreadAllocWorker worker(payload);
+  AsyncFunc<BgThreadAllocWorker>(&worker, &BgThreadAllocWorker::doJob).run();
+  {
+    MemoryManager::MaskAlloc masker(*tl_heap);
+    worker.free();
+  }
+}
+
+} // end anonymous namespace
+
+TEST(MemoryManager, GiveMemoryToBgThread) {
+  OptString payload(std::string(1024, 'x'));
+  auto const usage_at_start = tl_heap->getStatsCopy().usage();
+  for (int i = 0; i < 1024; i++) {
+    give_memory_to_bg_thread(payload);
+  }
+  auto const usage_at_end = tl_heap->getStatsCopy().usage();
+  EXPECT_EQ(usage_at_end, usage_at_start);
+}
+
+TEST(MemoryManager, GiveMemoryToBgThread2) {
+  OptString payload(std::string(1024, 'x'));
+  auto const usage_at_start = tl_heap->getStatsCopy().usage();
+  for (int i = 0; i < 1024; i++) {
+    give_memory_to_bg_thread2(payload);
+  }
+  auto const usage_at_end = tl_heap->getStatsCopy().usage();
+  EXPECT_EQ(usage_at_end, usage_at_start);
+}
+
+TEST(MemoryManager, GetMemoryFromBgThread) {
+  OptString payload(std::string(1024, 'x'));
+  auto const usage_at_start = tl_heap->getStatsCopy().usage();
+  for (int i = 0; i < 1024; i++) {
+    get_memory_from_bg_thread(payload);
+  }
+  auto const usage_at_end = tl_heap->getStatsCopy().usage();
+  EXPECT_EQ(usage_at_end, usage_at_start);
 }
 
 }

@@ -1,10 +1,5 @@
 
-Warning: %s
-NULL
+Warning: ldap_get_entries() expects exactly 2 positional parameters, 1 given in %s/ldap_get_entries_error.php on line 7
 
-Warning: %s
-NULL
-
-Warning: %s
-NULL
+Warning: ldap_get_entries() expects exactly 2 positional parameters, 3 given in %s/ldap_get_entries_error.php on line 10
 ===DONE===

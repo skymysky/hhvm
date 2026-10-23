@@ -1,7 +1,7 @@
-<?php
-
+<?hh
+<<__EntryPoint>> function main(): void {
 //Negative offset
-$dom = new DomDocument();
+$dom = new DOMDocument();
 $comment = $dom->createComment('test-comment');
 try {
   $comment->insertData(-1,'-inserted');
@@ -10,5 +10,4 @@ try {
     echo "Throws DOMException for -ve offset\n";
   }
 }
-
-?>
+}

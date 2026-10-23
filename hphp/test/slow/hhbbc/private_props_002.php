@@ -7,18 +7,22 @@
  * as a SStr or SArr.
  */
 class SerDe {
-  private $arr = array(1,2,3);
+  private $arr = vec[1,2,3];
   private $str = "one two three";
 
-  public function foo() {
+  public function foo() :mixed{
     var_dump($this->arr, $this->str);
   }
 }
 
-function main() {
+function main() :mixed{
   $x = new SerDe;
   $x = unserialize(serialize($x));
   $x->foo();
 }
 
+
+<<__EntryPoint>>
+function main_private_props_002() :mixed{
 main();
+}

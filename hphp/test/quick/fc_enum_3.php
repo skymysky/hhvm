@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 
 // Make sure we can't instantiate enums
 
@@ -11,5 +11,6 @@ enum Bar : int {
 function test(): Bar {
   return new Bar();
 }
-
+<<__EntryPoint>> function main(): void {
 var_dump(test());
+}

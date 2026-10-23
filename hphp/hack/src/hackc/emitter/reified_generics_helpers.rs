@@ -1,0 +1,411 @@
+// Copyright (c) Facebook, Inc. and its affiliates.
+//
+// This source code is licensed under the MIT license found in the
+// LICENSE file in the "hack" directory of this source tree.
+
+use decl_provider::TypeDecl;
+use env::Env;
+use env::emitter::Emitter;
+use error::Result;
+use hash::HashSet;
+use hhbc_string_utils::reified::ReifiedTparam;
+use instruction_sequence::InstrSeq;
+use instruction_sequence::instr;
+use naming_special_names_rust as sn;
+use oxidized::aast;
+use oxidized::aast_defs::HintFun;
+use oxidized::aast_defs::TupleInfo;
+use oxidized::ast_defs::Id;
+use oxidized::pos::Pos;
+
+use crate::emit_expression::emit_reified_arg;
+
+fn is_hack_array(id: &str) -> bool {
+    const HACK_ARRAYS: &[&str] = &[
+        sn::collections::VEC,
+        sn::collections::DICT,
+        sn::collections::KEYSET,
+        sn::collections::ANY_ARRAY,
+        sn::typehints::HH_VARRAY,
+        sn::typehints::HH_DARRAY,
+        sn::typehints::HH_VARRAY_OR_DARRAY,
+        sn::typehints::HH_VEC_OR_DICT,
+    ];
+    HACK_ARRAYS.contains(&id)
+}
+
+#[derive(Debug, Clone)]
+pub enum ReificationLevel {
+    /// There is a reified generic
+    Definitely,
+    /// There is no function or class reified generics, but there may be an inferred one
+    Maybe,
+    Not,
+    Unconstrained,
+}
+impl ReificationLevel {
+    fn combine(v1: &Self, v2: &Self) -> Self {
+        match (v1, v2) {
+            (Self::Definitely, _) | (_, Self::Definitely) => Self::Definitely,
+            (Self::Maybe, _) | (_, Self::Maybe) => Self::Maybe,
+            _ => Self::Not,
+        }
+    }
+}
+
+pub(crate) fn get_erased_tparams<'a>(env: &'a Env<'a>) -> impl Iterator<Item = String> + 'a {
+    env.scope.get_tparams().into_iter().filter_map(|tp| {
+        if tp.reified != aast::ReifyKind::Reified {
+            Some(tp.name.1.clone()) // TODO(hrust) figure out how to return &str
+        } else {
+            None
+        }
+    })
+}
+
+pub(crate) fn get_reified_tparam<'a>(
+    env: &'a Env<'a>,
+    name: &str,
+) -> Option<(ReifiedTparam, bool)> {
+    fn soft(tp: &oxidized::ast::Tparam) -> bool {
+        tp.user_attributes
+            .iter()
+            .any(|ua| sn::user_attributes::is_soft(&ua.name.1))
+    }
+    let reified = |(_, tp): &(usize, &oxidized::ast::Tparam)| {
+        matches!(
+            tp.reified,
+            aast::ReifyKind::Reified | aast::ReifyKind::SoftReified
+        ) && tp.name.1 == name
+    };
+
+    if let Some((i, tp)) = env.scope.get_fun_tparams().iter().enumerate().find(reified) {
+        return Some((ReifiedTparam::Fun(i), soft(tp)));
+    }
+    if let Some((i, tp)) = env
+        .scope
+        .get_class_tparams()
+        .iter()
+        .enumerate()
+        .find(reified)
+    {
+        return Some((ReifiedTparam::Class(i), soft(tp)));
+    }
+    None
+}
+
+pub(crate) fn is_reified_tparam<'a>(env: &'a Env<'a>, name: &str) -> bool {
+    get_reified_tparam(env, name).is_some()
+}
+
+pub(crate) fn has_reified_type_constraint<'a>(env: &Env<'a>, h: &aast::Hint) -> ReificationLevel {
+    has_reified_type_constraint_impl(env, h, true)
+}
+
+fn has_reified_type_constraint_impl<'a>(
+    env: &Env<'a>,
+    h: &aast::Hint,
+    top_level: bool,
+) -> ReificationLevel {
+    use aast::Hint_;
+    fn is_all_erased<'a>(
+        env: &'a Env<'_>,
+        mut h_iter: impl Iterator<Item = &'a aast::Hint>,
+    ) -> bool {
+        let erased_tparams: HashSet<String> = get_erased_tparams(env).collect();
+        h_iter.all(|h| match &*h.1 {
+            Hint_::Hwildcard => true,
+            Hint_::Happly(Id(_, id), apply_hints) => {
+                apply_hints.is_empty() && erased_tparams.contains(id)
+            }
+            _ => false,
+        })
+    }
+    match &*h.1 {
+        Hint_::Happly(Id(_, id), hs) => {
+            if is_reified_tparam(env, id) {
+                ReificationLevel::Definitely
+            } else if hs.is_empty()
+                || (top_level && is_hack_array(id))
+                || is_all_erased(env, hs.iter())
+            {
+                ReificationLevel::Not
+            } else {
+                hs.iter().rev().fold(ReificationLevel::Maybe, |v, h| {
+                    ReificationLevel::combine(
+                        &v,
+                        &has_reified_type_constraint_impl(env, h, false),
+                    )
+                })
+            }
+        }
+        Hint_::Hsoft(h) | Hint_::Hlike(h) | Hint_::Hoption(h) => {
+            has_reified_type_constraint_impl(env, h, top_level)
+        }
+        Hint_::HclassPtr(_, _) // TODO(T199611023) track reified when enforcing inner
+        | Hint_::Hprim(_)
+        | Hint_::Hmixed
+        | Hint_::Hwildcard
+        | Hint_::Hnonnull
+        | Hint_::HvecOrDict(_, _)
+        | Hint_::Hthis
+        | Hint_::Hnothing
+        | Hint_::Hdynamic
+        | Hint_::Htuple(_)
+        | Hint_::Hunion(_)
+        | Hint_::Hintersection(_)
+        | Hint_::Hshape(_)
+        | Hint_::Hfun(_)
+        | Hint_::Haccess(_, _)
+        | Hint_::Hrefinement(_, _)
+        | Hint_::HfunContext(_)
+        | Hint_::Hvar(_) => ReificationLevel::Not,
+        // Not found in the original AST
+        Hint_::Habstr(_) => panic!("TODO Unimplemented: Not in the original AST"),
+    }
+}
+
+fn remove_awaitable(aast::Hint(pos, hint): aast::Hint) -> aast::Hint {
+    use aast::Hint;
+    use aast::Hint_;
+    match *hint {
+        Hint_::Happly(sid, mut hs)
+            if hs.len() == 1 && sid.1.eq_ignore_ascii_case(sn::classes::AWAITABLE) =>
+        {
+            hs.pop().unwrap()
+        }
+        // For @Awaitable<T>, the soft type hint is moved to the inner type, i.e @T
+        Hint_::Hsoft(h) => Hint(pos, Box::new(Hint_::Hsoft(remove_awaitable(h)))),
+        // For ~Awaitable<T>, the like-type  hint is moved to the inner type, i.e ~T
+        Hint_::Hlike(h) => Hint(pos, Box::new(Hint_::Hlike(remove_awaitable(h)))),
+        // For ?Awaitable<T>, the optional is dropped
+        Hint_::Hoption(h) => remove_awaitable(h),
+        Hint_::Htuple(_)
+        | Hint_::Hunion(_)
+        | Hint_::Hintersection(_)
+        | Hint_::Hshape(_)
+        | Hint_::Hfun(_)
+        | Hint_::Haccess(_, _)
+        | Hint_::Hrefinement(_, _)
+        | Hint_::HclassPtr(_, _)
+        | Hint_::Happly(_, _)
+        | Hint_::HfunContext(_)
+        | Hint_::Hvar(_)
+        | Hint_::Hwildcard => Hint(pos, hint),
+        Hint_::Hmixed
+        | Hint_::Hnonnull
+        | Hint_::Habstr(_)
+        | Hint_::HvecOrDict(_, _)
+        | Hint_::Hprim(_)
+        | Hint_::Hthis
+        | Hint_::Hnothing
+        | Hint_::Hdynamic => panic!("TODO Unimplemented Did not exist on legacy AST"),
+    }
+}
+
+pub(crate) fn convert_awaitable<'a>(env: &Env<'a>, h: aast::Hint) -> aast::Hint {
+    if env.scope.is_in_async() {
+        remove_awaitable(h)
+    } else {
+        h
+    }
+}
+
+pub(crate) fn simplify_verify_type<'a>(
+    e: &mut Emitter,
+    env: &mut Env<'a>,
+    pos: &Pos,
+    check: InstrSeq,
+    hint: &aast::Hint,
+    verify_instr: InstrSeq,
+) -> Result<InstrSeq> {
+    let get_ts = |e, hint| Ok(emit_reified_arg(e, env, pos, false, hint)?.0);
+    let aast::Hint(_, hint_) = hint;
+    if let aast::Hint_::Hoption(ref hint) = **hint_ {
+        let label_gen = e.label_gen_mut();
+        let done_label = label_gen.next_regular();
+        Ok(InstrSeq::gather(vec![
+            check,
+            instr::jmp_nz(done_label),
+            get_ts(e, hint)?,
+            verify_instr,
+            instr::label(done_label),
+        ]))
+    } else {
+        Ok(InstrSeq::gather(vec![get_ts(e, hint)?, verify_instr]))
+    }
+}
+
+pub(crate) fn remove_erased_generics<'a>(env: &Env<'a>, h: aast::Hint) -> aast::Hint {
+    use aast::Hint;
+    use aast::Hint_;
+    use aast::NastShapeInfo;
+    use aast::ShapeElement;
+    use aast::ShapeFieldInfo;
+    use aast::TupleExtra;
+    use aast::TupleExtraInfo;
+    fn rec<'a>(env: &Env<'a>, Hint(pos, h_): Hint) -> Hint {
+        let h_ = match *h_ {
+            Hint_::Happly(Id(pos, id), hs) => {
+                if get_erased_tparams(env).any(|p| p == id) {
+                    Hint_::Hwildcard
+                } else {
+                    Hint_::Happly(Id(pos, id), hs.into_iter().map(|h| rec(env, h)).collect())
+                }
+            }
+            Hint_::Hsoft(h) => Hint_::Hsoft(rec(env, h)),
+            Hint_::Hlike(h) => Hint_::Hlike(rec(env, h)),
+            Hint_::HclassPtr(k, h) => Hint_::HclassPtr(k, rec(env, h)),
+            Hint_::Hoption(h) => Hint_::Hoption(rec(env, h)),
+            Hint_::Htuple(TupleInfo { required, extra }) => {
+                let extra = match extra {
+                    TupleExtra::Hextra(TupleExtraInfo { optional, variadic }) => {
+                        TupleExtra::Hextra(TupleExtraInfo {
+                            optional: optional.into_iter().map(|h| rec(env, h)).collect(),
+                            variadic: variadic.map(|h| rec(env, h)),
+                        })
+                    }
+                    TupleExtra::Hsplat(h) => TupleExtra::Hsplat(rec(env, h)),
+                };
+                Hint_::Htuple(TupleInfo {
+                    required: required.into_iter().map(|h| rec(env, h)).collect(),
+                    extra,
+                })
+            }
+            Hint_::Hunion(hs) => Hint_::Hunion(hs.into_iter().map(|h| rec(env, h)).collect()),
+            Hint_::Hintersection(hs) => {
+                Hint_::Hintersection(hs.into_iter().map(|h| rec(env, h)).collect())
+            }
+            Hint_::Hshape(NastShapeInfo {
+                allows_unknown_fields,
+                field_map,
+                unknown_fields_type,
+            }) => {
+                let field_map = field_map
+                    .into_iter()
+                    .map(|elem| match elem {
+                        ShapeElement::SEField(sfi) => ShapeElement::SEField(ShapeFieldInfo {
+                            hint: rec(env, sfi.hint),
+                            ..sfi
+                        }),
+                        ShapeElement::SESplat(h) => ShapeElement::SESplat(rec(env, h)),
+                    })
+                    .collect();
+                let unknown_fields_type = unknown_fields_type.map(|h| rec(env, h));
+                Hint_::Hshape(NastShapeInfo {
+                    allows_unknown_fields,
+                    field_map,
+                    unknown_fields_type,
+                })
+            }
+            Hint_::Hfun(HintFun {
+                is_readonly,
+                tparams,
+                param_tys,
+                param_info,
+                variadic_ty,
+                named_variadic_ty,
+                ctxs,
+                return_ty,
+                is_readonly_return,
+            }) => Hint_::Hfun(HintFun {
+                is_readonly,
+                tparams,
+                param_tys: param_tys.into_iter().map(|h| rec(env, h)).collect(),
+                param_info,
+                variadic_ty: variadic_ty.map(|h| rec(env, h)),
+                named_variadic_ty: named_variadic_ty.map(|h| rec(env, h)),
+                ctxs,
+                return_ty: rec(env, return_ty),
+                is_readonly_return,
+            }),
+            h_ @ Hint_::Haccess(_, _) | h_ @ Hint_::Hrefinement(_, _) | h_ @ Hint_::Hwildcard => h_,
+            Hint_::Hmixed
+            | Hint_::Hnonnull
+            | Hint_::Habstr(_)
+            | Hint_::HvecOrDict(_, _)
+            | Hint_::Hprim(_)
+            | Hint_::Hthis
+            | Hint_::Hnothing
+            | Hint_::Hdynamic => panic!("TODO Unimplemented Did not exist on legacy AST"),
+            Hint_::HfunContext(_) | Hint_::Hvar(_) => {
+                panic!("Coeffects are currently erased during compilation")
+            }
+        };
+        Hint(pos, Box::new(h_))
+    }
+    rec(env, h)
+}
+
+/// Warning: Experimental usage of decl-directed bytecode compilation.
+/// Given a hint, if the hint is an Happly(id, _), checks if the id is a class
+/// that has reified generics.
+pub(crate) fn happly_decl_has_reified_generics<'a>(
+    env: &Env<'a>,
+    emitter: &mut Emitter,
+    aast::Hint(_, hint): &aast::Hint,
+) -> bool {
+    use aast::Hint_;
+    use aast::ReifyKind;
+    match hint.as_ref() {
+        Hint_::Happly(Id(_, id), _) => {
+            // If the parameter itself is a reified type parameter, then we want to do the
+            // tparam check
+            if is_reified_tparam(env, id) {
+                return true;
+            }
+            // If the parameter is an erased type parameter, then no check is necessary
+            if get_erased_tparams(env).any(|tparam| &tparam == id) {
+                return false;
+            }
+            // Otherwise, we have a class or typedef name that we want to look up
+            let provider = match emitter.decl_provider.as_ref() {
+                Some(p) if emitter.options().hhbc.optimize_reified_param_checks => p,
+                Some(_) | None => {
+                    // If we don't have a `DeclProvider` available, or this specific optimization
+                    // has been turned off, assume that this may be a refied generic class.
+                    return true;
+                }
+            };
+            match provider.type_decl(id, 0) {
+                Ok(TypeDecl::Class(class_decl)) => {
+                    // Found a class with a matching name. Does it's shallow decl have
+                    // any reified tparams?
+                    class_decl
+                        .tparams
+                        .iter()
+                        .any(|tparam| tparam.reified != ReifyKind::Erased)
+                }
+                Ok(TypeDecl::Typedef(_)) => {
+                    // TODO: `id` could be an alias for something without reified generics,
+                    // but conservatively assume it has at least one, for now.
+                    true
+                }
+                Err(decl_provider::Error::NotFound) => {
+                    // The DeclProvider has no idea what `id` is.
+                    true
+                }
+                Err(
+                    decl_provider::Error::BincodeEncode(_) | decl_provider::Error::BincodeDecode(_),
+                ) => {
+                    // Infra error while handling serialized decls
+                    true
+                }
+            }
+        }
+        Hint_::Hoption(_)
+        | Hint_::Hlike(_)
+        | Hint_::Hfun(_)
+        | Hint_::Htuple(_)
+        | Hint_::Hshape(_)
+        | Hint_::Haccess(_, _)
+        | Hint_::Hsoft(_) => {
+            // Assume any of these types could have reified generics.
+            true
+        }
+        x => {
+            // Other AST nodes are impossible here, must be a bug.
+            unreachable!("unexpected AST node: {:#?}", x)
+        }
+    }
+}

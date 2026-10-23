@@ -1,6 +1,6 @@
 <?hh
 
-function g() {
+function g() :mixed{
   exit;
   $x = exit;
   exit(0);
@@ -11,5 +11,6 @@ function g() {
   $x = exit(1) + 3;
   f($x, exit($x), $x + 1);
 }
-
-call_user_func("g");
+<<__EntryPoint>> function main(): void {
+call_user_func(g<>);
+}

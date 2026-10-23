@@ -14,12 +14,11 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_EVAL_DEBUGGER_CMD_EXAMPLE_H_
-#define incl_HPHP_EVAL_DEBUGGER_CMD_EXAMPLE_H_
+#pragma once
 
 #include "hphp/runtime/debugger/cmd/cmd_extended.h"
 
-namespace HPHP { namespace Eval {
+namespace HPHP::Eval {
 ///////////////////////////////////////////////////////////////////////////////
 
 struct CmdExample : CmdExtended {
@@ -28,6 +27,8 @@ struct CmdExample : CmdExtended {
 
   bool onServer(DebuggerProxy&) override;
   void onClient(DebuggerClient&) override;
+
+  std::string name() const override { return "example"; }
 
 protected:
   void sendImpl(DebuggerThriftBuffer&) override;
@@ -39,6 +40,5 @@ private:
 };
 
 ///////////////////////////////////////////////////////////////////////////////
-}}
+}
 
-#endif // incl_HPHP_EVAL_DEBUGGER_CMD_EXAMPLE_H_

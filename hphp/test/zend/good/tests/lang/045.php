@@ -1,8 +1,6 @@
-<?php
-set_time_limit(1);
-register_shutdown_function("plop");
+<?hh
 
-function plop() {
+function plop() :mixed{
     $ts = time();
     while(true) {
         if ((time()-$ts) > 2) {
@@ -11,6 +9,11 @@ function plop() {
         }
     }
 }
+
+<<__EntryPoint>> function main(): void {
+set_time_limit(1);
+register_shutdown_function(plop<>);
+
 plop();
-?>
-===DONE===
+echo "===DONE===\n";
+}

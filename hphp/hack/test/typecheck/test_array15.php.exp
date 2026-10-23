@@ -1,1 +1,25 @@
-No errors
+error: Parsing[1002] Encountered unexpected token `&`. [1]
+
+test_array15.php:20:27
+18 | }
+19 | 
+20 | function test(varray<int> &$x): void {
+   |                           ^ [1]
+21 |   $x[0] = 33;
+22 | }
+
+error: Typing[4339] Wrong type hint [1]
+-> Expected `vec<int>` [2]
+-> But got `dict<nothing, nothing>` [3]
+
+test_array15.php:13:22
+11 | 
+12 | class X {
+13 |   public varray<int> $v = dict[];
+   |          ^^^^^^^^^^^ [2]
+   |                      ^^^^^^^^^^^ [1]
+   |                           ^^^^^^ [3]
+14 | 
+15 |   public function set(int $x): void {
+
+2 errors found

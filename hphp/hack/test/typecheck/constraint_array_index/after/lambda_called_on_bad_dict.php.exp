@@ -1,0 +1,14 @@
+error: Typing[4449] Invalid index type for this dict [1]
+-> This is a string [2]
+-> It is incompatible with an int [1]
+
+lambda_called_on_bad_dict.php:3:19
+1 | <?hh
+2 | function f(): void {
+3 |   $f = ($v ==> $v[0]);
+  |                   ^ [1]
+4 |   $f(dict["oiia oiia" => 0]);
+  |      ^^^^^^^^^^^^^^^^^^^^^^ [2]
+5 | }
+
+1 error found

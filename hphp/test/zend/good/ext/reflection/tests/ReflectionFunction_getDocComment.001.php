@@ -1,28 +1,24 @@
-<?php
+<?hh
 
 /**
  * my doc comment
  */
-function foo () {
-	static $c;
-	static $a = 1;
-	static $b = "hello";
-	$d = 5;
+function foo () :mixed{
+    $d = 5;
 }
 
 /***
  * not a doc comment
  */
-function bar () {}
+function bar () :mixed{}
 
 
-function dumpFuncInfo($name) {
-	$funcInfo = new ReflectionFunction($name);
-	var_dump($funcInfo->getDocComment());
+function dumpFuncInfo($name) :mixed{
+    $funcInfo = new ReflectionFunction($name);
+    var_dump($funcInfo->getDocComment());
 }
-
+<<__EntryPoint>> function main(): void {
 dumpFuncInfo('foo');
 dumpFuncInfo('bar');
-dumpFuncInfo('extract');
-
-?>
+dumpFuncInfo('array_pop');
+}

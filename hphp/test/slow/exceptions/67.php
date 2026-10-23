@@ -1,9 +1,9 @@
-<?php
+<?hh
 
-function runstuff() {
+function runstuff() :mixed{
   throw new Exception;
 }
-function main() {
+function main() :mixed{
     try {
       $start_time = 1;
       runstuff();
@@ -14,4 +14,8 @@ function main() {
       var_dump($elapsed);
     }
 }
+
+<<__EntryPoint>>
+function main_67() :mixed{
 main();
+}

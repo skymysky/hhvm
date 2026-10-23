@@ -1,1 +1,10 @@
-No errors
+error: Naming[2060] Cannot use dynamic `new`. [1]
+
+dynamic_new7.php:17:7
+15 | 
+16 | function f(): void {
+17 |   new C::$s();
+   |       ^^^^^ [1]
+18 | }
+
+1 error found

@@ -13,8 +13,7 @@
    | license@php.net so we can mail you a copy immediately.               |
    +----------------------------------------------------------------------+
 */
-#ifndef incl_HPHP_DATA_WALKER_H_
-#define incl_HPHP_DATA_WALKER_H_
+#pragma once
 
 #include "hphp/runtime/base/req-hash-map.h"
 #include "hphp/runtime/base/req-hash-set.h"
@@ -27,6 +26,7 @@ namespace HPHP {
 struct HeapObject;
 struct ArrayData;
 struct ObjectData;
+struct TypedValue;
 
 //////////////////////////////////////////////////////////////////////
 
@@ -39,12 +39,12 @@ struct ObjectData;
  */
 struct DataWalker {
   /*
-   * Directive for the DataWalker. Define what to look for.
+   * Directive for the DataWalker. Define what to look for. In any case, we
+   * also detect cycles in the data.
    */
   enum class LookupFeature {
-    Default                  = 0x0,
-    DetectSerializable       = 0x1,
-    HasObjectOrResource      = 0x2
+    DetectSerializable,
+    DetectNonPersistable,
   };
 
   /*
@@ -55,30 +55,30 @@ struct DataWalker {
     DataFeature()
       : isCircular(false)
       , hasSerializable(false)
-      , hasObjectOrResource(false) {
+      , hasNonPersistable(false) {
     }
 
     // whether the data graph is not a tree in a user-visible way (either
     // circular or DAG of types with reference semantics like objects).
     unsigned isCircular : 1;
-    // whether the data graph contains serializable objects
+    // whether the data graph contains objects implementing Serializable
     unsigned hasSerializable : 1;
-    // whether the data graph contains any object or resource
-    unsigned hasObjectOrResource : 1;
+    // whether the data graph contains anything that can't be made persistent
+    unsigned hasNonPersistable : 1;
   };
 
   using PointerSet = req::fast_set<const HeapObject*,
                                    pointer_hash<const HeapObject>>;
 
-  using PointerMap = req::fast_map<HeapObject*, HeapObject*,
-                                   pointer_hash<HeapObject>>;
+  using ArrayMap = req::fast_map<ArrayData*, ArrayData*,
+                                 pointer_hash<ArrayData>>;
 
 public:
   /*
    * Sets up a DataWalker to analyze an object or array.
    */
-  explicit DataWalker(LookupFeature features)
-    : m_features(features)
+  explicit DataWalker(LookupFeature feature)
+    : m_feature(feature)
   {}
 
   DataFeature traverseData(ObjectData* data) const {
@@ -90,7 +90,7 @@ public:
   }
 
   DataFeature traverseData(ArrayData* data,
-                           PointerMap* seenArrs = nullptr) const {
+                           ArrayMap* seenArrs = nullptr) const {
     // keep track of visited nodes in an array or object graph
     PointerSet visited;
     DataFeature features;
@@ -102,11 +102,15 @@ private:
   void traverseData(ArrayData* data,
                     DataFeature& features,
                     PointerSet& visited,
-                    PointerMap* seenArrs = nullptr) const;
+                    ArrayMap* seenArrs = nullptr) const;
   void traverseData(ObjectData* data,
                     DataFeature& features,
                     PointerSet& visited) const;
 
+  bool visitTypedValue(TypedValue rval,
+                       DataFeature& features,
+                       PointerSet& visited,
+                       ArrayMap* seenArrs = nullptr) const;
   bool markVisited(HeapObject* ptr,
                    DataFeature& features,
                    PointerSet& visited) const;
@@ -115,29 +119,10 @@ private:
   bool canStopWalk(DataFeature& features) const;
 
 private:
-  // the set of feature to analyze for this walker
-  LookupFeature m_features;
+  // the feature to analyze for this walker
+  LookupFeature m_feature;
 };
-
-inline DataWalker::LookupFeature operator|(
-    DataWalker::LookupFeature a,
-    DataWalker::LookupFeature b) {
-  return DataWalker::LookupFeature(
-      static_cast<int>(a) | static_cast<int>(b));
-}
-
-inline bool operator&(
-    DataWalker::LookupFeature a,
-    DataWalker::LookupFeature b) {
-  return static_cast<int>(a) & static_cast<int>(b);
-}
-
-inline DataWalker::LookupFeature operator~(DataWalker::LookupFeature f) {
-  return DataWalker::LookupFeature(~static_cast<int>(f));
-}
 
 //////////////////////////////////////////////////////////////////////
 
 }
-
-#endif

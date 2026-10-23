@@ -1,0 +1,29 @@
+error: Typing[4110] Invalid assignment [1]
+-> Expected `list(nothing, nothing)` resulting from a list destructuring assignment or a splat [2]
+-> But got `T` [3]
+
+list_generic_assign.php:5:3
+2 | 
+3 | // It's illegal to assign a generic to a tuple
+4 | function test<T>(T $v): void {
+  |                  ^ [3]
+5 |   list($x, $y) = $v;
+  |   ^^^^^^^^^^^^^^^^^ [1]
+  |   ^^^^^^^^^^^^ [2]
+6 | }
+
+error: Typing[4357] Invalid assignment [1]
+-> This expression cannot be destructured with a `list(...)` expression [2]
+-> This is `mixed` [3]
+
+list_generic_assign.php:5:3
+2 | 
+3 | // It's illegal to assign a generic to a tuple
+4 | function test<T>(T $v): void {
+  |               ^ [3]
+5 |   list($x, $y) = $v;
+  |   ^^^^^^^^^^^^^^^^^ [1]
+  |   ^^^^^^^^^^^^ [2]
+6 | }
+
+2 errors found

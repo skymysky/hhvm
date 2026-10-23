@@ -1,7 +1,7 @@
-<?php
+<?hh
 /* Prototype  : bool ctype_punct(mixed $c)
- * Description: Checks for any printable character which is not whitespace 
- * or an alphanumeric character 
+ * Description: Checks for any printable character which is not whitespace
+ * or an alphanumeric character
  * Source code: ext/ctype/ctype.c
  */
 
@@ -9,21 +9,18 @@
  * Pass different data types as $c argument to ctype_punt() to test behaviour
  */
 
-echo "*** Testing ctype_punct() : usage variations ***\n";
-
-$orig = setlocale(LC_CTYPE, "C"); 
-
-//get an unset variable
-$unset_var = 10;
-unset ($unset_var);
-
 // get a class
 class classA
 {
-  public function __toString() {
+  public function __toString() :mixed{
     return ",<.>";
   }
 }
+<<__EntryPoint>> function main(): void {
+echo "*** Testing ctype_punct() : usage variations ***\n";
+
+$orig = setlocale(LC_CTYPE, "C");
+
 
 // heredoc string
 $heredoc = <<<EOT
@@ -34,7 +31,7 @@ EOT;
 $fp = fopen(__FILE__, "r");
 
 // unexpected values to be passed to $c argument
-$inputs = array(
+$inputs = vec[
 
        // int data
 /*1*/  0,
@@ -58,29 +55,25 @@ $inputs = array(
        false,
        TRUE,
        FALSE,
-       
+
        // empty data
 /*16*/ "",
        '',
-       array(),
+       vec[],
 
        // string data
 /*19*/ ";:'@",
        '#~/?',
        $heredoc,
-       
+
        // object data
 /*22*/ new classA(),
 
-       // undefined data
-/*23*/ @$undefined_var,
 
-       // unset data
-/*24*/ @$unset_var,
 
        // resource variable
-/*25*/ $fp
-);
+/*23*/ $fp
+];
 
 // loop through each element of $inputs to check the behavior of ctype_punct
 $iterator = 1;
@@ -92,6 +85,6 @@ foreach($inputs as $input) {
 
 fclose($fp);
 
-setlocale(LC_CTYPE, $orig); 
-?>
-===DONE===
+setlocale(LC_CTYPE, $orig);
+echo "===DONE===\n";
+}

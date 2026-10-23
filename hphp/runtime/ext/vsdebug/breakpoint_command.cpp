@@ -16,9 +16,10 @@
 
 #include "hphp/runtime/base/file.h"
 #include "hphp/runtime/base/stat-cache.h"
-#include "hphp/runtime/ext/vsdebug/debugger.h"
-#include "hphp/runtime/ext/vsdebug/command.h"
+#include "hphp/runtime/vm/debugger-hook.h"
 #include "hphp/runtime/ext/vsdebug/breakpoint.h"
+#include "hphp/runtime/ext/vsdebug/command.h"
+#include "hphp/runtime/ext/vsdebug/debugger.h"
 
 namespace HPHP {
 namespace VSDEBUG {
@@ -112,16 +113,19 @@ bool SetBreakpointsCommand::executeImpl(
     );
   }
 
-  const std::string& path =
-    StatCache::realpath(
-      File::TranslatePathKeepRelative(String(filePath)).data());
+  const auto realPath = realpathLibc(
+      File::TranslatePathKeepRelative(OptString(filePath)).data());
+
+  const std::string& path = realPath.empty() && !filePath.empty()
+    ? filePath
+    : realPath;
 
   BreakpointManager* bpMgr = session->getBreakpointManager();
 
   // Make a map of line -> breakpoint for all breakpoints in this file before
   // this set breakpoints operation.
   std::unordered_map<int, Breakpoint*> oldBpLines;
-  const auto oldBpIds = bpMgr->getBreakpointIdsByFile(path);
+  const auto oldBpIds = bpMgr->getBreakpointIdsForPath(path);
   for (auto it = oldBpIds.begin(); it != oldBpIds.end(); it++) {
     Breakpoint* bp = bpMgr->getBreakpointById(*it);
     std::pair<int, Breakpoint*> pair;
@@ -181,7 +185,10 @@ bool SetBreakpointsCommand::executeImpl(
 
             folly::dynamic newBreakpointInfo = folly::dynamic::object;
             newBreakpointInfo["id"] = newBpId;
-            newBreakpointInfo["verified"] = false;
+            // We cannot resolve the breakpoints when they are set because
+            // the file may not be loaded, so we set the "verified" field
+            // to true here as a hack, so that the UI does not grey it out.
+            newBreakpointInfo["verified"] = true;
             responseBps.push_back(newBreakpointInfo);
           } else {
             Breakpoint* bp = bpIt->second;
@@ -191,7 +198,7 @@ bool SetBreakpointsCommand::executeImpl(
             bool verified = bpMgr->isBreakpointResolved(bp->m_id);
             int responseLine = line;
             if (verified) {
-              responseLine = bp->m_resolvedLocation.m_startLine;
+              responseLine = bp->m_resolvedLocations[0].m_startLine;
               if (!prefs.linesStartAt1) {
                 responseLine--;
               }
@@ -200,7 +207,8 @@ bool SetBreakpointsCommand::executeImpl(
             folly::dynamic bpInfo = folly::dynamic::object;
             bpInfo["id"] = bp->m_id;
             bpInfo["line"] = responseLine;
-            bpInfo["verified"] = verified;
+            // See the comment for newBreakpointInfo.
+            bpInfo["verified"] = true;
             responseBps.push_back(bpInfo);
 
             // Remove this bp from oldBpLines so that after processing this
@@ -217,7 +225,7 @@ bool SetBreakpointsCommand::executeImpl(
         bpMgr->removeBreakpoint(bp->m_id);
       }
     }
-  } catch (std::out_of_range e) {
+  } catch (std::out_of_range &) {
   }
 
   // Completion of this command does not resume the target.
@@ -274,7 +282,14 @@ bool SetExceptionBreakpointsCommand::executeImpl(DebuggerSession* session,
   }
 
   BreakpointManager* bpMgr = session->getBreakpointManager();
+  auto oldMode = bpMgr->getExceptionBreakMode();
   bpMgr->setExceptionBreakMode(mode);
+
+  if (mode != oldMode) {
+    m_debugger->onExceptionBreakpointChanged(
+      mode != ExceptionBreakMode::BreakNone
+    );
+  }
 
   // Completion of this command does not resume the target.
   return false;

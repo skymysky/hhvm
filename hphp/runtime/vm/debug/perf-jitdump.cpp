@@ -23,11 +23,12 @@
  */
 
 #include "hphp/runtime/vm/debug/debug.h"
-#include "hphp/runtime/base/runtime-option.h"
 #include "hphp/runtime/vm/debug/oprof-jitdump.h"
-#include "hphp/util/logger.h"
+#include "hphp/util/configs/eval.h"
 #include "hphp/util/cycles.h"
+#include "hphp/util/logger.h"
 
+#include <fmt/format.h>
 #include <folly/portability/SysSyscall.h>
 #include <folly/portability/Time.h>
 #include <folly/portability/Unistd.h>
@@ -35,10 +36,8 @@
 #include <stdio.h>
 #include <string.h>
 #include <errno.h>
-#include <boost/filesystem/operations.hpp>
-#include <boost/filesystem/path.hpp>
 
-using namespace HPHP::jit;
+#include <filesystem>
 
 const char padding_bytes[7] = {'\0', '\0', '\0', '\0', '\0', '\0', '\0'};
 
@@ -99,20 +98,20 @@ static inline uint64_t perfGetTimestamp(void) {
 static bool checkJitdumpDir(const char* dirName) {
   if (!dirName || !strlen(dirName))  return false;
 
-  namespace bfs = boost::filesystem;
-  boost::system::error_code ec;
-  bfs::path dirPath(dirName);
-  return bfs::is_directory(dirPath, ec);
+  namespace fs = std::filesystem;
+  std::error_code ec;
+  fs::path dirPath(dirName);
+  return fs::is_directory(dirPath, ec);
 }
 
 void DebugInfo::initPerfJitDump() {
   /* create and open the jitdump file*/
-  auto const jitdump_dir = RuntimeOption::EvalPerfJitDumpDir.data();
+  auto const jitdump_dir = Cfg::Eval::PerfJitDumpDir.data();
 
   if (checkJitdumpDir(jitdump_dir)) {
-    m_perfJitDumpName = folly::sformat("{}/jit-{}.dump", jitdump_dir, getpid());
+    m_perfJitDumpName = fmt::format("{}/jit-{}.dump", jitdump_dir, getpid());
   } else {
-    m_perfJitDumpName = folly::sformat("/tmp/jit-{}.dump", getpid());
+    m_perfJitDumpName = fmt::format("/tmp/jit-{}.dump", getpid());
   }
   Logger::Info("jitdump file: %s", m_perfJitDumpName.c_str());
 

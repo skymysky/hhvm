@@ -15,8 +15,7 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_CURL_SHARE_RESOURCE_H
-#define incl_HPHP_CURL_SHARE_RESOURCE_H
+#pragma once
 
 #include "hphp/runtime/ext/extension.h"
 #include "hphp/util/type-scan.h"
@@ -28,7 +27,7 @@ namespace HPHP {
 struct CurlShareResource : SweepableResourceData {
   DECLARE_RESOURCE_ALLOCATION(CurlShareResource)
   CLASSNAME_IS("curl_share")
-  const String& o_getClassNameHook() const override { return classnameof(); }
+  const OptString& o_getClassNameHook() const override { return classnameof(); }
   bool isInvalid() const override { return !m_share; }
 
   CurlShareResource();
@@ -46,4 +45,3 @@ struct CurlShareResource : SweepableResourceData {
 
 /////////////////////////////////////////////////////////////////////////////
 }
-#endif

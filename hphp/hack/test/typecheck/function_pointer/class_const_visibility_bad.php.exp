@@ -1,0 +1,18 @@
+error: Typing[4110] Invalid argument [1]
+-> Expected `int` [2]
+-> But got `string` [1]
+
+class_const_visibility_bad.php:8:8
+ 2 | 
+ 3 | final class Foo {
+ 4 |   private static function bar(int $x): void {}
+   |                               ^^^ [2]
+ 5 | 
+ 6 |   public function baz(): void {
+ 7 |     $x = self::bar<>;
+ 8 |     $x('hello');
+   |        ^^^^^^^ [1]
+ 9 |   }
+10 | }
+
+1 error found

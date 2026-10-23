@@ -1,4 +1,4 @@
-<?php
+<?hh
 /* Prototype  : array array_map  ( callback $callback  , array $arr1  [, array $...  ] )
  * Description: Applies the callback to the elements of the given arrays
  * Source code: ext/standard/array.c
@@ -11,50 +11,50 @@
  *   3) child class method using parent class
  *   4) parent class method using child class
  */
-echo "*** Testing array_map() : class methods as callback function ***\n";
-
-$arr1 = array(1, 5, 7);
-
-class ParentClass
-{
+class ParentClass {
   public $var1 = 10;
-  public static function staticParent1($n) {
+  <<__DynamicallyCallable>> public static function staticParent1($n) :mixed{
     return $n;
   }
-  private static function staticParent2($n) {
+  <<__DynamicallyCallable>> private static function staticParent2($n) :mixed{
     return $n;
   }
 }
 
-class ChildClass extends ParentClass 
-{
-  var $parent_obj;
+class ChildClass extends ParentClass {
+  public $parent_obj;
   public function __construct ( ) {
     $this->parent_obj = new ParentClass();
   }
   public $var2 = 5;
-  public static function staticChild($n) {
+  <<__DynamicallyCallable>> public static function staticChild($n) :mixed{
     return $n;
   }
-  public function nonstaticChild($n) {
+  <<__DynamicallyCallable>> public function nonstaticChild($n) :mixed{
     return $n;
   }
 }
 
-$childobj = new ChildClass();
-$parentobj = new ParentClass();
+<<__EntryPoint>>
+function main(): void {
+  echo "*** Testing array_map() : class methods as callback function ***\n";
 
-echo "-- accessing parent method from child class --\n";
-var_dump( array_map(array('ChildClass', 'staticParent1'), $arr1) );
+  $arr1 = vec[1, 5, 7];
 
-echo "-- accessing child method from parent class --\n";
-var_dump( array_map(array('ParentClass', 'staticChild'), $arr1) );
+  $childobj = new ChildClass();
+  $parentobj = new ParentClass();
 
-echo "-- accessing parent method using child class object --\n";
-var_dump( array_map(array($childobj, 'staticParent1'), $arr1) );
+  echo "-- accessing parent method from child class --\n";
+  var_dump( array_map(vec['ChildClass', 'staticParent1'], $arr1) );
 
-echo "-- accessing child method using parent class object --\n";
-var_dump( array_map(array($parentobj, 'staticChild'), $arr1) );
+  echo "-- accessing child method from parent class --\n";
+  var_dump( array_map(vec['ParentClass', 'staticChild'], $arr1) );
 
-echo "Done";
-?>
+  echo "-- accessing parent method using child class object --\n";
+  var_dump( array_map(vec[$childobj, 'staticParent1'], $arr1) );
+
+  echo "-- accessing child method using parent class object --\n";
+  var_dump( array_map(vec[$parentobj, 'staticChild'], $arr1) );
+
+  echo "Done";
+}

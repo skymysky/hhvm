@@ -1,18 +1,15 @@
-<?php /* destructor */
+<?hh /* destructor */
 
 const N = 10;
 
 class Obj {
-  function __destruct() {
-    echo "object destroyed\n";
-  }
 }
 
 class X {
-  public array $arr;
+  public AnyArray $arr;
   public int $id;
 
-  public function f() {
+  public function f() :mixed{
     // echo "";
     for (;;) {
       echo "iterating...\n";
@@ -26,6 +23,7 @@ class X {
   }
 
   function __construct() {
+    $this->arr = dict[];
     for ($i = 0; $i < N; $i++) {
       $this->arr[] = new Obj();
     }
@@ -33,6 +31,15 @@ class X {
   }
 }
 
-$x = new X();
-$x->f();
-echo "done\n";
+
+function f() :mixed{
+  $x = new X();
+  $x->f();
+}
+
+<<__EntryPoint>>
+function main_uninit_leak() :mixed{
+  f();
+  var_dump(HH\objprof_get_data());
+  echo "done\n";
+}

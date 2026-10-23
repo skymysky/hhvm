@@ -1,2 +1,2 @@
 
-Fatal error: %s
+Fatal error: Cannot break/continue in %s/try_finally_011.php on line 4

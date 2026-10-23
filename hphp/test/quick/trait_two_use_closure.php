@@ -1,7 +1,7 @@
 <?hh
 
 trait A {
-  function b() {
+  function b() :mixed{
     $c = function() {
       return 'd';
     };
@@ -13,9 +13,7 @@ trait A {
 class E { use A; }
 class F { use A; }
 
-function main() {
+<<__EntryPoint>> function main(): void {
   var_dump((new E)->b());
   var_dump((new F)->b());
 }
-
-main();

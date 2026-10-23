@@ -1,0 +1,28 @@
+error: Parsing[1002] A semicolon `;` is expected here. [1]
+
+namespaces.php--a-foo.php:4:9
+2 | 
+3 | 
+4 | module A\foo;
+  |         ^ [1]
+5 | function h(): void {}
+
+error: Naming[2049] Unbound name: `A` (a module) [1]
+
+namespaces.php--a-foo.php:4:8
+2 | 
+3 | 
+4 | module A\foo;
+  |        ^ [1]
+5 | function h(): void {}
+
+error: Naming[2128] Hack does not support top level statements. Use the `__EntryPoint` attribute on a function instead [1]
+
+namespaces.php--a-foo.php:4:9
+2 | 
+3 | 
+4 | module A\foo;
+  |         ^^^^^ [1]
+5 | function h(): void {}
+
+3 errors found

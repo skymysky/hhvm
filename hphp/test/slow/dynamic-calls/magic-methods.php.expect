@@ -1,20 +1,3 @@
-=============== test_magic_call ====================
-A::__construct
-A::__call
-A::__callStatic
-A::__call
-A::__callStatic
-A::__callStatic
-=============== test_magic_props ===================
-A::__construct
-A::__set
-A::__get
-A::__isset
-A::__unset
-A::__set
-A::__get
-A::__isset
-A::__unset
 =============== test_sleep =========================
 A::__construct
 A::__sleep
@@ -23,7 +6,6 @@ A::__sleep
 A::__wakeup
 =============== test_stringify =====================
 A::__construct
-A::__toString
 A::__toString
 =============== test_invoke ========================
 A::__construct
@@ -35,12 +17,11 @@ A::__invoke
 A::__invoke
 =============== test_debug =========================
 A::__construct
-A::__set_state(array(
-))
+A::__set_state(darray[
+])
 A::__debugInfo
-object(A)#3 (0) {
+object(A) (0) {
 }
-A::__set_state
 A::__set_state
 A::__debugInfo
 =============== test_clone =========================

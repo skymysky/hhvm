@@ -1,0 +1,11 @@
+error: Typing[4377] Interface `I` is used more than once in this declaration. [1]
+-> Here is another occurrence [2]
+
+multi_inherit3.php:6:20
+4 | interface I<T> { }
+5 | 
+6 | class C implements I<string>, I<string> { }
+  |                    ^^^^^^^^^ [1]
+  |                               ^ [2]
+
+1 error found

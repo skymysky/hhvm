@@ -1,0 +1,1 @@
+Fatal error: The splat operator `...` for unpacking variadic arguments may not appear before other positional arguments. in %s/test/slow/unpack_args/unpack_call_error.php on line 10

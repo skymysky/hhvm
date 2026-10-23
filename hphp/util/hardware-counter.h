@@ -14,8 +14,7 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_UTIL_HARDWARE_COUNTER_H_
-#define incl_HPHP_UTIL_HARDWARE_COUNTER_H_
+#pragma once
 
 #include "hphp/util/thread-local.h"
 
@@ -44,6 +43,8 @@ struct HardwareCounter {
   ~HardwareCounter();
 
   static void Reset();
+  static void Pause();
+  static void Resume();
   static int64_t GetInstructionCount();
   static int64_t GetLoadCount();
   static int64_t GetStoreCount();
@@ -66,11 +67,21 @@ struct HardwareCounter {
                    bool fastReads,
                    int exportInterval);
   static void RecordSubprocessTimes();
-  static void ExcludeKernel();
   static THREAD_LOCAL_NO_CHECK(HardwareCounter, s_counter);
   bool m_countersSet{false};
+
+  struct ExcludeScope final {
+    ExcludeScope() {
+      HardwareCounter::Pause();
+    }
+    ~ExcludeScope() {
+      HardwareCounter::Resume();
+    }
+  };
 private:
   void reset();
+  void pause();
+  void resume();
   int64_t getInstructionCount();
   int64_t getLoadCount();
   int64_t getStoreCount();
@@ -103,6 +114,8 @@ struct HardwareCounter {
   ~HardwareCounter() { }
 
   static void Reset() { }
+  static void Pause() { }
+  static void Resume() { }
   static int64_t GetInstructionCount() { return 0; }
   static int64_t GetLoadCount() { return 0; }
   static int64_t GetStoreCount() { return 0; }
@@ -124,7 +137,8 @@ struct HardwareCounter {
                    bool fastReads,
                    int exportInterval) {}
   static void RecordSubprocessTimes() {}
-  static void ExcludeKernel() {}
+
+  struct ExcludeScope final {};
 
   // Normally exposed by THREAD_LOCAL_NO_CHECK
   void getCheck() { }
@@ -137,5 +151,3 @@ struct HardwareCounter {
 
 ///////////////////////////////////////////////////////////////////////////////
 }
-
-#endif

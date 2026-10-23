@@ -16,9 +16,13 @@
 */
 
 #include "hphp/runtime/base/array-init.h"
+#include "hphp/runtime/base/array-iterator.h"
 #include "hphp/runtime/ext/extension.h"
 #include "hphp/runtime/base/builtin-functions.h"
 #include "hphp/util/lock.h"
+#include "hphp/util/rds-local.h"
+
+#include <folly/ScopeGuard.h>
 
 #ifdef USE_EDITLINE
 #include <editline/readline.h>
@@ -31,10 +35,10 @@ namespace HPHP {
 
 struct ReadlineVars {
   Variant completion;
-  Array array;
+  ArrayIter* iterator{nullptr};
 };
 
-THREAD_LOCAL(ReadlineVars, s_readline);
+RDS_LOCAL(ReadlineVars, s_readline);
 
 static Variant HHVM_FUNCTION(readline, const Variant& prompt /* = null */) {
   auto result = readline(
@@ -49,7 +53,7 @@ static Variant HHVM_FUNCTION(readline, const Variant& prompt /* = null */) {
   }
 }
 
-static bool HHVM_FUNCTION(readline_add_history, const String& line) {
+static bool HHVM_FUNCTION(readline_add_history, const OptString& line) {
   add_history(line.data());
   return true;
 }
@@ -66,12 +70,9 @@ static bool HHVM_FUNCTION(readline_clear_history) {
 /* This function is called repeatedly by rl_completion_matches. The first
  * invocation has state = 0, subsequent ones have state != 0. A return value of
  * nullptr indicates that all possible completions have been returned. */
-static char* _readline_command_generator(const char* text, int state) {
-  static ArrayIter iter;
-  if (state == 0) {
-    iter = s_readline->array.begin();
-  }
-  auto text_str = String(text);
+static char* _readline_command_generator(const char* text, int /*state*/) {
+  auto& iter = *s_readline->iterator;
+  auto text_str = OptString(text);
   while (iter) {
     auto value = tvCastToString(iter.secondVal());
     ++iter;
@@ -84,16 +85,19 @@ static char* _readline_command_generator(const char* text, int state) {
 }
 
 static char** readline_completion_cb(const char* text, int start, int end) {
-  if (!s_readline->completion.isInitialized()) {
+  if (s_readline->completion.isNull()) {
     return nullptr;
   }
   char** matches = nullptr;
   auto completion = vm_call_user_func(
       s_readline->completion,
-      make_packed_array(text, start, end));
+      make_vec_array(text, start, end));
   if (completion.isArray()) {
-    s_readline->array = completion.toArrRef();
-    if (s_readline->array.length() > 0) {
+    if (!completion.asArrRef().empty()) {
+      ArrayIter iter(completion.asArrRef());
+      auto const previous = s_readline->iterator;
+      s_readline->iterator = &iter;
+      SCOPE_EXIT { s_readline->iterator = previous; };
       matches = rl_completion_matches(text, _readline_command_generator);
     } else {
       // readline frees this using free(), so we must use malloc() and not new
@@ -102,7 +106,6 @@ static char** readline_completion_cb(const char* text, int start, int end) {
       matches[1] = "\0";
     }
   }
-  s_readline->array.clear();
   return matches;
 }
 
@@ -159,29 +162,29 @@ static Mutex info_lock;
 Variant HHVM_FUNCTION(readline_info, const Variant& varnameMixed /* = null */,
                       const Variant& newvalueMixed /* = null */) {
   if (varnameMixed.isNull()) {
-    ArrayInit ret(12, ArrayInit::Map{});
-    ret.add(s_line_buffer, convert_null_to_empty(rl_line_buffer));
-    ret.add(s_point, rl_point);
-    ret.add(s_end, rl_end);
+    DictInit ret(12);
+    ret.set(s_line_buffer, convert_null_to_empty(rl_line_buffer));
+    ret.set(s_point, rl_point);
+    ret.set(s_end, rl_end);
 #ifndef USE_EDITLINE
-    ret.add(s_mark, rl_mark);
-    ret.add(s_done, rl_done);
-    ret.add(s_pending_input, rl_pending_input);
-    ret.add(s_prompt, convert_null_to_empty(rl_prompt));
-    ret.add(s_terminal_name, convert_null_to_empty(rl_terminal_name));
+    ret.set(s_mark, rl_mark);
+    ret.set(s_done, rl_done);
+    ret.set(s_pending_input, rl_pending_input);
+    ret.set(s_prompt, convert_null_to_empty(rl_prompt));
+    ret.set(s_terminal_name, convert_null_to_empty(rl_terminal_name));
 #endif
 #if HAVE_ERASE_EMPTY_LINE
-    ret.add(s_erase_empty_line, rl_erase_empty_line);
+    ret.set(s_erase_empty_line, rl_erase_empty_line);
 #endif
-    ret.add(s_library_version, convert_null_to_empty(rl_library_version));
-    ret.add(s_readline_name, convert_null_to_empty(rl_readline_name));
-    ret.add(s_attempted_completion_over, rl_attempted_completion_over);
+    ret.set(s_library_version, convert_null_to_empty(rl_library_version));
+    ret.set(s_readline_name, convert_null_to_empty(rl_readline_name));
+    ret.set(s_attempted_completion_over, rl_attempted_completion_over);
     return ret.toArray();
   } else {
     auto const varname = varnameMixed.toString();
     Variant oldval;
     if (varname == s_line_buffer) {
-      oldval = String(convert_null_to_empty(rl_line_buffer));
+      oldval = OptString(convert_null_to_empty(rl_line_buffer));
       if (!newvalueMixed.isNull() &&
           oldval.toString() != newvalueMixed.toString()) {
         Lock lock(info_lock);
@@ -228,7 +231,7 @@ Variant HHVM_FUNCTION(readline_info, const Variant& varnameMixed /* = null */,
     } else if (varname == s_library_version) {
       return convert_null_to_empty(rl_library_version);
     } else if (varname == s_readline_name) {
-      oldval = String(convert_null_to_empty(rl_readline_name));
+      oldval = OptString(convert_null_to_empty(rl_readline_name));
       if (!newvalueMixed.isNull() &&
           oldval.toString() != newvalueMixed.toString()) {
         Lock lock(info_lock);
@@ -265,13 +268,9 @@ static bool HHVM_FUNCTION(readline_write_history,
 }
 
 static struct ReadlineExtension final : Extension {
-    ReadlineExtension() : Extension("readline") {}
-    void moduleInit() override {
-#ifdef USE_EDITLINE
-      HHVM_RC_STR(READLINE_LIB, "libedit");
-#else
+    ReadlineExtension() : Extension("readline", NO_EXTENSION_VERSION_YET, "hphp_hphpi") {}
+    void moduleRegisterNative() override {
       HHVM_RC_STR(READLINE_LIB, "readline");
-#endif
       HHVM_FE(readline);
       HHVM_FE(readline_add_history);
       HHVM_FE(readline_clear_history);
@@ -279,13 +278,12 @@ static struct ReadlineExtension final : Extension {
       HHVM_FE(readline_info);
       HHVM_FE(readline_read_history);
       HHVM_FE(readline_write_history);
-      loadSystemlib();
     }
 
     void requestShutdown() override {
       if (!s_readline.isNull()) {
         s_readline->completion.releaseForSweep();
-        s_readline->array.detach();
+        assertx(s_readline->iterator == nullptr);
       }
     }
 } s_readline_extension;

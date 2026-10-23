@@ -1,4 +1,4 @@
-(**
+(*
  * Copyright (c) 2017, Facebook, Inc.
  * All rights reserved.
  *
@@ -12,11 +12,21 @@ type t = {
   indent_width: int;
   indent_with_tabs: bool;
   line_width: int;
+  format_generated_code: bool;
+  version: int option;
 }
 
-let default = {
-  add_trailing_commas = true;
-  indent_width = 2;
-  indent_with_tabs = false;
-  line_width = 80;
-}
+let default =
+  {
+    add_trailing_commas = true;
+    indent_width = 2;
+    indent_with_tabs = false;
+    line_width = 80;
+    format_generated_code = false;
+    version = None;
+  }
+
+let version_gte env min_version =
+  match env.version with
+  | None -> true (* If no version is specified, use latest *)
+  | Some v -> v >= min_version

@@ -14,21 +14,20 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_EVAL_DEBUGGER_CMD_INFO_H_
-#define incl_HPHP_EVAL_DEBUGGER_CMD_INFO_H_
+#pragma once
 
 #include "hphp/runtime/base/type-array.h"
 #include "hphp/runtime/base/req-root.h"
 #include "hphp/runtime/debugger/debugger_client.h"
 #include "hphp/runtime/debugger/debugger_command.h"
 
-namespace HPHP { namespace Eval {
+namespace HPHP::Eval {
 ///////////////////////////////////////////////////////////////////////////////
 
 struct CmdInfo : DebuggerCommand {
   static void UpdateLiveLists(DebuggerClient &client);
-  static String GetProtoType(DebuggerClient &client, const std::string &cls,
-                             const std::string &func);
+  static OptString GetProtoType(DebuggerClient &client, const std::string &cls,
+                                const std::string &func);
 
   CmdInfo() : DebuggerCommand(KindOfInfo) {}
 
@@ -45,7 +44,9 @@ struct CmdInfo : DebuggerCommand {
     return m_info;
   }
 
-  static String FindSubSymbol(const Array& symbols, const std::string &symbol);
+  static OptString FindSubSymbol(const Array& symbols, const std::string &symbol);
+
+  std::string name() const override { return "info"; }
 
 protected:
   void sendImpl(DebuggerThriftBuffer&) override;
@@ -61,32 +62,33 @@ private:
   };
 
   int8_t m_type;
-  req::root<String> m_symbol;
+  req::root<OptString> m_symbol;
   req::root<Array>  m_info;
   std::shared_ptr<DebuggerClient::LiveLists> m_acLiveLists;
 
-  static String GetParams(const Array& params, bool varg, bool detailed=false);
-  static String GetParam(const Array& params, int index);
-  static String GetModifier(const Array& info, const String&);
-  static String GetTypeProfilingInfo(const Array& profilingArray,
-                                     const Array& params);
+  static OptString GetParams(const Array& params, bool varg, bool detailed=false);
+  static OptString GetParam(const Array& params, int index);
+  static OptString GetModifier(const Array& info, const OptString&);
+  static OptString GetTypeProfilingInfo(const Array& profilingArray,
+                                        const Array& params);
 
   static bool TryConstant(StringBuffer &sb, const Array& info,
                           const std::string &subsymbol);
   static bool TryProperty(StringBuffer &sb, const Array& info,
                           const std::string &subsymbol);
-  static bool TryMethod(DebuggerClient &client, StringBuffer &sb,
+  static bool TryMethod(DebuggerClient* client, StringBuffer &sb,
                         const Array& info, std::string subsymbol);
 
   static void PrintDocComments(StringBuffer &sb, const Array& info);
-  static void PrintInfo(DebuggerClient &client, StringBuffer &sb,
+  static void PrintHeader(DebuggerClient* client, StringBuffer &sb,
+                          const Array& info);
+
+public:
+  static void PrintInfo(DebuggerClient* client, StringBuffer &sb,
                         const Array& info,
                         const std::string &subsymbol);
-  static void PrintHeader(DebuggerClient &client, StringBuffer &sb,
-                          const Array& info);
 };
 
 ///////////////////////////////////////////////////////////////////////////////
-}}
+}
 
-#endif // incl_HPHP_EVAL_DEBUGGER_CMD_INFO_H_

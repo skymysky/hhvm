@@ -14,8 +14,7 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_TIMEZONE_H_
-#define incl_HPHP_TIMEZONE_H_
+#pragma once
 
 #include "hphp/runtime/base/resource-data.h"
 #include "hphp/runtime/base/type-string.h"
@@ -28,6 +27,11 @@ extern "C" {
 #include <timelib.h>
 }
 
+// NOTE: The "timelib" library underwent at least one major revision between
+// versions 201102 and 202002.  We use "TIMELIB_MODERN" to test for a modern
+// version, when we do not know exactly when a particular change occurred.
+#define TIMELIB_MODERN 202002
+
 namespace HPHP {
 
 struct Array;
@@ -38,12 +42,12 @@ struct Array;
  * Handles all timezone related functions.
  */
 struct TimeZone : SweepableResourceData {
-  DECLARE_RESOURCE_ALLOCATION(TimeZone);
+  DECLARE_RESOURCE_ALLOCATION(TimeZone)
 
   /**
    * Get/set current timezone that controls how local time is interpreted.
    */
-  static String CurrentName();              // current timezone's name
+  static OptString CurrentName();              // current timezone's name
   static req::ptr<TimeZone> Current();      // current timezone
   static bool SetCurrent(const char* name); // returns false if invalid
 
@@ -52,15 +56,15 @@ struct TimeZone : SweepableResourceData {
    */
   static bool IsValid(const char* name);
   static Array GetAbbreviations();
-  static String AbbreviationToName(String abbr, int utcoffset = -1,
-                                   int isdst = 1);
+  static OptString AbbreviationToName(OptString abbr, int utcoffset = -1,
+                                      int isdst = 1);
 
 public:
   /**
    * Constructing a timezone object by name or a raw pointer (internal).
    */
   TimeZone();
-  explicit TimeZone(const String& name);
+  explicit TimeZone(const OptString& name);
   explicit TimeZone(timelib_tzinfo *tzi);
 
   static StaticString& classnameof() {
@@ -68,7 +72,7 @@ public:
     return result;
   }
   // overriding ResourceData
-  const String& o_getClassNameHook() const override { return classnameof(); }
+  const OptString& o_getClassNameHook() const override { return classnameof(); }
 
   /**
    * Whether this represents a valid timezone.
@@ -89,8 +93,8 @@ public:
   /**
    * Get timezone's name or abbreviation.
    */
-  String name() const;
-  String abbr(int type = 0) const;
+  OptString name() const;
+  OptString abbr(int type = 0) const;
   int type() const;
 
   /**
@@ -117,9 +121,9 @@ public:
   /**
    * Timezone Database version
    */
-  static String getVersion() {
+  static OptString getVersion() {
     const timelib_tzdb* db = GetDatabase();
-    return String(db->version, CopyString);
+    return OptString(db->version, CopyString);
   }
 
   /**
@@ -146,13 +150,17 @@ private:
   /**
    * Look up cache and if found return it, otherwise, read it from database.
    */
+#if TIMELIB_VERSION >= TIMELIB_MODERN
+  static timelib_tzinfo* GetTimeZoneInfoRaw(const char* name, const timelib_tzdb* db, int* error_code);
+#else
   static timelib_tzinfo* GetTimeZoneInfoRaw(char* name, const timelib_tzdb* db);
+#endif
 
   unsigned int m_tztype = 0;
   timelib_tzinfo* m_tzi = nullptr;
   int m_offset;
   int m_dst;
-  String m_abbr;
+  OptString m_abbr;
 };
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -163,5 +171,3 @@ extern const timelib_tzdb* (*timezone_raw_get_tzdb)();
 
 ///////////////////////////////////////////////////////////////////////////////
 }
-
-#endif // incl_HPHP_TIMEZONE_H_

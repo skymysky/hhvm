@@ -17,18 +17,18 @@ enum Baz : int {
 }
 
 class Stringy {
-  function __toString(): string {
+  public function __toString(): string {
     return 'foo';
   }
 }
 
-function getFooValues(): array<string, Foo> {
+function getFooValues(): darray<string, Foo> {
   return Foo::getValues();
 }
-function getFooValues2(): array<string, int> {
+function getFooValues2(): darray<string, int> {
   return Foo::getValues();
 }
-
+<<__EntryPoint>> function main(): void {
 echo "Some basic tests on Foo\n";
 var_dump(getFooValues());
 var_dump(Foo::getNames());
@@ -75,3 +75,4 @@ var_dump(Bar::assert('foo'));
 
 echo "a broken assert()\n";
 var_dump(Bar::assert('welp'));
+}

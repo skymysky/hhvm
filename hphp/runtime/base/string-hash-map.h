@@ -14,8 +14,7 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_STRING_HASH_MAP_H_
-#define incl_HPHP_STRING_HASH_MAP_H_
+#pragma once
 
 #include "hphp/runtime/base/string-functors.h"
 #include "hphp/runtime/base/req-hash-map.h"
@@ -25,11 +24,12 @@ namespace req {
 
 // Map from case-insensitive String keys to T, with iter/ref stability
 template<typename T>
-using StringIMap = req::hash_map<String,T,hphp_string_hash,hphp_string_isame>;
+using StringTMap = req::hash_map<OptString,T,hphp_string_hash,hphp_string_tsame>;
+template<typename T>
+using StringFMap = req::hash_map<OptString,T,hphp_string_hash,hphp_string_fsame>;
 
 // Fast, case-sensitive String keys, no ref/iter stability
 template<typename T>
-using StringFastMap = req::fast_map<String,T,hphp_string_hash,hphp_string_same>;
+using StringFastMap = req::fast_map<OptString,T,hphp_string_hash,hphp_string_same>;
 
 }}
-#endif

@@ -1,12 +1,12 @@
-<?php
-$array1 = array("a" => "green", "b" => "brown", "c" => "blue", "red", "");
-$array2 = array("a" => "green", "yellow", "red", TRUE);
-$array3 = array("red", "a"=>"brown", "");
+<?hh <<__EntryPoint>> function main(): void {
+$array1 = dict["a" => "green", "b" => "brown", "c" => "blue", 0 => "red", 1 => ""];
+$array2 = dict["a" => "green", 0 => "yellow", 1 => "red", 2 => TRUE];
+$array3 = dict[0 => "red", "a"=>"brown", 1 => ""];
+$result = vec[];
 $result[] = array_diff_key($array1, $array2);
 $result[] = array_diff_key($array1, $array3);
 $result[] = array_diff_key($array2, $array3);
 $result[] = array_diff_key($array1, $array2, $array3);
 
 var_dump($result);
-
-?>
+}

@@ -1,0 +1,108 @@
+error: Typing[4090] Invalid type hint [1]
+-> No type constant `class` in `C` [2]
+-> Declaration of `C` is here [3]
+
+typeconst_wellformdness.php:4:28
+1 | <?hh
+2 | 
+3 | abstract class C {
+  |                ^ [3]
+4 |   abstract const type T as shape('a' => C::class, 'b' => int);
+  |                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ [1]
+  |                                            ^^^^^ [2]
+5 |   abstract const type T2 as shape('a' => C::FOO, 'b' => int);
+6 | 
+
+error: Typing[4090] Invalid type hint [1]
+-> No type constant `FOO` in `C` [2]
+-> Declaration of `C` is here [3]
+
+typeconst_wellformdness.php:5:29
+1 | <?hh
+2 | 
+3 | abstract class C {
+  |                ^ [3]
+4 |   abstract const type T as shape('a' => C::class, 'b' => int);
+5 |   abstract const type T2 as shape('a' => C::FOO, 'b' => int);
+  |                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ [1]
+  |                                             ^^^ [2]
+6 | 
+7 |   abstract const type T3 as ?shape('a' => C::class, 'b' => int) = null;
+
+error: Typing[4090] Invalid type hint [1]
+-> No type constant `class` in `C` [2]
+-> Declaration of `C` is here [3]
+
+typeconst_wellformdness.php:7:29
+1 | <?hh
+2 | 
+3 | abstract class C {
+  |                ^ [3]
+4 |   abstract const type T as shape('a' => C::class, 'b' => int);
+5 |   abstract const type T2 as shape('a' => C::FOO, 'b' => int);
+6 | 
+7 |   abstract const type T3 as ?shape('a' => C::class, 'b' => int) = null;
+  |                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ [1]
+  |                                              ^^^^^ [2]
+8 |   abstract const type T4 as ?shape('a' => C::FOO, 'b' => int) = null;
+9 | }
+
+error: Typing[4090] Invalid type hint [1]
+-> No type constant `FOO` in `C` [2]
+-> Declaration of `C` is here [3]
+
+typeconst_wellformdness.php:8:29
+ 1 | <?hh
+ 2 | 
+ 3 | abstract class C {
+   |                ^ [3]
+ 4 |   abstract const type T as shape('a' => C::class, 'b' => int);
+ 5 |   abstract const type T2 as shape('a' => C::FOO, 'b' => int);
+ 6 | 
+ 7 |   abstract const type T3 as ?shape('a' => C::class, 'b' => int) = null;
+ 8 |   abstract const type T4 as ?shape('a' => C::FOO, 'b' => int) = null;
+   |                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ [1]
+   |                                              ^^^ [2]
+ 9 | }
+10 | class D extends C {
+
+error: Typing[4090] Invalid type hint [1]
+-> No type constant `class` in `C` [2]
+-> Declaration of `C` is here [3]
+
+typeconst_wellformdness.php:11:18
+ 1 | <?hh
+ 2 | 
+ 3 | abstract class C {
+   |                ^ [3]
+ 4 |   abstract const type T as shape('a' => C::class, 'b' => int);
+ 5 |   abstract const type T2 as shape('a' => C::FOO, 'b' => int);
+   :
+ 9 | }
+10 | class D extends C {
+11 |   const type T = shape('a' => C::class, 'b' => int);
+   |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ [1]
+   |                                  ^^^^^ [2]
+12 |   const type T2 = shape('a' => C::FOO, 'b' => int);
+13 | }
+
+error: Typing[4090] Invalid type hint [1]
+-> No type constant `FOO` in `C` [2]
+-> Declaration of `C` is here [3]
+
+typeconst_wellformdness.php:12:19
+ 1 | <?hh
+ 2 | 
+ 3 | abstract class C {
+   |                ^ [3]
+ 4 |   abstract const type T as shape('a' => C::class, 'b' => int);
+ 5 |   abstract const type T2 as shape('a' => C::FOO, 'b' => int);
+   :
+10 | class D extends C {
+11 |   const type T = shape('a' => C::class, 'b' => int);
+12 |   const type T2 = shape('a' => C::FOO, 'b' => int);
+   |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ [1]
+   |                                   ^^^ [2]
+13 | }
+
+6 errors found

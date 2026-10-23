@@ -18,12 +18,18 @@
 #include "hphp/runtime/base/builtin-functions.h"
 #include "hphp/runtime/base/execution-context.h"
 #include "hphp/runtime/base/runtime-option.h"
-#include "hphp/runtime/base/thread-info.h"
-#include "hphp/runtime/vm/repo.h"
-#include "hphp/runtime/vm/repo-global-data.h"
+#include "hphp/runtime/base/request-info.h"
 #include "hphp/runtime/vm/vm-regs.h"
-#include "hphp/util/logger.h"
+#include "hphp/util/configs/errorhandling.h"
+#include "hphp/util/configs/eval.h"
+#include "hphp/util/configs/php7.h"
+#include "hphp/util/random.h"
 #include "hphp/util/string-vsnprintf.h"
+
+#include <fmt/format.h>
+#include <folly/Random.h>
+#include <folly/logging/RateLimiter.h>
+#include <folly/Range.h>
 
 #ifdef ERROR
 # undef ERROR
@@ -36,7 +42,7 @@ namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
 
 /*
- * Careful in these functions: they can be called when tl_regState is
+ * Careful in these functions: they can be called when regState() is
  * DIRTY.  ExecutionContext::handleError is dirty-reg safe, but
  * evaluate other functions that you might need here.
  */
@@ -83,53 +89,115 @@ void raise_recoverable_error_without_first_frame(const std::string &msg) {
 }
 
 void raise_typehint_error(const std::string& msg) {
-  if (RuntimeOption::PHP7_EngineExceptions) {
-    VMRegAnchor _;
-    SystemLib::throwTypeErrorObject(msg);
-  }
-  raise_recoverable_error_without_first_frame(msg);
-  if (RuntimeOption::EvalHardTypeHints) {
-    raise_error("Error handler tried to recover from typehint violation");
-  }
-}
-
-void raise_return_typehint_error(const std::string& msg) {
-  if (RuntimeOption::PHP7_EngineExceptions) {
+  if (Cfg::PHP7::EngineExceptions) {
     VMRegAnchor _;
     SystemLib::throwTypeErrorObject(msg);
   }
   raise_recoverable_error(msg);
-  if (RuntimeOption::EvalCheckReturnTypeHints >= 3) {
-    raise_error("Error handler tried to recover from a return typehint "
+  raise_error("Error handler tried to recover from typehint violation");
+}
+
+void raise_typehint_error_without_first_frame(const std::string& msg) {
+  if (Cfg::PHP7::EngineExceptions) {
+    VMRegAnchor _;
+    SystemLib::throwTypeErrorObject(msg);
+  }
+  raise_recoverable_error_without_first_frame(msg);
+  raise_error("Error handler tried to recover from typehint violation");
+}
+
+void raise_reified_typehint_error(const std::string& msg, bool warn) {
+  if (!warn) return raise_typehint_error_without_first_frame(msg);
+  raise_warning_unsampled(msg);
+}
+
+void raise_inline_typehint_error(std::string& givenType, std::string& expectedType, std::string& errorKey) {
+  std::string msg;
+  if (errorKey.empty()) {
+    msg = fmt::format("Runtime type-check: Expected {}, got {}", expectedType, givenType);
+  } else {
+    msg = fmt::format("Runtime type-check: Expected {} at {}, got {}",
+      expectedType, errorKey, givenType);
+  }
+  if (Cfg::ErrorHandling::ThrowExceptionOnInlineTypeError) return raise_typehint_error(msg);
+  raise_warning_unsampled(msg);
+}
+
+void raise_return_typehint_error(const std::string& msg) {
+  if (Cfg::PHP7::EngineExceptions) {
+    VMRegAnchor _;
+    SystemLib::throwTypeErrorObject(msg);
+  }
+  raise_recoverable_error(msg);
+  raise_error("Error handler tried to recover from a return typehint "
+              "violation");
+}
+
+void raise_property_typehint_error(const std::string& msg,
+                                   bool isSoft, bool isUB) {
+  assertx(Cfg::Eval::CheckPropTypeHints > 0);
+
+  if (Cfg::Eval::CheckPropTypeHints == 1 || isSoft) {
+    raise_warning_unsampled(msg);
+    return;
+  }
+
+  raise_recoverable_error(msg);
+  if (Cfg::Eval::CheckPropTypeHints >= 3) {
+    raise_error("Error handler tried to recover from a property typehint "
                 "violation");
   }
 }
 
-void raise_disallowed_dynamic_call(const Func* f) {
-  raise_hack_strict(
-    RuntimeOption::DisallowDynamicVarEnvFuncs,
-    "disallow_dynamic_var_env_funcs",
-    Strings::DISALLOWED_DYNCALL, f->fullName()->data()
+void raise_property_typehint_unset_error(const Class* declCls,
+                                         const StringData* propName,
+                                         bool isSoft, bool isUB) {
+  raise_property_typehint_error(
+    folly::sformat(
+      "Unsetting property '{}::{}' with type annotation",
+      declCls->name(),
+      propName
+    ),
+    isSoft,
+    isUB
   );
 }
 
-void raise_intish_index_cast() {
-  if (UNLIKELY(RID().getSuppressHackArrayCompatNotices())) return;
-  raise_notice("Hack Array Compat: Intish index cast");
+void raise_convert_object_to_string(const char* cls_name) {
+  raise_error("Cannot convert object to string (got instance of %s)", cls_name);
+}
+
+void throw_convert_rfunc_to_type(const char* typeName) {
+  SystemLib::throwInvalidOperationExceptionObject(
+    fmt::format("Cannot convert reified function to {}", typeName)
+  );
+}
+
+void throw_convert_rcls_meth_to_type(const char* typeName) {
+  SystemLib::throwInvalidOperationExceptionObject(
+    fmt::format("Cannot convert reified class method to {}", typeName)
+  );
+}
+
+void throw_convert_ecl_to_type(const char* typeName) {
+  SystemLib::throwInvalidOperationExceptionObject(
+    fmt::format("Cannot convert enum class label to {}", typeName)
+  );
+}
+
+void raise_use_of_specialized_array() {
+  raise_error(Strings::DATATYPE_SPECIALIZED_DVARR);
 }
 
 void raise_hackarr_compat_notice(const std::string& msg) {
-  if (UNLIKELY(RID().getSuppressHackArrayCompatNotices())) return;
   raise_notice("Hack Array Compat: %s", msg.c_str());
 }
 
-
 void raise_hack_arr_compat_serialize_notice(const ArrayData* arr) {
-  if (UNLIKELY(RID().getSuppressHackArrayCompatNotices())) return;
   auto const type = [&]{
-    if (arr->isVecArray()) return "vec";
-    if (arr->isDict())     return "dict";
-    if (arr->isKeyset())   return "keyset";
+    if (arr->isVecType()) return "vec";
+    if (arr->isDictType())     return "dict";
+    if (arr->isKeysetType())   return "keyset";
     return "array";
   }();
   raise_notice("Hack Array Compat: Serializing %s", type);
@@ -137,113 +205,36 @@ void raise_hack_arr_compat_serialize_notice(const ArrayData* arr) {
 
 namespace {
 
-void raise_hackarr_type_hint_impl(const Func* func,
-                                  const ArrayData* ad,
-                                  AnnotType at,
-                                  folly::Optional<int> param) {
-  if (UNLIKELY(RID().getSuppressHackArrayCompatNotices())) return;
-
-  auto const name = [&]{
-    if (at == AnnotType::VArray) return "varray";
-    if (at == AnnotType::DArray) return "darray";
-    if (at == AnnotType::VArrOrDArr) return "varray_or_darray";
-    if (at == AnnotType::Array) return "array";
-    always_assert(false);
-  }();
-
-  auto const given = [&]{
-    if (ad->isVArray()) return "varray";
-    if (ad->isDArray()) return "darray";
-    return "array";
-  }();
-
-  if (param) {
-    raise_notice(
-      "Hack Array Compat: Argument %d to %s() must be of type %s, %s given",
-      *param + 1, func->fullDisplayName()->data(), name, given
-    );
-  } else {
-    raise_notice(
-      "Hack Array Compat: Value returned from %s() must be of type %s, "
-      "%s given",
-      func->fullDisplayName()->data(), name, given
-    );
-  }
-}
-
+[[noreturn]]
 void raise_func_undefined(const char* prefix, const StringData* name,
                           const Class* cls) {
-  if (LIKELY(!needsStripInOut(name))) {
-    if (cls) {
-      raise_error("%s undefined method %s::%s()", prefix, cls->name()->data(),
-                  name->data());
-    }
-    raise_error("%s undefined function %s()", prefix, name->data());
-  } else {
-    auto stripped = stripInOutSuffix(name);
-    if (cls) {
-      if (cls->lookupMethod(stripped)) {
-        raise_error("%s method %s::%s() with incorrectly annotated inout "
-                    "parameter", prefix, cls->name()->data(), stripped->data());
-      }
-      raise_error("%s undefined method %s::%s()", cls->name()->data(), prefix,
-                  stripped->data());
-    } else if (Unit::lookupFunc(stripped)) {
-      raise_error("%s function %s() with incorrectly annotated inout "
-                  "parameter", prefix, stripped->data());
-    }
-    raise_error("%s undefined function %s()", prefix, stripped->data());
+  if (cls) {
+    raise_error("%s undefined method %s::%s()", prefix, cls->name()->data(),
+                name->data());
   }
+  raise_error("%s undefined function %s()", prefix, name->data());
 }
 
 }
 
-void raise_hackarr_type_hint_param_notice(const Func* func,
-                                          const ArrayData* ad,
-                                          AnnotType at,
-                                          int param) {
-  raise_hackarr_type_hint_impl(func, ad, at, param);
-}
-
-void raise_hackarr_type_hint_ret_notice(const Func* func,
-                                        const ArrayData* ad,
-                                        AnnotType at) {
-  raise_hackarr_type_hint_impl(func, ad, at, folly::none);
-}
-
-void raise_hackarr_type_hint_outparam_notice(const Func* func,
-                                             const ArrayData* ad,
-                                             AnnotType at,
-                                             int param) {
-  if (UNLIKELY(RID().getSuppressHackArrayCompatNotices())) return;
-
-  auto const name = [&]{
-    if (at == AnnotType::VArray) return "varray";
-    if (at == AnnotType::DArray) return "darray";
-    if (at == AnnotType::VArrOrDArr) return "varray_or_darray";
-    if (at == AnnotType::Array) return "array";
-    always_assert(false);
-  }();
-
-  auto const given = [&]{
-    if (ad->isVArray()) return "varray";
-    if (ad->isDArray()) return "darray";
-    return "array";
-  }();
-
+void raise_hackarr_compat_is_operator(const char* source, const char* target) {
   raise_notice(
-    "Hack Array Compat: Argument %d returned from %s() as an inout parameter "
-    "must be of type %s, %s given",
-    param + 1, func->fullDisplayName()->data(), name, given
+    "Hack Array Compat: is/as operator used with %s and %s",
+    source,
+    target
   );
 }
 
-void raise_resolve_undefined(const StringData* name, const Class* cls) {
+void raise_resolve_func_undefined(const StringData* name, const Class* cls) {
   raise_func_undefined("Failure to resolve", name, cls);
 }
 
 void raise_call_to_undefined(const StringData* name, const Class* cls) {
   raise_func_undefined("Call to", name, cls);
+}
+
+void raise_resolve_class_undefined(const StringData* name) {
+  raise_error(Strings::FAILED_RESOLVE_CLASS, name->data());
 }
 
 void raise_recoverable_error(const char *fmt, ...) {
@@ -259,8 +250,8 @@ static int64_t g_notice_counter = 0;
 
 static bool notice_freq_check(ErrorMode mode) {
   if (!g_context->getThrowAllErrors() &&
-      (RuntimeOption::NoticeFrequency <= 0 ||
-       g_notice_counter++ % RuntimeOption::NoticeFrequency != 0)) {
+      (Cfg::ErrorHandling::NoticeFrequency <= 0 ||
+       g_notice_counter++ % Cfg::ErrorHandling::NoticeFrequency != 0)) {
     return false;
   }
   return g_context->errorNeedsHandling(
@@ -286,7 +277,7 @@ static void raise_notice_helper(ErrorMode mode, bool skipTop,
       HANDLE_ERROR(true, Never, "\nDeprecated: ", skipTop);
       break;
     default:
-      always_assert(!"Unhandled type of error");
+      always_assert(false && "Unhandled type of error");
   }
 }
 
@@ -317,8 +308,8 @@ static int64_t g_warning_counter = 0;
 
 bool warning_freq_check() {
   if (!g_context->getThrowAllErrors() &&
-      (RuntimeOption::WarningFrequency <= 0 ||
-       g_warning_counter++ % RuntimeOption::WarningFrequency != 0)) {
+      (Cfg::ErrorHandling::WarningFrequency <= 0 ||
+       g_warning_counter++ % Cfg::ErrorHandling::WarningFrequency != 0)) {
     return false;
   }
   return g_context->errorNeedsHandling(
@@ -351,45 +342,6 @@ void raise_warning(const char *fmt, ...) {
   string_vsnprintf(msg, fmt, ap);
   va_end(ap);
   raise_warning_helper(false, msg);
-}
-
-static void raise_hack_strict_helper(
-  HackStrictOption option, const char *ini_setting, const std::string& msg) {
-  if (option == HackStrictOption::WARN) {
-    raise_warning_helper(
-      false, std::string("(hhvm.hack.") + ini_setting + "=warn) " + msg);
-  } else if (option == HackStrictOption::ON) {
-    raise_error(std::string("(hhvm.hack.") + ini_setting + "=error) " + msg);
-  }
-}
-
-
-/**
- * For use with the HackStrictOption settings. This will warn, error, or do
- * nothing depending on what the user chose for the option. The second param
- * should be the ini setting name after "hhvm.hack."
- */
-void raise_hack_strict(HackStrictOption option, const char *ini_setting,
-                       const std::string& msg) {
-  if (option == HackStrictOption::WARN ?
-      !warning_freq_check() : (option != HackStrictOption::ON)) {
-    return;
-  }
-  raise_hack_strict_helper(option, ini_setting, msg);
-}
-
-void raise_hack_strict(HackStrictOption option, const char *ini_setting,
-                       const char *fmt, ...) {
-  if (option == HackStrictOption::WARN ?
-      !warning_freq_check() : (option != HackStrictOption::ON)) {
-    return;
-  }
-  std::string msg;
-  va_list ap;
-  va_start(ap, fmt);
-  string_vsnprintf(msg, fmt, ap);
-  va_end(ap);
-  raise_hack_strict_helper(option, ini_setting, msg);
 }
 
 /**
@@ -466,16 +418,12 @@ void raise_deprecated(const char *fmt, ...) {
   raise_notice_helper(ErrorMode::PHP_DEPRECATED, false, msg);
 }
 
-void raise_param_type_warning(
+std::string param_type_error_message(
     const char* func_name,
     int param_num,
-    DataType expected_type,
-    DataType actual_type) {
+    const char* expected_type,
+    TypedValue actual_value) {
 
-  // its ok to do this before munging, because it only looks at the
-  // end of the string
-  auto is_constructor = is_constructor_name(func_name);
-  if (!is_constructor && !warning_freq_check()) return;
   // slice off fg1_
   if (strncmp(func_name, "fg1_", 4) == 0) {
     func_name += 4;
@@ -483,12 +431,33 @@ void raise_param_type_warning(
     func_name += 4;
   }
   assertx(param_num > 0);
-  auto msg = folly::sformat(
+
+  auto const isLegacy =
+    isArrayLikeType(type(actual_value)) &&
+    val(actual_value).parr->isLegacyArray();
+  return fmt::format(
     "{}() expects parameter {} to be {}, {} given",
     func_name,
     param_num,
-    getDataTypeString(expected_type).data(),
-    getDataTypeString(actual_type).data());
+    expected_type,
+    getDataTypeString(type(actual_value), isLegacy).data());
+}
+
+void raise_param_type_warning(
+    const char* func_name,
+    int param_num,
+    const char* expected_type,
+    TypedValue actual_value) {
+
+  // its ok to do this before munging, because it only looks at the
+  // end of the string
+  auto is_constructor = is_constructor_name(func_name);
+  if (!is_constructor && !warning_freq_check()) return;
+
+  auto msg = param_type_error_message(func_name,
+                                      param_num,
+                                      expected_type,
+                                      actual_value);
 
   if (is_constructor) {
     SystemLib::throwExceptionObject(msg);
@@ -535,33 +504,92 @@ void raise_message(ErrorMode mode,
   }
 
   if (mode == ErrorMode::WARNING) {
-    if (RuntimeOption::WarningFrequency <= 0 ||
-        (g_warning_counter++) % RuntimeOption::WarningFrequency != 0) {
+    if (Cfg::ErrorHandling::WarningFrequency <= 0 ||
+        (g_warning_counter++) % Cfg::ErrorHandling::WarningFrequency != 0) {
       return;
     }
     HANDLE_ERROR(true, Never, "\nWarning: ", skipTop);
     return;
   }
 
-  if (RuntimeOption::NoticeFrequency <= 0 ||
-      (g_notice_counter++) % RuntimeOption::NoticeFrequency != 0) {
+  if (Cfg::ErrorHandling::NoticeFrequency <= 0 ||
+      (g_notice_counter++) % Cfg::ErrorHandling::NoticeFrequency != 0) {
     return;
   }
 
   raise_notice_helper(mode, skipTop, msg);
 }
 
-///////////////////////////////////////////////////////////////////////////////
-
-SuppressHackArrCompatNotices::SuppressHackArrCompatNotices()
-  : old{RID().getSuppressHackArrayCompatNotices()} {
-  RID().setSuppressHackArrayCompatNotices(true);
+void raise_str_to_class_notice(const StringData* name, jit::StrToClassKind kind) {
+  auto const source = [&] {
+    switch (kind) {
+      case jit::StrToClassKind::Expression:
+        return "expression";
+      case jit::StrToClassKind::StaticMethod:
+        return "static method call";
+      case jit::StrToClassKind::TypeStructure:
+        return "type_structure()";
+      case jit::StrToClassKind::DynamicClassMeth:
+        return "dynamic_class_meth()";
+    }
+  }();
+  if (folly::Random::oneIn(Cfg::Eval::RaiseStrToClsConversionNoticeSampleRate, threadLocalRng64())) {
+    raise_notice("Implicit string to Class conversion for classname %s for %s",
+                 name->data(), source);
+  }
 }
 
-SuppressHackArrCompatNotices::~SuppressHackArrCompatNotices() {
-  RID().setSuppressHackArrayCompatNotices(old);
+void raise_clsmeth_compat_type_hint(
+  const Func* func, const std::string& displayName,
+  Optional<int> param) {
+  if (param) {
+    raise_notice(
+      "class_meth Compat: Argument %d passed to %s()"
+      " must be of type %s, clsmeth given",
+      *param + 1, func->fullName()->data(), displayName.c_str());
+  } else {
+    raise_notice(
+      "class_meth Compat: Value returned from function %s()"
+      " must be of type %s, clsmeth given",
+      func->fullName()->data(), displayName.c_str());
+  }
+}
+
+void raise_clsmeth_compat_type_hint_outparam_notice(
+  const Func* func, const std::string& displayName, int paramNum) {
+  raise_notice(
+    "class_meth Compat: Argument %d returned from %s()"
+    " must be of type %s, clsmeth given",
+    paramNum + 1, func->fullName()->data(), displayName.c_str());
+}
+
+void raise_clsmeth_compat_type_hint_property_notice(
+  const Class* declCls, const StringData* propName,
+  const std::string& displayName, bool isStatic) {
+  raise_notice(
+    "class_meth Compat: %s '%s::%s' declared as type %s, clsmeth assigned",
+    isStatic ? "Static property" : "Property",
+    declCls->name()->data(), propName->data(), displayName.c_str());
 }
 
 ///////////////////////////////////////////////////////////////////////////////
+
+void raise_class_to_string_conversion_notice(const char* source) {
+  if (LIKELY(!RID().getSuppressClassConversionNotices())) {
+    raise_notice(Strings::CLASS_TO_STRING_IMPLICIT, source);
+  }
+}
+
+SuppressClassConversionNotice::SuppressClassConversionNotice()
+  : old(RID().getSuppressClassConversionNotices()) {
+  RID().setSuppressClassConversionNotices(true);
+}
+SuppressClassConversionNotice::~SuppressClassConversionNotice() {
+  RID().setSuppressClassConversionNotices(old);
+}
+
+void raise_class_to_memokey_conversion_warning() {
+  raise_warning(Strings::CLASS_TO_MEMOKEY);
+}
 
 }

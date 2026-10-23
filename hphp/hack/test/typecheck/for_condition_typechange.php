@@ -12,6 +12,6 @@
 function meh_for(int $i): void {
   $x = $i;
   for( ; $x = true; $i++) {
-  	$i += $x;
+    $i += $x;
   }
 }

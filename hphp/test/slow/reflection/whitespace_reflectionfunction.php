@@ -1,7 +1,11 @@
-<?php
+<?hh
 
-function herp($derp) {}
-function foo($bar, $baz) {}
+function herp($derp) :mixed{}
+function foo($bar, $baz) :mixed{}
 
-var_dump((string) (new ReflectionFunction('herp')));
-var_dump((string) (new ReflectionFunction('foo')));
+
+<<__EntryPoint>>
+function main_whitespace_reflectionfunction() :mixed{
+var_dump((new ReflectionFunction('herp'))->__toString());
+var_dump((new ReflectionFunction('foo'))->__toString());
+}

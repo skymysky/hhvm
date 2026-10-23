@@ -1,0 +1,24 @@
+error: Parsing[1002] Binding a variable in a pattern is not yet supported. [1]
+
+refinement_pattern_variable.php:7:5
+5 | function f(arraykey $v): void {
+6 |   match ($v) {
+7 |     $i: int => echo "int $i\n";
+  |     ^^^^^^^ [1]
+8 |     _ => echo "string $v\n";
+9 |   }
+
+error: Naming[2050] Variable `$i` is undefined, or not always defined. [1]
+-> Did you mean `$v` instead? [2]
+
+refinement_pattern_variable.php:7:26
+4 | 
+5 | function f(arraykey $v): void {
+6 |   match ($v) {
+  |          ^^ [2]
+7 |     $i: int => echo "int $i\n";
+  |                          ^^ [1]
+8 |     _ => echo "string $v\n";
+9 |   }
+
+2 errors found

@@ -1,0 +1,7 @@
+Remove `async`
+
+<?hh
+
+interface MyIface {
+  public  function foo(): Awaitable<void>;
+}

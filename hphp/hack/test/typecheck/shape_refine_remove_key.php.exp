@@ -1,0 +1,15 @@
+error: Typing[4321] You are accessing a field known to not exist [1]
+-> The type of the field `a` in this shape doesn't allow any values [2]
+-> It is nothing because the field `a` was unset here [2]
+
+shape_refine_remove_key.php:9:5
+ 6 |   ) $x,
+ 7 | ): void {
+ 8 |   if (!Shapes::keyExists($x, 'a')) {
+   |        ^^^^^^^^^^^^^^^^^^^^^^^^^^ [2]
+ 9 |     $x['a'] ?? null;
+   |     ^^^^^^^^^^^^^^^ [1]
+10 |   }
+11 | }
+
+1 error found

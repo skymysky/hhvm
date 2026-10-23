@@ -1,3 +1,7 @@
-<?php
+<?hh
 
-var_dump(array('b' => '2', 'a' => '1'));
+
+<<__EntryPoint>>
+function main_177() :mixed{
+var_dump(dict['b' => '2', 'a' => '1']);
+}

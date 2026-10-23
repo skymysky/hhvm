@@ -9,6 +9,6 @@
  *
  */
 
-function foo(int $var) {
-  $a = array(&$var);
+function foo(int $var): void {
+  $a = vec[&$var];
 }

@@ -14,13 +14,12 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_EVAL_DEBUGGER_CMD_EVAL_H_
-#define incl_HPHP_EVAL_DEBUGGER_CMD_EVAL_H_
+#pragma once
 
 #include "hphp/runtime/debugger/debugger_command.h"
 #include "hphp/runtime/base/req-root.h"
 
-namespace HPHP { namespace Eval {
+namespace HPHP::Eval {
 ///////////////////////////////////////////////////////////////////////////////
 
 struct CmdEval : DebuggerCommand {
@@ -35,6 +34,8 @@ struct CmdEval : DebuggerCommand {
     return m_failed;
   }
 
+  std::string name() const override { return "eval"; }
+
 protected:
   void sendImpl(DebuggerThriftBuffer&) override;
   void recvImpl(DebuggerThriftBuffer&) override;
@@ -42,13 +43,12 @@ protected:
 private:
   void handleReply(DebuggerClient&);
 
-  req::root<String> m_output;
+  req::root<OptString> m_output;
   int m_frame;
   bool m_bypassAccessCheck{false};
   bool m_failed{false};
 };
 
 ///////////////////////////////////////////////////////////////////////////////
-}}
+}
 
-#endif // incl_HPHP_EVAL_DEBUGGER_CMD_EVAL_H_

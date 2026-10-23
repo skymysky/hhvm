@@ -1,1 +1,11 @@
-No errors
+error: Parsing[1002] Encountered unexpected token `&`. [1]
+
+test_array14.php:12:27
+10 |  */
+11 | 
+12 | function test(varray<int> &$x): void {
+   |                           ^ [1]
+13 |   $x[0] = 33;
+14 | }
+
+1 error found

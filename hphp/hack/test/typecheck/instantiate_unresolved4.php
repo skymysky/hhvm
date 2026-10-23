@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 /**
  * Copyright (c) 2014, Facebook, Inc.
  * All rights reserved.
@@ -9,12 +9,12 @@
  *
  */
 
-function foo<T>(mixed $x): array<T> {
-  // UNSAFE
+function foo<T>(mixed $x): varray<T> {
+  return vec[];
 }
 
-function a<T>(): array<T> {
-  return array();
+function a<T>(): varray<T> {
+  return vec[];
 }
 
 function f(): void {

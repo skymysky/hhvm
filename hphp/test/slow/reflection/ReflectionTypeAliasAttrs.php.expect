@@ -1,25 +1,25 @@
 TypeAlias [ MyTypeNoAttrs : HH\int ]
-array(0) {
+dict(0) {
 }
 TypeAlias [ MyType : HH\int ]
-array(1) {
+dict(1) {
   ["Attr1"]=>
-  array(1) {
-    [0]=>
+  vec(1) {
     int(1337)
   }
 }
 NULL
-array(1) {
-  [0]=>
+bool(false)
+vec(1) {
   int(1337)
 }
+bool(true)
 TypeAlias [ MyNewType : HH\int ]
-array(2) {
+dict(2) {
   ["Attr2"]=>
-  array(0) {
+  vec(0) {
   }
   ["Attr3"]=>
-  array(0) {
+  vec(0) {
   }
 }

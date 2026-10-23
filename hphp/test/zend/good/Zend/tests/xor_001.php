@@ -1,10 +1,10 @@
-<?php
+<?hh
+<<__EntryPoint>> function main(): void {
+$a = vec[1,2,3];
+$b = vec[];
 
-$a = array(1,2,3);
-$b = array();
-
-$c = $a ^ $b;
+$c = (int)$a ^ (int)$b;
 var_dump($c);
 
 echo "Done\n";
-?>
+}

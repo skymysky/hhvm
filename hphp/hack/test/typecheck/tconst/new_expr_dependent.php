@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 
 // This file test is a basic test that new class_id produces a expression
 // dependent type.
@@ -11,6 +11,7 @@ abstract class C2 {
 
   protected function setFoo(this::TFoo $foo): void {}
 
+  <<__NeedsConcrete>>
   public static function create(this::TFoo $foo): this {
     // new static() will produce the expression dependent type
     // `static.

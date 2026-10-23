@@ -1,8 +1,12 @@
-<?php
-
-function test($a, $b) {
+<?hh
+<<__DynamicallyCallable>>
+function test($a, $b) :mixed{
  print $a.$b;
 }
- $a = 'Test';
- $y = array('k','q','q');
- $a('o',$y[0]);
+
+ <<__EntryPoint>>
+function main_1186() :mixed{
+$a = 'test';
+ $y = vec['k','q','q'];
+ HH\dynamic_fun($a)('o',$y[0]);
+}

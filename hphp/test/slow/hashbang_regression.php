@@ -1,4 +1,8 @@
-#not-a-hashbang
-#test
+#! this is ok, hashbang is supported
+<?hh
+# not_a_hashbang
 
-<?php var_dump(true);
+<<__EntryPoint>>
+function main_hashbang_regression() : void {
+var_dump(true);
+}

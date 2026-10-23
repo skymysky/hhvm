@@ -1,18 +1,19 @@
-<?php
+<?hh
 class JoinPoint
 {
 }
 
 abstract class Pointcut
 {
-    abstract public function evaluate(JoinPoint $joinPoint);
+    abstract public function evaluate(JoinPoint $joinPoint):mixed;
 }
 
 class Read extends Pointcut
 {
-    public function evaluate(Joinpoint $joinPoint)
-    {
+    public function evaluate(JoinPoint $joinPoint)
+:mixed    {
     }
 }
-?>
-DONE
+<<__EntryPoint>> function main(): void {
+echo "DONE";
+}

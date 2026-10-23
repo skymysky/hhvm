@@ -1,16 +1,20 @@
-<?php
+<?hh
 
 class c {
-function foo() {
+function foo() :mixed{
  echo "called
 ";
  }
 }
-function meh() {
+function meh() :mixed{
 }
-function z() {
+function z() :mixed{
   $p = new c;
   $p->foo(meh());
   $p = null;
 }
+
+<<__EntryPoint>>
+function main_730() :mixed{
 z();
+}

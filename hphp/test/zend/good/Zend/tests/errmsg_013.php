@@ -1,9 +1,9 @@
-<?php
+<?hh
 
 class test {
-	function foo(array $a = "s") {
-	}
+    function foo(AnyArray $a = "s") :mixed{
+    }
 }
-
+<<__EntryPoint>> function main(): void {
 echo "Done\n";
-?>
+}

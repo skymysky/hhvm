@@ -17,7 +17,6 @@
 #include "hphp/test/ext/test.h"
 #include "hphp/util/logger.h"
 #include "hphp/runtime/base/program-functions.h"
-#include <dlfcn.h>
 
 #include "hphp/hhvm/process-init.h"
 
@@ -26,6 +25,7 @@ using namespace HPHP;
 ///////////////////////////////////////////////////////////////////////////////
 
 int main(int argc, char **argv) {
+  HPHP::StaticString::CreateAll();
   HPHP::register_process_init();
 
 #ifdef HHVM_FBMAKE
@@ -53,17 +53,18 @@ int main(int argc, char **argv) {
     Test::logger.log_url = argv[5];
   }
 
+  rds::local::init();
+  SCOPE_EXIT { rds::local::fini(); };
+
   // Initialize the runtime options with their default values
   {
     IniSetting::Map ini = IniSetting::Map::object;
     Hdf empty;
     RuntimeOption::Load(ini, empty);
     // This one's default value changed recently
-    RuntimeOption::AlwaysPopulateRawPostData = true;
+    Cfg::Server::AlwaysPopulateRawPostData = true;
   }
 
-  // Initialize compiler state
-  compile_file(0, 0, MD5(), 0);
   hphp_process_init();
   SCOPE_EXIT { hphp_process_exit(); };
   Test test;

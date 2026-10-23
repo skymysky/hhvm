@@ -1,3 +1,7 @@
-<?php
+<?hh
 
-var_dump(get_class_constants('C'));
+
+<<__EntryPoint>>
+function main_1616() :mixed{
+var_dump(get_class_constants('C1616'));
+}

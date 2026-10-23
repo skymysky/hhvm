@@ -14,12 +14,11 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_EVAL_DEBUGGER_CMD_COMPLETE_H_
-#define incl_HPHP_EVAL_DEBUGGER_CMD_COMPLETE_H_
+#pragma once
 
 #include "hphp/runtime/debugger/debugger_command.h"
 
-namespace HPHP { namespace Eval {
+namespace HPHP::Eval {
 ///////////////////////////////////////////////////////////////////////////////
 
 struct CmdComplete : DebuggerCommand {
@@ -31,6 +30,8 @@ struct CmdComplete : DebuggerCommand {
   bool onServer(DebuggerProxy& proxy) override;
   void onClient(DebuggerClient& client) override;
 
+  std::string name() const override { return "complete"; }
+
  protected:
   void sendImpl(DebuggerThriftBuffer& thrift) override;
   void recvImpl(DebuggerThriftBuffer& thrift) override;
@@ -39,6 +40,5 @@ struct CmdComplete : DebuggerCommand {
 };
 
 ///////////////////////////////////////////////////////////////////////////////
-}}
+}
 
-#endif // incl_HPHP_EVAL_DEBUGGER_CMD_COMPLETE_H_

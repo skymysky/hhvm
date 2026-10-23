@@ -1,0 +1,13 @@
+error: Typing[4449] Invalid index type for this vec [1]
+-> This is an int because only `int` can be used to index into a `Vector` or `vec`. [2]
+-> It is incompatible with a string [1]
+
+T136602673-2.php:15:34
+13 | <<__EntryPoint>>
+14 | function main(): void {
+15 |   project(vec[vec[0]], $x ==> $x['name']);
+   |               ^^^^^^ [2]
+   |                                  ^^^^^^ [1]
+16 | }
+
+1 error found

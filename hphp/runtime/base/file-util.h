@@ -16,10 +16,10 @@
 
 //////////////////////////////////////////////////////////////////////
 
-#ifndef incl_HPHP_FILE_UTIL_H_
-#define incl_HPHP_FILE_UTIL_H_
+#pragma once
 
 #include "hphp/util/file.h"
+#include "hphp/util/hash-set.h"
 
 #include "hphp/runtime/base/type-string.h"
 
@@ -72,15 +72,15 @@ int ssystem(const char *command);
 /**
  * Find the relative path from a directory with trailing slash to the file
  */
-String relativePath(const std::string& fromDir, const String& toFile);
+OptString relativePath(const std::string& fromDir, const OptString& toFile);
 
 /**
  * Canonicalize path to remove "..", "." and "\/", etc..
  */
-String canonicalize(const String& path);
-String canonicalize(const std::string& path);
-String canonicalize(const char* path, size_t len,
-                    bool collapse_slashes = true);
+OptString canonicalize(const OptString& path);
+OptString canonicalize(const std::string& path);
+OptString canonicalize(const char* path, size_t len,
+                       bool collapse_slashes = true);
 
 std::string expandUser(const std::string& path,
                        const std::string& sysUser = "");
@@ -92,15 +92,16 @@ std::string normalizeDir(const std::string &dirname);
 /**
  * Thread-safe dirname().
  */
-String dirname(const String& path);
+OptString dirname(const OptString& path);
 
 /**
- * Search for PHP or non-PHP files under a directory.
+ * Search for PHP, JS, or other files under a directory.
  */
 void find(std::vector<std::string> &out,
           const std::string &root, const std::string& path, bool php,
-          const std::set<std::string> *excludeDirs = nullptr,
-          const std::set<std::string> *excludeFiles = nullptr);
+          bool failHard,
+          const hphp_fast_string_set *excludeDirs = nullptr,
+          const hphp_fast_string_set *excludeFiles = nullptr);
 
 /**
  * Search for PHP or non-PHP files under a directory, calling callback for
@@ -115,15 +116,15 @@ void find(std::vector<std::string> &out,
  * Determines if a given string is a valid path or not
  * (ie: contains no null bytes)
  */
-bool isValidPath(const String& path);
+bool isValidPath(const OptString& path);
 
 /**
  * Helper functions for use with FileUtil::isValidPath
  */
-bool checkPathAndWarn(const String& path,
+bool checkPathAndWarn(const OptString& path,
                       const char* func_name,
                       int param_pos);
-void checkPathAndError(const String& path,
+void checkPathAndError(const OptString& path,
                        const char* func_name,
                        int param_pos);
 
@@ -134,11 +135,11 @@ void checkPathAndError(const String& path,
  * action() returns true.
  */
 template <class Action>
-bool runRelative(std::string suffix, String cmd,
+bool runRelative(std::string suffix, OptString cmd,
                  const char* currentDir, Action action);
+
+bool isSystemName(folly::StringPiece path);
 
 ///////////////////////////////////////////////////////////////////////////////
 }
 }
-
-#endif

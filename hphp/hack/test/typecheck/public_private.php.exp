@@ -1,2 +1,11 @@
-File "public_private.php", line 13, characters 3-28:
-A method declaration cannot have multiple visibility modifiers. (Parsing[1002])
+error: Parsing[1002] Methods cannot have multiple visibility modifiers except for `protected internal`. [1]
+
+public_private.php:13:17
+11 | 
+12 | class Foo {
+13 |   public static private function bar(): void {
+   |                 ^^^^^^^ [1]
+14 |   }
+15 | }
+
+1 error found

@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 
 namespace Test;
 
@@ -16,7 +16,7 @@ function g(): int {
 
 interface Traversable<T> {}
 
-// Refers to Traversable introduced into Test
+// Refers to autoimported Traversable
 class Vector implements Traversable<int> {}
 
 function h(): Traversable<int> {

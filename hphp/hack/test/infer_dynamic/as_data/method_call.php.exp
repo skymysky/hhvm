@@ -1,0 +1,11 @@
+{ "function": "\\takes_string", "solutions": [] }
+{
+  "function": "\\test_method_call",
+  "solutions": [
+    {
+      "name": "$d",
+      "pos": "File \"method_call.php\", line 5, characters 35-36:",
+      "type": "mixed"
+    }
+  ]
+}

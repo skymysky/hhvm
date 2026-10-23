@@ -1,35 +1,33 @@
-<?php
+<?hh
 
 namespace ShutdownTest;
 
-function test() {
-  var_dump('function');
+<<__DynamicallyCallable>>
+function test() :mixed{
+  \var_dump('function');
 }
 
 class Test {
-    function handleInstance() {
-        var_dump('Method - instance');
-    }
+  <<__DynamicallyCallable>>
+  function handleInstance() :mixed{
+    \var_dump('Method - instance');
+  }
 
-    static function handleStatic() {
-        var_dump('Method - static');
-    }
+  <<__DynamicallyCallable>>
+  static function handleStatic() :mixed{
+    \var_dump('Method - static');
+  }
 }
 
-register_postsend_function(__NAMESPACE__ . '\test');
-register_postsend_function([new Test, 'handleInstance']);
-register_postsend_function([__NAMESPACE__ . '\Test', 'handleStatic']);
-register_postsend_function(function () {
-    var_dump('Lambda');
-});
-
-
-register_postsend_function(function () {
-    var_dump(func_get_args());
-}, 123);
-register_postsend_function(function () {
-    var_dump(func_get_args());
-}, ['foo' => 'bar'], 123);
-register_postsend_function(function () {
-    var_dump(func_get_args());
-}, (object) ['foo' => 'bar']);
+<<__EntryPoint>>
+function main_register_postsend_function_simple() :mixed{
+  \register_postsend_function(\HH\dynamic_fun(__NAMESPACE__ . '\test'));
+  \register_postsend_function(vec[new Test, 'handleInstance']);
+  \register_postsend_function(vec[__NAMESPACE__ . '\Test', 'handleStatic']);
+  \register_postsend_function(function () {
+    \var_dump('Lambda');
+  });
+  \register_postsend_function(function (...$args) {
+    \var_dump($args);
+  });
+}

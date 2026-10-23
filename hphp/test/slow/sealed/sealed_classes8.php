@@ -1,5 +1,7 @@
 <?hh
 
+namespace SealedClass8;
+
 <<__Sealed(SomeOtherSealedClass::class)>>
 class SomeSealedClass {}
 
@@ -9,3 +11,4 @@ class SomeOtherSealedClass extends SomeSealedClass {}
 class SomeNotSealedClass extends SomeOtherSealedClass {}
 
 class SomeIrreleventClass extends SomeNotSealedClass {}
+<<__EntryPoint>> function main(): void { echo "Done.\n"; }

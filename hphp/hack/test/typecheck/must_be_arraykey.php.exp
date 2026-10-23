@@ -1,8 +1,23 @@
-File "must_be_arraykey.php", line 5, characters 14-22:
-Some type constraint(s) here are violated (Typing[4110])
-File "hhi_lib__srcs/hackarray.hhi", line 12, characters 30-30:
-'T' is a constrained type parameter
-File "hhi_lib__srcs/hackarray.hhi", line 12, characters 35-42:
-This is an array key (int/string)
-File "must_be_arraykey.php", line 5, characters 21-21:
-It is incompatible with an object of type I
+error: Typing[4323] Some type arguments violate their constraints [1]
+-> `T` is a constrained type parameter [2]
+-> This type constraint is violated [3]
+-> Expected `arraykey` [3]
+-> But got `I` [4]
+
+must_be_arraykey.php:5:14
+ 3 | interface I {}
+ 4 | 
+ 5 | function foo(keyset<I> $k): void {}
+   |              ^^^^^^^^^ [1]
+   |                     ^ [4]
+
+hackarray.hhi:43:50
+41 |    */
+42 |   <<__SupportDynamicType>>
+43 |   abstract final class keyset<<<__NoAutoBound>> +T as arraykey>
+   |                                                  ^ [2]
+   |                                                       ^^^^^^^^ [3]
+44 |     extends AnyArray<T, T> {}
+45 | 
+
+1 error found

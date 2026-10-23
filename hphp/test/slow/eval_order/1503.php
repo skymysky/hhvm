@@ -1,10 +1,14 @@
-<?php
+<?hh
 
 class X {
 }
- function foo() {
+ function foo() :mixed{
  var_dump('foo');
 }
- $x = new X;
- unset($x->a[foo()]->y);
 
+
+ <<__EntryPoint>>
+function main_1503() :mixed{
+$x = new X;
+ unset($x->a[foo()]);
+}

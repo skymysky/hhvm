@@ -1,16 +1,16 @@
-<?php
+<?hh
 
 class Test extends XMLReader
 {
-    private $testArr = array();
+    private $testArr = vec[];
     public function __construct()
     {
         $this->testArr[] = 1;
         var_dump($this->testArr);
     }
 }
-
-$t = new test;
+<<__EntryPoint>> function main(): void {
+$t = new Test;
 
 echo "Done\n";
-?>
+}

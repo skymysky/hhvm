@@ -20,7 +20,7 @@
 
 #include <boost/algorithm/string.hpp>
 
-#include <folly/Format.h>
+#include <fmt/format.h>
 
 #include "hphp/util/abi-cxx.h"
 #include "hphp/util/text-color.h"
@@ -29,7 +29,7 @@ namespace HPHP {
 
 static uintptr_t excludeLow, excludeLen;
 
-#ifdef HAVE_LIBXED
+#if defined(__x86_64__)
 
 // XED callback function to get a symbol from an address
 static int addressToSymbol(xed_uint64_t address, char* symbolBuffer,
@@ -41,16 +41,14 @@ static int addressToSymbol(xed_uint64_t address, char* symbolBuffer,
   if (boost::starts_with(name, "0x")) {
     return 0;
   }
-  auto pos = name.find_first_of('(');
-  auto copyLength = pos != std::string::npos
-    ? std::min(pos, size_t(bufferLength - 1))
-    : bufferLength - 1;
-  strncpy(symbolBuffer, name.c_str(), copyLength);
-  symbolBuffer[copyLength] = '\0';
+  strncpy(symbolBuffer, name.c_str(), bufferLength - 1);
+  symbolBuffer[bufferLength - 1] = '\0';
   *offset = 0;
   return 1;
 }
-#endif /* HAVE_LIBXED */
+#endif /* __x86_64__ */
+
+
 
 void Disasm::ExcludedAddressRange(void* low, size_t len) {
   excludeLow = uintptr_t(low);
@@ -60,28 +58,25 @@ void Disasm::ExcludedAddressRange(void* low, size_t len) {
 Disasm::Disasm(const Disasm::Options& opts)
     : m_opts(opts)
 {
-#ifdef HAVE_LIBXED
+#if defined(__x86_64__)
   xed_state_init(&m_xedState, XED_MACHINE_MODE_LONG_64,
                  XED_ADDRESS_WIDTH_64b, XED_ADDRESS_WIDTH_64b);
   xed_tables_init();
-#if XED_ENCODE_ORDER_MAX_ENTRIES == 28 // Older version of XED library
-  xed_register_disassembly_callback(addressToSymbol);
-#endif
-#endif // HAVE_LIBXED
+#endif // __x86_64__
 }
 
-#ifdef HAVE_LIBXED
+#if defined(__x86_64__)
 
 #define MAX_INSTR_ASM_LEN 128
 
 static const xed_syntax_enum_t s_xed_syntax =
   getenv("HHVM_INTEL_DISAS") ? XED_SYNTAX_INTEL : XED_SYNTAX_ATT;
-#endif // HAVE_LIBXED
+#endif // __x86_64__
 
 void Disasm::disasm(std::ostream& out, uint8_t* codeStartAddr,
-                    uint8_t* codeEndAddr) {
+                    uint8_t* codeEndAddr, uint64_t adjust) {
 
-#ifdef HAVE_LIBXED
+#if defined(__x86_64__)
   auto const endClr = m_opts.m_color.empty() ? "" : ANSI_COLOR_END;
   char codeStr[MAX_INSTR_ASM_LEN];
   xed_uint8_t *frontier;
@@ -100,7 +95,7 @@ void Disasm::disasm(std::ostream& out, uint8_t* codeStartAddr,
     xed_decoded_inst_set_input_chip(&xedd, XED_CHIP_INVALID);
     xed_error_enum_t xed_error = xed_decode(&xedd, frontier, 15);
     if (xed_error != XED_ERROR_NONE) {
-      out << folly::format("xed_decode failed at address {}\n", frontier);
+      out << fmt::format("xed_decode failed at address {}\n", fmt::ptr(frontier));
       return;
     }
 
@@ -108,13 +103,10 @@ void Disasm::disasm(std::ostream& out, uint8_t* codeStartAddr,
     auto const syntax = m_opts.m_forceAttSyntax ? XED_SYNTAX_ATT
                                                 : s_xed_syntax;
     if (!xed_format_context(syntax, &xedd, codeStr,
-                            MAX_INSTR_ASM_LEN, ip, nullptr
-#if XED_ENCODE_ORDER_MAX_ENTRIES != 28 // Newer version of XED library
-                            , addressToSymbol
-#endif
-                           )) {
-      out << folly::format("xed_format_context failed at address {}\n",
-                           frontier);
+                            MAX_INSTR_ASM_LEN, ip - adjust, nullptr,
+                            addressToSymbol)) {
+      out << fmt::format("xed_format_context failed at address {}\n",
+                           fmt::ptr(frontier));
       return;
     }
     uint32_t instrLen = xed_decoded_inst_get_length(&xedd);
@@ -130,21 +122,24 @@ void Disasm::disasm(std::ostream& out, uint8_t* codeStartAddr,
                              xed_decoded_inst_get_branch_displacement(&xedd) -
                              codeBase);
         if (disp < uint64_t(codeEndAddr - codeStartAddr)) {
-          jmpComment = folly::format(" # {:#x}", disp).str();
+          jmpComment = fmt::format(" # {:#x}", disp);
         }
       }
     }
 
     out << m_opts.m_color;
     if (m_opts.m_addresses) {
-      const char* fmt = m_opts.m_relativeOffset ? "{:3x}: " : "{:#10x}: ";
-      out << folly::format(fmt, ip - (m_opts.m_relativeOffset ? codeBase : 0));
+      const char* fmtStr = m_opts.m_relativeOffset ? "{:3x}: " : "{:#10x}: ";
+      out << fmt::format(
+        fmt::runtime(fmtStr),
+        m_opts.m_relativeOffset ? (ip - codeBase) : (ip - adjust)
+      );
     }
     if (m_opts.m_printEncoding) {
       // print encoding, like in objdump
       unsigned posi = 0;
       for (; posi < instrLen; ++posi) {
-        out << folly::format("{:02x} ", (uint8_t)frontier[posi]);
+        out << fmt::format("{:02x} ", (uint8_t)frontier[posi]);
       }
       for (; posi < 16; ++posi) {
         out << "   ";
@@ -156,7 +151,7 @@ void Disasm::disasm(std::ostream& out, uint8_t* codeStartAddr,
   }
 #else
   out << "This binary was compiled without disassembly support\n";
-#endif // HAVE_LIBXED
+#endif // __x86_64__
 }
 
 } // namespace HPHP

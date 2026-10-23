@@ -1,4 +1,4 @@
-(**
+(*
  * Copyright (c) 2015, Facebook, Inc.
  * All rights reserved.
  *
@@ -7,12 +7,22 @@
  *
  *)
 
+(** [check_implements_extends_uses env ~implements ~parents type_]
+    checks that a classish type implements its interfaces,
+    extends its base class, and uses its traits.
 
-(*****************************************************************************)
-(* Checks that a class implements an interface *)
-(*****************************************************************************)
+  This actually only checks member compatibility. Other hierarchy
+  checks like requirements (e.g. `require extends`) are checked
+  in Typing_class.
 
-val check_implements:
-    Typing_env.env ->
-    Typing_defs.decl Typing_defs.ty ->
-    Typing_defs.decl Typing_defs.ty -> unit
+  @param implements   the list of interfaces the classish type directly implements.
+  @param parents      the list of direct ancestors, including interfaces and
+                      traits, the class directly uses.
+  @param type_        the classish type to check.
+  *)
+val check_implements_extends_uses :
+  Typing_env_types.env ->
+  implements:Typing_defs.decl_ty list ->
+  parents:(Aast.hint * Typing_defs.decl_ty) list ->
+  Nast.class_ * Folded_class.t ->
+  Typing_env_types.env

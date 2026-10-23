@@ -1,0 +1,11 @@
+error: Parsing[1002] There can be only one `default` case in `switch` [1]
+
+three_defaults.php:8:5
+ 6 |     default:
+ 7 |       return 0;
+ 8 |     default:
+   |     ^^^^^^^^ [1]
+ 9 |       return 1;
+10 |     default:
+
+1 error found

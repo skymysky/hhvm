@@ -1,0 +1,14 @@
+error: Typing[4104] Too few positional arguments (required 1 but got 0) [1]
+-> Definition is here [2]
+
+typeparam_typedef.php:8:14
+3 | 
+4 | class A implements HH\TypeParameterAttribute {
+5 |   public function __construct(int $foo) {}
+  |                   ^^^^^^^^^^^ [2]
+6 | }
+7 | 
+8 | newtype Ty<<<A>> T> = int;
+  |              ^ [1]
+
+1 error found

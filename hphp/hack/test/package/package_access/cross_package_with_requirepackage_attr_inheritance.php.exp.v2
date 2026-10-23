@@ -1,0 +1,72 @@
+error: NastCheck[3107] Invalid __RequirePackage [1]
+-> This function belongs to package `pkg1` by this entry in the package config [2]
+-> The required package `pkg1` must strictly include (i.e. cannot equal) `pkg1` [2]
+
+cross_package_with_requirepackage_attr_inheritance.php--a.php:13:5
+11 |   public function test() : void {
+12 |   }
+13 |   <<__RequirePackage("pkg1")>> // error, equal to outer package
+   |     ^^^^^^^^^^^^^^^^ [1]
+14 |   public function test2(): void {
+15 |   }
+
+PACKAGES.toml:3:11
+ 1 | [packages]
+ 2 | 
+ 3 | [packages.pkg1]
+   |           ^^^^ [2]
+ 4 | include_paths=["//"]
+ 5 | allow_deployed_packages_checking = true
+
+error: Typing[4341] The method `test` is not compatible with the overridden method [1]
+-> Mismatch in `__RequirePackage` attribute [2]
+-> This method requires package `pkg2` [2]
+-> The parent method does not have a `__RequirePackage` attribute. The override must have a weaker requirement. [3]
+
+cross_package_with_requirepackage_attr_inheritance.php--a.php:23:19
+17 | class B extends A implements IA  {
+18 |   <<__Override>>
+19 |   public function test(): void {} // ok
+   |                   ^^^^ [3]
+20 | }
+21 | class C extends B implements IA  {
+22 |   <<__Override, __RequirePackage("pkg2")>>
+   |                                  ^^^^^^ [2]
+23 |   public function test(): void {} // error
+   |                   ^^^^ [1]
+24 | }
+25 | 
+
+error: Typing[4341] The method `test2` is not compatible with the overridden method [1]
+-> Mismatch in `__RequirePackage` attribute [2]
+-> This method requires package `pkg2_soft` [2]
+-> It cannot override a method that requires package `pkg1` [3]
+-> Because `pkg1` does not include `pkg2_soft` [4]
+
+cross_package_with_requirepackage_attr_inheritance.php--pkg2/b.php:9:19
+ 6 |   public function test(): void {}
+ 7 | 
+ 8 |   <<__RequirePackage("pkg2_soft")>> // err, pkg2 soft-includes pkg2_soft
+   |                      ^^^^^^^^^^^ [2]
+ 9 |   public function test2(): void {
+   |                   ^^^^^ [1]
+10 | 
+11 |   }
+
+cross_package_with_requirepackage_attr_inheritance.php--a.php:13:22
+11 |   public function test() : void {
+12 |   }
+13 |   <<__RequirePackage("pkg1")>> // error, equal to outer package
+   |                      ^^^^^^ [3]
+14 |   public function test2(): void {
+15 |   }
+
+PACKAGES.toml:3:11
+ 1 | [packages]
+ 2 | 
+ 3 | [packages.pkg1]
+   |           ^^^^ [4]
+ 4 | include_paths=["//"]
+ 5 | allow_deployed_packages_checking = true
+
+3 errors found

@@ -1,6 +1,40 @@
-File "shape_idx_dependent.php", line 8, characters 12-34:
-Invalid return type (Typing[4110])
-File "shape_idx_dependent.php", line 7, characters 37-39:
-This is an int
-File "shape_idx_dependent.php", line 5, characters 41-44:
-It is incompatible with a nullable type
+error: Typing[4110] Invalid argument [1]
+-> Expected `shape(?'x' => _, ...)` [2]
+-> But got `this::T as C::T` [3]
+
+shape_idx_dependent.php:8:24
+ 5 |   abstract const type T as shape('x' => ?int, ...);
+ 6 | 
+ 7 |   public function test(this::T $s): int {
+   |                        ^^^^^^^ [3]
+ 8 |     return Shapes::idx($s, 'x', 0);
+   |                        ^^ [1]
+ 9 |   }
+10 | }
+
+Shapes.hhi:42:19
+40 |     <<__NoAutoDynamic, __SupportDynamicType>>
+41 |     public static function idx<Tv>(
+42 |       ?shape(...) $shape,
+   |                   ^^^^^^ [2]
+43 |       arraykey $index,
+44 |       ?Tv $default = null,
+
+error: Typing[4110] Invalid argument [1]
+-> Expected `int` [2]
+-> But got `null` [3]
+
+shape_idx_dependent.php:8:24
+ 3 | 
+ 4 | abstract class C {
+ 5 |   abstract const type T as shape('x' => ?int, ...);
+   |                                         ^^^^ [3]
+ 6 | 
+ 7 |   public function test(this::T $s): int {
+   |                                     ^^^ [2]
+ 8 |     return Shapes::idx($s, 'x', 0);
+   |                        ^^ [1]
+ 9 |   }
+10 | }
+
+2 errors found

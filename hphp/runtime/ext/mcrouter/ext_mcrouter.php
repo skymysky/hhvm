@@ -22,16 +22,16 @@ class MCRouterException extends Exception {
  * Thrown when unable to parse an option list
  */
 class MCRouterOptionException extends Exception {
-  public function getErrors(): array<array<string,string>> {
+  public function getErrors(): varray<darray<string,string>> {
     return $this->errors;
   }
 
-  public function __construct(protected array<array<string,string>> $errors) {
+  public function __construct(protected varray<darray<string,string>> $errors) {
     parent::__construct("Failure parsing options", 0);
   }
 }
 
-<<__NativeData("MCRouter")>>
+<<__NativeData>>
 class MCRouter {
 
   /**
@@ -48,7 +48,7 @@ class MCRouter {
    */
   <<__Native>>
   public function __construct(
-    array<string,mixed> $options,
+    darray<string,mixed> $options,
     string $pid = "",
   ): void;
 
@@ -59,16 +59,16 @@ class MCRouter {
    * @return - Instance of MCRouter
    */
   public static function createSimple(ConstVector<string> $servers): MCRouter {
-    $options = array(
-      'config_str' => json_encode(array(
-        'pools' => array(
-          'P' => array(
+    $options = dict[
+      'config_str' => json_encode(dict[
+        'pools' => dict[
+          'P' => dict[
             'servers' => $servers,
-          ),
-        ),
+          ],
+        ],
         'route' => 'PoolRoute|P',
-      )),
-    );
+      ]),
+    ];
 
     return new MCRouter($options, implode(',', $servers));
   }
@@ -236,7 +236,7 @@ class MCRouter {
    * @throws On failure
    */
   <<__Native>>
-  public function gets(string $key): Awaitable<array>;
+  public function gets(string $key): Awaitable<darray>;
 
   /**
    * Get the remote server's current version
@@ -256,7 +256,7 @@ class MCRouter {
    * @return string - The name of the op
    */
   <<__Native>>
-  public static function getOpName(int $op): string;
+  public static function getOpName(int $op): ?string;
 
   /**
    * Translate an mc_res_* numeric code to something human-readable
@@ -266,5 +266,5 @@ class MCRouter {
    * @return string - The name of the result
    */
   <<__Native>>
-  public static function getResultName(int $op): string;
+  public static function getResultName(int $op): ?string;
 }

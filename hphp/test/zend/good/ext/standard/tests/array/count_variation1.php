@@ -1,6 +1,6 @@
-<?php
+<?hh
 /* Prototype  : int count(mixed $var [, int $mode])
- * Description: Count the number of elements in a variable (usually an array) 
+ * Description: Count the number of elements in a variable (usually an array)
  * Source code: ext/standard/array.c
  */
 
@@ -8,19 +8,16 @@
  * aPass different data types as $var argument to count() to test behaviour
  */
 
-echo "*** Testing count() : usage variations ***\n";
-
-//get an unset variable
-$unset_var = 10;
-unset ($unset_var);
-
 // get a class
 class classA
 {
-  public function __toString() {
+  public function __toString() :mixed{
     return "Class A object";
   }
 }
+<<__EntryPoint>> function main(): void {
+echo "*** Testing count() : usage variations ***\n";
+
 
 // heredoc string
 $heredoc = <<<EOT
@@ -31,7 +28,7 @@ EOT;
 $fp = fopen(__FILE__, "r");
 
 // unexpected values to be passed to $var argument
-$inputs = array(
+$inputs = vec[
 
        // int data
 /*1*/  0,
@@ -55,7 +52,7 @@ $inputs = array(
        false,
        TRUE,
        FALSE,
-       
+
        // empty data
 /*16*/ "",
        '',
@@ -64,19 +61,15 @@ $inputs = array(
 /*18*/ "string",
        'string',
        $heredoc,
-       
+
        // object data
 /*21*/ new classA(),
 
-       // undefined data
-/*22*/ @$undefined_var,
 
-       // unset data
-/*23*/ @$unset_var,
 
        // resource variable
-/*24*/ $fp
-);
+/*22*/ $fp
+];
 
 // loop through each element of $inputs to check the behavior of count()
 $iterator = 1;
@@ -89,4 +82,4 @@ foreach($inputs as $input) {
 fclose($fp);
 
 echo "Done";
-?>
+}

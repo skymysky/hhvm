@@ -13,8 +13,7 @@
    | license@php.net so we can mail you a copy immediately.               |
    +----------------------------------------------------------------------+
 */
-#ifndef incl_HPHP_EXCEPTION_H_
-#define incl_HPHP_EXCEPTION_H_
+#pragma once
 
 #include <cstdarg>
 #include <stdexcept>
@@ -85,11 +84,13 @@ struct FileOpenException : Exception {
       : Exception("Unable to open file %s", filename.c_str()) {
   }
 
-  EXCEPTION_COMMON_IMPL(FileOpenException);
+  EXCEPTION_COMMON_IMPL(FileOpenException)
 };
 
 ///////////////////////////////////////////////////////////////////////////////
 
-}
+std::string current_exception_name() noexcept;
 
-#endif // incl_HPHP_EXCEPTION_H_
+///////////////////////////////////////////////////////////////////////////////
+
+}

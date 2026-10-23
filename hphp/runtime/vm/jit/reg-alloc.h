@@ -14,8 +14,7 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_VM_REG_ALLOC_H_
-#define incl_HPHP_VM_REG_ALLOC_H_
+#pragma once
 
 #include <vector>
 
@@ -24,7 +23,7 @@
 #include "hphp/runtime/vm/jit/state-vector.h"
 #include "hphp/runtime/vm/jit/translator-runtime.h"
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -84,6 +83,5 @@ void getEffects(const Abi& abi, const Vinstr& i,
 
 ///////////////////////////////////////////////////////////////////////////////
 
-}}
+}
 
-#endif

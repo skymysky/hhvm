@@ -1,0 +1,2 @@
+Fatal: An unexpected exception was thrown while emitting: More than one function with the name foo. In %s and %s
+hphp failed

@@ -33,7 +33,11 @@ function pcntl_alarm(int $seconds): int;
  *
  */
 <<__Native>>
-function pcntl_exec(string $path, array $args = [], array $envs = []): void;
+function pcntl_exec(
+  string $path,
+  varray<string> $args = vec[],
+  darray<string, string> $envs = dict[],
+): void;
 
 /**
  * The pcntl_fork() function creates a child process that differs from the
@@ -105,7 +109,7 @@ function pcntl_setpriority(int $priority,
  * @return bool - Returns TRUE on success or FALSE on failure.
  *
  */
-<<__Native>>
+<<__Native("NoRecording")>>
 function pcntl_signal(int $signo,
                       mixed $handler,
                       bool $restart_syscalls = true): bool;
@@ -126,7 +130,12 @@ function pcntl_signal(int $signo,
  * @return bool - Returns TRUE on success or FALSE on failure.
  */
 <<__Native>>
-function pcntl_sigprocmask(int $how, array $set, mixed &$oldset = null): bool;
+function pcntl_sigprocmask(
+  int $how,
+  varray<int> $set,
+  <<__OutOnly>>
+  inout vec<int> $oldset
+): bool;
 
 /**
  * The wait function suspends execution of the current process until a child
@@ -157,7 +166,11 @@ function pcntl_sigprocmask(int $how, array $set, mixed &$oldset = null): bool;
  *
  */
 <<__Native>>
-function pcntl_wait(mixed &$status, int $options = 0): int;
+function pcntl_wait(
+  <<__OutOnly>>
+  inout int $status,
+  int $options = 0
+): int;
 
 /**
  * Suspends execution of the current process until a child as specified by the
@@ -191,7 +204,8 @@ function pcntl_wait(mixed &$status, int $options = 0): int;
  */
 <<__Native>>
 function pcntl_waitpid(int $pid,
-                       mixed &$status,
+                       <<__OutOnly>>
+                       inout int $status,
                        int $options = 0): int;
 
 /**
@@ -283,5 +297,5 @@ function pcntl_wtermsig(int $status): int;
  * @return bool - Returns TRUE on success or FALSE on failure.
  *
  */
-<<__Native>>
+<<__Native("NoRecording")>>
 function pcntl_signal_dispatch(): bool;

@@ -1,0 +1,9 @@
+error: Parsing[1002] Leading markup and `<?hh` are not permitted in `.hack` files, which are always `strict`. [1]
+
+dot_hack_can_not_have_header.hack:1:1
+1 | <?hh
+  | ^^^^ [1]
+2 | 
+3 | function foo(): void {
+
+1 error found

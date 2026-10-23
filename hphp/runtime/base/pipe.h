@@ -14,8 +14,7 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_PIPE_H_
-#define incl_HPHP_PIPE_H_
+#pragma once
 
 #include "hphp/runtime/base/plain-file.h"
 
@@ -26,23 +25,19 @@ namespace HPHP {
  * Wrapper around popen/pclose.
  */
 struct Pipe : PlainFile {
-  DECLARE_RESOURCE_ALLOCATION(Pipe);
+  DECLARE_RESOURCE_ALLOCATION(Pipe)
 
   Pipe();
   virtual ~Pipe();
 
   // overriding ResourceData
-  const String& o_getClassNameHook() const override { return classnameof(); }
+  const OptString& o_getClassNameHook() const override { return classnameof(); }
 
   // implementing File
-  bool open(const String& filename, const String& mode) override;
-  bool close() override;
-
-private:
-  bool closeImpl();
+  bool open(const OptString& filename, const OptString& mode) override;
+  bool close(int* raw_pclose_return = nullptr) final;
 };
 
 ///////////////////////////////////////////////////////////////////////////////
 }
 
-#endif // incl_HPHP_PIPE_H_

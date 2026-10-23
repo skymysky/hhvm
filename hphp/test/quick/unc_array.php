@@ -1,14 +1,12 @@
 <?hh
 
 class Foo {
-  public static function blah() { return true; }
+  public static function blah() :mixed{ return true; }
 }
 
-function what($k) {}
+function what($k) :mixed{}
 
-function a() {
-  $x = Foo::blah() ? array(1,2,3) : null;
+<<__EntryPoint>> function a(): void {
+  $x = Foo::blah() ? vec[1,2,3] : null;
   what($x);
 }
-
-a();

@@ -1,6 +1,6 @@
-<?php
+<?hh
 /* Prototype  : int array_unshift(array $array, mixed $var [, mixed ...])
- * Description: Pushes elements onto the beginning of the array 
+ * Description: Pushes elements onto the beginning of the array
  * Source code: ext/standard/array.c
 */
 
@@ -9,18 +9,18 @@
  * other than array values for $array argument
 */
 
+// get a class
+class classA
+{
+  public function __toString() :mixed{
+    return "Class A object";
+  }
+}
+<<__EntryPoint>> function main(): void {
 echo "*** Testing array_unshift() : unexpected values for \$array argument ***\n";
 
 // Initialise $var argument
 $var = 12;
-
-// get a class
-class classA
-{
-  public function __toString() {
-    return "Class A object";
-  }
-}
 
 // heredoc string
 $heredoc = <<<EOT
@@ -30,12 +30,9 @@ EOT;
 // get a resource variable
 $fp = fopen(__FILE__, "r");
 
-// get an unset variable
-$unset_var = 10;
-unset ($unset_var);
 
 // array of unexpected values to be passed to $array argument
-$arrays = array(
+$arrays = vec[
 
        // int data
 /*1*/  0,
@@ -72,15 +69,11 @@ $arrays = array(
        // object data
 /*21*/ new classA(),
 
-       // undefined data
-       @$undefined_var,
 
-       // unset data
-       @$unset_var,
 
        // resource variable
-/*24*/ $fp
-);
+/*22*/ $fp
+];
 
 // loop through each element of $arrays to test the functionality of array_unshift()
 $iterator = 1;
@@ -88,10 +81,10 @@ foreach($arrays as $array) {
   echo "\n-- Iteration $iterator --";
 
   /* with default arguments */
-  // returns element count in the resulting array after arguments are pushed to 
+  // returns element count in the resulting array after arguments are pushed to
   // beginning of the given array
   $temp_array = $array;
-  var_dump( array_unshift($temp_array, $var) );
+  var_dump( array_unshift(inout $temp_array, $var) );
 
   // dump the resulting array
   var_dump($temp_array);
@@ -100,7 +93,7 @@ foreach($arrays as $array) {
   // returns element count in the resulting array after arguments are pushed to
   // beginning of the given array
   $temp_array = $array;
-  var_dump( array_unshift($temp_array, $var, "hello", 'world') );
+  var_dump( array_unshift(inout $temp_array, $var, "hello", 'world') );
 
   // dump the resulting array
   var_dump($temp_array);
@@ -111,4 +104,4 @@ foreach($arrays as $array) {
 fclose($fp);
 
 echo "Done";
-?>
+}

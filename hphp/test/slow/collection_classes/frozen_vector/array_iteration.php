@@ -2,7 +2,7 @@
 
 // Test array-like iteration for ImmVector.
 
-function main() {
+function main() :mixed{
 
   $fv = ImmVector {1, 2, 3, 4};
 
@@ -12,4 +12,8 @@ function main() {
 
 }
 
+
+<<__EntryPoint>>
+function main_array_iteration() :mixed{
 main();
+}

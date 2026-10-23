@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2013 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-present Facebook, Inc. (http://www.facebook.com)  |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -16,12 +16,16 @@
 
 #include "hphp/runtime/vm/jit/vasm-info.h"
 
+#include "hphp/runtime/vm/jit/memory-effects.h"
 #include "hphp/runtime/vm/jit/vasm-instr.h"
 #include "hphp/runtime/vm/jit/vasm-reg.h"
+#include "hphp/runtime/vm/jit/vasm-visit.h"
+#include "hphp/util/match.h"
 
+#include <cstdint>
 #include <utility>
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -74,6 +78,43 @@ constexpr bool useMemory<Vptr128>() { return true; }
 
 ///////////////////////////////////////////////////////////////////////////////
 
+/*
+ * Operand visitor that captures the single memory operand of an instruction.
+ * Sets rv to Invalid if more than one memory operand is seen, so that callers
+ * can treat multi-memory instructions as "non-simple".
+ */
+struct GetMemOp {
+  template<class T> void imm (T) {}
+  template<class T> void def (T) {}
+  template<class T> void use (T) {}
+  void use (Vptr mem) {
+    if (rv != ResValid::Empty) {
+      rv = ResValid::Invalid;
+    } else {
+      mr = mem;
+      rv = ResValid::Valid;
+    }
+  }
+  template<class T> void across (T) {}
+  template<class T, class H> void useHint(T,H) {}
+  template<class T, class H> void defHint(T,H) {}
+  // The cast to Vptr erases the width, so record it first. Bare-Vptr operands
+  // leave ptrWidth at None.
+  template<Width w> void use(Vp<w> m) {
+    use(static_cast<Vptr>(m));
+    if (rv == ResValid::Valid) ptrWidth = w;
+  }
+
+  bool isValid() { return rv == ResValid::Valid; }
+
+  Vptr mr;
+  Width ptrWidth{Width::None};
+  enum class ResValid : uint8_t { Empty, Valid, Invalid };
+  ResValid rv{ResValid::Empty};
+};
+
+///////////////////////////////////////////////////////////////////////////////
+
 }
 
 ConditionCode& getConditionCode(Vinstr& inst) {
@@ -87,6 +128,7 @@ Vreg getSFUseReg(const Vinstr& inst) {
 }
 
 bool touchesMemory(Vinstr::Opcode op) {
+  if (op == Vinstr::killeffects) return true;
   if (op == Vinstr::lea) return false;
   if (isCall(op)) return true;
 #define O(name, imms, uses, defs) \
@@ -114,6 +156,7 @@ bool touchesMemory(Vinstr::Opcode op) {
 }
 
 bool writesMemory(Vinstr::Opcode op) {
+  if (op == Vinstr::killeffects) return true;
   if (isCall(op)) return true;
 #define O(name, imms, uses, defs)               \
   case Vinstr::name: { using T = name; return uses false; }
@@ -148,7 +191,442 @@ bool writesMemory(const Vinstr& inst) {
   return writesMemory(inst.op);
 }
 
+std::pair<Vptr, uint8_t> getMemOpAndSize(const Vinstr& inst) {
+  GetMemOp g;
+  visitOperands(inst, g);
+
+  auto const vop = g.mr;
+  if (!g.isValid()) return {vop, 0};
+
+  // The operand's declared width is the access size; width(inst.op) is the
+  // *dest register's* — load/store take a Vptr64 but define an untyped Vreg,
+  // so they land in Width::AnyNF and read as a 16-byte access. Bare-Vptr
+  // instructions (lea, callm, the push/pop-memory family) have no width.
+  auto sz = g.ptrWidth != Width::None ? g.ptrWidth : width(inst.op);
+  sz &= Width::AnyNF;
+
+  auto const size = [&] {
+    switch (sz) {
+      case Width::Byte:
+        return sz::byte;
+      case Width::Word: case Width::WordN:
+        return sz::word;
+      case Width::Long: case Width::LongN:
+        return sz::dword;
+      case Width::Quad: case Width::QuadN:
+        return sz::qword;
+      case Width::Octa: case Width::AnyNF:
+        return 16;
+      default: return 0;
+    }
+  }();
+  return {vop, static_cast<uint8_t>(size)};
+}
+
+bool memRangesDisjoint(const Vptr& a, uint8_t aSize,
+                       const Vptr& b, uint8_t bSize) {
+  if (aSize == 0 || bSize == 0) return false;
+  if (a.base != b.base || a.seg != b.seg) return false;
+  if ((a.index != b.index) ||
+      (a.index.isValid() && (a.scale != b.scale))) {
+    return false;
+  }
+  if (a.disp == b.disp) return false;
+  if (a.disp < b.disp) {
+    return b.disp >= a.disp + aSize;
+  } else {
+    return a.disp >= b.disp + bSize;
+  }
+}
+
+// Calculate the abstract memory locations that the given instruction
+// may write to. We don't have memory effects on the vasm level, so we
+// use the HHIR ones. We get the origin HHIR instruction corresponding
+// to the vasm instruction, and get the memory effects of that. This
+// is necessarily an overly conservative estimate, but it's better
+// than nothing.
+//
+// Note: this means that we need to keep the origin field properly up
+// to date!
+AliasClass mem_writes_for_inst(const Vinstr& inst) {
+  if (!inst.origin) {
+    // The instruction has no origin, so we have no way to get any
+    // memory effects for it. If the vasm instruction writes to
+    // memory, we act conservatively and assume it can write to
+    // anything (this covers most cases). The exception are the
+    // inlinestart and inlineend instructions, which don't actually do
+    // anything, but mark the transition of stack slots to locals. We
+    // treat these pessimistically as well.
+    if (inst.op == Vinstr::inlinestart ||
+        inst.op == Vinstr::inlineend ||
+        writesMemory(inst.op)) {
+      return AUnknown;
+    }
+    return AEmpty;
+  }
+  // Get the memory effects and use to calculate an aggregated set of
+  // locations that may be written to (for our purposes, killed is
+  // treated as a write).
+  auto const effects = memory_effects(*inst.origin);
+  return match<AliasClass>(
+    effects,
+    [] (const GeneralEffects& e)  { return e.stores | e.kills | e.inout; },
+    [] (const PureLoad&)          { return AEmpty; },
+    [] (const PureStore& a)       { return a.dst; },
+    [] (const PureInlineCall& a)  { return a.base; },
+    [] (const CallEffects& e)     {
+      return e.kills | e.uninits | e.actrec | e.outputs | AHeapAny | ARdsAny;
+    },
+    [] (const ReturnEffects& e)   { return e.kills; },
+    [] (const ExitEffects& e)     { return e.kills | e.uninits; },
+    [] (const IrrelevantEffects&) { return AEmpty; },
+    [] (const UnknownEffects&)    { return AUnknown; }
+  );
+}
 
 ///////////////////////////////////////////////////////////////////////////////
 
-}}
+namespace {
+
+bool effectsImpl(const Vinstr& inst, bool pure) {
+  switch (inst.op) {
+    // Pure:
+    case Vinstr::absdbl:
+    case Vinstr::addl:
+    case Vinstr::addli:
+    case Vinstr::addq:
+    case Vinstr::addqi:
+    case Vinstr::addsd:
+    case Vinstr::andb:
+    case Vinstr::andbi:
+    case Vinstr::andw:
+    case Vinstr::andwi:
+    case Vinstr::andl:
+    case Vinstr::andli:
+    case Vinstr::andq:
+    case Vinstr::andqi64:
+    case Vinstr::andqi:
+    case Vinstr::btrq:
+    case Vinstr::cmovb:
+    case Vinstr::cmovl:
+    case Vinstr::cmovq:
+    case Vinstr::cmovw:
+    case Vinstr::cmpb:
+    case Vinstr::cmpbi:
+    case Vinstr::cmpl:
+    case Vinstr::cmpli:
+    case Vinstr::cmpq:
+    case Vinstr::cmpqi:
+    case Vinstr::cmpsd:
+    case Vinstr::cmpsdz:
+    case Vinstr::cmpw:
+    case Vinstr::cmpwi:
+    case Vinstr::copy2:
+    case Vinstr::copy:
+    case Vinstr::copyargs:
+    case Vinstr::crc32q:
+    case Vinstr::csincb:
+    case Vinstr::csincl:
+    case Vinstr::csincq:
+    case Vinstr::csincw:
+    case Vinstr::cvtsi2sd:
+    case Vinstr::cvttsd2siq:
+    case Vinstr::decl:
+    case Vinstr::decq:
+    case Vinstr::divint:
+    case Vinstr::divsd:
+    case Vinstr::fcvtzs:
+    case Vinstr::imul:
+    case Vinstr::incl:
+    case Vinstr::incq:
+    case Vinstr::incw:
+    case Vinstr::ldimmb:
+    case Vinstr::ldimml:
+    case Vinstr::ldimmq:
+    case Vinstr::ldimm128:
+    case Vinstr::ldimmw:
+    case Vinstr::ldundefq:
+    case Vinstr::lea:
+    case Vinstr::lead:
+    case Vinstr::movb:
+    case Vinstr::movl:
+    case Vinstr::movsbl:
+    case Vinstr::movsbq:
+    case Vinstr::movslq:
+    case Vinstr::movswl:
+    case Vinstr::movswq:
+    case Vinstr::movtdb:
+    case Vinstr::movtdq:
+    case Vinstr::movtqb:
+    case Vinstr::movtql:
+    case Vinstr::movtqw:
+    case Vinstr::movw:
+    case Vinstr::movzbl:
+    case Vinstr::movzbq:
+    case Vinstr::movzbw:
+    case Vinstr::movzlq:
+    case Vinstr::movzwl:
+    case Vinstr::movzwq:
+    case Vinstr::mulsd:
+    case Vinstr::neg:
+    case Vinstr::nop:
+    case Vinstr::not_:
+    case Vinstr::notb:
+    case Vinstr::orbi:
+    case Vinstr::orwi:
+    case Vinstr::orli:
+    case Vinstr::orq:
+    case Vinstr::orqi:
+    case Vinstr::reload:
+    case Vinstr::roundsd:
+    case Vinstr::sar:
+    case Vinstr::sarq:
+    case Vinstr::sarqi:
+    case Vinstr::sbfizq:
+    case Vinstr::setcc:
+    case Vinstr::shl:
+    case Vinstr::shr:
+    case Vinstr::shlli:
+    case Vinstr::shlq:
+    case Vinstr::shlqi:
+    case Vinstr::shrq:
+    case Vinstr::shrli:
+    case Vinstr::shrqi:
+    case Vinstr::spill:
+    case Vinstr::spillbi:
+    case Vinstr::spillli:
+    case Vinstr::spillqi:
+    case Vinstr::spillundefq:
+    case Vinstr::sqrtsd:
+    case Vinstr::srem:
+    case Vinstr::ssaalias:
+    case Vinstr::subl:
+    case Vinstr::subli:
+    case Vinstr::subq:
+    case Vinstr::subqi:
+    case Vinstr::subsd:
+    case Vinstr::testb:
+    case Vinstr::testbi:
+    case Vinstr::testl:
+    case Vinstr::testli:
+    case Vinstr::testq:
+    case Vinstr::testqi:
+    case Vinstr::testqi64:
+    case Vinstr::testw:
+    case Vinstr::testwi:
+    case Vinstr::ubfmli:
+    case Vinstr::ubfmliq:
+    case Vinstr::ucomisd:
+    case Vinstr::ucomisdz:
+    case Vinstr::unpcklpd:
+    case Vinstr::pack2q:
+    case Vinstr::xorb:
+    case Vinstr::xorbi:
+    case Vinstr::xorw:
+    case Vinstr::xorwi:
+    case Vinstr::xorl:
+    case Vinstr::xorq:
+    case Vinstr::xorqi:
+    case Vinstr::xorqi64:
+      assertx(!touchesMemory(inst));
+      return pure;
+
+    // Non-effectful but non-pure:
+    case Vinstr::cloadq:
+    case Vinstr::cmpbim:
+    case Vinstr::cmpbm:
+    case Vinstr::cmplim:
+    case Vinstr::cmplm:
+    case Vinstr::cmpqim:
+    case Vinstr::cmpqm:
+    case Vinstr::cmpwim:
+    case Vinstr::cmpwm:
+    case Vinstr::cvtsi2sdm:
+    case Vinstr::defvmretdata:
+    case Vinstr::defvmrettype:
+    case Vinstr::defvmsp:
+    case Vinstr::defvmfp:
+    case Vinstr::leap:
+    case Vinstr::load:
+    case Vinstr::loadb:
+    case Vinstr::loadl:
+    case Vinstr::loadpair:
+    case Vinstr::loadpairl:
+    case Vinstr::loadpairups:
+    case Vinstr::loadqd:
+    case Vinstr::loadqp:
+    case Vinstr::loadsbl:
+    case Vinstr::loadsbq:
+    case Vinstr::loadsd:
+    case Vinstr::loadtqb:
+    case Vinstr::loadtql:
+    case Vinstr::loadups:
+    case Vinstr::loadw:
+    case Vinstr::loadzbl:
+    case Vinstr::loadzbq:
+    case Vinstr::loadzwq:
+    case Vinstr::loadzlq:
+    case Vinstr::mrs:
+    case Vinstr::testbim:
+    case Vinstr::testbm:
+    case Vinstr::testlim:
+    case Vinstr::testlm:
+    case Vinstr::testqim:
+    case Vinstr::testqm:
+    case Vinstr::testwim:
+    case Vinstr::testwm:
+#define VASM_LOAD_UPDATE_CASE(name, pre, post, ...) \
+    case Vinstr::pre: \
+    case Vinstr::post:
+    VASM_LOAD_UPDATE_SINGLE_LIST(VASM_LOAD_UPDATE_CASE)
+    VASM_LOAD_UPDATE_PAIR_LIST(VASM_LOAD_UPDATE_CASE)
+#undef VASM_LOAD_UPDATE_CASE
+      assertx(!writesMemory(inst));
+      assertx(!isCall(inst));
+      return false;
+
+    // Effectful:
+    case Vinstr::addlim:
+    case Vinstr::addlm:
+    case Vinstr::addqim:
+    case Vinstr::addqmr:
+    case Vinstr::addqrm:
+    case Vinstr::addwm:
+    case Vinstr::andbim:
+    case Vinstr::bindaddr:
+    case Vinstr::ldbindaddr:
+    case Vinstr::ldbindretaddr:
+    case Vinstr::bindjcc:
+    case Vinstr::bindjmp:
+    case Vinstr::call:
+    case Vinstr::callfaststub:
+    case Vinstr::callm:
+    case Vinstr::callphp:
+    case Vinstr::callphpfe:
+    case Vinstr::callphpr:
+    case Vinstr::callphps:
+    case Vinstr::callr:
+    case Vinstr::calls:
+    case Vinstr::callstub:
+    case Vinstr::cbzl:
+    case Vinstr::cbnzl:
+    case Vinstr::cbzq:
+    case Vinstr::cbnzq:
+    case Vinstr::tbzl:
+    case Vinstr::tbnzl:
+    case Vinstr::tbzq:
+    case Vinstr::tbnzq:
+    case Vinstr::conjure:
+    case Vinstr::contenter:
+    case Vinstr::cqo:
+    case Vinstr::debugtrap:
+    case Vinstr::declm:
+    case Vinstr::decqm:
+    case Vinstr::decqmlock:
+    case Vinstr::decqmlocknosf:
+    case Vinstr::fallback:
+    case Vinstr::fallbackcc:
+    case Vinstr::fallthru:
+    case Vinstr::idiv:
+    case Vinstr::inclm:
+    case Vinstr::incqm:
+    case Vinstr::incwm:
+    case Vinstr::inittc:
+    case Vinstr::inlineend:
+    case Vinstr::inlinesideexit:
+    case Vinstr::inlinestart:
+    case Vinstr::jcc:
+    case Vinstr::jcci:
+    case Vinstr::interceptjcc:
+    case Vinstr::jmp:
+    case Vinstr::jmpi:
+    case Vinstr::jmpm:
+    case Vinstr::jmpr:
+    case Vinstr::killeffects:
+    case Vinstr::landingpad:
+    case Vinstr::leavetc:
+    case Vinstr::loadstubret:
+    case Vinstr::mcprep:
+    case Vinstr::msr:
+    case Vinstr::nothrow:
+    case Vinstr::orbim:
+    case Vinstr::orlim:
+    case Vinstr::orqim:
+    case Vinstr::orwim:
+    case Vinstr::phidef:
+    case Vinstr::phijmp:
+    case Vinstr::phplogue:
+    case Vinstr::phpret:
+    case Vinstr::pop:
+    case Vinstr::popf:
+    case Vinstr::popm:
+    case Vinstr::popp:
+    case Vinstr::poppm:
+    case Vinstr::prefetch:
+    case Vinstr::push:
+    case Vinstr::pushf:
+    case Vinstr::pushm:
+    case Vinstr::pushp:
+    case Vinstr::pushpm:
+    case Vinstr::pushvmfp:
+    case Vinstr::recordbasenativesp:
+    case Vinstr::unrecordbasenativesp:
+    case Vinstr::recordstack:
+    case Vinstr::restoreripm:
+    case Vinstr::restorerips:
+    case Vinstr::resumetc:
+    case Vinstr::ret:
+    case Vinstr::saverips:
+    case Vinstr::store:
+    case Vinstr::storeb:
+    case Vinstr::storebi:
+    case Vinstr::storel:
+    case Vinstr::storeli:
+    case Vinstr::storeqi:
+    case Vinstr::storesd:
+    case Vinstr::storeups:
+    case Vinstr::storew:
+    case Vinstr::storewi:
+    case Vinstr::storepair:
+    case Vinstr::storepairl:
+#define VASM_STORE_UPDATE_CASE(name, pre, post, ...) \
+    case Vinstr::pre: \
+    case Vinstr::post:
+    VASM_STORE_UPDATE_SINGLE_LIST(VASM_STORE_UPDATE_CASE)
+    VASM_STORE_UPDATE_PAIR_LIST(VASM_STORE_UPDATE_CASE)
+#undef VASM_STORE_UPDATE_CASE
+    case Vinstr::storepairups:
+    case Vinstr::stublogue:
+    case Vinstr::stubret:
+    case Vinstr::stubtophp:
+    case Vinstr::stubunwind:
+    case Vinstr::subqim:
+    case Vinstr::syncpoint:
+    case Vinstr::syncvmret:
+    case Vinstr::syncvmrettype:
+    case Vinstr::syncvmsp:
+    case Vinstr::tailcallstub:
+    case Vinstr::tailcallstubr:
+    case Vinstr::trap:
+    case Vinstr::unstublogue:
+    case Vinstr::unwind:
+    case Vinstr::vcall:
+    case Vinstr::vinvoke:
+    case Vinstr::vregrestrict:
+    case Vinstr::vregunrestrict:
+      return !pure;
+  }
+  always_assert(false);
+}
+
+}
+
+bool effectful(const Vinstr& inst) {
+  return effectsImpl(inst, false);
+}
+
+bool isPure(const Vinstr& inst) {
+  return effectsImpl(inst, true);
+}
+
+}

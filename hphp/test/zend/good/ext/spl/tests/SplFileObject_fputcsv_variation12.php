@@ -1,33 +1,33 @@
-<?php
+<?hh
 
 /* Testing fputcsv() to write to a file when default enclosure value and delimiter value
    other than that in the field is provided */
-
+<<__EntryPoint>> function main(): void {
 echo "*** Testing fputcsv() : with default enclosure and different delimiter value ***\n";
 
 /* the array is with three elements in it. Each element should be read as 
    1st element is delimiter, 2nd element is enclosure 
    and 3rd element is csv fields
 */
-$csv_lists = array (
-  array(',', '"', array('water,fruit') ),
-  array(',', '"', array('"water","fruit') ),
-  array(',', '"', array('"water","fruit"') ),
-  array(' ', '^', array('^water^ ^fruit^')),
-  array(':', '&', array('&water&:&fruit&')),
-  array('=', '=', array('=water===fruit=')),
-  array('-', '-', array('-water--fruit-air')),
-  array('-', '-', array('-water---fruit---air-')),
-  array(':', '&', array('&""""&:&"&:,:":&,&:,,,,'))
+$csv_lists = vec[
+  vec[',', '"', vec['water,fruit'] ],
+  vec[',', '"', vec['"water","fruit'] ],
+  vec[',', '"', vec['"water","fruit"'] ],
+  vec[' ', '^', vec['^water^ ^fruit^']],
+  vec[':', '&', vec['&water&:&fruit&']],
+  vec['=', '=', vec['=water===fruit=']],
+  vec['-', '-', vec['-water--fruit-air']],
+  vec['-', '-', vec['-water---fruit---air-']],
+  vec[':', '&', vec['&""""&:&"&:,:":&,&:,,,,']]
 
-);
-$file_path = dirname(__FILE__);
-$file = "$file_path/fputcsv_variation12.tmp";
+];
 
-$file_modes = array ("r+", "r+b", "r+t",
+$file = sys_get_temp_dir().'/'.'fputcsv_variation12.tmp';
+
+$file_modes = vec["r+", "r+b", "r+t",
                      "a+", "a+b", "a+t",
                      "w+", "w+b", "w+t",
-                     "x+", "x+b", "x+t"); 
+                     "x+", "x+b", "x+t"]; 
 
 $loop_counter = 1;
 foreach ($csv_lists as $csv_list) {
@@ -50,7 +50,7 @@ foreach ($csv_lists as $csv_list) {
     var_dump( $fo->ftell() );
     var_dump( $fo->eof() );
     //close the file
-    unset($fo);
+    $fo = null;
     
     // print the file contents 
     var_dump( file_get_contents($file) );
@@ -61,4 +61,4 @@ foreach ($csv_lists as $csv_list) {
 } // end of foreach
 
 echo "Done\n";
-?>
+}

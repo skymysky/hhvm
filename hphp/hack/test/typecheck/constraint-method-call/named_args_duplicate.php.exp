@@ -1,0 +1,10 @@
+error: Typing[4501] Duplicate named argument: n [1]
+
+named_args_duplicate.php:16:7
+14 |   $c = new NamedDup();
+15 |   // Error: duplicate named argument 'n'
+16 |   $c->f(n = 1, n = "wrong");
+   |       ^^^^^^^^^^^^^^^^^^^^^ [1]
+17 | }
+
+1 error found

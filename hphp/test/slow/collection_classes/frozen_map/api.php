@@ -3,14 +3,14 @@
 // Test ImmMap's PHP-accessible public methods.
 
 // Helpers
-function show_keyed_iter($iter) {
+function show_keyed_iter($iter) :mixed{
   $vs = Vector {};
 
   foreach ($iter as $k => $v) {
     $vs[] = Pair {$k, $v};
   }
 
-  usort(&$vs, function($p1, $p2) {
+  usort(inout $vs, function($p1, $p2) {
     if ($p1[0] < $p2[0]) return -1;
     else if ($p1[0] == $p2[0]) return 0;
     else return 1;
@@ -21,9 +21,9 @@ function show_keyed_iter($iter) {
   echo "]\n";
 }
 
-function show_iter($iter) {
+function show_iter($iter) :mixed{
   $vs = new Vector($iter);
-  sort(&$vs);
+  sort(inout $vs);
 
   echo get_class($iter), " [\n";
   foreach ($vs as $v) var_dump($v);
@@ -31,7 +31,7 @@ function show_iter($iter) {
 }
 /////////////////////////////////////
 
-function main() {
+function main() :mixed{
   $fm = new ImmMap(Vector {1, 2, 3});
   $e = new ImmMap();
 
@@ -87,32 +87,36 @@ function main() {
   $m1 = new ImmMap(Map {1 => 1, 2 => 2, 3 => 3});
   $m2 = new ImmMap(Map {1 => 1, 2 => 2});
   $res =$m1->differenceByKey($m2);
-  var_dump($res instanceof ImmMap);
+  var_dump($res is ImmMap);
   show_keyed_iter($res);
 
   echo "\n= map =\n";
   $res = $fm->map(function ($v) { return 2 * $v; });
-  var_dump($res instanceof ImmMap);
+  var_dump($res is ImmMap);
   show_keyed_iter($res);
 
   echo "\n= mapwithkey =\n";
   $res = $fm->mapWithKey(function ($k, $v) { return Pair {$k, $v}; });
-  var_dump($res instanceof ImmMap);
+  var_dump($res is ImmMap);
   show_keyed_iter($res);
 
   echo "\n= filter =\n";
   $res = $fm->filter(function ($v) { return $v == 1; });
-  var_dump($res instanceof ImmMap);
+  var_dump($res is ImmMap);
   show_keyed_iter($res);
 
   echo "\n= filterwithkey =\n";
   $res = $fm->filterWithKey(function ($k, $v) { return $k == 0 || $v == 3; });
-  var_dump($res instanceof ImmMap);
+  var_dump($res is ImmMap);
   show_keyed_iter($res);
 
   echo "\n= fromItems =\n";
-  var_dump(ImmMap::fromItems(Vector {}) instanceof ImmMap);
+  var_dump(ImmMap::fromItems(Vector {}) is ImmMap);
   show_keyed_iter(ImmMap::fromItems((Vector {Pair {1, 2}, Pair {3, 4}, Pair {5, 6}})));
 }
 
+
+<<__EntryPoint>>
+function main_api() :mixed{
 main();
+}

@@ -1,0 +1,27 @@
+error: Typing[4110] Wrong type hint [1]
+-> Expected `D` [1]
+-> But got `B` [2]
+
+explicit_type_collection_subtyping_sad.php:8:12
+5 | class D extends B {}
+6 | 
+7 | function f(B $b, C $c, D $d): void {
+  |            ^ [2]
+8 |   $e = vec<D>[$b, $c, $d];
+  |            ^ [1]
+9 | }
+
+error: Typing[4110] Wrong type hint [1]
+-> Expected `D` [1]
+-> But got `C` [2]
+
+explicit_type_collection_subtyping_sad.php:8:12
+5 | class D extends B {}
+6 | 
+7 | function f(B $b, C $c, D $d): void {
+  |                  ^ [2]
+8 |   $e = vec<D>[$b, $c, $d];
+  |            ^ [1]
+9 | }
+
+2 errors found

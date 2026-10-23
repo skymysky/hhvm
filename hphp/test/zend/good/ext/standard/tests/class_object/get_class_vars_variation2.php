@@ -1,16 +1,16 @@
-<?php
+<?hh
 /* Prototype  : array get_class_vars(string class_name)
- * Description: Returns an array of default properties of the class. 
+ * Description: Returns an array of default properties of the class.
  * Source code: Zend/zend_builtin_functions.c
- * Alias to functions: 
+ * Alias to functions:
  */
 
 class Ancestor {
-  function test() {
+  function test() :mixed{
     var_dump(get_class_vars("Tester"));
   }
-  
-  static function testStatic() {
+
+  static function testStatic() :mixed{
     var_dump(get_class_vars("Tester"));
   }
 }
@@ -19,30 +19,30 @@ class Tester extends Ancestor {
   public $pub = "public var";
   protected $prot = "protected var";
   private $priv = "private var";
-  
+
   static public $pubs = "public static var";
   static protected $prots = "protected static var";
   static private $privs = "private static var";
-  
-  function test() {
+
+  function test() :mixed{
     var_dump(get_class_vars("Tester"));
   }
-  
-  static function testStatic() {
+
+  static function testStatic() :mixed{
     var_dump(get_class_vars("Tester"));
   }
 }
 
 class Child extends Tester {
-  function test() {
+  function test() :mixed{
     var_dump(get_class_vars("Tester"));
   }
-  
-  static function testStatic() {
+
+  static function testStatic() :mixed{
     var_dump(get_class_vars("Tester"));
   }
 }
-
+<<__EntryPoint>> function get_class_vars_variation2(): void {
 echo "*** Testing get_class_vars() : testing visibility\n";
 
 echo "\n-- From global context --\n";
@@ -70,5 +70,5 @@ $child->test();
 
 echo "\n-- From a child's static context --\n";
 Child::testStatic();
-?>
-===DONE===
+echo "===DONE===\n";
+}

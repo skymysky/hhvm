@@ -18,10 +18,10 @@
 
 #include "hphp/runtime/debugger/debugger_client.h"
 
-namespace HPHP { namespace Eval {
+namespace HPHP::Eval {
 ///////////////////////////////////////////////////////////////////////////////
 
-TRACE_SET_MOD(debugger);
+TRACE_SET_MOD(debugger)
 
 void CmdExample::sendImpl(DebuggerThriftBuffer &thrift) {
   CmdExtended::sendImpl(thrift);
@@ -74,4 +74,4 @@ bool CmdExample::onServer(DebuggerProxy &proxy) {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-}}
+}

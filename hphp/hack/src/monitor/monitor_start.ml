@@ -1,0 +1,203 @@
+(*
+ * Copyright (c) 2015, Facebook, Inc.
+ * All rights reserved.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the "hack" directory of this source tree.
+ *
+ *)
+
+(**
+ * Hack for HipHop: type checker's server monitor code.
+ *
+ * This runs hh server in 1 of 3 ways:
+   1) Runs hh server in-process (check mode)
+   2) Runs a ServerMonitor in-process which will pass connections to a
+      daemonized hh server (non-detached mode).
+   3) Daemonizes a ServerMonitor which will pass connections to a daemonized
+      hh_server (detached mode).
+*)
+
+let () = Random.self_init ()
+
+let make_tmp_dir () =
+  let tmpdir = Path.make (Tmp.temp_dir Global_config.tmp_dir "files") in
+  Relative_path.set_path_prefix Relative_path.Tmp tmpdir
+
+let log_monitor_exit (finale_data : Exit_status.finale_data) =
+  if finale_data.exit_status != Exit_status.No_error then
+    let { Exit_status.exit_status; msg; stack; telemetry } = finale_data in
+    let stack = Utils.show_callstack stack in
+
+    Hack_event_logger.monitor_exit ~msg ~stack telemetry exit_status
+
+(** Main method of the server monitor daemon. The daemon is responsible for
+    listening to socket requests from hh_client, checking Build ID, and relaying
+    requests to the typechecker process. *)
+let monitor_daemon_main
+    (options : Server_args.options) ~(proc_stack : string list) =
+  (* This invokes fbinit logic, which subsumes Folly.ensure_folly_init () *)
+  Startup_initializer.init ();
+
+  let www_root = Server_args.root options in
+  Server_progress.set_root www_root;
+
+  (* Check mode: --check means we'll start up the server and it will do a typecheck
+     and then terminate; in the absence of that flag, (1) if a monitor was already running
+     then we will exit immediately, and avoid side-effects like cycling the logfile;
+     (2) otherwise we'll start up the server and it will continue to run
+     and handle requests. *)
+  (if not (Server_args.check_mode options) then
+    let lock_file = Server_files.lock_file www_root in
+    if not (Lock.grab lock_file) then (
+      Printf.eprintf "Monitor lock file already exists: %s\n%!" lock_file;
+      Exit.exit Exit_status.No_error
+    ));
+
+  (* Daemon mode (should_detach): --daemon means the caller already spawned
+     us in a new process, and it's now our responsibility to establish a logfile
+     and redirect stdout/err to it; in the absence of that flag, we'll just continue
+     to write to stdout/err as normal. *)
+  if Server_args.should_detach options then begin
+    let log_link = Server_files.monitor_log_link www_root in
+    (try Sys.rename log_link (log_link ^ ".old") with
+    | _ -> ());
+    let log_file_path = Sys_utils.make_link_of_timestamped log_link in
+    try Sys_utils.redirect_stdout_and_stderr_to_file log_file_path with
+    | e ->
+      Printf.eprintf "Can't write to logfile: %s\n%!" (Printexc.to_string e)
+  end;
+
+  Relative_path.set_path_prefix Relative_path.Root www_root;
+  let () = Server_load_flag.set_no_load (Server_args.no_load options) in
+  let init_id = Random_id.short_string () in
+  Hh_logger.log "MonitorStart. Monitor init_id: %s" init_id;
+  Server_config.warn_on_invalid_config_keys (Server_args.config options);
+  let (config, local_config) =
+    Server_config.load
+      ~silent:false
+      ~from:(Server_args.from options)
+      ~cli_config_overrides:(Server_args.config options)
+  in
+  Hack_event_logger.init_monitor
+    ~from:(Server_args.from options)
+    ~custom_columns:(Server_args.custom_telemetry_data options)
+    ~hhconfig_version:
+      (Server_config.version config |> Config_file.version_to_string_opt)
+    ~rollout_flags:(Server_local_config_load.to_rollout_flags local_config)
+    ~rollout_group:local_config.Server_local_config.rollout_group
+    ~proc_stack
+    (Server_args.root options)
+    init_id
+    (Unix.gettimeofday ());
+  Exit.add_hook_upon_clean_exit log_monitor_exit;
+  Sys_utils.set_signal
+    Sys.sigpipe
+    (Sys.Signal_handle (fun i -> Hh_logger.log "SIGPIPE(%d)" i));
+
+  (try ignore (Sys_utils.setsid ()) with
+  | Unix.Unix_error _ -> ());
+  ignore (make_tmp_dir ());
+
+  (match Server_args.custom_hhi_path options with
+  | None -> ignore (Hhi.get_hhi_root ())
+  | Some path ->
+    if Disk.file_exists path && Disk.is_directory path then (
+      Hh_logger.log "Custom hhi directory set to %s." path;
+      Hhi.set_custom_hhi_root (Path.make path)
+    ) else (
+      Hh_logger.log "Custom hhi directory %s not found." path;
+      Exit.exit Exit_status.Input_error
+    ));
+
+  (* Now that we've got an exclusive lock and all globals have been initialized: *)
+  Server_progress.write "monitor initializing...";
+  Exit.add_hook_upon_clean_exit (fun _finale_data ->
+      Server_progress.try_delete ());
+
+  if Server_args.check_mode options then (
+    Hh_logger.log "%s" "Will run once in check mode then exit.";
+    Server_main.run_once options config local_config
+  ) else
+    let current_version = Server_config.version config in
+    let waiting_client = Server_args.waiting_client options in
+    let Server_local_config.Watchman.
+          { debug_logging; subscribe = allow_subscriptions; _ } =
+      local_config.Server_local_config.watchman
+    in
+    let informant_options =
+      {
+        Informant.root = Server_args.root options;
+        allow_subscriptions;
+        use_dummy = local_config.Server_local_config.use_dummy_informant;
+        watchman_debug_logging =
+          Server_args.watchman_debug_logging options || debug_logging;
+        use_eden = local_config.Server_local_config.edenfs_informant_enabled;
+        min_distance_restart =
+          local_config.Server_local_config.informant_min_distance_restart;
+        ignore_hh_version = Server_args.ignore_hh_version options;
+        initial_saved_state_is_precomputed =
+          (match Server_args.with_saved_state options with
+          | Some (Server_args.Saved_state_target_info _) -> true
+          | _ -> false);
+        allow_restart_from_precomputed_saved_state =
+          local_config
+            .Server_local_config.allow_restart_from_precomputed_saved_state;
+      }
+    in
+    Utils.try_finally
+      ~f:(fun () ->
+        Monitor_main.start_monitoring
+          ~current_version
+          ~waiting_client
+          ~max_purgatory_clients:
+            local_config.Server_local_config.max_purgatory_clients
+          options
+          informant_options
+          Monitor_utils.
+            {
+              socket_file = Server_files.socket_file www_root;
+              lock_file = Server_files.lock_file www_root;
+              server_log_file = Server_files.log_link www_root;
+              monitor_log_file = Server_files.monitor_log_link www_root;
+            })
+      ~finally:Server_progress.try_delete
+
+let daemon_entry =
+  Daemon.register_entry_point
+    "monitor_daemon_main"
+    (fun ((options, proc_stack) : Server_args.options * string list) (_ic, _oc)
+    -> monitor_daemon_main options ~proc_stack)
+
+(** Either starts a monitor daemon (which will spawn a typechecker daemon),
+    or just runs the typechecker if detachment not enabled. *)
+let start () =
+  try
+    (* This avoids dying if SIGUSR{1,2} is received by accident: *)
+    Sys_utils.set_signal Sys.sigusr1 Sys.Signal_ignore;
+    Sys_utils.set_signal Sys.sigusr2 Sys.Signal_ignore;
+    (* This call might not return: *)
+    Daemon.check_entry_point ();
+    (* This allows us to measure cgroups relative to what it was at startup: *)
+    Cgroup_profiler.get_initial_reading ()
+    |> Cgroup_profiler.use_initial_reading;
+    (* This invokes fbinit logic, which subsumes Folly.ensure_folly_init () *)
+    Startup_initializer.init ();
+    let proc_stack = Proc.get_proc_stack (Unix.getpid ()) in
+    let options = Server_args.parse_options () in
+    if Server_args.should_detach options then begin
+      let (_ : (unit, unit) Daemon.handle) =
+        Daemon.spawn
+          (Daemon.null_fd (), Unix.stdout, Unix.stderr)
+          daemon_entry
+          (options, proc_stack)
+      in
+      Printf.eprintf "Running in daemon mode\n";
+      Exit.exit Exit_status.No_error
+    end else
+      monitor_daemon_main options ~proc_stack
+  with
+  | Shared_mem.Out_of_shared_memory ->
+    Exit.exit Exit_status.Out_of_shared_memory
+  | Exit_status.Exit_with status -> Exit.exit status
+  | exn -> Exit.exit (Exit_status.Uncaught_exception (Exception.wrap exn))

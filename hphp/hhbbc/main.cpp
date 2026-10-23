@@ -25,79 +25,62 @@
 #include <exception>
 #include <utility>
 #include <vector>
+#include <filesystem>
 
 #include <boost/program_options.hpp>
-#include <boost/filesystem.hpp>
 
 #include <folly/ScopeGuard.h>
-#include <folly/String.h>
+#include <fmt/core.h>
+#include <folly/system/HardwareConcurrency.h>
 #include <folly/portability/Unistd.h>
 
+#include "hphp/runtime/base/configs/configs.h"
 #include "hphp/runtime/base/ini-setting.h"
 #include "hphp/runtime/base/runtime-option.h"
+#include "hphp/runtime/base/variable-serializer.h"
+#include "hphp/runtime/base/vm-worker.h"
 #include "hphp/hhvm/process-init.h"
-#include "hphp/runtime/vm/repo.h"
+#include "hphp/runtime/vm/preclass-emitter.h"
+#include "hphp/runtime/vm/repo-autoload-map-builder.h"
+#include "hphp/runtime/vm/repo-file.h"
 #include "hphp/runtime/vm/repo-global-data.h"
 #include "hphp/runtime/vm/treadmill.h"
 
 #include "hphp/hhbbc/misc.h"
-#include "hphp/hhbbc/stats.h"
+#include "hphp/hhbbc/options.h"
 #include "hphp/hhbbc/parallel.h"
+#include "hphp/hhbbc/representation.h"
 
-namespace HPHP { namespace HHBBC {
+#include "hphp/util/configs/eval.h"
+#include "hphp/util/configs/jit.h"
+#include "hphp/util/logger.h"
+#include "hphp/util/rds-local.h"
+
+namespace HPHP {
+
+using namespace extern_worker;
+namespace coro = folly::coro;
+
+namespace HHBBC {
 
 namespace {
-
-namespace fs = boost::filesystem;
 
 //////////////////////////////////////////////////////////////////////
 
 std::string output_repo;
 std::string input_repo;
-std::string hack_compiler_extract_path;
 bool logging = true;
-bool print_bytecode_stats_and_exit = false;
-
 
 //////////////////////////////////////////////////////////////////////
-
-template<class SinglePassReadableRange>
-MethodMap make_method_map(SinglePassReadableRange& range) {
-  auto ret = MethodMap{};
-  for (auto& str : range) {
-    std::vector<std::string> parts;
-    folly::split("::", str, parts);
-    if (parts.size() != 2) {
-      ret[""].insert(str);
-      continue;
-    }
-    ret[parts[0]].insert(parts[1]);
-  }
-  return ret;
-}
-
-template<class SinglePassReadableRange>
-OpcodeSet make_bytecode_map(SinglePassReadableRange& bcs) {
-  if (bcs.empty()) return {};
-  hphp_fast_map<std::string,Op> bcmap;
-  for (auto i = 0; i < Op_count; i++) {
-    auto const op = static_cast<Op>(i);
-    bcmap[opcodeToName(op)] = op;
-  }
-  OpcodeSet oset;
-  for (auto& n : bcs) {
-    if (bcmap.count(n)) oset.insert(bcmap[n]);
-  }
-  return oset;
-}
 
 void parse_options(int argc, char** argv) {
   namespace po = boost::program_options;
 
   auto const defaultThreadCount =
-    std::max<long>(sysconf(_SC_NPROCESSORS_ONLN) - 1, 1);
+    std::max<long>(static_cast<long>(folly::available_concurrency()) - 1, 1);
+  auto const defaultFinalThreadCount =
+    std::max<long>(defaultThreadCount - 1, 1);
 
-  std::vector<std::string> interceptable_fns;
   std::vector<std::string> trace_fns;
   std::vector<std::string> trace_bcs;
   bool no_logging = false;
@@ -112,36 +95,28 @@ void parse_options(int argc, char** argv) {
     ("input",
       po::value(&input_repo)->default_value("hhvm.hhbc"),
       "input hhbc repo path")
-    ("stats-file",
-      po::value(&options.stats_file)->default_value(""),
-      "stats file path")
-    ("no-optimizations",
-      po::bool_switch(&options.NoOptimizations),
-      "turn off all optimizations")
     ("no-logging",
       po::bool_switch(&no_logging),
       "turn off logging")
     ("no-cores",
       po::bool_switch(&no_cores),
       "turn off core dumps (useful when running lots of tests in parallel)")
-    ("extended-stats",
-      po::bool_switch(&options.extendedStats),
-      "Spend time to produce extra stats")
+    ("profile-memory",
+     po::value(&options.profileMemory)->default_value(""),
+      "If non-empty, dump jemalloc memory profiles at key points")
     ("parallel-num-threads",
       po::value(&parallel::num_threads)->default_value(defaultThreadCount),
       "Number of threads to use for parallelism")
-    ("parallel-work-size",
-      po::value(&parallel::work_chunk)->default_value(120),
-      "Work unit size for parallelism")
+    ("parallel-final-threads",
+      po::value(&parallel::final_threads)->default_value(
+        defaultFinalThreadCount),
+      "Number of threads to use for the final pass")
     ("trace",
       po::value(&trace_fns)->composing(),
       "Add a function to increase tracing level on (for debugging)")
     ("trace-bytecode",
       po::value(&trace_bcs)->composing(),
       "Add a bytecode to trace (for debugging)")
-    ("hack-compiler-extract-path",
-      po::value(&hack_compiler_extract_path)->default_value(""),
-      "hack compiler extract path")
     ;
 
   // Some extra esoteric options that aren't exposed in --help for
@@ -151,34 +126,36 @@ void parse_options(int argc, char** argv) {
     ("analyze-func-wlimit",  po::value(&options.analyzeFuncWideningLimit))
     ("analyze-class-wlimit", po::value(&options.analyzeClassWideningLimit))
     ("return-refine-limit",  po::value(&options.returnTypeRefineLimit))
-    ("bytecode-stats",       po::bool_switch(&print_bytecode_stats_and_exit))
+    ("public-sprop-refine-limit", po::value(&options.publicSPropRefineLimit))
+    ("local-hhbbc", po::value(&options.useLocalHHBBC))
     ;
 
   po::options_description oflags("Optimization Flags");
   oflags.add_options()
-    ("context-sensitive-interp",
-                                po::value(&options.ContextSensitiveInterp))
-    ("remove-dead-blocks",      po::value(&options.RemoveDeadBlocks))
-    ("constant-prop",           po::value(&options.ConstantProp))
-    ("constant-fold-builtins",  po::value(&options.ConstantFoldBuiltins))
-    ("peephole",                po::value(&options.Peephole))
-    ("local-dce",               po::value(&options.LocalDCE))
-    ("global-dce",              po::value(&options.GlobalDCE))
-    ("remove-unused-locals",    po::value(&options.RemoveUnusedLocals))
-    ("remove-unused-clsref-slots", po::value(&options.RemoveUnusedClsRefSlots))
-    ("insert-assertions",       po::value(&options.InsertAssertions))
-    ("insert-stack-assertions", po::value(&options.InsertStackAssertions))
-    ("filter-assertions",       po::value(&options.FilterAssertions))
-    ("strength-reduce",         po::value(&options.StrengthReduce))
-    ("func-families",           po::value(&options.FuncFamilies))
-    ("hard-const-prop",         po::value(&options.HardConstProp))
-    ("hard-private-prop",       po::value(&options.HardPrivatePropInference))
-    ("analyze-pseudomains",     po::value(&options.AnalyzePseudomains))
-    ("analyze-public-statics",  po::value(&options.AnalyzePublicStatics))
+    ("context-sensitive-interp",  po::value(&options.ContextSensitiveInterp))
+    ;
+
+  po::options_description eflags("Extern-Worker Flags");
+  eflags.add_options()
+    ("extern-worker-use-case",                 po::value(&options.ExternWorkerUseCase))
+    ("extern-worker-platform",                 po::value(&options.ExternWorkerPlatform))
+    ("extern-worker-working-dir",              po::value(&options.ExternWorkerWorkingDir))
+    ("extern-worker-timeout-secs",             po::value(&options.ExternWorkerTimeoutSecs))
+    ("extern-worker-throttle-retries",         po::value(&options.ExternWorkerThrottleRetries))
+    ("extern-worker-throttle-base-wait-msecs", po::value(&options.ExternWorkerThrottleBaseWaitMSecs))
+    ("extern-worker-use-exec-cache",           po::value(&options.ExternWorkerUseExecCache))
+    ("extern-worker-cleanup",                  po::value(&options.ExternWorkerCleanup))
+    ("extern-worker-use-rich-client",          po::value(&options.ExternWorkerUseRichClient))
+    ("extern-worker-use-p2p",                  po::value(&options.ExternWorkerUseP2P))
+    ("extern-worker-verbose-logging",          po::value(&options.ExternWorkerVerboseLogging))
+    ("extern-worker-async-cleanup",            po::value(&options.ExternWorkerAsyncCleanup))
+    ("extern-worker-max-subprocess-memory",    po::value(&options.ExternWorkerMaxSubprocessMemory))
+    ("extern-worker-use-subprocess-scheduler", po::value(&options.ExternWorkerUseSubprocessScheduler))
+    ("extern-worker-zstd-dictionary",          po::value(&options.ExternWorkerZstdDictionaryPath))
     ;
 
   po::options_description all;
-  all.add(basic).add(extended).add(oflags);
+  all.add(basic).add(extended).add(oflags).add(eflags);
 
   po::positional_options_description pd;
   pd.add("input", 1);
@@ -203,7 +180,7 @@ void parse_options(int argc, char** argv) {
   );
   po::notify(vm);
 
-  if (vm.count("help")) {
+  if (vm.contains("help")) {
     std::cout << basic << "\n"
 "Individual optimizations may be turned on and off using gcc-style -fflag\n"
 "and -fno-flag arguments.  The various optimization flags are documented\n"
@@ -211,222 +188,368 @@ void parse_options(int argc, char** argv) {
     std::exit(0);
   }
 
-  if (no_cores) {
-    struct rlimit rl{};
-    setrlimit(RLIMIT_CORE, &rl);
-  }
+  options.CoreDump = !no_cores;
+  add_to_method_map(options.TraceFunctions, trace_fns);
 
-  options.TraceFunctions = make_method_map(trace_fns);
-  options.TraceBytecodes = make_bytecode_map(trace_bcs);
+  if (!options.profileMemory.empty()) {
+    mallctlWrite("prof.active", true);
+    mallctlWrite("prof.thread_active_init", true);
+  }
 
   logging = !no_logging;
 }
 
 UNUSED void validate_options() {
-  if (parallel::work_chunk <= 10 || parallel::num_threads < 1) {
+  if (parallel::num_threads < 1) {
     std::cerr << "Invalid parallelism configuration.\n";
-    std::exit(1);
-  }
-
-  if (options.AnalyzePublicStatics && !options.AnalyzePseudomains) {
-    std::cerr << "-fanalyze-public-statics requires -fanalyze-pseudomains\n";
-    std::exit(1);
-  }
-
-  if (options.RemoveUnusedLocals && !options.GlobalDCE) {
-    std::cerr << "-fremove-unused-locals requires -fglobal-dce\n";
-    std::exit(1);
-  }
-
-  if (options.RemoveUnusedClsRefSlots && !options.GlobalDCE) {
-    std::cerr << "-fremove-unused-clsref-slots requires -fglobal-dce\n";
     std::exit(1);
   }
 }
 
 //////////////////////////////////////////////////////////////////////
 
-void open_repo(const std::string& path) {
-  RuntimeOption::RepoCentralPath = path;
-  // Make sure the changes take effect
-  Repo::shutdown();
-  Repo::get();
-}
-
-std::pair<std::vector<std::unique_ptr<UnitEmitter>>,
-          std::vector<SString>> load_input() {
-  trace_time timer("load units");
-
-  open_repo(input_repo);
-  Repo::get().loadGlobalData();
-  SCOPE_EXIT { Repo::shutdown(); };
-
-  auto const& gd = Repo::get().global();
-  // When running hhbbc, these option is loaded from GD, and will override CLI.
-  // When running hhvm, these option is not loaded from GD, but read from CLI.
-  RuntimeOption::EvalJitEnableRenameFunction = gd.EnableRenameFunction;
-  RuntimeOption::EvalHackArrCompatNotices =
-    RuntimeOption::EvalHackArrCompatCheckIntishCast =
-    RuntimeOption::EvalHackArrCompatCheckRefBind =
-    RuntimeOption::EvalHackArrCompatCheckFalseyPromote =
-    RuntimeOption::EvalHackArrCompatCheckCompare =
-    RuntimeOption::EvalHackArrCompatCheckMisc =
-      gd.HackArrCompatNotices;
-  RuntimeOption::EvalAllowObjectDestructors  = gd.AllowObjectDestructors;
-  RuntimeOption::EvalForbidDynamicCalls      = gd.ForbidDynamicCalls;
-  RuntimeOption::EvalNoticeOnBuiltinDynamicCalls =
-    gd.NoticeOnBuiltinDynamicCalls;
-  RuntimeOption::EvalHackArrCompatIsArrayNotices =
-    gd.HackArrCompatIsArrayNotices;
-  RuntimeOption::EvalHackArrCompatPromoteNotices =
-    gd.HackArrCompatPromoteNotices;
-  RuntimeOption::EvalHackArrCompatTypeHintNotices =
-    gd.HackArrCompatTypeHintNotices;
-  RuntimeOption::EvalHackArrCompatDVCmpNotices =
-    gd.HackArrCompatDVCmpNotices;
-  RuntimeOption::EvalHackArrCompatSerializeNotices =
-    gd.HackArrCompatSerializeNotices;
-  RuntimeOption::EvalUseMSRVForInOut = gd.UseMSRVForInOut;
-  RuntimeOption::EvalHackArrDVArrs = gd.HackArrDVArrs;
-  RuntimeOption::EvalDisableReturnByReference = gd.DisableReturnByReference;
-  return {
-    parallel::map(Repo::get().enumerateUnits(RepoIdCentral, false, true),
-                  [&] (const std::pair<std::string,MD5>& kv) {
-                    return Repo::get().urp().loadEmitter(kv.first, kv.second);
-                  }),
-    Repo().get().global().APCProfile
-  };
-}
-
-void write_units(UnitEmitterQueue& ueq) {
-  folly::Optional<trace_time> timer;
-
-  RuntimeOption::RepoCommit = true;
-  RuntimeOption::RepoEvalMode = "local";
-  RuntimeOption::RepoDebugInfo = false; // Don't record UnitSourceLoc
-  open_repo(output_repo);
-  SCOPE_EXIT { Repo::shutdown(); };
-
-  std::vector<std::unique_ptr<UnitEmitter>> ues;
-  while (auto ue = ueq.pop()) {
-    if (!timer) timer.emplace("writing output repo");
-    ues.push_back(std::move(ue));
-    if (ues.size() == 8) {
-      batchCommit(ues);
-      ues.clear();
-    }
-  }
-
-  batchCommit(ues);
-  ues.clear();
-}
-
-void write_global_data(
-  std::unique_ptr<ArrayTypeTable::Builder>& arrTable,
-  std::vector<SString> apcProfile) {
-
+RepoGlobalData get_global_data() {
   auto const now = std::chrono::high_resolution_clock::now();
   auto const nanos =
     std::chrono::duration_cast<std::chrono::nanoseconds>(
       now.time_since_epoch()
     );
 
-  auto gd                        = Repo::GlobalData{};
-  gd.UsedHHBBC                   = true;
+  auto gd                        = RepoGlobalData{};
   gd.Signature                   = nanos.count();
-  gd.EnableHipHopSyntax          = RuntimeOption::EnableHipHopSyntax;
-  gd.HardTypeHints               = RuntimeOption::EvalHardTypeHints;
-  gd.ThisTypeHintLevel           = RuntimeOption::EvalThisTypeHintLevel;
-  gd.HardReturnTypeHints         = RuntimeOption::EvalCheckReturnTypeHints >= 3;
-  gd.HardPrivatePropInference    = options.HardPrivatePropInference;
-  gd.DisallowDynamicVarEnvFuncs  = RuntimeOption::DisallowDynamicVarEnvFuncs;
-  gd.ElideAutoloadInvokes        = options.ElideAutoloadInvokes;
-  gd.PHP7_IntSemantics           = RuntimeOption::PHP7_IntSemantics;
-  gd.PHP7_NoHexNumerics          = RuntimeOption::PHP7_NoHexNumerics;
-  gd.PHP7_ScalarTypes            = RuntimeOption::PHP7_ScalarTypes;
-  gd.PHP7_Substr                 = RuntimeOption::PHP7_Substr;
-  gd.PHP7_Builtins               = RuntimeOption::PHP7_Builtins;
-  gd.AutoprimeGenerators         = RuntimeOption::AutoprimeGenerators;
-  gd.PromoteEmptyObject          = RuntimeOption::EvalPromoteEmptyObject;
-  gd.EnableRenameFunction        = RuntimeOption::EvalJitEnableRenameFunction;
-  gd.HackArrCompatNotices        = RuntimeOption::EvalHackArrCompatNotices;
-  gd.EnableIntrinsicsExtension   = RuntimeOption::EnableIntrinsicsExtension;
-  gd.APCProfile                  = std::move(apcProfile);
-  gd.ReffinessInvariance         = RuntimeOption::EvalReffinessInvariance;
-  gd.AllowObjectDestructors      = RuntimeOption::EvalAllowObjectDestructors;
-  gd.ForbidDynamicCalls          = RuntimeOption::EvalForbidDynamicCalls;
-  gd.NoticeOnBuiltinDynamicCalls =
-    RuntimeOption::EvalNoticeOnBuiltinDynamicCalls;
-  gd.HackArrCompatIsArrayNotices =
-    RuntimeOption::EvalHackArrCompatIsArrayNotices;
-  gd.HackArrCompatPromoteNotices =
-    RuntimeOption::EvalHackArrCompatPromoteNotices;
-  gd.HackArrCompatTypeHintNotices =
-    RuntimeOption::EvalHackArrCompatTypeHintNotices;
-  gd.HackArrCompatDVCmpNotices =
-    RuntimeOption::EvalHackArrCompatDVCmpNotices;
-  gd.HackArrCompatSerializeNotices =
-    RuntimeOption::EvalHackArrCompatSerializeNotices;
-  gd.HackArrDVArrs = RuntimeOption::EvalHackArrDVArrs;
-  gd.InitialNamedEntityTableSize  =
-    RuntimeOption::EvalInitialNamedEntityTableSize;
-  gd.InitialStaticStringTableSize =
-    RuntimeOption::EvalInitialStaticStringTableSize;
-  gd.DisableReturnByReference =
-    RuntimeOption::EvalDisableReturnByReference;
-  for (auto const& elm : RuntimeOption::ConstantFunctions) {
-    gd.ConstantFunctions.push_back(elm);
-  }
-  gd.UseMSRVForInOut = RuntimeOption::EvalUseMSRVForInOut;
 
-  globalArrayTypeTable().repopulate(*arrTable);
-  // NOTE: There's no way to tell if saveGlobalData() fails for some reason.
-  Repo::get().saveGlobalData(gd);
+  Cfg::StoreToGlobalData(gd);
+
+  gd.EvalCoeffectEnforcementLevels = RO::EvalCoeffectEnforcementLevels;
+  gd.SourceRootForFileBC = options.SourceRootForFileBC;
+
+  for (auto const& elm : RuntimeOption::ConstantFunctions) {
+    auto const s = internal_serialize(tvAsCVarRef(elm.second));
+    gd.ConstantFunctions.emplace_back(elm.first, s.toCppString());
+  }
+  std::sort(gd.ConstantFunctions.begin(), gd.ConstantFunctions.end());
+
+  return gd;
+}
+
+//////////////////////////////////////////////////////////////////////
+
+// Receives UnitEmitters and turns them into WholeProgramInput Key and
+// Values. This "loads" them locally and uploads them into an
+// extern_worker::Client in the way that whole_program expects.
+struct LoadRepoJob {
+  using W = WholeProgramInput;
+
+  static std::string name() { return "hhbbc-load-repo"; }
+  static void init(const Config& config) {
+    process_init(config.o, config.gd, false);
+  }
+  static std::vector<W::Key> fini() {
+    process_exit(false);
+    return std::move(s_keys);
+  }
+  static Variadic<W::Value> run(UnitEmitterSerdeWrapper wrapper) {
+    std::vector<W::Value> values;
+    for (auto& [key, value] : W::make(std::move(wrapper.m_ue))) {
+      s_keys.emplace_back(std::move(key));
+      values.emplace_back(std::move(value));
+    }
+    return Variadic<W::Value>{std::move(values)};
+  }
+
+  static std::vector<W::Key> s_keys;
+};
+std::vector<WholeProgramInput::Key> LoadRepoJob::s_keys;
+Job<LoadRepoJob> s_loadRepoJob;
+
+// Load all UnitEmitters from the RepoFile and convert them into what
+// whole_program expects as input.
+std::pair<WholeProgramInput, Config> load_repo(TicketExecutor& executor,
+                                               Client& client,
+                                               StructuredLogEntry& sample) {
+  trace_time timer("load repo", &sample);
+
+  SCOPE_EXIT { RepoFile::destroy(); };
+  RepoFile::loadGlobalTables(false);
+  auto const units = RepoFile::enumerateUnits();
+  if (logging) std::cout << fmt::format("{} units\n", units.size());
+
+  // Start this as early as possible
+  auto config = Config::get(RepoFile::globalData());
+  CoroAsyncValue<Ref<Config>> storedConfig{
+    [&client, config] () { return client.store(config); },
+    executor.sticky()
+  };
+
+  // Shard the emitters using consistent hashing of their path. Force
+  // all systemlib units into the first bucket (and nothing else in
+  // there).
+  constexpr size_t kLoadGroupSize = 500;
+  auto const numBuckets = std::max<size_t>(
+    (units.size() + kLoadGroupSize - 1) / kLoadGroupSize,
+    2
+  );
+
+  std::vector<std::vector<const StringData*>> groups;
+  groups.resize(numBuckets);
+
+  for (auto const unit : units) {
+    if (FileUtil::isSystemName(unit->slice())) {
+      groups[0].emplace_back(unit);
+      continue;
+    }
+    auto const idx = consistent_hash(unit->hash(), numBuckets - 1) + 1;
+    assertx(idx < numBuckets);
+    groups[idx].emplace_back(unit);
+  }
+
+  // Maintain deterministic ordering within each group
+  for (auto& group : groups) {
+    std::sort(
+      group.begin(),
+      group.end(),
+      [] (const StringData* a, const StringData* b) {
+        return strcmp(a->data(), b->data()) < 0;
+      }
+    );
+  }
+
+  using WPI = WholeProgramInput;
+  WPI inputs;
+
+  auto const load = [&] (size_t bucketIdx,
+                         std::vector<const StringData*> units)
+    -> coro::Task<void> {
+    assertx(!units.empty());
+
+    // Load the UnitEmitters from disk (deferring this until here cuts
+    // down on the number of UnitEmitters we have to keep in memory at
+    // once).
+    std::vector<UnitEmitterSerdeWrapper> ues;
+    ues.reserve(units.size());
+    for (auto const unit : units) {
+      assertx((bucketIdx == 0) == FileUtil::isSystemName(unit->slice()));
+      ues.emplace_back(
+        RepoFile::loadUnitEmitter(unit, nullptr, false)
+      );
+    }
+
+    // Process the first bucket locally. Systemlib units need full
+    // process init and we don't currently do that in extern-worker
+    // jobs.
+    if (bucketIdx == 0) {
+      std::vector<WPI::Key> keys;
+      std::vector<WPI::Value> values;
+      for (auto& ue : ues) {
+        assertx(FileUtil::isSystemName(ue.m_ue->m_filepath->slice()));
+        for (auto& [key, value] : WPI::make(std::move(ue.m_ue))) {
+          keys.emplace_back(std::move(key));
+          values.emplace_back(std::move(value));
+        }
+      }
+      if (keys.empty()) co_return;
+      auto valueRefs = co_await client.storeMulti(std::move(values));
+      auto const numKeys = keys.size();
+      assertx(valueRefs.size() == numKeys);
+      for (size_t i = 0; i < numKeys; ++i) {
+        inputs.add(std::move(keys[i]), std::move(valueRefs[i]));
+      }
+      co_return;
+    }
+
+    // Store them (and the config we'll use).
+    auto [refs, configRef] = co_await coro::collectAll(
+      client.storeMulti(std::move(ues)),
+      storedConfig.getCopy()
+    );
+
+    std::vector<std::tuple<Ref<UnitEmitterSerdeWrapper>>> tuplized;
+    tuplized.reserve(refs.size());
+    for (auto& r : refs) tuplized.emplace_back(std::move(r));
+
+    auto metadata = make_exec_metadata("load-repo", units[0]->toCppString());
+
+    // Run the job and get refs to the keys and values.
+    auto [valueRefs, keyRefs] = co_await
+      client.exec(
+        s_loadRepoJob,
+        std::move(configRef),
+        std::move(tuplized),
+        std::move(metadata)
+      );
+
+    // We need the keys locally, so load them. Values can stay as
+    // Refs.
+    auto keys = co_await client.load(std::move(keyRefs));
+
+    auto const numKeys = keys.size();
+    size_t keyIdx = 0;
+    for (auto& v : valueRefs) {
+      for (auto& r : v) {
+        always_assert(keyIdx < numKeys);
+        inputs.add(std::move(keys[keyIdx]), std::move(r));
+        ++keyIdx;
+      }
+    }
+    always_assert(keyIdx == numKeys);
+
+    co_return;
+  };
+
+  std::vector<coro::TaskWithExecutor<void>> tasks;
+  for (size_t i = 0; i < groups.size(); ++i) {
+    auto& group = groups[i];
+    if (group.empty()) continue;
+    tasks.emplace_back(co_withExecutor(executor.sticky(), load(i, std::move(group))));
+  }
+  coro::blockingWait(coro::collectAllRange(std::move(tasks)));
+  return std::make_pair(std::move(inputs), std::move(config));
+}
+
+extern_worker::Options make_extern_worker_options() {
+  extern_worker::Options opts;
+  opts
+    .setApplication("hhbbc")
+    .setUseCase(options.ExternWorkerUseCase)
+    .setUseSubprocess(options.ExternWorkerUseCase.empty()
+                      ? extern_worker::Options::UseSubprocess::Always
+                      : extern_worker::Options::UseSubprocess::Never)
+    .setCacheExecs(options.ExternWorkerUseExecCache)
+    .setCleanup(options.ExternWorkerCleanup)
+    .setUseRichClient(options.ExternWorkerUseRichClient)
+    .setUseP2P(options.ExternWorkerUseP2P)
+    .setVerboseLogging(options.ExternWorkerVerboseLogging)
+    .setCasConnectionCount(options.ExternWorkerCASConnectionCount)
+    .setEngineConnectionCount(options.ExternWorkerEngineConnectionCount)
+    .setAcConnectionCount(options.ExternWorkerActionCacheConnectionCount)
+    .setFeaturesFile(options.ExternWorkerFeaturesFile)
+    .setUseSubprocessScheduler(options.ExternWorkerUseSubprocessScheduler);
+  if (options.ExternWorkerTimeoutSecs > 0) {
+    opts.setTimeout(std::chrono::seconds{options.ExternWorkerTimeoutSecs});
+  }
+  if (!options.ExternWorkerPlatform.empty()) {
+    opts.setPlatform(options.ExternWorkerPlatform);
+  }
+  if (!options.ExternWorkerWorkingDir.empty()) {
+    opts.setWorkingDir(options.ExternWorkerWorkingDir);
+  }
+  if (options.ExternWorkerThrottleRetries >= 0) {
+    opts.setThrottleRetries(options.ExternWorkerThrottleRetries);
+  }
+  if (options.ExternWorkerThrottleBaseWaitMSecs >= 0) {
+    opts.setThrottleBaseWait(
+      std::chrono::milliseconds{options.ExternWorkerThrottleBaseWaitMSecs}
+    );
+  }
+  if (options.ExternWorkerMaxSubprocessMemory > 0) {
+    opts.setMaxSubprocessMemory(options.ExternWorkerMaxSubprocessMemory);
+  }
+  if (!options.ExternWorkerZstdDictionaryPath.empty()) {
+    opts.setZSTDDictionaryPath(options.ExternWorkerZstdDictionaryPath);
+  }
+  return opts;
 }
 
 void compile_repo() {
-  auto input = load_input();
-  if (logging) {
-    std::cout << folly::format("{} units\n", input.first.size());
-  }
-
-  UnitEmitterQueue ueq;
-  std::unique_ptr<ArrayTypeTable::Builder> arrTable;
-  auto wp_thread = std::thread([&] {
-    hphp_thread_init();
-    hphp_session_init(Treadmill::SessionKind::CompileRepo);
-    SCOPE_EXIT {
+  auto executor = std::make_unique<TicketExecutor>(
+    "HHBBCWorker",
+    0,
+    parallel::num_threads,
+    [] {
+      hphp_thread_init();
+      hphp_session_init(Treadmill::SessionKind::HHBBC);
+    },
+    [] {
       hphp_context_exit();
       hphp_session_exit();
       hphp_thread_exit();
-    };
-    Trace::BumpRelease bumper(Trace::hhbbc_time, -1, logging);
-    whole_program(std::move(input.first), ueq, arrTable);
-  });
+    },
+    std::chrono::minutes{15}
+  );
+  auto client = std::make_unique<Client>(
+    executor->sticky(),
+    make_extern_worker_options()
+  );
+  trace_time::register_client_stats(client->getStatsPtr());
 
-  write_units(ueq);
-  write_global_data(arrTable, input.second);
-  wp_thread.join();
-}
+  StructuredLogEntry sample;
+  sample.setStr("debug", debug ? "true" : "false");
+  sample.setStr("use_case", options.ExternWorkerUseCase);
+  sample.setStr("platform", options.ExternWorkerPlatform);
+  sample.setInt("use_rich_client", options.ExternWorkerUseRichClient);
+  sample.setInt("use_p2p", options.ExternWorkerUseP2P);
+  sample.setInt("force_subprocess", options.ExternWorkerForceSubprocess);
+  sample.setInt("use_exec_cache", options.ExternWorkerUseExecCache);
+  sample.setInt("timeout_secs", options.ExternWorkerTimeoutSecs);
+  sample.setInt("cleanup", options.ExternWorkerCleanup);
+  sample.setInt("throttle_retries", options.ExternWorkerThrottleRetries);
+  sample.setInt("throttle_base_wait_ms",
+                options.ExternWorkerThrottleBaseWaitMSecs);
+  sample.setInt("use_subprocess_scheduler",
+                options.ExternWorkerUseSubprocessScheduler);
+  sample.setStr("working_dir", options.ExternWorkerWorkingDir);
+  sample.setStr("use_hphpc", "false");
+  sample.setStr("use_hhbbc", "true");
+  sample.setInt("hhbbc_thread_count", executor->numThreads());
+  sample.setInt("hhbbc_async_cleanup", options.ExternWorkerAsyncCleanup);
+  sample.setStr("extern_worker_impl", client->implName());
+  sample.setStr("extern_worker_session", client->session());
 
-void print_repo_bytecode_stats() {
-  std::array<uint64_t,Op_count> op_counts{};
+  // Package Info must be read prior to load_repo as loading the repo
+  // destroys the repo file
+  auto const packageInfo = RepoFile::packageInfo();
 
-  auto const input = load_input();
-  for (auto const& ue : input.first) {
-    auto pc = ue->bc();
-    auto const end = pc + ue->bcPos();
-    for (; pc < end; pc += instrLen(pc)) {
-      op_counts[static_cast<uint16_t>(peek_op(pc))]++;
+  auto [inputs, config] = load_repo(*executor, *client, sample);
+
+  RepoAutoloadMapBuilder autoload;
+  RepoFileBuilder repo{output_repo};
+  std::mutex repoLock;
+  std::atomic<size_t> numUnits{0};
+
+  auto const emit = [&] (std::unique_ptr<UnitEmitter> ue) {
+    ++numUnits;
+    autoload.addUnit(*ue);
+    RepoFileBuilder::EncodedUE encoded{*ue, false};
+    std::scoped_lock<std::mutex> _{repoLock};
+    repo.add(encoded);
+  };
+
+  std::thread asyncDispose;
+  SCOPE_EXIT { if (asyncDispose.joinable()) asyncDispose.join(); };
+  auto const dispose = [&] (std::unique_ptr<TicketExecutor> e,
+                            std::unique_ptr<Client> c) {
+    if (!options.ExternWorkerAsyncCleanup) {
+      // If we don't want to cleanup asynchronously, do so now.
+      c.reset();
+      e.reset();
+      return;
     }
-  }
+    // All the thread does is reset the unique_ptr to run the dtor.
+    asyncDispose = std::thread{
+      [e = std::move(e), c = std::move(c)] () mutable {
+        c.reset();
+        e.reset();
+      }
+    };
+  };
 
-  for (auto i = uint32_t{}; i < op_counts.size(); ++i) {
-    std::cout << folly::format(
-      "{: <20} {}\n",
-      opcodeToName(static_cast<Op>(i)),
-      op_counts[i]
-    );
+  whole_program(
+    std::move(inputs),
+    std::move(config),
+    std::move(executor),
+    std::move(client),
+    emit,
+    dispose,
+    &sample
+  );
+
+  trace_time timer{"finalizing repo", &sample};
+  repo.finish(get_global_data(), autoload, packageInfo);
+
+  // Only log big builds.
+  if (numUnits >= Cfg::Eval::HHBBCMinUnitsToLog) {
+    sample.force_init = true;
+    StructuredLog::log("hhvm_whole_program", sample);
   }
 }
 
@@ -434,10 +557,86 @@ void print_repo_bytecode_stats() {
 
 }
 
+void process_init(const Options& o,
+                  const RepoGlobalData& gd,
+                  bool fullInit) {
+  if (!o.CoreDump) {
+    struct rlimit rl{};
+    rl.rlim_cur = 0;
+    rl.rlim_max = 0;
+    setrlimit(RLIMIT_CORE, &rl);
+  }
+
+  rds::threadInit();
+  rds::local::init();
+  SCOPE_FAIL { rds::local::fini(); };
+
+  Hdf config;
+  IniSetting::Map ini = IniSetting::Map::object;
+
+  // We need to write correct coeffects before we load
+  for (auto const& [name, value] : gd.EvalCoeffectEnforcementLevels) {
+    config["Eval"]["CoeffectEnforcementLevels"][name] = value;
+  }
+
+  // These need to be set before RO::Load, because it triggers the
+  // table resizing.
+  if (gd.Eval_InitialTypeTableSize) {
+    Cfg::Eval::InitialTypeTableSize  = gd.Eval_InitialTypeTableSize;
+  }
+  if (gd.Eval_InitialFuncTableSize) {
+    Cfg::Eval::InitialFuncTableSize  = gd.Eval_InitialFuncTableSize;
+  }
+  if (gd.Eval_InitialStaticStringTableSize) {
+    Cfg::Eval::InitialStaticStringTableSize = gd.Eval_InitialStaticStringTableSize;
+  }
+
+  RO::Load(ini, config);
+  Cfg::Repo::Authoritative                  = false;
+  Cfg::Jit::Enabled                         = false;
+  Cfg::Eval::LowStaticArrays                = false;
+  Cfg::Repo::DebugInfo                      = false;
+  Cfg::Eval::PerfPidMap                     = false;
+  Logger::LogLevel                          = Logger::LogError;
+
+  // Load RepoGlobalData first because hphp_process_init can read
+  // RuntimeOptions.
+  gd.load(false);
+
+  register_process_init();
+  hphp_process_init(!fullInit, true);
+  SCOPE_FAIL { hphp_process_exit(); };
+
+  options = o;
+  // Now that process state is set up, we can safely do a full load of
+  // RepoGlobalData.
+  gd.load();
+
+  // When running hhbbc, these options are loaded from GD, and will
+  // override CLI. When running hhvm, these options are not loaded
+  // from GD, but read from CLI. NB: These are only needed if
+  // RepoGlobalData::load() does not currently write them which is
+  // called in hphp_process_init().
+  Cfg::LoadFromGlobalDataOnlyHHBBC(gd);
+
+  options.SourceRootForFileBC = gd.SourceRootForFileBC;
+
+  if (fullInit) hphp_session_init(Treadmill::SessionKind::HHBBC);
+}
+
+void process_exit(bool full) {
+  if (full) {
+    hphp_context_exit();
+    hphp_session_exit();
+  }
+  hphp_process_exit();
+  rds::local::fini();
+}
+
 int main(int argc, char** argv) try {
   parse_options(argc, argv);
 
-  if (!print_bytecode_stats_and_exit && fs::exists(output_repo)) {
+  if (std::filesystem::exists(output_repo)) {
     std::cout << "output repo already exists; removing it\n";
     if (unlink(output_repo.c_str())) {
       std::cerr << "failed to unlink output repo: "
@@ -445,67 +644,30 @@ int main(int argc, char** argv) try {
       return 1;
     }
   }
-  if (!fs::exists(input_repo)) {
+  if (!std::filesystem::exists(input_repo)) {
     std::cerr << "input repo `" << input_repo << "' not found\n";
     return 1;
   }
 
-  initialize_repo();
+  RepoFile::init(input_repo);
 
-  // We need to set this flag so Repo::global will let us access it.
-  RuntimeOption::RepoAuthoritative = true;
+  auto const& gd = RepoFile::globalData();
+  gd.load(false);
 
-  LitstrTable::init();
-  RuntimeOption::RepoLocalMode = "--";
-  RuntimeOption::RepoEvalMode = "readonly";
-  open_repo(input_repo);
-  Repo::get().loadGlobalData(false, false);
-  LitstrTable::fini();
-  auto const& gd = Repo::get().global();
-  if (gd.InitialNamedEntityTableSize) {
-    RuntimeOption::EvalInitialNamedEntityTableSize =
-      gd.InitialNamedEntityTableSize;
-  }
-  if (gd.InitialStaticStringTableSize) {
-    RuntimeOption::EvalInitialStaticStringTableSize =
-      gd.InitialStaticStringTableSize;
-  }
+  process_init(options, gd, true);
+  SCOPE_EXIT { process_exit(true); };
 
-  Hdf config;
-  IniSetting::Map ini = IniSetting::Map::object;
-  RuntimeOption::Load(ini, config);
-  RuntimeOption::RepoLocalPath       = "/tmp/hhbbc.repo";
-  RuntimeOption::RepoCentralPath     = input_repo;
-  RuntimeOption::RepoLocalMode       = "--";
-  RuntimeOption::RepoJournal         = "memory";
-  RuntimeOption::RepoCommit          = false;
-  RuntimeOption::EvalJit             = false;
-
-  if (!hack_compiler_extract_path.empty()) {
-    RuntimeOption::EvalHackCompilerExtractPath = hack_compiler_extract_path;
-  }
-
-  RuntimeOption::EvalThisTypeHintLevel = gd.ThisTypeHintLevel;
-
-  register_process_init();
-
-  hphp_process_init();
-  SCOPE_EXIT { hphp_process_exit(); };
-
-  Repo::shutdown();
-
-  if (print_bytecode_stats_and_exit) {
-    print_repo_bytecode_stats();
-    return 0;
-  }
+  Logger::LogLevel = logging ? Logger::LogInfo : Logger::LogError;
+  Logger::Escape = false;
+  Logger::AlwaysEscapeLog = false;
 
   Trace::BumpRelease bumper(Trace::hhbbc_time, -1, logging);
-  compile_repo(); // NOTE: errors ignored
+  compile_repo();
   return 0;
 }
 
 catch (std::exception& e) {
-  std::cerr << e.what() << '\n';
+  Logger::Error("std::exception: %s", e.what());
   return 1;
 }
 

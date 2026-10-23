@@ -1,0 +1,21 @@
+error: Typing[4110] Typing error [1]
+-> Expected `string` [2]
+-> But got `int` [3]
+
+contravariance_unresolved_bad.php:37:3
+ 6 | }
+ 7 | 
+ 8 | final class C1 implements I1<string> {
+   |                              ^^^^^^ [2]
+ 9 |   public function f(string $t): int {
+10 |     return 42;
+   :
+35 | 
+36 |   // the following line fails in runtime
+37 |   $c2->f(42);
+   |   ^^^^^^^^^^ [1]
+   |          ^^ [3]
+38 | }
+39 | 
+
+1 error found

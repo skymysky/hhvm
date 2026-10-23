@@ -1,2 +1,2 @@
 <?hh
-include "syntax-error.php";
+<<__EntryPoint>> function main() :void{ include "syntax-error.php"; }

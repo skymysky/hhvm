@@ -1,0 +1,15 @@
+warning: Warn[12001] This expression is likely always `false` [1]
+-> This is a string [2]
+-> This is an int [3]
+
+sketchy_equality1.php:4:3
+1 | <?hh
+2 | 
+3 | function fasdfj(?string $x, ?int $y): void {
+  |                  ^^^^^^ [2]
+  |                              ^^^ [3]
+4 |   $x === $y;
+  |   ^^^^^^^^^ [1]
+5 | }
+
+1 error found

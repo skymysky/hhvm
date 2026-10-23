@@ -1,6 +1,6 @@
 <?hh
 
-function captureUninit() {
+function captureUninit() :mixed{
   echo "\n== captureUninit ==\n\n";
 
   $foo = () ==> { // no warning for $x
@@ -10,13 +10,17 @@ function captureUninit() {
 
   $foo(); // 2
 
-  var_dump($x); // uninit
+  try {
+    var_dump($x); // uninit
+  } catch (UndefinedVariableException $e) {
+    var_dump($e->getMessage());
+  }
 
   $x = 1;
   var_dump($x); // 1
 }
 
-function captureCatchUninit() {
+function captureCatchUninit() :mixed{
   echo "\n== captureCatchUninit ==\n\n";
 
   try {
@@ -27,19 +31,32 @@ function captureCatchUninit() {
         var_dump($e);
       }
     };
-  } catch (Exception $e) {}
+  } catch (Exception $e) {
+  }
 
-  var_dump($e); // uninit
+  try {
+    var_dump($e); // uninit
+  } catch (UndefinedVariableException $e) {
+    var_dump($e->getMessage());
+  }
 }
 
-function captureUninitWarning() {
+function captureUninitWarning() :mixed{
   echo "\n== captureUninitWarning ==\n\n";
 
   $foo = () ==> { // no warning for $x
-    var_dump($x);
+    try {
+      var_dump($x); // uninit
+    } catch (UndefinedVariableException $e) {
+      var_dump($e->getMessage());
+    }
   };
 
-  var_dump($x); // uninit
+  try {
+    var_dump($x); // uninit
+  } catch (UndefinedVariableException $e) {
+    var_dump($e->getMessage());
+  }
 
   $x = 1;
   var_dump($x); // 1
@@ -47,23 +64,26 @@ function captureUninitWarning() {
   $foo(); // still warning for $x
 }
 
-function captureExplicitUninit() {
+function captureExplicitUninit() :mixed{
   echo "\n== captureExplicitUninit ==\n\n";
 
-  $foo = function() use ($x) { // warning here for $x
-    $x = 2;
-    var_dump($x);
-  };
+  try {
+    $foo = function() use ($x) { // fatal here for $x
+      $x = 2;
+      var_dump($x);
+    };
 
-  $foo(); // 2
-
-  var_dump($x); // uninit
-
-  $x = 1;
-  var_dump($x); // 1
+    $foo(); // 2
+  } catch (UndefinedVariableException $e) {
+    var_dump($e->getMessage());
+  }
 }
 
-captureUninit();
-captureCatchUninit();
-captureUninitWarning();
-captureExplicitUninit();
+
+<<__EntryPoint>>
+function main_lambda_uninit_capture() :mixed{
+  captureUninit();
+  captureCatchUninit();
+  captureUninitWarning();
+  captureExplicitUninit();
+}

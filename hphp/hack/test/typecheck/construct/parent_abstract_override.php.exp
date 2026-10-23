@@ -1,0 +1,18 @@
+error: Typing[4073] Cannot call `parent::__construct()`; it is abstract [1]
+-> Declaration is here [2]
+
+parent_abstract_override.php:9:13
+ 2 | 
+ 3 | abstract class BaseClass {
+ 4 |   public abstract function __construct();
+   |                            ^^^^^^^^^^^ [2]
+ 5 | }
+ 6 | 
+ 7 | final class ChildClass extends BaseClass {
+ 8 |   public function __construct() {
+ 9 |     parent::__construct();
+   |             ^^^^^^^^^^^ [1]
+10 |   }
+11 | }
+
+1 error found

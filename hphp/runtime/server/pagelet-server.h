@@ -14,8 +14,7 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_PAGELET_SERVER_H_
-#define incl_HPHP_PAGELET_SERVER_H_
+#pragma once
 
 #include <string>
 #include <atomic>
@@ -42,10 +41,10 @@ struct PageletServer {
    * Create a task. This returns a task handle, or null object
    * if there are no worker threads.
    */
-  static Resource TaskStart(
-    const String& url, const Array& headers,
-    const String& remote_host,
-    const String& post_data = null_string,
+  static OptResource TaskStart(
+    const OptString& url, const Array& headers,
+    const OptString& remote_host,
+    const OptString& post_data = null_string,
     const Array& files = null_array,
     int timeoutSeconds = -1,
     PageletServerTaskEvent *event = nullptr
@@ -55,16 +54,16 @@ struct PageletServer {
    * Query if a task is finished. This is non-blocking and can be called as
    * many times as desired.
    */
-  static int64_t TaskStatus(const Resource& task);
+  static int64_t TaskStatus(const OptResource& task);
 
   /**
    * Get results of a task. This is blocking until task is finished or times
    * out. The status code is set to -1 in the event of a timeout.
    */
-  static String TaskResult(const Resource& task,
-                           Array &headers,
-                           int &code,
-                           int64_t timeout_ms);
+  static OptString TaskResult(const OptResource& task,
+                              Array &headers,
+                              int &code,
+                              int64_t timeout_ms);
 
   /**
    * Get asynchronous results of a task. Returns a tuple of 3 items:
@@ -72,7 +71,7 @@ struct PageletServer {
    * - a WaitHandle representing the future results (or null if finished)
    * - the status code
    */
-  static Array AsyncTaskResult(const Resource& task);
+  static Array AsyncTaskResult(const OptResource& task);
 
   /**
    * Add a piece of response to the pipeline.
@@ -90,8 +89,8 @@ const StaticString s_pagelet("pagelet");
 
 struct PageletTransport final : Transport, Synchronizable {
   PageletTransport(
-    const String& url, const Array& headers, const String& postData,
-    const String& remoteHost,
+    const OptString& url, const Array& headers, const OptString& postData,
+    const OptString& remoteHost,
     const std::set<std::string> &rfc1867UploadedFiles,
     const Array& files, int timeoutSeconds);
 
@@ -104,19 +103,19 @@ struct PageletTransport final : Transport, Synchronizable {
   const void *getPostData(size_t &size) override;
   Method getMethod() override;
   std::string getHeader(const char *name) override;
-  void getHeaders(HeaderMap &headers) override;
+  const HeaderMap& getHeaders() override;
   void addHeaderImpl(const char *name, const char *value) override;
   void removeHeaderImpl(const char *name) override;
   void sendImpl(const void *data, int size, int code, bool chunked, bool eom)
        override;
   void onSendEndImpl() override;
-  bool isUploadedFile(const String& filename) override;
+  bool isUploadedFile(const OptString& filename) override;
   bool getFiles(std::string &files) override;
 
   /**
    * Get a description of the type of transport.
    */
-  String describe() const override {
+  OptString describe() const override {
     return s_pagelet;
   }
 
@@ -127,7 +126,7 @@ struct PageletTransport final : Transport, Synchronizable {
 
   bool isPipelineEmpty();
 
-  String getResults(
+  OptString getResults(
     Array &headers,
     int &code,
     int64_t timeout_ms
@@ -168,6 +167,11 @@ private:
 };
 
 struct PageletServerTaskEvent final : AsioExternalThreadEvent {
+
+  PageletServerTaskEvent() = default;
+  PageletServerTaskEvent(const PageletServerTaskEvent&) = delete;
+  PageletServerTaskEvent& operator=(const PageletServerTaskEvent&) = delete;
+
   ~PageletServerTaskEvent() override {
     if (m_job) m_job->decRefCount();
   }
@@ -182,12 +186,13 @@ struct PageletServerTaskEvent final : AsioExternalThreadEvent {
   }
 
 protected:
- void unserialize(Cell& result) final {
-   cellCopy(make_array_like_tv(m_job->getAsyncResults(false).detach()), result);
+ void unserialize(TypedValue& result) final {
+   tvCopy(make_array_like_tv(m_job->getAsyncResults(false).detach()), result);
   }
 
 private:
-  PageletTransport* m_job;
+
+  PageletTransport* m_job{nullptr};
   // string m_response;
   // Object m_next_wait_handle;
 };
@@ -195,4 +200,3 @@ private:
 ///////////////////////////////////////////////////////////////////////////////
 }
 
-#endif // incl_HPHP_PAGELET_SERVER_H_

@@ -1,0 +1,46 @@
+error: Typing[4444] Cannot access an internal element from module `foo` in the default module [1]
+-> This is from module `foo` [2]
+
+cross_package_access_internal1.php--bar.php:3:13
+1 | <?hh
+2 | // package pkg1
+3 | type TBar = TFoo;
+  |             ^^^^ [1]
+
+cross_package_access_internal1.php--cross_package_access_internal1_foo.php:4:15
+2 | // package pkg2
+3 | module foo;
+4 | internal type TFoo = int;
+  |               ^^^^ [2]
+
+error: Typing[4472] Cannot access transparent type alias `TFoo` defined in package `pkg2` which may not be available [1]
+-> `TFoo` is defined in cross_package_access_internal1.php--cross_package_access_internal1_foo.php [2]
+-> `TFoo` belongs to package `pkg2` by this entry in the package config [3]
+-> package `pkg1` is available because the current file belongs to it by this entry in the package config [4]
+
+cross_package_access_internal1.php--bar.php:3:13
+1 | <?hh
+2 | // package pkg1
+3 | type TBar = TFoo;
+  |             ^^^^ [1]
+
+cross_package_access_internal1.php--cross_package_access_internal1_foo.php:4:15
+2 | // package pkg2
+3 | module foo;
+4 | internal type TFoo = int;
+  |               ^^^^ [2]
+
+PACKAGES.toml:7:11
+1 | [packages]
+2 | 
+3 | [packages.pkg1]
+  |           ^^^^ [4]
+4 | include_paths=["//"]
+5 | allow_deployed_packages_checking = true
+6 | 
+7 | [packages.pkg2]
+  |           ^^^^ [3]
+8 | include_paths=[
+9 |     "//cross_package_access_internal1_foo.php",
+
+2 errors found

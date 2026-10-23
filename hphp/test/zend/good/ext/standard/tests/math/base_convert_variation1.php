@@ -1,14 +1,11 @@
-<?php
+<?hh
 /* Prototype  : string base_convert  ( string $number  , int $frombase  , int $tobase  )
  * Description: Convert a number between arbitrary bases.
  * Source code: ext/standard/math.c
  */
-
+<<__EntryPoint>> function main(): void {
 echo "*** Testing base_convert() : usage variations ***\n";
 
-//get an unset variable
-$unset_var = 10;
-unset ($unset_var);
 
 // heredoc string
 $heredoc = <<<EOT
@@ -19,12 +16,12 @@ EOT;
 // get a resource variable
 $fp = fopen(__FILE__, "r");
 
-$inputs = array(
+$inputs = vec[
        // int data
 /*1*/  0,
        1,
        12,
-       -12,       
+       -12,
        2147483647,
 
        // float data
@@ -43,34 +40,30 @@ $inputs = array(
        false,
        TRUE,
        FALSE,
-       
+
        // empty data
 /*17*/ "",
        '',
-       array(),
+       'Array',
 
        // string data
 /*20*/ "abcxyz",
        'abcxyz',
        $heredoc,
-       
-       // undefined data
-/*23*/ @$undefined_var,
 
-       // unset data
-/*24*/ @$unset_var,
+
 
        // resource variable
-/*25*/ $fp
-);
+/*23*/ $fp
+];
 
 // loop through each element of $inputs to check the behaviour of base_convert()
 $iterator = 1;
 foreach($inputs as $input) {
-	echo "\n-- Iteration $iterator --\n";
-	var_dump(base_convert($input, 10, 8));
-	$iterator++;
+    echo "\n-- Iteration $iterator --\n";
+    var_dump(base_convert($input, 10, 8));
+    $iterator++;
 };
 fclose($fp);
-?>
-===Done===
+echo "===Done===";
+}

@@ -1,3 +1,3 @@
-<?php
-function foo($arg1/) {}
-?>
+<?hh
+function foo($arg1/) :mixed{}
+

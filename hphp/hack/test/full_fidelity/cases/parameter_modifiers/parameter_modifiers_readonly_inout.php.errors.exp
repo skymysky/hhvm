@@ -1,0 +1,2 @@
+(5,42)-(5,44) A parameter cannot be both `inout` and `readonly`.
+(6,42)-(6,44) A parameter cannot be both `inout` and `readonly`.

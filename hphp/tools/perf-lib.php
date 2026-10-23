@@ -1,30 +1,34 @@
-<?php
+<?hh
 // Copyright 2004-present Facebook. All Rights Reserved.
 
 function starts_with($str, $prefix) {
   return strncmp($str, $prefix, strlen($prefix)) === 0;
 }
 
-# If $func looks like a mangled C++ symbol, attempt to demangle it, stripping
-# off any trailing junk first.
-function filter_func(string $func): string {
-  static $cache = Map {};
+<<__Memoize>>
+function filter_func_raw(string $func): string {
+  return trim(shell_exec("echo '$func' | c++filt"));
+}
 
+// If $func looks like a mangled C++ symbol, attempt to demangle it, stripping
+// off any trailing junk first.
+function filter_func(string $func): string {
   if (strncmp($func, '_Z', 2) === 0) {
-    if (preg_match('/^(.+)\.isra\.\d+$/', $func, &$matches) === 1) {
+    $matches = null;
+    if (
+      preg_match_with_matches('/^(.+)\.isra\.\d+$/', $func, inout $matches) ===
+        1
+    ) {
       $func = $matches[1];
     }
-    if (!isset($cache[$func])) {
-      $cache[$func] = trim(shell_exec("echo '$func' | c++filt"));
-    }
-    $func = $cache[$func];
+    return filter_func_raw($func);
   }
 
   return $func;
 }
 
-# Read perf samples from the given file stream into a Vector of stack traces.
-# The stream should contain the output of "perf script -f comm,ip,sym".
+// Read perf samples from the given file stream into a Vector of stack traces.
+// The stream should contain the output of "perf script -f comm,ip,sym".
 function read_perf_samples($file, $desired_binary_prefix = 'hhvmworker') {
   $samples = Vector {};
   $skip_sample = false;
@@ -46,9 +50,14 @@ function read_perf_samples($file, $desired_binary_prefix = 'hhvmworker') {
       continue;
     }
 
-    if (preg_match('/^[a-f0-9]+ (.+)$/', $line, &$matches) === 1) {
-      if (!$stack) $stack = Vector {};
-      $stack[] = filter_func($matches[1]);
+    $matches = null;
+    if (
+      preg_match_with_matches('/^[a-f0-9]+ (.+)$/', $line, inout $matches) === 1
+    ) {
+      if (!starts_with($matches[0], "ffffffff")) { // skip kernel frames
+        if (!$stack) $stack = Vector {};
+        $stack[] = filter_func($matches[1]);
+      }
     } else {
       if ($stack !== null) throw new Exception("Unexpected line $line");
       $binary = $line;

@@ -1,8 +1,11 @@
 <?hh
 // Copyright 2004-present Facebook. All Rights Reserved.
 
-function loop() {
-  $a = $b = $c = $d = false;
+function loop() :mixed{
+  $d = false;
+  $c = $d;
+  $b = $c;
+  $a = $b;
   while (true) {
     if ($a) continue;
     if ($c) {
@@ -18,4 +21,8 @@ function loop() {
     $d = (bool)__hhvm_intrinsics\launder_value(true);
   }
 }
+
+<<__EntryPoint>>
+function main_equiv_locals() :mixed{
 loop();
+}

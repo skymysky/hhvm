@@ -14,15 +14,14 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_IR_INSTR_TABLE_H_
-#define incl_HPHP_IR_INSTR_TABLE_H_
+#pragma once
 
 #include <folly/Hash.h>
 
 #include "hphp/runtime/vm/jit/ir-instruction.h"
 #include "hphp/runtime/vm/jit/ssa-tmp.h"
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 ///////////////////////////////////////////////////////////////////////////////
 
 /*
@@ -103,6 +102,5 @@ private:
 };
 
 ///////////////////////////////////////////////////////////////////////////////
-}}
+}
 
-#endif

@@ -1,8 +1,12 @@
-<?php
+<?hh
 
-function main($s) {
+function main($s) :mixed{
   var_dump(wordwrap($s, 10));
 }
 
-main("hello goodbye");
 
+
+<<__EntryPoint>>
+function main_builtin_defaults() :mixed{
+main("hello goodbye");
+}

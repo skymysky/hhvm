@@ -1,0 +1,26 @@
+error: Typing[4422] Async functions that do not return a value must have a type of Awaitable<void> [1]
+
+function_async_partial.php:4:23
+2 | 
+3 | // Skipping an Awaitable hint's type parameters is an error.
+4 | async function foo(): Awaitable {}
+  |                       ^^^^^^^^^ [1]
+
+error: Typing[4101] Wrong number of type arguments (expected 1, got 0) [1]
+-> Definition is here [2]
+
+function_async_partial.php:4:23
+  2 | 
+  3 | // Skipping an Awaitable hint's type parameters is an error.
+  4 | async function foo(): Awaitable {}
+    |                       ^^^^^^^^^ [1]
+
+classes.hhi:167:18
+165 |     __SupportDynamicType,
+166 |   >>
+167 |   abstract class Awaitable<+T> {
+    |                  ^^^^^^^^^ [2]
+168 |     public static function setOnIOWaitEnterCallback(
+169 |       ?(function(): void) $callback,
+
+2 errors found

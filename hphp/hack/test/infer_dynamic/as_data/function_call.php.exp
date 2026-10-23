@@ -1,0 +1,11 @@
+{ "function": "\\takes_int", "solutions": [] }
+{
+  "function": "\\test_call_dynamic",
+  "solutions": [
+    {
+      "name": "$d",
+      "pos": "File \"function_call.php\", line 5, characters 36-37:",
+      "type": "(function(int, string): int)"
+    }
+  ]
+}

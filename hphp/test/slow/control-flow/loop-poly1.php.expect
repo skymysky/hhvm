@@ -1,12 +1,12 @@
-array(0) {
+dict(0) {
 }
-array(2) {
+dict(2) {
   [0]=>
   string(1) "1"
   [1]=>
   int(1)
 }
-array(2) {
+dict(2) {
   [0]=>
   string(1) "1"
   [1]=>

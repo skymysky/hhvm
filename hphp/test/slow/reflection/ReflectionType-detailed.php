@@ -1,17 +1,26 @@
 <?hh
-function foo(stdClass $a, array $b, callable $c, stdClass $d = null,
+function foo(stdClass $a, AnyArray $b, callable $c, ?stdClass $d = null,
              $e = null, string $f, bool $g, int $h, float $i,
-             NotExisting $j) { }
+             NotExisting $j) :mixed{ }
 function bar(): stdClass { return new stdClass; }
-class c extends stdClass {
-  function bar(self $x): int { return 1; }
-  function pbar(parent $x): int { return 1; }
-  function factory(): self { return new c; }
-  function pfactory(): parent { return new stdClass; }
+
+class Base {
+  function foo<T as arraykey>() : T {
+    return 1;
+  }
 }
+
+class Derived extends Base {
+  function foo<T as ?int>() : T {
+    return 1;
+  }
+}
+
+<<__EntryPoint>>
+function main_reflection_type_detailed() :mixed{
 $closure = function (Test $a): Test { return $a; };
 echo "*** functions\n";
-foreach ([
+foreach (vec[
   new ReflectionFunction('foo'),
   new ReflectionFunction($closure),
 ] as $idx => $rf) {
@@ -22,15 +31,13 @@ foreach ([
     if ($ra) {
       var_dump($ra->allowsNull());
       var_dump($ra->isBuiltin());
-      var_dump((string)$ra);
+      var_dump($ra->__toString());
     }
   }
 }
 echo "\n*** methods\n";
-foreach ([
+foreach (vec[
   new ReflectionMethod('SplObserver', 'update'),
-  new ReflectionMethod('c', 'bar'),
-  new ReflectionMethod('c', 'pbar'),
   new ReflectionMethod($closure, '__invoke'),
 ] as $idx => $rm) {
   foreach ($rm->getParameters() as $idx2 => $rp) {
@@ -40,19 +47,17 @@ foreach ([
     if ($ra) {
       var_dump($ra->allowsNull());
       var_dump($ra->isBuiltin());
-      var_dump((string)$ra);
+      var_dump($ra->__toString());
     }
   }
 }
 echo "\n*** return types\n";
-foreach ([
+foreach (vec[
   new ReflectionMethod('SplObserver', 'update'),
   new ReflectionFunction('bar'),
-  new ReflectionMethod('c', 'bar'),
-  new ReflectionMethod('c', 'factory'),
-  new ReflectionMethod('c', 'pfactory'),
   new ReflectionFunction($closure),
   new ReflectionMethod($closure, '__invoke'),
+  new ReflectionMethod('Derived', 'foo'),
 ] as $idx => $rf) {
   echo "** Function/method return type $idx\n";
   var_dump($rf->hasReturnType());
@@ -60,6 +65,7 @@ foreach ([
   if ($ra) {
     var_dump($ra->allowsNull());
     var_dump($ra->isBuiltin());
-    var_dump((string)$ra);
+    var_dump($ra->__toString());
   }
+}
 }

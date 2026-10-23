@@ -3,7 +3,7 @@
 // Test that iterators for Vector and Map remain valid
 // if an existing element is overwritten.
 
-function main() {
+function main() :mixed{
 
   // Vector
   $v = Vector {0, 0, 0};
@@ -22,4 +22,8 @@ function main() {
   var_dump($sm);
 }
 
+
+<<__EntryPoint>>
+function main_iter_collections() :mixed{
 main();
+}

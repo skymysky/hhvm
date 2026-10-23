@@ -1,74 +1,62 @@
-array(3) {
+dict(3) {
   ["10"]=>
   int(100)
   [10]=>
-  &int(1)
+  int(1)
   [11]=>
-  array(1) {
-    [0]=>
-    &int(1)
+  vec(1) {
+    int(1)
   }
 }
-array(2) {
+dict(2) {
   ["10"]=>
   int(100)
   [11]=>
-  array(1) {
-    [0]=>
-    &int(1)
+  vec(1) {
+    int(1)
   }
 }
-array(4) {
-  ["10"]=>
-  int(100)
+dict(3) {
   [0]=>
-  &int(1)
+  int(1)
   [1]=>
-  array(1) {
-    [0]=>
-    &int(1)
+  vec(1) {
+    int(1)
   }
   [2]=>
   int(10)
 }
-array(4) {
+dict(4) {
   ["10"]=>
   int(100)
   [0]=>
-  &int(1)
+  int(1)
   [1]=>
-  array(1) {
-    [0]=>
-    &int(1)
+  vec(1) {
+    int(1)
   }
   [2]=>
   int(10)
 }
-array(3) {
+dict(2) {
   [0]=>
-  array(1) {
-    [0]=>
-    &int(1)
+  vec(1) {
+    int(1)
   }
   [1]=>
-  &int(1)
-  ["10"]=>
-  int(100)
+  int(1)
 }
-array(2) {
-  [0]=>
-  array(2) {
+vec(2) {
+  dict(2) {
     [0]=>
     int(100)
     [1]=>
-    &int(1)
+    int(1)
   }
-  [1]=>
-  array(1) {
+  dict(1) {
     [0]=>
-    array(1) {
-      [0]=>
-      &int(1)
+    vec(1) {
+      int(1)
     }
   }
 }

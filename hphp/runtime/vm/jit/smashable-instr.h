@@ -14,8 +14,7 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_JIT_SMASHABLE_INSTR_H_
-#define incl_HPHP_JIT_SMASHABLE_INSTR_H_
+#pragma once
 
 #include "hphp/runtime/vm/jit/types.h"
 #include "hphp/runtime/vm/jit/phys-reg.h"
@@ -23,7 +22,7 @@
 #include "hphp/util/asm-x64.h"
 #include "hphp/util/data-block.h"
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 
 struct CGMeta;
 
@@ -49,24 +48,25 @@ struct CGMeta;
  *      - jcc
  *      - jcc_jmp:  A jcc followed contiguously by a jmp, both of which have
  *                  independently smashable targets.  Used for bindjcc1st.
+ *      - interceptjcc:  A jcc instruction that can be smashed into a
+ *                       jmp instruction to the same target.
+ *      - interceptjmp:  A jmp instruction that can be smashed into a
+ *                       jcc instruction to the same target.
  *
- * Smashable instructions must have a statically known length (though they may
- * require nop-gap realignment when they are emitted).
+ * Smashable instructions must have a statically known maximum length (though
+ * they may require nop-gap realignment when they are emitted, and some
+ * architectures may emit a shorter variant).
  */
 
 /*
- * Size of the smashable machine code sequence.
+ * Maximum size of the smashable machine code sequence.
  */
 size_t smashableMovqLen();
 size_t smashableCmpqLen();
 size_t smashableCallLen();
 size_t smashableJmpLen();
 size_t smashableJccLen();
-
-/*
- * Boundry to align the smashables to (normally cache line size).
- */
-size_t smashableAlignTo();
+size_t smashableInterceptLen();
 
 /*
  * Emit a smashable instruction and return the instruction's address.
@@ -74,9 +74,7 @@ size_t smashableAlignTo();
  * For jcc_and_jmp, return a pair of (jcc_addr, jmp_addr).
  */
 TCA emitSmashableMovq(CodeBlock& cb, CGMeta& fixups, uint64_t imm,
-                      PhysReg d);
-TCA emitSmashableCmpq(CodeBlock& cb, CGMeta& fixups, int32_t imm,
-                      PhysReg r, int8_t disp);
+                      PhysReg d, bool emitFarLiteral = false);
 TCA emitSmashableCall(CodeBlock& cb, CGMeta& fixups, TCA target);
 TCA emitSmashableJmp(CodeBlock& cb, CGMeta& fixups, TCA target);
 TCA emitSmashableJcc(CodeBlock& cb, CGMeta& fixups, TCA target,
@@ -96,6 +94,8 @@ void smashCmpq(TCA inst, uint32_t imm);
 void smashCall(TCA inst, TCA target);
 void smashJmp(TCA inst, TCA target);
 void smashJcc(TCA inst, TCA target);
+void smashInterceptJcc(TCA inst);
+void smashInterceptJmp(TCA inst);
 
 /*
  * Extract instruction operands from assembly.
@@ -108,6 +108,12 @@ uint64_t smashableMovqImm(TCA inst);
 uint32_t smashableCmpqImm(TCA inst);
 TCA smashableCallTarget(TCA inst);
 TCA smashableJmpTarget(TCA inst);
+/*
+ * If a smashable call reaches its target by loading a pointer rather than by
+ * branching straight there, the address of that pointer; nullptr otherwise.
+ * Lets an external patcher retarget the call without decoding our encoding.
+ */
+TCA smashableCallLiteral(TCA inst);
 TCA smashableJccTarget(TCA inst);
 ConditionCode smashableJccCond(TCA inst);
 
@@ -126,6 +132,4 @@ bool optimizeSmashedJcc(TCA inst);
 
 ///////////////////////////////////////////////////////////////////////////////
 
-}}
-
-#endif
+}

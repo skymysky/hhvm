@@ -14,40 +14,70 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_HTTP_SERVER_TRANSPORT_H_
-#define incl_HPHP_HTTP_SERVER_TRANSPORT_H_
+#pragma once
 
+#include "hphp/runtime/base/debuggable.h"
+#include "hphp/runtime/base/request-id.h"
+#include "hphp/runtime/base/request-tracing.h"
+#include "hphp/runtime/base/runtime-option.h"
+#include "hphp/runtime/base/type-string.h"
+#include "hphp/util/functional.h"
+#include "hphp/util/gzip.h"
+#include "hphp/util/string-holder.h"
+#include "hphp/util/tiny-vector.h"
+
+#include "proxygen/lib/http/HTTPHeaders.h"
+
+#include <chrono>
 #include <list>
 #include <string>
-#include <unordered_map>
 #include <utility>
-
-#include "hphp/util/compression.h"
-#include "hphp/util/functional.h"
-#include "hphp/runtime/base/debuggable.h"
-#include "hphp/runtime/base/runtime-option.h"
-#include "hphp/runtime/base/string-holder.h"
-#include "hphp/runtime/base/type-string.h"
-
-namespace brotli {
-  class BrotliCompressor;
-};
+#include <vector>
 
 namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
 
 struct Array;
 struct Variant;
+struct ResponseCompressorManager;
+namespace stream_transport {
+struct StreamTransport;
+}
+struct StructuredLogEntry;
 
-/**
- * For storing headers and cookies.
- */
-template <typename V>
-using CaseInsenMap =
-  std::unordered_map<std::string, V, string_hashi, string_eqstri>;
+using HeaderMap = hphp_fast_string_imap<TinyVector<std::string>>;
+using CookieMap = hphp_fast_string_map<std::string>;
 
-using HeaderMap = CaseInsenMap<std::vector<std::string>>;
-using CookieList = std::vector<std::pair<std::string, std::string>>;
+struct ITransportHeaders {
+  enum class Method {
+    Unknown,
+    GET,
+    POST,
+    HEAD,
+    AUTO, // check GET parameter first, then POST
+  };
+  /* Request header methods */
+  virtual const char *getUrl() = 0;
+  virtual std::string getCommand() = 0; // URL with params stripped
+  virtual std::string getHeader(const char *name) = 0;
+  virtual const HeaderMap& getHeaders() = 0;
+  virtual const proxygen::HTTPHeaders* getProxygenHeaders() { return nullptr; }
+  virtual Method getMethod() = 0;
+  virtual const char *getMethodName() = 0;
+  virtual const void *getPostData(size_t &size) = 0;
+
+  /* Response header methods */
+  virtual void addHeaderNoLock(const char *name, const char *value) = 0;
+  virtual void addHeader(const char *name, const char *value) = 0;
+  virtual void addHeader(const OptString& header) = 0;
+  virtual void replaceHeader(const char *name, const char *value) = 0;
+  virtual void replaceHeader(const OptString& header) = 0;
+  virtual void removeHeader(const char *name) = 0;
+  virtual void removeAllHeaders() = 0;
+  virtual void getResponseHeaders(HeaderMap& headers) = 0;
+  virtual void addToCommaSeparatedHeader(
+      const char* name, const char* value) = 0;
+};
 
 /**
  * A class defining an interface that request handler can use to query
@@ -56,15 +86,8 @@ using CookieList = std::vector<std::pair<std::string, std::string>>;
  * Note that one transport object is created for each request, and
  * one transport is ONLY accessed from one single thread.
  */
-struct Transport : IDebuggable {
-  enum class Method {
-    Unknown,
-
-    GET,
-    POST,
-    HEAD,
-    AUTO, // check GET parameter first, then POST
-  };
+struct Transport : IDebuggable, ITransportHeaders {
+  using Method = ITransportHeaders::Method;
 
   // TODO: add all status codes
   // (http://www.w3.org/Protocols/rfc2616/rfc2616-sec10.html)
@@ -100,8 +123,17 @@ public:
 
   void onRequestStart(const timespec &queueTime);
   const timespec &getQueueTime() const { return m_queueTime; }
+  const std::chrono::steady_clock::time_point getQueueTimePoint() const {
+    return timespecToSteadyTimePoint(m_queueTime);
+  }
   const timespec &getWallTime() const { return m_wallTime; }
+  const std::chrono::steady_clock::time_point getWallTimePoint() const {
+    return timespecToSteadyTimePoint(m_wallTime);
+  }
   const timespec &getCpuTime() const { return m_cpuTime; }
+  const std::chrono::steady_clock::time_point getCpuTimePoint() const {
+    return timespecToSteadyTimePoint(m_cpuTime);
+  }
   const int64_t &getInstructions() const { return m_instructions; }
   const int64_t &getSleepTime() const { return m_sleepTime; }
   void incSleepTime(unsigned int seconds) { m_sleepTime += seconds; }
@@ -115,13 +147,25 @@ public:
     m_nsleepTimeN %= 1000000000;
   }
 
+  void forceInitRequestTrace();
+  rqtrace::Trace* getRequestTrace() { return m_requestTrace.get_pointer(); }
+  StructuredLogEntry* createStructuredLogEntry();
+  StructuredLogEntry* getStructuredLogEntry();
+  void resetStructuredLogEntry();
+
+  /*
+   * Manage root request id.
+   */
+  RequestId getRootRequestId() const { return m_root_req_id; }
+  void setRootRequestId(RequestId id) { m_root_req_id = id; }
+
   ///////////////////////////////////////////////////////////////////////////
   // Functions sub-classes have to implement.
 
   /**
    * Request URI.
    */
-  virtual const char *getUrl() = 0;
+  virtual const char *getUrl() override = 0;
   virtual const char *getRemoteHost() = 0;
   virtual uint16_t getRemotePort() = 0;
   // The transport can override REMOTE_ADDR if it has one
@@ -139,31 +183,61 @@ public:
    */
   virtual const char *getServerName() {
     return "";
-  };
+  }
   virtual const std::string& getServerAddr() {
     auto const& ipv4 = RuntimeOption::GetServerPrimaryIPv4();
     return ipv4.empty() ? RuntimeOption::GetServerPrimaryIPv6() : ipv4;
-  };
+  }
   virtual uint16_t getServerPort() {
-    return RuntimeOption::ServerPort;
-  };
+    return Cfg::Server::Port;
+  }
   virtual const char *getServerSoftware() {
     return "HPHP";
-  };
+  }
+
+  /**
+   * Get stream transport if it has one, otherwise returns nullptr
+   */
+  virtual std::shared_ptr<stream_transport::StreamTransport>
+  getStreamTransport() const {
+    return nullptr;
+  }
+  /**
+   * Is this a streaming transport?
+   */
+  virtual bool isStreamTransport() const {
+    return false;
+  }
+
+  /**
+   * Returns true if post data should be read.
+   */
+  virtual bool shouldReadPostData() {
+    return getMethod() == Transport::Method::POST &&
+      !isStreamTransport();
+  }
 
   /**
    * POST request's data.
    */
-  virtual const void *getPostData(size_t &size) = 0;
+  virtual const void *getPostData(size_t &size) override = 0;
   virtual bool hasMorePostData() { return false; }
   virtual const void *getMorePostData(size_t &size) { size = 0;return nullptr; }
   virtual bool getFiles(std::string& /*files*/) { return false; }
+
+  /**
+   * This callback should be called when the StreamTransport is ready
+   * to receive data.
+   * This is relevant only for transports that have a StreamTransport.
+   */
+  virtual void onStreamReady() {}
+
   /**
    * Is this a GET, POST or anything?
    */
-  virtual Method getMethod() = 0;
+  virtual Method getMethod() override = 0;
   virtual const char *getExtendedMethod() { return nullptr;}
-  const char *getMethodName();
+  const char *getMethodName() override;
 
   /**
    * What version of HTTP was the request?
@@ -176,36 +250,37 @@ public:
   virtual size_t getRequestSize() const;
 
   /**
-   * Get request header(s).
+   * Get transport params.
    */
-  virtual std::string getHeader(const char *name) = 0;
-  virtual void getHeaders(HeaderMap &headers) = 0;
-  virtual void getTransportParams(HeaderMap& /*serverParams*/){};
+  virtual void getTransportParams(HeaderMap& /*serverParams*/){}
 
   /**
    * Get a description of the type of transport.
    */
-  virtual String describe() const = 0;
+  virtual OptString describe() const = 0;
 
   /**
    * Get/set response headers.
    */
-  void addHeaderNoLock(const char *name, const char *value);
-  void addHeader(const char *name, const char *value);
-  void addHeader(const String& header);
-  void replaceHeader(const char *name, const char *value);
-  void replaceHeader(const String& header);
-  void removeHeader(const char *name);
-  void removeAllHeaders();
-  void getResponseHeaders(HeaderMap &headers);
+  void addHeaderNoLock(const char *name, const char *value) override;
+  void addHeader(const char *name, const char *value) override;
+  void addHeader(const OptString& header) override;
+  void replaceHeader(const char *name, const char *value) override;
+  void replaceHeader(const OptString& header) override;
+  void removeHeader(const char *name) override;
+  void removeAllHeaders() override;
+  void getResponseHeaders(HeaderMap &headers) override;
   std::string getFirstHeaderFile() const { return m_firstHeaderFile;}
   int getFirstHeaderLine() const { return m_firstHeaderLine;}
+  // Appends value to the response header field, separated with a ", "
+  // If the value doesn't exist in m_responseHeaders[name] then, we add it
+  void addToCommaSeparatedHeader(const char* name, const char* value) override;
 
   /**
    * Content/MIME type related functions.
    */
-  void setMimeType(const String& mimeType);
-  String getMimeType();
+  void setMimeType(const OptString& mimeType);
+  OptString getMimeType();
   bool getUseDefaultContentType() { return m_sendContentType;}
   void setUseDefaultContentType(bool send) { m_sendContentType = send;}
 
@@ -214,13 +289,13 @@ public:
    */
   void enableCompression();
   void disableCompression();
-  bool isCompressionEnabled() const;
+  bool isCompressionEnabled();
 
   /**
    * Set cookie response header.
    */
-  bool setCookie(const String& name, const String& value, int64_t expire = 0,
-                 const String& path = "", const String& domain = "",
+  bool setCookie(const OptString& name, const OptString& value, int64_t expire = 0,
+                 const OptString& path = "", const OptString& domain = "",
                  bool secure = false, bool httponly = false,
                  bool encode_url = true);
 
@@ -257,45 +332,6 @@ public:
   virtual void onSendEndImpl() {}
 
   /**
-   * Returns true if this transport supports server pushed resources
-   */
-  virtual bool supportsServerPush() { return false; }
-
-  /**
-   * Attempt to push the resource identified by host/path on this transport
-   *
-   * @param priority (3 bit priority, 0 = highest, 7 = lowest),
-   * @param promiseHeaders HTTP request headers for this resource
-   *        (for PUSH_PROMISE)
-   * @param responseHeaders HTTP response headers for this resource
-   * @param body body bytes (optional)
-   * @param size length of @p body or 0
-   * @param eom true if no more body bytes are expected
-   *
-   * @return an ID that can be passed to pushResourceBody if more body
-   *         is being streamed later.  0 indicates that the push failed
-   *         immediately.
-   */
-  virtual int64_t
-  pushResource(const char* /*host*/, const char* /*path*/, uint8_t /*priority*/,
-               const Array& /*promiseHeaders*/,
-               const Array& /*responseHeaders*/, const void* /*data*/,
-               int /*size*/, bool /*eom*/) {
-    return 0;
-  };
-
-  /**
-   * Stream body and/or EOM marker for a pushed resource
-   *
-   * @param id ID returned by pushResource
-   * @param data body bytes (optional if eom is true)
-   * @param size length of @p body
-   * @param eom true if no more body bytes are expected
-   */
-  virtual void pushResourceBody(int64_t /*id*/, const void* /*data*/,
-                                int /*size*/, bool /*eom*/) {}
-
-  /**
    * Need this implementation to break keep-alive connections.
    */
   virtual bool isServerStopping() { return false;}
@@ -319,13 +355,7 @@ public:
    *   foo/bar?x=1   command is "foo/bar"
    *   /foo/bar?x=1  command is "foo/bar"
    */
-  std::string getCommand();
-
-  /**
-   * Whether a parameter exists. Normally this is not needed to know, unless
-   * "null" is different from an empty string or 0.
-   */
-  bool paramExists(const char *name, Method method = Method::GET);
+  std::string getCommand() override;
 
   /**
    * Get value of a parameter. Returns empty string is not present.
@@ -374,45 +404,55 @@ public:
   std::string getCookie(const std::string &name);
 
   /**
-   * Test whether client is okay to accept compressed response.
-   */
-  bool decideCompression();
-
-  /**
    * Sending back a response.
+   * These APIs should not be used for streaming treansports.
    */
   void setResponse(int code, const char *info = nullptr);
   const std::string &getResponseInfo() const { return m_responseCodeInfo; }
   bool headersSent() { return m_headerSent;}
-  void sendRaw(void *data, int size, int code = 200,
-               bool compressed = false, bool chunked = false,
+  void sendRaw(const char *data, int size, int code = 200,
+               bool precompressed = false, bool chunked = false,
                const char *codeInfo = nullptr);
+
+  /**
+   * Sending response for streaming transports.
+   */
+  virtual void sendStreamResponse(const void* /*data*/, int /*size*/) {}
+  virtual void sendStreamEOM() {}
 private:
-  void sendRawInternal(const void *data, int size, int code = 200,
-                       bool compressed = false,
+  const std::chrono::steady_clock::time_point timespecToSteadyTimePoint(const  timespec &ts) const {
+    auto duration = std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+      std::chrono::seconds{ts.tv_sec} + std::chrono::nanoseconds{ts.tv_nsec}
+    );
+    return std::chrono::steady_clock::time_point(duration);
+  }
+
+  void sendRawInternal(const char *data, int size, int code = 200,
+                       bool precompressed = false,
                        const char *codeInfo = nullptr);
 public:
-  void sendString(const char *data, int code = 200, bool compressed = false,
+  void sendString(const char *data, int code = 200, bool precompressed = false,
                   bool chunked = false,
                   const char * codeInfo = nullptr) {
-    sendRaw((void*)data, strlen(data), code, compressed, chunked, codeInfo);
+    sendRaw(data, strlen(data), code, precompressed, chunked, codeInfo);
   }
   void sendString(const std::string &data, int code = 200,
-                  bool compressed = false, bool chunked = false,
+                  bool precompressed = false, bool chunked = false,
                   const char *codeInfo = nullptr) {
-    sendRaw((void*)data.c_str(), data.length(), code, compressed, chunked,
+    sendRaw(data.c_str(), data.length(), code, precompressed, chunked,
             codeInfo);
   }
   void redirect(const char *location, int code, const char *info = nullptr);
 
   // TODO: support rfc1867
-  virtual bool isUploadedFile(const String& filename);
+  virtual bool isUploadedFile(const OptString& filename);
 
+  // For streaming transports, only getResponseSentSize is valid.
   int getResponseSize() const { return m_responseSize; }
-  int getResponseCode() const { return m_responseCode; }
-
   int getResponseTotalSize() const { return m_responseTotalSize; }
   int getResponseSentSize() const { return m_responseSentSize; }
+
+  int getResponseCode() const { return m_responseCode; }
   int64_t getFlushTime() const { return m_flushTimeUs; }
   int getLastChunkSentSize();
   void getChunkSentSizes(Array &ret);
@@ -443,102 +483,76 @@ protected:
    * token's start char * addresses in ParamMaps. Therefore, this entire
    * process is very efficient without excessive string copying.
    */
-  using ParamMap = hphp_hash_map<const char*, std::vector<const char*>,
+  using ParamMap = hphp_fast_map<const char*, TinyVector<const char*>,
                                  cstr_hash, eqstr>;
 
-  // timers
-  timespec m_queueTime;
-  timespec m_wallTime;
-  timespec m_cpuTime;
+  // timers and other perf data
+  timespec m_queueTime{};
+  timespec m_wallTime{};
+  timespec m_cpuTime{};
 
-  int64_t m_instructions;
+  int64_t m_instructions{};
 
-  int64_t m_sleepTime;
-  int64_t m_usleepTime;
-  int64_t m_nsleepTimeS;
-  int32_t m_nsleepTimeN;
+  int64_t m_sleepTime{};
+  int64_t m_usleepTime{};
+  int64_t m_nsleepTimeS{};
+  int32_t m_nsleepTimeN{};
+
+  std::unique_ptr<StructuredLogEntry> m_structLogEntry;
 
   // input
-  char *m_url;
-  char *m_postData;
-  bool m_postDataParsed;
+  char *m_url{};
+  char *m_postData{};
   ParamMap m_getParams;
   ParamMap m_postParams;
+  bool m_postDataParsed{};
 
   // output
-  bool m_chunkedEncoding;
-  bool m_headerSent;
-  int m_responseCode;
+  bool m_chunkedEncoding{};
+  bool m_headerSent{};
+  bool m_firstHeaderSet{};
+  bool m_sendEnded{};
+  bool m_sendStarted{false};
+  bool m_sendContentType{true};
+  bool m_isSSL{};
+  int m_responseCode{-1};
   std::string m_responseCodeInfo;
   HeaderMap m_responseHeaders;
-  bool m_firstHeaderSet;
   std::string m_firstHeaderFile;
-  int m_firstHeaderLine;
-  CookieList m_responseCookiesList;
-  int m_responseSize;
-  int m_responseTotalSize; // including added headers
-  int m_responseSentSize;
-  int64_t m_flushTimeUs;
-  bool m_sendEnded;
+  int m_firstHeaderLine{};
+  int m_responseSize{};
+  CookieMap m_responseCookies;
+  int m_responseTotalSize{}; // including added headers
+  int m_responseSentSize{};
+  int64_t m_flushTimeUs{};
 
   std::vector<int> m_chunksSentSizes;
 
-  // Supported compression types.
-  enum CompressionType {
-    Brotli,
-    BrotliChunked,
-    Gzip,
-    Max,
-  };
-  static const char* ENCODING_TYPE_TO_NAME[CompressionType::Max + 1];
-  const char* compressionName(CompressionType type);
-
   std::string m_mimeType;
-  bool m_sendContentType;
-  //  0 - disabled
-  //  1 - enabled, ini_set("off) allows to disable
-  // -1 - disabled, ini_set("on") allows to enable
-  int8_t m_compressionEnabled[CompressionType::Max];
-  // encodings accepted by the client, and enabled
-  bool m_acceptedEncodings[CompressionType::Max];
-  // encoding we decided to use
-  CompressionType m_encodingType;
-  std::unique_ptr<StreamCompressor> m_compressor;
-  std::unique_ptr<brotli::BrotliCompressor> m_brotliCompressor;
 
-  bool m_isSSL;
+  std::unique_ptr<ResponseCompressorManager> m_compressor;
 
-  enum class CompressionDecision {
-    NotDecidedYet,
-    ShouldNot,
-    Should,
-    HasTo,
-  };
-  CompressionDecision m_compressionDecision;
+  ThreadType m_threadType{ThreadType::RequestThread};
 
-  ThreadType m_threadType;
+  Optional<rqtrace::Trace> m_requestTrace;
+
+  RequestId m_root_req_id;
 
   // helpers
   void parseGetParams();
   void parsePostParams();
   static void parseQuery(char *query, ParamMap &params);
   static void urlUnescape(char *value);
-  bool splitHeader(const String& header, String &name, const char *&value);
+  bool splitHeader(const OptString& header, OptString &name, const char *&value);
   std::list<std::string> getCookieLines();
 
-  StringHolder prepareResponse(const void *data, int size, bool &compressed,
-                               bool last);
-  StringHolder compressGzip(const void *data, int size, bool &compressed,
-                            bool last);
-  StringHolder compressBrotli(const void *data, int size, bool &compressed,
-                              bool last);
+  ResponseCompressorManager& getCompressor();
 
 private:
-  void prepareHeaders(bool compressed, bool chunked,
+  StringHolder compressResponse(const char *data, int size, bool last);
+  void prepareHeaders(bool precompressed, bool chunked,
     const StringHolder &response, const StringHolder& orig_response);
 };
 
 ///////////////////////////////////////////////////////////////////////////////
 }
-
-#endif // incl_HPHP_HTTP_SERVER_TRANSPORT_H_

@@ -18,6 +18,7 @@
 #include "hphp/runtime/ext/url/ext_url.h"
 #include <set>
 #include "hphp/runtime/base/array-init.h"
+#include "hphp/runtime/base/array-iterator.h"
 #include "hphp/runtime/base/comparisons.h"
 #include "hphp/runtime/base/string-util.h"
 #include "hphp/runtime/base/zend-url.h"
@@ -44,24 +45,20 @@ const int64_t k_PHP_QUERY_RFC1738 = 1;
 const int64_t k_PHP_QUERY_RFC3986 = 2;
 ///////////////////////////////////////////////////////////////////////////////
 
-Variant HHVM_FUNCTION(base64_decode, const String& data,
+Variant HHVM_FUNCTION(base64_decode, const OptString& data,
                                      bool strict /* = false */) {
-  String decoded = StringUtil::Base64Decode(data, strict);
+  OptString decoded = StringUtil::Base64Decode(data, strict);
   if (decoded.isNull()) {
     return false;
   }
   return decoded;
 }
 
-Variant HHVM_FUNCTION(base64_encode, const String& data) {
-  String encoded = StringUtil::Base64Encode(data);
-  if (encoded.isNull()) {
-    return false;
-  }
-  return encoded;
+OptString HHVM_FUNCTION(base64_encode, const OptString& data) {
+  return StringUtil::Base64Encode(data);
 }
 
-Variant HHVM_FUNCTION(get_headers, const String& url, int format /* = 0 */) {
+Variant HHVM_FUNCTION(get_headers, const OptString& url, int64_t format /* = 0 */) {
   Variant c = HHVM_FN(curl_init)();
   HHVM_FN(curl_setopt)(c.toResource(), CURLOPT_URL, url);
   HHVM_FN(curl_setopt)(c.toResource(), CURLOPT_RETURNTRANSFER, true);
@@ -71,9 +68,9 @@ Variant HHVM_FUNCTION(get_headers, const String& url, int format /* = 0 */) {
     return false;
   }
 
-  String response = res.toString();
+  OptString response = res.toString();
   int pos = response.find("\r\n\r\n");
-  if (pos != String::npos) {
+  if (pos != OptString::npos) {
     response = response.substr(0, pos);
   }
 
@@ -95,7 +92,7 @@ Variant HHVM_FUNCTION(get_headers, const String& url, int format /* = 0 */) {
   return assoc;
  }
 
-static String normalize_variable_name(const String& name) {
+static OptString normalize_variable_name(const OptString& name) {
   StringBuffer sb;
   for (int i = 0; i < name.size(); i++) {
     char ch = name.charAt(i);
@@ -112,7 +109,7 @@ static String normalize_variable_name(const String& name) {
   return sb.detach();
 }
 
-Array HHVM_FUNCTION(get_meta_tags, const String& filename,
+Array HHVM_FUNCTION(get_meta_tags, const OptString& filename,
                     bool /*use_include_path*/ /* = false */) {
   auto const f = HHVM_FN(file_get_contents)(filename).toString();
 
@@ -120,7 +117,7 @@ Array HHVM_FUNCTION(get_meta_tags, const String& filename,
   preg_match_all("/<meta\\s+name=\"(.*?)\"\\s+content=\"(.*?)\".*?>/s",
                  f, &matches, PREG_SET_ORDER);
 
-  Array ret = Array::Create();
+  Array ret = Array::CreateDict();
   for (ArrayIter iter(matches.toArray()); iter; ++iter) {
     Array pair = iter.second().toArray();
     ret.set(normalize_variable_name(pair[1].toString()), pair[2]);
@@ -132,8 +129,8 @@ Array HHVM_FUNCTION(get_meta_tags, const String& filename,
 
 static void url_encode_array(StringBuffer &ret, const Variant& varr,
                              std::set<void*> &seen_arrs,
-                             const String& num_prefix, const String& key_prefix,
-                             const String& key_suffix, const String& arg_sep,
+                             const OptString& num_prefix, const OptString& key_prefix,
+                             const OptString& key_suffix, const OptString& arg_sep,
                              bool encode_plus = true) {
   void *id = varr.isArray() ?
     (void*)varr.getArrayData() : (void*)varr.getObjectData();
@@ -162,7 +159,7 @@ static void url_encode_array(StringBuffer &ret, const Variant& varr,
     bool numeric = key.isNumeric();
 
     if (data.isArray() || data.is(KindOfObject)) {
-      String encoded;
+      OptString encoded;
       if (numeric) {
         encoded = key;
       } else {
@@ -175,8 +172,8 @@ static void url_encode_array(StringBuffer &ret, const Variant& varr,
       new_prefix.append(encoded);
       new_prefix.append(key_suffix);
       new_prefix.append("%5B");
-      url_encode_array(ret, data, seen_arrs, String(),
-                       new_prefix.detach(), String("%5D", CopyString),
+      url_encode_array(ret, data, seen_arrs, OptString(),
+                       new_prefix.detach(), OptString("%5D", CopyString),
                        arg_sep, encode_plus);
     } else {
       if (!ret.empty()) {
@@ -192,9 +189,9 @@ static void url_encode_array(StringBuffer &ret, const Variant& varr,
       ret.append(key_suffix);
       ret.append("=");
       if (data.isInteger() || data.is(KindOfBoolean)) {
-        ret.append(String(data.toInt64()));
+        ret.append(OptString::FromInt64(data.toInt64()));
       } else if (data.is(KindOfDouble)) {
-        ret.append(String(data.toDouble()));
+        ret.append(OptString::FromDouble(data.toDouble()));
       } else {
         ret.append(StringUtil::UrlEncode(data.toString(), encode_plus));
       }
@@ -202,20 +199,20 @@ static void url_encode_array(StringBuffer &ret, const Variant& varr,
   }
 }
 
-const StaticString s_arg_separator_output("arg_separator.output");
+const StaticString s_arg_separator_output("&");
 
 Variant HHVM_FUNCTION(http_build_query, const Variant& formdata,
                            const Variant& numeric_prefix /* = null_string */,
-                           const String& arg_separator /* = null_string */,
-                           int enc_type /* = k_PHP_QUERY_RFC1738 */) {
+                           const OptString& arg_separator /* = null_string */,
+                           int64_t enc_type /* = k_PHP_QUERY_RFC1738 */) {
   if (!formdata.isArray() && !formdata.is(KindOfObject)) {
-    throw_invalid_argument("formdata: (need Array or Object)");
+    raise_invalid_argument_warning("formdata: (need Array or Object)");
     return false;
   }
 
-  String arg_sep;
+  OptString arg_sep;
   if (arg_separator.empty()) {
-    arg_sep = HHVM_FN(ini_get)(s_arg_separator_output).toString();
+    arg_sep = s_arg_separator_output;
   } else {
     arg_sep = arg_separator;
   }
@@ -223,12 +220,12 @@ Variant HHVM_FUNCTION(http_build_query, const Variant& formdata,
   StringBuffer ret(1024);
   std::set<void*> seen_arrs;
 
-  String num_prefix;
+  OptString num_prefix;
   if (!numeric_prefix.isNull()) {
-    num_prefix = numeric_prefix.toCStrRef();
+    num_prefix = numeric_prefix.asCStrRef();
   }
   url_encode_array(ret, formdata, seen_arrs,
-                   num_prefix, String(), String(), arg_sep,
+                   num_prefix, OptString(), OptString(), arg_sep,
                    enc_type != k_PHP_QUERY_RFC3986);
   return ret.detach();
 }
@@ -255,7 +252,7 @@ const StaticString
     ret.set(s_ ## name, resource.name);                                 \
   }                                                                     \
 
-Variant HHVM_FUNCTION(parse_url, const String& url,
+Variant HHVM_FUNCTION(parse_url, const OptString& url,
                                  int64_t component /* = -1 */) {
   Url resource;
   if (!url_parse(resource, url.data(), url.size())) {
@@ -284,7 +281,7 @@ Variant HHVM_FUNCTION(parse_url, const String& url,
     return init_null();
   }
 
-  ArrayInit ret(resource.port ? 8 : 7, ArrayInit::Map{});
+  DictInit ret(resource.port ? 8 : 7);
   SET_COMPONENT(scheme);
   SET_COMPONENT(host);
   if (resource.port) {
@@ -298,27 +295,27 @@ Variant HHVM_FUNCTION(parse_url, const String& url,
   return ret.toVariant();
 }
 
-String HHVM_FUNCTION(rawurldecode, const String& str) {
-  return StringUtil::UrlDecode(str, false);
+String HHVM_FUNCTION(rawurldecode, const OptString& str) {
+  return String::assertNonNull(StringUtil::UrlDecode(str, false));
 }
 
-String HHVM_FUNCTION(rawurlencode, const String& str) {
-  return StringUtil::UrlEncode(str, false);
+String HHVM_FUNCTION(rawurlencode, const OptString& str) {
+  return String::assertNonNull(StringUtil::UrlEncode(str, false));
 }
 
-String HHVM_FUNCTION(urldecode, const String& str) {
-  return StringUtil::UrlDecode(str, true);
+String HHVM_FUNCTION(urldecode, const OptString& str) {
+  return String::assertNonNull(StringUtil::UrlDecode(str, true));
 }
 
-String HHVM_FUNCTION(urlencode, const String& str) {
-  return StringUtil::UrlEncode(str, true);
+String HHVM_FUNCTION(urlencode, const OptString& str) {
+  return String::assertNonNull(StringUtil::UrlEncode(str, true));
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 
 struct StandardURLExtension final : Extension {
-  StandardURLExtension() : Extension("url") {}
-  void moduleInit() override {
+  StandardURLExtension() : Extension("url", NO_EXTENSION_VERSION_YET, "hphp_hphpi") {}
+  void moduleRegisterNative() override {
     HHVM_RC_INT(PHP_URL_SCHEME, k_PHP_URL_SCHEME);
     HHVM_RC_INT(PHP_URL_HOST, k_PHP_URL_HOST);
     HHVM_RC_INT(PHP_URL_PORT, k_PHP_URL_PORT);
@@ -339,8 +336,6 @@ struct StandardURLExtension final : Extension {
     HHVM_FE(rawurlencode);
     HHVM_FE(urldecode);
     HHVM_FE(urlencode);
-
-    loadSystemlib();
   }
 } s_standardurl_extension;
 

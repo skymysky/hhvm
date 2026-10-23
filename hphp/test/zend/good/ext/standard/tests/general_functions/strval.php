@@ -1,8 +1,9 @@
-<?php
+<?hh
 /* Prototype: string strval ( mixed $var );
  * Description: Returns the string value of var
  */
 
+<<__EntryPoint>> function main(): void {
 echo "*** Testing str_val() with scalar values***\n";
 $heredoc_string = <<<EOD
 This is a multiline heredoc
@@ -16,32 +17,32 @@ EOD;
 /* null heredoc string */
 $heredoc_empty_string = <<<EOD
 EOD;
-/* heredoc string with NULL */ 
+/* heredoc string with NULL */
 $heredoc_NULL_string = <<<EOD
 NULL
 EOD;
 
-// different valid  scalar vlaues 
-$scalars = array(
+// different valid  scalar vlaues
+$scalars = vec[
   /* integers */
   0,
   1,
   -1,
   -2147483648, // max negative integer value
-  -2147483647, 
+  -2147483647,
   2147483647,  // max positive integer value
   2147483640,
   0x123B,      // integer as hexadecimal
   0x12ab,
   0Xfff,
   0XFA,
- 
-  /* floats */ 
+
+  /* floats */
   -0x80000000, // max negative integer as hexadecimal
   0x7fffffff,  // max postive integer as hexadecimal
   0x7FFFFFFF,  // max postive integer as hexadecimal
   0123,        // integer as octal
-  01912,       // should be quivalent to octal 1
+  01,       // should be quivalent to octal 1
   -020000000000, // max negative integer as octal
   017777777777,  // max positive integer as octal
   -2147483649, // float value
@@ -61,12 +62,12 @@ $scalars = array(
   .0034E-30,
 
   /* booleans */
-  true,  
+  true,
   TRUE,
   FALSE,
-  false,  
+  false,
 
-  /* strings */  
+  /* strings */
   "",
   '',
   " ",
@@ -86,11 +87,11 @@ $scalars = array(
   "true",
   /*"\0123",
   "\0x12FF",*/
-  $heredoc_string, 
+  $heredoc_string,
   $heredoc_numeric_string,
   $heredoc_empty_string
-);
-/* loop to check that strval() recognizes different 
+];
+/* loop to check that strval() recognizes different
    scalar values and retuns the string conversion of same */
 $loop_counter = 1;
 foreach ($scalars as $scalar ) {
@@ -103,32 +104,14 @@ echo "\n*** Testing strval() with non_scalar values ***\n";
 $fp = fopen(__FILE__, "r");
 $dfp = opendir( dirname(__FILE__) );
 
-// unset variable
-$unset_var = 10;
-unset ($unset_var);
 
-// non_scalar values, objects, arrays, resources and boolean 
-class foo
-{
-  function __toString() {
-    return "Object";
-  }
-}
-
-$not_scalars = array (
-  new foo, //object
+$not_scalars = vec[
   $fp,  // resource
   $dfp,
-  array(),  // arrays
-  array(NULL),
-  array(1,2,3,4),
-  array("string"),
   NULL,  // nulls
   null,
-  @$unset_var,  // unset variable
-  @$undefined_var
-);
-/* loop through the $not_scalars to see working of 
+];
+/* loop through the $not_scalars to see working of
    strval() on objects, arrays, boolean and others */
 $loop_counter = 1;
 foreach ($not_scalars as $value ) {
@@ -138,15 +121,14 @@ foreach ($not_scalars as $value ) {
 
 echo "\n*** Testing error conditions ***\n";
 //Zero argument
-var_dump( strval() );
+try { var_dump( strval() ); } catch (Exception $e) { echo "\n".'Warning: '.$e->getMessage().' in '.__FILE__.' on line '.__LINE__."\n"; }
 
-//arguments more than expected 
-var_dump( strval( $scalars[0], $scalars[1]) );
- 
+//arguments more than expected
+try { var_dump( strval( $scalars[0], $scalars[1]) ); } catch (Exception $e) { echo "\n".'Warning: '.$e->getMessage().' in '.__FILE__.' on line '.__LINE__."\n"; }
+
 echo "Done\n";
 
 // close the resources used
 fclose($fp);
 closedir($dfp);
-
-?>
+}

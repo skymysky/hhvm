@@ -1,0 +1,25 @@
+error: Typing[4341] The method `foo` is not compatible with the overridden method [1]
+-> Method `foo` has type `(function(): ~(function(int): ~void))` in `C2` [1]
+-> But it has type `(function(): ~(function(inout ~int): ~void))` in parent `C1` [2]
+-> Type `(function(): ~(function(int): ~void))` is not a subtype of `(function(): ~(function(inout ~int): ~void))` [1]
+-> This is an `inout` parameter [3]
+-> It is incompatible with a normal parameter [4]
+
+bad_inout_hint_parent5.php:11:19
+ 2 | 
+ 3 | class C1 {
+ 4 |   public function foo(): (function(inout int): void) {
+   |                   ^^^ [2]
+   |                                          ^^^ [3]
+ 5 |     return (inout $x) ==> {
+ 6 |     };
+   :
+ 9 | 
+10 | class C2 extends C1 {
+11 |   public function foo(): (function(int): void) {
+   |                   ^^^ [1]
+   |                                    ^^^ [4]
+12 |     return $x ==> {
+13 |     };
+
+1 error found

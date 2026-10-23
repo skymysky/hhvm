@@ -1,5 +1,5 @@
 <?hh
-function test() {
+function test() :mixed{
   /**
    * Rules for XHP names and guidelines for avoid ambiguities:
    *
@@ -78,7 +78,7 @@ function test() {
    *              whitespace before the ':')
    *
    */
-  $a = false?:array();
+  $a = false?:vec[];
   $a = false?:floor(12.98);
   $a = b()?:NULL;
 
@@ -99,17 +99,8 @@ function test() {
   $x=$y?$y : foo::bar();
   $x=$y?$y :foo::bar();
   $x=:foo::bar();
-  label:foo::bar();
   $x=$y?: foo::bar();
   $x=$y? :foo::bar() : 0;
-  $x=${'y'}? : foo();
-  $x=${'y'} ?: foo();
-  $x=${'y'}?: foo();
-  $x=${'y'} ? : foo();
-  $x=${'y'}? : foo;
-  $x=${'y'}?: foo;
-  $x=${'y'} ?: foo;
-  $x=${'y'} ? : foo;
   $x=$y?$y:foo::bar();
   $x=$y?$y: foo::bar();
   $x=$y?$y :foo();
@@ -122,17 +113,9 @@ function test() {
   $x=$obj->{'foo'}? : foo::bar();
   $x=true?$obj->{'foo'}: foo::bar();
   $x=true?$obj->{'foo'} : foo::bar();
-  $x=${'y'}?:foo();
-  $x=$y?${'y'}:foo();
   $x=$y?$y:foo();
   $x=$y?($y):foo();
   if(0){} :foo::bar();
-  function bar1(:foo $x): :foo {}
-  function bar2(:foo $x):?:foo {}
-  function bar3(:foo $x): ?:foo {}
-  function bar4(?:foo $x): :foo {}
-  function bar5(?:foo $x):?:foo {}
-  function bar6(?:foo $x): ?:foo {}
 
   /**
    * Examples which violate rule #1
@@ -152,8 +135,6 @@ function test() {
    */
 
   // $x=$y?:foo::bar():$z;
-  // $x=${'y'}?:foo::bar():$z;
-  // $x=$y?:foo::bar():$z;
   // if(0){}:foo::bar();
 
   /**
@@ -164,10 +145,6 @@ function test() {
   // $x=$y? :FOO;
   // $x=$y? :foo::bar();
   // $x=$y? :foo::BAR;
-  // $x=${'y'} ? :foo();
-  // $x=${'y'} ? :FOO;
-  // $x=${'y'} ? :foo::bar();
-  // $x=${'y'} ? :foo::BAR;
   // $x=$obj->{'foo'}? :foo();
   // $x=$obj->{'foo'}? :FOO;
   // $x=$obj->{'foo'}? :foo::bar();
@@ -178,4 +155,12 @@ function test() {
   // $x=true?$obj->{'foo'} :foo::BAR;
 
 }
+function bar1(:foo $x): :foo {}
+function bar2(:foo $x):?:foo {}
+function bar3(:foo $x): ?:foo {}
+function bar4(?:foo $x): :foo {}
+function bar5(?:foo $x):?:foo {}
+function bar6(?:foo $x): ?:foo {}
+<<__EntryPoint>> function main(): void {
 echo "Done\n";
+}

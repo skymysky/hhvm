@@ -14,184 +14,30 @@
    +----------------------------------------------------------------------+
 */
 
+#include "hphp/runtime/vm/unit-util.h"
+
 namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
 
-template <class TraitMethod,
-          class Ops,
-          class String,
-          class StringHash,
-          class StringEq>
+template <class TraitMethod, class Ops>
 inline void
-TraitMethodImportData<TraitMethod, Ops, String, StringHash, StringEq>
-::add(const TraitMethod& tm, const String& name) {
+TraitMethodImportData<TraitMethod, Ops>
+::add(const TraitMethod& tm, const OptString& name) {
   if (Ops::exclude(name)) return;
-
-  bool found = m_dataForName.count(name);
-
+  auto const found = m_dataForName.count(name);
   m_dataForName[name].methods.push_back(tm);
   if (!found) m_orderedNames.push_back(name);
 }
 
-template <class TraitMethod,
-          class Ops,
-          class String,
-          class StringHash,
-          class StringEq>
-inline void
-TraitMethodImportData<TraitMethod, Ops, String, StringHash, StringEq>
-::add(const TraitMethod& tm,
-      const String& aliasedName,
-      const String& origName) {
-  if (Ops::exclude(aliasedName)) return;
-
-  add(tm, aliasedName);
-
-  assertx(m_dataForName.count(origName));
-  m_dataForName[origName].aliases.push_back(aliasedName);
-}
-
-template <class TraitMethod,
-          class Ops,
-          class String,
-          class StringHash,
-          class StringEq>
-inline void
-TraitMethodImportData<TraitMethod, Ops, String, StringHash, StringEq>
-::erase(const String& name) {
-  // We don't bother erasing `name' from any name lists---since it will not
-  // correspond to any NameData, it will be skipped during finalization anyway.
-  m_dataForName.erase(name);
-}
-
-template <class TraitMethod,
-          class Ops,
-          class String,
-          class StringHash,
-          class StringEq>
-inline void
-TraitMethodImportData<TraitMethod, Ops, String, StringHash, StringEq>
-::setModifiers(const String& name,
-               typename TraitMethod::class_type trait,
-               typename TraitMethod::modifiers_type mods) {
-  auto& methods = m_dataForName[name].methods;
-
-  for (auto& tm : methods) {
-    if (tm.trait == trait) {
-      tm.modifiers = mods;
-      return;
-    }
-  }
-}
-
 ///////////////////////////////////////////////////////////////////////////////
-
-template <class TraitMethod,
-          class Ops,
-          class String,
-          class StringHash,
-          class StringEq>
-template <typename Context>
-inline void
-TraitMethodImportData<TraitMethod, Ops, String, StringHash, StringEq>
-::applyPrecRule(typename Ops::prec_type rule, Context ctx) {
-  auto methName          = Ops::precMethodName(rule);
-  auto selectedTraitName = Ops::precSelectedTraitName(rule);
-  auto otherTraitNames   = Ops::precOtherTraitNames(rule);
-
-  auto it = m_dataForName.find(methName);
-  if (it == m_dataForName.end()) {
-    Ops::errorUnknownMethod(rule);
-    return;
-  }
-
-  if (otherTraitNames.find(selectedTraitName) != otherTraitNames.end()) {
-    Ops::errorInconsistentInsteadOf(Ops::findTraitClass(ctx, selectedTraitName),
-                                    methName);
-  }
-
-  bool foundSelectedTrait = false;
-  auto& methods = it->second.methods;
-
-  for (auto next = methods.begin(); next != methods.end(); ) {
-    auto cur = next++;
-    auto availTraitName = Ops::clsName(cur->trait);
-
-    if (availTraitName == selectedTraitName) {
-      foundSelectedTrait = true;
-    } else if (otherTraitNames.count(availTraitName)) {
-      otherTraitNames.erase(availTraitName);
-      methods.erase(cur);
-    }
-  }
-
-  if (!foundSelectedTrait) {
-    Ops::errorUnknownTrait(rule, selectedTraitName);
-  }
-  for (auto const& traitName : otherTraitNames) {
-    if (auto trait = Ops::findTraitClass(ctx, traitName)) {
-      if (Ops::findTraitMethod(ctx, trait, methName)) {
-        // The trait exists, and defines the method, but it wasn't in methods,
-        // so it must have been removed by a previous prec rule.
-        Ops::errorMultiplyExcluded(rule, traitName, methName);
-      }
-    } else {
-      Ops::errorUnknownTrait(rule, traitName);
-    }
-  }
-}
-
-template <class TraitMethod,
-          class Ops,
-          class String,
-          class StringHash,
-          class StringEq>
-template <class Context>
-inline void
-TraitMethodImportData<TraitMethod, Ops, String, StringHash, StringEq>
-::applyAliasRule(typename Ops::alias_type rule, Context ctx) {
-  auto traitName    = Ops::aliasTraitName(rule);
-  auto origMethName = Ops::aliasOrigMethodName(rule);
-  auto newMethName  = Ops::aliasNewMethodName(rule);
-  auto modifiers    = Ops::aliasModifiers(rule);
-
-  typename TraitMethod::class_type traitCls;
-  if (Ops::strEmpty(traitName)) {
-    traitCls = Ops::findSingleTraitWithMethod(ctx, origMethName);
-  } else {
-    traitCls = Ops::findTraitClass(ctx, traitName);
-  }
-
-  if (!traitCls || !Ops::isTrait(traitCls)) {
-    Ops::errorUnknownTrait(rule, traitName);
-  }
-
-  Ops::addTraitAlias(ctx, rule, traitCls);
-
-  auto traitMeth = Ops::findTraitMethod(ctx, traitCls, origMethName);
-  if (!traitMeth) {
-    Ops::errorUnknownMethod(rule, origMethName);
-  }
-
-  if (origMethName == newMethName) {
-    setModifiers(origMethName, traitCls, modifiers);
-  } else {
-    add(Ops::traitMethod(traitCls, traitMeth, rule),
-        newMethName, origMethName);
-  }
-}
 
 /*
  * Remove trait abstract methods that are either (a) implemented by other
  * traits, or (b) duplicated.
  */
-template <class TraitMethod,
-          class Ops,
-          class String,
-          class StringHash,
-          class StringEq>
+template <class TraitMethod, class Ops>
 inline void
-TraitMethodImportData<TraitMethod, Ops, String, StringHash, StringEq>
+TraitMethodImportData<TraitMethod, Ops>
 ::removeSpareTraitAbstractMethods() {
   for (auto& nameData : m_dataForName) {
     auto& methods = nameData.second.methods;
@@ -225,54 +71,65 @@ TraitMethodImportData<TraitMethod, Ops, String, StringHash, StringEq>
   }
 }
 
-template <class TraitMethod,
-          class Ops,
-          class String,
-          class StringHash,
-          class StringEq>
-template <class Context>
-inline std::vector<typename TraitMethodImportData<TraitMethod,
-                                                  Ops,
-                                                  String,
-                                                  StringHash,
-                                                  StringEq>::MethodData>
-TraitMethodImportData<TraitMethod, Ops, String, StringHash, StringEq>
-::finish(Context ctx) {
-  removeSpareTraitAbstractMethods();
+/*
+ * If a method has been imported multiple times via multiple use chains, remove
+ * the duplicates.  Duplicates are detected comparing (name, originalClass)
+ * information, which uniquely identifies a method.
+ */
+template <class TraitMethod, class Ops>
+inline void
+TraitMethodImportData<TraitMethod, Ops>
+::removeDiamondDuplicates(bool enableMethodTraitDiamond) {
+  for (auto& nameData : m_dataForName) {
+    auto& methods = nameData.second.methods;
 
-  std::unordered_set<String> seenNames;
+    for (auto& method : methods) {
+      nameData.second.methodOriginsWithDuplicates.push_back(Ops::clsName(method.trait));
+    }
+
+    if (enableMethodTraitDiamond) {
+      std::set<typename TraitMethod::origin_type> origins;
+      methods.erase(
+        std::remove_if(methods.begin(), methods.end(),
+                      [&](const auto &m) {
+                        return !origins.insert(Ops::originalClass(m.method)).second;
+                      }),
+        methods.end());
+    }
+  }
+}
+
+template <class TraitMethod, class Ops>
+inline std::vector<typename TraitMethodImportData<TraitMethod, Ops>::MethodData>
+TraitMethodImportData<TraitMethod, Ops>
+::finish(typename TraitMethod::class_type ctx, bool enableMethodTraitDiamond) {
+  removeSpareTraitAbstractMethods();
+  removeDiamondDuplicates(enableMethodTraitDiamond);
+
+  hphp_fast_set<OptString> seenNames;
   std::vector<MethodData> output;
 
   seenNames.reserve(m_orderedNames.size());
   output.reserve(m_orderedNames.size());
 
-  auto process = [&] (const String& name) {
-    if (seenNames.count(name)) return;
+  for (auto const& name : m_orderedNames) {
+    if (seenNames.count(name)) continue;
     auto const& methods = m_dataForName[name].methods;
 
     // The rules eliminated this method from all traits.
-    if (methods.size() == 0) return;
+    if (methods.size() == 0) continue;
 
     if (methods.size() > 1) {
       // This may or may not actually throw; if it doesn't, the client is okay
       // with the duplication.
-      Ops::errorDuplicateMethod(ctx, name);
+      // For error reporting, we keep the
+      auto const& methodOriginsWithDuplicates = m_dataForName[name].methodOriginsWithDuplicates;
+      Ops::errorDuplicateMethod(ctx, name, methodOriginsWithDuplicates);
     }
 
     seenNames.insert(name);
-    output.push_back(MethodData { name, *methods.begin() });
-  };
-
-  for (auto const& name : m_orderedNames) {
-    auto const& nameData = m_dataForName[name];
-
-    // Aliases of a given method name are always ordered immediately before
-    // that name (in the order the aliases were declared in), even if
-    // precedence rules override them.
-    for (auto const& alias : nameData.aliases) {
-      process(alias);
-    }
-    process(name);
+    auto const &front = *methods.begin();
+    output.push_back({name, front});
   }
 
   return output;

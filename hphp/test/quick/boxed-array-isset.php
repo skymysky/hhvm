@@ -1,12 +1,13 @@
 <?hh
 
 
-function main($o) {
-  $x =& $y;
+function main($o, inout $x) :mixed{
   $x = $o->prop;
   return isset($x[23]) ? true : false;
 }
-
-$o = new stdclass;
-$o->prop = array(23 => 'hi');
-echo main($o) ? "true\n" : "false\n";
+<<__EntryPoint>> function main_entry(): void {
+$o = new stdClass;
+$o->prop = dict[23 => 'hi'];
+$y = null;
+echo main($o, inout $y) ? "true\n" : "false\n";
+}

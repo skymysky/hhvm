@@ -1,0 +1,56 @@
+error: Parsing[1002] Destructuring values in patterns is not yet supported. [1]
+
+constructor_pattern.php:7:5
+5 | function f(Option<int> $o): void {
+6 |   match ($o) {
+7 |     Some(_) => echo "Some\n";
+  |     ^^^^^^^ [1]
+8 |     None => echo "None\n";
+9 |   }
+
+error: Parsing[1002] Wildcard patterns must begin with the `_` character. To bind a variable, use a `$` character (`$Some`). [1]
+
+constructor_pattern.php:7:5
+5 | function f(Option<int> $o): void {
+6 |   match ($o) {
+7 |     Some(_) => echo "Some\n";
+  |     ^^^^^^^ [1]
+8 |     None => echo "None\n";
+9 |   }
+
+error: Parsing[1002] Wildcard patterns must begin with the `_` character. To bind a variable, use a `$` character (`$None`). [1]
+
+constructor_pattern.php:8:5
+ 6 |   match ($o) {
+ 7 |     Some(_) => echo "Some\n";
+ 8 |     None => echo "None\n";
+   |     ^^^^ [1]
+ 9 |   }
+10 | }
+
+error: Naming[2049] Unbound name: `Option` [1]
+
+constructor_pattern.php:5:12
+3 | <<file:__EnableUnstableFeatures('match_statements')>>
+4 | 
+5 | function f(Option<int> $o): void {
+  |            ^^^^^^ [1]
+6 |   match ($o) {
+7 |     Some(_) => echo "Some\n";
+
+error: Typing[4479] This expression has type `Option<int>`, which is not supported in match statements [1]
+
+constructor_pattern.php:6:3
+ 4 | 
+ 5 | function f(Option<int> $o): void {
+ 6 |   match ($o) {
+   |   ^^^^^^^^^^^^ [1]
+ 7 |     Some(_) => echo "Some\n";
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^ [1]
+ 8 |     None => echo "None\n";
+   |     ^^^^^^^^^^^^^^^^^^^^^^ [1]
+ 9 |   }
+   |   ^ [1]
+10 | }
+
+5 errors found

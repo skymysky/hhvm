@@ -1,0 +1,18 @@
+warning: Lint[5564] C is the only class declared in redundant_option_mixed.php, so that file should be named C.php instead.
+   --> redundant_option_mixed.php
+  3 | class C<T>
+    |       ^
+
+
+warning: Lint[5624] The generic parameter `T` is unused.
+   --> redundant_option_mixed.php
+  5 | function g<T>(): void {}
+    |            ^
+
+
+warning: Lint[5624] The generic parameter `T` is unused.
+   --> redundant_option_mixed.php
+  7 | function f<T>(): void {
+    |            ^
+
+

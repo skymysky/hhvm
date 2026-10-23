@@ -14,7 +14,7 @@ function gmp_and(mixed $a,
 
 
 <<__Native>>
-function gmp_clrbit(mixed &$a,
+function gmp_clrbit(inout mixed $a,
                     int $index): void;
 
 
@@ -170,7 +170,7 @@ function gmp_scan1(mixed $a,
 
 
 <<__Native>>
-function gmp_setbit(mixed& $a,
+function gmp_setbit(inout mixed $a,
                     int $index,
                     bool $bit_on = true): void;
 
@@ -207,10 +207,10 @@ function gmp_xor(mixed $a,
                  mixed $b): mixed;
 
 
-<<__NativeData("GMPData")>>
+<<__NativeData>>
 class GMP implements Serializable {
   <<__Native>>
-  public function serialize() : string;
+  public function serialize() : ?string;
 
 
   <<__Native>>
@@ -218,6 +218,6 @@ class GMP implements Serializable {
 
 
   <<__Native>>
-  public function __debugInfo() : array;
+  public function __debugInfo() : darray;
 
 }

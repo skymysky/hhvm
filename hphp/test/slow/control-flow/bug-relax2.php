@@ -1,13 +1,17 @@
-<?php
+<?hh
 
-function foo($arr) {
-  $children = array();
+function foo($arr) :mixed{
+  $children = vec[];
   foreach ($arr as $child) {
     $children[] = $child;
   }
   return $children;
 }
 
-var_dump(foo(array()));
-var_dump(foo(array(1)));
-var_dump(foo(array(2)));
+
+<<__EntryPoint>>
+function main_bug_relax2() :mixed{
+var_dump(foo(vec[]));
+var_dump(foo(vec[1]));
+var_dump(foo(vec[2]));
+}

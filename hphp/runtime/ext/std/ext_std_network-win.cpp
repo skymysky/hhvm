@@ -26,7 +26,6 @@
 
 #include "hphp/runtime/base/builtin-functions.h"
 #include "hphp/runtime/base/file.h"
-#include "hphp/runtime/base/runtime-option.h"
 #include "hphp/runtime/ext/sockets/ext_sockets.h"
 #include "hphp/runtime/ext/std/ext_std_function.h"
 #include "hphp/runtime/ext/string/ext_string.h"
@@ -39,8 +38,8 @@ namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
 // DNS
 
-bool HHVM_FUNCTION(checkdnsrr, const String& host,
-                               const String& type /* = null_string */) {
+bool HHVM_FUNCTION(checkdnsrr, const OptString& host,
+                               const OptString& type /* = null_string */) {
   int ntype;
   if (!validate_dns_arguments(host, type, ntype)) {
     return false;
@@ -162,11 +161,11 @@ static void php_parserr(PDNS_RECORD pRec, int type_to_fetch, int store,
     DWORD i = 0;
     DNS_TXT_DATA *data_txt = &pRec->Data.TXT;
     DWORD count = data_txt->dwStringCount;
-    String txt;
+    OptString txt;
 
     subarray->set(s_type, s_TXT);
     for (i = 0; i < count; i++) {
-      txt += String(data_txt->pStringArray[i], CopyString);
+      txt += OptString(data_txt->pStringArray[i], CopyString);
     }
     subarray->set(s_txt, txt);
   }
@@ -273,9 +272,9 @@ static void php_parserr(PDNS_RECORD pRec, int type_to_fetch, int store,
 
 }
 
-Variant HHVM_FUNCTION(dns_get_record, const String& hostname, int type /*= -1*/,
-                      VRefParam authnsRef /* = null */,
-                      VRefParam addtlRef /* = null */) {
+Variant HHVM_FUNCTION(dns_get_record, const OptString& hostname, int64_t type,
+                      Variant& authnsRef,
+                      Variant& addtlRef) {
   IOStatusHelper io("dns_get_record", hostname.data(), type);
   if (type < 0) type = PHP_DNS_ALL;
   if (type & ~PHP_DNS_ALL && type != PHP_DNS_ANY) {
@@ -283,7 +282,7 @@ Variant HHVM_FUNCTION(dns_get_record, const String& hostname, int type /*= -1*/,
     return false;
   }
 
-  Array ret = Array::Create();
+  Array ret = Array::CreateVec();
   int type2;
   Array authns;
   Array addtl;
@@ -297,9 +296,7 @@ Variant HHVM_FUNCTION(dns_get_record, const String& hostname, int type /*= -1*/,
   bool first_query = true;
   bool store_results = true;
   for (;
-  type2 < (!addtlRef.isNull()
-        ? (PHP_DNS_NUM_TYPES + 2)
-        : PHP_DNS_NUM_TYPES) || first_query;
+  type2 < PHP_DNS_NUM_TYPES + 2 || first_query;
     type2++
     ) {
     first_query = false;
@@ -399,8 +396,7 @@ Variant HHVM_FUNCTION(dns_get_record, const String& hostname, int type /*= -1*/,
 # define DnsSectionAdditional 3
 # endif
 #endif
-        if (!addtlRef.isNull() &&
-            pRec->Flags.S.Section == DnsSectionAdditional) {
+        if (pRec->Flags.S.Section == DnsSectionAdditional) {
           php_parserr(pRec, type_to_fetch, 1, &retval);
           if (!retval.empty()) {
             addtl.append(retval);
@@ -411,20 +407,20 @@ Variant HHVM_FUNCTION(dns_get_record, const String& hostname, int type /*= -1*/,
       DnsRecordListFree(pResult, DnsFreeRecordListDeep);
     }
   }
-  authnsRef.assignIfRef(authns);
-  addtlRef.assignIfRef(addtl);
+  authnsRef = authns;
+  addtlRef = addtl;
   return ret;
 }
 
-bool HHVM_FUNCTION(getmxrr, const String& hostname,
-                            VRefParam mxhostsRef,
-                            VRefParam weightsRef /* = null */) {
+bool HHVM_FUNCTION(getmxrr, const OptString& hostname,
+                            Variant& mxhostsRef,
+                            Variant& weightsRef) {
   IOStatusHelper io("dns_get_mx", hostname.data());
   Array mxhosts;
   Array weights;
   SCOPE_EXIT {
-    mxhostsRef.assignIfRef(mxhosts);
-    weightsRef.assignIfRef(weights);
+    mxhostsRef = mxhosts;
+    weightsRef = weights;
   };
 
   DNS_STATUS      status;         /* Return value of DnsQuery_A() function */
@@ -444,7 +440,7 @@ bool HHVM_FUNCTION(getmxrr, const String& hostname,
       continue;
     }
 
-    mxhosts.append(String(pRec->Data.MX.pNameExchange, CopyString));
+    mxhosts.append(OptString(pRec->Data.MX.pNameExchange, CopyString));
     weights.append(srv->wPriority);
   }
 

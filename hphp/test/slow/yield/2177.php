@@ -1,18 +1,28 @@
-<?php
+<?hh
 
-function makeClosureCont() {
-  return function () {
-    static $x = 0;
-    yield $x++;
-    yield $x++;
+class IntRef {
+  public function __construct(public int $val)[] {}
+}
+
+function makeClosureCont() :mixed{
+  $ref = new IntRef(0);
+  return function () use ($ref) {
+    $t = $ref->val; $ref->val++; yield $t;
+    $t = $ref->val; $ref->val++; yield $t;
   }
 ;
 }
-function gen() {
-  static $x = 0;
-  yield $x++;
-  yield $x++;
+
+abstract final class GenStatics {
+  public static $x = 0;
 }
+function gen() :AsyncGenerator<mixed,mixed,void>{
+  $t = GenStatics::$x; GenStatics::$x++; yield $t;
+  $t = GenStatics::$x; GenStatics::$x++; yield $t;
+}
+
+<<__EntryPoint>>
+function main_2177() :mixed{
 $cc = makeClosureCont();
 foreach ($cc() as $v) {
  var_dump($v);
@@ -27,3 +37,4 @@ foreach (gen() as $v) {
 foreach (gen() as $v) {
  var_dump($v);
  }
+}

@@ -1,6 +1,10 @@
-<?php
+<?hh
 
-function foo() {
+function foo() :mixed{
  return false;
  }
-foo() or die("foobar");
+
+<<__EntryPoint>>
+function main_1560() :mixed{
+foo() || exit("foobar");
+}

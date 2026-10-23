@@ -1,44 +1,15 @@
 <?hh
 
-/* Set the various assert() control options or just query their current
- * settings.
- */
-<<__Native>>
-function assert_options(int $what,
-                        mixed $value = null): mixed;
+namespace {
 
-/* assert() will check the given assertion and take appropriate action if its
- * result is FALSE.  If the assertion is given as a string it will be
- * evaluated as PHP code by assert(). The advantages of a string assertion are
- * less overhead when assertion checking is off and messages containing the
- * assertion expression when an assertion fails. This means that if you pass a
- * boolean condition as assertion this condition will not show up as parameter
- * to the assertion function which you may have defined with the
- * assert_options() function, the condition is converted to a string before
- * calling that handler function, and the boolean FALSE is converted as the
- * empty string.  Assertions should be used as a debugging feature only. You
- * may use them for sanity-checks that test for conditions that should always
- * be TRUE and that indicate some programming errors if not or to check for
- * the presence of certain features like extension functions or certain system
- * limits and features.  Assertions should not be used for normal runtime
- * operations like input parameter checks. As a rule of thumb your code should
- * always be able to work correctly if assertion checking is not activated.
- * The behavior of assert() may be configured by assert_options() or by
- * .ini-settings described in that functions manual page.  The
- * assert_options() function and/or ASSERT_CALLBACK configuration directive
- * allow a callback function to be set to handle failed assertions.  assert()
- * callbacks are particularly useful for building automated test suites
- * because they allow you to easily capture the code passed to the assertion,
- * along with information on where the assertion was made. While this
- * information can be captured via other methods, using assertions makes it
- * much faster and easier!  The callback function should accept three
- * arguments. The first argument will contain the file the assertion failed
- * in. The second argument will contain the line the assertion failed on and
- * the third argument will contain the expression that failed (if any -
- * literal values such as 1 or "two" will not be passed via this argument)
- */
-<<__Native("ReadsCallerFrame", "WritesCallerFrame")>>
-function assert(mixed $assertion, mixed $message = null): mixed;
+const int INFO_GENERAL = 1 << 0;
+const int INFO_CREDITS = 1 << 1;
+const int INFO_CONFIGURATION = 1 << 2;
+const int INFO_MODULES = 1 << 3;
+const int INFO_ENVIRONMENT = 1 << 4;
+const int INFO_VARIABLES = 1 << 5;
+const int INFO_LICENSE = 1 << 6;
+const int INFO_ALL = -1;
 
 /* Loads the PHP extension given by the parameter library.  Use
  * extension_loaded() to test whether a given extension is already available
@@ -46,25 +17,24 @@ function assert(mixed $assertion, mixed $message = null): mixed;
  * (either through php.ini or dl()). Warning: This function has been removed
  * from some SAPI's in PHP 5.3.
  */
-<<__Native>>
-function dl(string $library): int;
+function dl(string $_library): int { return 0; }
 
 /* Finds out whether the extension is loaded.
  */
 <<__Native>>
-function extension_loaded(string $name): bool;
+function extension_loaded(string $name)[read_globals]: bool;
 
 /* This function returns the names of all the modules compiled and loaded in
  * the PHP interpreter.
  */
 <<__Native>>
-function get_loaded_extensions(bool $zend_extensions = false): array;
+function get_loaded_extensions(bool $zend_extensions = false)[read_globals]: varray<string>;
 
 /* This function returns the names of all the functions defined in the module
  * indicated by module_name or false if $module_name is not a valid extension.
  */
 <<__Native>>
-function get_extension_funcs(string $module_name): mixed;
+function get_extension_funcs(string $module_name)[read_globals]: mixed;
 
 /* Gets the value of a PHP configuration option.  This function will not
  * return configuration information set when the PHP was compiled, or read
@@ -73,21 +43,19 @@ function get_extension_funcs(string $module_name): mixed;
  * configuration setting. If this is available, a configuration file is being
  * used.
  */
-<<__Native>>
-function get_cfg_var(string $option): mixed;
+function get_cfg_var(string $_option): mixed { return false; }
 
 <<__Native>>
-function get_current_user(): string;
+function get_current_user(): ?string;
 
 /* Returns the names and values of all the constants currently defined. This
- * includes those created by extensions as well as those created with the
- * define() function.
+ * includes those created by extensions.
  */
 <<__Native>>
-function get_defined_constants(bool $categorize = false): array;
+function get_defined_constants(bool $categorize = false): darray<string, mixed>;
 
 <<__Native>>
-function get_include_path(): string;
+function get_include_path(): ?string;
 
 <<__Native>>
 function restore_include_path(): void;
@@ -95,42 +63,33 @@ function restore_include_path(): void;
 /* Sets the include_path configuration option for the duration of the script.
  */
 <<__Native>>
-function set_include_path(mixed $new_include_path): string;
+function set_include_path(mixed $new_include_path): ?string;
 
 /* Gets the names of all files that have been included using include(),
  * include_once(), require() or require_once().
  */
 <<__Native>>
-function get_included_files(): array;
+function get_included_files(): varray<string>;
 
-function get_required_files(): array {
+function get_required_files(): varray<string> {
   return get_included_files();
 }
 
-/* Returns the current configuration setting of magic_quotes_gpc  Keep in mind
- * that attempting to set magic_quotes_gpc at runtime will not work.  For more
- * information about magic_quotes, see this security section.
+/* For the duration of the request, keep track of all files that were
+ * invovled in autoloading
  */
-function get_magic_quotes_gpc(): ?bool {
-  if (($argc = func_num_args()) != 0) {
-    trigger_error(__FUNCTION__ . "() expects exactly 0 parameters," .
-                  " $argc given", E_USER_WARNING);
-    return null;
-  }
-  return false;
-}
+<<__Native>>
+function record_visited_files(): void;
 
-function get_magic_quotes_runtime(): ?bool {
-  if (($argc = func_num_args()) != 0) {
-    trigger_error(__FUNCTION__ . "() expects exactly 0 parameters," .
-                  " $argc given", E_USER_WARNING);
-    return null;
-  }
-  return false;
-}
+/* Return a list of all files that were involved in autoloading for
+ * this request. Recording of visited files starts when the method
+ * record_visited_files is called.
+ */
+<<__Native>>
+function get_visited_files(): keyset<string>;
 
 <<__Native>>
-function getenv(string $varname): mixed;
+function getenv(string $varname)[read_globals]: mixed;
 
 /* Gets the time of the last modification of the current page.  If you're
  * interested in getting the last modification time of a different file,
@@ -166,55 +125,90 @@ function getmyuid(): mixed;
  * as options takes a string (where each character is the option).
  */
 <<__Native>>
-function getopt(string $options,
-                mixed $longopts = null): array;
+function getopt(
+  string $options,
+  mixed $longopts = null,
+): darray<arraykey, mixed>;
+
+/* Similar to getopt but accepts an inout optind which controls the argument
+ * at which parsing begins. Sets the optind to the index of the first unparsed
+ * option.
+ */
+<<__Native>>
+function getopt_with_optind(string $options,
+                            ?vec<string> $longopts,
+                            inout int $optind): dict<string, mixed>;
 
 /* This is an interface to getrusage(2). It gets data returned from the system
  * call.
  */
 <<__Native>>
-function getrusage(int $who = 0): array;
+function getrusage(int $who = 0): shape(
+  'ru_oublock' => int,
+  'ru_inblock' => int,
+  'ru_msgsnd' => int,
+  'ru_msgrcv' => int,
+  'ru_maxrss' => int,
+  'ru_ixrss' => int,
+  'ru_idrss' => int,
+  'ru_minflt' => int,
+  'ru_majflt' => int,
+  'ru_nsignals' => int,
+  'ru_nvcsw' => int,
+  'ru_nivcsw' => int,
+  'ru_nswap' => int,
+  'ru_utime_tv_usec' => int,
+  'ru_utime_tv_sec' => int,
+  'ru_stime_tv_usec' => int,
+  'ru_stime_tv_sec' => int,
+);
 
 /* Gets resolution of system clock. "man 3 clock_getres" for more details.
  */
 <<__Native>>
 function clock_getres(int $clk_id,
-                      mixed &$sec,
-                      mixed &$nsec): bool;
+                      <<__OutOnly>>
+                      inout int $sec,
+                      <<__OutOnly>>
+                      inout int $nsec): bool;
 
 /* Gets time of a system clock. "man 3 clock_gettime" for more details.
  */
 <<__Native>>
 function clock_gettime(int $clk_id,
-                       mixed &$sec,
-                       mixed &$nsec): bool;
+                       <<__OutOnly>>
+                       inout int $sec,
+                       <<__OutOnly>>
+                       inout int $nsec)[leak_safe]: bool;
 
 /* Same as clock_gettime(), but returns a single integer in nanoseconds.
  * Returns -1 if invalid or non-supported clock is specified.
  */
 <<__Native>>
-function clock_gettime_ns(int $clk_id): int;
+function clock_gettime_ns(int $clk_id)[leak_safe]: int;
 
 /* Gets number of processors.
  */
 <<__Native>>
-function cpu_get_count(): int;
+function cpu_get_count()[read_globals]: int;
 
 /* Gets processor model.
  */
 <<__Native>>
-function cpu_get_model(): string;
+function cpu_get_model()[read_globals]: ?string;
 
 /* Returns the value of the configuration option on success.
  */
 <<__Native>>
-function ini_get(string $varname): mixed;
+function ini_get(string $varname)[read_globals]: mixed;
 
 /* Gets all configuration options
  */
 <<__Native>>
-function ini_get_all(string $extension = "",
-                     bool $details = true): array;
+function ini_get_all(
+  string $extension = "",
+  bool $details = true,
+): darray<string, mixed>;
 
 /* Restores a given configuration option to its original value.
  */
@@ -241,23 +235,23 @@ function ini_alter(string $varname,
  * script.
  */
 <<__Native>>
-function memory_get_peak_usage(bool $real_usage = false): int;
+function memory_get_peak_usage(bool $real_usage = false)[read_globals]: int;
 
 /* Returns the amount of memory, in bytes, that's currently being allocated to
  * your PHP script.
  */
 <<__Native>>
-function memory_get_usage(bool $real_usage = false): int;
+function memory_get_usage(bool $real_usage = false)[read_globals]: int;
 
 /* Returns the total memory, in bytes, that your PHP script has allocated.
  */
-<<__Native, __HipHopSpecific>>
-function memory_get_allocation(): int;
+<<__Native>>
+function memory_get_allocation()[read_globals]: int;
 
 /* Returns the request-heap memory currently in use by the script.
  * Does not trigger OOM.
  */
-<<__Native, __HipHopSpecific>>
+<<__Native>>
 function hphp_memory_heap_usage(): int;
 
 /* Returns the current total capacity of the request-heap, including
@@ -265,13 +259,13 @@ function hphp_memory_heap_usage(): int;
  * external fragmentation, and heap management overhead.
  * Does not trigger OOM.
  */
-<<__Native, __HipHopSpecific>>
+<<__Native>>
 function hphp_memory_heap_capacity(): int;
 
 /* Returns the peak of memory, in bytes, that's been allocated to your PHP
  * script since calling memory_start_usage_interval.
  */
-<<__Native, __HipHopSpecific>>
+<<__Native>>
 function hphp_memory_get_interval_peak_usage(bool $real_usage = false): int;
 
 /* Starts per-interval usage tracking to allow peak usage to be tracked
@@ -279,7 +273,7 @@ function hphp_memory_get_interval_peak_usage(bool $real_usage = false): int;
  *
  * Returns whether the state of interval tracking was changed.
  */
-<<__Native, __HipHopSpecific>>
+<<__Native>>
 function hphp_memory_start_interval(): bool;
 
 /* Stops per-interval usage tracking to allow peak usage to be tracked
@@ -287,8 +281,24 @@ function hphp_memory_start_interval(): bool;
  *
  * Returns whether the state of interval tracking was changed.
  */
-<<__Native, __HipHopSpecific>>
+<<__Native>>
 function hphp_memory_stop_interval(): bool;
+
+/* Set the OOM multiplier for the current request. A multiplier larger than 1
+ * can increase the chance of survival (without any guarantee) when the host
+ * runs out of memory, but doing so can make other requests suffer. Thus,
+ * discipline is required to manipulate this value. And HHVM could decide to
+ * reject values that are deemed unreasonable.
+ *
+ * Right now, this function is experimental. So you should refrain from using it
+ * without checking with the HHVM team first. The multiplier will also be
+ * applied to cost attribution, i.e., larger multiplier means you pay more for
+ * the execution of the request.
+ *
+ * Returns whether the multiplier was successfuly changed.
+ */
+<<__Native>>
+function set_oom_multiplier(int $m): bool;
 
 /* Retrieve a path to the loaded php.ini file.
  */
@@ -304,7 +314,7 @@ function php_ini_scanned_files(): mixed {
 }
 
 <<__Native>>
-function php_sapi_name(): string;
+function php_sapi_name()[read_globals]: ?string;
 
 /* php_uname() returns a description of the operating system PHP is running
  * on. This is the same string you see at the very top of the phpinfo()
@@ -357,28 +367,6 @@ function phpversion(string $extension = ""): mixed;
 <<__Native>>
 function putenv(string $setting): bool;
 
-/* Set the current active configuration setting of magic_quotes_runtime.
- * Warning: This function has been DEPRECATED as of PHP 5.3.0. Relying on this
- * feature is highly discouraged.
- */
-function set_magic_quotes_runtime(mixed $new_setting): bool {
-  trigger_error("Function set_magic_quotes_runtime() is deprecated",
-                E_USER_DEPRECATED);
-
-  if ($new_setting) {
-    trigger_error(__FUNCTION__ . "() is not supported anymore", E_USER_ERROR);
-  }
-
-  return false;
-}
-
-/*
- * Alias of set_magic_quotes_runtime()
- */
-function magic_quotes_runtime(mixed $new_setting): bool {
-  return set_magic_quotes_runtime($new_setting);
-}
-
 /* Set the number of seconds a script is allowed to run. If this is reached,
  * the script returns a fatal error. The default limit is 30 seconds or, if it
  * exists, the max_execution_time value defined in the php.ini.  When called,
@@ -390,10 +378,17 @@ function magic_quotes_runtime(mixed $new_setting): bool {
 <<__Native>>
 function set_time_limit(int $seconds): void;
 
+/* Set the number of seconds into the request to invoke a callback.
+ * The callback is invoked only once unless another call to this function is
+ * made. This can help debugging scripts that take a long time to run.
+ */
+<<__Native>>
+function set_pre_timeout_handler(int $seconds, mixed $callback): void;
+
 /* Returns the path of the directory PHP stores temporary files in by default.
  */
 <<__Native>>
-function sys_get_temp_dir(): string;
+function sys_get_temp_dir(): ?string;
 
 /* version_compare() compares two "PHP-standardized" version number strings.
  * This is useful if you would like to write programs working only on some
@@ -410,13 +405,36 @@ function sys_get_temp_dir(): string;
 <<__IsFoldable, __Native>>
 function version_compare(string $version1,
                          string $version2,
-                         string $sop = ""): mixed;
+                         string $sop = "")[]: mixed;
 
-/* Returns a string containing the version of the currently running Zend
- * Engine.
+/* rds_bytes() returns a shape of all RDS memory utilization in bytes.
+ * You should assume this is an implementation detail of HHVM and is subject
+ * to change.
  */
 <<__Native>>
-function zend_version(): string;
+function rds_bytes(): shape(
+  "used_bytes" => int,
+  "used_local_bytes" => int, 
+  "used_persistent_bytes" => int,
+);
+
+<<__Native>>
+function tc_usage(): dict<string, shape(
+  "capacity" => int,
+  "used" => int,
+  "global" => bool
+)>;
+
+<<__Native>>
+function get_active_worker_counts(): shape(
+  "pagelet_workers" => int,
+  "xbox_workers" => int,
+  "http_workers" => int,
+  "cli_workers" => int,
+);
+
+
+} // root namespace
 
 namespace __SystemLib {
 
@@ -430,26 +448,44 @@ namespace __SystemLib {
       $this->body = $this->element('body');
     }
 
-    private function is_cli() { return php_sapi_name() == 'cli'; }
+    private function is_cli(): bool { return \php_sapi_name() == 'cli'; }
 
-    private function appendChildren(\DOMElement $el, ?array $children) {
-      if ($children) {
+    private function appendChildren(
+      \DOMElement $el,
+      ?varray<mixed> $children,
+    ): void {
+      if ($children is nonnull) {
         foreach ($children as $v) {
           if ($v === null) {
-          } else if ($v instanceof \DOMElement) {
+          } else if ($v is \DOMElement) {
             $el->appendChild($v);
-          } else if (is_array($v)) {
-            $this->appendChildren($el, $v);
+          } else if (\HH\is_any_array($v)) {
+            $this->appendChildren(
+              $el,
+              HH\FIXME\UNSAFE_CAST<AnyArray<arraykey, mixed>, varray<mixed>>($v),
+            );
           } else {
-            $el->appendChild($this->xml->createTextNode($v));
+            $el->appendChild(
+              HH\FIXME\UNSAFE_CAST<mixed, \DOMNode>(
+                $this->xml->createTextNode(
+                  HH\FIXME\UNSAFE_CAST<mixed, string>($v),
+                )
+              )
+            );
           }
         }
       }
     }
 
-    private function element(string $tag, ?array $attr = null, ...$children) {
-      $el = $this->xml->createElement($tag);
-      if ($attr) {
+    private function element(
+      string $tag,
+      ?darray<string, string> $attr = null,
+      mixed... $children
+    ): \DOMElement {
+      $el = HH\FIXME\UNSAFE_CAST<mixed, \DOMElement>(
+        $this->xml->createElement($tag)
+      );
+      if ($attr is nonnull) {
         foreach ($attr as $k => $v) {
           $el->setAttribute($k, $v);
         }
@@ -458,36 +494,43 @@ namespace __SystemLib {
       return $el;
     }
 
-    private function tr(string $l, mixed $d) {
+    private function tr(string $l, mixed $d): \DOMElement {
       return
         $this->element(
-          'tr', [],
-          $this->element('td', ['class' => 'l'], $l),
-          $this->element('td', ['class' => 'r'], $d));
+          'tr', dict[],
+          $this->element('td', dict['class' => 'l'], $l),
+          $this->element('td', dict['class' => 'r'], $d));
     }
 
-    private function table(string $title, array $data) {
+    private function table(
+      string $title,
+      darray<string, mixed> $data,
+    ): ?varray<\DOMElement> {
       if ($this->is_cli()) {
         echo $title . "\n";
         echo "\n";
         foreach ($data as $k => $v) {
-          echo $k . " => " . print_r($v, true) . "\n";
+          echo $k .
+            " => " .
+            HH\FIXME\UNSAFE_CAST<mixed, string>(\print_r($v, true)) .
+            "\n";
         }
         echo "\n";
+        return null;
       } else {
-        $children = [];
+        $children = dict[];
         foreach ($data as $k => $v) {
-          array_push($children, $this->tr($k, print_r($v, true)));
+          \array_push(inout $children, $this->tr($k, \print_r($v, true)));
         }
-        return [
+        return vec[
           $this->element('hr'),
-          $this->element('h2', [], $title),
-          $this->element('table', [], $children)
+          $this->element('h2', dict[], $title),
+          $this->element('table', dict[], $children)
         ];
       }
     }
 
-    private function appendHead(\DOMElement $html) {
+    private function appendHead(\DOMElement $html): void {
       $style =
         'body { margin: auto; text-align: center; width: 600px; }' .
         'hr { margin-top: 30px; }' .
@@ -498,58 +541,64 @@ namespace __SystemLib {
 
       $html->appendChild(
         $this->element(
-          'head', [],
-          $this->element('title', [], "HHVM phpinfo"),
-          $this->element('style', ['type' => 'text/css'], $style)));
+          'head', dict[],
+          $this->element('title', dict[], "HHVM phpinfo"),
+          $this->element('style', dict['type' => 'text/css'], $style)));
     }
 
-    private function reportVersionTitle() {
+    private function reportVersionTitle(): void {
       if ($this->is_cli()) {
-        echo 'HHVM Version => ' . HHVM_VERSION . "\n";
+        echo 'HHVM Version => ' . \HHVM_VERSION . "\n";
       } else {
         $this->body->appendChild(
-          $this->element('h1', [], 'HHVM Version ' . HHVM_VERSION));
+          $this->element('h1', dict[], 'HHVM Version ' . \HHVM_VERSION));
       }
     }
 
-    private function reportVersions() {
+    private function reportVersions(): void {
       if (!$this->is_cli()) {
-        $this->body->appendChild($this->element('h2', [], 'Version'));
+        $this->body->appendChild($this->element('h2', dict[], 'Version'));
       }
 
-      $data = array(
-        'Version' => HHVM_VERSION,
-        'Version ID' => HHVM_VERSION_ID,
-        'Debug' => HHVM_DEBUG,
-        'Compiler ID' => HHVM_COMPILER_ID,
-        'Repo Schema' => HHVM_REPO_SCHEMA,
-        'PHP Version' => phpversion(),
-        'Zend Version' => zend_version(),
-        'uname' => php_uname());
+      $data = dict[
+        'Version' => \HHVM_VERSION,
+        'Version ID' => \HHVM_VERSION_ID,
+        'Debug' => \HHVM_DEBUG,
+        'Compiler ID' => \HHVM_COMPILER_ID,
+        'Repo Schema' => \HHVM_REPO_SCHEMA,
+        'PHP Version' => \phpversion(),
+        'uname' => \php_uname()];
 
       $this->appendChildren($this->body, $this->table('Version', $data));
     }
 
-    private function reportIni() {
+    private function reportIni(): void {
       $this->appendChildren($this->body,
-                            $this->table('INI', ini_get_all('', false)));
+                            $this->table('INI', \ini_get_all('', false)));
     }
 
-    private function reportHeaders() {
-      if (!function_exists('getallheaders')) return;
+    private function reportHeaders(): void {
+      if (!\function_exists('HH\\get_headers_secure')) return;
+      $headers = dict[];
+      foreach (\HH\get_headers_secure() as $k => $vs) {
+        // preserve "last seen header" behavior of `getallheaders`
+        $headers[$k] = $vs[\count($vs) - 1];
+      }
       $this->appendChildren($this->body,
-                            $this->table('Headers', getallheaders()));
+                            $this->table('Headers', $headers));
     }
 
-    private function reportMap(string $name, array $map) {
-      $data = [];
+    private function reportMap(string $name, darray<string, mixed> $map): void {
+      $data = dict[];
       foreach ($map as $k => $v) {
-        $data[sprintf("%s['%s']", $name, $k)] = $v;
+        $data[
+          HH\FIXME\UNSAFE_CAST<mixed, string>(\sprintf("%s['%s']", $name, $k))
+        ] = $v;
       }
       $this->appendChildren($this->body, $this->table($name, $data));
     }
 
-    public function report() {
+    public function report(): void {
 
       $html = $this->element('html');
 
@@ -568,14 +617,24 @@ namespace __SystemLib {
       $this->reportIni();
       $this->reportHeaders();
 
-      $this->reportMap('$_SERVER', $_SERVER);
-      $this->reportMap('$_ENV', $_ENV);
+      $this->reportMap(
+        '$_SERVER',
+        HH\FIXME\UNSAFE_CAST<mixed, darray<string, mixed>>(
+          \HH\global_get('_SERVER')
+        ),
+      );
+      $this->reportMap(
+        '$_ENV',
+        HH\FIXME\UNSAFE_CAST<mixed, darray<string, mixed>>(
+          \HH\global_get('_ENV')
+        ),
+      );
 
       if (!$this->is_cli()) {
         $this->body->appendChild($this->element('br'));
         $this->xml->appendChild($html);
-        header('content-type: text/html; charset=UTF-8');
-        echo $this->xml->saveHTML();
+        \header('content-type: text/html; charset=UTF-8');
+        echo HH\FIXME\UNSAFE_CAST<mixed, arraykey>($this->xml->saveHTML());
       }
     }
   }

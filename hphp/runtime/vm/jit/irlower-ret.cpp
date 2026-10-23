@@ -17,25 +17,21 @@
 #include "hphp/runtime/vm/jit/irlower-internal.h"
 
 #include "hphp/runtime/base/datatype.h"
-#include "hphp/runtime/base/memory-manager.h"
-#include "hphp/runtime/base/runtime-option.h"
 #include "hphp/runtime/base/typed-value.h"
 #include "hphp/runtime/vm/act-rec.h"
-#include "hphp/runtime/vm/bytecode.h"
 #include "hphp/runtime/vm/func.h"
+#include "hphp/runtime/vm/resumable.h"
 
 #include "hphp/runtime/vm/jit/types.h"
 #include "hphp/runtime/vm/jit/abi.h"
 #include "hphp/runtime/vm/jit/arg-group.h"
 #include "hphp/runtime/vm/jit/bc-marker.h"
 #include "hphp/runtime/vm/jit/call-spec.h"
-#include "hphp/runtime/vm/jit/code-gen-cf.h"
 #include "hphp/runtime/vm/jit/code-gen-helpers.h"
 #include "hphp/runtime/vm/jit/extra-data.h"
 #include "hphp/runtime/vm/jit/fixup.h"
 #include "hphp/runtime/vm/jit/ir-instruction.h"
 #include "hphp/runtime/vm/jit/ir-opcode.h"
-#include "hphp/runtime/vm/jit/release-vv-profile.h"
 #include "hphp/runtime/vm/jit/ssa-tmp.h"
 #include "hphp/runtime/vm/jit/tc.h"
 #include "hphp/runtime/vm/jit/target-profile.h"
@@ -46,13 +42,15 @@
 #include "hphp/runtime/vm/jit/vasm-instr.h"
 #include "hphp/runtime/vm/jit/vasm-reg.h"
 
+#include "hphp/util/arch.h"
+#include "hphp/runtime/ext/asio/ext_async-function-wait-handle.h"
+
+#include "hphp/util/configs/hhir.h"
 #include "hphp/util/trace.h"
 
-#include <folly/Optional.h>
+namespace HPHP::jit::irlower {
 
-namespace HPHP { namespace jit { namespace irlower {
-
-TRACE_SET_MOD(irlower);
+TRACE_SET_MOD(irlower)
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -78,29 +76,35 @@ Vreg adjustSPForReturn(IRLS& env, const IRInstruction* inst) {
  * ABI-specified return registers.
  */
 void prepare_return_regs(Vout& v, SSATmp* retVal, Vloc retLoc,
-                         folly::Optional<AuxUnion> aux) {
+                         const AuxUnion& aux) {
+  using u_data_type = std::make_unsigned<data_type_t>::type;
+
   auto const tp = [&] {
-    auto const mask = [&] { return uint64_t{(*aux).u_raw} << 32; };
+    auto const mask = [&] {
+      if (arch::any<arch::ARM>()) {
+        // ARM return registers keep the aux payload in bits [63:32] and reserve
+        // bits [31:8] for narrow type operations.
+        return uint64_t{aux.u_raw} << 32;
+      }
+      return auxToMask(aux);
+    }();
 
     if (!retLoc.hasReg(1)) {
-      auto const dt = static_cast<data_type_t>(retVal->type().toDataType());
-      return aux ? v.cns(dt | mask()) : v.cns(dt);
+      auto const dt = static_cast<u_data_type>(retVal->type().toDataType());
+      static_assert(std::numeric_limits<u_data_type>::digits <= 32, "");
+      return v.cns(dt | mask);
     }
+
     auto const type = retLoc.reg(1);
-
-    if (!aux) {
-      auto const ret = v.makeReg();
-      v << copy{type, ret};
-      return ret;
-    }
-
     auto const extended = v.makeReg();
     auto const result = v.makeReg();
 
     // DataType is signed. We're using movzbq here to clear out the upper 7
     // bytes of the register, not to actually extend the type value.
     v << movzbq{type, extended};
-    v << orq{extended, v.cns(mask()), result, v.makeReg()};
+    if (!mask) return extended;
+
+    v << orq{extended, v.cns(mask), result, v.makeReg()};
     return result;
   }();
   auto const data = zeroExtendIfBool(v, retVal->type(), retLoc.reg(0));
@@ -108,17 +112,22 @@ void prepare_return_regs(Vout& v, SSATmp* retVal, Vloc retLoc,
   v << syncvmret{data, tp};
 }
 
-void asyncFuncRetImpl(IRLS& env, const IRInstruction* inst, TCA target) {
-  auto const ret = inst->src(2);
-  auto const retLoc = srcLoc(env, inst, 2);
+void asyncRetRImpl(IRLS& env, const IRInstruction* inst, TCA target,
+                   uint32_t numRets) {
   auto& v = vmain(env);
 
   adjustSPForReturn<IRSPRelOffsetData>(env, inst);
 
-  // The asyncFuncRet{,Slow} stubs take the return TV as its arguments.
-  copyTV(v, rarg(0), rarg(1), retLoc, ret);
-  auto args = vm_regs_with_sp() | rarg(1);
-  if (!ret->isA(TNull)) args |= rarg(0);
+  auto args = vm_regs_with_sp();
+  for (auto i = 0; i < numRets; ++i) {
+    auto const ret = inst->src(2 + i);
+    auto const retLoc = srcLoc(env, inst, 2 + i);
+
+    // The `target' stub takes `numRets` return TVs as its rarg() arguments.
+    copyTV(v, rarg(2 * i), rarg(2 * i + 1), retLoc, ret);
+    args |= rarg(2 * i + 1);
+    if (!ret->isA(TNull)) args |= rarg(2 * i);
+  }
 
   v << jmpi{target, args};
 }
@@ -129,10 +138,10 @@ void asyncFuncRetImpl(IRLS& env, const IRInstruction* inst, TCA target) {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-void traceRet(ActRec* fp, Cell* sp, void* rip) {
+void traceRet(ActRec* fp, TypedValue* sp, void* rip) {
   if (rip == tc::ustubs().callToExit) return;
-  checkFrame(fp, sp, false /* fullCheck */, 0);
-  assertx(sp <= (Cell*)fp || fp->resumed());
+  checkFrame(fp, sp, false /* fullCheck */);
+  assertx(sp <= (TypedValue*)fp || isResumed(fp));
 }
 
 void cgRetCtrl(IRLS& env, const IRInstruction* inst) {
@@ -140,7 +149,7 @@ void cgRetCtrl(IRLS& env, const IRInstruction* inst) {
   auto const sync_sp = adjustSPForReturn<RetCtrlData>(env, inst);
   auto& v = vmain(env);
 
-  if (RuntimeOption::EvalHHIRGenerateAsserts) {
+  if (Cfg::HHIR::GenerateAsserts) {
     auto rip = v.makeReg();
     auto prev_fp = v.makeReg();
     v << load{fp[AROFF(m_savedRip)], rip};
@@ -149,21 +158,53 @@ void cgRetCtrl(IRLS& env, const IRInstruction* inst) {
     v << vcall{
       CallSpec::direct(traceRet),
       v.makeVcallArgs({{prev_fp, sync_sp, rip}}),
-      v.makeTuple({})
+      v.makeTuple({}),
+      Fixup::none()
     };
   }
 
   prepare_return_regs(v, inst->src(2), srcLoc(env, inst, 2),
                       inst->extra<RetCtrl>()->aux);
-  v << phpret{fp, rvmfp(), php_return_regs()};
+  v << phpret{fp, php_return_regs()};
+}
+
+namespace {
+using AFWH = c_AsyncFunctionWaitHandle;
+constexpr ptrdiff_t afwhToAr(ptrdiff_t off) {
+  return off - AFWH::arOff();
+}
+constexpr ptrdiff_t afwhToBl(ptrdiff_t off) {
+  return off - AFWH::childrenOff() - AFWH::Node::blockableOff();
+}
+}
+
+void cgAsyncFuncRetPrefetch(IRLS& env, const IRInstruction* inst) {
+  auto const fp = srcLoc(env, inst, 0).reg();
+  auto constexpr offset_to_parent = afwhToAr(AFWH::parentChainOff());
+  auto constexpr offset_to_blocks = AsioBlockable::bitsOff();
+  auto constexpr offset_to_return = afwhToBl(AFWH::resumeAddrOff());
+
+  auto& v = vmain(env);
+  auto const parent = v.makeReg();
+  v << load{fp[offset_to_parent], parent};
+  v << prefetch{parent[offset_to_blocks]};
+  v << prefetch{parent[offset_to_return]};
 }
 
 void cgAsyncFuncRet(IRLS& env, const IRInstruction* inst) {
-  asyncFuncRetImpl(env, inst, tc::ustubs().asyncFuncRet);
+  asyncRetRImpl(env, inst, tc::ustubs().asyncFuncRet, 1);
 }
 
 void cgAsyncFuncRetSlow(IRLS& env, const IRInstruction* inst) {
-  asyncFuncRetImpl(env, inst, tc::ustubs().asyncFuncRetSlow);
+  asyncRetRImpl(env, inst, tc::ustubs().asyncFuncRetSlow, 1);
+}
+
+void cgAsyncGenRetR(IRLS& env, const IRInstruction* inst) {
+  asyncRetRImpl(env, inst, tc::ustubs().asyncGenRetR, 0);
+}
+
+void cgAsyncGenYieldR(IRLS& env, const IRInstruction* inst) {
+  asyncRetRImpl(env, inst, tc::ustubs().asyncGenYieldR, 2);
 }
 
 void cgAsyncSwitchFast(IRLS& env, const IRInstruction* inst) {
@@ -177,12 +218,7 @@ void cgAsyncSwitchFast(IRLS& env, const IRInstruction* inst) {
 void cgLdRetVal(IRLS& env, const IRInstruction* inst) {
   auto const fp = srcLoc(env, inst, 0).reg();
   auto& v = vmain(env);
-  loadTV(v, inst->dst(), dstLoc(env, inst, 0), fp[kArRetOff], true);
-}
-
-void cgDbgTrashRetVal(IRLS& env, const IRInstruction* inst) {
-  auto& v = vmain(env);
-  trashTV(v, srcLoc(env, inst, 0).reg(), kArRetOff, kTVTrashJITRetVal);
+  loadTV(v, inst->dst(), dstLoc(env, inst, 0), fp[kArRetOff]);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -193,8 +229,7 @@ void cgGenericRetDecRefs(IRLS& env, const IRInstruction* inst) {
   auto const numLocals = marker.func()->numLocals();
   auto& v = vmain(env);
 
-  assertx(fp == rvmfp() &&
-          "freeLocalsHelper assumes the frame pointer is rvmfp()");
+  // TODO: assert that fp is the same value stored in rvmfp here.
 
   if (numLocals == 0) return;
 
@@ -202,86 +237,22 @@ void cgGenericRetDecRefs(IRLS& env, const IRInstruction* inst) {
     ? tc::ustubs().freeManyLocalsHelper
     : tc::ustubs().freeLocalsHelpers[numLocals - 1];
 
-  auto const iterReg = v.makeReg();
-  v << lea{fp[localOffset(numLocals - 1)], iterReg};
+  auto const startType = v.makeReg();
+  auto const startData = v.makeReg();
+  v << lea{ptrToLocalType(fp, numLocals - 1), startType};
+  v << lea{ptrToLocalData(fp, numLocals - 1), startData};
 
-  auto const fix = Fixup{
-    marker.bcOff() - marker.func()->base(),
-    marker.spOff().offset
-  };
-  // The stub uses arg reg 0 as scratch and to pass arguments to destructors,
-  // so it expects the iter argument in arg reg 1.
-  auto const args = v.makeVcallArgs({{v.cns(Vconst::Quad), iterReg}});
+  auto const fixupBcOff = marker.bcOff();
+  auto const fix = Fixup::direct(fixupBcOff, marker.fixupBcSPOff());
+  // The stub uses arg reg 0 as scratch and to pass arguments to
+  // destructors, so it expects the starting pointers in arg reg 1 and
+  // 2.
+  auto const args =
+    v.makeVcallArgs({{v.cns(Vconst::Quad), startType, startData}});
   v << vcall{CallSpec::stub(target), args, v.makeTuple({}),
              fix, DestType::None, false};
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 
-const StaticString s_ReleaseVV("ReleaseVV");
-
-void cgReleaseVVAndSkip(IRLS& env, const IRInstruction* inst) {
-  auto const fp = srcLoc(env, inst, 0).reg();
-  auto& v = vmain(env);
-  auto& vc = vcold(env);
-
-  auto const profile = TargetProfile<ReleaseVVProfile> {
-    env.unit.context(), inst->marker(), s_ReleaseVV.get()
-  };
-
-  if (profile.profiling()) {
-    auto const executedOff = offsetof(ReleaseVVProfile, executed);
-    v << incwm{rvmtl()[profile.handle() + executedOff], v.makeReg()};
-  }
-
-  auto const releaseUnlikely = [&] {
-    if (!profile.optimizing()) return true;
-
-    auto const data = profile.data();
-    FTRACE(3, "cgReleaseVVAndSkip({}): percentReleased = {}\n",
-           inst->toString(), data.percentReleased());
-
-    return data.percentReleased() <
-           RuntimeOption::EvalJitPGOReleaseVVMinPercent;
-  }();
-
-  auto const sf = v.makeReg();
-  v << cmpqim{0, fp[AROFF(m_varEnv)], sf};
-
-  ifThen(v, vc, CC_NZ, sf, [&] (Vout& v) {
-    if (profile.profiling()) {
-      auto const releasedOff = offsetof(ReleaseVVProfile, released);
-      v << incwm{rvmtl()[profile.handle() + releasedOff], v.makeReg()};
-    }
-
-    auto const sf = v.makeReg();
-    v << testqim{ActRec::kExtraArgsBit, fp[AROFF(m_varEnv)], sf};
-
-    unlikelyIfThenElse(v, vc, CC_NZ, sf,
-      [&] (Vout& v) {
-        cgCallHelper(
-          v, env,
-          CallSpec::direct(static_cast<void (*)(ActRec*)>(
-                           ExtraArgs::deallocate)),
-          kVoidDest,
-          SyncOptions::Sync,
-          argGroup(env, inst).reg(fp)
-        );
-      },
-      [&] (Vout& v) {
-        cgCallHelper(
-          v, env,
-          CallSpec::direct(static_cast<void (*)(ActRec*)>(
-                           VarEnv::deallocate)),
-          kVoidDest,
-          SyncOptions::Sync,
-          argGroup(env, inst).reg(fp)
-        );
-        v << jmp{label(env, inst->taken())};
-      });
-  }, releaseUnlikely);
 }
-
-///////////////////////////////////////////////////////////////////////////////
-
-}}}

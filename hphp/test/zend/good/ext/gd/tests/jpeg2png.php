@@ -1,24 +1,36 @@
-<?php
-	$cwd = dirname(__FILE__);
+<?hh
+<<__EntryPoint>> function main(): void {
 
-	echo "PNG to JPEG conversion: ";
-	echo imagejpeg(imagecreatefrompng($cwd . "/conv_test.png"), $cwd . "/test_jpeg.jpeg") ? 'ok' : 'failed';
-	echo "\n";
+echo "PNG to JPEG conversion: ";
+echo imagejpeg(
+  imagecreatefrompng(__DIR__ . '/conv_test.png'),
+  sys_get_temp_dir().'/'.'test_jpeg.jpeg'
+) ? 'ok' : 'failed';
+echo "\n";
 
-	echo "Generated JPEG to PNG conversion: ";
-	echo imagepng(imagecreatefromjpeg($cwd . "/test_jpeg.jpeg"), $cwd . "/test_jpng.png") ? 'ok' : 'failed';
-	echo "\n";
+echo "Generated JPEG to PNG conversion: ";
+echo imagepng(
+  imagecreatefromjpeg(sys_get_temp_dir().'/'.'test_jpeg.jpeg'),
+  sys_get_temp_dir().'/'.'test_jpng.png'
+) ? 'ok' : 'failed';
+echo "\n";
 
-	echo "JPEG to PNG conversion: ";
-	echo imagepng(imagecreatefromjpeg($cwd . "/conv_test.jpeg"), $cwd . "/test_png.png") ? 'ok' : 'failed';
-	echo "\n";
+echo "JPEG to PNG conversion: ";
+echo imagepng(
+  imagecreatefromjpeg(__DIR__ . '/conv_test.jpeg'),
+  sys_get_temp_dir().'/'.'test_png.png'
+) ? 'ok' : 'failed';
+echo "\n";
 
-	echo "Generated PNG to JPEG conversion: ";
-	echo imagejpeg(imagecreatefrompng($cwd . "/test_png.png"), $cwd . "/test_pjpeg.jpeg") ? 'ok' : 'failed';
-	echo "\n";
+echo "Generated PNG to JPEG conversion: ";
+echo imagejpeg(
+  imagecreatefrompng(sys_get_temp_dir().'/'.'test_png.png'),
+  sys_get_temp_dir().'/'.'test_pjpeg.jpeg'
+) ? 'ok' : 'failed';
+echo "\n";
 
-	@unlink($cwd . "/test_jpeg.jpeg");
-	@unlink($cwd . "/test_jpng.png");
-	@unlink($cwd . "/test_png.png");
-	@unlink($cwd . "/test_pjpeg.jpeg");
-?>
+unlink(sys_get_temp_dir().'/'.'test_jpeg.jpeg');
+unlink(sys_get_temp_dir().'/'.'test_jpng.png');
+unlink(sys_get_temp_dir().'/'.'test_png.png');
+unlink(sys_get_temp_dir().'/'.'test_pjpeg.jpeg');
+}

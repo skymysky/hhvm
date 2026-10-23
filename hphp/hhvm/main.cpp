@@ -15,6 +15,7 @@
 */
 
 #include <vector>
+#include <string>
 
 #include "hphp/runtime/base/program-functions.h"
 #include "hphp/runtime/base/emulate-zend.h"
@@ -22,41 +23,28 @@
 #include "hphp/runtime/base/execution-context.h"
 #include "hphp/hhvm/process-init.h"
 #include "hphp/compiler/compiler.h"
+#include "hphp/compiler/compiler-systemlib.h"
 #include "hphp/hhbbc/hhbbc.h"
 
 #include "hphp/util/embedded-data.h"
 #include "hphp/util/embedded-vfs.h"
+#include "hphp/util/extern-worker.h"
 #include "hphp/util/logger.h"
+#include "hphp/util/numa.h"
 #include "hphp/util/process.h"
 #include "hphp/util/process-exec.h"
 #include "hphp/util/stack-trace.h"
 #include "hphp/util/struct-log.h"
 #include "hphp/util/text-util.h"
 
-#include <folly/Format.h>
-#include <folly/Singleton.h>
+#include <fmt/core.h>
 
 #include <dlfcn.h>
+#include <pthread.h>
 #include <spawn.h>
 
-/*
- * These are here to work around a gcc-5 lto bug. Without them,
- * certain symbols don't get defined, even though they're referenced,
- * but the build succeeds, and the references get set to nullptr (so
- * calls to vector<string>::~vector() end up as a call to 0.
- *
- * See t15096405
- */
-std::vector<std::string> dummy_vec { "hello", "foo" };
-std::set<std::string> dummy_set { "hello" };
-
 int main(int argc, char** argv) {
-  // Also for t15096405
-  std::string (*ptr1)(std::string&&, const char*) = std::operator+;
-  std::string (*ptr2)(const char*, std::string&&) = std::operator+;
-  if (!argc) {
-    return intptr_t(ptr1) + intptr_t(ptr2);
-  }
+  HPHP::StaticString::CreateAll();
 
   HPHP::Process::RecordArgv(argv);
   int len = strlen(argv[0]);
@@ -74,6 +62,15 @@ int main(int argc, char** argv) {
   if (argc > 1 && !strcmp(argv[1], "--hhbbc")) {
     argv[1] = "hhbbc";
     return HPHP::HHBBC::main(argc - 1, argv + 1);
+  }
+
+  if (argc > 1 &&!strcmp(argv[1], "--compile-systemlib")) {
+    argv[1] = "compile-systemlib";
+    return HPHP::compiler_systemlib_main(argc - 1, argv + 1);
+  }
+
+  if (argc > 1 && !strcmp(argv[1], HPHP::extern_worker::s_option)) {
+    return HPHP::extern_worker::main(argc, argv);
   }
 
   HPHP::register_process_init();
@@ -107,8 +104,7 @@ int main(int argc, char** argv) {
   std::vector<char*> args;
   args.push_back(argv[0]);
   args.push_back("-vRepo.Authoritative=true");
-  args.push_back("-vRepo.Local.Mode=r-");
-  repo = "-vRepo.Local.Path=" + repo;
+  repo = "-vRepo.Path=" + repo;
   args.push_back(const_cast<char*>(repo.c_str()));
   if (argc > 1) {
     args.insert(args.end(), argv + 1, argv + argc);
@@ -180,7 +176,7 @@ static FUNC_PTR forking_wrapper(FUNC_PTR* real_func, const char* func_name) {
       return *real_func;
     } else {
       HPHP::Logger::Error(
-          folly::sformat("cannot find an implementation of {}()", func_name)
+          fmt::format("cannot find an implementation of {}()", func_name)
       );
       assert(false);
     }
@@ -188,7 +184,6 @@ static FUNC_PTR forking_wrapper(FUNC_PTR* real_func, const char* func_name) {
 
   return nullptr;
 }
-
 
 extern "C" {
   // Note: in glibc, fork is a weak symbol aliasing to __fork.  Here we redefine
@@ -252,6 +247,23 @@ extern "C" {
     }
     errno = ENOSYS;
     return errno;
+  }
+
+  int pthread_setname_np(pthread_t thread, const char* name) {
+    static decltype(&pthread_setname_np) orig = nullptr;
+    if (!orig) {
+      orig = (decltype(&pthread_setname_np))dlsym(RTLD_NEXT,
+                                                  "pthread_setname_np");
+    }
+    if (HPHP::use_nuca && strncmp(name, "hhvmworker", 10)) {
+      cpu_set_t all_cpus;
+      CPU_ZERO(&all_cpus);
+      for (int i = 0; i < CPU_SETSIZE; i++) {
+        CPU_SET(i, &all_cpus);
+      }
+      sched_setaffinity(0, sizeof(cpu_set_t), &all_cpus);
+    }
+    return orig(thread, name);
   }
 }
 

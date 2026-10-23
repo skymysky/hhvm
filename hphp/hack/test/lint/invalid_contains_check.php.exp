@@ -1,0 +1,156 @@
+warning: Lint[5608] Invalid `C\contains` check: This call will always return `false`.
+A `Traversable<Map<string, mixed>>` cannot contain a value of type `int`
+   --> invalid_contains_check.php
+  7 |   return !HH\Lib\C\contains($table_data, (int)$assoc['id1']);
+    |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+
+warning: Lint[5638] This call to 'HH\Lib\C\contains' will always return the same value, because type Map<string, mixed> is disjoint from type int.
+   --> invalid_contains_check.php
+  7 |   return !HH\Lib\C\contains($table_data, (int)$assoc['id1']);
+    |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+
+warning: Lint[5608] Invalid `C\contains` check: This call will always return `false`.
+A `Traversable<Foo>` cannot contain a value of type `int`
+   --> invalid_contains_check.php
+ 16 |   return HH\Lib\C\contains($x, $i);
+    |          ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+
+warning: Lint[5638] This call to 'HH\Lib\C\contains' will always return the same value, because type Foo is disjoint from type int.
+   --> invalid_contains_check.php
+ 16 |   return HH\Lib\C\contains($x, $i);
+    |          ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+
+warning: Lint[5608] Invalid `C\contains` check: This call will always return `false`.
+A `Traversable<Foo>` cannot contain a value of type `int`
+   --> invalid_contains_check.php
+ 19 |   return HH\Lib\C\contains($x, $i);
+    |          ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+
+warning: Lint[5638] This call to 'HH\Lib\C\contains' will always return the same value, because type Foo is disjoint from type int.
+   --> invalid_contains_check.php
+ 19 |   return HH\Lib\C\contains($x, $i);
+    |          ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+
+warning: Lint[5608] Invalid `C\contains` check: This call will always return `false`.
+A `Traversable<Foo>` cannot contain a value of type `int`
+   --> invalid_contains_check.php
+ 22 |   return HH\Lib\C\contains($x, $i);
+    |          ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+
+warning: Lint[5638] This call to 'HH\Lib\C\contains' will always return the same value, because type Foo is disjoint from type int.
+   --> invalid_contains_check.php
+ 22 |   return HH\Lib\C\contains($x, $i);
+    |          ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+
+warning: Lint[5608] Invalid `C\contains` check: This call will always return `false`.
+A `Traversable<Foo>` cannot contain a value of type `int`
+   --> invalid_contains_check.php
+ 25 |   return HH\Lib\C\contains($x, $i);
+    |          ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+
+warning: Lint[5638] This call to 'HH\Lib\C\contains' will always return the same value, because type Foo is disjoint from type int.
+   --> invalid_contains_check.php
+ 25 |   return HH\Lib\C\contains($x, $i);
+    |          ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+
+warning: Lint[5608] Invalid `C\contains` check: This call will always return `false`.
+A `Traversable<Foo>` cannot contain a value of type `int`
+   --> invalid_contains_check.php
+ 28 |   return HH\Lib\C\contains($x, $i);
+    |          ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+
+warning: Lint[5638] This call to 'HH\Lib\C\contains' will always return the same value, because type Foo is disjoint from type int.
+   --> invalid_contains_check.php
+ 28 |   return HH\Lib\C\contains($x, $i);
+    |          ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+
+warning: Lint[5608] Invalid `C\contains` check: This call will always return `false`.
+A `Traversable<Foo>` cannot contain a value of type `int`
+   --> invalid_contains_check.php
+ 31 |   return HH\Lib\C\contains($x, $i);
+    |          ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+
+warning: Lint[5638] This call to 'HH\Lib\C\contains' will always return the same value, because type Foo is disjoint from type int.
+   --> invalid_contains_check.php
+ 31 |   return HH\Lib\C\contains($x, $i);
+    |          ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+
+warning: Lint[5608] Invalid `C\contains` check: This call will always return `false`.
+A `Traversable<Foo>` cannot contain a value of type `int`
+   --> invalid_contains_check.php
+ 34 |   return HH\Lib\C\contains($x, $i);
+    |          ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+
+warning: Lint[5638] This call to 'HH\Lib\C\contains' will always return the same value, because type Foo is disjoint from type int.
+   --> invalid_contains_check.php
+ 34 |   return HH\Lib\C\contains($x, $i);
+    |          ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+
+warning: Lint[5608] Invalid `C\contains` check: This call will always return `false`.
+A `Traversable<Foo>` cannot contain a value of type `int`
+   --> invalid_contains_check.php
+ 37 |   return HH\Lib\C\contains($x, $i);
+    |          ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+
+warning: Lint[5638] This call to 'HH\Lib\C\contains' will always return the same value, because type Foo is disjoint from type int.
+   --> invalid_contains_check.php
+ 37 |   return HH\Lib\C\contains($x, $i);
+    |          ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+
+warning: Lint[5608] Invalid `C\contains` check: This call will always return `false`.
+A `Traversable<Foo>` cannot contain a value of type `Baz`
+   --> invalid_contains_check.php
+ 40 |   return HH\Lib\C\contains($x, $i);
+    |          ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+
+warning: Lint[5638] This call to 'HH\Lib\C\contains' will always return the same value, because type Foo is disjoint from type Baz.
+   --> invalid_contains_check.php
+ 40 |   return HH\Lib\C\contains($x, $i);
+    |          ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+
+warning: Lint[5608] Invalid `C\contains` check: This call will always return `false`.
+A `Traversable<Foo>` cannot contain a value of type `<expr#3> as Bar`
+   --> invalid_contains_check.php
+ 43 |   return HH\Lib\C\contains($x, $i);
+    |          ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+
+warning: Lint[5638] This call to 'HH\Lib\C\contains' will always return the same value, because type Foo is disjoint from type <expr#3> as Bar.
+   --> invalid_contains_check.php
+ 43 |   return HH\Lib\C\contains($x, $i);
+    |          ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+
+warning: Lint[5608] Invalid `C\contains` check: This call will always return `false`.
+A `Traversable<Bar>` cannot contain a value of type `Foo`
+   --> invalid_contains_check.php
+ 46 |   return HH\Lib\C\contains($x, $i);
+    |          ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+
+warning: Lint[5638] This call to 'HH\Lib\C\contains' will always return the same value, because type Bar is disjoint from type Foo.
+   --> invalid_contains_check.php
+ 46 |   return HH\Lib\C\contains($x, $i);
+    |          ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+

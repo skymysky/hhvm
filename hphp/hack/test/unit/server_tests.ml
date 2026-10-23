@@ -1,4 +1,4 @@
-(**
+(*
  * Copyright (c) 2015, Facebook, Inc.
  * All rights reserved.
  *
@@ -8,25 +8,390 @@
  *
  *)
 
+open Hh_prelude
+
 let test_process_data =
-  ServerProcess.{
-    pid = 2758734;
-    start_t = 0.0;
-    in_fd = Unix.stdin;
-    out_fds = ["default", Unix.stdout];
-    last_request_handoff = ref 0.0;
-  }
+  Server_process.
+    {
+      pid = 2758734;
+      server_specific_files =
+        { Server_command_types.server_finale_file = "2758734.fin" };
+      start_t = 0.0;
+      in_fd = Unix.stdin;
+      out_fds =
+        Monitor_rpc.PipeTypeMap.of_list [(Monitor_rpc.Default, Unix.stdout)];
+      last_request_handoff = ref 0.0;
+    }
 
 let test_dmesg_parser () =
-  let input = [
-    "[3034339.262439] Out of memory: Kill process 2758734 (hh_server) \
-    score 253 or sacrifice child";
-  ] in
-  Sys_utils.find_oom_in_dmesg_output test_process_data.ServerProcess.pid "hh_server" input
+  let input =
+    [
+      "[3034339.262439] Out of memory: Kill process 2758734 (hh_server) score 253 or sacrifice child";
+    ]
+  in
+  Sys_utils.For_test.find_oom_in_dmesg_output
+    test_process_data.Server_process.pid
+    "hh_server"
+    input
 
-let tests = [
-  "test_dmesg_parser", test_dmesg_parser;
-]
+let test_depgraph_unavailable_exits_server () =
+  Test_client_provider.clear ();
+  Test_client_provider.mock_new_client_type Server_command_types.Non_persistent;
+  let client_provider = Client_provider.provider_for_test () in
+  let client =
+    match
+      Client_provider.sleep_and_check client_provider ~idle_gc_slice:0 `Any
+    with
+    | Client_provider.Select_new { Client_provider.client; _ } -> client
+    | _ -> failwith "Expected a test client"
+  in
+  let env =
+    Server_env_build.make_env
+      ~init_id:"test_depgraph_unavailable_exits_server"
+      ~deps_mode:(Typing_deps_mode.InMemoryMode None)
+      Server_config.default_config
+  in
+  let pid = Unix.fork () in
+  if pid = 0 then begin
+    let e =
+      Exception.wrap
+        (Typing_deps.Depgraph_unavailable
+           (Typing_deps.Depgraph_not_found "/missing/depgraph.hhdg"))
+    in
+    ignore
+      (Client_command_handler.For_test.handle_client_command_exception
+         ~env
+         ~client
+         e
+        : Server_env.env);
+    Stdlib.exit 1
+  end;
+  let (_pid, status) = Unix.waitpid [] pid in
+  let expected_exit_code = Exit_status.(exit_code Depgraph_unavailable) in
+  let actual_exit_code =
+    match status with
+    | Unix.WEXITED code -> code
+    | Unix.WSIGNALED signal ->
+      failwith (Printf.sprintf "Child process terminated by signal %d" signal)
+    | Unix.WSTOPPED signal ->
+      failwith (Printf.sprintf "Child process stopped by signal %d" signal)
+  in
+  Asserter.Int_asserter.assert_equals
+    expected_exit_code
+    actual_exit_code
+    (Printf.sprintf
+       "Depgraph_unavailable should terminate the server with exit code %d"
+       expected_exit_code);
+  true
+
+(* In this test, we wish to establish that we enable deferring type checking
+   for files that have undeclared dependencies, UNLESS we've already deferred
+   those files a certain number of times. *)
+let test_process_file_deferring () =
+  let { Common_setup.ctx; foo_path; _ } =
+    Common_setup.setup ~sqlite:false Global_options.default ~xhp_as:`Namespaces
+  in
+  let file =
+    Typing_service_types.{ path = foo_path; was_already_deferred = false }
+  in
+
+  (* Finally, this is what all the setup was for: process this file *)
+  Decl_counters.set_mode
+    Hack_event_logger.PerFileProfilingConfig.DeclingTopCounts;
+  let prev_counter_state = Counters.reset () in
+  let { Typing_check_service.deferred_decls; _ } =
+    Typing_check_service.process_file
+      ctx
+      file
+      ~prefetch_decls_enabled:true
+      ~prefetch_decls_threshold:0
+  in
+  Counters.restore_state prev_counter_state;
+
+  List.iter deferred_decls ~f:(fun (deferred_file, decl_name) ->
+      Printf.printf "%s - %s\n" (Relative_path.suffix deferred_file) decl_name);
+  (* Validate the declare file computation *)
+  let found_declare =
+    List.exists deferred_decls ~f:(fun (deferred_file, _) ->
+        String.equal (Relative_path.suffix deferred_file) "Bar.php")
+  in
+  Asserter.Bool_asserter.assert_equals
+    true
+    found_declare
+    "Should have found the declare file computation";
+  let decl_names =
+    List.fold deferred_decls ~init:S_set.empty ~f:(fun s (_, id) ->
+        S_set.add id s)
+  in
+  let expected_decl_names =
+    ["A"; "B"; "D"; "Foo"; "Bar"]
+    |> List.map ~f:(Printf.sprintf "\\%s")
+    |> S_set.of_list
+  in
+  Asserter.Bool_asserter.assert_equals
+    true
+    (S_set.equal decl_names expected_decl_names)
+    (Printf.sprintf
+       "Unexpected set of deferred decls. Expected %s, got %s"
+       (S_set.show expected_decl_names)
+       (S_set.show decl_names));
+  Asserter.Int_asserter.assert_equals
+    5
+    (List.length deferred_decls)
+    "Should be this many deferred_decls";
+
+  true
+
+let expected_decling_count = 82
+
+(* This test verifies that the deferral/counting machinery works for
+   ProviderUtils.compute_tast_and_errors_unquarantined. *)
+let test_compute_tast_counting () =
+  let { Common_setup.ctx; foo_path; foo_contents; _ } =
+    Common_setup.setup ~sqlite:false Global_options.default ~xhp_as:`Namespaces
+  in
+
+  let (ctx, entry) =
+    Provider_context.add_or_overwrite_entry_contents
+      ~ctx
+      ~path:foo_path
+      ~contents:foo_contents
+  in
+  let { Tast_provider.Compute_tast_and_errors.telemetry; _ } =
+    Tast_provider.compute_tast_and_errors_unquarantined
+      ~ctx
+      ~entry
+      ~error_filter:Tast_provider.ErrorFilter.default
+  in
+
+  Asserter.Int_asserter.assert_equals
+    expected_decling_count
+    (Telemetry_test_utils.int_exn telemetry "Decl_provider_get.count")
+    "There should be this many Decl_provider_get for shared_mem provider";
+
+  true
+
+(* This test verifies that the deferral/counting machinery works for
+   ProviderUtils.compute_tast_and_errors_unquarantined, this time with local memory backend. *)
+let test_compute_tast_counting_local_mem () =
+  Utils.with_context
+    ~enter:(fun () ->
+      Provider_backend.set_local_memory_backend_with_defaults_for_test ())
+    ~exit:(fun () ->
+      (* restore it back to shared_mem for the rest of the tests *)
+      Provider_backend.set_shared_memory_backend ())
+    ~do_:(fun () ->
+      let { Common_setup.ctx; foo_path; foo_contents; _ } =
+        Common_setup.setup
+          ~sqlite:false
+          Global_options.default
+          ~xhp_as:`Namespaces
+      in
+      let (ctx, entry) =
+        Provider_context.add_or_overwrite_entry_contents
+          ~ctx
+          ~path:foo_path
+          ~contents:foo_contents
+      in
+      let { Tast_provider.Compute_tast_and_errors.telemetry; _ } =
+        Tast_provider.compute_tast_and_errors_unquarantined
+          ~ctx
+          ~entry
+          ~error_filter:Tast_provider.ErrorFilter.default
+      in
+      Asserter.Int_asserter.assert_equals
+        expected_decling_count
+        (Telemetry_test_utils.int_exn telemetry "Decl_provider_get.count")
+        "There should be this many Decl_provider_get for local_memory provider");
+
+  true
+
+let test_should_enable_deferring () =
+  Relative_path.set_path_prefix
+    Relative_path.Root
+    (Path.make @@ Common_setup.in_fake_dir "www");
+
+  let file =
+    Typing_service_types.
+      {
+        path =
+          Relative_path.create Relative_path.Root
+          @@ Common_setup.in_fake_dir "www/Foo.php";
+        was_already_deferred = false;
+      }
+  in
+  Asserter.Bool_asserter.assert_equals
+    true
+    (Typing_check_service.should_enable_deferring file)
+    "File should be deferred twice - below max";
+
+  let file = Typing_service_types.{ file with was_already_deferred = true } in
+  Asserter.Bool_asserter.assert_equals
+    false
+    (Typing_check_service.should_enable_deferring file)
+    "File should not be deferred - at max";
+
+  let file = Typing_service_types.{ file with was_already_deferred = true } in
+  Asserter.Bool_asserter.assert_equals
+    false
+    (Typing_check_service.should_enable_deferring file)
+    "File should not be deferred - above max";
+
+  true
+
+(* This test verifies quarantine. *)
+let test_quarantine () =
+  Provider_backend.set_local_memory_backend_with_defaults_for_test ();
+  let { Common_setup.ctx; foo_path; foo_contents; nonexistent_path; _ } =
+    Common_setup.setup ~sqlite:false Global_options.default ~xhp_as:`Namespaces
+  in
+  let ctx_orig = ctx in
+
+  (* simple case *)
+  let (ctx, _foo_entry) =
+    Provider_context.add_or_overwrite_entry_contents
+      ~ctx:ctx_orig
+      ~path:foo_path
+      ~contents:foo_contents
+  in
+  let can_quarantine =
+    try
+      Provider_utils.respect_but_quarantine_unsaved_changes ~ctx ~f:(fun () ->
+          "ok")
+    with
+    | e -> e |> Exception.wrap |> Exception.to_string
+  in
+  Asserter.String_asserter.assert_equals
+    "ok"
+    can_quarantine
+    "Should be able to quarantine foo";
+
+  (* repeat of simple case *)
+  let can_quarantine =
+    try
+      Provider_utils.respect_but_quarantine_unsaved_changes ~ctx ~f:(fun () ->
+          "ok")
+    with
+    | e -> e |> Exception.wrap |> Exception.to_string
+  in
+  Asserter.String_asserter.assert_equals
+    "ok"
+    can_quarantine
+    "Should be able to quarantine foo a second time";
+
+  (* add a non-existent file; should fail *)
+  let (ctx2, _nonexistent_entry) =
+    Provider_context.add_or_overwrite_entry_contents
+      ~ctx:ctx_orig
+      ~path:nonexistent_path
+      ~contents:""
+  in
+  let can_quarantine =
+    try
+      Provider_utils.respect_but_quarantine_unsaved_changes
+        ~ctx:ctx2
+        ~f:(fun () -> "ok")
+    with
+    | e -> e |> Exception.wrap |> Exception.to_string
+  in
+  Asserter.String_asserter.assert_equals
+    "ok"
+    can_quarantine
+    "Should be able to quarantine nonexistent_file";
+
+  (* repeat of simple case, back with original ctx *)
+  let can_quarantine =
+    try
+      Provider_utils.respect_but_quarantine_unsaved_changes ~ctx ~f:(fun () ->
+          "ok")
+    with
+    | e -> e |> Exception.wrap |> Exception.to_string
+  in
+  Asserter.String_asserter.assert_equals
+    "ok"
+    can_quarantine
+    "Should be able to quarantine foo a third time";
+
+  true
+
+let test_autocomplete_sort_text () =
+  let make_item ~label ~explicit_sort_text =
+    let position = File_content.Position.beginning_of_file in
+    Autocomplete_types.
+      {
+        res_decl_pos = Pos.to_absolute Pos.none;
+        res_replace_pos = Ide_api_types.{ st = position; ed = position };
+        res_base_class = None;
+        res_label = label;
+        res_insert_text = InsertLiterally label;
+        res_detail = "";
+        res_sort_text = explicit_sort_text;
+        res_filter_text = None;
+        res_additional_edits = [];
+        res_fullname = label;
+        res_kind = File_info.SI_Class;
+        res_documentation = None;
+      }
+  in
+  List.iter
+    [
+      ("regular", None, "regular");
+      ("__internal", None, "~__internal");
+      ("regular", Some "0001", "0001");
+      ("__internal", Some "0001", "~0001");
+      ("please_DO_NOT_USE_this", Some "0002", "~0002");
+      ("__internal", Some "", "~__internal");
+    ]
+    ~f:(fun (label, sort_text, expected) ->
+      let actual =
+        Autocomplete_types.sort_text
+          (make_item ~label ~explicit_sort_text:sort_text)
+      in
+      Asserter.String_asserter.assert_equals
+        expected
+        actual
+        (Printf.sprintf "Unexpected sort text for %s" label));
+  true
+
+let tests =
+  [
+    ("test_autocomplete_sort_text", test_autocomplete_sort_text);
+    ( "test_depgraph_unavailable_exits_server",
+      test_depgraph_unavailable_exits_server );
+    ("test_process_file_deferring", test_process_file_deferring);
+    ("test_compute_tast_counting", test_compute_tast_counting);
+    ( "test_compute_tast_counting_local_mem",
+      test_compute_tast_counting_local_mem );
+    ("test_dmesg_parser", test_dmesg_parser);
+    ("test_should_enable_deferring", test_should_enable_deferring);
+    ("test_quarantine", test_quarantine);
+  ]
 
 let () =
-  Unit_test.run_all tests
+  Event_logger.init_fake ();
+  (* The parsing service needs shared memory to be set up *)
+  let config =
+    Shared_mem.
+      {
+        global_size = 1024;
+        heap_size = 1024 * 8;
+        hash_table_pow = 10;
+        shm_dirs = [];
+        shm_use_sharded_hashtbl = false;
+        shm_cache_size = -1;
+        shm_min_avail = 0;
+        log_level = 0;
+        sample_rate = 0.0;
+        compression = 0;
+      }
+  in
+  let (_ : Shared_mem.handle) = Shared_mem.init config ~num_workers:0 in
+  tests
+  |> List.map ~f:(fun (name, do_) ->
+         ( name,
+           fun () ->
+             Utils.with_context
+               ~enter:Provider_backend.set_shared_memory_backend
+               ~exit:(fun () -> ())
+               ~do_ ))
+  |> Unit_test.run_all

@@ -1,9 +1,9 @@
-<?php
+<?hh
 /* Prototype  : int vfprintf  ( resource $handle  , string $format , array $args  )
  * Description: Write a formatted string to a stream
  * Source code: ext/standard/formatted_print.c
 */
-
+<<__EntryPoint>> function main(): void {
 echo "*** Testing vfprintf() : basic functionality - using unsigned format ***\n";
 
 // Initialise all required variables
@@ -11,13 +11,14 @@ $format = "format";
 $format1 = "%u";
 $format2 = "%u %u";
 $format3 = "%u %u %u";
-$arg1 = array(-1111);
-$arg2 = array(-1111,-1234567);
-$arg3 = array(-1111,-1234567,-2345432);
+$arg1 = vec[-1111];
+$arg2 = vec[-1111,-1234567];
+$arg3 = vec[-1111,-1234567,-2345432];
 
 /* creating dumping file */
-$data_file = dirname(__FILE__) . '/vfprintf_basic7_64bit.txt';
-if (!($fp = fopen($data_file, 'wt')))
+$data_file = sys_get_temp_dir().'/'.'vfprintf_basic7_64bit.txt';
+$fp = fopen($data_file, 'wt');
+if (!$fp)
    return;
    
 vfprintf($fp, $format1,$arg1);
@@ -34,5 +35,5 @@ print_r(file_get_contents($data_file));
 
 unlink($data_file);
 
-?>
-===DONE===
+echo "===DONE===\n";
+}

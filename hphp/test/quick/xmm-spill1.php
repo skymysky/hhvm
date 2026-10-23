@@ -1,8 +1,8 @@
 <?hh
 // Copyright 2004-2015 Facebook. All Rights Reserved.
 
-function foo($val, $a, $b, $c, $d, $e, $f, $g, $h, $i, $j, $k, $l, $m, $n, $o,
-             $p, $q) {
+function foo(float $val, float $a, float $b, float $c, float $d, float $e, float $f, float $g, float $h, float $i, float $j, float $k, float $l, float $m, float $n, float $o,
+             float $p, float $q) :mixed{
   $a = $b;
   $b = $c;
   $c = $d;
@@ -27,6 +27,7 @@ function foo($val, $a, $b, $c, $d, $e, $f, $g, $h, $i, $j, $k, $l, $m, $n, $o,
   $res = $prod + $sum;
   return $res;
 }
-
+<<__EntryPoint>> function main(): void {
 var_dump(foo(500.5, 1.1, 2.2, 3.3, 4.4, 5.5, 6.6, 7.7, 8.8, 9.9, 10.1, 11.1,
              12.2, 13.3, 14.4, 15.5, 16.6, 17.7));
+}

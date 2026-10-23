@@ -1,17 +1,17 @@
-<?php
+<?hh
 /* Prototype  : string mb_strrchr(string haystack, string needle[, bool part[, string encoding]])
  * Description: Finds the last occurrence of a character in a string within another 
  * Source code: ext/mbstring/mbstring.c
  * Alias to functions: 
  */
-
+<<__EntryPoint>> function main(): void {
 echo "*** Testing mb_strrchr() : variation ***\n";
 
 mb_internal_encoding('UTF-8');
 
 //with repeated needles
-$string_ascii = b'abcdef zbcdyx';
-$needle_ascii = b"bcd";
+$string_ascii = 'abcdef zbcdyx';
+$needle_ascii = "bcd";
 
 //Japanese string in UTF-8 with repeated needles
 $string_mb = base64_decode('5pel5pys6Kqe44OG44Kt44K544OIMzTvvJXvvJbml6XmnKzoqp7jg4bjgq3jgrnjg4g=');
@@ -38,5 +38,5 @@ else {
 }
 
 
-?>
-===DONE===
+echo "===DONE===\n";
+}

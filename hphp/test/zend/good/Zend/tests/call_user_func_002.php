@@ -1,12 +1,8 @@
-<?php
+<?hh
 
-function __autoload($class) {
-	var_dump($class);
+<<__EntryPoint>> function main(): void {
+call_user_func(vec['foo', 'bar']);
+call_user_func(vec['', 'bar']);
+call_user_func(vec[$foo, 'bar']);
+call_user_func(vec[$foo, '']);
 }
-
-call_user_func(array('foo', 'bar'));
-call_user_func(array('', 'bar'));
-call_user_func(array($foo, 'bar'));
-call_user_func(array($foo, ''));
-
-?>

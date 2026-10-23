@@ -14,12 +14,11 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_UTIL_IMMED_H
-#define incl_HPHP_UTIL_IMMED_H
+#pragma once
 
 #include "hphp/util/safe-cast.h"
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 
 /*
  * When selecting encodings, we often need to assess a two's complement
@@ -47,6 +46,10 @@ inline bool magFits(uint64_t val, int s) {
   return (val & ((1ull << bits) - 1)) == val;
 }
 
+constexpr uint64_t splat8x8(uint8_t byte) {
+  return uint64_t{byte} * 0x0101010101010101ULL;
+}
+
 /*
  * Immediate wrappers for the assembler.
  *
@@ -63,15 +66,7 @@ inline bool magFits(uint64_t val, int s) {
  */
 struct Immed {
   /* implicit */ Immed(int i) : m_int(i) {}
-#ifdef _MSC_VER
-  // MSVC prefers not changing the sign of the value when
-  // resolving the overloads, which means that an unsigned
-  // argument, even of a size smaller than int, will error
-  // so we provide an unsigned overload to fix that.
-  /* implicit */ Immed(unsigned int i) : m_int((int)i) {}
-#else
   /* implicit */ Immed(unsigned i) = delete;
-#endif
   /* implicit */ Immed(long i) = delete;
   /* implicit */ Immed(unsigned long i) = delete;
   /* implicit */ Immed(long long i) = delete;
@@ -79,6 +74,7 @@ struct Immed {
 
   int64_t q() const { return m_int; }
   int32_t l() const { return safe_cast<int32_t>(m_int); }
+  uint32_t ul() const { return static_cast<uint32_t>(m_int); }
   int16_t w() const { return safe_cast<int16_t>(m_int); }
   uint16_t uw() const { return static_cast<uint16_t>(m_int); }
   int8_t  b() const { return safe_cast<int8_t>(m_int); }
@@ -87,6 +83,9 @@ struct Immed {
   bool fits(int sz) const { return deltaFits(m_int, sz); }
 
   Immed operator-() { return -this->m_int; }
+
+  bool operator==(Immed o) const { return m_int == o.m_int; }
+  bool operator!=(Immed o) const { return m_int != o.m_int; }
 
 private:
   int32_t m_int;
@@ -114,9 +113,11 @@ struct Immed64 {
 
   bool fits(int sz) const { return deltaFits(m_long, sz); }
 
+  bool operator==(Immed64 o) const { return m_long == o.m_long; }
+  bool operator!=(Immed64 o) const { return m_long != o.m_long; }
+
 private:
   int64_t m_long;
 };
 
-}}
-#endif
+}

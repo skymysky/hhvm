@@ -13,8 +13,7 @@
    | license@php.net so we can mail you a copy immediately.               |
    +----------------------------------------------------------------------+
 */
-#ifndef incl_HPHP_ASSERTIONS_H_
-#define incl_HPHP_ASSERTIONS_H_
+#pragma once
 
 #include <cassert>
 #include <cstdio>
@@ -25,6 +24,7 @@
 #include <type_traits>
 #include <utility>
 
+#include <fmt/core.h>
 #include <folly/Format.h>
 #include <folly/Preprocessor.h>
 
@@ -34,20 +34,11 @@
 
 #define IMPLIES(a, b) (!(a) || (b))
 
-#if defined(__INTEL_COMPILER)
-#define not_reached()                                                \
-  do {                                                               \
-    assert(false);                                                   \
-  } while (true)
-#elif defined(_MSC_VER)
-#define not_reached() __assume(0)
-#else
 #define not_reached() /* gcc-4.5 supports __builtin_unreachable() */  \
   do {                                                                \
-    assert(false);                                                    \
+    assertx(false);                                                   \
     __builtin_unreachable();                                          \
   } while (true)
-#endif
 
 #define not_implemented() do {                   \
   fprintf(stderr, "not implemented: %s:%d %s\n", \
@@ -77,20 +68,6 @@ void assert_fail(const char* e,
                  const char* func,
                  const std::string& msg);
 
-[[noreturn]]
-void assert_fail_no_log(const char* e,
-                        const char* file,
-                        unsigned int line,
-                        const char* func,
-                        const std::string& msg);
-
-/*
- * Register a function for auxiliary assert logging.
- */
-using AssertFailLogger = std::function<void(const char*, const std::string&)>;
-
-void register_assert_fail_logger(AssertFailLogger);
-
 ///////////////////////////////////////////////////////////////////////////////
 
 /*
@@ -98,11 +75,10 @@ void register_assert_fail_logger(AssertFailLogger);
  */
 struct AssertDetailImpl {
   /*
-   * Prints the results of all registered detailers to stderr.  Returns true if
-   * we had any registered detailers.
+   * Reads the most recently added message, and removes it from the
+   * list. Returns true if there was a message to read.
    */
-  static bool log();
-
+  static bool readAndRemove(std::string& msg);
 protected:
   explicit AssertDetailImpl(const char* name)
     : m_name(name)
@@ -129,7 +105,8 @@ protected:
   AssertDetailImpl& operator=(const AssertDetailImpl&) = delete;
 
 private:
-  static bool log_impl(const AssertDetailImpl*);
+  static std::pair<std::string,std::string>
+  log_one(const AssertDetailImpl* adi, const char* name);
   virtual std::string run() const = 0;
 
 private:
@@ -172,7 +149,7 @@ private:
 }
 
 #define SCOPE_ASSERT_DETAIL(name)           \
-  auto FB_ANONYMOUS_VARIABLE(SCOPE_ASSERT)  \
+  auto const FB_ANONYMOUS_VARIABLE(SCOPE_ASSERT)  \
   = ::HPHP::detail::AssertDetailScopeMaker(name) + [&]()
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -194,12 +171,7 @@ private:
 #define assert_fail_impl(e, msg) \
   ::HPHP::assert_fail(#e, __FILE__, __LINE__, __PRETTY_FUNCTION__, msg)
 
-#define assert_fail_impl_no_log(e, msg) \
-  ::HPHP::assert_fail_no_log(#e, __FILE__, __LINE__, __PRETTY_FUNCTION__, msg)
-
 #define always_assert(e)            assert_impl(e, assert_fail_impl(e, ""))
-#define always_assert_no_log(e)    assert_impl(e, \
-                                        assert_fail_impl_no_log(e, ""))
 #define always_assert_log(e, l)     assert_impl(e, assert_fail_impl(e, l()))
 #define always_assert_flog(e, ...)  assert_impl(e, assert_fail_impl(e,        \
                                         ::folly::format(__VA_ARGS__).str()))
@@ -209,27 +181,15 @@ private:
 #ifndef NDEBUG
 #define assert(e) always_assert(e)
 #define assertx(e) always_assert(e)
-#define assert_no_log(e) always_assert_no_log(e)
 #define assert_log(e, l) always_assert_log(e, l)
 #define assert_flog(e, ...) always_assert_flog(e, __VA_ARGS__)
 #else
 #define assert(e) static_cast<void>(0)
 #define assertx(e) static_cast<void>(0)
-#define assert_no_log(e) static_cast<void>(0)
 #define assert_log(e, l) static_cast<void>(0)
 #define assert_flog(e, ...) static_cast<void>(0)
 #endif
 
-const bool do_assert =
-#ifdef NDEBUG
-  false
-#else
-  true
-#endif
-  ;
-
 ///////////////////////////////////////////////////////////////////////////////
 
 }
-
-#endif

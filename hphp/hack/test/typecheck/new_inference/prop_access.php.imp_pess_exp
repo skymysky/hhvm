@@ -1,0 +1,41 @@
+warning: Warn[12042] Property accessed on a value of type `dynamic` [1]
+-> This expression has type `dynamic` [2]
+
+prop_access.php:12:29
+10 |   while (true) {
+11 |     if (!$x->isEmpty()) {
+12 |       expect<string>($x[0]->x);
+   |                      ^^^^^ [2]
+   |                             ^ [1]
+13 |       break;
+14 |     } else {
+
+error: Typing[4110] Invalid assignment [1]
+-> Expected `string` [2]
+->   via this generic `T` [3]
+-> But got `int` [4]
+
+prop_access.php:15:7
+ 3 | 
+ 4 | class A {
+ 5 |   public function __construct(public int $x) {}
+   |                                      ^^^ [4]
+ 6 | }
+ 7 | 
+   :
+10 |   while (true) {
+11 |     if (!$x->isEmpty()) {
+12 |       expect<string>($x[0]->x);
+   |              ^^^^^^ [2]
+13 |       break;
+14 |     } else {
+15 |       $x[] = $a;
+   |       ^^^^^^^^^ [1]
+16 |     }
+17 |   }
+18 | }
+19 | 
+20 | function expect<T>(T $_): void {}
+   |                    ^ [3]
+
+2 errors found

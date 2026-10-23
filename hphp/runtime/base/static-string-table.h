@@ -13,24 +13,22 @@
    | license@php.net so we can mail you a copy immediately.               |
    +----------------------------------------------------------------------+
 */
-#ifndef incl_HPHP_STATIC_STRING_TABLE_H_
-#define incl_HPHP_STATIC_STRING_TABLE_H_
+#pragma once
 
 #include <string>
 
 #include <folly/Range.h>
 
 #include "hphp/runtime/base/rds.h"
+#include "hphp/runtime/base/string-data.h"
 
 namespace HPHP {
 
 //////////////////////////////////////////////////////////////////////
 
 struct Array;
-struct StringData;
-struct String;
+struct OptString;
 struct TypedValue;
-using Cell = TypedValue;
 
 //////////////////////////////////////////////////////////////////////
 
@@ -59,6 +57,10 @@ using Cell = TypedValue;
 
 extern StringData** precomputed_chars;
 
+inline bool is_static_string(const StringData* s) {
+  return is_low_mem(reinterpret_cast<void*>(const_cast<StringData*>(s)));
+}
+
 /*
  * Attempt to lookup a string (specified in various ways) in the
  * static string table.  If it's not there, create a new static string
@@ -67,17 +69,24 @@ extern StringData** precomputed_chars;
 StringData* makeStaticString(const StringData* str);
 StringData* makeStaticString(folly::StringPiece);
 StringData* makeStaticString(const std::string& str);
-StringData* makeStaticString(const String& str);
+StringData* makeStaticString(const OptString& str);
 StringData* makeStaticString(const char* str, size_t len);
 StringData* makeStaticString(const char* str);
 
+#define LAZY_STATIC_STRING(x) \
+  []{ \
+    static StaticString result(x); \
+    return result.get(); \
+  }()
+
 /*
- * As their counterparts above, but check that the static string
- * table has been initialized. These should be used for anything
- * that might run before main().
+ * Insert an already initialized static StringData into the static string table.
+ * If the same string is already present, invoke the deleter to take appropriate
+ * action. By default, the deleter tries to free the memory; thus we need to
+ * pass a custom deleter if we manipulate pre-allocated memory.
  */
-StringData* makeStaticStringSafe(const char* str, size_t len);
-StringData* makeStaticStringSafe(const char* str);
+StringData* insertStaticString(StringData*,
+                               void (*deleter)(StringData*) = nullptr);
 
 /*
  * Lookup static strings for single character strings.  (We pre-create
@@ -92,6 +101,7 @@ StringData* makeStaticString(char c);
  * Returns: a string that isStatic(), or nullptr if there was none.
  */
 StringData* lookupStaticString(const StringData* str);
+StringData* lookupStaticString(folly::StringPiece);
 
 /*
  * Return the number of static strings in the process.
@@ -115,7 +125,7 @@ rds::Handle makeCnsHandle(const StringData* cnsName);
  *
  * Returns true iff the constant has a persistent handle.
  */
-bool bindPersistentCns(const StringData* cnsName, const Cell& value);
+bool bindPersistentCns(const StringData* cnsName, const TypedValue& value);
 
 /*
  * Return an array of all the static strings in the current
@@ -136,6 +146,11 @@ Array lookupDefinedConstants(bool categorize = false);
 size_t countStaticStringConstants();
 
 /*
+ * Initialize the static string table. This needs to happen before any static
+ * strings are materialized.
+ */
+void create_string_data_map();
+/*
  * The static string table is generally initially created before main
  * by global constructors (StaticString objects).  After we've parsed
  * options, we may find out a different size was requested for the
@@ -147,8 +162,8 @@ size_t countStaticStringConstants();
  */
 void refineStaticStringTableSize();
 
+void log_static_strings();
+
 //////////////////////////////////////////////////////////////////////
 
 }
-
-#endif

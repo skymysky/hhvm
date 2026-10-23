@@ -1,7 +1,7 @@
-<?php
+<?hh
 
 //
 // function don't allow promotion
 //
-function f(public $a) {}
+function f(public $a) :mixed{}
 

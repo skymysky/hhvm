@@ -1,4 +1,4 @@
-  (**
+(*
  * Copyright (c) 2015, Facebook, Inc.
  * All rights reserved.
  *
@@ -7,47 +7,79 @@
  *
  *)
 
+open Hh_prelude
 module Env = Typing_env
-open Env
-module TUtils = Typing_utils
-module Type = Typing_ops
-module Reason = Typing_reason
+open Typing_env_types
 module C = Typing_continuations
-module LEnvC = Typing_lenv_cont
+module LEnvC = Typing_per_cont_env
+module LEnvOps = Typing_per_cont_ops
+module Union = Typing_union
 
 (*****************************************************************************)
 (* Module dealing with local environments. *)
 (*****************************************************************************)
 
-let get_all_locals env = env.lenv.local_types
+let get_all_locals env = env.lenv.per_cont_env
 
 (*****************************************************************************)
 (* Functions dealing with old style local environment *)
 (*****************************************************************************)
-let union env local1 local2 =
-  let (ty1, eid1), (ty2, eid2) = local1, local2 in
-  let eid = if eid1 = eid2 then eid1 else Ident.tmp() in
-  let env, ty =
-    (* In principle this is covered by the is_sub_type_alt tests, but
-     * that function isn't complete and sometimes returns None.
-     *)
-    if Typing_defs.ty_equal ty1 ty2
-    then env, ty1
-    else
-    if Typing_subtype.is_sub_type_alt env ty1 ty2 = Some true
-    then env, ty2
-    else
-    if Typing_subtype.is_sub_type_alt env ty2 ty1 = Some true
-    then env, ty1
-    else
-      let env, ty1 = TUtils.unresolved env ty1 in
-      let env, ty2 = TUtils.unresolved env ty2 in
-      Type.union env.Env.pos Reason.URnone env ty1 ty2 in
-  env, (ty, eid)
 
-let get_cont env cont =
-  let local_types = get_all_locals env in
-  LEnvC.get_cont cont local_types
+let union
+    env
+    ~join_pos
+    Typing_local_types.
+      {
+        ty = ty1;
+        pos = pos1;
+        eid = eid1;
+        macro_splice_vars = macro_splice_vars1;
+      }
+    Typing_local_types.
+      {
+        ty = ty2;
+        pos = pos2;
+        eid = eid2;
+        macro_splice_vars = macro_splice_vars2;
+      } =
+  (* TODO(mjt) Use a more specific reason here provided as an argument *)
+  let reason = Some (Typing_reason.join_point join_pos) in
+  let (env, ty) = Union.union ?reason ~approx_cancel_neg:true env ty1 ty2 in
+  (* TODO(mjt) Determin if this need updating to if the change to reasons will
+     be sufficient*)
+  let pos =
+    if phys_equal ty ty1 || Pos.equal Pos.none pos2 then
+      pos1
+    else if phys_equal ty ty2 || Pos.equal Pos.none pos1 then
+      pos2
+    else
+      Pos.none
+  in
+  let eid =
+    if Expression_id.equal eid1 eid2 then
+      eid1
+    else
+      Env.make_expression_id env
+  in
+  let (env, macro_splice_vars) =
+    match (macro_splice_vars1, macro_splice_vars2) with
+    | (x, None) -> (env, x)
+    | (None, x) -> (env, x)
+    | (Some map1, Some map2) ->
+      let (env, map) =
+        Local_id.Map.union_env
+          env
+          ~combine:(fun env _ (p1, t1) (_p2, t2) ->
+            let (env, t) =
+              Union.union ?reason ~approx_cancel_neg:true env t1 t2
+            in
+            (env, Some (p1, t)))
+          map1
+          map2
+      in
+      (env, Some map)
+  in
+  Typing_local_types.(env, { ty; pos; eid; macro_splice_vars })
 
 let get_cont_option env cont =
   let local_types = get_all_locals env in
@@ -71,89 +103,78 @@ let replace_cont env cont ctxopt =
 let restore_conts_from env fromlocals conts =
   let local_types = get_all_locals env in
   let local_types =
-    LEnvC.restore_conts_from local_types ~from:fromlocals conts in
+    LEnvOps.restore_conts_from local_types ~from:fromlocals conts
+  in
   Env.env_with_locals env local_types
 
-let restore_and_merge_conts_from env fromlocals conts =
+let restore_and_merge_conts_from env ~join_pos fromlocals conts =
   let local_types = get_all_locals env in
-  let env, local_types =
-    LEnvC.restore_and_merge_conts_from env union local_types ~from:fromlocals
-    conts in
+  let (env, local_types) =
+    LEnvOps.restore_and_merge_conts_from
+      env
+      (union ~join_pos)
+      local_types
+      ~from:fromlocals
+      conts
+  in
   Env.env_with_locals env local_types
 
 (* Merge all continuations in the provided list and update the 'next'
-* continuation with the result. *)
-let update_next_from_conts env cont_list =
+   * continuation with the result. *)
+let update_next_from_conts env ~join_pos cont_list =
   let local_types = get_all_locals env in
-  let env, local_types = LEnvC.update_next_from_conts env union local_types
-    cont_list in
+  let (env, local_types) =
+    LEnvOps.update_next_from_conts env (union ~join_pos) local_types cont_list
+  in
   Env.env_with_locals env local_types
 
 (* After this call, the provided continuation will be the union of itself and
-* the next continuation *)
-let save_and_merge_next_in_cont env cont =
+   * the next continuation *)
+let save_and_merge_next_in_cont env ~join_pos cont =
   let local_types = get_all_locals env in
-  let env, local_types = LEnvC.save_and_merge_next_in_cont env union
-    local_types cont in
+  let (env, local_types) =
+    LEnvOps.save_and_merge_next_in_cont env (union ~join_pos) local_types cont
+  in
   Env.env_with_locals env local_types
 
-let move_and_merge_next_in_cont env cont =
+let move_and_merge_next_in_cont env ~join_pos cont =
   let local_types = get_all_locals env in
-  let env, local_types = LEnvC.move_and_merge_next_in_cont env union
-    local_types cont in
+  let (env, local_types) =
+    LEnvOps.move_and_merge_next_in_cont env (union ~join_pos) local_types cont
+  in
   Env.env_with_locals env local_types
 
-let union_contextopts = LEnvC.union_opts union
+let union_contextopts ~join_pos = LEnvOps.union_opts (union ~join_pos)
 
-let union_by_cont env lenv1 lenv2 =
-  let locals1 = lenv1.Env.local_types in
-  let locals2 = lenv2.Env.local_types in
-  let env, locals = LEnvC.union_by_cont env union locals1 locals2 in
+let union_by_cont env ~join_pos lenv1 lenv2 =
+  let locals1 = lenv1.per_cont_env in
+  let locals2 = lenv2.per_cont_env in
+  let (env, locals) =
+    LEnvOps.union_by_cont env (union ~join_pos) locals1 locals2
+  in
   Env.env_with_locals env locals
 
-(* Intersects the set of valid fake_members.
- * Fake members are introduced when we know that a member is not null.
- * Example: if($this->x) { ... $this->x is a fake member now ... }
- * What it means in practice is that the member behaves like a local, it can
- * change type.
- *)
-let intersect_fake lenv1 lenv2 =
-  let nextctxopt1 = LEnvC.get_cont_option C.Next lenv1.local_types in
-  let nextctxopt2 = LEnvC.get_cont_option C.Next lenv2.local_types in
-  let fake1 = lenv1.fake_members in
-  let fake2 = lenv2.fake_members in
-  let valid = match nextctxopt1, nextctxopt2 with
-  | Some _, Some _
-  | None, None -> SSet.inter fake1.valid fake2.valid
-  | Some _, None -> fake1.valid
-  | None, Some _ -> fake2.valid in
-  { fake1 with Env.valid = valid }
+let join_fake lenv1 lenv2 =
+  let nextctxopt1 = LEnvC.get_cont_option C.Next lenv1.per_cont_env in
+  let nextctxopt2 = LEnvC.get_cont_option C.Next lenv2.per_cont_env in
+  match (nextctxopt1, nextctxopt2) with
+  | (Some c1, Some c2) ->
+    Typing_fake_members.join c1.LEnvC.fake_members c2.LEnvC.fake_members
+  | (None, None) -> Typing_fake_members.empty
+  | (Some c1, None) -> c1.LEnvC.fake_members
+  | (None, Some c2) -> c2.LEnvC.fake_members
 
-let merge_reactivity parent_lenv lenv1 lenv2 =
-  let nextctxopt1 = LEnvC.get_cont_option C.Next lenv1.local_types in
-  let nextctxopt2 = LEnvC.get_cont_option C.Next lenv2.local_types in
-  match nextctxopt1, nextctxopt2 with
-  | Some _, Some _
-  | None, None -> parent_lenv.local_reactive
-  | Some _, None -> lenv1.local_reactive
-  | None, Some _ -> lenv2.local_reactive
-
-let union_lenvs_ env parent_lenv lenv1 lenv2 =
-  let fake_members = intersect_fake lenv1 lenv2 in
+let union_lenvs_ env ~join_pos parent_lenv lenv1 lenv2 =
+  let fake_members = join_fake lenv1 lenv2 in
   let local_using_vars = parent_lenv.local_using_vars in
-  let tpenv = env.lenv.tpenv in
-  let local_mutability = Typing_mutability_env.intersect_mutability
-    parent_lenv.local_mutability lenv1.local_mutability lenv2.local_mutability in
-  let local_reactive = merge_reactivity parent_lenv lenv1 lenv2 in
-  let env = union_by_cont env lenv1 lenv2 in
-  let lenv = { env.Env.lenv with
-    fake_members;
-    local_using_vars;
-    tpenv;
-    local_mutability;
-    local_reactive;
-  } in
-  { env with lenv }, lenv
+  let env = union_by_cont env ~join_pos lenv1 lenv2 in
+  let lenv = { env.lenv with local_using_vars } in
+  let per_cont_env =
+    LEnvC.update_cont_entry C.Next lenv.per_cont_env (fun entry ->
+        LEnvC.{ entry with fake_members })
+  in
+  let lenv = { lenv with per_cont_env } in
+  ({ env with lenv }, lenv)
 
 (* Used when we want the new local environment to be the union
  * of 2 local environments. Typical use case is an if statement.
@@ -164,25 +185,45 @@ let union_lenvs_ env parent_lenv lenv1 lenv2 =
  * when that is the case, their type becomes the union (least upper bound)
  * of the types it had in each branch.
  *)
-let union_lenvs env parent_lenv lenv1 lenv2 =
-  fst @@ union_lenvs_ env parent_lenv lenv1 lenv2
+let union_lenvs env ~join_pos parent_lenv lenv1 lenv2 =
+  fst @@ union_lenvs_ env ~join_pos parent_lenv lenv1 lenv2
 
-let rec union_lenv_list env parent_lenv = function
+let rec union_lenv_list env ~join_pos parent_lenv = function
   | []
-  | [_] -> env
+  | [_] ->
+    env
   | lenv1 :: lenv2 :: lenvlist ->
-    let env, lenv = union_lenvs_ env parent_lenv lenv1 lenv2 in
-    union_lenv_list env parent_lenv (lenv :: lenvlist)
+    let (env, lenv) = union_lenvs_ env ~join_pos parent_lenv lenv1 lenv2 in
+    union_lenv_list env ~join_pos parent_lenv (lenv :: lenvlist)
 
 let stash_and_do env conts f =
   let parent_locals = get_all_locals env in
   let env = drop_conts env conts in
-  let env, res = f env in
+  let (env, res) = f env in
   let env = restore_conts_from env parent_locals conts in
-  env, res
+  (env, res)
 
 let env_with_empty_fakes env =
-  { env with Env.lenv = {
-      env.Env.lenv with Env.fake_members = Env.empty_fake_members;
-    }
-  }
+  let per_cont_env =
+    LEnvC.update_cont_entry C.Next env.lenv.per_cont_env (fun entry ->
+        LEnvC.{ entry with fake_members = Typing_fake_members.empty })
+  in
+  { env with lenv = { env.lenv with per_cont_env } }
+
+let has_next env =
+  match get_cont_option env C.Next with
+  | None -> false
+  | Some _ -> true
+
+let assert_package_loaded env pos pkg status =
+  let package_info = Env.get_tcopt env |> Typechecker_options.package_info in
+  let per_cont_env =
+    LEnvC.assert_package_loaded_in_cont
+      ~package_info
+      C.Next
+      pos
+      pkg
+      status
+      env.lenv.per_cont_env
+  in
+  { env with lenv = { env.lenv with per_cont_env } }

@@ -23,60 +23,53 @@
 #include <type_traits>
 
 #include <folly/gen/Base.h>
+#include <fmt/core.h>
 #include <folly/Conv.h>
-#include <folly/Optional.h>
 #include <folly/Memory.h>
 
 #include "hphp/hhbbc/cfg.h"
 #include "hphp/hhbbc/class-util.h"
+#include "hphp/hhbbc/context.h"
 #include "hphp/hhbbc/func-util.h"
 #include "hphp/hhbbc/index.h"
 #include "hphp/hhbbc/representation.h"
 #include "hphp/hhbbc/unit-util.h"
 
-#include "hphp/runtime/base/repo-auth-type-array.h"
-#include "hphp/runtime/base/repo-auth-type-codec.h"
+#include "hphp/runtime/base/array-data.h"
+#include "hphp/runtime/base/array-init.h"
 #include "hphp/runtime/base/repo-auth-type.h"
-#include "hphp/runtime/base/tv-comparisons.h"
+
+#include "hphp/runtime/ext/extension-registry.h"
 
 #include "hphp/runtime/vm/bytecode.h"
 #include "hphp/runtime/vm/func-emitter.h"
 #include "hphp/runtime/vm/native.h"
 #include "hphp/runtime/vm/preclass-emitter.h"
+#include "hphp/runtime/vm/type-alias-emitter.h"
 #include "hphp/runtime/vm/unit-emitter.h"
 
-namespace HPHP { namespace HHBBC {
+#include "hphp/util/configs/eval.h"
 
-TRACE_SET_MOD(hhbbc_emit);
+namespace HPHP::HHBBC {
+
+TRACE_SET_MOD(hhbbc_emit)
 
 namespace {
 
 //////////////////////////////////////////////////////////////////////
 
-const StaticString s_empty("");
 const StaticString s_invoke("__invoke");
-const StaticString s_86cinit("86cinit");
 
 //////////////////////////////////////////////////////////////////////
 
-struct PceInfo {
-  PreClassEmitter* pce;
-  Id origId;
-};
-
-struct FeInfo {
-  FuncEmitter* fe;
-  Id origId;
-};
-
 struct EmitUnitState {
-  explicit EmitUnitState(const Index& index, const php::Unit* unit) :
+  explicit EmitUnitState(const IIndex& index, const php::Unit* unit) :
       index(index), unit(unit) {}
 
   /*
    * Access to the Index for this program.
    */
-  const Index& index;
+  const IIndex& index;
 
   /*
    * Access to the unit we're emitting
@@ -87,141 +80,57 @@ struct EmitUnitState {
    * While emitting bytecode, we keep track of the classes and funcs
    * we emit.
    */
-  std::vector<Offset>  classOffsets;
-  std::vector<PceInfo> pceInfo;
-  std::vector<FeInfo>  feInfo;
-  std::vector<Id>      typeAliasInfo;
+  std::vector<std::pair<php::Class*, PreClassEmitter*>> pces;
+
+  /*
+   * Whether a closure in a CreateCl opcode has been seen before
+   * (CreateCls within the same func are allowed to refer to the same
+   * closure, so we must avoid creating duplicate PreClassEmitters for
+   * them).
+   */
+  hphp_fast_set<const php::Class*> seenClosures;
 };
 
-Id recordClass(EmitUnitState& euState, UnitEmitter& ue, Id id) {
-  auto cls = borrow(euState.unit->classes[id]);
-  euState.pceInfo.push_back(
-    { ue.newPreClassEmitter(cls->name->toCppString(), cls->hoistability), id }
-  );
-  return euState.pceInfo.back().pce->id();
-}
+/*
+ * Some bytecodes need to be mutated before being emitted. Pass those
+ * bytecodes by value to their respective emit_op functions.
+ */
+template<typename T>
+struct OpInfoHelper {
+  static constexpr bool by_value = T::op == Op::CreateCl;
+  using type = typename std::conditional<by_value, T, const T&>::type;
+};
 
-Id recordFunc(EmitUnitState& euState, UnitEmitter& ue, Id id) {
-  auto func = borrow(euState.unit->funcs[id - 1]);
-  euState.feInfo.push_back({ ue.newFuncEmitter(func->name), id });
-  return euState.feInfo.back().fe->id();
+template<typename T>
+using OpInfo = typename OpInfoHelper<T>::type;
+
+/*
+ * Helper to conditionally call fun on data provided data is of the
+ * given type.
+ */
+template<Op op, typename F, typename Bc>
+std::enable_if_t<std::remove_reference_t<Bc>::op == op>
+caller(F&& fun, Bc&& data) { fun(std::forward<Bc>(data)); }
+
+template<Op op, typename F, typename Bc>
+std::enable_if_t<std::remove_reference_t<Bc>::op != op>
+caller(F&&, Bc&&) {}
+
+void recordClass(EmitUnitState& euState,
+                 UnitEmitter& ue,
+                 php::Class& cls) {
+  euState.pces.emplace_back(
+    &cls,
+    ue.newPreClassEmitter(cls.name->toCppString())
+  );
 }
 
 //////////////////////////////////////////////////////////////////////
 
-php::SrcLoc srcLoc(const php::Func& func, int32_t ix) {
+php::SrcLoc srcLoc(const php::Unit& unit, const php::Func& func, int32_t ix) {
   if (ix < 0) return php::SrcLoc{};
-  auto const unit = func.originalUnit ? func.originalUnit : func.unit;
-  return unit->srcLocs[ix];
-}
-
-/*
- * We need to ensure that all blocks in an fpi region are
- * contiguous. This will normally be guaranteed by rpo order (since
- * the blocks are dominated by the FPush and post-dominated by the
- * FCall). If there are exceptional edges from the fpi region,
- * however, but the FCall is still reachable its possible that the
- * block(s) ending in the exceptional edge get sorted after the block
- * containing the FCall.
- *
- * To solve this, we need to find all exceptional exits from fpi
- * regions, and insert "fake" edges to the block containing the
- * corresponding call.
- */
-std::vector<borrowed_ptr<php::Block>> initial_sort(const php::Func& f) {
-  auto sorted = rpoSortFromMain(f);
-
-  FTRACE(4, "Initial sort {}\n", f.name);
-
-  // We give each fpi region a unique id
-  auto nextFpi = 0;
-  // Map from fpi region id to the block containing its FCall.
-  // Needs value stability because extraEdges holds pointers into this map.
-  hphp_hash_map<int, borrowed_ptr<php::Block>> fpiToCallBlkMap;
-  // Map from the ids of terminal blocks within fpi regions to the
-  // entries in fpiToCallBlkMap corresponding to the active fpi regions.
-  hphp_fast_map<BlockId, std::vector<borrowed_ptr<php::Block>*>> extraEdges;
-  // The fpi state at the start of each block
-  std::vector<folly::Optional<std::vector<int>>> blkFpiState(f.blocks.size());
-  for (auto blk : sorted) {
-    auto& fpiState = blkFpiState[blk->id];
-    if (!fpiState) fpiState.emplace();
-    auto curState = *fpiState;
-    for (auto const& bc : blk->hhbcs) {
-      if (isFPush(bc.op)) {
-        FTRACE(4, "blk:{} FPush {} (nesting {})\n",
-               blk->id, nextFpi, curState.size());
-        curState.push_back(nextFpi++);
-      } else if (isFCallStar(bc.op)) {
-        FTRACE(4, "blk:{} FCall {} (nesting {})\n",
-               blk->id, curState.back(), curState.size() - 1);
-        fpiToCallBlkMap[curState.back()] = blk;
-        curState.pop_back();
-      }
-    }
-    auto hasNormalSucc = false;
-    forEachNormalSuccessor(
-      *blk,
-      [&] (BlockId id) {
-        hasNormalSucc = true;
-        auto &succState = blkFpiState[id];
-        FTRACE(4, "blk:{} propagate state to {}\n",
-               blk->id, id);
-        if (!succState) {
-          succState = curState;
-        } else {
-          assertx(succState == curState);
-        }
-      }
-    );
-    if (!hasNormalSucc) {
-      for (auto fpi : curState) {
-        // We may or may not have seen the FCall yet; if we've not
-        // seen it, either there is none (in which case there's
-        // nothing to do), or the blocks happen to be in the right
-        // order anyway (so again there's apparently nothing to
-        // do). But in the latter case its possible that adding edges
-        // for another fpi region (or another exceptional exit in this
-        // fpi region) might perturb the order; so we record a pointer
-        // to the unordered_map element, in case it gets filled in
-        // later.
-        auto curBlkPtr = &fpiToCallBlkMap[fpi];
-        extraEdges[blk->id].push_back(curBlkPtr);
-      }
-    }
-  }
-
-  if (!extraEdges.empty()) {
-    auto changes = false;
-    for (auto& elm : extraEdges) {
-      auto const blk = borrow(f.blocks[elm.first]);
-      for (auto const blkPtr : elm.second) {
-        if (!*blkPtr) {
-          // There was no FCall, so no need to do anything
-          continue;
-        }
-        changes = true;
-        FTRACE(4, "blk:{} add throw edge to {}\n",
-               blk->id, (*blkPtr)->id);
-        blk->throwExits.push_back((*blkPtr)->id);
-      }
-    }
-    if (changes) {
-      // redo the sort with the extra edges in place
-      sorted = rpoSortFromMain(f);
-      // Remove all the extra edges
-      for (auto& elm : extraEdges) {
-        auto const blk = borrow(f.blocks[elm.first]);
-        for (auto const blkPtr : elm.second) {
-          if (*blkPtr) {
-            blk->throwExits.pop_back();
-          }
-        }
-      }
-    }
-  }
-
-  return sorted;
+  assertx(ix < unit.srcLocs.size());
+  return unit.srcLocs[ix];
 }
 
 /*
@@ -229,14 +138,7 @@ std::vector<borrowed_ptr<php::Block>> initial_sort(const php::Func& f) {
  *
  * Rules about block order:
  *
- *   - The "primary function body" must come first.  This is all blocks
- *     that aren't part of a fault funclet.
- *
- *   - All bytecodes corresponding to a given FPI region must be
- *     contiguous. Note that an FPI region can start or end part way
- *     through a block, so this constraint is on bytecodes, not blocks
- *
- *   - Each funclet must have all of its blocks contiguous, with the
+ *   - Each DV funclet must have all of its blocks contiguous, with the
  *     entry block first.
  *
  *   - Main entry point must be the first block.
@@ -246,8 +148,8 @@ std::vector<borrowed_ptr<php::Block>> initial_sort(const php::Func& f) {
  * case for DV initializers is that each one falls through to the
  * next, with the block jumping back to the main entry point.
  */
-std::vector<borrowed_ptr<php::Block>> order_blocks(const php::Func& f) {
-  auto sorted = initial_sort(f);
+std::vector<BlockId> order_blocks(const php::WideFunc& f) {
+  auto sorted = rpoSortFromMain(f);
 
   // Get the DV blocks, without the rest of the primary function body,
   // and then add them to the end of sorted.
@@ -261,36 +163,12 @@ std::vector<borrowed_ptr<php::Block>> order_blocks(const php::Func& f) {
   }();
   sorted.insert(end(sorted), begin(dvBlocks), end(dvBlocks));
 
-  // This stable sort will keep the blocks only reachable from DV
-  // entry points after all other main code, and move fault funclets
-  // after all that.
-  std::stable_sort(
-    begin(sorted), end(sorted),
-    [&] (borrowed_ptr<php::Block> a, borrowed_ptr<php::Block> b) {
-      using T = std::underlying_type<php::Block::Section>::type;
-      return static_cast<T>(a->section) < static_cast<T>(b->section);
-    }
-  );
-
-  // If the first block is just a Nop, this means that there is a jump to the
-  // second block from somewhere in the function. We don't want this, so we
-  // change this nop to an EntryNop so it doesn't get optimized away
-  if (is_single_nop(*sorted.front())) {
-    sorted.front()->hhbcs.clear();
-    sorted.front()->hhbcs.push_back(bc::EntryNop{});
-    FTRACE(2, "      changing Nop to EntryNop in block {}\n",
-           sorted.front()->id);
-  }
-
   FTRACE(2, "      block order:{}\n",
     [&] {
       std::string ret;
-      for (auto& b : sorted) {
+      for (auto const bid : sorted) {
         ret += " ";
-        if (b->section != php::Block::Section::Main) {
-          ret += "f";
-        }
-        ret += folly::to<std::string>(b->id);
+        ret += folly::to<std::string>(bid);
       }
       return ret;
     }()
@@ -301,12 +179,6 @@ std::vector<borrowed_ptr<php::Block>> order_blocks(const php::Func& f) {
 // While emitting bytecode, we learn about some metadata that will
 // need to be registered in the FuncEmitter.
 struct EmitBcInfo {
-  struct FPI {
-    Offset fpushOff;
-    Offset fpiEndOff;
-    int32_t fpDelta;
-  };
-
   struct JmpFixup { Offset instrOff; Offset jmpImmedOff; };
 
   struct BlockInfo {
@@ -323,8 +195,8 @@ struct EmitBcInfo {
     // The offset past the end of this block.
     Offset past;
 
-    // How many fault regions the jump at the end of this block is leaving.
-    // 0 if there is no jump or if the jump is to the same fault region or a
+    // How many catch regions the jump at the end of this block is leaving.
+    // 0 if there is no jump or if the jump is to the same catch region or a
     // child
     int regionsToPop;
 
@@ -337,67 +209,62 @@ struct EmitBcInfo {
     // depth at the jump site here.  This is needed to track
     // currentStackDepth correctly (and we also assert all the jumps
     // have the same depth).
-    folly::Optional<uint32_t> expectedStackDepth;
-
-    // Similar to expectedStackDepth, for the fpi stack. Needed to deal with
-    // terminal instructions that end an fpi region.
-    folly::Optional<uint32_t> expectedFPIDepth;
+    Optional<uint32_t> expectedStackDepth;
   };
 
-  std::vector<borrowed_ptr<php::Block>> blockOrder;
+  std::vector<BlockId> blockOrder;
   uint32_t maxStackDepth;
-  uint32_t maxFpiDepth;
   bool containsCalls;
-  std::vector<FPI> fpiRegions;
   std::vector<BlockInfo> blockInfo;
 };
 
-using ExnNodePtr = borrowed_ptr<php::ExnNode>;
+using ExnNodePtr = php::ExnNode*;
 
-bool handleEquivalent (ExnNodePtr eh1, ExnNodePtr eh2) {
-  if (!eh1 && !eh2) return true;
-  if (!eh1 || !eh2 || eh1->depth != eh2->depth) return false;
-
-  auto entry = [](ExnNodePtr eh) {
-    return match<BlockId>(eh->info,
-          [] (const php::CatchRegion& c) { return c.catchEntry; },
-          [] (const php::FaultRegion& f) { return f.faultEntry; });
+bool handleEquivalent(const php::Func& func, ExnNodeId eh1, ExnNodeId eh2) {
+  auto entry = [&] (ExnNodeId eid) {
+    return func.exnNodes[eid].region.catchEntry;
   };
 
-  while (entry(eh1) == entry(eh2)) {
-    eh1 = eh1->parent;
-    eh2 = eh2->parent;
-    if (!eh1 && !eh2) return true;
+  while (eh1 != eh2) {
+    assertx(eh1 != NoExnNodeId &&
+            eh2 != NoExnNodeId &&
+            func.exnNodes[eh1].depth == func.exnNodes[eh2].depth);
+    if (entry(eh1) != entry(eh2)) return false;
+    eh1 = func.exnNodes[eh1].parent;
+    eh2 = func.exnNodes[eh2].parent;
   }
 
-  return false;
-};
+  return true;
+}
 
 // The common parent P of eh1 and eh2 is the deepest region such that
 // eh1 and eh2 are both handle-equivalent to P or a child of P
-ExnNodePtr commonParent(ExnNodePtr eh1, ExnNodePtr eh2) {
-  if (!eh1 || !eh2) return nullptr;
-  while (eh1->depth > eh2->depth) eh1 = eh1->parent;
-  while (eh2->depth > eh1->depth) eh2 = eh2->parent;
-  while (!handleEquivalent(eh1, eh2)) {
-    eh1 = eh1->parent;
-    eh2 = eh2->parent;
+ExnNodeId commonParent(const php::Func& func, ExnNodeId eh1, ExnNodeId eh2) {
+  if (eh1 == NoExnNodeId || eh2 == NoExnNodeId) return NoExnNodeId;
+  while (func.exnNodes[eh1].depth > func.exnNodes[eh2].depth) {
+    eh1 = func.exnNodes[eh1].parent;
+  }
+  while (func.exnNodes[eh2].depth > func.exnNodes[eh1].depth) {
+    eh2 = func.exnNodes[eh2].parent;
+  }
+  while (!handleEquivalent(func, eh1, eh2)) {
+    eh1 = func.exnNodes[eh1].parent;
+    eh2 = func.exnNodes[eh2].parent;
   }
   return eh1;
-};
+}
 
-EmitBcInfo emit_bytecode(EmitUnitState& euState,
-                         UnitEmitter& ue,
-                         const php::Func& func) {
+const StaticString
+  s_hhbbc_fail_verification("__hhvm_intrinsics\\hhbbc_fail_verification");
+
+EmitBcInfo emit_bytecode(EmitUnitState& euState, UnitEmitter& ue, FuncEmitter& fe,
+                         const php::WideFunc& func) {
   EmitBcInfo ret = {};
   auto& blockInfo = ret.blockInfo;
-  blockInfo.resize(func.blocks.size());
+  blockInfo.resize(func.blocks().size());
 
   // Track the stack depth while emitting to determine maxStackDepth.
   int32_t currentStackDepth { 0 };
-
-  // Stack of in-progress fpi regions.
-  std::vector<EmitBcInfo::FPI> fpiStack;
 
   // Temporary buffer for vector immediates.  (Hoisted so it's not
   // allocated in the loop.)
@@ -406,300 +273,226 @@ EmitBcInfo emit_bytecode(EmitUnitState& euState,
   // Offset of the last emitted bytecode.
   Offset lastOff { 0 };
 
-  bool traceBc = false;
+  auto const unit = euState.index.lookup_func_original_unit(*func);
 
-  Type tos{};
-
-  auto const pseudomain = is_pseudomain(&func);
-  auto process_mergeable = [&] (const Bytecode& bc) {
-    if (!pseudomain) return;
-    switch (bc.op) {
-      case Op::DefCls:
-      case Op::DefClsNop:
-        if (!ue.m_returnSeen) {
-          auto const& cls = euState.unit->classes[
-            bc.op == Op::DefCls ? bc.DefCls.arg1 : bc.DefClsNop.arg1];
-          if (cls->hoistability == PreClass::NotHoistable) {
-            cls->hoistability = PreClass::Mergeable;
-          }
-        }
-        return;
-      case Op::AssertRATL:
-      case Op::AssertRATStk:
-      case Op::Nop:
-        return;
-
-      case Op::DefCns: {
-        if (ue.m_returnSeen || tos.subtypeOf(BBottom)) break;
-        auto top = tv(tos);
-        assertx(top);
-        auto val = euState.index.lookup_persistent_constant(bc.DefCns.str1);
-        // If there's a persistent constant with the same name, either
-        // this is the one and only definition, or the persistent
-        // definition is in systemlib (and this one will always fail).
-        auto const kind = val && cellSame(*val, *top) ?
-          Unit::MergeKind::PersistentDefine : Unit::MergeKind::Define;
-        ue.pushMergeableDef(kind, bc.DefCns.str1, *top);
-        return;
-      }
-      case Op::DefTypeAlias:
-        ue.pushMergeableTypeAlias(Unit::MergeKind::TypeAlias,
-                                  bc.DefTypeAlias.arg1);
-        return;
-
-      case Op::Null:   tos = TInitNull; return;
-      case Op::True:   tos = TTrue; return;
-      case Op::False:  tos = TFalse; return;
-      case Op::Int:    tos = ival(bc.Int.arg1); return;
-      case Op::Double: tos = dval(bc.Double.dbl1); return;
-      case Op::String: tos = sval(bc.String.str1); return;
-      case Op::Vec:    tos = vec_val(bc.Vec.arr1); return;
-      case Op::Dict:   tos = dict_val(bc.Dict.arr1); return;
-      case Op::Keyset: tos = keyset_val(bc.Keyset.arr1); return;
-      case Op::Array:  tos = aval(bc.Array.arr1); return;
-      case Op::PopC:
-        tos = TBottom;
-        return;
-      case Op::RetC: {
-        if (ue.m_returnSeen || tos.subtypeOf(BBottom)) break;
-        auto top = tv(tos);
-        assertx(top);
-        ue.m_returnSeen = true;
-        ue.m_mainReturn = *top;
-        tos = TBottom;
-        return;
-      }
-      default:
-        break;
+  SCOPE_ASSERT_DETAIL("emit") {
+    std::string ret;
+    for (auto bid : func.blockRange()) {
+      auto const block = show(*func, *func.blocks()[bid]);
+      ret += fmt::format("block #{}\n{}", bid, block);
     }
-    ue.m_returnSeen = true;
-    ue.m_mainReturn = make_tv<KindOfUninit>();
-    tos = TBottom;
+
+    return ret;
   };
 
-  auto map_local = [&] (LocalId id) {
-    auto const loc = func.locals[id];
-    assert(!loc.killed);
-    assert(loc.id <= id);
-    return loc.id;
+  auto const map_local = [&] (LocalId id) {
+    if (id >= func->locals.size()) return id;
+    auto const loc = func->locals[id];
+    assertx(!loc.killed);
+    assertx(loc.id <= id);
+    id = loc.id;
+    return id;
   };
 
-  auto end_fpi = [&] (Offset off) {
-    auto& fpi = fpiStack.back();
-    fpi.fpiEndOff = off;
-    ret.fpiRegions.push_back(fpi);
-    fpiStack.pop_back();
+  auto const map_local_name = [&] (NamedLocal nl) {
+    nl.id = map_local(nl.id);
+    if (nl.name == kInvalidLocalName) return nl;
+    if (nl.name >= func->locals.size()) return nl;
+    auto const loc = func->locals[nl.name];
+    if (!loc.name) {
+      nl.name = kInvalidLocalName;
+      return nl;
+    }
+    assertx(!loc.unusedName);
+    nl.name = loc.nameId;
+    return nl;
   };
 
-  auto set_expected_depth = [&] (EmitBcInfo::BlockInfo& info) {
+  auto const set_expected_depth = [&] (BlockId block) {
+    auto& info = blockInfo[block];
+
     if (info.expectedStackDepth) {
-      assert(*info.expectedStackDepth == currentStackDepth);
+      assertx(*info.expectedStackDepth == currentStackDepth);
     } else {
       info.expectedStackDepth = currentStackDepth;
     }
-
-    if (info.expectedFPIDepth) {
-      assert(*info.expectedFPIDepth == fpiStack.size());
-    } else {
-      info.expectedFPIDepth = fpiStack.size();
-    }
   };
 
-  auto make_member_key = [&] (MKey mkey) {
+  auto const make_member_key = [&] (MKey mkey) {
     switch (mkey.mcode) {
       case MEC: case MPC:
-        return MemberKey{mkey.mcode, mkey.idx};
+        return MemberKey{mkey.mcode, static_cast<int32_t>(mkey.idx), mkey.rop};
       case MEL: case MPL:
-        return MemberKey{
-          mkey.mcode, static_cast<int32_t>(map_local(mkey.local))
-        };
+        return MemberKey{mkey.mcode, map_local_name(mkey.local), mkey.rop};
       case MET: case MPT: case MQT:
-        return MemberKey{mkey.mcode, mkey.litstr};
+        return MemberKey{mkey.mcode, mkey.litstr, mkey.rop};
       case MEI:
-        return MemberKey{mkey.mcode, mkey.int64};
+        return MemberKey{mkey.mcode, mkey.int64, mkey.rop};
       case MW:
         return MemberKey{};
     }
     not_reached();
   };
 
-  auto emit_inst = [&] (const Bytecode& inst) {
-    process_mergeable(inst);
-    auto const startOffset = ue.bcPos();
+  auto const emit_inst = [&] (const Bytecode& inst) {
+    auto const startOffset = fe.bcPos();
     lastOff = startOffset;
 
-    FTRACE(4, " emit: {} -- {} @ {}\n", currentStackDepth, show(&func, inst),
-           show(srcLoc(func, inst.srcLoc)));
+    FTRACE(4, " emit: {} -- {} @ {}\n", currentStackDepth, show(*func, inst),
+           show(srcLoc(*unit, *func, inst.srcLoc)));
 
-    if (options.TraceBytecodes.count(inst.op)) traceBc = true;
-
-    auto emit_vsa = [&] (const CompactVector<LSString>& keys) {
+    auto const emit_vsa = [&] (const CompactVector<LSString>& keys) {
       auto n = keys.size();
-      ue.emitIVA(n);
+      fe.emitIVA(n);
       for (size_t i = 0; i < n; ++i) {
-        ue.emitInt32(ue.mergeLitstr(keys[i]));
+        fe.emitInt32(ue.mergeLitstr(keys[i]));
       }
     };
 
-    auto emit_branch = [&] (BlockId id) {
+    auto const emit_branch = [&] (BlockId id) {
       auto& info = blockInfo[id];
-
-      set_expected_depth(info);
-
       if (info.offset != kInvalidOffset) {
-        ue.emitInt32(info.offset - startOffset);
+        fe.emitInt32(info.offset - startOffset);
       } else {
-        info.forwardJumps.push_back({ startOffset, ue.bcPos() });
-        ue.emitInt32(0);
+        info.forwardJumps.push_back({ startOffset, fe.bcPos() });
+        fe.emitInt32(0);
       }
     };
 
-    auto emit_switch = [&] (const SwitchTab& targets) {
-      ue.emitIVA(targets.size());
-      for (auto t : targets) emit_branch(t);
+    auto const emit_switch = [&] (const SwitchTab& targets) {
+      fe.emitIVA(targets.size());
+      for (auto t : targets) {
+        set_expected_depth(t);
+        emit_branch(t);
+      }
     };
 
-    auto emit_sswitch = [&] (const SSwitchTab& targets) {
-      ue.emitIVA(targets.size());
+    auto const emit_sswitch = [&] (const SSwitchTab& targets) {
+      fe.emitIVA(targets.size());
       for (size_t i = 0; i < targets.size() - 1; ++i) {
-        ue.emitInt32(ue.mergeLitstr(targets[i].first));
+        set_expected_depth(targets[i].second);
+        fe.emitInt32(ue.mergeLitstr(targets[i].first));
         emit_branch(targets[i].second);
       }
-      ue.emitInt32(-1);
+      fe.emitInt32(-1);
+      set_expected_depth(targets[targets.size() - 1].second);
       emit_branch(targets[targets.size() - 1].second);
     };
 
-    auto emit_itertab = [&] (const IterTab& iterTab) {
-      ue.emitIVA(iterTab.size());
-      for (auto const& kv : iterTab) {
-        ue.emitIVA(kv.kind);
-        ue.emitIVA(kv.id);
-        if (kv.kind == KindOfLIter) {
-          always_assert(kv.local != NoLocalId);
-          ue.emitIVA(map_local(kv.local));
-        } else {
-          always_assert(kv.local == NoLocalId);
-        }
-      }
+    auto const emit_srcloc = [&] {
+      auto const sl = srcLoc(*unit, *func, inst.srcLoc);
+      auto const loc = sl.isValid() ?
+        Location::Range(sl.start.line, sl.start.col, sl.past.line, sl.past.col)
+        : Location::Range(-1,-1,-1,-1);
+      fe.recordSourceLocation(loc, startOffset);
     };
 
-    auto emit_argvec32 = [&] (const CompactVector<uint32_t>& argv) {
-      ue.emitIVA(argv.size());
-      for (auto i : argv) {
-        ue.emitInt32(i);
-      }
-    };
-
-    auto emit_argvecb = [&] (const CompactVector<bool>& argv) {
-      ue.emitIVA(argv.size());
-      uint32_t i = 0;
-      uint8_t tmp = 0;
-      while (i < argv.size()) {
-        tmp |= argv[i] << (i % 8);
-        if ((++i % 8) == 0) {
-          ue.emitByte(tmp);
-          tmp = 0;
-        }
-      }
-      if (i % 8) ue.emitByte(tmp);
-    };
-
-    auto emit_srcloc = [&] {
-      auto const sl = srcLoc(func, inst.srcLoc);
-      if (!sl.isValid()) return;
-      Location::Range loc(sl.start.line, sl.start.col,
-                          sl.past.line, sl.past.col);
-      ue.recordSourceLocation(loc, startOffset);
-    };
-
-    auto pop = [&] (int32_t n) {
+    auto const pop = [&] (int32_t n) {
       currentStackDepth -= n;
-      assert(currentStackDepth >= 0);
+      assertx(currentStackDepth >= 0);
     };
-    auto push = [&] (int32_t n) {
+    auto const push = [&] (int32_t n) {
       currentStackDepth += n;
-      if (currentStackDepth > ret.maxStackDepth) {
-        ret.maxStackDepth = currentStackDepth;
+      ret.maxStackDepth =
+        std::max<uint32_t>(ret.maxStackDepth, currentStackDepth);
+    };
+
+    auto const ret_assert = [&] { assertx(currentStackDepth == inst.numPop()); };
+
+    auto const createcl = [&] (auto const& data) {
+      auto const cls = euState.index.lookup_class(data.str2);
+      always_assert_flog(
+        cls,
+        "A closure class ({}) failed to resolve",
+        data.str2
+      );
+      assertx(cls->unit == euState.unit->filename);
+      assertx(is_closure(*cls));
+      // Skip closures we've already recorded
+      if (!euState.seenClosures.emplace(cls).second) return;
+      recordClass(euState, ue, const_cast<php::Class&>(*cls));
+    };
+
+    auto const emit_lar  = [&](const LocalRange& range) {
+      encodeLocalRange(fe, HPHP::LocalRange{
+        map_local(range.first), range.count
+      });
+    };
+
+    auto const emit_named_args = [&](const NamedArgNameVec* names) {
+      assertx(names != nullptr);
+      assertx(names->size() > 0);
+      VecInit nameVec(names->size());
+      for (auto name : *names) {
+        nameVec.append(make_tv<KindOfPersistentString>(name));
       }
+      auto nameTV = nameVec.create();
+      ArrayData::GetScalarArray(&nameTV);
+      fe.emitInt32(ue.mergeArray(nameTV));
     };
 
-    auto fpush = [&] {
-      fpiStack.push_back({startOffset, kInvalidOffset, currentStackDepth});
-      ret.maxFpiDepth = std::max<uint32_t>(ret.maxFpiDepth, fpiStack.size());
-    };
 
-    auto fcall = [&] (Op op) {
-      // FCallUnpack do their own stack overflow checking
-      if (op != Op::FCallUnpack) {
-        ret.containsCalls = true;
-      }
-      end_fpi(startOffset);
-    };
-
-    auto ret_assert = [&] { assert(currentStackDepth == inst.numPop()); };
-
-    auto defcls_impl = [&] (const uint32_t& id, bool closure) {
-      if (euState.classOffsets[id] != kInvalidOffset) {
-        if (closure) {
-          for (auto const& elm : euState.pceInfo) {
-            if (elm.origId == id) {
-              const_cast<uint32_t&>(id) = elm.pce->id();
-              return;
-            }
-          }
-        }
-        always_assert(false);
-      }
-      euState.classOffsets[id] = startOffset;
-      const_cast<uint32_t&>(id) = recordClass(euState, ue, id);
-    };
-    auto defcls    = [&] { defcls_impl(inst.DefCls.arg1, false); };
-    auto defclsnop = [&] { defcls_impl(inst.DefClsNop.arg1, false); };
-    auto createcl  = [&] { defcls_impl(inst.CreateCl.arg2, true); };
-    auto deffun    = [&] {
-      const_cast<uint32_t&>(inst.DefFunc.arg1) =
-        recordFunc(euState, ue, inst.DefFunc.arg1);
-    };
-    auto deftype   = [&] {
-      euState.typeAliasInfo.push_back(inst.DefTypeAlias.arg1);
-      const_cast<uint32_t&>(inst.DefTypeAlias.arg1) =
-        euState.typeAliasInfo.size() - 1;
-    };
-
-    auto emit_lar  = [&](const LocalRange& range) {
-      always_assert(range.first + range.count <= func.locals.size());
-      auto const first = (range.count > 0) ? map_local(range.first) : 0;
-      encodeLocalRange(ue, HPHP::LocalRange{first, range.count});
-    };
 
 #define IMM_BLA(n)     emit_switch(data.targets);
 #define IMM_SLA(n)     emit_sswitch(data.targets);
-#define IMM_ILA(n)     emit_itertab(data.iterTab);
-#define IMM_I32LA(n)   emit_argvec32(data.argv);
-#define IMM_BLLA(n)    emit_argvecb(data.argv);
-#define IMM_IVA(n)     ue.emitIVA(data.arg##n);
-#define IMM_I64A(n)    ue.emitInt64(data.arg##n);
-#define IMM_LA(n)      ue.emitIVA(map_local(data.loc##n));
-#define IMM_IA(n)      ue.emitIVA(data.iter##n);
-#define IMM_CAR(n)     ue.emitIVA(data.slot);
-#define IMM_CAW(n)     ue.emitIVA(data.slot);
-#define IMM_DA(n)      ue.emitDouble(data.dbl##n);
-#define IMM_SA(n)      ue.emitInt32(ue.mergeLitstr(data.str##n));
-#define IMM_RATA(n)    encodeRAT(ue, data.rat);
-#define IMM_AA(n)      ue.emitInt32(ue.mergeArray(data.arr##n));
-#define IMM_OA_IMPL(n) ue.emitByte(static_cast<uint8_t>(data.subop##n));
+#define IMM_IVA(n)     fe.emitIVA(data.arg##n);
+#define IMM_I64A(n)    fe.emitInt64(data.arg##n);
+#define IMM_LA(n)      fe.emitIVA(map_local(data.loc##n));
+#define IMM_NLA(n)     fe.emitNamedLocal(map_local_name(data.nloc##n));
+#define IMM_ILA(n)     fe.emitIVA(map_local(data.loc##n));
+#define IMM_IA(n)      fe.emitIVA(data.iter##n);
+#define IMM_DA(n)      fe.emitDouble(data.dbl##n);
+#define IMM_SA(n)      fe.emitInt32(ue.mergeLitstr(data.str##n));
+#define IMM_RATA(n)    encodeRAT(fe, ue, data.rat);
+#define IMM_AA(n)      fe.emitInt32(ue.mergeArray(data.arr##n));
+#define IMM_OA_IMPL(n) fe.emitByte(static_cast<uint8_t>(data.subop##n));
 #define IMM_OA(type)   IMM_OA_IMPL
-#define IMM_BA(n)      emit_branch(data.target);
+#define IMM_BA(n)      targets[numTargets++] = data.target##n; \
+                       emit_branch(data.target##n);
 #define IMM_VSA(n)     emit_vsa(data.keys);
-#define IMM_KA(n)      encode_member_key(make_member_key(data.mkey), ue);
+#define IMM_KA(n)      encode_member_key(make_member_key(data.mkey), fe, ue);
 #define IMM_LAR(n)     emit_lar(data.locrange);
+#define IMM_ITA(n)     encodeIterArgs(fe, data.ita);
+#define IMM_FCA(n)     encodeFCallArgs(                                 \
+                         fe, data.fca.base(),                           \
+                         data.fca.enforceInOut(),                       \
+                         [&] {                                          \
+                           data.fca.applyIO(                            \
+                             [&] (int numBytes, const uint8_t* inOut) { \
+                               encodeFCallArgsBoolVec(fe, numBytes, inOut); \
+                             }                                          \
+                           );                                           \
+                         },                                             \
+                         data.fca.enforceReadonly(),                    \
+                         [&] {                                          \
+                           data.fca.applyReadonly(                     \
+                             [&] (int numBytes, const uint8_t* readonly) { \
+                               encodeFCallArgsBoolVec(fe, numBytes, readonly); \
+                             }                                          \
+                           );                                           \
+                         },                                             \
+                         data.fca.namedArgNames() != nullptr,           \
+                         [&] {                                          \
+                           emit_named_args(data.fca.namedArgNames());   \
+                         },                                             \
+                         data.fca.asyncEagerTarget() != NoBlockId,      \
+                         [&] {                                          \
+                           set_expected_depth(data.fca.asyncEagerTarget()); \
+                           emit_branch(data.fca.asyncEagerTarget());    \
+                         },                                             \
+                         data.fca.context() != nullptr,                 \
+                         [&] {                                          \
+                           fe.emitInt32(ue.mergeLitstr(data.fca.context()));\
+                         });                                            \
+                       if (!data.fca.hasUnpack()) ret.containsCalls = true;
 
 #define IMM_NA
-#define IMM_ONE(x)           IMM_##x(1)
-#define IMM_TWO(x, y)        IMM_##x(1);         IMM_##y(2);
-#define IMM_THREE(x, y, z)   IMM_TWO(x, y);      IMM_##z(3);
-#define IMM_FOUR(x, y, z, n) IMM_THREE(x, y, z); IMM_##n(4);
-#define IMM_FIVE(x, y, z, n, m) IMM_FOUR(x, y, z, n); IMM_##m(5);
+#define IMM_ONE(x)                IMM_##x(1)
+#define IMM_TWO(x, y)             IMM_##x(1); IMM_##y(2);
+#define IMM_THREE(x, y, z)        IMM_TWO(x, y); IMM_##z(3);
+#define IMM_FOUR(x, y, z, n)      IMM_THREE(x, y, z); IMM_##n(4);
+#define IMM_FIVE(x, y, z, n, m)   IMM_FOUR(x, y, z, n); IMM_##m(5);
+#define IMM_SIX(x, y, z, n, m, o) IMM_FIVE(x, y, z, n, m); IMM_##o(6);
 
 #define POP_NOV
 #define POP_ONE(x)            pop(1);
@@ -707,63 +500,78 @@ EmitBcInfo emit_bytecode(EmitUnitState& euState,
 #define POP_THREE(x, y, z)    pop(3);
 
 #define POP_MFINAL     pop(data.arg1);
-#define POP_C_MFINAL   pop(1); pop(data.arg1);
-#define POP_V_MFINAL   POP_C_MFINAL
+#define POP_C_MFINAL(n) pop(n); pop(data.arg1);
 #define POP_CMANY      pop(data.arg##1);
 #define POP_SMANY      pop(data.keys.size());
-#define POP_CVMANY     pop(data.arg##1);
-#define POP_CVUMANY    pop(data.arg##1);
-#define POP_C_CVMANY   pop(data.arg##1);
-#define POP_CVMANY_UMANY   pop(data.arg##1 + data.arg##2 - 1);
-#define POP_C_CVMANY_UMANY pop(data.arg##1 + data.arg##2 - 1);
+#define POP_CUMANY     pop(data.arg##1);
+#define POP_FCALL(nin, nobj) \
+                       pop(nin + data.fca.numInputs() + 1 + data.fca.numRets());
 
 #define PUSH_NOV
 #define PUSH_ONE(x)            push(1);
 #define PUSH_TWO(x, y)         push(2);
 #define PUSH_THREE(x, y, z)    push(3);
-#define PUSH_INS_1(x)          push(1);
-#define PUSH_CMANY             push(data.arg2);
+#define PUSH_CMANY             push(data.arg1);
+#define PUSH_FCALL             push(data.fca.numRets());
 
-#define O(opcode, imms, inputs, outputs, flags)         \
-    auto emit_##opcode = [&] (const bc::opcode& data) { \
-      if (Op::opcode == Op::DefCls)       defcls();     \
-      if (Op::opcode == Op::DefClsNop)    defclsnop();  \
-      if (Op::opcode == Op::CreateCl)     createcl();   \
-      if (Op::opcode == Op::DefFunc)      deffun();     \
-      if (Op::opcode == Op::DefTypeAlias) deftype();    \
-      if (isRet(Op::opcode))              ret_assert(); \
-      ue.emitOp(Op::opcode);                            \
-      POP_##inputs                                      \
-      /* MemoGet pushes after branching */              \
-      if (Op::opcode != Op::MemoGet) {                  \
-        PUSH_##outputs                                  \
-      }                                                 \
-      IMM_##imms                                        \
-      if (Op::opcode == Op::MemoGet) {                  \
-        PUSH_##outputs                                  \
-      }                                                 \
-      if (isFPush(Op::opcode))     fpush();             \
-      if (isFCallStar(Op::opcode)) fcall(Op::opcode);   \
-      if (flags & TF) currentStackDepth = 0;            \
-      emit_srcloc();                                    \
-    };
-
-    OPCODES
-
+#define O(opcode, imms, inputs, outputs, flags)                  \
+    case Op::opcode: {                                           \
+      if (Op::opcode == Op::Nop) break;                          \
+      OpInfo<bc::opcode> data{inst.opcode};                      \
+      if (Cfg::Eval::EnableIntrinsicsExtension) {            \
+        if (Op::opcode == Op::FCallFuncD &&                      \
+            inst.FCallFuncD.str2 == s_hhbbc_fail_verification.get()) {\
+          fe.emitOp(Op::CheckProp);                              \
+          fe.emitInt32(                                          \
+            ue.mergeLitstr(inst.FCallFuncD.str2));               \
+          fe.emitOp(Op::PopC);                                   \
+          ret.maxStackDepth++;                                   \
+        }                                                        \
+      }                                                          \
+      caller<Op::CreateCl>(createcl, data);                      \
+                                                                 \
+      if (isRet(Op::opcode)) ret_assert();                       \
+      fe.emitOp(Op::opcode);                                     \
+      POP_##inputs                                               \
+                                                                 \
+      size_t numTargets = 0;                                     \
+      std::array<BlockId, kMaxHhbcImms> targets;                 \
+                                                                 \
+      if (Op::opcode == Op::MemoGet) {                           \
+        IMM_##imms                                               \
+        assertx(numTargets == 1);                                \
+        set_expected_depth(targets[0]);                          \
+        PUSH_##outputs                                           \
+      } else if (Op::opcode == Op::MemoGetEager) {               \
+        IMM_##imms                                               \
+        assertx(numTargets == 2);                                \
+        set_expected_depth(targets[0]);                          \
+        PUSH_##outputs                                           \
+        set_expected_depth(targets[1]);                          \
+      } else {                                                   \
+        PUSH_##outputs                                           \
+        IMM_##imms                                               \
+        for (size_t i = 0; i < numTargets; ++i) {                \
+          set_expected_depth(targets[i]);                        \
+        }                                                        \
+      }                                                          \
+                                                                 \
+      if (flags & TF) currentStackDepth = 0;                     \
+      emit_srcloc();                                             \
+      break;                                                     \
+    }
+    switch (inst.op) { OPCODES }
 #undef O
 
 #undef IMM_MA
 #undef IMM_BLA
 #undef IMM_SLA
-#undef IMM_ILA
-#undef IMM_I32LA
-#undef IMM_BLLA
 #undef IMM_IVA
 #undef IMM_I64A
 #undef IMM_LA
+#undef IMM_NLA
+#undef IMM_ILA
 #undef IMM_IA
-#undef IMM_CAR
-#undef IMM_CAW
 #undef IMM_DA
 #undef IMM_SA
 #undef IMM_RATA
@@ -774,6 +582,7 @@ EmitBcInfo emit_bytecode(EmitUnitState& euState,
 #undef IMM_VSA
 #undef IMM_KA
 #undef IMM_LAR
+#undef IMM_FCA
 
 #undef IMM_NA
 #undef IMM_ONE
@@ -781,6 +590,7 @@ EmitBcInfo emit_bytecode(EmitUnitState& euState,
 #undef IMM_THREE
 #undef IMM_FOUR
 #undef IMM_FIVE
+#undef IMM_SIX
 
 #undef POP_NOV
 #undef POP_ONE
@@ -789,197 +599,182 @@ EmitBcInfo emit_bytecode(EmitUnitState& euState,
 
 #undef POP_CMANY
 #undef POP_SMANY
-#undef POP_CVMANY
-#undef POP_CVUMANY
-#undef POP_C_CVMANY
-#undef POP_CVMANY_UMANY
-#undef POP_C_CVMANY_UMANY
+#undef POP_CUMANY
+#undef POP_FCALL
 #undef POP_MFINAL
 #undef POP_C_MFINAL
-#undef POP_V_MFINAL
 
 #undef PUSH_NOV
 #undef PUSH_ONE
 #undef PUSH_TWO
 #undef PUSH_THREE
-#undef PUSH_INS_1
 #undef PUSH_CMANY
+#undef PUSH_FCALL
 
-#define O(opcode, ...)                                        \
-    case Op::opcode:                                          \
-      if (Op::opcode != Op::Nop) emit_##opcode(inst.opcode);  \
-      break;
-    switch (inst.op) { OPCODES }
-#undef O
   };
 
   ret.blockOrder        = order_blocks(func);
   auto blockIt          = begin(ret.blockOrder);
   auto const endBlockIt = end(ret.blockOrder);
   for (; blockIt != endBlockIt; ++blockIt) {
-    auto& b = *blockIt;
-    auto& info = blockInfo[b->id];
-    info.offset = ue.bcPos();
-    FTRACE(2, "      block {}: {}\n", b->id, info.offset);
+    auto bid = *blockIt;
+    auto& info = blockInfo[bid];
+    auto const b = func.blocks()[bid].get();
+
+    info.offset = fe.bcPos();
+    FTRACE(2, "      block {}: {}\n", bid, info.offset);
 
     for (auto& fixup : info.forwardJumps) {
-      ue.emitInt32(info.offset - fixup.instrOff, fixup.jmpImmedOff);
+      fe.emitInt32(info.offset - fixup.instrOff, fixup.jmpImmedOff);
     }
 
     if (!info.expectedStackDepth) {
       // unreachable, or entry block
-      info.expectedStackDepth = 0;
+      info.expectedStackDepth = b->catchEntry ? 1 : 0;
     }
 
     currentStackDepth = *info.expectedStackDepth;
 
-    if (!info.expectedFPIDepth) {
-      // unreachable, or an entry block
-      info.expectedFPIDepth = 0;
-    }
+    auto fallthrough = b->fallthrough;
+    auto end = b->hhbcs.end();
+    auto flip = false;
 
-    // deal with fpiRegions that were ended by terminal instructions
-    assert(*info.expectedFPIDepth <= fpiStack.size());
-    while (*info.expectedFPIDepth < fpiStack.size()) end_fpi(lastOff);
-
-    // If the block ends with JmpZ or JmpNZ to the next block, flip
-    // the condition to make the fallthrough the next block
-    if (b->hhbcs.back().op == Op::JmpZ ||
-        b->hhbcs.back().op == Op::JmpNZ) {
-      auto& bc = b->hhbcs.back();
-      auto const target = bc.op == Op::JmpNZ ? bc.JmpNZ.target : bc.JmpZ.target;
-      if (std::next(blockIt) != endBlockIt && blockIt[1]->id == target) {
-        if (bc.op == Op::JmpNZ) {
-          bc = bc_with_loc(bc.srcLoc, bc::JmpZ { b->fallthrough });
-        } else {
-          bc = bc_with_loc(bc.srcLoc, bc::JmpNZ { b->fallthrough });
+    if (!is_single_nop(*b)) {
+      // If the block ends with JmpZ or JmpNZ to the next block, flip
+      // the condition to make the fallthrough the next block
+      if (b->hhbcs.back().op == Op::JmpZ ||
+          b->hhbcs.back().op == Op::JmpNZ) {
+        auto const& bc = b->hhbcs.back();
+        auto const target =
+          bc.op == Op::JmpNZ ? bc.JmpNZ.target1 : bc.JmpZ.target1;
+        if (std::next(blockIt) != endBlockIt && blockIt[1] == target) {
+          fallthrough = target;
+          --end;
+          flip = true;
         }
-        b->fallthrough = target;
+      }
+
+      for (auto iit = b->hhbcs.begin(); iit != end; ++iit) emit_inst(*iit);
+      if (flip) {
+        if (end->op == Op::JmpNZ) {
+          emit_inst(bc_with_loc(end->srcLoc, bc::JmpZ { b->fallthrough }));
+        } else {
+          emit_inst(bc_with_loc(end->srcLoc, bc::JmpNZ { b->fallthrough }));
+        }
       }
     }
 
-    for (auto& inst : b->hhbcs) emit_inst(inst);
+    info.past = fe.bcPos();
 
-    info.past = ue.bcPos();
-
-    if (b->fallthrough != NoBlockId) {
-      set_expected_depth(blockInfo[b->fallthrough]);
+    if (fallthrough != NoBlockId) {
+      set_expected_depth(fallthrough);
       if (std::next(blockIt) == endBlockIt ||
-          blockIt[1]->id != b->fallthrough) {
-        if (b->fallthroughNS) {
-          emit_inst(bc::JmpNS { b->fallthrough });
-        } else {
-          emit_inst(bc::Jmp { b->fallthrough });
-        }
+          blockIt[1] != fallthrough) {
+        emit_inst(bc::Jmp { fallthrough });
 
-        auto parent = commonParent(func.blocks[b->fallthrough]->exnNode,
-                                   b->exnNode);
+        auto const nextExnId = func.blocks()[fallthrough]->exnNodeId;
+        auto const parent = commonParent(*func, nextExnId, b->exnNodeId);
+
+        auto depth = [&] (ExnNodeId eid) {
+          return eid == NoExnNodeId ? 0 : func->exnNodes[eid].depth;
+        };
         // If we are in an exn region we pop from the current region to the
         // common parent. If the common parent is null, we pop all regions
-        info.regionsToPop = b->exnNode ?
-                            b->exnNode->depth - (parent ? parent->depth : 0) :
-                            0;
-        assert(info.regionsToPop >= 0);
-        FTRACE(4, "      popped fault regions: {}\n", info.regionsToPop);
+        info.regionsToPop = depth(b->exnNodeId) - depth(parent);
+        assertx(info.regionsToPop >= 0);
+        FTRACE(4, "      popped catch regions: {}\n", info.regionsToPop);
       }
     }
 
-    if (b->throwExits.size()) {
-      FTRACE(4, "      throw:");
-      for (auto DEBUG_ONLY id : b->throwExits) FTRACE(4, " {}", id);
-      FTRACE(4, "\n");
+    if (b->throwExit != NoBlockId) {
+      FTRACE(4, "      throw: {}\n", b->throwExit);
     }
-    if (b->unwindExits.size()) {
-      FTRACE(4, "      unwind:");
-      for (auto DEBUG_ONLY id : b->unwindExits) FTRACE(4, " {}", id);
-      FTRACE(4, "\n");
+    if (fallthrough != NoBlockId) {
+      FTRACE(4, "      fallthrough: {}\n", fallthrough);
     }
-    if (b->fallthrough != NoBlockId) {
-      FTRACE(4, "      fallthrough: {}\n", b->fallthrough);
-    }
-    FTRACE(2, "      block {} end: {}\n", b->id, info.past);
-  }
-
-  while (fpiStack.size()) end_fpi(lastOff);
-
-  if (traceBc) {
-    FTRACE(0, "TraceBytecode (emit): {}::{} in {}\n",
-           func.cls ? func.cls->name->data() : "",
-           func.name, func.unit->filename);
+    FTRACE(2, "      block {} end: {}\n", bid, info.past);
   }
 
   return ret;
 }
 
-void emit_locals_and_params(FuncEmitter& fe,
-                            const php::Func& func,
+void emit_locals_and_params(UnitEmitter& ue, FuncEmitter& fe, const php::Func& func,
                             const EmitBcInfo& info) {
   Id id = 0;
-
-  for (auto& loc : func.locals) {
+  for (auto const& loc : func.locals) {
     if (loc.id < func.params.size()) {
-      assert(!loc.killed);
+      assertx(loc.name);
+      assertx(!loc.killed);
+      assertx(!loc.unusedName);
       auto& param = func.params[id];
-      FuncEmitter::ParamInfo pinfo;
+      Func::ParamInfo pinfo;
       pinfo.defaultValue = param.defaultValue;
-      pinfo.typeConstraint = param.typeConstraint;
-      pinfo.userType = param.userTypeConstraint;
-      pinfo.phpCode = param.phpCode;
+      pinfo.typeConstraints = param.typeConstraints;
+      pinfo.userType = ue.mergeLitstr(param.userTypeConstraint);
+      pinfo.phpCode = ue.mergeLitstr(param.phpCode);
       pinfo.userAttributes = param.userAttributes;
-      pinfo.builtinType = param.builtinType;
-      pinfo.byRef = param.byRef;
-      pinfo.inout = param.inout;
-      pinfo.variadic = param.isVariadic;
+      if (param.inout) pinfo.setFlag(Func::ParamInfo::Flags::InOut);
+      if (param.outOnly) pinfo.setFlag(Func::ParamInfo::Flags::OutOnly);
+      if (param.readonly) pinfo.setFlag(Func::ParamInfo::Flags::Readonly);
+      if (param.isVariadic) pinfo.setFlag(Func::ParamInfo::Flags::Variadic);
+      if (param.isOptional) pinfo.setFlag(Func::ParamInfo::Flags::Optional);
+      if (param.isNamed) pinfo.setFlag(Func::ParamInfo::Flags::Named);
       fe.appendParam(func.locals[id].name, pinfo);
       auto const dv = param.dvEntryPoint;
       if (dv != NoBlockId) {
         fe.params[id].funcletOff = info.blockInfo[dv].offset;
       }
       ++id;
-    } else if (!loc.killed) {
-      if (loc.name) {
+    } else {
+      if (loc.killed) continue;
+      if (loc.name && !loc.unusedName && loc.name) {
         fe.allocVarId(loc.name);
-        assert(fe.lookupVarId(loc.name) == id);
-        assert(loc.id == id);
+        assertx(fe.lookupVarId(loc.name) == id);
+        assertx(loc.id == id);
+        ++id;
       } else {
         fe.allocUnnamedLocal();
+        ++id;
       }
-      ++id;
     }
   }
-  assert(fe.numLocals() == id);
-  fe.setNumIterators(func.numIters);
-  fe.setNumClsRefSlots(func.numClsRefSlots);
-
-  for (auto& sv : func.staticLocals) {
-    fe.staticVars.push_back(Func::SVInfo {sv.name});
+  for (auto const& loc : func.locals) {
+    if (loc.killed && !loc.unusedName && loc.name) {
+      fe.allocVarId(loc.name, true);
+    }
   }
+
+  if (debug) {
+    for (auto const& loc : func.locals) {
+      if (!loc.killed) {
+        assertx(loc.id < fe.numLocals());
+      }
+      if (!loc.unusedName && loc.name) {
+        assertx(loc.nameId < fe.numNamedLocals());
+      }
+    }
+  }
+
+  assertx(fe.numLocals() == id);
+  fe.setNumIterators(func.numIters);
 }
 
 struct EHRegion {
-  borrowed_ptr<const php::ExnNode> node;
-  borrowed_ptr<EHRegion> parent;
+  const php::ExnNode* node;
+  EHRegion* parent;
   Offset start;
   Offset past;
 };
 
 template<class BlockInfo, class ParentIndexMap>
 void emit_eh_region(FuncEmitter& fe,
-                    borrowed_ptr<const EHRegion> region,
+                    const EHRegion* region,
                     const BlockInfo& blockInfo,
                     ParentIndexMap& parentIndexMap) {
-  FTRACE(2,  "    func {}: ExnNode {}\n", fe.name, region->node->id);
+  FTRACE(2,  "    func {}: ExnNode {}\n", fe.name, region->node->idx);
 
   auto const unreachable = [&] (const php::ExnNode& node) {
-    return match<bool>(
-      node.info,
-      [&] (const php::CatchRegion& cr) {
-        return blockInfo[cr.catchEntry].offset == kInvalidOffset;
-      },
-      [&] (const php::FaultRegion& fr) {
-        return blockInfo[fr.faultEntry].offset == kInvalidOffset;
-      }
-    );
+    return blockInfo[node.region.catchEntry].offset == kInvalidOffset;
   };
 
   // A region on a single empty block.
@@ -996,8 +791,8 @@ void emit_eh_region(FuncEmitter& fe,
   auto& eh = fe.addEHEnt();
   eh.m_base = region->start;
   eh.m_past = region->past;
-  assert(eh.m_past >= eh.m_base);
-  assert(eh.m_base != kInvalidOffset && eh.m_past != kInvalidOffset);
+  assertx(eh.m_past >= eh.m_base);
+  assertx(eh.m_base != kInvalidOffset && eh.m_past != kInvalidOffset);
 
   // An unreachable parent won't be emitted (and thus its offset won't be set),
   // so find the closest reachable one.
@@ -1005,38 +800,28 @@ void emit_eh_region(FuncEmitter& fe,
   while (parent && unreachable(*parent->node)) parent = parent->parent;
   if (parent) {
     auto parentIt = parentIndexMap.find(parent);
-    assert(parentIt != end(parentIndexMap));
+    assertx(parentIt != end(parentIndexMap));
     eh.m_parentIndex = parentIt->second;
   } else {
     eh.m_parentIndex = -1;
   }
   parentIndexMap[region] = fe.ehtab.size() - 1;
 
-  match<void>(
-    region->node->info,
-    [&] (const php::CatchRegion& cr) {
-      eh.m_type = EHEnt::Type::Catch;
-      eh.m_handler = blockInfo[cr.catchEntry].offset;
-      eh.m_end = kInvalidOffset;
-      eh.m_iterId = cr.iterId;
-      eh.m_itRef = cr.itRef;
-    },
-    [&] (const php::FaultRegion& fr) {
-      eh.m_type = EHEnt::Type::Fault;
-      eh.m_handler = blockInfo[fr.faultEntry].offset;
-      eh.m_end = kInvalidOffset;
-      eh.m_iterId = fr.iterId;
-      eh.m_itRef = fr.itRef;
-    }
-  );
+  auto const& cr = region->node->region;
+  eh.m_handler = blockInfo[cr.catchEntry].offset;
+  eh.m_end = kInvalidOffset;
+  eh.m_iterId = cr.iterId;
 
-  assert(eh.m_handler != kInvalidOffset);
+  assertx(eh.m_handler != kInvalidOffset);
 }
 
-void exn_path(std::vector<const php::ExnNode*>& ret, const php::ExnNode* n) {
-  if (!n) return;
-  exn_path(ret, n->parent);
-  ret.push_back(n);
+void exn_path(const php::Func& func,
+              std::vector<const php::ExnNode*>& ret,
+              ExnNodeId id) {
+  if (id == NoExnNodeId) return;
+  auto const& n = func.exnNodes[id];
+  exn_path(func, ret, n.parent);
+  ret.push_back(&n);
 }
 
 // Return the count of shared elements in the front of two forward
@@ -1063,10 +848,10 @@ size_t shared_prefix(ForwardRange1& r1, ForwardRange2& r2) {
  * reasonably likely to have the same ExnNode.  Try to coalesce the EH
  * regions we create for in those cases.
  */
-void emit_ehent_tree(FuncEmitter& fe, const php::Func& /*func*/,
+void emit_ehent_tree(FuncEmitter& fe, const php::WideFunc& func,
                      const EmitBcInfo& info) {
   hphp_fast_map<
-    borrowed_ptr<const php::ExnNode>,
+    const php::ExnNode*,
     std::vector<std::unique_ptr<EHRegion>>
   > exnMap;
 
@@ -1076,7 +861,7 @@ void emit_ehent_tree(FuncEmitter& fe, const php::Func& /*func*/,
    * from each other.  When a new active node is pushed, begin an
    * EHEnt, and when it's popped, it's done.
    */
-  std::vector<borrowed_ptr<const php::ExnNode>> activeList;
+  std::vector<const php::ExnNode*> activeList;
 
   auto pop_active = [&] (Offset past) {
     auto p = activeList.back();
@@ -1087,7 +872,7 @@ void emit_ehent_tree(FuncEmitter& fe, const php::Func& /*func*/,
   auto push_active = [&] (const php::ExnNode* p, Offset start) {
     auto const parent = activeList.empty()
       ? nullptr
-      : borrow(exnMap[activeList.back()].back());
+      : exnMap[activeList.back()].back().get();
     exnMap[p].push_back(
       std::make_unique<EHRegion>(
         EHRegion { p, parent, start, kInvalidOffset }
@@ -1102,16 +887,17 @@ void emit_ehent_tree(FuncEmitter& fe, const php::Func& /*func*/,
    * then modify the active list by popping and then pushing nodes to
    * set it to the new block's path.
    */
-  for (auto& b : info.blockOrder) {
-    auto const offset = info.blockInfo[b->id].offset;
+  for (auto const bid : info.blockOrder) {
+    auto const b = func.blocks()[bid].get();
+    auto const offset = info.blockInfo[bid].offset;
 
-    if (!b->exnNode) {
+    if (b->exnNodeId == NoExnNodeId) {
       while (!activeList.empty()) pop_active(offset);
       continue;
     }
 
-    std::vector<borrowed_ptr<const php::ExnNode>> current;
-    exn_path(current, b->exnNode);
+    std::vector<const php::ExnNode*> current;
+    exn_path(*func, current, b->exnNodeId);
 
     auto const prefix = shared_prefix(current, activeList);
     for (size_t i = prefix, sz = activeList.size(); i < sz; ++i) {
@@ -1121,21 +907,21 @@ void emit_ehent_tree(FuncEmitter& fe, const php::Func& /*func*/,
       push_active(current[i], offset);
     }
 
-    for (int i = 0; i < info.blockInfo[b->id].regionsToPop; i++) {
-      // If the block ended in a jump out of the fault region, this effectively
-      // ends all fault regions deeper than the one we are jumping to
-      pop_active(info.blockInfo[b->id].past);
+    for (int i = 0; i < info.blockInfo[bid].regionsToPop; i++) {
+      // If the block ended in a jump out of the catch region, this effectively
+      // ends all catch regions deeper than the one we are jumping to
+      pop_active(info.blockInfo[bid].past);
     }
 
     if (debug && !activeList.empty()) {
       current.clear();
-      exn_path(current, activeList.back());
-      assert(current == activeList);
+      exn_path(*func, current, activeList.back()->idx);
+      assertx(current == activeList);
     }
   }
 
   while (!activeList.empty()) {
-    pop_active(info.blockInfo[info.blockOrder.back()->id].past);
+    pop_active(info.blockInfo[info.blockOrder.back()].past);
   }
 
   /*
@@ -1153,15 +939,15 @@ void emit_ehent_tree(FuncEmitter& fe, const php::Func& /*func*/,
    *   - a starts at the same place, but encloses b entirely
    *   - a has the same extents as b, but is a parent of b
    */
-  std::vector<borrowed_ptr<EHRegion>> regions;
+  std::vector<EHRegion*> regions;
   for (auto& mapEnt : exnMap) {
     for (auto& region : mapEnt.second) {
-      regions.push_back(borrow(region));
+      regions.push_back(region.get());
     }
   }
   std::sort(
     begin(regions), end(regions),
-    [&] (borrowed_ptr<const EHRegion> a, borrowed_ptr<const EHRegion> b) {
+    [&] (const EHRegion* a, const EHRegion* b) {
       if (a == b) return false;
       if (a->start == b->start) {
         if (a->past == b->past) {
@@ -1175,7 +961,7 @@ void emit_ehent_tree(FuncEmitter& fe, const php::Func& /*func*/,
           if (debug) {
             auto p = a->parent;
             for (; p != b && p != nullptr; p = p->parent) continue;
-            assert(p == b);
+            assertx(p == b);
           }
           return false;
         }
@@ -1185,239 +971,146 @@ void emit_ehent_tree(FuncEmitter& fe, const php::Func& /*func*/,
     }
   );
 
-  hphp_fast_map<borrowed_ptr<const EHRegion>,uint32_t> parentIndexMap;
+  hphp_fast_map<const EHRegion*,uint32_t> parentIndexMap;
   for (auto& r : regions) {
     emit_eh_region(fe, r, info.blockInfo, parentIndexMap);
   }
   fe.setEHTabIsSorted();
 }
 
-void merge_repo_auth_type(UnitEmitter& ue, RepoAuthType rat) {
-  using T = RepoAuthType::Tag;
+void emit_finish_func(EmitUnitState& state, UnitEmitter& ue, FuncEmitter& fe,
+                      php::WideFunc& wf, const EmitBcInfo& info) {
+  auto const& func = *wf;
+  if (info.containsCalls) fe.containsCalls = true;
 
-  switch (rat.tag()) {
-  case T::OptBool:
-  case T::OptInt:
-  case T::OptSStr:
-  case T::OptStr:
-  case T::OptDbl:
-  case T::OptRes:
-  case T::OptObj:
-  case T::OptUncArrKey:
-  case T::OptArrKey:
-  case T::Null:
-  case T::Cell:
-  case T::Ref:
-  case T::InitUnc:
-  case T::Unc:
-  case T::UncArrKey:
-  case T::ArrKey:
-  case T::InitCell:
-  case T::InitGen:
-  case T::Gen:
-  case T::Uninit:
-  case T::InitNull:
-  case T::Bool:
-  case T::Int:
-  case T::Dbl:
-  case T::Res:
-  case T::SStr:
-  case T::Str:
-  case T::Obj:
-    return;
-
-  case T::OptSArr:
-  case T::OptArr:
-  case T::SArr:
-  case T::Arr:
-  case T::OptSVArr:
-  case T::OptVArr:
-  case T::SVArr:
-  case T::VArr:
-  case T::OptSDArr:
-  case T::OptDArr:
-  case T::SDArr:
-  case T::DArr:
-  case T::OptSVec:
-  case T::OptVec:
-  case T::SVec:
-  case T::Vec:
-  case T::OptSDict:
-  case T::OptDict:
-  case T::SDict:
-  case T::Dict:
-  case T::OptSKeyset:
-  case T::OptKeyset:
-  case T::SKeyset:
-  case T::Keyset:
-    // NOTE: In repo mode, RAT's in Array's might only contain global litstr
-    // id's. No need to merge. In non-repo mode, RAT's in Array's might contain
-    // local litstr id's.
-    if (RuntimeOption::RepoAuthoritative) return;
-
-    if (rat.hasArrData()) {
-      auto arr = rat.array();
-      switch (arr->tag()) {
-        case RepoAuthType::Array::Tag::Packed:
-          for (uint32_t i = 0; i < arr->size(); ++i) {
-            merge_repo_auth_type(ue, arr->packedElem(i));
-          }
-          break;
-        case RepoAuthType::Array::Tag::PackedN:
-          merge_repo_auth_type(ue, arr->elemType());
-          break;
-      }
-    }
-    return;
-
-  case T::OptSubObj:
-  case T::OptExactObj:
-  case T::SubObj:
-  case T::ExactObj:
-    ue.mergeLitstr(rat.clsName());
-    return;
-  }
-}
-
-void emit_finish_func(EmitUnitState& state,
-                      const php::Func& func,
-                      FuncEmitter& fe,
-                      const EmitBcInfo& info) {
-  if (info.containsCalls) fe.containsCalls = true;;
-
-  for (auto& fpi : info.fpiRegions) {
-    auto& e = fe.addFPIEnt();
-    e.m_fpushOff = fpi.fpushOff;
-    e.m_fpiEndOff = fpi.fpiEndOff;
-    e.m_fpOff    = fpi.fpDelta;
-  }
-
-  emit_locals_and_params(fe, func, info);
-  emit_ehent_tree(fe, func, info);
-
-  // Nothing should look at the bytecode from now on. Free it up to
-  // compensate for the UnitEmitter we're creating.
-  const_cast<php::Func&>(func).blocks.clear();
+  emit_locals_and_params(ue, fe, func, info);
+  emit_ehent_tree(fe, wf, info);
+  wf.blocks().clear();
 
   fe.userAttributes = func.userAttributes;
-  fe.retUserType = func.returnUserType;
-  fe.originalFilename =
-    func.originalFilename ? func.originalFilename :
-    func.originalUnit ? func.originalUnit->filename : nullptr;
+  fe.retUserType = ue.mergeLitstr(func.returnUserType);
+  fe.retTypeConstraints = func.retTypeConstraints;
+  fe.typeParamNames = std::vector<PackedStringPtr>(
+    func.typeParamNames.begin(),
+    func.typeParamNames.end()
+  );
+  fe.originalUnit =
+    func.originalUnit ? func.originalUnit : nullptr;
+  fe.originalModuleName = func.originalModuleName;
+  fe.requiresFromOriginalModule = func.requiresFromOriginalModule;
   fe.isClosureBody = func.isClosureBody;
   fe.isAsync = func.isAsync;
   fe.isGenerator = func.isGenerator;
   fe.isPairGenerator = func.isPairGenerator;
-  fe.isNative = func.nativeInfo != nullptr;
+  fe.isNative = func.isNative;
   fe.isMemoizeWrapper = func.isMemoizeWrapper;
   fe.isMemoizeWrapperLSB = func.isMemoizeWrapperLSB;
 
-  auto const retTy = state.index.lookup_return_type_and_clear(&func);
+  for (auto& name : func.staticCoeffects) fe.staticCoeffects.push_back(name);
+  for (auto& rule : func.coeffectRules)   fe.coeffectRules.push_back(rule);
+
+  auto const retTy = state.index.lookup_return_type_raw(&func).first.t;
   if (!retTy.subtypeOf(BBottom)) {
-    auto const rat = make_repo_type(*state.index.array_table_builder(), retTy);
-    merge_repo_auth_type(fe.ue(), rat);
-    fe.repoReturnType = rat;
+    fe.repoReturnType = make_repo_type(retTy);
   }
 
   if (is_specialized_wait_handle(retTy)) {
     auto const awaitedTy = wait_handle_inner(retTy);
     if (!awaitedTy.subtypeOf(BBottom)) {
-      auto const rat = make_repo_type(
-        *state.index.array_table_builder(),
-        awaitedTy
-      );
-      merge_repo_auth_type(fe.ue(), rat);
-      fe.repoAwaitedReturnType = rat;
+      fe.repoAwaitedReturnType = make_repo_type(awaitedTy);
     }
   }
-
-  if (func.nativeInfo) {
-    fe.hniReturnType = func.nativeInfo->returnType;
-  }
-  fe.retTypeConstraint = func.retTypeConstraint;
 
   fe.maxStackCells = info.maxStackDepth +
                      fe.numLocals() +
-                     fe.numIterators() * kNumIterCells +
-                     clsRefCountToCells(fe.numClsRefSlots()) +
-                     info.maxFpiDepth * kNumActRecCells;
+                     fe.numIterators() * kNumIterCells;
 
-  fe.finish(fe.ue().bcPos(), false /* load */);
-  fe.ue().recordFunction(&fe);
+  fe.finish();
 }
 
-void emit_init_func(FuncEmitter& fe, const php::Func& func) {
+void renumber_locals(php::Func& func) {
   Id id = 0;
+  Id nameId = 0;
 
-  for (auto& loc : const_cast<php::Func&>(func).locals) {
+  // We initialise local name ids in two passes, since locals that have not
+  // been remapped may require their name be at the same offset as the local.
+  // That's true for params, volatile locals, or locals in funcs with VarEnvs.
+  //
+  // In the first pass, we assume that all local names are used. Only in the
+  // second pass do we apply the fact that some local names are never used.
+
+  for (auto& loc : func.locals) {
     if (loc.killed) {
-      // make sure its out of range, in case someone tries to read it.
+      // Make sure it's out of range, in case someone tries to read it.
       loc.id = INT_MAX;
     } else {
+      loc.nameId = nameId++;
       loc.id = id++;
     }
   }
+  for (auto& loc : func.locals) {
+    if (loc.unusedName || !loc.name) {
+      // Make sure it's out of range, in case someone tries to read it.
+      loc.nameId = INT_MAX;
+    } else if (loc.killed) {
+      // The local uses a shared local slot, but its name is still used.
+      loc.nameId = nameId++;
+    }
+  }
+}
 
+void emit_init_func(UnitEmitter& ue,
+                    FuncEmitter& fe,
+                    const php::Func& func,
+                    Attr attrs) {
   fe.init(
     std::get<0>(func.srcInfo.loc),
     std::get<1>(func.srcInfo.loc),
-    fe.ue().bcPos(),
-    func.attrs,
-    func.top,
-    func.srcInfo.docComment
+    attrs | (func.sampleDynamicCalls ? AttrDynamicallyCallable : AttrNone),
+    func.srcInfo.docComment,
+    ue.isSystemLib()
   );
 }
 
 void emit_func(EmitUnitState& state, UnitEmitter& ue,
-               FuncEmitter* fe, const php::Func& func) {
-  FTRACE(2,  "    func {}\n", func.name->data());
-  emit_init_func(*fe, func);
-  auto const info = emit_bytecode(state, ue, func);
-  emit_finish_func(state, func, *fe, info);
+               FuncEmitter& fe, php::Func& f) {
+  FTRACE(2,  "    func {}\n", f.name->data());
+  assertx(f.attrs & AttrPersistent);
+  auto attrs = f.attrs;
+  attrSetter(
+    attrs,
+    f.isAsync &&
+      !f.isGenerator &&
+      !(f.attrs & AttrAbstract) &&
+      !state.index.lookup_return_type_raw(&f).first.canSuspend,
+    AttrEagerOnly
+  );
+  renumber_locals(f);
+  emit_init_func(ue, fe, f, attrs);
+  auto func = php::WideFunc::mut(&f);
+  auto const info = emit_bytecode(state, ue, fe, func);
+  emit_finish_func(state, ue, fe, func, info);
 }
 
-void emit_pseudomain(EmitUnitState& state,
-                     UnitEmitter& ue,
-                     const php::Unit& unit) {
-  FTRACE(2,  "    pseudomain\n");
-  auto& pm = *unit.pseudomain;
-  ue.initMain(std::get<0>(pm.srcInfo.loc),
-              std::get<1>(pm.srcInfo.loc));
-  auto const fe = ue.getMain();
-  auto const info = emit_bytecode(state, ue, pm);
-  if (is_systemlib_part(unit)) {
-    ue.m_mergeOnly = true;
-    auto const tv = make_tv<KindOfInt64>(1);
-    ue.m_mainReturn = tv;
-  } else {
-    ue.m_mergeOnly =
-      ue.m_returnSeen && ue.m_mainReturn.m_type != KindOfUninit;
-  }
-
-  emit_finish_func(state, pm, *fe, info);
-}
-
-void emit_class(EmitUnitState& state,
-                UnitEmitter& ue,
-                PreClassEmitter* pce,
-                Offset offset,
-                const php::Class& cls) {
+void emit_class(EmitUnitState& state, UnitEmitter& ue, PreClassEmitter* pce,
+                php::Class& cls) {
   FTRACE(2, "    class: {}\n", cls.name->data());
+  assertx(cls.attrs & AttrPersistent);
   pce->init(
     std::get<0>(cls.srcInfo.loc),
     std::get<1>(cls.srcInfo.loc),
-    offset == kInvalidOffset ? ue.bcPos() : offset,
-    cls.attrs,
-    cls.parentName ? cls.parentName : s_empty.get(),
-    cls.srcInfo.docComment
+    cls.attrs |
+      (cls.sampleDynamicConstruct ? AttrDynamicallyConstructible : AttrNone),
+    cls.parentName ? cls.parentName : staticEmptyString(),
+    cls.srcInfo.docComment,
+    ue.isSystemLib()
   );
   pce->setUserAttributes(cls.userAttributes);
 
   for (auto& x : cls.interfaceNames)     pce->addInterface(x);
+  for (auto& x : cls.includedEnumNames)  pce->addEnumInclude(x);
   for (auto& x : cls.usedTraitNames)     pce->addUsedTrait(x);
   for (auto& x : cls.requirements)       pce->addClassRequirement(x);
-  for (auto& x : cls.traitPrecRules)     pce->addTraitPrecRule(x);
-  for (auto& x : cls.traitAliasRules)    pce->addTraitAliasRule(x);
 
   pce->setIfaceVtableSlot(state.index.lookup_iface_vtable_slot(&cls));
 
@@ -1428,185 +1121,266 @@ void emit_class(EmitUnitState& state,
 
   for (auto& cconst : cls.constants) {
     if (nativeConsts && nativeConsts->count(cconst.name)) {
-      break;
+      continue;
     }
-    if (!cconst.val.hasValue()) {
+    if (cconst.kind == ConstModifierFlags::Kind::Context) {
+      assertx(cconst.cls->tsame(cls.name));
+      assertx(!cconst.resolvedTypeStructure);
+      assertx(cconst.invariance == php::Const::Invariance::None);
+      pce->addContextConstant(
+        cconst.name,
+        std::vector<PackedStringPtr>(cconst.coeffects),
+        cconst.isAbstract,
+        cconst.isFromTrait
+      );
+    } else if (!cconst.val.has_value()) {
+      assertx(cconst.cls->tsame(cls.name));
+      assertx(!cconst.resolvedTypeStructure);
+      assertx(cconst.invariance == php::Const::Invariance::None);
       pce->addAbstractConstant(
         cconst.name,
-        cconst.typeConstraint,
-        cconst.isTypeconst
+        cconst.kind,
+        cconst.isFromTrait
       );
     } else {
       needs86cinit |= cconst.val->m_type == KindOfUninit;
-
       pce->addConstant(
         cconst.name,
-        cconst.typeConstraint,
+        cconst.cls->tsame(cls.name) ? nullptr : cconst.cls,
         &cconst.val.value(),
-        cconst.phpCode,
-        cconst.isTypeconst
+        ArrNR{cconst.resolvedTypeStructure},
+        cconst.kind,
+        cconst.invariance,
+        cconst.isFromTrait,
+        cconst.isAbstract
       );
     }
   }
 
   for (auto& m : cls.methods) {
+    if (!m) continue; // Removed
     if (!needs86cinit && m->name == s_86cinit.get()) continue;
-    FTRACE(2, "    method: {}\n", m->name->data());
+    FTRACE(2, "    method: {}\n", m->name);
     auto const fe = ue.newMethodEmitter(m->name, pce);
-    emit_init_func(*fe, *m);
+    emit_func(state, ue, *fe, *m);
     pce->addMethod(fe);
-    auto const info = emit_bytecode(state, ue, *m);
-    emit_finish_func(state, *m, *fe, info);
   }
 
-  std::vector<Type> useVars;
+  CompactVector<Type> useVars;
   if (is_closure(cls)) {
     auto f = find_method(&cls, s_invoke.get());
-    useVars = state.index.lookup_closure_use_vars(f, true);
+    always_assert(f);
+    useVars = state.index.lookup_closure_use_vars_raw(*f);
   }
   auto uvIt = useVars.begin();
 
   auto const privateProps   = state.index.lookup_private_props(&cls, true);
   auto const privateStatics = state.index.lookup_private_statics(&cls, true);
-  for (auto& prop : cls.properties) {
+  auto const publicStatics  = state.index.lookup_public_statics(&cls);
+  for (auto const& prop : cls.properties) {
     auto const makeRat = [&] (const Type& ty) -> RepoAuthType {
-      if (ty.couldBe(BCls)) {
+      if (!ty.subtypeOf(BCell)) return RepoAuthType{};
+      if (ty.subtypeOf(BBottom)) {
+        // A property can be TBottom if no sets (nor its initial value) is
+        // compatible with its type-constraint, or if its LateInit and there's
+        // no sets to it. The repo auth type here doesn't particularly matter,
+        // since such a prop will be inaccessible.
         return RepoAuthType{};
       }
-      auto const rat = make_repo_type(*state.index.array_table_builder(), ty);
-      merge_repo_auth_type(ue, rat);
-      return rat;
+      return make_repo_type(ty);
     };
 
-    auto const privPropTy = [&] (const PropState& ps) -> Type {
+    auto const privPropTy = [&] (const PropState& ps) -> std::pair<Type, bool> {
       if (is_closure(cls)) {
         // For closures use variables will be the first properties of the
         // closure object, in declaration order
-        if (uvIt != useVars.end()) return *uvIt++;
-        return Type{};
+        if (uvIt != useVars.end()) return std::make_pair(*uvIt++, true);
+        return std::make_pair(TCell, true);
       }
 
       auto it = ps.find(prop.name);
-      if (it == end(ps)) return Type{};
-      return it->second;
+      if (it == end(ps)) return std::make_pair(TCell, true);
+      return std::make_pair(it->second.ty, it->second.everModified);
     };
 
-    Type propTy;
-    auto const attrs = prop.attrs;
+    auto propTy = TCell;
+    auto everModified = true;
+    auto attrs = prop.attrs;
     if (attrs & AttrPrivate) {
-      propTy = privPropTy((attrs & AttrStatic) ? privateStatics : privateProps);
-    } else if ((attrs & AttrPublic) && (attrs & AttrStatic)) {
-      propTy = state.index.lookup_public_static(&cls, prop.name);
+      std::tie(propTy, everModified) =
+        privPropTy((attrs & AttrStatic) ? privateStatics : privateProps);
+    } else if ((attrs & (AttrPublic|AttrProtected)) && (attrs & AttrStatic)) {
+      std::tie(propTy, everModified) = [&] {
+        auto const it = publicStatics.find(prop.name);
+        if (it == end(publicStatics)) return std::make_pair(TCell, true);
+        return std::make_pair(it->second.ty, it->second.everModified);
+      }();
+    }
+
+    if (!everModified && (attrs & AttrStatic) && !propTy.is(BBottom)) {
+      attrs |= AttrPersistent;
     }
 
     pce->addProperty(
       prop.name,
-      prop.attrs,
-      prop.typeConstraint,
+      attrs,
+      prop.userType,
+      TypeIntersectionConstraint(prop.typeConstraints),
       prop.docComment,
       &prop.val,
       makeRat(propTy),
       prop.userAttributes
     );
   }
-  assert(uvIt == useVars.end());
+  assertx(uvIt == useVars.end());
 
   pce->setEnumBaseTy(cls.enumBaseTy);
+  std::vector<PackedStringPtr> names;
+  for (auto const& name : cls.typeParamNames) {
+    names.emplace_back(name);
+  }
+  pce->setTypeParamNames(std::move(names));
 }
 
 void emit_typealias(UnitEmitter& ue, const php::TypeAlias& alias) {
-  auto const id = ue.addTypeAlias(alias);
-  ue.pushMergeableTypeAlias(HPHP::Unit::MergeKind::TypeAlias, id);
+  assertx(alias.attrs & AttrPersistent);
+  auto const te = ue.newTypeAliasEmitter(alias.name->toCppString());
+
+  te->init(
+    std::get<0>(alias.srcInfo.loc),
+    std::get<1>(alias.srcInfo.loc),
+    alias.attrs,
+    alias.value,
+    alias.kind,
+    Array::attach(const_cast<ArrayData*>(alias.typeStructure)),
+    Array::attach(const_cast<ArrayData*>(alias.resolvedTypeStructure))
+  );
+  te->setUserAttributes(alias.userAttrs);
+}
+
+void emit_constant(UnitEmitter& ue, const php::Constant& constant) {
+  assertx(constant.attrs & AttrPersistent);
+  Constant c {
+    constant.name,
+    constant.val,
+    constant.attrs,
+  };
+  ue.addConstant(c);
+}
+
+void emit_module(UnitEmitter& ue, const php::Module& module) {
+  Module m {
+    module.name,
+    module.srcInfo.docComment,
+    (int)std::get<0>(module.srcInfo.loc),
+    (int)std::get<1>(module.srcInfo.loc),
+    module.attrs,
+    module.userAttributes,
+  };
+  ue.addModule(m);
 }
 
 //////////////////////////////////////////////////////////////////////
 
 }
 
-std::unique_ptr<UnitEmitter> emit_unit(const Index& index,
-                                       const php::Unit& unit) {
+std::unique_ptr<UnitEmitter> emit_unit(IIndex& index, php::Unit& unit) {
+  SCOPE_ASSERT_DETAIL("emit_unit") { return unit.filename->toCppString(); };
+
   Trace::Bump bumper{
     Trace::hhbbc_emit, kSystemLibBump, is_systemlib_part(unit)
   };
 
-  assert(check(unit));
+  ContextPusher _{index, Context{ unit.filename, nullptr, nullptr }};
 
-  auto ue = std::make_unique<UnitEmitter>(unit.md5);
+  assertx(!is_native_unit(unit));
+  assertx(check(unit, index));
+
+  auto extension = [&]() -> Extension* {
+    if (unit.extName->empty()) return nullptr;
+    auto const ext = ExtensionRegistry::get(unit.extName->data(), false);
+    always_assert(ext);
+    return ext;
+  }();
+
+  auto ue = std::make_unique<UnitEmitter>(SHA1{},
+                                          SHA1{},
+                                          unit.packageInfo,
+                                          unit.attributes);
   FTRACE(1, "  unit {}\n", unit.filename->data());
+  ue->m_sn = 0; // Will be set before writing to repo
   ue->m_filepath = unit.filename;
-  ue->m_preloadPriority = unit.preloadPriority;
-  ue->m_isHHFile = unit.isHHFile;
-  ue->m_useStrictTypes = unit.useStrictTypes;
-  ue->m_useStrictTypesForBuiltins = unit.useStrictTypesForBuiltins;
+  ue->m_extension = extension;
   ue->m_metaData = unit.metaData;
+  ue->m_fileAttributes = unit.fileAttributes;
+  ue->m_moduleName = unit.moduleName;
+  ue->m_softDeployedRepoOnly = unit.softDeployed;
+
+  if (unit.fatalInfo) {
+    // We should have dealt with verifier failures long ago.
+    assertx(unit.fatalInfo->fatalLoc.has_value());
+    ue->m_fatalUnit = true;
+    ue->m_fatalOp = unit.fatalInfo->fatalOp;
+    ue->m_fatalLoc = *unit.fatalInfo->fatalLoc;
+    ue->m_fatalMsg = unit.fatalInfo->fatalMsg;
+  }
 
   EmitUnitState state { index, &unit };
-  state.classOffsets.resize(unit.classes.size(), kInvalidOffset);
 
-  emit_pseudomain(state, *ue, unit);
-
-  std::vector<FuncEmitter*> top_fes;
-  /*
-   * Top level funcs are always defined when the unit is loaded, and
-   * don't have a DefFunc bytecode. Process them up front.
-   */
-  for (size_t id = 0; id < unit.funcs.size(); ++id) {
-    auto const f = borrow(unit.funcs[id]);
-    assertx(f != borrow(unit.pseudomain));
-    if (!f->top) continue;
-    auto const fe = new FuncEmitter(*ue, -1, -1, f->name);
-    top_fes.push_back(fe);
-    emit_func(state, *ue, fe, *f);
+  // Go through all constants and see if they still need their
+  // matching 86cinit func. In repo mode we are able to optimize away
+  // most of them away. If the const doesn't need them anymore we
+  // should not emit them.
+  hphp_fast_set<const StringData*> const_86cinit_funcs;
+  for (size_t id = 0; id < unit.constants.size(); ++id) {
+    auto const& c = unit.constants[id];
+    if (type(c->val) != KindOfUninit) {
+      const_86cinit_funcs.emplace(Constant::funcNameFromName(c->name));
+    }
   }
 
-  /*
-   * Find any top-level classes that need to be included due to
-   * hoistability, even though the corresponding DefCls was not
-   * reachable.
-   */
-  for (size_t id = 0; id < unit.classes.size(); ++id) {
-    if (state.classOffsets[id] != kInvalidOffset) continue;
-    auto const c = borrow(unit.classes[id]);
-    if (c->hoistability != PreClass::MaybeHoistable &&
-        c->hoistability != PreClass::AlwaysHoistable) {
-      continue;
+  index.for_each_unit_class_mutable(
+    unit,
+    [&] (php::Class& c) {
+      // No reason to include closures unless there's a reachable
+      // CreateCl.
+      if (is_closure(c)) return;
+      recordClass(state, *ue, c);
     }
-    // Closures are AlwaysHoistable; but there's no need to include
-    // them unless there's a reachable CreateCl.
-    if (is_closure(*c)) continue;
-    recordClass(state, *ue, id);
+  );
+
+  index.for_each_unit_func_mutable(
+    unit,
+    [&] (php::Func& f) {
+      if (const_86cinit_funcs.contains(f.name)) return;
+      auto fe = ue->newFuncEmitter(f.name);
+      emit_func(state, *ue, *fe, f);
+    }
+  );
+
+  // Note that state.pces can grow inside the loop due to discovering
+  // more closures.
+  for (size_t idx = 0; idx < state.pces.size(); ++idx) {
+    auto const [cls, pce] = state.pces[idx];
+    emit_class(state, *ue, pce, *cls);
   }
 
-  size_t pceId = 0, feId = 0;
-  do {
-    // Note that state.pceInfo can grow inside the loop
-    while (pceId < state.pceInfo.size()) {
-      auto const& pceInfo = state.pceInfo[pceId++];
-      auto const& c = unit.classes[pceInfo.origId];
-      emit_class(state, *ue, pceInfo.pce,
-                 state.classOffsets[pceInfo.origId], *c);
-    }
-
-    while (feId < state.feInfo.size()) {
-      auto const& feInfo = state.feInfo[feId++];
-      // DefFunc ids are off by one wrt unit.funcs because we don't
-      // store the pseudomain there.
-      auto const& f = unit.funcs[feInfo.origId - 1];
-      emit_func(state, *ue, feInfo.fe, *f);
-    }
-  } while (pceId < state.pceInfo.size());
-
-  for (auto tid : state.typeAliasInfo) {
-    emit_typealias(*ue, *unit.typeAliases[tid]);
+  for (size_t id = 0; id < unit.typeAliases.size(); ++id) {
+    emit_typealias(*ue, *unit.typeAliases[id]);
   }
 
-  // Top level funcs need to go after any non-top level funcs. See
-  // Unit::merge for details.
-  for (auto fe : top_fes) ue->appendTopEmitter(fe);
+  for (size_t id = 0; id < unit.constants.size(); ++id) {
+    emit_constant(*ue, *unit.constants[id]);
+  }
 
+  for (size_t id = 0; id < unit.modules.size(); ++id) {
+    emit_module(*ue, *unit.modules[id]);
+  }
+
+  ue->finish();
   return ue;
 }
 
 //////////////////////////////////////////////////////////////////////
 
-}}
+}

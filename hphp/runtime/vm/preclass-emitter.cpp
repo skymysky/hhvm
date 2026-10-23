@@ -19,55 +19,45 @@
 
 #include <folly/Memory.h>
 
-#include "hphp/parser/parser.h"
-
 #include "hphp/runtime/base/array-iterator.h"
-#include "hphp/runtime/base/runtime-option.h"
-#include "hphp/runtime/vm/repo.h"
-#include "hphp/runtime/vm/blob-helper.h"
+#include "hphp/runtime/base/coeffects-config.h"
+#include "hphp/runtime/vm/repo-autoload-map-builder.h"
 #include "hphp/runtime/vm/native.h"
 #include "hphp/runtime/vm/native-data.h"
 
+#include "hphp/util/blob-encoder.h"
+
 namespace HPHP {
 
-std::string NewAnonymousClassName(const std::string& name) {
-  static std::atomic<uint32_t> next_anon_class;
-  return folly::sformat("{};{}", name, next_anon_class.fetch_add(1));
-}
-
-namespace {
-
-const StringData* preClassName(const std::string& name) {
-  if (ParserBase::IsAnonymousClassName(name)) {
-    if (name.find(';') == std::string::npos) {
-      return makeStaticString(NewAnonymousClassName(name));
-    }
-  }
-  return makeStaticString(name);
-}
-
-}
+const StaticString s_SoftInternal("__SoftInternal");
 
 //=============================================================================
 // PreClassEmitter::Prop.
 
-PreClassEmitter::Prop::Prop(const PreClassEmitter* pce,
-                            const StringData* n,
-                            Attr attrs,
-                            const StringData* typeConstraint,
-                            const StringData* docComment,
-                            const TypedValue* val,
-                            RepoAuthType repoAuthType,
-                            UserAttributeMap userAttributes)
+PreClassEmitter::Prop::Prop(
+  const PreClassEmitter* pce,
+  const StringData* n,
+  Attr attrs,
+  const StringData* userType,
+  TypeIntersectionConstraint&& typeConstraints,
+  const StringData* docComment,
+  const TypedValue* val,
+  RepoAuthType repoAuthType,
+  UserAttributeMap userAttributes
+)
   : m_name(n)
   , m_attrs(attrs)
-  , m_typeConstraint(typeConstraint)
+  , m_userType(userType)
   , m_docComment(docComment)
   , m_repoAuthType(repoAuthType)
+  , m_typeConstraints(std::move(typeConstraints))
   , m_userAttributes(userAttributes)
 {
-  m_mangledName = PreClass::manglePropName(pce->name(), n, attrs);
   memcpy(&m_val, val, sizeof(TypedValue));
+  if (m_attrs & AttrInternal &&
+      m_userAttributes.contains(s_SoftInternal.get())) {
+    m_attrs |= AttrInternalSoft;
+  }
 }
 
 PreClassEmitter::Prop::~Prop() {
@@ -76,25 +66,19 @@ PreClassEmitter::Prop::~Prop() {
 //=============================================================================
 // PreClassEmitter.
 
-PreClassEmitter::PreClassEmitter(UnitEmitter& ue,
-                                 Id id,
-                                 const std::string& n,
-                                 PreClass::Hoistable hoistable)
-  : m_ue(ue)
-  , m_name(preClassName(n))
-  , m_id(id)
-  , m_hoistable(hoistable) {}
+PreClassEmitter::PreClassEmitter(const StringData* n)
+  : m_name(n), m_typeParamNames() {}
 
-void PreClassEmitter::init(int line1, int line2, Offset offset, Attr attrs,
+void PreClassEmitter::init(int line1, int line2, Attr attrs,
                            const StringData* parent,
-                           const StringData* docComment) {
+                           const StringData* docComment,
+                           bool isSystemLib) {
   m_line1 = line1;
   m_line2 = line2;
-  m_offset = offset;
   m_attrs = attrs;
   m_parent = parent;
   m_docComment = docComment;
-  if (!SystemLib::s_inited) {
+  if (isSystemLib) {
     m_attrs = m_attrs | AttrBuiltin;
   }
 }
@@ -110,6 +94,10 @@ void PreClassEmitter::addInterface(const StringData* n) {
   m_interfaces.push_back(n);
 }
 
+void PreClassEmitter::addEnumInclude(const StringData* n) {
+  m_enumIncludes.push_back(n);
+}
+
 bool PreClassEmitter::addMethod(FuncEmitter* method) {
   MethodMap::const_iterator it = m_methodMap.find(method->name);
   if (it != m_methodMap.end()) {
@@ -120,126 +108,184 @@ bool PreClassEmitter::addMethod(FuncEmitter* method) {
   return true;
 }
 
-void PreClassEmitter::renameMethod(const StringData* oldName,
-                                   const StringData* newName) {
-  assertx(m_methodMap.count(oldName));
-  auto it = m_methodMap.find(oldName);
-  auto fe = it->second;
-  m_methodMap.erase(it);
-  fe->name = newName;
-  m_methodMap[newName] = fe;
-}
-
-bool PreClassEmitter::addProperty(const StringData* n, Attr attrs,
-                                  const StringData* typeConstraint,
-                                  const StringData* docComment,
-                                  const TypedValue* val,
-                                  RepoAuthType repoAuthType,
-                                  UserAttributeMap userAttributes) {
+bool PreClassEmitter::addProperty(
+  const StringData* n,
+  Attr attrs,
+  const StringData* userType,
+  TypeIntersectionConstraint&& typeConstraints,
+  const StringData* docComment,
+  const TypedValue* val,
+  RepoAuthType repoAuthType,
+  UserAttributeMap userAttributes
+) {
+  assertx(typeConstraints.validForProp());
   PropMap::Builder::const_iterator it = m_propMap.find(n);
   if (it != m_propMap.end()) {
     return false;
   }
-  PreClassEmitter::Prop prop(this, n, attrs, typeConstraint, docComment, val,
-    repoAuthType, userAttributes);
+  PreClassEmitter::Prop prop{
+    this,
+    n,
+    attrs,
+    userType,
+    std::move(typeConstraints),
+    docComment,
+    val,
+    repoAuthType,
+    userAttributes
+  };
   m_propMap.add(prop.name(), prop);
   return true;
 }
 
-const PreClassEmitter::Prop&
-PreClassEmitter::lookupProp(const StringData* propName) const {
-  PropMap::Builder::const_iterator it = m_propMap.find(propName);
-  assertx(it != m_propMap.end());
-  Slot idx = it->second;
-  return m_propMap[idx];
-}
-
 bool PreClassEmitter::addAbstractConstant(const StringData* n,
-                                          const StringData* typeConstraint,
-                                          const bool typeconst) {
+                                          ConstModifierFlags::Kind kind,
+                                          bool fromTrait) {
+  assertx(kind == ConstModifierFlags::Kind::Value ||
+          kind == ConstModifierFlags::Kind::Type);
+
   auto it = m_constMap.find(n);
   if (it != m_constMap.end()) {
     return false;
   }
-  PreClassEmitter::Const cns(n, typeConstraint, nullptr, nullptr, typeconst);
+  PreClassEmitter::Const cns(n, nullptr, nullptr,
+                             {}, Array{}, kind,
+                             Const::Invariance::None,
+                             true, fromTrait);
+  m_constMap.add(cns.name(), cns);
+  return true;
+}
+
+bool PreClassEmitter::addContextConstant(
+    const StringData* n,
+    PreClassEmitter::Const::CoeffectsVec coeffects,
+    bool isAbstract,
+    bool fromTrait) {
+  auto it = m_constMap.find(n);
+  if (it != m_constMap.end()) {
+    return false;
+  }
+  PreClassEmitter::Const cns(n, nullptr, nullptr,
+                             std::move(coeffects),
+                             Array{},
+                             ConstModifierFlags::Kind::Context,
+                             Const::Invariance::None,
+                             isAbstract, fromTrait);
   m_constMap.add(cns.name(), cns);
   return true;
 }
 
 bool PreClassEmitter::addConstant(const StringData* n,
-                                  const StringData* typeConstraint,
+                                  const StringData* cls,
                                   const TypedValue* val,
-                                  const StringData* phpCode,
-                                  const bool typeconst,
-                                  const Array& typeStructure) {
+                                  Array resolvedTypeStructure,
+                                  ConstModifierFlags::Kind kind,
+                                  Const::Invariance invariance,
+                                  bool fromTrait,
+                                  bool isAbstract) {
+  assertx(kind == ConstModifierFlags::Kind::Value ||
+          kind == ConstModifierFlags::Kind::Type);
+  assertx(IMPLIES(kind == ConstModifierFlags::Kind::Value, !cls));
+  assertx(IMPLIES(kind == ConstModifierFlags::Kind::Value,
+                  resolvedTypeStructure.isNull()));
+  assertx(IMPLIES(!resolvedTypeStructure.isNull(),
+                  resolvedTypeStructure.isDict() &&
+                  !resolvedTypeStructure.empty() &&
+                  resolvedTypeStructure->isStatic()));
+  assertx(IMPLIES(invariance != Const::Invariance::None,
+                  !resolvedTypeStructure.isNull()));
+  assertx(val);
+
   ConstMap::Builder::const_iterator it = m_constMap.find(n);
   if (it != m_constMap.end()) {
     return false;
   }
-  TypedValue tvVal;
-  if (typeconst && !typeStructure.empty())  {
-    assertx(typeStructure.isDictOrDArray());
-    tvVal = make_persistent_array_like_tv(typeStructure.get());
-    assertx(tvIsPlausible(tvVal));
-  } else {
-    tvVal = *val;
-  }
-  PreClassEmitter::Const cns(n, typeConstraint, &tvVal, phpCode, typeconst);
+  PreClassEmitter::Const cns(n, cls, val, {}, std::move(resolvedTypeStructure),
+                             kind, invariance, isAbstract, fromTrait);
   m_constMap.add(cns.name(), cns);
   return true;
+}
+
+void PreClassEmitter::setTypeParamNames(
+  std::vector<PackedStringPtr>&& typeParamNames
+) {
+  this->m_typeParamNames = FixedVector(typeParamNames);
+}
+
+folly::Range<const PackedStringPtr*> PreClassEmitter::getTypeParamNames() const {
+  return folly::Range<const PackedStringPtr*>(
+    m_typeParamNames.begin(),
+    m_typeParamNames.end()
+  );
 }
 
 void PreClassEmitter::addUsedTrait(const StringData* traitName) {
   m_usedTraits.push_back(traitName);
 }
 
-void PreClassEmitter::addTraitPrecRule(
-    const PreClass::TraitPrecRule &rule) {
-  m_traitPrecRules.push_back(rule);
-}
-
-void PreClassEmitter::addTraitAliasRule(
-    const PreClass::TraitAliasRule &rule) {
-  m_traitAliasRules.push_back(rule);
-}
-
-void PreClassEmitter::commit(RepoTxn& txn) const {
-  Repo& repo = Repo::get();
-  PreClassRepoProxy& pcrp = repo.pcrp();
-  int repoId = m_ue.m_repoId;
-  int64_t usn = m_ue.m_sn;
-  pcrp.insertPreClass[repoId]
-      .insert(*this, txn, usn, m_id, m_name, m_hoistable);
-
-  for (MethodVec::const_iterator it = m_methods.begin();
-       it != m_methods.end(); ++it) {
-    (*it)->commit(txn);
-  }
-}
-
-const StaticString s_nativedata("__nativedata");
+const StaticString
+  s_NativeData("__NativeData"),
+  s_DynamicallyConstructible("__DynamicallyConstructible"),
+  s_DynamicallyReferenced("__DynamicallyReferenced"),
+  s_invoke("__invoke"),
+  s_coeffectsProp("86coeffects");
 
 PreClass* PreClassEmitter::create(Unit& unit) const {
   Attr attrs = m_attrs;
-  if (attrs & AttrPersistent &&
-      !RuntimeOption::RepoAuthoritative && SystemLib::s_inited) {
+  assertx(IMPLIES(unit.isSystemLib(), attrs & AttrBuiltin));
+  if (Cfg::Eval::ForceAllPersistent) {
+    attrs |= AttrPersistent;
+  } else if (attrs & AttrPersistent &&
+      !Cfg::Repo::Authoritative && !unit.isSystemLib()) {
     attrs = Attr(attrs & ~AttrPersistent);
   }
 
-  assertx(attrs & AttrPersistent || SystemLib::s_inited);
+  auto const dynConstructSampleRate = [&] () -> int64_t {
+    if (!(attrs & AttrDynamicallyConstructible)) return -1;
+
+    auto const it = m_userAttributes.find(s_DynamicallyConstructible.get());
+    if (it == m_userAttributes.end()) return -1;
+
+    assertx(isArrayLikeType(type(it->second)));
+    auto const rate = val(it->second).parr->get(int64_t(0));
+    if (!isIntType(type(rate)) || val(rate).num < 0) return -1;
+
+    attrs = Attr(attrs & ~AttrDynamicallyConstructible);
+    return val(rate).num;
+  }();
+
+  auto const invoke = lookupMethod(s_invoke.get());
+  if (invoke && invoke->isClosureBody) {
+    attrs |= AttrIsClosureClass;
+    if (!invoke->coeffectRules.empty()) {
+      assertx(invoke->coeffectRules.size() == 1);
+      if (invoke->coeffectRules[0].isClosureParentScope()) {
+        attrs |= AttrHasClosureCoeffectsProp;
+      } else {
+        assertx(invoke->coeffectRules[0].isCaller());
+      }
+    }
+  }
+
+  if (attrs & AttrInternal &&
+      m_userAttributes.contains(s_SoftInternal.get())) {
+    attrs |= AttrInternalSoft;
+  }
+
+  assertx(attrs & AttrPersistent || !unit.isSystemLib());
 
   auto pc = std::make_unique<PreClass>(
-    &unit, m_line1, m_line2, m_offset, m_name,
-    attrs, m_parent, m_docComment, m_id,
-    m_hoistable);
+    &unit, m_line1, m_line2, m_name,
+    attrs, m_parent, m_docComment);
   pc->m_interfaces = m_interfaces;
+  pc->m_includedEnums = m_enumIncludes;
   pc->m_usedTraits = m_usedTraits;
   pc->m_requirements = m_requirements;
-  pc->m_traitPrecRules = m_traitPrecRules;
-  pc->m_traitAliasRules = m_traitAliasRules;
   pc->m_enumBaseTy = m_enumBaseTy;
   pc->m_numDeclMethods = -1;
   pc->m_ifaceVtableSlot = m_ifaceVtableSlot;
+  pc->m_dynConstructSampleRate = dynConstructSampleRate;
+  pc->m_typeParamNames = FixedVector<PackedStringPtr>(m_typeParamNames);
 
   // Set user attributes.
   [&] {
@@ -247,23 +293,11 @@ PreClass* PreClassEmitter::create(Unit& unit) const {
     pc->m_nativeDataInfo = nullptr;
     if (!m_userAttributes.size()) return;
 
-    // Check for <<__NativeData("Type")>>.
-    auto it = m_userAttributes.find(s_nativedata.get());
+    // Check for <<__NativeData>>.
+    auto it = m_userAttributes.find(s_NativeData.get());
     if (it == m_userAttributes.end()) return;
 
-    TypedValue ndiInfo = it->second;
-    if (!isArrayType(ndiInfo.m_type)) return;
-
-    // Use the first string label which references a registered type.  In
-    // practice, there should generally only be one item and it should be a
-    // string, but maybe that'll be extended...
-    for (ArrayIter it(ndiInfo.m_data.parr); it; ++it) {
-      Variant val = it.second();
-      if (!val.isString()) continue;
-
-      pc->m_nativeDataInfo = Native::getNativeDataInfo(val.toString().get());
-      if (pc->m_nativeDataInfo) break;
-    }
+    pc->m_nativeDataInfo = Native::getNativeDataInfo(m_name.get());
   }();
 
   PreClass::MethodMap::Builder methodBuild;
@@ -282,45 +316,110 @@ PreClass* PreClassEmitter::create(Unit& unit) const {
   pc->m_methods.create(methodBuild);
 
   PreClass::PropMap::Builder propBuild;
+  if (pc->attrs() & AttrHasClosureCoeffectsProp) {
+    TypedValue tvInit;
+    tvWriteUninit(tvInit);
+
+    propBuild.add(
+      s_coeffectsProp.get(),
+      PreClass::Prop(pc.get(),
+      s_coeffectsProp.get(),
+      AttrPrivate|AttrSystemInitialValue,
+      staticEmptyString(),
+      TypeIntersectionConstraint(TypeConstraint()),
+      staticEmptyString(),
+      tvInit,
+      RepoAuthType{},
+      UserAttributeMap{}
+    ));
+  }
   for (unsigned i = 0; i < m_propMap.size(); ++i) {
     const Prop& prop = m_propMap[i];
-    propBuild.add(prop.name(), PreClass::Prop(pc.get(),
-                                              prop.name(),
-                                              prop.attrs(),
-                                              prop.typeConstraint(),
-                                              prop.docComment(),
-                                              prop.val(),
-                                              prop.repoAuthType(),
-                                              prop.userAttributes()));
+    assertx(!prop.typeConstraints().isTop());
+    propBuild.add(
+      prop.name(),
+      PreClass::Prop(
+        pc.get(),
+        prop.name(),
+        prop.attrs(),
+        prop.userType(),
+        TypeIntersectionConstraint(prop.typeConstraints()),
+        prop.docComment(),
+        prop.val(),
+        prop.repoAuthType(),
+        prop.userAttributes())
+    );
   }
+
   pc->m_properties.create(propBuild);
 
   PreClass::ConstMap::Builder constBuild;
   for (unsigned i = 0; i < m_constMap.size(); ++i) {
     const Const& const_ = m_constMap[i];
     TypedValueAux tvaux;
-    if (const_.isAbstract()) {
-      tvWriteUninit(tvaux);
-      tvaux.constModifiers().isAbstract = true;
+    tvaux.constModifierFlags() = {};
+    tvaux.constModifiers() = {};
+    tvaux.constModifierFlags().isAbstract = const_.isAbstract();
+    if (const_.kind() == ConstModifierFlags::Kind::Context) {
+      auto const coeffects =
+        getCoeffectsInfoFromList(const_.coeffects(), false).first;
+      tvaux.constModifiers().setCoeffects(coeffects);
+      if (!const_.coeffects().empty()) {
+        tvCopy(make_tv<KindOfInt64>(0), tvaux); // dummy value for m_data
+      } else {
+        tvWriteConstValMissing(tvaux);
+      }
     } else {
-      tvCopy(const_.val(), tvaux);
-      tvaux.constModifiers().isAbstract = false;
+      if (const_.valOption()) {
+        tvCopy(const_.val(), tvaux);
+      } else {
+        tvWriteConstValMissing(tvaux);
+      }
     }
 
-    tvaux.constModifiers().isType = const_.isTypeconst();
+    tvaux.constModifierFlags().kind = const_.kind();
 
-    constBuild.add(const_.name(), PreClass::Const(const_.name(),
-                                                  tvaux,
-                                                  const_.phpCode()));
+    assertx(
+      IMPLIES(const_.kind() != ConstModifierFlags::Kind::Type, !const_.cls())
+    );
+    assertx(
+      IMPLIES(const_.kind() != ConstModifierFlags::Kind::Type,
+              const_.resolvedTypeStructure().isNull())
+    );
+    assertx(
+      IMPLIES(!const_.resolvedTypeStructure().isNull(),
+              const_.resolvedTypeStructure().isDict() &&
+              !const_.resolvedTypeStructure().empty())
+    );
+    assertx(
+      IMPLIES(const_.invariance() != Const::Invariance::None,
+              !const_.resolvedTypeStructure().isNull())
+    );
+
+    constBuild.add(
+      const_.name(),
+      PreClass::Const(
+        const_.name(),
+        const_.cls() ? const_.cls() : m_name.get(),
+        tvaux,
+        const_.resolvedTypeStructure(),
+        const_.invariance(),
+        const_.isFromTrait()
+      )
+    );
   }
   if (auto nativeConsts = Native::getClassConstants(m_name)) {
     for (auto cnsMap : *nativeConsts) {
       TypedValueAux tvaux;
       tvCopy(cnsMap.second, tvaux);
-      tvaux.constModifiers() = { false, false };
+      tvaux.constModifierFlags() = {};
+      tvaux.constModifiers() = {};
       constBuild.add(cnsMap.first, PreClass::Const(cnsMap.first,
+                                                   m_name,
                                                    tvaux,
-                                                   staticEmptyString()));
+                                                   Array{},
+                                                   Const::Invariance::None,
+                                                   false));
     }
   }
 
@@ -329,116 +428,28 @@ PreClass* PreClassEmitter::create(Unit& unit) const {
 }
 
 template<class SerDe> void PreClassEmitter::serdeMetaData(SerDe& sd) {
-  // NOTE: name, hoistable, and a few other fields currently
+  // NOTE: name and a few other fields currently
   // serialized outside of this.
   sd(m_line1)
     (m_line2)
-    (m_offset)
     (m_attrs)
     (m_parent)
     (m_docComment)
     (m_ifaceVtableSlot)
 
     (m_interfaces)
+    (m_enumIncludes)
     (m_usedTraits)
     (m_requirements)
-    (m_traitPrecRules)
-    (m_traitAliasRules)
     (m_userAttributes)
-    (m_propMap)
-    (m_constMap)
+    (m_propMap, [](Prop p) { return p.name(); })
+    (m_constMap, [](Const c) { return c.name(); })
     (m_enumBaseTy)
+    (m_typeParamNames)
     ;
-
-    if (SerDe::deserializing) {
-      for (unsigned i = 0; i < m_propMap.size(); ++i) {
-        m_propMap[i].resolveArray(this);
-      }
-    }
 }
 
-//=============================================================================
-// PreClassRepoProxy.
-
-PreClassRepoProxy::PreClassRepoProxy(Repo& repo)
-    : RepoProxy(repo),
-      insertPreClass{InsertPreClassStmt(repo, 0), InsertPreClassStmt(repo, 1)},
-      getPreClasses{GetPreClassesStmt(repo, 0), GetPreClassesStmt(repo, 1)}
-{}
-
-PreClassRepoProxy::~PreClassRepoProxy() {
-}
-
-void PreClassRepoProxy::createSchema(int repoId, RepoTxn& txn) {
-  {
-    std::stringstream ssCreate;
-    ssCreate << "CREATE TABLE " << m_repo.table(repoId, "PreClass")
-             << "(unitSn INTEGER, preClassId INTEGER, name TEXT,"
-                " hoistable INTEGER, extraData BLOB,"
-                " PRIMARY KEY (unitSn, preClassId));";
-    txn.exec(ssCreate.str());
-  }
-}
-
-void PreClassRepoProxy::InsertPreClassStmt
-                      ::insert(const PreClassEmitter& pce, RepoTxn& txn,
-                               int64_t unitSn, Id preClassId,
-                               const StringData* name,
-                               PreClass::Hoistable hoistable) {
-  if (!prepared()) {
-    std::stringstream ssInsert;
-    ssInsert << "INSERT INTO " << m_repo.table(m_repoId, "PreClass")
-             << " VALUES(@unitSn, @preClassId, @name, @hoistable, "
-                "@extraData);";
-    txn.prepare(*this, ssInsert.str());
-  }
-
-  auto n = name->slice();
-  auto const pos = RuntimeOption::RepoAuthoritative ?
-    std::string::npos : qfind(n, ';');
-  auto const nm = pos == std::string::npos ?
-    n : folly::StringPiece{n.data(), pos};
-  BlobEncoder extraBlob;
-  RepoTxnQuery query(txn, *this);
-  query.bindInt64("@unitSn", unitSn);
-  query.bindId("@preClassId", preClassId);
-  query.bindStringPiece("@name", nm);
-  query.bindInt("@hoistable", hoistable);
-  const_cast<PreClassEmitter&>(pce).serdeMetaData(extraBlob);
-  query.bindBlob("@extraData", extraBlob, /* static */ true);
-  query.exec();
-}
-
-void PreClassRepoProxy::GetPreClassesStmt
-                      ::get(UnitEmitter& ue) {
-  RepoTxn txn(m_repo);
-  if (!prepared()) {
-    std::stringstream ssSelect;
-    ssSelect << "SELECT preClassId,name,hoistable,extraData FROM "
-             << m_repo.table(m_repoId, "PreClass")
-             << " WHERE unitSn == @unitSn ORDER BY preClassId ASC;";
-    txn.prepare(*this, ssSelect.str());
-  }
-  RepoTxnQuery query(txn, *this);
-  query.bindInt64("@unitSn", ue.m_sn);
-  do {
-    query.step();
-    if (query.row()) {
-      Id preClassId;          /**/ query.getId(0, preClassId);
-      std::string name;       /**/ query.getStdString(1, name);
-      int hoistable;          /**/ query.getInt(2, hoistable);
-      BlobDecoder extraBlob = /**/ query.getBlob(3);
-      PreClassEmitter* pce = ue.newPreClassEmitter(
-        name, (PreClass::Hoistable)hoistable);
-      pce->serdeMetaData(extraBlob);
-      if (!SystemLib::s_inited) {
-        assertx(pce->attrs() & AttrPersistent);
-        assertx(pce->attrs() & AttrUnique);
-      }
-      assertx(pce->id() == preClassId);
-    }
-  } while (!query.done());
-  txn.commit();
-}
+template void PreClassEmitter::serdeMetaData<>(BlobDecoder&);
+template void PreClassEmitter::serdeMetaData<>(BlobEncoder&);
 
 } // HPHP

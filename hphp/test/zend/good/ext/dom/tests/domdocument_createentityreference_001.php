@@ -1,7 +1,8 @@
-<?php
-	$objDoc = new DomDocument();
-	
-	$objRef = $objDoc->createEntityReference('Test');
-	echo $objRef->nodeName . "\n";
-?>
-===DONE===
+<?hh
+<<__EntryPoint>> function main(): void {
+  $objDoc = new DOMDocument();
+
+  $objRef = $objDoc->createEntityReference('Test');
+  echo $objRef->nodeName . "\n";
+  echo "===DONE===\n";
+}

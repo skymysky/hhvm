@@ -1,15 +1,19 @@
-<?php
+<?hh
 
 class A implements Serializable {
   public $__foo = true;
-  public function serialize() {
-    return serialize(array('a' => 'apple', 'b' => 'banana'));
+  public function serialize() :mixed{
+    return serialize(dict['a' => 'apple', 'b' => 'banana']);
   }
-  public function unserialize($serialized) {
+  public function unserialize($serialized) :mixed{
     $props = unserialize($serialized);
     $this->a = $props['a'];
     $this->b = $props['b'];
   }
 }
- $obj = unserialize(serialize(new A()));
+
+ <<__EntryPoint>>
+function main_1540() :mixed{
+$obj = unserialize(serialize(new A()));
  var_dump($obj->b);
+}

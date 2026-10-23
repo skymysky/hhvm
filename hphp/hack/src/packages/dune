@@ -1,0 +1,48 @@
+; FFI OCaml to Rust (../../target/*/libpackages_ocaml_ffi.a)
+; contains "external" function definition in .ml and
+; the symbol is provided by the ocaml-rs Rust package via caml! macro
+
+(data_only_dirs cargo packages_ocaml_ffi)
+
+(library
+ (name packages_ocaml_ffi)
+ (modules)
+ (wrapped false)
+ (foreign_archives packages_ocaml_ffi))
+
+(rule
+ (targets libpackages_ocaml_ffi.a)
+ (deps
+  (source_tree %{workspace_root}/hack/src))
+ (locks /cargo)
+ (action
+  (run
+   %{workspace_root}/hack/scripts/invoke_cargo.sh
+   packages_ocaml_ffi
+   packages_ocaml_ffi)))
+
+(library
+ (name package_info)
+ (wrapped false)
+ (modules
+  package
+  package_info)
+ (libraries
+  pos
+  utils_multifile)
+ (preprocess
+  (pps ppx_deriving.std)))
+
+(library
+ (name package_config)
+ (wrapped false)
+ (modules package_config)
+ (libraries
+  errors
+  parsing_error
+  package_info
+  packages_ocaml_ffi
+  pos_or_decl
+  utils_config_file_common)
+ (preprocess
+  (pps ppx_deriving.std)))

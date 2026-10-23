@@ -1,0 +1,10 @@
+error: Parsing[1002] The first argument to `__Memoize` must be a label, e.g. `#KeyedByIC`. [1]
+
+memoized_invalid_syntax.php:3:13
+1 | <?hh
+2 | 
+3 | <<__Memoize("Bar")>>
+  |             ^^^^^ [1]
+4 | function foo(): void {}
+
+1 error found

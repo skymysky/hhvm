@@ -13,8 +13,7 @@
    | license@php.net so we can mail you a copy immediately.               |
    +----------------------------------------------------------------------+
 */
-#ifndef incl_HPHP_SPARSE_ID_CONTAINERS_H_
-#define incl_HPHP_SPARSE_ID_CONTAINERS_H_
+#pragma once
 
 #include <cstdlib>
 #include <cstring>
@@ -125,13 +124,9 @@ struct sparse_id_set {
           : nullptr
       }
   {
-    // Note: the sparse part of m_mem is deliberately uninitialized, but we do
-    // it for valgrind or asan builds.
-#if FOLLY_SANITIZE || defined(VALGRIND)
     if (m_mem) {
-      std::memset(m_mem, 0, sizeof(T) * universe_size);
+      std::memset(m_mem, 0, sizeof(T) * universe_size * 2);
     }
-#endif
   }
   ~sparse_id_set() { if (m_universe_size) std::free(m_mem); }
 
@@ -262,13 +257,14 @@ struct sparse_id_set {
    *
    * Post: contains an element with the id of `lt'
    */
-  void insert(LookupT lt) {
+  bool insert(LookupT lt) {
     auto const t = Extract()(lt);
     assert(t < m_universe_size);
-    if (containsImpl(t)) return;
+    if (containsImpl(t)) return false;
     dense()[m_next] = t;
     sparse()[t] = m_next;
     ++m_next;
+    return true;
   }
 
   /*
@@ -289,6 +285,18 @@ struct sparse_id_set {
     --m_next;
     // No need to write to sparse()[t].  If it's read, next and dense are
     // rechecked to ensure it's actually relevant.
+  }
+
+  void resize(T new_size) {
+    if (new_size > m_universe_size) {
+      sparse_id_set tmp{new_size};
+      for (auto t : *this) {
+        tmp.dense()[tmp.m_next] = t;
+        tmp.sparse()[t] = tmp.m_next;
+        ++tmp.m_next;
+      }
+      swap(tmp);
+    }
   }
 
   /*
@@ -427,13 +435,10 @@ struct sparse_id_map {
           : nullptr
       }
   {
-    // Note: the sparse part of m_mem is deliberately uninitialized, but we do
-    // it for valgrind or asan builds.
-#if FOLLY_SANITIZE || defined(VALGRIND)
     if (m_mem) {
-      std::memset(m_mem, 0, sizeof(K) * universe_size);
+      std::memset(m_mem, 0,
+        sizeof(K) * universe_size + sizeof(value_type) * universe_size);
     }
-#endif
   }
   ~sparse_id_map() {
     if (!m_universe_size) return;
@@ -570,7 +575,7 @@ struct sparse_id_map {
   bool empty() const { return !size(); }
 
   /*
-   * Clear all members from the map.  O(1) if V is trivially destructable,
+   * Clear all members from the map.  O(1) if V is trivially destructible,
    * O(size()) if not.
    *
    * Post: empty()
@@ -781,5 +786,3 @@ void swap(sparse_id_map<K,V,LK,LKE>& a, sparse_id_map<K,V,LK,LKE>& b) {
 //////////////////////////////////////////////////////////////////////
 
 }
-
-#endif

@@ -23,9 +23,9 @@
 
 #include "hphp/util/trace.h"
 
-TRACE_SET_MOD(vasm_phi);
+TRACE_SET_MOD(vasm_phi)
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 
 /*
  * optimizePhis() performs limited tail duplication in a few specific
@@ -136,22 +136,9 @@ void optimizePhis(Vunit& unit) {
             if (pred == label) continue;
             auto i2 = unit.blocks[pred].code.end();
             --i2;
-            if (i2->op == Vinstr::phijmp) {
-              assertx(i2->phijmp_.target == label);
-              i2->phijmp_.target = phijmp.target;
-            } else {
-              assertx(i2->op == Vinstr::phijcc);
-              int changes = 0;
-              if (i2->phijcc_.targets[0] == label) {
-                i2->phijcc_.targets[0] = phijmp.target;
-                changes++;
-              }
-              if (i2->phijcc_.targets[1] == label) {
-                i2->phijcc_.targets[1] = phijmp.target;
-                changes++;
-              }
-              assertx(changes > 0);
-            }
+            assertx(i2->op == Vinstr::phijmp);
+            assertx(i2->phijmp_.target == label);
+            i2->phijmp_.target = phijmp.target;
             preds[phijmp.target].push_back(pred);
           }
           preds[label].clear();
@@ -193,7 +180,7 @@ void optimizePhis(Vunit& unit) {
         auto predNeedsFixing = [&](Iter it2, Iter begin) -> bool {
           if (it2->op != Vinstr::phijmp) return false;
           auto const use = unit.tuples[it2->phijmp_.uses][0];
-          if (!unit.regToConst.count(use)) {
+          if (!unit.regToConst.contains(use)) {
             if (useCounts[use] > 1) return false;
             if (it2 == begin) return false;
             --it2;
@@ -262,4 +249,4 @@ void optimizePhis(Vunit& unit) {
   }
 }
 
-}}
+}

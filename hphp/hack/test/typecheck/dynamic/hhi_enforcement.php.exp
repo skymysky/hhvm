@@ -1,0 +1,51 @@
+error: Typing[4110] Invalid argument [1]
+-> Expected `int` [2]
+-> But got `dynamic` [3]
+
+hhi_enforcement.php:6:18
+  1 | <?hh
+  2 | 
+  3 | function f(dynamic $d) : void {
+    |            ^^^^^^^ [3]
+  4 | 
+  5 |   $nf = new NumberFormatter("", 1);
+  6 |   $nf->getSymbol($d); // error, non-hsl .hhi type are unenforced
+    |                  ^^ [1]
+  7 | 
+  8 |   HH\Lib\_Private\Native\pseudorandom_seed($d); // ok, in hsl
+
+NumberFormatter.hhi:102:29
+100 |   public function getLocale(int $type = Locale::ACTUAL_LOCALE)[]: string;
+101 |   public function getPattern()[]: string;
+102 |   public function getSymbol(int $attr)[]: string;
+    |                             ^^^ [2]
+103 |   public function getTextAttribute(int $attr)[]: string;
+104 |   public function parseCurrency(
+
+error: Typing[4110] Invalid argument [1]
+-> Expected `int` [2]
+-> But got `dynamic` [3]
+
+hhi_enforcement.php:8:44
+ 1 | <?hh
+ 2 | 
+ 3 | function f(dynamic $d) : void {
+   |            ^^^^^^^ [3]
+ 4 | 
+ 5 |   $nf = new NumberFormatter("", 1);
+ 6 |   $nf->getSymbol($d); // error, non-hsl .hhi type are unenforced
+ 7 | 
+ 8 |   HH\Lib\_Private\Native\pseudorandom_seed($d); // ok, in hsl
+   |                                            ^^ [1]
+ 9 | 
+10 | }
+
+hsl/ext_random.hhi:16:30
+14 |     int $max = \PHP_INT_MAX,
+15 |   )[leak_safe]: int;
+16 |   function pseudorandom_seed(int $seed): void;
+   |                              ^^^ [2]
+17 |   function random_int(
+18 |     int $min = \PHP_INT_MIN,
+
+2 errors found

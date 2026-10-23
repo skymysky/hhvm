@@ -1,0 +1,49 @@
+error: Typing[4341] The method `getTypeAbs` is not compatible with the overridden method [1]
+-> Method `getTypeAbs` has type `(function(): ~class<mixed>)` in `ReproClassField` [1]
+-> But it has type `(function(): ~string)` in parent `ReproFieldBase` [2]
+-> Type `(function(): ~class<mixed>)` is not a subtype of `(function(): ~string)` [1]
+-> Expected `string` [3]
+-> But got `class<mixed>` [4]
+
+abstract_return.php:18:19
+ 6 | 
+ 7 | abstract class ReproFieldBase {
+ 8 |   abstract public function getTypeAbs(): string;
+   |                            ^^^^^^^^^^ [2]
+   |                                          ^^^^^^ [3]
+ 9 |   public function getType(): string {
+10 |     return '';
+   :
+16 | 
+17 |   <<__Override>>
+18 |   public function getTypeAbs(): class<mixed> {
+   |                   ^^^^^^^^^^ [1]
+   |                                 ^^^^^^^^^^^^ [4]
+19 |     return $this->classType;
+20 |   }
+
+error: Typing[4341] The method `getType` is not compatible with the overridden method [1]
+-> Method `getType` has type `(function(): ~class<mixed>)` in `ReproClassField` [1]
+-> But it has type `(function(): string)` in parent `ReproFieldBase` [2]
+-> Type `(function(): ~class<mixed>)` is not a subtype of `(function(): string)` [1]
+-> Expected `string` [3]
+-> But got `class<mixed>` [4]
+
+abstract_return.php:23:19
+ 7 | abstract class ReproFieldBase {
+ 8 |   abstract public function getTypeAbs(): string;
+ 9 |   public function getType(): string {
+   |                   ^^^^^^^ [2]
+   |                              ^^^^^^ [3]
+10 |     return '';
+11 |   }
+   :
+21 | 
+22 |   <<__Override>>
+23 |   public function getType(): class<mixed> {
+   |                   ^^^^^^^ [1]
+   |                              ^^^^^^^^^^^^ [4]
+24 |     return $this->classType;
+25 |   }
+
+2 errors found

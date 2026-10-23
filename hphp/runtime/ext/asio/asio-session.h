@@ -15,13 +15,15 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_EXT_ASIO_SESSION_H_
-#define incl_HPHP_EXT_ASIO_SESSION_H_
+#pragma once
 
 #include "hphp/runtime/ext/extension.h"
-#include "hphp/runtime/base/thread-info.h"
+#include "hphp/runtime/base/request-info.h"
+#include "hphp/runtime/base/type-array.h"
+#include "hphp/runtime/base/type-object.h"
 #include "hphp/runtime/ext/asio/asio-context.h"
 #include "hphp/runtime/ext/asio/asio-external-thread-event-queue.h"
+#include "hphp/util/rds-local.h"
 
 namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
@@ -29,12 +31,14 @@ namespace HPHP {
 struct ActRec;
 struct c_Awaitable;
 struct c_AwaitAllWaitHandle;
+struct c_ConcurrentWaitHandle;
 struct c_ConditionWaitHandle;
 struct c_ResumableWaitHandle;
+struct c_PriorityBridgeWaitHandle;
 
 struct AsioSession final {
   static void Init();
-  static AsioSession* Get() { return s_current.get(); }
+  static AsioSession* Get() { return *s_current; }
 
   // context
   void enterContext(ActRec* savedFP);
@@ -44,19 +48,28 @@ struct AsioSession final {
     return !m_contexts.empty();
   }
 
-  AsioContext* getContext(context_idx_t ctx_idx) {
-    assertx(ctx_idx <= m_contexts.size());
-    return ctx_idx ? m_contexts[ctx_idx - 1] : nullptr;
+  AsioContext* getContext(ContextIndex ctxIdx) {
+    assertx(ctxIdx.value <= m_contexts.size());
+    return ctxIdx.value ? m_contexts[ctxIdx.value - 1] : nullptr;
   }
 
   AsioContext* getCurrentContext() {
-    assertx(isInContext());
+    assertx(m_currCtxStateIdx.contextIndex().value == m_contexts.size());
     return m_contexts.back();
   }
 
-  context_idx_t getCurrentContextIdx() {
-    assertx(static_cast<context_idx_t>(m_contexts.size()) == m_contexts.size());
-    return static_cast<context_idx_t>(m_contexts.size());
+  void setCurrentContextStateIndex(ContextStateIndex ctxStateIdx) {
+    assertx(ctxStateIdx.contextIndex().value == m_contexts.size());
+    m_currCtxStateIdx = ctxStateIdx;
+  }
+
+  size_t getCurrentContextDepth() {
+    return m_contexts.size();
+  }
+
+  ContextStateIndex getCurrentContextStateIndex() {
+    assertx(m_currCtxStateIdx.contextIndex().value == m_contexts.size());
+    return m_currCtxStateIdx;
   }
 
   // External thread events.
@@ -65,13 +78,13 @@ struct AsioSession final {
   }
 
   // Meager time abstractions.
-  typedef std::chrono::time_point<std::chrono::steady_clock> TimePoint;
+  using TimePoint = std::chrono::time_point<std::chrono::steady_clock>;
 
   // The latest time we will wait for an I/O operation to complete.  If this
   // time is exceeded, onIOWaitExit will throw after checking surprise.
   static TimePoint getLatestWakeTime() {
     auto now = std::chrono::steady_clock::now();
-    auto info = ThreadInfo::s_threadInfo.getNoCheck();
+    auto info = RequestInfo::s_requestInfo.getNoCheck();
     auto& data = info->m_reqInjectionData;
     if (!data.getTimeout()) {
       // Don't wait for over nine thousand hours.
@@ -105,8 +118,8 @@ struct AsioSession final {
   bool hasOnIOWaitExit() { return !!m_onIOWaitExit; }
   bool hasOnJoin() { return !!m_onJoin; }
   void onIOWaitEnter();
-  void onIOWaitExit();
-  void onJoin(c_Awaitable* waitHandle);
+  void onIOWaitExit(c_WaitableWaitHandle* waitHandle);
+  void onJoin(c_WaitableWaitHandle* waitHandle);
 
   // ResumableWaitHandle callbacks:
   void setOnResumableCreate(const Variant& callback);
@@ -126,7 +139,12 @@ struct AsioSession final {
   // AwaitAllWaitHandle callbacks:
   void setOnAwaitAllCreate(const Variant& callback);
   bool hasOnAwaitAllCreate() { return !!m_onAwaitAllCreate; }
-  void onAwaitAllCreate(c_AwaitAllWaitHandle* wh, const Variant& dependencies);
+  void onAwaitAllCreate(c_AwaitAllWaitHandle* wh, Array&& dependencies);
+
+  // ConcurrentWaitHandle callbacks:
+  void setOnConcurrentCreate(const Variant& callback);
+  bool hasOnConcurrentCreate() { return !!m_onConcurrentCreate; }
+  void onConcurrentCreate(c_ConcurrentWaitHandle* wh, Array&& dependencies);
 
   // ConditionWaitHandle callbacks:
   void setOnConditionCreate(const Variant& callback);
@@ -154,15 +172,22 @@ struct AsioSession final {
   void onSleepCreate(c_SleepWaitHandle* waitHandle);
   void onSleepSuccess(c_SleepWaitHandle* waitHandle, int64_t finish_time);
 
+  // PriorityBridgeWaitHandle callbacks:
+  void setOnPriorityBridgeCreate(const Variant& callback);
+  bool hasOnPriorityBridgeCreate() { return !!m_onPriorityBridgeCreate; }
+  void onPriorityBridgeCreate(c_PriorityBridgeWaitHandle* wh,
+                              c_WaitableWaitHandle* child);
+
 private:
   AsioSession();
   friend AsioSession* req::make_raw<AsioSession>();
 
 private:
-  static THREAD_LOCAL_PROXY(AsioSession, s_current);
+  static RDS_LOCAL_NO_CHECK(AsioSession*, s_current);
   req::vector<AsioContext*> m_contexts;
   req::vector<c_SleepWaitHandle*> m_sleepEvents;
   AsioExternalThreadEventQueue m_externalThreadEventQueue;
+  ContextStateIndex m_currCtxStateIdx;
 
   Object m_abruptInterruptException;
   Object m_onIOWaitEnter;
@@ -173,15 +198,15 @@ private:
   Object m_onResumableSuccess;
   Object m_onResumableFail;
   Object m_onAwaitAllCreate;
+  Object m_onConcurrentCreate;
   Object m_onConditionCreate;
   Object m_onExtThreadEventCreate;
   Object m_onExtThreadEventSuccess;
   Object m_onExtThreadEventFail;
   Object m_onSleepCreate;
   Object m_onSleepSuccess;
+  Object m_onPriorityBridgeCreate;
 };
 
 ///////////////////////////////////////////////////////////////////////////////
 }
-
-#endif // incl_HPHP_EXT_ASIO_SESSION_H_

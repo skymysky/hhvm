@@ -482,12 +482,12 @@ static void init_entity_table() {
     XHPEntityMap[charset]["amp"] = "&";
     // XHP-specific entities
     XHPEntityMap[charset]["apos"] = "\'";
-    XHPEntityMap[charset]["cloud"] = u8"\u2601";
-    XHPEntityMap[charset]["umbrella"] = u8"\u2602";
-    XHPEntityMap[charset]["snowman"] = u8"\u2603";
-    XHPEntityMap[charset]["snowflake"] = u8"\u2745";
-    XHPEntityMap[charset]["comet"] = u8"\u2604";
-    XHPEntityMap[charset]["thunderstorm"] = u8"\u2608";
+    XHPEntityMap[charset]["cloud"] = (const char *)u8"\u2601";
+    XHPEntityMap[charset]["umbrella"] = (const char *)u8"\u2602";
+    XHPEntityMap[charset]["snowman"] = (const char *)u8"\u2603";
+    XHPEntityMap[charset]["snowflake"] = (const char *)u8"\u2745";
+    XHPEntityMap[charset]["comet"] = (const char *)u8"\u2604";
+    XHPEntityMap[charset]["thunderstorm"] = (const char *)u8"\u2608";
   }
 
   // the first element is an empty table
@@ -497,12 +497,12 @@ static void init_entity_table() {
   EntityMap[cs_terminator]["amp"] = "&";
   // XHP-specific entities
   XHPEntityMap[cs_terminator]["apos"] = "\'";
-  XHPEntityMap[cs_terminator]["cloud"] = u8"\u2601";
-  XHPEntityMap[cs_terminator]["umbrella"] = u8"\u2602";
-  XHPEntityMap[cs_terminator]["snowman"] = u8"\u2603";
-  XHPEntityMap[cs_terminator]["snowflake"] = u8"\u2745";
-  XHPEntityMap[cs_terminator]["comet"] = u8"\u2604";
-  XHPEntityMap[cs_terminator]["thunderstorm"] = u8"\u2608";
+  XHPEntityMap[cs_terminator]["cloud"] = (const char *)u8"\u2601";
+  XHPEntityMap[cs_terminator]["umbrella"] = (const char *)u8"\u2602";
+  XHPEntityMap[cs_terminator]["snowman"] = (const char *)u8"\u2603";
+  XHPEntityMap[cs_terminator]["snowflake"] = (const char *)u8"\u2745";
+  XHPEntityMap[cs_terminator]["comet"] = (const char *)u8"\u2604";
+  XHPEntityMap[cs_terminator]["thunderstorm"] = (const char *)u8"\u2608";
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -652,7 +652,7 @@ char *string_html_encode(const char *input, int &len,
    * time this function is called with small strings, or fragments of HTMLs.
    * Allocating/deallocating anything less than 1K is trivial these days, and
    * we want avoid string copying as much as possible. Of course, the return
-   * char * is really sent back at large, occupying unnessary space for
+   * char * is really sent back at large, occupying unnecessary space for
    * potentially longer time than we need, we have to realize the two closest
    * solutions are not that much better, either:
    *
@@ -750,8 +750,7 @@ char *string_html_encode(const char *input, int &len,
         p++;
         break;
       }
-
-      // fallthrough
+      [[fallthrough]];
     default: {
       if (LIKELY(c < 0x80)) {
         *q++ = c;
@@ -767,8 +766,8 @@ char *string_html_encode(const char *input, int &len,
           */
         *q++ = '&';
         const char *s = ent_iso_8859_1[c - 160];
-        int len = strlen(s);
-        for (int n = 0; n < len; n++) {
+        int len_2 = strlen(s);
+        for (int n = 0; n < len_2; n++) {
           *q++ = *s++;
         }
         *q++ = ';';
@@ -799,7 +798,7 @@ char *string_html_encode(const char *input, int &len,
         if (cond) { \
           p += (len) - 1; \
           if (should_skip) { break; } \
-          else if (should_replace) { strcpy(q, u8"\uFFFD"); q += 3; break; } \
+          else if (should_replace) { strcpy(q, (const char *)u8"\uFFFD"); q += 3; break; } \
           else { goto exit_error; } \
         }
 
@@ -874,12 +873,12 @@ char *string_html_encode(const char *input, int &len,
 
         char buf[16] = {0};
         buf[0] = c;
-        int len = 1;
+        int len_2 = 1;
 
-        if (encode_entity(buf, &len, const_cast<char*>(entity), utf8)) {
+        if (encode_entity(buf, &len_2, const_cast<char*>(entity), utf8)) {
           *q++ = '&';
           const char *s = buf;
-          for (int n = 0; n < len; n++) {
+          for (int n = 0; n < len_2; n++) {
             *q++ = *s++;
           }
           *q++ = ';';
@@ -923,7 +922,7 @@ char *string_html_encode_extra(const char *input, int &len,
    * time this function is called with small strings, or fragments of HTMLs.
    * Allocating/deallocating anything less than 1K is trivial these days, and
    * we want avoid string copying as much as possible. Of course, the return
-   * char * is really sent back at large, occupying unnessary space for
+   * char * is really sent back at large, occupying unnecessary space for
    * potentially longer time than we need, we have to realize the two closest
    * solutions are not that much better, either:
    *
@@ -937,7 +936,7 @@ char *string_html_encode_extra(const char *input, int &len,
     return nullptr;
   }
   char *q = ret;
-  const char *rep = u8"\ufffd";
+  const char *rep = (const char *)u8"\ufffd";
   int32_t srcPosBytes;
   for (srcPosBytes = 0; srcPosBytes < len; /* incremented in-loop */) {
     unsigned char c = input[srcPosBytes];

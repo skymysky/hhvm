@@ -1,6 +1,6 @@
-<?php
+<?hh
 
-function main($arr1, $arr2) {
+function main($arr1, $arr2) :mixed{
   $tot = 0;
   foreach($arr1 as $v1) {
     foreach($arr2 as $v2) {
@@ -10,9 +10,13 @@ function main($arr1, $arr2) {
   return $tot;
 }
 
-$a = array(1,2,3);
-$b = array(10,20,30);
+
+<<__EntryPoint>>
+function main_nested_foreach1() :mixed{
+$a = vec[1,2,3];
+$b = vec[10,20,30];
 
 for ($i = 0; $i < 10; $i++) {
   var_dump(main($a, $b));
+}
 }

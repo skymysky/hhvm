@@ -1,8 +1,8 @@
-<?hh //strict
+<?hh
 
 class A {
   protected static function invariant_violation(): noreturn {
-    //UNSAFE
+    throw new Exception();
   }
 }
 

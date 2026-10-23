@@ -1,11 +1,11 @@
 <?hh
 
-function main($bar) {
+function main($bar) :mixed{
   $foo = "Hello!";
-  array(1, 2, 3)
+  vec[1, 2, 3]
     |> array_map($x ==> $x + 1, $$)
     |> array_merge(
-      array(50, 60, 70)
+      vec[50, 60, 70]
         |> array_map($x ==> $x * 2, $$)
         |> array_filter($$, $x ==> $x != 100),
       $$)
@@ -15,4 +15,8 @@ function main($bar) {
   var_dump($bar);
 }
 
+
+<<__EntryPoint>>
+function main_pipevar_3() :mixed{
 main("Goodbye");
+}

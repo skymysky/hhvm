@@ -14,12 +14,9 @@
  | license@php.net so we can mail you a copy immediately.               |
  +----------------------------------------------------------------------+
  */
-#include "ext_gettext.h"
-
-#include <stdio.h>
+#include "hphp/runtime/ext/gettext/ext_gettext.h"
 
 #include "hphp/runtime/base/array-init.h"
-#include "hphp/runtime/base/execution-context.h"
 #include "hphp/runtime/base/file.h"
 
 #include <libintl.h>
@@ -29,15 +26,10 @@
 #define PHP_GETTEXT_MAX_DOMAIN_LENGTH 1024
 #define PHP_GETTEXT_MAX_MSGID_LENGTH 4096
 
-// This is based on what is defined in
-// hphp/runtime/ext_zend_compat/php-src/main/php_config-*.h
-// And also what I know is present under MSVC.
-#ifndef __APPLE__
 # define HAVE_NGETTEXT 1
 # define HAVE_DNGETTEXT 1
 # define HAVE_DCNGETTEXT 1
 # define HAVE_BIND_TEXTDOMAIN_CODESET 1
-#endif
 
 namespace HPHP {
 
@@ -53,36 +45,36 @@ namespace HPHP {
     return false; \
   }
 
-Variant HHVM_FUNCTION(textdomain, const String& domain) {
+Variant HHVM_FUNCTION(textdomain, const OptString& domain) {
   CHECK_DOMAIN_LENGTH();
 
   const char* realDomain = nullptr;
-  if (!domain.empty() && domain != String(0)) {
+  if (!domain.empty() && domain != OptString::FromInt64(0)) {
     realDomain = domain.data();
   }
 
-  return String(textdomain(realDomain), CopyString);
+  return OptString(textdomain(realDomain), CopyString);
 }
 
-Variant HHVM_FUNCTION(gettext, const String& msgid) {
+Variant HHVM_FUNCTION(gettext, const OptString& msgid) {
   CHECK_GETTEXT_LENGTH("msgid", msgid.length());
-  return String(gettext(msgid.data()), CopyString);
+  return OptString(gettext(msgid.data()), CopyString);
 }
 
-Variant HHVM_FUNCTION(dgettext, const String& domain, const String& msgid) {
+Variant HHVM_FUNCTION(dgettext, const OptString& domain, const OptString& msgid) {
   CHECK_DOMAIN_LENGTH();
   CHECK_GETTEXT_LENGTH("msgid", msgid.length());
-  return String(dgettext(domain.data(), msgid.data()), CopyString);
+  return OptString(dgettext(domain.data(), msgid.data()), CopyString);
 }
 
-Variant HHVM_FUNCTION(dcgettext, const String& domain, const String& msgid,
+Variant HHVM_FUNCTION(dcgettext, const OptString& domain, const OptString& msgid,
                       int64_t category) {
   CHECK_DOMAIN_LENGTH();
   CHECK_GETTEXT_LENGTH("msgid", msgid.length());
-  return String(dcgettext(domain.data(), msgid.data(), category), CopyString);
+  return OptString(dcgettext(domain.data(), msgid.data(), category), CopyString);
 }
 
-Variant HHVM_FUNCTION(bindtextdomain, const String& domain, const String& dir) {
+Variant HHVM_FUNCTION(bindtextdomain, const OptString& domain, const OptString& dir) {
   CHECK_DOMAIN_LENGTH();
   if (!domain.length()) {
     raise_warning("The first parameter of bindtextdomain must not be empty");
@@ -90,7 +82,7 @@ Variant HHVM_FUNCTION(bindtextdomain, const String& domain, const String& dir) {
   }
 
   char dirName[PATH_MAX];
-  if (!dir.empty() && dir != String(0)) {
+  if (!dir.empty() && dir != OptString::FromInt64(0)) {
     auto tmp = File::TranslatePath(dir);
     if (tmp.empty()) {
       return false;
@@ -102,11 +94,11 @@ Variant HHVM_FUNCTION(bindtextdomain, const String& domain, const String& dir) {
     return false;
   }
 
-  return String(bindtextdomain(domain.data(), dirName), CopyString);
+  return OptString(bindtextdomain(domain.data(), dirName), CopyString);
 }
 
 #if HAVE_NGETTEXT
-Variant HHVM_FUNCTION(ngettext, const String& msgid1, const String& msgid2,
+Variant HHVM_FUNCTION(ngettext, const OptString& msgid1, const OptString& msgid2,
                       int64_t count) {
   CHECK_GETTEXT_LENGTH("msgid1", msgid1.length());
   CHECK_GETTEXT_LENGTH("msgid2", msgid2.length());
@@ -115,13 +107,13 @@ Variant HHVM_FUNCTION(ngettext, const String& msgid1, const String& msgid2,
   if (!msgstr) {
     return init_null();
   }
-  return String(msgstr, CopyString);
+  return OptString(msgstr, CopyString);
 }
 #endif
 
 #if HAVE_DNGETTEXT
-Variant HHVM_FUNCTION(dngettext, const String& domain, const String& msgid1,
-                      const String& msgid2, int64_t count) {
+Variant HHVM_FUNCTION(dngettext, const OptString& domain, const OptString& msgid1,
+                      const OptString& msgid2, int64_t count) {
   CHECK_DOMAIN_LENGTH();
   CHECK_GETTEXT_LENGTH("msgid1", msgid1.length());
   CHECK_GETTEXT_LENGTH("msgid2", msgid2.length());
@@ -130,13 +122,13 @@ Variant HHVM_FUNCTION(dngettext, const String& domain, const String& msgid1,
   if (!msgstr) {
     return init_null();
   }
-  return String(msgstr, CopyString);
+  return OptString(msgstr, CopyString);
 }
 #endif
 
 #if HAVE_DCNGETTEXT
-Variant HHVM_FUNCTION(dcngettext, const String& domain, const String& msgid1,
-                      const String& msgid2, int64_t count, int64_t category) {
+Variant HHVM_FUNCTION(dcngettext, const OptString& domain, const OptString& msgid1,
+                      const OptString& msgid2, int64_t count, int64_t category) {
   CHECK_DOMAIN_LENGTH();
   CHECK_GETTEXT_LENGTH("msgid1", msgid1.length());
   CHECK_GETTEXT_LENGTH("msgid2", msgid2.length());
@@ -146,25 +138,25 @@ Variant HHVM_FUNCTION(dcngettext, const String& domain, const String& msgid1,
   if (!msgstr) {
     return false;
   }
-  return String(msgstr, CopyString);
+  return OptString(msgstr, CopyString);
 }
 #endif
 
 #if HAVE_BIND_TEXTDOMAIN_CODESET
-Variant HHVM_FUNCTION(bind_textdomain_codeset, const String& domain,
-                      const String& codeset) {
+Variant HHVM_FUNCTION(bind_textdomain_codeset, const OptString& domain,
+                      const OptString& codeset) {
   CHECK_DOMAIN_LENGTH();
 
   auto ret = bind_textdomain_codeset(domain.data(), codeset.data());
   if (!ret) {
     return false;
   }
-  return String(ret, CopyString);
+  return OptString(ret, CopyString);
 }
 #endif
 
 static GettextExtension s_gettext_extension;
-void GettextExtension::moduleInit() {
+void GettextExtension::moduleRegisterNative() {
   HHVM_FE(textdomain);
   HHVM_FE(gettext);
   HHVM_FALIAS(_, gettext);
@@ -183,12 +175,11 @@ void GettextExtension::moduleInit() {
 #if HAVE_BIND_TEXTDOMAIN_CODESET
   HHVM_FE(bind_textdomain_codeset);
 #endif
-  loadSystemlib();
 }
 
 void GettextExtension::moduleInfo(Array &info) {
   Extension::moduleInfo(info);
-  info.set(String("GetText Support"), "enabled");
+  info.set(OptString("GetText Support"), "enabled");
 }
 
 }

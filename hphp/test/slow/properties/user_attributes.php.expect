@@ -1,21 +1,18 @@
 dict(1) {
   ["A"]=>
-  array(1) {
-    [0]=>
+  vec(1) {
     int(1)
   }
 }
 dict(1) {
   ["B"]=>
-  array(1) {
-    [0]=>
+  vec(1) {
     string(3) "two"
   }
 }
 dict(1) {
   ["C"]=>
-  array(1) {
-    [0]=>
+  vec(1) {
     vec(1) {
       int(3)
     }
@@ -23,8 +20,7 @@ dict(1) {
 }
 dict(1) {
   ["D"]=>
-  array(1) {
-    [0]=>
+  vec(1) {
     vec(1) {
       string(4) "four"
     }

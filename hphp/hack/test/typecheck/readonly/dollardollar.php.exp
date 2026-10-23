@@ -1,0 +1,19 @@
+error: Typing[4411] Invalid argument [1]
+-> This expression is readonly [1]
+-> It is incompatible with this parameter, which is mutable [2]
+
+dollardollar.php:26:28
+16 |   return $x;
+17 | }
+18 | function takes_mutable(Foo $x): Foo {
+   |                            ^^ [2]
+19 |   return $x;
+20 | }
+   :
+24 |   $y = readonly new Foo();
+25 |   $z = $y |> readonly takes_readonly($$) // ok
+26 |           |> takes_mutable($$); // not ok
+   |                            ^^ [1]
+27 | }
+
+1 error found

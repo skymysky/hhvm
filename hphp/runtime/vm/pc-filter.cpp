@@ -21,14 +21,9 @@
 
 namespace HPHP {
 
-TRACE_SET_MOD(debuggerflow);
+TRACE_SET_MOD(debuggerflow)
 
 //////////////////////////////////////////////////////////////////////////
-
-struct PCFilter::PtrMapNode {
-  void **m_entries;
-  void clearImpl(unsigned short bits);
-};
 
 void PCFilter::PtrMapNode::clearImpl(unsigned short bits) {
   static_assert(sizeof(PCFilter::PtrMapNode) == sizeof(PCFilter::PtrMap) &&
@@ -41,21 +36,24 @@ void PCFilter::PtrMapNode::clearImpl(unsigned short bits) {
     return;
   }
   for (int i = 0; i < PTRMAP_LEVEL_ENTRIES; i++) {
-    if (m_entries[i]) {
-      ((PCFilter::PtrMapNode*)&m_entries[i])->clearImpl(bits -
-                                                        PTRMAP_LEVEL_BITS);
-      free(m_entries[i]);
-      m_entries[i] = nullptr;
+    if (m_entries[i].m_entries) {
+      m_entries[i].clearImpl(bits - PTRMAP_LEVEL_BITS);
+      free(m_entries[i].m_entries);
+      m_entries[i].m_entries = nullptr;
     }
   }
 }
 
-static void* MakeNode() {
-  return calloc(PTRMAP_LEVEL_ENTRIES, sizeof(void*));
+auto PCFilter::PtrMap::makeNode() -> PtrMapNode {
+  return {
+    static_cast<PtrMapNode*>(
+      calloc(PCFilter::PTRMAP_LEVEL_ENTRIES, sizeof(PtrMapNode))
+    )
+  };
 }
 
 void* PCFilter::PtrMap::getPointerImpl(void* ptr) const {
-  auto current = (PtrMapNode*)&m_root;
+  auto current = &m_root;
   assertx(current->m_entries);
   unsigned short cursor = PTRMAP_PTR_SIZE;
   do {
@@ -63,19 +61,19 @@ void* PCFilter::PtrMap::getPointerImpl(void* ptr) const {
     unsigned long index = ((PTRMAP_LEVEL_MASK << cursor) & (unsigned long)ptr)
                           >> cursor;
     assertx(index < PTRMAP_LEVEL_ENTRIES);
-    current = (PtrMapNode*)&current->m_entries[index];
-  } while (current->m_entries && cursor);
-  return current->m_entries;
+    current = &current->m_entries[index];
+    if (!cursor) return current->m_value;
+  } while (current->m_entries);
+  return nullptr;
 }
 
 void PCFilter::PtrMap::setPointer(void* ptr, void* val) {
-  PtrMapNode* current = (PtrMapNode*)&m_root;
-  if (!current->m_entries) {
+  if (!m_root.m_entries) {
     if (!val) return;
-    m_root = MakeNode();
+    m_root = makeNode();
   }
-  assertx(current->m_entries == m_root);
 
+  auto current = &m_root;
   unsigned short cursor = PTRMAP_PTR_SIZE;
   while (true) {
     cursor -= PTRMAP_LEVEL_BITS;
@@ -83,39 +81,41 @@ void PCFilter::PtrMap::setPointer(void* ptr, void* val) {
                           >> cursor;
     assertx(index < PTRMAP_LEVEL_ENTRIES);
     if (!cursor) {
-      current->m_entries[index] = val;
+      current->m_entries[index].m_value = val;
       break;
     }
-    if (!current->m_entries[index])  {
-      current->m_entries[index] = MakeNode();
+    if (!current->m_entries[index].m_entries)  {
+      current->m_entries[index] = makeNode();
     }
-    current = (PtrMapNode*)&current->m_entries[index];
+    current = &current->m_entries[index];
   }
 }
 
 void PCFilter::PtrMap::clear() {
-  if (m_root) {
-    auto current = (PtrMapNode*)&m_root;
-    current->clearImpl(PTRMAP_PTR_SIZE);
-    free(m_root);
-    m_root = nullptr;
+  if (m_root.m_entries) {
+    m_root.clearImpl(PTRMAP_PTR_SIZE);
+    free(m_root.m_entries);
+    m_root.m_entries = nullptr;
   }
 }
 
 // Adds a range of PCs to the filter given a collection of offset ranges.
 // Omit PCs which have opcodes that don't pass the given opcode filter.
-void PCFilter::addRanges(const Unit* unit, const OffsetRangeVec& offsets,
+void PCFilter::addRanges(const OffsetFuncRangeVec& funcOffsets,
                          OpcodeFilter isOpcodeAllowed) {
-  for (auto range = offsets.cbegin(); range != offsets.cend(); ++range) {
-    TRACE(3, "\toffsets [%d, %d)\n", range->base, range->past);
-    for (PC pc = unit->at(range->base); pc < unit->at(range->past);
-         pc += instrLen(pc)) {
-      if (isOpcodeAllowed(peek_op(pc))) {
-        TRACE(3, "\t\tpc %p\n", pc);
-        addPC(pc);
-      } else {
-        TRACE(3, "\t\tpc %p -- skipping (offset %d)\n", pc,
-              unit->offsetOf(pc));
+  for (auto offsets : funcOffsets) {
+    auto func = offsets.first;
+    for (auto range = offsets.second.cbegin(); range != offsets.second.cend(); ++range) {
+      TRACE(3, "\toffsets [%d, %d)\n", range->base, range->past);
+      for (PC pc = func->at(range->base); pc < func->at(range->past);
+          pc += instrLen(pc)) {
+        if (isOpcodeAllowed(peek_op(pc))) {
+          TRACE(3, "\t\tpc %p\n", pc);
+          addPC(pc);
+        } else {
+          TRACE(3, "\t\tpc %p -- skipping (offset %d)\n", pc,
+                func->offsetOf(pc));
+        }
       }
     }
   }
@@ -123,25 +123,28 @@ void PCFilter::addRanges(const Unit* unit, const OffsetRangeVec& offsets,
 
 // Removes a range of PCs to the filter given a collection of offset ranges.
 // Omit PCs which have opcodes that don't pass the given opcode filter.
-void PCFilter::removeRanges(const Unit* unit, const OffsetRangeVec& offsets,
+void PCFilter::removeRanges(const OffsetFuncRangeVec& funcOffsets,
                             OpcodeFilter isOpcodeAllowed) {
-  for (auto range = offsets.cbegin(); range != offsets.cend(); ++range) {
-    TRACE(3, "\toffsets [%d, %d) (remove)\n", range->base, range->past);
-    for (PC pc = unit->at(range->base); pc < unit->at(range->past);
-         pc += instrLen(pc)) {
-      if (isOpcodeAllowed(peek_op(pc))) {
-        TRACE(3, "\t\tpc %p (remove)\n", pc);
-        removePC(pc);
-      } else {
-        TRACE(3, "\t\tpc %p -- skipping (offset %d) (remove)\n", pc,
-              unit->offsetOf(pc));
+  for (auto offsets : funcOffsets) {
+    auto func = offsets.first;
+    for (auto range = offsets.second.cbegin(); range != offsets.second.cend(); ++range) {
+      TRACE(3, "\toffsets [%d, %d) (remove)\n", range->base, range->past);
+      for (PC pc = func->at(range->base); pc < func->at(range->past);
+          pc += instrLen(pc)) {
+        if (isOpcodeAllowed(peek_op(pc))) {
+          TRACE(3, "\t\tpc %p (remove)\n", pc);
+          removePC(pc);
+        } else {
+          TRACE(3, "\t\tpc %p -- skipping (offset %d) (remove)\n", pc,
+                func->offsetOf(pc));
+        }
       }
     }
   }
 }
 
-void PCFilter::removeOffset(const Unit* unit, Offset offset) {
-  removePC(unit->at(offset));
+void PCFilter::removeOffset(const Func* func, Offset offset) {
+  removePC(func->at(offset));
 }
 
 ///////////////////////////////////////////////////////////////////////////////

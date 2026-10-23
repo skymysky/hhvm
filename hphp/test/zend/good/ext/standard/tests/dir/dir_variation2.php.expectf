@@ -1,114 +1,80 @@
 *** Testing dir() : unexpected values for $context argument ***
 
 -- Iteration 1 --
-Warning: %s
-NULL
+Warning: dir() expects exactly 1 positional parameter, 2 given in %s/dir_variation2.php on line %d
 
 -- Iteration 2 --
-Warning: %s
-NULL
+Warning: dir() expects exactly 1 positional parameter, 2 given in %s/dir_variation2.php on line %d
 
 -- Iteration 3 --
-Warning: %s
-NULL
+Warning: dir() expects exactly 1 positional parameter, 2 given in %s/dir_variation2.php on line %d
 
 -- Iteration 4 --
-Warning: %s
-NULL
+Warning: dir() expects exactly 1 positional parameter, 2 given in %s/dir_variation2.php on line %d
 
 -- Iteration 5 --
-Warning: %s
-NULL
+Warning: dir() expects exactly 1 positional parameter, 2 given in %s/dir_variation2.php on line %d
 
 -- Iteration 6 --
-Warning: %s
-NULL
+Warning: dir() expects exactly 1 positional parameter, 2 given in %s/dir_variation2.php on line %d
 
 -- Iteration 7 --
-Warning: %s
-NULL
+Warning: dir() expects exactly 1 positional parameter, 2 given in %s/dir_variation2.php on line %d
 
 -- Iteration 8 --
-Warning: %s
-NULL
+Warning: dir() expects exactly 1 positional parameter, 2 given in %s/dir_variation2.php on line %d
 
 -- Iteration 9 --
-Warning: %s
-NULL
+Warning: dir() expects exactly 1 positional parameter, 2 given in %s/dir_variation2.php on line %d
 
 -- Iteration 10 --
-Warning: %s
-NULL
+Warning: dir() expects exactly 1 positional parameter, 2 given in %s/dir_variation2.php on line %d
 
 -- Iteration 11 --
-Warning: %s
-NULL
+Warning: dir() expects exactly 1 positional parameter, 2 given in %s/dir_variation2.php on line %d
 
 -- Iteration 12 --
-Warning: %s
-NULL
+Warning: dir() expects exactly 1 positional parameter, 2 given in %s/dir_variation2.php on line %d
 
 -- Iteration 13 --
-Warning: %s
-NULL
+Warning: dir() expects exactly 1 positional parameter, 2 given in %s/dir_variation2.php on line %d
 
 -- Iteration 14 --
-Warning: %s
-NULL
+Warning: dir() expects exactly 1 positional parameter, 2 given in %s/dir_variation2.php on line %d
 
 -- Iteration 15 --
-Warning: %s
-NULL
+Warning: dir() expects exactly 1 positional parameter, 2 given in %s/dir_variation2.php on line %d
 
 -- Iteration 16 --
-Warning: %s
-NULL
+Warning: dir() expects exactly 1 positional parameter, 2 given in %s/dir_variation2.php on line %d
 
 -- Iteration 17 --
-Warning: %s
-NULL
+Warning: dir() expects exactly 1 positional parameter, 2 given in %s/dir_variation2.php on line %d
 
 -- Iteration 18 --
-Warning: %s
-NULL
+Warning: dir() expects exactly 1 positional parameter, 2 given in %s/dir_variation2.php on line %d
 
 -- Iteration 19 --
-Warning: %s
-NULL
+Warning: dir() expects exactly 1 positional parameter, 2 given in %s/dir_variation2.php on line %d
 
 -- Iteration 20 --
-Warning: %s
-NULL
+Warning: dir() expects exactly 1 positional parameter, 2 given in %s/dir_variation2.php on line %d
 
 -- Iteration 21 --
-Warning: %s
-NULL
+Warning: dir() expects exactly 1 positional parameter, 2 given in %s/dir_variation2.php on line %d
 
 -- Iteration 22 --
-Warning: %s
-NULL
+Warning: dir() expects exactly 1 positional parameter, 2 given in %s/dir_variation2.php on line %d
 
 -- Iteration 23 --
-Warning: %s
-NULL
+Warning: dir() expects exactly 1 positional parameter, 2 given in %s/dir_variation2.php on line %d
 
 -- Iteration 24 --
-Warning: %s
-NULL
+Warning: dir() expects exactly 1 positional parameter, 2 given in %s/dir_variation2.php on line %d
 
 -- Iteration 25 --
-Warning: %s
-NULL
+Warning: dir() expects exactly 1 positional parameter, 2 given in %s/dir_variation2.php on line %d
 
 -- Iteration 26 --
-Warning: %s
-NULL
-
--- Iteration 27 --
-Warning: %s
-NULL
-
--- Iteration 28 --
-Warning: %s
-NULL
+Warning: dir() expects exactly 1 positional parameter, 2 given in %s/dir_variation2.php on line %d
 Done

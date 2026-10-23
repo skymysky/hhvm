@@ -1,0 +1,10 @@
+<?hh
+
+<<__Deprecated("Use `renamed` instead")>>
+function original(inout int $x): void {
+  renamed(inout $x);
+}
+//
+function renamed(inout int $x): void {
+  $x += 1;
+}

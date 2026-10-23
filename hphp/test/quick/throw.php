@@ -1,21 +1,21 @@
 <?hh
 
 class Ex1 extends Exception {
-  function getString() {
+  function getString() :mixed{
     return "Ex1\n";
   }
 }
 
 class Ex2 extends Exception {
-  function getString() {
+  function getString() :mixed{
     return "Ex2\n";
   }
 }
 
-function foo() {
+function foo() :mixed{
   throw new Ex2();
 }
-
+<<__EntryPoint>> function main(): void {
 try {
   foo();
   echo "should not be here\n";
@@ -28,3 +28,4 @@ try {
 }
 
 echo "after exception\n";
+}

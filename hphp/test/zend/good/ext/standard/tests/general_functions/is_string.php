@@ -1,10 +1,10 @@
-<?php
+<?hh
 /* Prototype: bool is_string ( mixed $var );
  * Description: Finds whether the given variable is a string
  */
-
+<<__EntryPoint>> function main(): void {
 echo "*** Testing is_string() with valid string values ***\n";
-// different valid strings 
+// different valid strings
 
 /* string created using Heredoc (<<<) */
 $heredoc_string = <<<EOT
@@ -14,7 +14,7 @@ EOT;
 /* heredoc string with only numerics */
 $heredoc_numeric_string = <<<EOT
 123456 3993
-4849 string 
+4849 string
 EOT;
 /* null heardoc string */
 $heredoc_empty_string = <<<EOT
@@ -23,7 +23,7 @@ $heredoc_null_string = <<<EOT
 NULL
 EOT;
 
-$strings = array(
+$strings = vec[
   "",
   " ",
   '',
@@ -46,8 +46,8 @@ $strings = array(
   $heredoc_numeric_string,
   $heredoc_empty_string,
   $heredoc_null_string
-);
-/* loop to check that is_string() recognizes different 
+];
+/* loop to check that is_string() recognizes different
    strings, expected output bool(true) */
 $loop_counter = 1;
 foreach ($strings as $string ) {
@@ -61,17 +61,8 @@ echo "\n*** Testing is_string() on non string values ***\n";
 $fp = fopen (__FILE__, "r");
 $dfp = opendir ( dirname(__FILE__) );
 
-// unset vars
-$unset_string1 = "string";
-$unset_string2 = 'string';
-$unset_heredoc = <<<EOT
-this is heredoc string
-EOT;
-// unset the vars 
-unset($unset_string1, $unset_string2, $unset_heredoc);
-
-// other types in a array 
-$not_strings = array (
+// other types in a array
+$not_strings = vec[
   /* integers */
   0,
   1,
@@ -103,33 +94,27 @@ $not_strings = array (
   -1E7,
 
   /* objects */
-  new stdclass,
+  new stdClass,
 
   /* resources */
   $fp,
   $dfp,
 
   /* arrays */
-  array(),
-  array(0),
-  array(1),
-  array(NULL),
-  array(null),
-  array("string"),
-  array(true),
-  array(TRUE),
-  array(false),
-  array(FALSE),
-  array(1,2,3,4),
-  array(1 => "One", "two" => 2),
-
-  /* undefined and unset vars */
-  @$unset_string1,
-  @$unset_string2,
-  @$unset_heredoc,
-  @$undefined_var 
-);
-/* loop through the $not_strings to see working of 
+  vec[],
+  vec[0],
+  vec[1],
+  vec[NULL],
+  vec[null],
+  vec["string"],
+  vec[true],
+  vec[TRUE],
+  vec[false],
+  vec[FALSE],
+  vec[1,2,3,4],
+  dict[1 => "One", "two" => 2],
+];
+/* loop through the $not_strings to see working of
    is_string() on non string types, expected output bool(false) */
 $loop_counter = 1;
 foreach ($not_strings as $type ) {
@@ -139,15 +124,14 @@ foreach ($not_strings as $type ) {
 
 echo "\n*** Testing error conditions ***\n";
 //Zero argument
-var_dump( is_string() );
+try { var_dump( is_string() ); } catch (Exception $e) { echo "\n".'Warning: '.$e->getMessage().' in '.__FILE__.' on line '.__LINE__."\n"; }
 
-//arguments more than expected 
-var_dump( is_string("string", "test") );
- 
+//arguments more than expected
+try { var_dump( is_string("string", "test") ); } catch (Exception $e) { echo "\n".'Warning: '.$e->getMessage().' in '.__FILE__.' on line '.__LINE__."\n"; }
+
 echo "Done\n";
 
 // close the resources used
 fclose($fp);
 closedir($dfp);
-
-?>
+}

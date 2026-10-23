@@ -26,21 +26,18 @@
 #include "hphp/util/safe-cast.h"
 #include "hphp/util/thread-local.h"
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 
 ///////////////////////////////////////////////////////////////////////////////
 
 template<typename T>
 inline Vptr emitTLSAddr(Vout& v, TLSDatum<T> datum) {
-  switch (arch()) {
-    case Arch::X64:
-      return x64::detail::emitTLSAddr(v, datum);
-    case Arch::ARM:
-      return arm::detail::emitTLSAddr(v, datum);
-    case Arch::PPC64:
-      return ppc64::detail::emitTLSAddr(v, datum);
-  }
-  not_reached();
+  return ARCH_SWITCH_CALL(detail::emitTLSAddr, v, datum);
+}
+
+template<typename T>
+inline Vreg emitTLSLea(Vout& v, TLSDatum<T> datum, int offset) {
+  return ARCH_SWITCH_CALL(detail::emitTLSLea, v, datum, offset);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -66,7 +63,7 @@ emitTLSLoad(Vout& v, TLSDatum<ThreadLocalNoCheck<T>> datum, Vreg d) {
     CallSpec::direct(pthread_getspecific),
     v.makeVcallArgs({{v.cns(datum.tls->m_key)}}),
     v.makeTuple({d}),
-    Fixup{},
+    Fixup::none(),
     DestType::SSA
   };
 }
@@ -75,4 +72,4 @@ emitTLSLoad(Vout& v, TLSDatum<ThreadLocalNoCheck<T>> datum, Vreg d) {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-}}
+}

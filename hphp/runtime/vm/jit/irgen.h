@@ -14,8 +14,7 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_JIT_IRGEN_H_
-#define incl_HPHP_JIT_IRGEN_H_
+#pragma once
 
 #include "hphp/runtime/base/repo-auth-type.h"
 #include "hphp/runtime/base/types.h"
@@ -24,6 +23,7 @@
 #include "hphp/runtime/vm/srckey.h"
 
 #include "hphp/runtime/vm/jit/bc-marker.h"
+#include "hphp/runtime/vm/jit/inline-state.h"
 #include "hphp/runtime/vm/jit/ir-builder.h"
 #include "hphp/runtime/vm/jit/ir-opcode.h"
 #include "hphp/runtime/vm/jit/ir-unit.h"
@@ -110,16 +110,11 @@ SSATmp* cns(IRGS& env, Args&&... args) {
 /*
  * Type checks and assertions.
  */
-void checkType(IRGS&, const Location&, Type,
-               Offset dest, bool outerOnly);
+void checkType(IRGS&, const Location&, Type, Block* exit);
 void assertTypeStack(IRGS&, BCSPRelOffset, Type);
 void assertTypeLocal(IRGS&, uint32_t id, Type);
 void assertTypeLocation(IRGS&, const Location&, Type);
-
-/*
- * Type predictions.
- */
-void predictType(IRGS&, const Location&, Type);
+SSATmp* loadLocation(IRGS&, const Location&);
 
 /*
  * After all initial guards instructions have been emitted, the client of this
@@ -131,18 +126,32 @@ void prepareEntry(IRGS&);
 ///////////////////////////////////////////////////////////////////////////////
 
 /*
- * Creates a no-op IR instruction that branches to an exit.
- *
- * These placeholder instructions are later removed after any passes that want
- * to use them for their exits.
+ * Sync VM regs eagerly
  */
-void makeExitPlaceholder(IRGS&);
+void eagerVMSync(IRGS&, IRSPRelOffset spOff);
+
+///////////////////////////////////////////////////////////////////////////////
 
 /*
  * Support for Profiling counters, including reoptimization (CheckCold).
  */
 void incProfCounter(IRGS&, TransID);
 void checkCold(IRGS&, TransID);
+
+/*
+ * Exit if code coverage is enabled for the current function.
+ */
+void checkCoverage(IRGS& env);
+
+/*
+ * Exit if debugger interrupt is set on the current function.
+ */
+void checkDebuggerIntr(IRGS& env, SrcKey sk);
+
+/*
+ * Exit if exception breakpoint is set by the debugger.
+ */
+void checkDebuggerExceptionIntr(IRGS& env, Block* slowExit);
 
 uint64_t curProfCount(const IRGS& env);
 uint64_t calleeProfCount(const IRGS& env, const RegionDesc& calleeRegion);
@@ -158,24 +167,11 @@ void ringbufferMsg(IRGS&, Trace::RingBufferType, const StringData*,
 ///////////////////////////////////////////////////////////////////////////////
 
 /*
- * For handling PUNT-based interpOnes.  When we PUNT, an exception is thrown
- * and the whole region is retried, with a bit set to interp the instruction
- * that failed.
- */
-void interpOne(IRGS&, const NormalizedInstruction&);
-
-///////////////////////////////////////////////////////////////////////////////
-
-/*
  * Before translating/processing each bytecode instruction, the driver
  * of the irgen module calls this function to move to the next
  * bytecode instruction (`newSk') to translate.
- *
- * The flag `lastBcInst' should be set if this is the last bytecode in
- * a region that's being translated.
  */
-void prepareForNextHHBC(IRGS&, const NormalizedInstruction*,
-                        SrcKey newSk, bool lastBcInst);
+void prepareForNextHHBC(IRGS&, SrcKey newSk);
 
 /*
  * After translating each bytecode instruction, the driver of the
@@ -190,7 +186,7 @@ void finishHHBC(IRGS&);
  */
 void endRegion(IRGS&);
 void endRegion(IRGS&, SrcKey);
-void endBlock(IRGS&, Offset next);
+void endBlock(IRGS&, SrcKey nextSk);
 
 /*
  * When we're done creating the IRUnit, this function must be called to ensure
@@ -206,37 +202,35 @@ void sealUnit(IRGS&);
 bool isInlining(const IRGS& env);
 
 /*
- * Attempt to begin inlining, and return whether or not we succeeded.
+ * Returns the current depth of inlining in `env`.
+ */
+uint16_t inlineDepth(const IRGS& env);
+
+/*
+ * Begin inlining. Always succeeds.
  *
  * When doing gen-time inlining, we set up a series of IR instructions that
  * looks like this:
  *
  *   fp0  = DefFP
- *   sp   = DefSP<offset>
+ *   sp   = DefFrameRelSP<offset>/DefRegSP<offset>
  *
  *   // ... normal stuff happens ...
- *
- *   // FPI region:
- *     SpillFrame sp, ...
- *     // ... probably some StStks due to argument expressions
- *             BeginInlining<offset> sp
- *     fp2   = DefInlineFP<func,retBC,retSP,off> sp
+ *   // ... probably some StStks due to argument expressions
+ *   // FCall*:
+ *     fp2   = DefCalleeFP<offset,func,cost,numArgs> sp fp
  *
  *         // ... callee body ...
  *
- *     InlineReturn fp2
- *
- * In DCE we attempt to remove the InlineReturn and DefInlineFP instructions if
- * they aren't needed.
+ *     LeaveInlineFrame fp2
  */
-bool beginInlining(IRGS& env,
-                   unsigned numParams,
-                   const Func* target,
-                   SrcKey startSk,
-                   Offset returnBcOffset,
-                   ReturnTarget returnTarget,
+void beginInlining(IRGS& env,
+                   SrcKey entry,
+                   SSATmp* ctx,
+                   Offset asyncEagerOffset,
                    int cost,
-                   bool conjure);
+                   SSATmp* calleeFP,
+                   bool addedUninitNamed);
 
 /*
  * End the current inlined frame, after all its blocks have been emitted.
@@ -245,7 +239,7 @@ bool beginInlining(IRGS& env,
  * eval stack, in addition to the actual control transfer and bookkeeping done
  * by implInlineReturn().
  */
-void endInlining(IRGS& env);
+bool endInlining(IRGS& env, const RegionDesc& calleeRegion);
 
 /*
  * Begin inlining func into a dummy region used to measure the cost of
@@ -253,15 +247,11 @@ void endInlining(IRGS& env);
  *
  * Simulating the inlining measures the cost of pushing a dummy frame (or not if
  * we are able to elide it) and any effects that may have on alias analysis.
- *
- * Returns false if the inlined region would be invalid for inlining
  */
-bool conjureBeginInlining(IRGS& env,
-                          const Func* func,
-                          SrcKey startSk,
+void conjureBeginInlining(IRGS& env,
+                          SrcKey entry,
                           Type thisType,
-                          const std::vector<Type>& args,
-                          ReturnTarget returnTarget);
+                          const std::vector<Type>& inputs);
 
 /*
  * Close an inlined function inserted using conjureBeginInlining; returns false
@@ -269,18 +259,9 @@ bool conjureBeginInlining(IRGS& env,
  * conjureBeginInlining, this function should not be used in a region that will
  * be executed.
  */
-void conjureEndInlining(IRGS& env, bool builtin);
-
-/*
- * We do two special-case optimizations to partially inline 'singleton'
- * accessor functions (functions that just return a static local or static
- * property if it's not null).
- *
- * This is exposed publically because the region translator drives inlining
- * decisions.
- */
-void inlSingletonSProp(IRGS&, const Func*, PC clsOp, PC propOp);
-void inlSingletonSLoc(IRGS&, const Func*, PC op);
+bool conjureEndInlining(IRGS& env,
+                        const RegionDesc& calleeRegion,
+                        bool builtin);
 
 ///////////////////////////////////////////////////////////////////////////////
 /*
@@ -297,10 +278,9 @@ void inlSingletonSLoc(IRGS&, const Func*, PC op);
 Type publicTopType(const IRGS& env, BCSPRelOffset);
 
 /*
- * Return the proven or predicted Type for the given location.
+ * Return the proven Type for the given location.
  */
 Type provenType(const IRGS&, const Location&);
-Type predictedType(const IRGS&, const Location&);
 
 ///////////////////////////////////////////////////////////////////////////////
 /*
@@ -311,16 +291,13 @@ Type predictedType(const IRGS&, const Location&);
 
 #define IMM_BLA        const ImmVector&
 #define IMM_SLA        const ImmVector&
-#define IMM_ILA        const IterTable&
-#define IMM_I32LA      const ImmVector&
-#define IMM_BLLA       const ImmVector&
 #define IMM_VSA        const ImmVector&
 #define IMM_IVA        uint32_t
 #define IMM_I64A       int64_t
 #define IMM_LA         int32_t
+#define IMM_NLA        NamedLocal
+#define IMM_ILA        int32_t
 #define IMM_IA         int32_t
-#define IMM_CAR        uint32_t
-#define IMM_CAW        uint32_t
 #define IMM_DA         double
 #define IMM_SA         const StringData*
 #define IMM_RATA       RepoAuthType
@@ -329,6 +306,8 @@ Type predictedType(const IRGS&, const Location&);
 #define IMM_OA(subop)  subop
 #define IMM_KA         MemberKey
 #define IMM_LAR        LocalRange
+#define IMM_ITA        IterArgs
+#define IMM_FCA        FCallArgs
 
 #define NA /*  */
 #define ONE(x0)              , IMM_##x0
@@ -336,6 +315,7 @@ Type predictedType(const IRGS&, const Location&);
 #define THREE(x0, x1, x2)    , IMM_##x0, IMM_##x1, IMM_##x2
 #define FOUR(x0, x1, x2, x3) , IMM_##x0, IMM_##x1, IMM_##x2, IMM_##x3
 #define FIVE(x0, x1, x2, x3, x4) , IMM_##x0, IMM_##x1, IMM_##x2, IMM_##x3, IMM_##x4
+#define SIX(x0, x1, x2, x3, x4, x5) , IMM_##x0, IMM_##x1, IMM_##x2, IMM_##x3, IMM_##x4, IMM_##x5
 
 #define O(name, imms, ...) void emit##name(IRGS& imms);
   OPCODES
@@ -347,20 +327,18 @@ Type predictedType(const IRGS&, const Location&);
 #undef THREE
 #undef FOUR
 #undef FIVE
+#undef SIX
 
 #undef IMM_MA
 #undef IMM_BLA
 #undef IMM_SLA
-#undef IMM_ILA
-#undef IMM_I32LA
-#undef IMM_BLLA
 #undef IMM_VSA
 #undef IMM_IVA
 #undef IMM_I64A
 #undef IMM_LA
+#undef IMM_NLA
+#undef IMM_ILA
 #undef IMM_IA
-#undef IMM_CAR
-#undef IMM_CAW
 #undef IMM_DA
 #undef IMM_SA
 #undef IMM_RATA
@@ -369,9 +347,9 @@ Type predictedType(const IRGS&, const Location&);
 #undef IMM_OA
 #undef IMM_KA
 #undef IMM_LAR
+#undef IMM_ITA
+#undef IMM_FCA
 
 ///////////////////////////////////////////////////////////////////////////////
 
 }}}
-
-#endif

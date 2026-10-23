@@ -1,0 +1,24 @@
+File "vec_or_dict_is.php", line 5, characters 5-15:
+  vec<bool>
+File "vec_or_dict_is.php", line 7, characters 5-15:
+  dict<string, bool>
+File "vec_or_dict_is.php", line 13, characters 5-15:
+  dict<string, bool>
+File "vec_or_dict_is.php", line 15, characters 5-15:
+  vec<bool>
+error: Typing[4110] Invalid return type [1]
+-> Expected `string` [2]
+-> But got `int` because only `int` can be used to index into a `Vector` or `vec`. [3]
+
+vec_or_dict_is.php:22:10
+18 | 
+19 | function is_vec_vec_or_dict_with_string_key(
+20 |   vec<bool> $x,
+   |   ^^^^^^^^^ [3]
+21 | ): vec_or_dict<string, bool> {
+   |                ^^^^^^ [2]
+22 |   return $x;
+   |          ^^ [1]
+23 | }
+
+1 error found

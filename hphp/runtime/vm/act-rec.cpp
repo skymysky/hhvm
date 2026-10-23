@@ -29,36 +29,34 @@
 
 namespace HPHP {
 
-TRACE_SET_MOD(bcinterp);
+TRACE_SET_MOD(bcinterp)
 
 ///////////////////////////////////////////////////////////////////////////////
 
-bool isReturnHelper(void* address) {
+bool isReturnHelper(uint64_t address) {
   auto tca = reinterpret_cast<jit::TCA>(address);
   auto& u = jit::tc::ustubs();
   return tca == u.retHelper ||
          tca == u.genRetHelper ||
-         tca == u.asyncGenRetHelper ||
-         tca == u.retInlHelper ||
-         tca == u.callToExit;
+         tca == u.asyncGenRetHelper;
 }
 
-bool isDebuggerReturnHelper(void* address) {
-  auto tca = reinterpret_cast<jit::TCA>(address);
-  auto& u = jit::tc::ustubs();
-  return tca == u.debuggerRetHelper ||
-         tca == u.debuggerGenRetHelper ||
-         tca == u.debuggerAsyncGenRetHelper;
+bool isCallToExit(uint64_t address) {
+  return reinterpret_cast<jit::TCA>(address) == jit::tc::ustubs().callToExit;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 
-void ActRec::setReturn(ActRec* fp, PC pc, void* retAddr) {
-  assertx(fp->func()->contains(pc));
-  assertx(isReturnHelper(retAddr));
+void ActRec::setReturn(ActRec* fp, PC callPC, void* retAddr,
+                       bool asyncEagerReturn) {
+  assertx(fp->func()->contains(callPC));
+  assertx(isReturnHelper(reinterpret_cast<uintptr_t>(retAddr)));
   m_sfp = fp;
   m_savedRip = reinterpret_cast<uintptr_t>(retAddr);
-  m_soff = Offset(pc - fp->func()->getEntry());
+  m_callOffAndFlags = encodeCallOffsetAndFlags(
+    Offset(callPC - fp->func()->entry()),
+    asyncEagerReturn ? (1 << AsyncEagerRet) : 0
+  );
 }
 
 void ActRec::setJitReturn(void* retAddr) {
@@ -69,15 +67,6 @@ void ActRec::setJitReturn(void* retAddr) {
 
 bool ActRec::skipFrame() const {
   return func() && func()->isSkipFrame();
-}
-
-///////////////////////////////////////////////////////////////////////////////
-
-TypedValue* ActRec::getExtraArg(unsigned ind) const {
-  assertx(hasExtraArgs() || hasVarEnv());
-  return hasExtraArgs() ? getExtraArgs()->getExtraArg(ind) :
-         hasVarEnv()    ? getVarEnv()->getExtraArg(ind) :
-         static_cast<TypedValue*>(nullptr);
 }
 
 ///////////////////////////////////////////////////////////////////////////////

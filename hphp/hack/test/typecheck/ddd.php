@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 /**
  * Copyright (c) 2014, Facebook, Inc.
  * All rights reserved.
@@ -13,6 +13,6 @@ class X {
   public function foo(): void {
     $this->bar($this->WtF);
   }
-  public function bar(...): void {
+  public function bar(...$_): void {
   }
 }

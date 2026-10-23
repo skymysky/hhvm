@@ -1,19 +1,24 @@
-<?php ;
+<?hh
+
 class X {
   private $m;
   function __construct($m) {
     $this->m = $m;
   }
 }
-function prof($what, $fn) {
+function prof($what, $fn) :mixed{
   if ($what == 'exit' && $fn == 'main') throw new Exception("Surprise");
 }
-function main() {
+<<__NEVER_INLINE>>
+function main() :mixed{
   return new X(null);
 }
-try {
-  fb_setprofile('prof');
-  var_dump(main());
-} catch (Exception $e) {
-  var_dump($e->getMessage());
+<<__EntryPoint>>
+function entrypoint_retcthrow(): void {
+  try {
+    fb_setprofile('prof');
+    var_dump(main());
+  } catch (Exception $e) {
+    var_dump($e->getMessage());
+  }
 }

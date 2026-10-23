@@ -1,11 +1,12 @@
-<?php
+<?hh
 
-function bar($a) {
+function bar($a) :mixed{
 }
-function foo($x) {
+function foo($x) :mixed{
   $a = $x;
   echo $x;
-  unset($a);
+  $a = null;
   $a = bar(1);
-  bar($a++);
+  $t = $a; $a++; bar($t);
 }
+<<__EntryPoint>> function main(): void { echo "Done.\n"; }

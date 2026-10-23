@@ -23,7 +23,7 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  */
-#include "file.h"
+#include "hphp/runtime/ext/fileinfo/libmagic/file.h"
 
 #ifndef lint
 FILE_RCSID("@(#)$File: readcdf.c,v 1.33 2012/06/20 21:52:36 christos Exp $")
@@ -34,8 +34,8 @@ FILE_RCSID("@(#)$File: readcdf.c,v 1.33 2012/06/20 21:52:36 christos Exp $")
 #include <time.h>
 #include <ctype.h>
 
-#include "cdf.h"
-#include "magic.h"
+#include "hphp/runtime/ext/fileinfo/libmagic/cdf.h"
+#include "hphp/runtime/ext/fileinfo/libmagic/magic.h"
 
 #include "hphp/util/bstring.h"
 
@@ -398,13 +398,16 @@ file_trycdf(struct magic_set *ms, int fd, const unsigned char *buf,
        if (i == 0) {
          const char *str = nullptr;
          cdf_directory_t *d;
-         char name[__arraycount(d->d_name)];
+         // +1 and an explicit NUL: d_name need not be terminated, but
+         // cdf_app_to_mime runs strlen over it.
+         char name[__arraycount(d->d_name) + 1];
          size_t j, k;
 
          for (j = 0; str == nullptr && j < dir.dir_len; j++) {
            d = &dir.dir_tab[j];
-           for (k = 0; k < sizeof(name); k++)
+           for (k = 0; k < sizeof(name) - 1; k++)
              name[k] = (char)cdf_tole2(d->d_name[k]);
+           name[sizeof(name) - 1] = '\0';
            str = cdf_app_to_mime(name,
                NOTMIME(ms) ? name2desc : name2mime);
          }

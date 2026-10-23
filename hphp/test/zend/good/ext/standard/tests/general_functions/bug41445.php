@@ -1,6 +1,6 @@
-<?php
-
-$file = dirname(__FILE__)."/bug41445.ini";
+<?hh
+<<__EntryPoint>> function main(): void {
+$file = sys_get_temp_dir().'/'.'bug41445.ini';
 
 $data = <<<DATA
 [001099030277]
@@ -28,7 +28,7 @@ file_put_contents($file, $data);
 var_dump(parse_ini_file($file, TRUE));
 var_dump(parse_ini_file($file));
 
-@unlink($file);
+unlink($file);
 
 echo "Done\n";
-?>
+}

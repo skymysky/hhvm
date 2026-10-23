@@ -1,0 +1,3 @@
+--inputs=__DIR__/recursive-1.inc
+--inputs=__DIR__/recursive-2.inc
+--inputs=__DIR__/recursive-3.inc

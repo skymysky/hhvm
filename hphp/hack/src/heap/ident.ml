@@ -1,4 +1,4 @@
-(**
+(*
  * Copyright (c) 2015, Facebook, Inc.
  * All rights reserved.
  *
@@ -7,41 +7,29 @@
  *
  *)
 
+open Hh_prelude
+
 external hh_counter_next : unit -> int = "hh_counter_next"
 
-type t = int
-
-let compare x y = x - y
+type t = int [@@deriving eq, hash, ord, show]
 
 let track_names = ref false
-let trace = ref IMap.empty
+
+let trace = ref I_map.empty
+
+let set_name id name = trace := I_map.add id name !trace
 
 let tmp () =
   let res = hh_counter_next () in
-  if !track_names then begin
-    trace := IMap.add res ("__tmp"^string_of_int res) !trace ;
-  end;
+  if !track_names then set_name res ("__tmp" ^ string_of_int res);
   res
 
 let to_string x =
-  try IMap.find_unsafe x !trace
-  with Not_found -> "v"^string_of_int x
+  match I_map.find_opt x !trace with
+  | Some res -> res
+  | None -> "v" ^ string_of_int x
 
-let debug ?normalize:(f=fun x->x) x =
-  let normalized_x = string_of_int (f x) in
-  try IMap.find_unsafe x !trace^"["^normalized_x^"]"
-  with Not_found -> "tvar_"^normalized_x
-
-let get_name x =
-  assert (!track_names);
-  IMap.find_unsafe x !trace
-
-let set_name x y =
-  trace := IMap.add x y !trace
-
-let make x =
+let make name =
   let res = hh_counter_next () in
-  if !track_names then set_name res x;
+  if !track_names then set_name res name;
   res
-
-let pp = Format.pp_print_int

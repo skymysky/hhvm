@@ -1,6 +1,6 @@
 <?hh
 class someClass1 {
-  private function someMethod() {
+  private function someMethod() :mixed{
     //do things
   }
 }
@@ -10,5 +10,6 @@ class someClass2 extends someClass1 {
     $this->someMethod();
   }
 }
-
+<<__EntryPoint>> function main(): void {
 $someClass2 = new someClass2;
+}

@@ -1,19 +1,14 @@
-<?php
-
-$tmp_dir = __DIR__ . "/bug41518/";
-@mkdir($tmp_dir);
+<?hh
+<<__EntryPoint>> function main(): void {
+$pattern = sys_get_temp_dir().'/bug41518.XXXXXX';
+$tmp_dir = HH\Lib\OS\mkdtemp($pattern);
 $tmp_file = $tmp_dir."/bug41418.tmp";
 
 touch($tmp_file);
 var_dump(file_exists($tmp_file)); //exists
 var_dump(file_exists($tmp_file."nosuchfile")); //doesn't exist
 
-@unlink($tmp_file);
-@rmdir($tmp_dir);
+unlink($tmp_file);
+rmdir($tmp_dir);
 echo "Done\n";
-?>
-<?php error_reporting(0); ?>
-<?php
-$tmp_dir = __DIR__ . "/bug41518/";
-@unlink($tmp_dir);
-?>
+}

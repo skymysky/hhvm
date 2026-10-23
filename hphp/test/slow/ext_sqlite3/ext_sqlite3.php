@@ -1,25 +1,28 @@
-<?php
+<?hh
 
-function VS($x, $y) {
+function VS($x, $y) :mixed{
   var_dump($x === $y);
   if ($x !== $y) { echo "Failed: $y\n"; echo "Got: $x\n";
                    var_dump(debug_backtrace()); }
 }
-function VERIFY($x) { VS($x != false, true); }
+function VERIFY($x) :mixed{ VS($x != false, true); }
 
 //////////////////////////////////////////////////////////////////////
 
-function lower($a) {
+function lower($a) :mixed{
  return strtolower($a);
 }
-function sumlen_step($a,$b,$c) {
+function sumlen_step($a,$b,$c) :mixed{
  return (int)$a + strlen($c);
 }
-function sumlen_fini($a) {
+function sumlen_fini($a) :mixed{
  return (int)$a;
 }
 
-$db = new SQLite3(':memory:test');
+
+<<__EntryPoint>>
+function main_ext_sqlite3() :mixed{
+$db = new SQLite3(sys_get_temp_dir().'/'.':memory:test');
 $db->exec("DROP TABLE IF EXISTS foo");
 $db->exec("CREATE TABLE foo (bar STRING)");
 
@@ -30,20 +33,21 @@ VS($db->changes(), 1);
 VS($db->lasterrorcode(), 0);
 VS($db->lasterrormsg(), "not an error");
 
-VS($db->escapestring("'\""), "''\"");
+VS(SQLite3::escapestring("'\""), "''\"");
 VS($db->querysingle("SELECT * FROM foo"), "ABC");
-VS($db->querysingle("SELECT * FROM foo", true), array("bar" => "ABC"));
+VS($db->querysingle("SELECT * FROM foo", true), dict["bar" => "ABC"]);
 
 // testing query() and SQLite3Result
 {
   $res = $db->query("SELECT * FROM foo");
 
-  VS($res->fetcharray(), array(0 => "ABC", "bar" => "ABC"));
+  VS($res->fetcharray(), dict[0 => "ABC", "bar" => "ABC"]);
   VS($res->numcolumns(), 1);
   VS($res->columnname(0), "bar");
   VS($res->columntype(0), SQLITE3_TEXT);
 
-  VS($res->fetcharray(SQLITE3_NUM), array("DEF"));
+  VS($res->fetcharray(SQLITE3_NUM), dict[0 => "DEF"]);
+  $res->finalize();
 }
 
 // testing prepare() and sqlite3stmt
@@ -56,42 +60,41 @@ VS($db->querysingle("SELECT * FROM foo", true), array("bar" => "ABC"));
   $id = "ABC";
   {
     $res = $stmt->execute();
-    VS($res->fetcharray(SQLITE3_NUM), array("DEF"));
+    VS($res->fetcharray(SQLITE3_NUM), dict[0 => "DEF"]);
+    $res->finalize();
   }
 
   VERIFY($stmt->clear());
   VERIFY($stmt->reset());
-  $id = "DEF";
-  VERIFY($stmt->bindparam(":id", $id, SQLITE3_TEXT));
-  $id = "ABC";
-  {
-    $res = $stmt->execute();
-    VS($res->fetcharray(SQLITE3_NUM), array("ABC"));
-  }
 }
 
 // testing UDF
 {
-  VERIFY($db->createfunction("tolower", "lower", 1));
+  VERIFY($db->createfunction("tolower", lower<>, 1));
   $res = $db->query("SELECT tolower(bar) FROM foo");
-  VS($res->fetcharray(SQLITE3_NUM), array("abc"));
+  VS($res->fetcharray(SQLITE3_NUM), dict[0 => "abc"]);
+  $res->finalize();
 }
 {
-  VERIFY($db->createaggregate("sumlen", "sumlen_step", "sumlen_fini", 1));
+  VERIFY($db->createaggregate("sumlen", sumlen_step<>, sumlen_fini<>, 1));
   $res = $db->query("SELECT sumlen(bar) FROM foo");
-  VS($res->fetcharray(SQLITE3_NUM), array(6));
+  VS($res->fetcharray(SQLITE3_NUM), dict[0 => 6]);
+  $res->finalize();
 }
 
+$stmt->close();
+
 // Since minor version can change frequently, just test the major version
-VS($db->version()['versionString'][0], "3");
-VERIFY((int)$db->version()['versionNumber'] > (int)3000000);
+VS(SQLite3::version()['versionString'][0], "3");
+VERIFY((int)SQLite3::version()['versionNumber'] > (int)3000000);
 
 $db->close();
-unlink(":memory:test");
+unlink(sys_get_temp_dir().'/'.':memory:test');
 
 // Check that a PHP Exception is thrown for nonexistant databases
 try {
   new SQLite3('/'.uniqid('random', true).'/db');
 } catch (Exception $e) {
   var_dump(true);
+}
 }

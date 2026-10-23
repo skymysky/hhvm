@@ -1,0 +1,6 @@
+ERROR: File "named_type_bad.php", line 14, characters 19-25:
+Invalid argument (Typing[4110])
+  File "named_type_bad.php", line 7, characters 41-43:
+  Expected `int`
+  File "named_type_bad.php", line 14, characters 19-25:
+  But got `string`

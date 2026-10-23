@@ -1,18 +1,27 @@
-<?php
+<?hh
 
 namespace {
-    require 'includes/global_bar.php';
-    require 'includes/foo_bar.php';
-}
-
-namespace {
-    var_dump(bar);
+    function test1() :mixed{
+        var_dump(bar);
+    }
 }
 
 namespace {
     use const foo\bar;
-    var_dump(bar);
-    echo "Done\n";
+    
+    function test2() :mixed{
+        var_dump(bar);
+        echo "Done\n";
+    }
 }
 
-?>
+namespace {
+    <<__EntryPoint>>
+    function main() :mixed{
+        require 'includes/global_bar.inc';
+        require 'includes/foo_bar.inc';
+
+        \test1();
+        \test2();
+    }
+}

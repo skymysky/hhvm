@@ -1,0 +1,38 @@
+warning: Warn[12042] Property accessed on a value of type `dynamic` [1]
+-> This expression has type `dynamic` [2]
+
+dynamic_refine_then_invoke.php--file2.php:5:17
+3 |   $d = make_dynamic();
+4 | 
+5 |   $x = $d ? $d->type : null;
+  |                 ^^^^ [1]
+6 |   $y = $d->id;
+7 | }
+
+dynamic_refine_then_invoke.php--file1.php:4:25
+2 | // Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved.
+3 | 
+4 | function make_dynamic():dynamic {
+  |                         ^^^^^^^ [2]
+5 |   return 3 as dynamic;
+6 | }
+
+warning: Warn[12042] Property accessed on a value of type `dynamic` [1]
+-> This expression has type `dynamic` [2]
+
+dynamic_refine_then_invoke.php--file2.php:6:12
+4 | 
+5 |   $x = $d ? $d->type : null;
+6 |   $y = $d->id;
+  |            ^^ [1]
+7 | }
+
+dynamic_refine_then_invoke.php--file1.php:4:25
+2 | // Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved.
+3 | 
+4 | function make_dynamic():dynamic {
+  |                         ^^^^^^^ [2]
+5 |   return 3 as dynamic;
+6 | }
+
+2 errors found

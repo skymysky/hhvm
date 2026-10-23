@@ -1,0 +1,2 @@
+Fatal: An unexpected exception was thrown while emitting: More than one module with the name A. In %s and %s
+hphp failed

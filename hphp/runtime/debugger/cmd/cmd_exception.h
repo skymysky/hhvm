@@ -14,12 +14,11 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_EVAL_DEBUGGER_CMD_EXCEPTION_H_
-#define incl_HPHP_EVAL_DEBUGGER_CMD_EXCEPTION_H_
+#pragma once
 
 #include "hphp/runtime/debugger/cmd/cmd_break.h"
 
-namespace HPHP { namespace Eval {
+namespace HPHP::Eval {
 ///////////////////////////////////////////////////////////////////////////////
 
 struct CmdException : CmdBreak {
@@ -30,9 +29,10 @@ struct CmdException : CmdBreak {
   void list(DebuggerClient&) override;
   void help(DebuggerClient&) override;
   void onClient(DebuggerClient&) override;
+
+  std::string name() const override { return "exception"; }
 };
 
 ///////////////////////////////////////////////////////////////////////////////
-}}
+}
 
-#endif // incl_HPHP_EVAL_DEBUGGER_CMD_EXCEPTION_H_

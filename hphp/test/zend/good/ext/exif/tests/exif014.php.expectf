@@ -1,4 +1,4 @@
-array(37) {
+dict(37) {
   ["FileName"]=>
   string(12) "image014.jpg"
   ["FileDateTime"]=>
@@ -12,7 +12,7 @@ array(37) {
   ["SectionsFound"]=>
   string(24) "ANY_TAG, IFD0, EXIF, GPS"
   ["COMPUTED"]=>
-  array(9) {
+  dict(9) {
     ["html"]=>
     string(20) "width="1" height="1""
     ["Height"]=>
@@ -77,11 +77,11 @@ array(37) {
   ["ExifImageLength"]=>
   int(1)
   ["GPSVersion"]=>
-  string(4) "%r\x02\x02\x00\x00%r"
+  string(4) "%h{02}%h{02}%h{00}%h{00}"
   ["GPSLatitudeRef"]=>
   string(1) "N"
   ["GPSLatitude"]=>
-  array(3) {
+  dict(3) {
     [0]=>
     string(4) "33/1"
     [1]=>
@@ -92,7 +92,7 @@ array(37) {
   ["GPSLongitudeRef"]=>
   string(1) "W"
   ["GPSLongitude"]=>
-  array(3) {
+  dict(3) {
     [0]=>
     string(4) "84/1"
     [1]=>
@@ -101,11 +101,11 @@ array(37) {
     string(3) "0/1"
   }
   ["GPSAltitudeRef"]=>
-  string(1) "%r\x00%r"
+  string(1) "%h{00}"
   ["GPSAltitude"]=>
   string(5) "295/1"
   ["GPSTimeStamp"]=>
-  array(3) {
+  dict(3) {
     [0]=>
     string(3) "1/1"
     [1]=>

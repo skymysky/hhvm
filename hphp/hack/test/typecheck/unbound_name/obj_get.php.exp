@@ -1,0 +1,19 @@
+error: Naming[2049] Unbound name: `bar` (a global constant) [1]
+
+obj_get.php:9:13
+ 7 | function test(Foo $obj): void {
+ 8 |   // the inner bar should be an unbound constant name
+ 9 |   $obj->bar(bar);
+   |             ^^^ [1]
+10 | }
+
+error: Typing[4106] Unbound global constant (Typing) [1]
+
+obj_get.php:9:13
+ 7 | function test(Foo $obj): void {
+ 8 |   // the inner bar should be an unbound constant name
+ 9 |   $obj->bar(bar);
+   |             ^^^ [1]
+10 | }
+
+2 errors found

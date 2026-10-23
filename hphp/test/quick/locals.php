@@ -1,5 +1,5 @@
 <?hh
-function f($a, $b, $c) {
+function f($a, $b, $c) :mixed{
   $x = $a + $b;
   $y = $a - $b;
   if ($x <= 0 && $x >= 0) $x = 1;
@@ -10,5 +10,7 @@ function f($a, $b, $c) {
   }
   return f($x+0, $y+0, $z+0);
 }
+<<__EntryPoint>> function main(): void {
 echo f(12,7,5);
 echo "\n";
+}

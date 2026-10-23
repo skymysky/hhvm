@@ -1,0 +1,19 @@
+error: Typing[4163] Invalid argument [1]
+-> The field `field` is **optional** [2]
+-> The field `field` is defined as **required** [3]
+-> `field` is defined here [4]
+
+open_shape_optional_required_reason1.php:6:7
+1 | <?hh
+2 | 
+3 | function foo(shape('field' => string, ...) $_): void {}
+  |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ [3]
+  |                               ^^^^^^ [4]
+4 | 
+5 | function bar(shape(...) $s): void {
+  |              ^^^^^^^^^^ [2]
+6 |   foo($s);
+  |       ^^ [1]
+7 | }
+
+1 error found

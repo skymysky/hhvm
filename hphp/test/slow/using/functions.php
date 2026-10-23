@@ -1,8 +1,6 @@
 <?hh
 
-require 'logger.inc';
-
-function main() {
+function main() :mixed{
   echo "Entering main()\n";
   using new Logger();
 
@@ -31,7 +29,7 @@ function main() {
   echo "Done with main\n";
 }
 
-async function mainAsync() {
+async function mainAsync() :Awaitable<mixed>{
   echo "Entering mainAsync()\n";
   await using new Logger();
   await using await Logger::makeAsync();
@@ -39,7 +37,7 @@ async function mainAsync() {
   echo "Leaving mainAsync()\n";
 }
 
-function thrower() {
+function thrower() :mixed{
   echo "Entering thrower()\n";
   using new Logger();
   using new Logger();
@@ -48,12 +46,17 @@ function thrower() {
 }
 
 class Foo {
-  static function bar() {
+  static function bar() :mixed{
     echo "Entering Foo::bar()\n";
     using new Logger();
     echo "Leaving Foo::bar()\n";
   }
 }
+
+
+<<__EntryPoint>>
+function main_functions() :mixed{
+require 'logger.inc';
 
 main();
 echo "Returned from main\n";
@@ -64,4 +67,5 @@ try {
   thrower();
 } catch (Exception $e) {
   var_dump($e->getMessage());
+}
 }

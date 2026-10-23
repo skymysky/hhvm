@@ -1,11 +1,11 @@
-<?php
+<?hh
 
 class Base {
   public $basePub = 10;
   protected $baseProt = 20;
   private $basePriv = 30;
 
-  public function baseIterate() {
+  public function baseIterate() :mixed{
     foreach ($this as $k => $v) {
       echo "$k => $v\n";
     }
@@ -20,13 +20,13 @@ class Child extends Base {
   // Same name as private in base class, different value
   private $basePriv = "child's basePriv";
 
-  public function childIterate() {
+  public function childIterate() :mixed{
     foreach ($this as $k => $v) {
       echo "$k => $v\n";
     }
   }
 }
-
+<<__EntryPoint>> function main(): void {
 $b = new Base();
 $b->baseDynamic = "base dynamic";
 echo "\nBase context, Base object\n";
@@ -50,19 +50,9 @@ foreach ($c as $k => $v) {
   echo "$k => $v\n";
 }
 
-$c = new Child();
-$c->dynamic = "dynamic";
-echo "\nAnonymous context, Child object, strong foreach\n";
-foreach ($c as $k => &$v) {
-  $v = "BLARK";
-}
-var_dump($c);
-
 // empty iteration
-$c = new stdclass();
+$c = new stdClass();
 foreach ($c as $k => $v) {
   echo "empty object has properties, oh no\n";
 }
-foreach ($c as $k => &$v) {
-  echo "empty object (strong) has properties, oh no\n";
 }

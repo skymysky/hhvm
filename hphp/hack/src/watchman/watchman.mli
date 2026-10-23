@@ -1,4 +1,4 @@
-(**
+(*
  * Copyright (c) 2015, Facebook, Inc.
  * All rights reserved.
  *
@@ -7,20 +7,13 @@
  *
  *)
 
-module Watchman_process_helpers: sig
-  module J = Hh_json_helpers.AdhocJsonHelpers
+(** Module for us to interface with Watchman, a file watching service.
+    https://facebook.github.io/watchman/
+  *)
 
-  val debug: bool
+include Watchman_sig.S
 
-  exception Read_payload_too_long
-
-  val assert_no_error: Hh_json.json -> unit
-  val sanitize_watchman_response: debug_logging:bool -> string -> Hh_json.json
-end
-
-module Functor : functor (Watchman_process: Watchman_sig.WATCHMAN_PROCESS)
-  -> Watchman_sig.S with type 'a result = 'a Watchman_process.result
-
-include Watchman_sig.S with type 'a result = 'a
-
-val get_reader: watchman_instance -> Buffered_line_reader.t option
+module Process : functor (Exec : Watchman_sig.Exec) ->
+  Watchman_sig.Process_S
+    with type 'a future := 'a Exec.future
+     and type exec_error := Exec.error

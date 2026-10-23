@@ -1,200 +1,108 @@
 ==== array ====
 f1:
-array(3) {
-  [0]=>
+vec(3) {
   int(1)
-  [1]=>
   int(2)
-  [2]=>
   int(3)
 }
-array(4) {
-  [0]=>
+vec(4) {
   int(1)
-  [1]=>
   int(2)
-  [2]=>
   int(3)
-  [3]=>
   int(4)
 }
 f2:
-array(3) {
-  [0]=>
+vec(3) {
   int(1)
-  [1]=>
   int(2)
-  [2]=>
   int(3)
 }
-array(4) {
-  [0]=>
+vec(4) {
   int(1)
-  [1]=>
   int(2)
-  [2]=>
   int(3)
-  [3]=>
   int(4)
 }
 f3:
-array(3) {
-  [0]=>
+vec(3) {
   int(1)
-  [1]=>
   int(2)
-  [2]=>
   int(3)
 }
-array(4) {
-  [0]=>
+vec(4) {
   int(1)
-  [1]=>
   int(2)
-  [2]=>
   int(3)
-  [3]=>
   int(4)
 }
 f4:
-array(3) {
-  [0]=>
+vec(3) {
   int(1)
-  [1]=>
   int(2)
-  [2]=>
   int(3)
 }
-array(4) {
-  [0]=>
+vec(4) {
   int(1)
-  [1]=>
   int(2)
-  [2]=>
   int(3)
-  [3]=>
   int(4)
 }
 f5:
-array(3) {
-  [0]=>
+vec(3) {
   int(1)
-  [1]=>
   int(2)
-  [2]=>
   int(3)
 }
-array(4) {
-  [0]=>
+vec(4) {
   int(1)
-  [1]=>
   int(2)
-  [2]=>
   int(3)
-  [3]=>
   int(4)
 }
 f6:
-array(3) {
-  [0]=>
+vec(3) {
   int(1)
-  [1]=>
   int(2)
-  [2]=>
   int(3)
 }
-array(4) {
-  [0]=>
+vec(4) {
   int(1)
-  [1]=>
   int(2)
-  [2]=>
   int(3)
-  [3]=>
   int(4)
 }
 f7:
-array(3) {
-  [0]=>
+vec(3) {
   int(1)
-  [1]=>
   int(2)
-  [2]=>
   int(3)
 }
-array(4) {
-  [0]=>
+vec(4) {
   int(1)
-  [1]=>
   int(2)
-  [2]=>
   int(3)
-  [3]=>
   int(4)
 }
 f8:
-array(3) {
-  [0]=>
+vec(3) {
   int(1)
-  [1]=>
   int(2)
-  [2]=>
   int(3)
 }
-array(4) {
-  [0]=>
+vec(4) {
   int(1)
-  [1]=>
   int(2)
-  [2]=>
   int(3)
-  [3]=>
   int(4)
 }
 ==== Vector ====
 f1:
-Triggered E_NOTICE with message "Argument 1 to f1() must be of type array, HH\Vector given; argument 1 was implicitly cast to array"
-array(3) {
-  [0]=>
-  int(1)
-  [1]=>
-  int(2)
-  [2]=>
-  int(3)
-}
-array(4) {
-  [0]=>
-  int(1)
-  [1]=>
-  int(2)
-  [2]=>
-  int(3)
-  [3]=>
-  int(4)
-}
+f1() threw an exception
 f2:
-Triggered E_NOTICE with message "Argument 1 to f2() must be of type ?array, HH\Vector given; argument 1 was implicitly cast to array"
-array(3) {
-  [0]=>
-  int(1)
-  [1]=>
-  int(2)
-  [2]=>
-  int(3)
-}
-array(4) {
-  [0]=>
-  int(1)
-  [1]=>
-  int(2)
-  [2]=>
-  int(3)
-  [3]=>
-  int(4)
-}
+f2() threw an exception
 f3:
-Triggered E_WARNING with message "Argument 1 to f3() must be of type @array, HH\Vector given"
-object(HH\Vector)#6 (3) {
+Triggered E_WARNING with message "Argument 1 to f3() must be of type @HH\varray, HH\Vector given"
+object(HH\Vector) (3) {
   [0]=>
   int(1)
   [1]=>
@@ -202,7 +110,7 @@ object(HH\Vector)#6 (3) {
   [2]=>
   int(3)
 }
-object(HH\Vector)#6 (4) {
+object(HH\Vector) (4) {
   [0]=>
   int(1)
   [1]=>
@@ -213,8 +121,8 @@ object(HH\Vector)#6 (4) {
   int(4)
 }
 f4:
-Triggered E_WARNING with message "Argument 1 to f4() must be of type @?array, HH\Vector given"
-object(HH\Vector)#6 (3) {
+Triggered E_WARNING with message "Argument 1 to f4() must be of type @?HH\varray, HH\Vector given"
+object(HH\Vector) (3) {
   [0]=>
   int(1)
   [1]=>
@@ -222,7 +130,7 @@ object(HH\Vector)#6 (3) {
   [2]=>
   int(3)
 }
-object(HH\Vector)#6 (4) {
+object(HH\Vector) (4) {
   [0]=>
   int(1)
   [1]=>
@@ -237,8 +145,8 @@ f5() threw an exception
 f6:
 f6() threw an exception
 f7:
-Triggered E_WARNING with message "Argument 1 to f7() must be of type @array, HH\Vector given"
-object(HH\Vector)#10 (3) {
+Triggered E_WARNING with message "Argument 1 to f7() must be of type @HH\varray, HH\Vector given"
+object(HH\Vector) (3) {
   [0]=>
   int(1)
   [1]=>
@@ -246,7 +154,7 @@ object(HH\Vector)#10 (3) {
   [2]=>
   int(3)
 }
-object(HH\Vector)#10 (4) {
+object(HH\Vector) (4) {
   [0]=>
   int(1)
   [1]=>
@@ -256,9 +164,10 @@ object(HH\Vector)#10 (4) {
   [3]=>
   int(4)
 }
+Triggered E_WARNING with message "Argument 1 returned from f7() as an inout parameter must be of type @HH\varray, HH\Vector given"
 f8:
-Triggered E_WARNING with message "Argument 1 to f8() must be of type @?array, HH\Vector given"
-object(HH\Vector)#10 (3) {
+Triggered E_WARNING with message "Argument 1 to f8() must be of type @?HH\varray, HH\Vector given"
+object(HH\Vector) (3) {
   [0]=>
   int(1)
   [1]=>
@@ -266,7 +175,7 @@ object(HH\Vector)#10 (3) {
   [2]=>
   int(3)
 }
-object(HH\Vector)#10 (4) {
+object(HH\Vector) (4) {
   [0]=>
   int(1)
   [1]=>
@@ -276,50 +185,15 @@ object(HH\Vector)#10 (4) {
   [3]=>
   int(4)
 }
+Triggered E_WARNING with message "Argument 1 returned from f8() as an inout parameter must be of type @?HH\varray, HH\Vector given"
 ==== Map ====
 f1:
-Triggered E_NOTICE with message "Argument 1 to f1() must be of type array, HH\Map given; argument 1 was implicitly cast to array"
-array(3) {
-  ["a"]=>
-  int(1)
-  ["b"]=>
-  int(2)
-  ["c"]=>
-  int(3)
-}
-array(4) {
-  ["a"]=>
-  int(1)
-  ["b"]=>
-  int(2)
-  ["c"]=>
-  int(3)
-  [0]=>
-  int(4)
-}
+f1() threw an exception
 f2:
-Triggered E_NOTICE with message "Argument 1 to f2() must be of type ?array, HH\Map given; argument 1 was implicitly cast to array"
-array(3) {
-  ["a"]=>
-  int(1)
-  ["b"]=>
-  int(2)
-  ["c"]=>
-  int(3)
-}
-array(4) {
-  ["a"]=>
-  int(1)
-  ["b"]=>
-  int(2)
-  ["c"]=>
-  int(3)
-  [0]=>
-  int(4)
-}
+f2() threw an exception
 f3:
-Triggered E_WARNING with message "Argument 1 to f3() must be of type @array, HH\Map given"
-object(HH\Map)#10 (3) {
+Triggered E_WARNING with message "Argument 1 to f3() must be of type @HH\varray, HH\Map given"
+object(HH\Map) (3) {
   ["a"]=>
   int(1)
   ["b"]=>
@@ -327,7 +201,7 @@ object(HH\Map)#10 (3) {
   ["c"]=>
   int(3)
 }
-object(HH\Map)#10 (4) {
+object(HH\Map) (4) {
   ["a"]=>
   int(1)
   ["b"]=>
@@ -338,8 +212,8 @@ object(HH\Map)#10 (4) {
   int(4)
 }
 f4:
-Triggered E_WARNING with message "Argument 1 to f4() must be of type @?array, HH\Map given"
-object(HH\Map)#10 (3) {
+Triggered E_WARNING with message "Argument 1 to f4() must be of type @?HH\varray, HH\Map given"
+object(HH\Map) (3) {
   ["a"]=>
   int(1)
   ["b"]=>
@@ -347,7 +221,7 @@ object(HH\Map)#10 (3) {
   ["c"]=>
   int(3)
 }
-object(HH\Map)#10 (4) {
+object(HH\Map) (4) {
   ["a"]=>
   int(1)
   ["b"]=>
@@ -362,8 +236,8 @@ f5() threw an exception
 f6:
 f6() threw an exception
 f7:
-Triggered E_WARNING with message "Argument 1 to f7() must be of type @array, HH\Map given"
-object(HH\Map)#14 (3) {
+Triggered E_WARNING with message "Argument 1 to f7() must be of type @HH\varray, HH\Map given"
+object(HH\Map) (3) {
   ["a"]=>
   int(1)
   ["b"]=>
@@ -371,7 +245,7 @@ object(HH\Map)#14 (3) {
   ["c"]=>
   int(3)
 }
-object(HH\Map)#14 (4) {
+object(HH\Map) (4) {
   ["a"]=>
   int(1)
   ["b"]=>
@@ -381,9 +255,10 @@ object(HH\Map)#14 (4) {
   ["z"]=>
   int(4)
 }
+Triggered E_WARNING with message "Argument 1 returned from f7() as an inout parameter must be of type @HH\varray, HH\Map given"
 f8:
-Triggered E_WARNING with message "Argument 1 to f8() must be of type @?array, HH\Map given"
-object(HH\Map)#14 (3) {
+Triggered E_WARNING with message "Argument 1 to f8() must be of type @?HH\varray, HH\Map given"
+object(HH\Map) (3) {
   ["a"]=>
   int(1)
   ["b"]=>
@@ -391,7 +266,7 @@ object(HH\Map)#14 (3) {
   ["c"]=>
   int(3)
 }
-object(HH\Map)#14 (4) {
+object(HH\Map) (4) {
   ["a"]=>
   int(1)
   ["b"]=>
@@ -401,68 +276,33 @@ object(HH\Map)#14 (4) {
   ["z"]=>
   int(4)
 }
+Triggered E_WARNING with message "Argument 1 returned from f8() as an inout parameter must be of type @?HH\varray, HH\Map given"
 ==== Set ====
 f1:
-Triggered E_NOTICE with message "Argument 1 to f1() must be of type array, HH\Set given; argument 1 was implicitly cast to array"
-array(3) {
-  [1]=>
-  int(1)
-  [2]=>
-  int(2)
-  [3]=>
-  int(3)
-}
-array(4) {
-  [1]=>
-  int(1)
-  [2]=>
-  int(2)
-  [3]=>
-  int(3)
-  [4]=>
-  int(4)
-}
+f1() threw an exception
 f2:
-Triggered E_NOTICE with message "Argument 1 to f2() must be of type ?array, HH\Set given; argument 1 was implicitly cast to array"
-array(3) {
-  [1]=>
-  int(1)
-  [2]=>
-  int(2)
-  [3]=>
-  int(3)
-}
-array(4) {
-  [1]=>
-  int(1)
-  [2]=>
-  int(2)
-  [3]=>
-  int(3)
-  [4]=>
-  int(4)
-}
+f2() threw an exception
 f3:
-Triggered E_WARNING with message "Argument 1 to f3() must be of type @array, HH\Set given"
-object(HH\Set)#14 (3) {
+Triggered E_WARNING with message "Argument 1 to f3() must be of type @HH\varray, HH\Set given"
+object(HH\Set) (3) {
   int(1)
   int(2)
   int(3)
 }
-object(HH\Set)#14 (4) {
+object(HH\Set) (4) {
   int(1)
   int(2)
   int(3)
   int(4)
 }
 f4:
-Triggered E_WARNING with message "Argument 1 to f4() must be of type @?array, HH\Set given"
-object(HH\Set)#14 (3) {
+Triggered E_WARNING with message "Argument 1 to f4() must be of type @?HH\varray, HH\Set given"
+object(HH\Set) (3) {
   int(1)
   int(2)
   int(3)
 }
-object(HH\Set)#14 (4) {
+object(HH\Set) (4) {
   int(1)
   int(2)
   int(3)
@@ -473,53 +313,57 @@ f5() threw an exception
 f6:
 f6() threw an exception
 f7:
-Triggered E_WARNING with message "Argument 1 to f7() must be of type @array, HH\Set given"
-object(HH\Set)#18 (3) {
+Triggered E_WARNING with message "Argument 1 to f7() must be of type @HH\varray, HH\Set given"
+object(HH\Set) (3) {
   int(1)
   int(2)
   int(3)
 }
-object(HH\Set)#18 (4) {
+object(HH\Set) (4) {
   int(1)
   int(2)
   int(3)
   int(4)
 }
+Triggered E_WARNING with message "Argument 1 returned from f7() as an inout parameter must be of type @HH\varray, HH\Set given"
 f8:
-Triggered E_WARNING with message "Argument 1 to f8() must be of type @?array, HH\Set given"
-object(HH\Set)#18 (3) {
+Triggered E_WARNING with message "Argument 1 to f8() must be of type @?HH\varray, HH\Set given"
+object(HH\Set) (3) {
   int(1)
   int(2)
   int(3)
 }
-object(HH\Set)#18 (4) {
+object(HH\Set) (4) {
   int(1)
   int(2)
   int(3)
   int(4)
 }
+Triggered E_WARNING with message "Argument 1 returned from f8() as an inout parameter must be of type @?HH\varray, HH\Set given"
 ==== stdClass ====
 f1:
 f1() threw an exception
 f2:
 f2() threw an exception
 f3:
-Triggered E_WARNING with message "Argument 1 to f3() must be of type @array, stdClass given"
-object(stdClass)#4 (0) {
+Triggered E_WARNING with message "Argument 1 to f3() must be of type @HH\varray, stdClass given"
+object(stdClass) (0) {
 }
 f4:
-Triggered E_WARNING with message "Argument 1 to f4() must be of type @?array, stdClass given"
-object(stdClass)#4 (0) {
+Triggered E_WARNING with message "Argument 1 to f4() must be of type @?HH\varray, stdClass given"
+object(stdClass) (0) {
 }
 f5:
 f5() threw an exception
 f6:
 f6() threw an exception
 f7:
-Triggered E_WARNING with message "Argument 1 to f7() must be of type @array, stdClass given"
-object(stdClass)#4 (0) {
+Triggered E_WARNING with message "Argument 1 to f7() must be of type @HH\varray, stdClass given"
+object(stdClass) (0) {
 }
+Triggered E_WARNING with message "Argument 1 returned from f7() as an inout parameter must be of type @HH\varray, stdClass given"
 f8:
-Triggered E_WARNING with message "Argument 1 to f8() must be of type @?array, stdClass given"
-object(stdClass)#4 (0) {
+Triggered E_WARNING with message "Argument 1 to f8() must be of type @?HH\varray, stdClass given"
+object(stdClass) (0) {
 }
+Triggered E_WARNING with message "Argument 1 returned from f8() as an inout parameter must be of type @?HH\varray, stdClass given"

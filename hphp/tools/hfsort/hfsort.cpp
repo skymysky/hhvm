@@ -24,17 +24,18 @@
 #include <fstream>
 #include <unordered_map>
 
-#include <folly/Format.h>
+#include <fmt/core.h>
 #include <folly/String.h>
 
 #include "hphp/util/text-util.h"
 
-namespace HPHP { namespace hfsort {
+namespace HPHP::hfsort {
 
-constexpr uint32_t BUFLEN = 1000;
+// some mangled names are very long up to 20k in size
+constexpr uint32_t BUFLEN = 24000;
 constexpr uint32_t kPageSize = 2 << 20;
 
-void error(const char* msg) {
+[[noreturn]] void error(const char* msg) {
   printf("ERROR: %s\n", msg);
   exit(1);
 }
@@ -47,16 +48,12 @@ void readSymbols(CallGraph& cg, FILE* file) {
   char     kind;
   while (fgets(line, BUFLEN, file)) {
     if (sscanf(line, "%lx %x %c %s", &addr, &size, &kind, name) == 4) {
-      int status;
-      char* demangledName = abi::__cxa_demangle(name, 0, 0, &status);
-      if (demangledName) {
-        free(demangledName);
-      } else {
-        if (!std::isalpha((uint8_t)*name) && *name != '_') continue;
-        for (const char* n = name; *++n; ) {
-          if (!std::isalnum((uint8_t)*n) && *n != '_' && *n != '.') {
-            continue;
-          }
+      if (!std::isalpha((uint8_t)*name) && *name != '_') {
+        continue;
+      }
+      for (const char* n = name; *++n; ) {
+        if (!std::isalnum((uint8_t)*n) && *n != '_' && *n != '.') {
+          continue;
         }
       }
       cg.addFunc(name, addr, size, 0);
@@ -114,16 +111,22 @@ void readSymbolCntData(CallGraph& cg, std::ifstream& file) {
   std::string line;
   while (std::getline(file, line)) {
     std::string caller, top;
-    int32_t count;
-    folly::split(" ", line, caller, top, count);
+    uint64_t count;
+    folly::split(' ', line, caller, top, count);
     TargetId idTop = cg.funcToTargetId(top);
-    if (idTop == InvalidId) continue;
+    if (idTop == InvalidId) {
+      HFTRACE(2, "Target func not found: %s\n", top.c_str());
+      continue;
+    }
     cg.targets[idTop].samples += count;
     HFTRACE(2, "readSymbolCntData: idTop: %u %s\n", idTop,
             cg.funcs[idTop].mangledNames[0].c_str());
 
     TargetId idCaller = cg.funcToTargetId(caller);
-    if (idCaller == InvalidId) continue;
+    if (idCaller == InvalidId) {
+      HFTRACE(2, "Caller func not found: %s\n", caller.c_str());
+      continue;
+    }
     cg.incArcWeight(idCaller, idTop, count);
     HFTRACE(2, "readSymbolCntData: idCaller: %u %s\n", idCaller,
             cg.funcs[idCaller].mangledNames[0].c_str());
@@ -166,12 +169,12 @@ void readEdgcntData(CallGraph& cg, FILE* file) {
 }
 
 std::string getNameWithoutSuffix(std::string str) {
-  int suffixStartPosition = str.find(".");
+  int suffixStartPosition = str.find('.');
   if (suffixStartPosition == -1) {
     // if no suffix is found, just add the wildcard
     return str + "*";
   } else {
-    // replace sufix with wildcard
+    // replace suffix with wildcard
     return str.substr(0, suffixStartPosition) + "*";
   }
 }
@@ -180,7 +183,7 @@ void print(CallGraph& cg, const char* filename,
            const std::vector<Cluster>& clusters, bool useWildcards) {
   FILE* outfile = fopen(filename, "wt");
   if (!outfile) {
-    error(folly::sformat("opening output file {}", filename).c_str());
+    error(fmt::format("opening output file {}", filename).c_str());
   }
   uint32_t totalSize   = 0;
   uint32_t curPage     = 0;
@@ -189,6 +192,9 @@ void print(CallGraph& cg, const char* filename,
   double totalCalls    = 0;
   double totalCalls64B = 0;
   double totalCalls4KB = 0;
+  double totalCalls32KB = 0;
+  double totalCalls128KB = 0;
+  double totalCalls512KB = 0;
   double totalCalls2MB = 0;
   std::unordered_map<TargetId,uint64_t> newAddr;
   for (auto& cluster : clusters) {
@@ -231,7 +237,10 @@ void print(CallGraph& cg, const char* filename,
           calls += w;
           if (d < 64)      totalCalls64B += w;
           if (d < 4096)    totalCalls4KB += w;
-          if (d < 2 << 20) totalCalls2MB += w;
+          if (d < 1 << 15) totalCalls32KB += w;
+          if (d < 1 << 17) totalCalls128KB += w;
+          if (d < 1 << 19) totalCalls512KB += w;
+          if (d < 1 << 21) totalCalls2MB += w;
           HFTRACE(
             2,
             "arc: %u [@%lu+%.1lf] -> %u [@%lu]: weight = %.0lf, "
@@ -268,6 +277,12 @@ void print(CallGraph& cg, const char* filename,
            totalCalls64B, 100 * totalCalls64B / totalCalls);
     printf("  Total Calls within 4KB = %.0lf (%.2lf%%)\n",
            totalCalls4KB, 100 * totalCalls4KB / totalCalls);
+    printf("  Total Calls within 32KB = %.0lf (%.2lf%%)\n",
+           totalCalls32KB, 100 * totalCalls32KB / totalCalls);
+    printf("  Total Calls within 128KB = %.0lf (%.2lf%%)\n",
+           totalCalls128KB, 100 * totalCalls128KB / totalCalls);
+    printf("  Total Calls within 512KB = %.0lf (%.2lf%%)\n",
+           totalCalls512KB, 100 * totalCalls512KB / totalCalls);
     printf("  Total Calls within 2MB = %.0lf (%.2lf%%)\n",
            totalCalls2MB, 100 * totalCalls2MB / totalCalls);
   }
@@ -283,7 +298,7 @@ Algorithm checkAlgorithm(const char* algorithm) {
   return Algorithm::Invalid;
 }
 
-}}
+}
 
 int main(int argc, char* argv[]) {
   using namespace HPHP::hfsort;
@@ -378,7 +393,7 @@ int main(int argc, char* argv[]) {
 
   std::vector<Cluster> clusters;
 
-  const char* filename;
+  const char* filename = nullptr;
   if (algorithm == Algorithm::Hfsort) {
     HFTRACE(1, "=== algorithm : hfsort\n\n");
     clusters = clusterize(cg);

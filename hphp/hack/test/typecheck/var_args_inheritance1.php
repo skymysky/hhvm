@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 /**
  * Copyright (c) 2014, Facebook, Inc.
  * All rights reserved.
@@ -10,7 +10,7 @@
  */
 
 class A {
-  public function f1(int $x, ...): void {}
+  public function f1(int $x, mixed ...$_): void {}
 }
 
 class B extends A {

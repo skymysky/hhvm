@@ -1,0 +1,31 @@
+error: Typing[4110] Invalid return type [1]
+-> Expected `nonnull` [2]
+-> But got `T` [3]
+
+unconstrained_generic_type_parameter.php:4:10
+1 | <?hh
+2 | 
+3 | function cast<T>(T $x): nonnull {
+  |                  ^ [3]
+  |                         ^^^^^^^ [2]
+4 |   return $x;
+  |          ^^ [1]
+5 | }
+
+error: Typing[4110] Invalid return type [1]
+-> Expected `nonnull` [2]
+-> But got `mixed` [3]
+->   by the definition of `T` [4]
+
+unconstrained_generic_type_parameter.php:4:10
+1 | <?hh
+2 | 
+3 | function cast<T>(T $x): nonnull {
+  |               ^ [4]
+  |                  ^ [3]
+  |                         ^^^^^^^ [2]
+4 |   return $x;
+  |          ^^ [1]
+5 | }
+
+2 errors found

@@ -14,20 +14,17 @@
    +----------------------------------------------------------------------+
 */
 
+#include <fmt/format.h>
+
 #include "hphp/runtime/vm/jit/srcdb.h"
 
-#include "hphp/runtime/vm/debug/debug.h"
-#include "hphp/runtime/vm/treadmill.h"
-
-#include "hphp/runtime/vm/jit/cg-meta.h"
-#include "hphp/runtime/vm/jit/relocation.h"
-#include "hphp/runtime/vm/jit/service-requests.h"
+#include "hphp/runtime/vm/func-cleanup.h"
 #include "hphp/runtime/vm/jit/smashable-instr.h"
 #include "hphp/runtime/vm/jit/tc.h"
 
+#include "hphp/util/configs/jit.h"
 #include "hphp/util/trace.h"
 
-#include <cstdarg>
 #include <cstdint>
 #include <string>
 
@@ -35,34 +32,18 @@ namespace HPHP { namespace jit {
 
 TRACE_SET_MOD(trans)
 
-void IncomingBranch::relocate(RelocationInfo& rel) {
-  // compute adjustedTarget before altering the smash address,
-  // because it might be a 5-byte nop
-  TCA adjustedTarget = rel.adjustedAddressAfter(target());
-
-  if (TCA adjusted = rel.adjustedAddressAfter(toSmash())) {
-    m_ptr.set(m_ptr.tag(), adjusted);
-  }
-
-  if (adjustedTarget) {
-    FTRACE_MOD(Trace::mcg, 1, "Patching: 0x{:08x} from 0x{:08x} to 0x{:08x}\n",
-               (uintptr_t)toSmash(), (uintptr_t)target(),
-               (uintptr_t)adjustedTarget);
-
-    patch(adjustedTarget);
-  }
-}
-
 void IncomingBranch::patch(TCA dest) {
   switch (type()) {
+    case Tag::CALL:
+      smashCall(toSmash(), dest);
+      break;
+
     case Tag::JMP:
       smashJmp(toSmash(), dest);
-      Debug::DebugInfo::Get()->recordRelocMap(toSmash(), dest, "Arc-2");
       break;
 
     case Tag::JCC:
       smashJcc(toSmash(), dest);
-      Debug::DebugInfo::Get()->recordRelocMap(toSmash(), dest, "Arc-1");
       break;
 
     case Tag::ADDR: {
@@ -72,11 +53,29 @@ void IncomingBranch::patch(TCA dest) {
       *addr = dest;
       break;
     }
+    case Tag::LDADDR: {
+      smashMovq(toSmash(), (uint64_t)dest);
+      break;
+    }
   }
+}
+
+bool IncomingBranch::optimize() {
+  switch (type()) {
+    case Tag::CALL: return optimizeSmashedCall(toSmash());
+    case Tag::JMP: return optimizeSmashedJmp(toSmash());
+    case Tag::JCC: return optimizeSmashedJcc(toSmash());
+    case Tag::ADDR: return false;
+    case Tag::LDADDR: return false;
+  }
+  always_assert(false);
 }
 
 TCA IncomingBranch::target() const {
   switch (type()) {
+    case Tag::CALL:
+      return smashableCallTarget(toSmash());
+
     case Tag::JMP:
       return smashableJmpTarget(toSmash());
 
@@ -85,7 +84,38 @@ TCA IncomingBranch::target() const {
 
     case Tag::ADDR:
       return *reinterpret_cast<TCA*>(toSmash());
+
+    case Tag::LDADDR:
+      return reinterpret_cast<TCA>(smashableMovqImm(toSmash()));
   }
+  always_assert(false);
+}
+
+std::string IncomingBranch::show() const {
+  auto const typeStr = [&] {
+    switch (type()) {
+      case Tag::CALL: return "call";
+      case Tag::JMP: return "jmp";
+      case Tag::JCC: return "jcc";
+      case Tag::ADDR: return "addr";
+      case Tag::LDADDR: return "ldaddr";
+    }
+    always_assert(false);
+  }();
+  return fmt::format("{}@{}", typeStr, fmt::ptr(toSmash()));
+}
+
+TCA TransLoc::entry() const {
+  if (m_mainLen)        return mainStart();
+  if (coldCodeSize())   return coldCodeStart();
+  if (frozenCodeSize()) return frozenCodeStart();
+  always_assert(false);
+}
+
+TcaRange TransLoc::entryRange() const {
+  if (auto const size = m_mainLen)        return {mainStart(), size};
+  if (auto const size = coldCodeSize())   return {coldCodeStart(), size};
+  if (auto const size = frozenCodeSize()) return {frozenCodeStart(), size};
   always_assert(false);
 }
 
@@ -108,29 +138,11 @@ void TransLoc::setFrozenStart(TCA newStart) {
   m_frozenOff = tc::addrToOffset(newStart);
 }
 
-/*
- * The fallback translation is where to jump to if the
- * currently-translating translation's checks fail.
- *
- * The current heuristic we use for translation chaining is to assume
- * the most common cases are probably translated first, so we chain
- * new translations on the end.  This means if we have to fallback
- * from the currently-translating translation we jump to the "anchor"
- * translation (which just is a REQ_RETRANSLATE).
- */
-TCA SrcRec::getFallbackTranslation() const {
-  assertx(m_anchorTranslation);
-  return m_anchorTranslation;
-}
-
-FPInvOffset SrcRec::nonResumedSPOff() const {
-  return svcreq::extract_spoff(getFallbackTranslation());
-}
-
-void SrcRec::chainFrom(IncomingBranch br) {
+void SrcRec::chainFrom(IncomingBranch br, TCA stub) {
   assertx(br.type() == IncomingBranch::Tag::ADDR ||
           tc::isValidCodeAddress(br.toSmash()));
-  TCA destAddr = getTopTranslation();
+  TCA destAddr = getTopTranslation() ? getTopTranslation() : stub;
+  assertx(destAddr);
   m_incomingBranches.push_back(br);
   TRACE(1, "SrcRec(%p)::chainFrom %p -> %p (type %d); %zd incoming branches\n",
         this,
@@ -138,7 +150,7 @@ void SrcRec::chainFrom(IncomingBranch br) {
         m_incomingBranches.size());
   br.patch(destAddr);
 
-  if (RuntimeOption::EvalEnableReusableTC) {
+  if (Cfg::Eval::EnableReusableTC) {
     tc::recordJump(br.toSmash(), this);
   }
 }
@@ -149,15 +161,15 @@ void SrcRec::newTranslation(TransLoc loc,
   // When translation punts due to hitting limit, will generate one
   // more translation that will call the interpreter.
   assertx(m_translations.size() <=
-          std::max(RuntimeOption::EvalJitMaxProfileTranslations,
-                   RuntimeOption::EvalJitMaxTranslations));
+          std::max(Cfg::Jit::MaxProfileTranslations,
+                   Cfg::Jit::MaxTranslations));
 
-  TRACE(1, "SrcRec(%p)::newTranslation @%p, ", this, loc.mainStart());
+  TRACE(1, "SrcRec(%p)::newTranslation @%p, ", this, loc.entry());
 
   m_translations.push_back(loc);
   if (!m_topTranslation.get()) {
-    m_topTranslation = loc.mainStart();
-    patchIncomingBranches(loc.mainStart());
+    m_topTranslation = loc.entry();
+    patchIncomingBranches(loc.entry());
   }
 
   /*
@@ -166,16 +178,16 @@ void SrcRec::newTranslation(TransLoc loc,
    *
    * It's (mostly) ok if someone is running in this code while we do
    * this: we hold the write lease, they'll instead jump to the anchor
-   * and do REQ_RETRANSLATE and failing to get the write lease they'll
+   * and do handleRetranslate() and failing to get the write lease they'll
    * interp.  FIXME: Unfortunately, right now, in an unlikely race
    * another thread could create another translation with the same
    * type specialization that we just created in this case.  (If we
    * happen to release the write lease after they jump but before they
-   * get into REQ_RETRANSLATE, they'll acquire it and generate a
+   * get into handleRetranslate(), they'll acquire it and generate a
    * translation possibly for this same situation.)
    */
   for (auto& br : m_tailFallbackJumps) {
-    br.patch(loc.mainStart());
+    br.patch(loc.entry());
   }
 
   // This is the new tail translation, so store the fallback jump list
@@ -183,65 +195,20 @@ void SrcRec::newTranslation(TransLoc loc,
   m_tailFallbackJumps.swap(tailBranches);
 }
 
-void SrcRec::relocate(RelocationInfo& rel) {
-  tc::assertOwnsCodeLock();
-
+/*
+ * Smash the fallbacks to a particular stub (not a translation). Used
+ * to smash all of the fallback jumps to interpHelperNoTranslateFromTC
+ * when we stop translating.
+ */
+void SrcRec::smashFallbacksToStub(TCA stub) {
+  assertx(stub);
   auto srLock = writelock();
-  if (auto adjusted = rel.adjustedAddressAfter(m_anchorTranslation)) {
-    m_anchorTranslation = adjusted;
-  }
-
-  if (auto adjusted = rel.adjustedAddressAfter(m_topTranslation.get())) {
-    m_topTranslation = adjusted;
-  }
-
-  for (auto &t : m_translations) {
-    if (TCA adjusted = rel.adjustedAddressAfter(t.mainStart())) {
-      t.setMainStart(adjusted);
-    }
-
-    if (TCA adjusted = rel.adjustedAddressAfter(t.coldStart())) {
-      t.setColdStart(adjusted);
-    }
-
-    if (TCA adjusted = rel.adjustedAddressAfter(t.frozenStart())) {
-      t.setFrozenStart(adjusted);
-    }
-  }
-
-  for (auto &ib : m_tailFallbackJumps) {
-    ib.relocate(rel);
-  }
-
-  for (auto &ib : m_incomingBranches) {
-    ib.relocate(rel);
-  }
-}
-
-void SrcRec::addDebuggerGuard(TCA dbgGuard, TCA dbgBranchGuardSrc) {
-  assertx(!m_dbgBranchGuardSrc);
-
-  TRACE(1, "SrcRec(%p)::addDebuggerGuard @%p, "
-        "%zd incoming branches to rechain\n",
-        this, dbgGuard, m_incomingBranches.size());
-
-  patchIncomingBranches(dbgGuard);
-
-  // Set m_dbgBranchGuardSrc after patching, so we don't try to patch
-  // the debug guard.
-  m_dbgBranchGuardSrc = dbgBranchGuardSrc;
-  m_topTranslation = dbgGuard;
+  TRACE(1, "SrcRec(%p)::smashFallbacksToStub @%p, ", this, stub);
+  for (auto& br : m_tailFallbackJumps) br.patch(stub);
+  m_tailFallbackJumps.clear();
 }
 
 void SrcRec::patchIncomingBranches(TCA newStart) {
-  if (hasDebuggerGuard()) {
-    // We have a debugger guard, so all jumps to us funnel through
-    // this.  Just smash m_dbgBranchGuardSrc.
-    TRACE(1, "smashing m_dbgBranchGuardSrc @%p\n", m_dbgBranchGuardSrc.get());
-    smashJmp(m_dbgBranchGuardSrc, newStart);
-    return;
-  }
-
   TRACE(1, "%zd incoming branches to rechain\n", m_incomingBranches.size());
 
   for (auto &br : m_incomingBranches) {
@@ -263,45 +230,49 @@ void SrcRec::removeIncomingBranch(TCA toSmash) {
   m_incomingBranches.setEnd(end);
 }
 
-void SrcRec::replaceOldTranslations() {
+void SrcRec::removeIncomingBranchesInRange(TCA start, TCA frontier) {
   auto srLock = writelock();
 
-  // Everyone needs to give up on old translations; send them to the anchor,
-  // which is a REQ_RETRANSLATE.
+  auto end = std::remove_if(
+    m_incomingBranches.begin(),
+    m_incomingBranches.end(),
+    [&] (const IncomingBranch& ib) {
+      auto addr = ib.toSmash();
+      return start <= addr && addr < frontier;
+    }
+  );
+
+  m_incomingBranches.setEnd(end);
+}
+
+void SrcRec::replaceOldTranslations(TCA transStub) {
+  auto srLock = writelock();
+
+  // Everyone needs to give up on old translations; send them to the provided
+  // translate stub.
   auto translations = std::move(m_translations);
   m_tailFallbackJumps.clear();
   m_topTranslation = nullptr;
-
-  /*
-   * It may seem a little weird that we're about to point every
-   * incoming branch at the anchor, since that's going to just
-   * unconditionally retranslate this SrcKey and never patch the
-   * incoming branch to do something else.
-   *
-   * The reason this is ok is this mechanism is only used in
-   * non-RepoAuthoritative mode, and the granularity of code
-   * invalidation there is such that we'll only have incoming branches
-   * like this basically within the same file since we don't have
-   * whole program analysis.
-   *
-   * This means all these incoming branches are about to go away
-   * anyway ...
-   *
-   * If we ever change that we'll have to change this to patch to
-   * some sort of rebind requests.
-   */
-  assertx(!RuntimeOption::RepoAuthoritative || RuntimeOption::EvalJitPGO);
-  patchIncomingBranches(m_anchorTranslation);
+  assertx(!Cfg::Repo::Authoritative || Cfg::Jit::PGO);
+  patchIncomingBranches(transStub);
 
   // Now that we've smashed all the IBs for these translations they should be
   // unreachable-- to prevent a race we treadmill here and then reclaim their
   // associated TC space
-  if (RuntimeOption::EvalEnableReusableTC) {
+  if (Cfg::Eval::EnableReusableTC) {
     tc::reclaimTranslations(std::move(translations));
     return;
   }
 
   translations.clear();
+}
+
+SrcRec* SrcDB::insert(SrcKey sk) {
+  FuncCleanup::addSrcDBKey(sk);
+  auto const srcRec = new SrcRec();
+  DEBUG_ONLY auto prev = m_map.insertOrUpdate(sk.toAtomicInt(), srcRec);
+  assertx(prev == nullptr); // We should not have called this in case it already existed
+  return srcRec;
 }
 
 } } // HPHP::jit

@@ -1,4 +1,4 @@
-<?hh // decl    /* -*- php -*- */
+<?hh /* -*- php -*- */
 /**
  * Copyright (c) 2014, Facebook, Inc.
  * All rights reserved.
@@ -8,217 +8,398 @@
  *
  */
 
-const DATE_ATOM    = "Y-m-d\\TH:i:sP";
-const DATE_COOKIE  = "l, d-M-y H:i:s T";
-const DATE_ISO8601 = "Y-m-d\\TH:i:sO";
-const DATE_RFC1036 = "D, d M y H:i:s O";
-const DATE_RFC1123 = "D, d M Y H:i:s O";
-const DATE_RFC2822 = "D, d M Y H:i:s O";
-const DATE_RFC3339 = "Y-m-d\\TH:i:sP";
-const DATE_RFC822  = "D, d M y H:i:s O";
-const DATE_RFC850  = "l, d-M-y H:i:s T";
-const DATE_RSS     = "D, d M Y H:i:s O";
-const DATE_W3C     = "Y-m-d\\TH:i:sP";
+const string DATE_ATOM;
+const string DATE_COOKIE;
+const string DATE_ISO8601;
+const string DATE_RFC1036;
+const string DATE_RFC1123;
+const string DATE_RFC2822;
+const string DATE_RFC3339;
+const string DATE_RFC822;
+const string DATE_RFC850;
+const string DATE_RSS;
+const string DATE_W3C;
 
-const DAY_1 = 131079;
-const DAY_2 = 131080;
-const DAY_3 = 131081;
-const DAY_4 = 131082;
-const DAY_5 = 131083;
-const DAY_6 = 131084;
-const DAY_7 = 131085;
+const int DAY_1;
+const int DAY_2;
+const int DAY_3;
+const int DAY_4;
+const int DAY_5;
+const int DAY_6;
+const int DAY_7;
+
+type DateTimeErrors = shape(
+  'warning_count' => int,
+  'warnings' => darray<int, string>,
+  'error_count' => int,
+  'errors' => darray<int, string>,
+);
 
 <<__PHPStdLib>>
-function checkdate($month, $day, $year) { }
+function checkdate(
+  int $month,
+  int $day,
+  int $year,
+): bool;
 <<__PHPStdLib>>
-function date_add($datetime, $interval) { }
+function date_add(
+  DateTime $datetime,
+  DateInterval $interval,
+): DateTime;
 <<__PHPStdLib>>
-function date_create_from_format($format, $time, $timezone = null) { }
+function date_create_from_format(
+  string $format,
+  string $time,
+  ?DateTimeZone $timezone = null,
+): HH\FIXME\MISSING_RETURN_TYPE; /* DateTime | false */
 <<__PHPStdLib>>
-function date_create($time = null, $timezone = null) { }
+function date_create(
+  ?string $time = null,
+  ?DateTimeZone $timezone = null,
+): HH\FIXME\MISSING_RETURN_TYPE; /* DateTime | false */
 <<__PHPStdLib>>
-function date_date_set($object, $year, $month, $day) { }
+function date_date_set(
+  DateTime $object,
+  int $year,
+  int $month,
+  int $day,
+): void;
 <<__PHPStdLib>>
-function date_default_timezone_get() { }
+function date_default_timezone_get(): string;
 <<__PHPStdLib>>
-function date_default_timezone_set($name) { }
+function date_default_timezone_set(string $name): bool;
 <<__PHPStdLib>>
-function date_diff($datetime, $datetime2, $absolute = false) { }
+function date_diff(
+  DateTimeInterface $datetime,
+  DateTimeInterface $datetime2,
+  bool $absolute = false,
+): DateInterval;
 <<__PHPStdLib>>
-function date_format($object, $format) { }
+function date_format(
+  DateTimeInterface $object,
+  string $format,
+): string;
 <<__PHPStdLib>>
-function date_get_last_errors() { }
+function date_get_last_errors(): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function date_interval_create_from_date_string($time) { }
+function date_interval_create_from_date_string(
+  string $time,
+): DateInterval;
 <<__PHPStdLib>>
-function date_interval_format($interval, $format_spec) { }
+function date_interval_format(
+  DateInterval $interval,
+  string $format_spec,
+): string;
 <<__PHPStdLib>>
-function date_isodate_set($object, $year, $week, $day = 1) { }
+function date_isodate_set(
+  DateTime $object,
+  int $year,
+  int $week,
+  int $day = 1,
+): DateTime;
 <<__PHPStdLib>>
-function date_modify($object, $modify) { }
+function date_modify(
+  DateTime $object,
+  string $modify,
+): void;
 <<__PHPStdLib>>
-function date_offset_get($object) { }
+function date_offset_get(
+  DateTimeInterface $object,
+): ~int;
 <<__PHPStdLib>>
-function date_parse($date) { }
+function date_parse(string $date): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function date_sub($datetime, $interval) { }
+function date_sub(
+  DateTime $datetime,
+  DateInterval $interval,
+): DateTime;
 <<__PHPStdLib>>
-function date_sun_info($ts, $latitude, $longitude) { }
+function date_sun_info(
+  int $ts,
+  float $latitude,
+  float $longitude,
+): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function date_sunrise($timestamp, $format = 0, $latitude = 0.0, $longitude = 0.0, $zenith = 0.0, $gmt_offset = 99999.0) { }
+function date_sunrise(
+  int $timestamp,
+  int $format = 0,
+  ?float $latitude = null,
+  ?float $longitude = null,
+  ?float $zenith = null,
+  ?float $gmt_offset = null,
+): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function date_sunset($timestamp, $format = 0, $latitude = 0.0, $longitude = 0.0, $zenith = 0.0, $gmt_offset = 99999.0) { }
+function date_sunset(
+  int $timestamp,
+  int $format = 0,
+  ?float $latitude = null,
+  ?float $longitude = null,
+  ?float $zenith = null,
+  ?float $gmt_offset = null,
+): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function date_time_set($object, $hour, $minute, $second = 0) { }
+function date_time_set(
+  DateTime $object,
+  int $hour,
+  int $minute,
+  int $second = 0,
+): void;
 <<__PHPStdLib>>
-function date_timestamp_get($datetime) { }
+function date_timestamp_get(
+  DateTimeInterface $datetime,
+): ~int;
 <<__PHPStdLib>>
-function date_timestamp_set($datetime, $timestamp) { }
+function date_timestamp_set(
+  DateTime $datetime,
+  int $timestamp,
+): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function date_timezone_get($object) { }
+function date_timezone_get(
+  DateTimeInterface $object,
+): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function date_timezone_set($object, $timezone) { }
+function date_timezone_set(
+  DateTime $object,
+  DateTimeZone $timezone,
+): DateTime;
 <<__PHPStdLib>>
-function date($format, $timestamp = null)/*: string*/ { }
+function date(
+  string $format,
+  ?int $timestamp = null,
+)/*: string*/ : HH\FIXME\MISSING_RETURN_TYPE {}
 <<__PHPStdLib>>
-function getdate($timestamp = null) { }
+function getdate(?int $timestamp = null): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function gettimeofday($return_float = false) { }
+function gettimeofday(bool $return_float = false): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function gmdate($format, $timestamp = null) { }
+function gmdate(
+  string $format,
+  ?int $timestamp = null,
+): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function gmmktime($hour = PHP_INT_MAX, $minute = PHP_INT_MAX, $second = PHP_INT_MAX, $month = PHP_INT_MAX, $day = PHP_INT_MAX, $year = PHP_INT_MAX) { }
+function gmmktime(
+  int $hour = PHP_INT_MAX,
+  int $minute = PHP_INT_MAX,
+  int $second = PHP_INT_MAX,
+  int $month = PHP_INT_MAX,
+  int $day = PHP_INT_MAX,
+  int $year = PHP_INT_MAX,
+): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function gmstrftime($format, $timestamp = null) { }
+function gmstrftime(
+  string $format,
+  ?int $timestamp = null,
+): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function idate($format, $timestamp = null) { }
+function idate(
+  string $format,
+  ?int $timestamp = null,
+): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function localtime($timestamp = null, $is_associative = false) { }
+function localtime(
+  ?int $timestamp = null,
+  bool $is_associative = false,
+): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function microtime($get_as_float = false) { }
+function microtime(
+  bool $get_as_float = false,
+)[leak_safe]: HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function mktime($hour = PHP_INT_MAX, $minute = PHP_INT_MAX, $second = PHP_INT_MAX, $month = PHP_INT_MAX, $day = PHP_INT_MAX, $year = PHP_INT_MAX) { }
+function mktime(
+  int $hour = PHP_INT_MAX,
+  int $minute = PHP_INT_MAX,
+  int $second = PHP_INT_MAX,
+  int $month = PHP_INT_MAX,
+  int $day = PHP_INT_MAX,
+  int $year = PHP_INT_MAX,
+)[leak_safe]: HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function strftime($format, $timestamp = null) { }
+function strftime(
+  string $format,
+  ?int $timestamp = null,
+)[leak_safe]: HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function strptime($date, $format) { }
+function strptime(string $date, string $format): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function strtotime($input, $timestamp = null) { }
+function strtotime(
+  string $input,
+  ?int $timestamp = null,
+)[leak_safe]: HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function time(): int { }
+function time()[leak_safe]: int;
 <<__PHPStdLib>>
-function timezone_abbreviations_list() { }
+function timezone_abbreviations_list(): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function timezone_identifiers_list(int $what = 2047, string $country = '') { }
+function timezone_identifiers_list(
+  int $what = 2047,
+  string $country = '',
+): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function timezone_location_get($timezone) { }
+function timezone_location_get(
+  DateTimeZone $timezone,
+): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function timezone_name_from_abbr($abbr, $gmtoffset = -1, $isdst = true) { }
+function timezone_name_from_abbr(
+  string $abbr,
+  int $gmtoffset = -1,
+  int $isdst = 1,
+): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function timezone_name_get($object) { }
+function timezone_name_get(
+  DateTimeZone $object,
+): string;
 <<__PHPStdLib>>
-function timezone_offset_get($object, $dt) { }
+function timezone_offset_get(
+  DateTimeZone $object,
+  DateTime $dt,
+): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function timezone_open($timezone) { }
+function timezone_open(string $timezone): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function timezone_transitions_get(DateTimeZone $object,
-                                  int $timestamp_begin = PHP_INT_MIN,
-                                  int $timestamp_end = PHP_INT_MAX) { }
+function timezone_transitions_get(
+  DateTimeZone $object,
+  int $timestamp_begin = PHP_INT_MIN,
+  int $timestamp_end = PHP_INT_MAX,
+): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function timezone_version_get() { }
+function timezone_version_get(): string;
 
 interface DateTimeInterface {
-  public function diff(DateTimeInterface $datetime2, bool $absolute = false);
-  public function format(string $format);
-  public function getOffset();
-  public function getTimestamp();
-  public function getTimezone();
+  public function diff(
+    DateTimeInterface $datetime2,
+    bool $absolute = false,
+  ): ~DateInterval;
+  public function format(string $format): HH\FIXME\MISSING_RETURN_TYPE /* string (newtype ISODate) */;
+  public function getOffset(): ~int;
+  public function getTimestamp()[]: ~int;
+  public function getTimezone(): HH\FIXME\MISSING_RETURN_TYPE /* DateTimeZone | false */;
 }
 
 class DateTime implements DateTimeInterface {
-  const ATOM = '';
-  const COOKIE = '';
-  const ISO8601 = '';
-  const RFC822 = '';
-  const RFC850 = '';
-  const RFC1036 = '';
-  const RFC1123 = '';
-  const RFC2822 = '';
-  const RFC3339 = '';
-  const RSS = '';
-  const W3C = '';
-  public function __construct(mixed $time = 'now', ?DateTimeZone $timezone = null);
-  public function add(DateInterval $interval);
-  public function modify(string $modify);
-  public function getOffset();
-  public function getTimestamp();
-  public function getTimezone();
-  public function setDate(int $year, int $month, int $day);
-  public function setISODate(int $year, int $week, int $day = 1);
-  public function setTime(int $hour, int $minute, int $second = 0);
-  public function setTimestamp(int $unixtimestamp);
-  public function setTimezone(DateTimeZone $timezone);
-  public function sub(DateInterval $interval) { }
-  public function diff(DateTimeInterface $datetime2, bool $absolute = false);
-  public function format(string $format);
+  const string ATOM;
+  const string COOKIE;
+  const string ISO8601;
+  const string RFC822;
+  const string RFC850;
+  const string RFC1036;
+  const string RFC1123;
+  const string RFC2822;
+  const string RFC3339;
+  const string RSS;
+  const string W3C;
+
+  public function __construct(
+    string $time = 'now',
+    ?DateTimeZone $timezone = null,
+  )[read_globals];
+  public function add(DateInterval $interval)[write_props]: this;
+  public function modify(string $modify)[write_props]: HH\FIXME\MISSING_RETURN_TYPE /* this | false */;
+  public function getOffset()[]: int;
+  public function getTimestamp()[]: int;
+  public function getTimezone()[]: HH\FIXME\MISSING_RETURN_TYPE /* DateTimeZone | false */;
+  public function setDate(
+    int $year,
+    int $month,
+    int $day,
+  )[write_props]: this;
+  public function setISODate(
+    int $year,
+    int $week,
+    int $day = 1,
+  )[write_props]: this;
+  public function setTime(
+    int $hour,
+    int $minute,
+    int $second = 0,
+  )[write_props]: this;
+  public function setTimestamp(int $unixtimestamp)[read_globals, write_props]: this;
+  public function setTimezone(
+    DateTimeZone $timezone,
+  )[write_props]: this;
+  public function sub(DateInterval $interval)[write_props]: this;
+  public function diff(
+    DateTimeInterface $datetime2,
+    bool $absolute = false,
+  )[]: DateInterval;
+  public function format(string $format)[]: HH\FIXME\MISSING_RETURN_TYPE /* string (newtype ISODate) */;
   public static function createFromFormat(
     string $format,
-    mixed $time,
+    string $time,
     ?DateTimeZone $timezone = null,
-  );
-  public static function getLastErrors(): darray;
+  ): HH\FIXME\MISSING_RETURN_TYPE;
+  public static function getLastErrors()[read_globals]: DateTimeErrors;
 }
 
 class DateTimeImmutable implements DateTimeInterface {
   private DateTime $data;
 
-  public function __construct(mixed $time = 'now', ?DateTimeZone $timezone = null);
-  public function add(DateInterval $interval);
-  public function modify(string $modify);
-  public function getOffset();
-  public function getTimestamp();
-  public function getTimezone();
-  public function setDate(int $year, int $month, int $day);
-  public function setISODate(int $year, int $week, int $day = 1);
-  public function setTime(int $hour, int $minute, int $second = 0);
-  public function setTimestamp(int $unixtimestamp);
-  public function setTimezone(DateTimeZone $timezone);
-  public function sub(DateInterval $interval);
-  public function diff(DateTimeInterface $datetime2, bool $absolute = false);
-  public function format(string $format);
-  public static function createFromFormat(
-    string $format,
-    mixed $time,
+  public function __construct(
+    string $time = 'now',
     ?DateTimeZone $timezone = null,
   );
-  public static function createFromMutable(DateTime $datetime);
-  public static function getLastErrors(): darray;
-  public function __clone();
+  public function add(DateInterval $interval): this;
+  public function modify(string $modify): this;
+  public function getOffset(): int;
+  public function getTimestamp()[]: int;
+  public function getTimezone(): HH\FIXME\MISSING_RETURN_TYPE /* DateTimeZone | false */;
+  public function setDate(int $year, int $month, int $day): this;
+  public function setISODate(int $year, int $week, int $day = 1): this;
+  public function setTime(int $hour, int $minute, int $second = 0): this;
+  public function setTimestamp(int $unixtimestamp): this;
+  public function setTimezone(DateTimeZone $timezone): this;
+  public function sub(DateInterval $interval): this;
+  public function diff(
+    DateTimeInterface $datetime2,
+    bool $absolute = false,
+  ): ~DateInterval;
+  public function format(string $format): HH\FIXME\MISSING_RETURN_TYPE /* string (newtype ISODate) */;
+  public static function createFromFormat(
+    string $format,
+    string $time,
+    ?DateTimeZone $timezone = null,
+  ): HH\FIXME\MISSING_RETURN_TYPE /* DateTimeImmutable | false */;
+  public static function createFromMutable(
+    DateTime $datetime,
+  ): HH\FIXME\MISSING_RETURN_TYPE /* DateTimeImmutable */;
+  public static function getLastErrors(): DateTimeErrors;
+  public function __clone(): void;
 }
 
 class DateTimeZone {
-  const AFRICA = 0;
-  const AMERICA = 0;
-  const ANTARCTICA = 0;
-  const ARCTIC = 0;
-  const ASIA = 0;
-  const ATLANTIC = 0;
-  const AUSTRALIA = 0;
-  const EUROPE = 0;
-  const INDIAN = 0;
-  const PACIFIC = 0;
-  const UTC = 0;
-  const ALL = 0;
-  const ALL_WITH_BC = 0;
-  const PER_COUNTRY = 0;
-  public function __construct(string $timezone);
-  public function getLocation(): darray { }
-  public function getName(): string { }
-  public function getOffset(DateTime $datetime);
-  public function getTransitions(int $timestamp_begin = PHP_INT_MIN,
-                                 int $timestamp_end = PHP_INT_MAX);
-  static public function listAbbreviations();
-  static public function listIdentifiers(int $what = 2047, string $country = '');
+  const int AFRICA;
+  const int AMERICA;
+  const int ANTARCTICA;
+  const int ARCTIC;
+  const int ASIA;
+  const int ATLANTIC;
+  const int AUSTRALIA;
+  const int EUROPE;
+  const int INDIAN;
+  const int PACIFIC;
+  const int UTC;
+  const int ALL;
+  const int ALL_WITH_BC;
+  const int PER_COUNTRY;
+  public function __construct(string $timezone)[];
+  public function getLocation()[]: shape(
+    'country_code' => string,
+    'latitude' => float,
+    'longitude' => float,
+    'comments' => string,
+  ) {}
+  public function getName()[]: string {}
+  public function getOffset(
+    DateTimeInterface $datetime,
+  )[]: int;
+  public function getTransitions(
+    int $timestamp_begin = PHP_INT_MIN,
+    int $timestamp_end = PHP_INT_MAX,
+  )[]: HH\FIXME\MISSING_RETURN_TYPE;
+  static public function listAbbreviations(): HH\FIXME\MISSING_RETURN_TYPE;
+  static public function listIdentifiers(
+    int $what = 2047,
+    string $country = '',
+  ): HH\FIXME\MISSING_RETURN_TYPE;
 }
 
 class DateInterval {
@@ -229,28 +410,30 @@ class DateInterval {
   public int $i;
   public int $s;
   public int $invert;
-  public mixed $days;
+  public int $days;
 
   public function __construct(string $interval_spec);
-  public function __get($member);
-  public function __set($member, $value);
-  static public function createFromDateString(string $time);
-  public function format(string $format);
+  static public function createFromDateString(
+    string $time,
+  ): DateInterval;
+  public function format(string $format): string;
 }
 
 class DatePeriod implements Iterator<DateTime> {
-  const EXCLUDE_START_DATE = 1;
+  const int EXCLUDE_START_DATE;
 
   public function __construct(
-    /* DateTimeInterface */ $start, // date string converts
+    HH\FIXME\MISSING_PARAM_TYPE /* DateTimeInterface */
+      $start, // date string converts
     DateInterval $interval,
-    /* ?DateTimeInterface */ $end = null, // date string converts
+    HH\FIXME\MISSING_PARAM_TYPE /* ?DateTimeInterface */ $end =
+      null, // date string converts
     int $options = 0,
   );
   public function current(): DateTime;
   public function rewind(): void;
-  public function key();
-  public function next();
+  public function key(): int;
+  public function next(): void;
   public function valid(): bool;
   public function getStartDate(): DateTime;
   public function getEndDate(): DateTime;

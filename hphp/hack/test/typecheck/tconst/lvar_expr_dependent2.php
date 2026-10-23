@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 
 // This file tests expression dependent types for locals variables
 // when integration occurs
@@ -20,11 +20,11 @@ abstract class C {
     hh_show($c2->get());
 
     if ($c1 < $c2) {
-      // $c will have the same expression id as $c1 in this branch
+      // $c will have a different expression id as $c1 in this branch
       $c = $c1;
       hh_show($c->get());
     } else {
-      // $c will have the same expression id as $c1 in this branch
+      // $c will have a different expression id as $c2 in this branch
       $c = $c2;
       hh_show($c->get());
     }

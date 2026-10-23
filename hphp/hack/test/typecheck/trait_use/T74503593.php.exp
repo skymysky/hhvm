@@ -1,0 +1,22 @@
+error: Typing[4091] This class overrides some members with a different staticness [1]
+-> The method `foo` is declared as non-static here [2]
+-> But it conflicts with an inherited static declaration here [3]
+
+T74503593.php:12:7
+ 3 | 
+ 4 | class MyClass {
+ 5 |   public static function foo(): void {}
+   |                          ^^^ [3]
+ 6 | }
+ 7 | 
+ 8 | trait MyTrait {
+ 9 |   public function foo(): void {}
+   |                   ^^^ [2]
+10 | }
+11 | 
+12 | class MyChild extends MyClass {
+   |       ^^^^^^^ [1]
+13 |   use MyTrait;
+14 | } // fatals when loading the file
+
+1 error found

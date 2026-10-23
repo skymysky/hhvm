@@ -1,0 +1,11 @@
+error: NastCheck[3089] `__DynamicallyCallable` cannot be used on reified functions or methods [1]
+
+dynamically_callable_soft_reified2.php:5:5
+3 | class Foo {
+4 | 
+5 |   <<__DynamicallyCallable>>
+  |     ^^^^^^^^^^^^^^^^^^^^^ [1]
+6 |   public function test<<<__Soft>> reify T>(): void {}
+7 | }
+
+1 error found

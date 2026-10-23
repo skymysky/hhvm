@@ -1,0 +1,30 @@
+error: Parsing[1002] This expression is readonly, its members cannot be modified [1]
+
+nested_readonly_bad.php:13:3
+11 | ): void {
+12 |   shape('inner' => shape('x' => $x)) = $s;
+13 |   $x->prop = 4; // error: $x is readonly (propagated through nesting)
+   |   ^^^^^^^^^^^^ [1]
+14 | }
+15 | 
+
+error: Parsing[1002] This expression is readonly, its members cannot be modified [1]
+
+nested_readonly_bad.php:21:3
+19 | ): void {
+20 |   tuple(shape('x' => $x), $y) = $t;
+21 |   $x->prop = 4; // error: $x is readonly
+   |   ^^^^^^^^^^^^ [1]
+22 |   $y->prop = 4; // error: $y is readonly
+23 | }
+
+error: Parsing[1002] This expression is readonly, its members cannot be modified [1]
+
+nested_readonly_bad.php:22:3
+20 |   tuple(shape('x' => $x), $y) = $t;
+21 |   $x->prop = 4; // error: $x is readonly
+22 |   $y->prop = 4; // error: $y is readonly
+   |   ^^^^^^^^^^^^ [1]
+23 | }
+
+3 errors found

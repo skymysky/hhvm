@@ -1,0 +1,28 @@
+[(Fun
+    { fd_namespace =
+      { Namespace_env.ns_ns_uses = <opaque>; ns_class_uses = <opaque>; 
+        ns_fun_uses = <opaque>; ns_const_uses = <opaque>; ns_name = None; 
+        ns_mode = Namespace_env.ForTypecheck; ns_disable_xhp_element_mangling = false };
+      fd_file_attributes = []; fd_mode = Mstrict; fd_name = ([3:10-38], "\\foreach_kv_union_int_dynamic");
+      fd_fun =
+      { f_span = [3:1-7:2]; f_readonly_this = None; f_annotation = (); 
+        f_readonly_ret = None; f_tparams = []; f_ret = ((void), (Some ([3:59-63], (Hprim Tvoid))));
+        f_params =
+        [{ param_annotation = (~int); param_type_hint = ((~int), (Some ([3:39-52], (Hunion [([3:40-43], (Hprim Tint)); ([3:44-51], Hdynamic)])))); 
+           param_pos = [3:53-56]; param_name = "$xs"; param_info = Param_required; 
+           param_readonly = None; param_splat = None; param_callconv = Pnormal; 
+           param_named = None; param_user_attributes = []; param_visibility = None }
+          ];
+        f_ctxs = None; f_unsafe_ctxs = None;
+        f_body =
+        { fb_ast =
+          [([5:3-6:4],
+            (Foreach (((~int), [5:12-15], (Hole (((~int), [5:12-15], (Lvar ([5:12-15], $xs))), (~int), (KeyedTraversable<nothing, nothing>), Typing))),
+               (As_kv (((nothing), [5:19-21], (Lvar ([5:19-21], $k))), ((nothing), [5:25-27], (Lvar ([5:25-27], $v))))), 
+               [])))
+            ]
+          };
+        f_fun_kind = FSync; f_user_attributes = [{ ua_name = ([3:10-38], "__SupportDynamicType"); ua_params = [] }]; 
+        f_external = false; f_hidden = false; f_doc_comment = None };
+      fd_internal = false; fd_module = None; fd_tparams = []; fd_where_constraints = []; 
+      fd_package = None })

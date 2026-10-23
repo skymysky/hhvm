@@ -14,7 +14,8 @@
    +----------------------------------------------------------------------+
 */
 #include "hphp/runtime/server/server-note.h"
-#include "hphp/runtime/base/request-local.h"
+#include "hphp/runtime/base/array-iterator.h"
+#include "hphp/runtime/base/tv-conversions.h"
 
 namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
@@ -25,19 +26,29 @@ ServerNote* get_server_note() {
   return s_note.getCheck();
 }
 
-void ServerNote::Add(const String& name, const String& value) {
+void ServerNote::Add(const OptString& name, const OptString& value) {
   Array &arr = s_note->m_notes;
   arr.set(name, value);
 }
 
-String ServerNote::Get(const String& name) {
-  Array &arr = s_note->m_notes;
-  return arr.exists(name)
-    ? tvCastToString(arr.rvalAt(name).tv())
-    : String{};
+void ServerNote::AddNotes(const Array& notes) {
+  auto& arr = s_note->m_notes;
+  IterateKV(notes.get(), [&arr](TypedValue key, TypedValue v) {
+    if (!isStringType(type(key)) || !isStringType(type(v))) {
+      SystemLib::throwInvalidArgumentExceptionObject(
+      "server notes: keys and values must be strings");
+    }
+    arr.set(key, v, true);
+  });
 }
 
-void ServerNote::Delete(const String& name) {
+OptString ServerNote::Get(const OptString& name) {
+  Array &arr = s_note->m_notes;
+  auto const tv = arr.lookup(name);
+  return tv.is_init() ? tvCastToString(tv) : OptString{};
+}
+
+void ServerNote::Delete(const OptString& name) {
   s_note->m_notes.remove(name);
 }
 

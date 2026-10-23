@@ -22,11 +22,14 @@
 #include "hphp/runtime/vm/jit/vasm-text.h"
 #include "hphp/runtime/vm/jit/vasm-unit.h"
 
+#include "hphp/util/configs/jit.h"
 #include "hphp/util/data-block.h"
+
+#include <folly/Random.h>
 
 #include <vector>
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 
 struct IRInstruction;
 
@@ -93,11 +96,6 @@ bool is_empty_catch(const Vblock& block);
 void register_catch_block(const Venv& env, const Venv::LabelPatch& p);
 
 /*
- * Emit a service request stub and register a patch point as needed.
- */
-void emit_svcreq_stub(Venv& env, const Venv::SvcReqPatch& p);
-
-/*
  * Arch-independent emitters.
  *
  * Return true if the instruction was supported.
@@ -106,20 +104,46 @@ template <class Inst>
 bool emit(Venv& /*env*/, const Inst&) {
   return false;
 }
-bool emit(Venv& env, const callphp& i);
+bool emit(Venv& env, const callphpfe& i);
+bool emit(Venv& env, const callphps& i);
 bool emit(Venv& env, const bindjmp& i);
 bool emit(Venv& env, const bindjcc& i);
 bool emit(Venv& env, const bindaddr& i);
+bool emit(Venv& env, const ldbindaddr& i);
 bool emit(Venv& env, const fallback& i);
 bool emit(Venv& env, const fallbackcc& i);
-bool emit(Venv& env, const retransopt& i);
-bool emit(Venv& env, const funcguard& i);
-bool emit(Venv& env, const debugguardjmp& i);
 
-inline void record_frame(Venv& env) {
+inline bool emit(Venv& env, const recordbasenativesp& i) {
+  return true;
+}
+
+inline bool emit(Venv& env, const unrecordbasenativesp& i) {
+  return true;
+}
+
+inline bool emit(Venv& env, const recordstack& i) {
+  env.record_inline_stack(i.fakeAddress);
+  return true;
+}
+
+inline bool emit(Venv&, const inlinestart&) {
+  return true;
+}
+
+inline bool emit(Venv&, const inlineend&) {
+  return true;
+}
+
+inline void record_frame(Venv& env, TCA start) {
+  if (!env.origin ||
+      !env.origin->marker().valid() ||
+      !env.origin->marker().fp()) return;
+
   auto const& block = env.unit.blocks[env.current];
-  auto const frame = env.frame;
-  auto const start = env.framestart;
+  auto const frameIt = env.unit.fpToFrame.find(env.origin->marker().fp());
+  assertx(frameIt != env.unit.fpToFrame.end());
+
+  auto const frame = frameIt->second;
   auto& frames = env.unit.frames;
   auto const size = env.cb->frontier() - start;
   // It's possible that (a) this block is empty, and (b) cb is full, so the
@@ -130,33 +154,20 @@ inline void record_frame(Venv& env) {
   always_assert((int64_t)size >= 0);
   auto const area = static_cast<uint8_t>(block.area_idx);
   frames[frame].sections[area].exclusive += size;
-  for (auto f = block.frame; f != Vframe::Top; f = frames[f].parent) {
+  for (auto f = frame; f != Vframe::Top; f = frames[f].parent) {
     frames[f].sections[area].inclusive += size;
   }
-  env.framestart = env.cb->frontier();
-}
-
-inline bool emit(Venv& env, const inlinestart& i) {
-  if (env.frame == -1) return true; // unreachable block
-
-  always_assert(0 <= i.id && i.id < env.unit.frames.size());
-  record_frame(env);
-  env.frame = i.id;
-  return true;
-}
-inline bool emit(Venv& env, const inlineend&) {
-  if (env.frame == -1) return true; // unreachable block
-
-  record_frame(env);
-  env.frame = env.unit.frames[env.frame].parent;
-  always_assert(0 <= env.frame && env.frame < env.unit.frames.size());
-  return true;
 }
 
 template<class Vemit>
 void check_nop_interval(Venv& env, const Vinstr& inst,
-                        int& nop_counter, int nop_interval) {
-  if (LIKELY(nop_counter < 0)) return;
+                        uint32_t& nop_counter, uint32_t nop_interval) {
+  if (LIKELY(nop_interval == 0)) return;
+
+  if (nop_counter == 0) {
+    // Initialize start position randomly.
+    nop_counter = folly::Random::rand32(nop_interval) + 1;
+  }
 
   switch (inst.op) {
     // These instructions are for exception handling or state syncing and do
@@ -180,18 +191,37 @@ void check_nop_interval(Venv& env, const Vinstr& inst,
   }
 }
 
-/*
- * Perform miscellaneous postprocessing for architecture-independent emitters.
- */
 template<class Vemit>
-void postprocess(Venv& env, const Vinstr& inst) {
-  if (inst.op == Vinstr::callphp) {
-    auto const& i = inst.callphp_;
-    // The body of callphp{} is arch-independent, but the unwind information is
-    // not.  We could do this in the emitter for callphp{}, but then we'd have
-    // to thread Vemit through all the emitters and implement them all in the
-    // header... so instead we have this.
-    Vemit(env).emit(unwind{i.targets[0], i.targets[1]});
+void emitLdBindRetAddrStubs(Venv& env) {
+  jit::fast_map<SrcKey, CodeAddress, SrcKey::Hasher> stubs;
+  env.cb = &env.text.areas().back().code;
+
+  for (auto const& ldbindretaddr : env.ldbindretaddrs) {
+    CodeAddress stub = [&] {
+      auto const i = stubs.find(ldbindretaddr.target);
+      if (i != stubs.end()) return i->second;
+
+      auto const start = env.cb->frontier();
+      stubs.insert({ldbindretaddr.target, start});
+
+      // Store return value to the stack.
+      Vemit(env).emit(store{rret_data(), rvmsp()[TVOFF(m_data)]});
+      Vemit(env).emit(store{rret_type(), rvmsp()[TVOFF(m_type)]});
+
+      // Bind jump to the translation.
+      emit(env, bindjmp{
+        ldbindretaddr.target,
+        ldbindretaddr.spOff,
+        cross_trace_regs_resumed()
+      });
+
+      return start;
+    }();
+
+    auto const addr = env.unit.makeAddr();
+    assertx(env.vaddrs.size() == addr);
+    env.vaddrs.push_back(stub);
+    env.leas.push_back({ldbindretaddr.instr, addr});
   }
 }
 
@@ -201,10 +231,34 @@ void postprocess(Venv& env, const Vinstr& inst) {
 
 ///////////////////////////////////////////////////////////////////////////////
 
+inline Venv::Venv(Vunit& unit, Vtext& text, CGMeta& meta)
+  : unit(unit)
+  , text(text)
+  , meta(meta)
+{
+  vaddrs.resize(unit.next_vaddr);
+}
+
+inline void Venv::record_inline_stack(TCA addr) {
+  // Do not record stack if we are not inlining
+  if (!origin || !origin->marker().valid() ||
+      !origin->marker().fp()->inst()->is(DefCalleeFP)) return;
+
+  auto const sk = origin->marker().sk();
+  auto const callOff = sk.anyFuncEntry() ? sk.entryOffset() : sk.offset();
+  auto const it = unit.fpToFrame.find(origin->marker().fp());
+  assertx(it != unit.fpToFrame.end());
+
+  stacks.emplace_back(addr, IStack{it->second - 1, callOff});
+}
+
 template<class Vemit>
 void vasm_emit(Vunit& unit, Vtext& text, CGMeta& fixups,
                AsmInfo* asm_info) {
   using namespace vasm_detail;
+
+  // Lower inlinestart and inlineend instructions to jmps, and annotate blocks
+  // with inlined function parents
 
   Venv env { unit, text, fixups };
   env.addrs.resize(unit.blocks.size());
@@ -221,8 +275,8 @@ void vasm_emit(Vunit& unit, Vtext& text, CGMeta& fixups,
   // We don't want to put nops in Vunits representing stubs, and those Vunits
   // don't have a context set.
   auto const nop_interval =
-    unit.context ? RuntimeOption::EvalJitNopInterval : 0;
-  auto nop_counter = nop_interval;
+    unit.context ? Cfg::Jit::NopInterval : uint32_t{0};
+  auto nop_counter = uint32_t{0};
 
   for (int i = 0, n = labels.size(); i < n; ++i) {
     assertx(checkBlockEnd(unit, labels[i]));
@@ -232,8 +286,6 @@ void vasm_emit(Vunit& unit, Vtext& text, CGMeta& fixups,
 
     env.cb = &text.area(block.area_idx).code;
     env.addrs[b] = env.cb->frontier();
-    env.framestart = env.cb->frontier();
-    env.frame = block.frame;
 
     { // Compute the next block we will emit into the current area.
       auto const cur_start = area_start(labels[i]);
@@ -252,9 +304,11 @@ void vasm_emit(Vunit& unit, Vtext& text, CGMeta& fixups,
 
     for (auto& inst : block.code) {
       irmu.register_inst(inst);
+      env.origin = inst.origin;
 
       check_nop_interval<Vemit>(env, inst, nop_counter, nop_interval);
 
+      auto const start = env.cb->frontier();
       switch (inst.op) {
 #define O(name, imms, uses, defs)               \
         case Vinstr::name:                      \
@@ -264,23 +318,40 @@ void vasm_emit(Vunit& unit, Vtext& text, CGMeta& fixups,
         VASM_OPCODES
 #undef O
       }
-      postprocess<Vemit>(env, inst);
+      record_frame(env, start);
     }
 
-    if (block.frame != -1) record_frame(env);
     irmu.register_block_end();
   }
 
+  emitLdBindRetAddrStubs<Vemit>(env);
+
+  Vemit::processVveneers(env);
+
+  Vemit::emitVeneers(env);
+
   Vemit::handleLiterals(env);
 
-  // Emit service request stubs and register patch points.
-  for (auto& p : env.stubs) emit_svcreq_stub(env, p);
+  // Retarget smashable binds.
+  Vemit::retargetBinds(env);
 
   // Patch up jump targets and friends.
   Vemit::patch(env);
 
   // Register catch blocks.
   for (auto& p : env.catches) register_catch_block(env, p);
+
+  // Register inline frames.
+  for (auto& f : unit.frames) {
+    if (f.parent == Vframe::Top) continue; // skip the top frame
+    auto const parent = f.parent != Vframe::Root
+      ? f.parent - 1 : kRootIFrameID;
+    fixups.inlineFrames.emplace_back(
+      IFrame{f.func, f.callOff, f.sbToRootSbOff.offset, parent});
+  }
+
+  // Register inline stacks.
+  fixups.inlineStacks = std::move(env.stacks);
 
   if (unit.padding) Vemit::pad(text.main().code);
 
@@ -289,4 +360,4 @@ void vasm_emit(Vunit& unit, Vtext& text, CGMeta& fixups,
 
 ///////////////////////////////////////////////////////////////////////////////
 
-}}
+}

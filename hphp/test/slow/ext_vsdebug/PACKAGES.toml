@@ -1,0 +1,14 @@
+[packages]
+
+[packages.foo]
+uses = ["a"]
+allow_deployed_packages_checking=true
+
+[packages.bar]
+uses = ["b"]
+allow_deployed_packages_checking=true
+
+[deployments]
+
+[deployments.my-prod]
+packages = ["foo"]

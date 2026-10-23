@@ -15,14 +15,13 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_EXT_HASH_MURMUR_H_
-#define incl_HPHP_EXT_HASH_MURMUR_H_
+#pragma once
 
 #include <stdint.h>
 
 namespace HPHP {
 
-uint64_t murmur_hash_64A(const void* const key, const size_t len,
+uint64_t murmur_hash_64A(const void* const key, const unsigned long len,
                          const uint32_t seed);
 
 uint64_t murmur_rehash_64A(uint64_t k);
@@ -34,7 +33,3 @@ const int SEED = 4193360111ul;
 
 ///////////////////////////////////////////////////////////////////////////////
 }
-
-#endif // incl_HPHP_EXT_HASH_MURMUR_H_
-
-

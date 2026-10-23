@@ -1,14 +1,9 @@
 <?hh
 
-function err() {
-  return true;
-}
-set_error_handler('err');
-
-function doswitch($foo) {
+function doswitch(mixed $foo) :void{
   echo "--------------------------------\n";
   var_dump($foo);
-  switch($foo) {
+  switch(HH\Lib\Legacy_FIXME\int_cast_for_switch($foo, -1)) {
     case 0:
       echo "0\n";
       break;
@@ -23,7 +18,8 @@ function doswitch($foo) {
 
     case 4:
     case 2:
-      echo "2 or 4: $foo\n";
+      $foo__str = (string)($foo);
+      echo "2 or 4: $foo__str\n";
       break;
 
     case 5:
@@ -38,9 +34,10 @@ function doswitch($foo) {
 
 class c {}
 
-function main() {
+<<__EntryPoint>>
+function main() :void{
   $f = fopen("/dev/null", "w");
-  $things = array(
+  $things = vec[
     null,
     true,
     false,
@@ -53,15 +50,18 @@ function main() {
     'blar',
     '',
     4,
-    array(),
-    array('foo', 'floo'),
-    new stdclass(),
+    vec[],
+    vec['foo', 'floo'],
+    new stdClass(),
     new c(),
     $f
-  );
-  var_dump($f == 4);
+  ];
+  var_dump(HH\Lib\Legacy_FIXME\eq($f, 4));
   foreach ($things as $t) {
-    doswitch($t);
+    try {
+      doswitch($t);
+    } catch (Exception $e) {
+      var_dump($e->getMessage());
+    }
   }
 }
-main();

@@ -1,0 +1,28 @@
+error: Typing[4110] Wrong type hint [1]
+-> Expected `int` [1]
+-> But got `string` [2]
+
+pair-typehints.php:6:13
+3 | 
+4 | function badPair(): int {
+5 |   $s = "X";
+  |        ^^^ [2]
+6 |   $x = Pair<int, int>{$s, "Y"};
+  |             ^^^ [1]
+7 |   return 0;
+8 | }
+
+error: Typing[4110] Wrong type hint [1]
+-> Expected `int` [1]
+-> But got `string` [2]
+
+pair-typehints.php:6:18
+4 | function badPair(): int {
+5 |   $s = "X";
+6 |   $x = Pair<int, int>{$s, "Y"};
+  |                  ^^^ [1]
+  |                           ^^^ [2]
+7 |   return 0;
+8 | }
+
+2 errors found

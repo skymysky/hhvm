@@ -15,9 +15,9 @@
  *                  returned.
  *                  On error, FALSE is returned.
  */
-<<__Native,__IsFoldable>>
+<<__Native>>
 function hash(string $algo, string $data,
-              bool $raw_output = false): mixed;
+              bool $raw_output = false)[]: mixed;
 
 /**
  * hash_algos() - http://php.net/function.hash-algos
@@ -25,8 +25,8 @@ function hash(string $algo, string $data,
  * @return array - A numerically indexed array containing the list of
  *                  supported hashing algorithms.
  */
-<<__Native,__IsFoldable>>
-function hash_algos(): array<string>;
+<<__Native, __IsFoldable>>
+function hash_algos()[]: varray<string>;
 
 /**
  * hash_file() - http://php.net/function.hash-file
@@ -60,7 +60,7 @@ function hash_file(string $algo, string $filename,
  *                  of the message digest is returned.
  */
 <<__Native>>
-function hash_final(resource $context, bool $raw_output = false): mixed;
+function hash_final(resource $context, bool $raw_output = false)[write_props]: mixed;
 
 /**
  * hash() - http://php.net/function.hash
@@ -79,33 +79,20 @@ function hash_final(resource $context, bool $raw_output = false): mixed;
  *                  returned.
  *                  On error, FALSE is returned.
  */
-<<__IsFoldable>>
-function hash_hmac(?string $algo = null,
-                   ?mixed $data = null,
-                   ?string $key = null,
-                   ?bool $raw_output = false): mixed {
-  // Behave like a builtin function so that we pass Zend's tests
-  $args = func_num_args();
-  if ($args < 3) {
-    trigger_error("hash_hmac() expects 3 parameters, $args given",
-      E_WARNING);
-    return null;
-  } else if ($args > 4) {
-    trigger_error("hash_hmac() expects at most 4 parameters, $args given",
-      E_WARNING);
-    return null;
-  }
-
+function hash_hmac(string $algo,
+                   mixed $data,
+                   string $key,
+                   ?bool $raw_output = false)[write_props]: mixed {
   // hash_init() doesn't allow empty keys (for good reason)
   // but hash_hmac() needs to support them.
   // Rely on the fact that HMAC keys are null padded
   // making a key of "\0" equivalent to ""
   $ctx = hash_init($algo, HASH_HMAC, ($key !== '') ? $key : "\0");
-  if (!$ctx) {
+  if (!($ctx is resource)) {
     return false;
   }
   hash_update($ctx, (string) $data);
-  return hash_final($ctx, $raw_output);
+  return hash_final($ctx, HH\FIXME\UNSAFE_CAST<?bool, bool>($raw_output));
 }
 
 /**
@@ -125,27 +112,20 @@ function hash_hmac(?string $algo = null,
  *                  returned.
  *                  On error, FALSE is returned.
  */
-function hash_hmac_file(?string $algo = null,
-                        ?string $filename = null,
-                        ?string $key = null,
+function hash_hmac_file(string $algo,
+                        string $filename,
+                        string $key,
                         ?bool $raw_output = false): mixed {
-  $args = func_num_args();
-  if ($args < 3) {
-    trigger_error("hash_hmac_file() expects 3 parameters, $args given",
-      E_WARNING);
-    return null;
-  }
-
   // hash_init() doesn't allow empty keys (for good reason)
   // but hash_hmac_file() needs to support them.
   // Rely on the fact that HMAC keys are null padded
   // making a key of "\0" equivalent to ""
   $ctx = hash_init($algo, HASH_HMAC, ($key !== '') ? $key : "\0");
-  if (!$ctx) {
+  if (!($ctx is resource)) {
     return false;
   }
   hash_update_file($ctx, $filename);
-  return hash_final($ctx, $raw_output);
+  return hash_final($ctx, HH\FIXME\UNSAFE_CAST<?bool, bool>($raw_output));
 }
 
 /**
@@ -168,7 +148,7 @@ function hash_hmac_file(?string $algo = null,
  */
 <<__Native>>
 function hash_init(string $algo, int $options = 0,
-                   string $key = ""): mixed;
+                   string $key = "")[]: mixed;
 
 /**
  * hash_update() - http://php.net/function.hash-update
@@ -179,7 +159,7 @@ function hash_init(string $algo, int $options = 0,
  * @return bool - Returns TRUE on success, FALSE on failure.
  */
 <<__Native>>
-function hash_update(resource $context, string $data): bool;
+function hash_update(resource $context, string $data)[write_props]: bool;
 
 /**
  * hash_update_file() - http://php.net/function.hash-update-file
@@ -193,11 +173,15 @@ function hash_update(resource $context, string $data): bool;
 function hash_update_file(mixed $context, string $filename,
                           mixed $stream_context = null): bool {
   $fp = fopen($filename, 'r', false, $stream_context);
-  if (!$fp) {
+  if (!($fp is resource)) {
     return false;
   }
-  while (strlen($data = fread($fp, 1024))) {
-    if (!hash_update($context, $data)) {
+  for (
+    $data = HH\FIXME\UNSAFE_CAST<mixed, string>(fread($fp, 1024));
+    strlen($data) !== 0;
+    $data = HH\FIXME\UNSAFE_CAST<mixed, string>(fread($fp, 1024))
+  ) {
+    if (!hash_update(HH\FIXME\UNSAFE_CAST<mixed, resource>($context), $data)) {
       return false;
     }
   }
@@ -220,10 +204,14 @@ function hash_update_file(mixed $context, string $filename,
 function hash_update_stream(mixed $context, mixed $handle,
                             int $maxlen = -1): int {
   $didread = 0;
-  while ($maxlen) {
-    $chunk = fread($handle, ($maxlen > 0) ? $maxlen : 1024);
+  $context = HH\FIXME\UNSAFE_CAST<mixed, resource>($context);
+  $handle = HH\FIXME\UNSAFE_CAST<mixed, resource>($handle);
+  while ($maxlen !== 0) {
+    $chunk = HH\FIXME\UNSAFE_CAST<mixed, string>(
+      fread($handle, ($maxlen > 0) ? $maxlen : 1024)
+    );
     $len = strlen($chunk);
-    if (!$len) {
+    if ($len === 0) {
       return $didread;
     }
     if (!hash_update($context, $chunk)) {
@@ -244,7 +232,7 @@ function hash_update_stream(mixed $context, mixed $handle,
  * @return resource - Returns a copy of Hashing Context resource.
  */
 <<__Native>>
-function hash_copy(resource $context): mixed;
+function hash_copy(resource $context)[]: mixed;
 
 /**
  * hash_pbkdf2 - http://php.net/function.hash-pbkdf2.php
@@ -272,13 +260,13 @@ function hash_copy(resource $context): mixed;
  *                  unless raw_output is set to TRUE in which case the raw
  *                  binary representation of the derived key is returned.
  */
-<<__IsFoldable>>
 function hash_pbkdf2(string $algo, string $password, string $salt,
                      int $iterations, int $length = 0,
                      bool $raw_output = false): mixed {
   $algo = strtolower($algo);
   if (!in_array($algo, hash_algos())) {
     error_log("\nWarning: hash_pbkdf2(): Unknown hashing algorithm: ".
+              /* HH_FIXME[4110] $algo is ?string after strtolower */
               $algo);
     return false;
   }
@@ -296,29 +284,44 @@ function hash_pbkdf2(string $algo, string $password, string $salt,
   }
 
   $result = "";
-  $hash_length = strlen(hash($algo, "", true));
-  if (!$length) {
+  $hash_length = strlen(
+    /* HH_FIXME[4110] $algo is ?string after strtolower */
+    HH\FIXME\UNSAFE_CAST<mixed, string>(hash($algo, "", true))
+  );
+  if ($length === 0) {
     $length = $hash_length;
     if (!$raw_output) {
       // It's a bit weird
       $length *= 2;
     }
   }
-  $key_blocks = ceil($length / $hash_length);
+  $key_blocks = HH\FIXME\UNSAFE_CAST<mixed, num>(ceil($length / $hash_length));
   for ($i = 1; $i <= $key_blocks; $i++) {
     // Note: $i encoded with most siginificant octet first.
-    $xor = hash_hmac($algo, $salt.pack("N", $i), $password, true);
+    $xor = HH\FIXME\UNSAFE_CAST<mixed, string>(hash_hmac(
+      /* HH_FIXME[4110] $algo is ?string after strtolower */
+      $algo,
+      $salt.HH\FIXME\UNSAFE_CAST<mixed, string>(pack("N", $i)),
+      $password,
+      true,
+    ));
     $prev = $xor;
     for ($j = 1; $j < $iterations; $j++) {
-      $prev = hash_hmac($algo, $prev, $password, true);
-      $xor ^= $prev;
+      $prev = HH\FIXME\UNSAFE_CAST<mixed, string>(
+        /* HH_FIXME[4110] $algo is ?string after strtolower */
+        hash_hmac($algo, $prev, $password, true)
+      );
+      /* HH_FIXME[4110] $xor / str_bitwise_xor result is ?string */
+      $xor = \HH\str_bitwise_xor($xor, $prev);
     }
+    /* HH_FIXME[4110] $xor is ?string */
     $result .= $xor;
   }
 
   if ($raw_output) {
     return substr($result, 0, $length);
   } else {
+    /* HH_FIXME[4110] bin2hex() now `?string` */
     return substr(bin2hex($result), 0, $length);
   }
   return $result;
@@ -344,7 +347,7 @@ function hash_pbkdf2(string $algo, string $password, string $salt,
 // the purpose of having a comparison function which takes a fixed amount
 // of time.
 <<__Native>>
-function hash_equals(mixed $known, mixed $user): bool;
+function hash_equals(mixed $known, mixed $user)[]: bool;
 
 /**
  * furchash_hphp_ext
@@ -356,7 +359,7 @@ function hash_equals(mixed $known, mixed $user): bool;
  * @return int - A number in the range of 0-(nPart-1)
  */
 <<__Native, __IsFoldable>>
-function furchash_hphp_ext(string $key, int $len, int $npart): int;
+function furchash_hphp_ext(string $key, int $len, int $npart)[]: int;
 
 /**
  * furchash_hphp_ext_supported
@@ -364,7 +367,7 @@ function furchash_hphp_ext(string $key, int $len, int $npart): int;
  * @return bool - True
  */
 <<__IsFoldable>>
-function furchash_hphp_ext_supported(): bool {
+function furchash_hphp_ext_supported()[]: bool {
   return true;
 }
 
@@ -378,4 +381,4 @@ function furchash_hphp_ext_supported(): bool {
  * @return - The Int64 hash of the first len input characters
  */
 <<__Native, __IsFoldable>>
-function hphp_murmurhash(string $key, int $len, int $seed): int;
+function hphp_murmurhash(string $key, int $len, int $seed)[]: int;

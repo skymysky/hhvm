@@ -19,7 +19,7 @@ function fail($a, $a2) {
 }
 
 function get($key, $a) {
-  $a2 = apc_fetch($key);
+  $a2 = __hhvm_intrinsics\apc_fetch_no_check($key);
   if ($a2 === false) {
     echo "=============== Error fetching $key ==============\n";
     return;
@@ -50,37 +50,39 @@ function get_all($values) {
 function launder($v) { return __hhvm_intrinsics\launder_value($v); }
 
 function make_circular_varray() {
-  $x = new stdclass;
-  $v = varray[$x];
+  $x = new stdClass;
+  $v = vec[$x];
   $x->foo = $v;
   return $v;
 }
 
 function make_circular_darray() {
-  $x = new stdclass;
-  $d = darray[0 => $x];
+  $x = new stdClass;
+  $d = dict[0 => $x];
   $x->foo = $d;
   return $d;
 }
 
+function test(): void {
 $values = dict[
-  'varray1' => varray[],
-  'varray2' => varray[1, 2, 3],
-  'varray3' => varray['a', 'b', 'c'],
-  'varray4' => varray[launder(7), launder(8), launder(9)],
+  'varray1' => vec[],
+  'varray2' => vec[1, 2, 3],
+  'varray3' => vec['a', 'b', 'c'],
+  'varray4' => vec[launder(7), launder(8), launder(9)],
   'varray5' => make_circular_varray(),
-  'darray1' => darray[],
-  'darray2' => darray[0 => 'a', 1 => 'b', 2 => 'c'],
-  'darray3' => darray['a' => 100, 'b' => 200],
-  'darray4' => darray[0 => launder('x'), 1 => launder('y'), 2 => launder('z')],
-  'darray5' => darray[launder('j') => 11, launder('k') => 222],
+  'darray1' => dict[],
+  'darray2' => dict[0 => 'a', 1 => 'b', 2 => 'c'],
+  'darray3' => dict['a' => 100, 'b' => 200],
+  'darray4' => dict[0 => launder('x'), 1 => launder('y'), 2 => launder('z')],
+  'darray5' => dict[launder('j') => 11, launder('k') => 222],
   'darray6' => make_circular_darray()
 ];
 
-if (apc_fetch('second-time') === false) {
+if (__hhvm_intrinsics\apc_fetch_no_check('second-time') === false) {
   set_all($values);
   apc_store('second-time', true);
 } else {
   get_all($values);
   echo "============ DONE ================\n";
+}
 }

@@ -1,7 +1,9 @@
-<?php
+<?hh
 
-function f($x) {
-  switch ($x++ + ++$x) {
+function f($x) :AsyncGenerator<mixed,mixed,void>{
+  $t1 = $x; $x++;
+  ++$x; $t2 = $x;
+  switch ($t1 + $t2) {
   case 1:
     yield 1;
   case 2:
@@ -12,9 +14,13 @@ function f($x) {
     yield 4;
   }
 }
+
+<<__EntryPoint>>
+function main_2159() :mixed{
 foreach (f(0) as $x) {
  var_dump($x);
  }
 foreach (f(1) as $x) {
  var_dump($x);
  }
+}

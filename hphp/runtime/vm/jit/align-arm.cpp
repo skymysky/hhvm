@@ -20,13 +20,13 @@
 #include "hphp/runtime/vm/jit/smashable-instr-arm.h"
 
 #include "hphp/util/data-block.h"
-#include "hphp/vixl/a64/macro-assembler-a64.h"
+#include "hphp/vixl/hphp-compat.h"
 
 #include <folly/Bits.h>
 
 #include <utility>
 
-namespace HPHP { namespace jit { namespace arm {
+namespace HPHP::jit::arm {
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -38,6 +38,11 @@ namespace {
 constexpr size_t kJmpTargetAlign = vixl::kInstructionSize;
 
 struct AlignImpl {
+  /*
+   * Don't align the smashables on arm.  The sensitive part of the instruction is
+   * the literal which is stored out of line.
+   */
+  static constexpr size_t SmashableAlignTo = 0;
   static DECLARE_ALIGN_TABLE(s_table);
 
   static void pad(CodeBlock& cb, AlignContext context, size_t bytes) {
@@ -67,7 +72,6 @@ struct AlignImpl {
   }
 };
 
-DEFINE_ALIGN_TABLE(AlignImpl::s_table);
 
 }
 
@@ -90,4 +94,4 @@ const AlignInfo& alignment_info(Alignment alignment) {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-}}}
+}

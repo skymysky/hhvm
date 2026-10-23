@@ -1,18 +1,18 @@
-<?php
+<?hh
 
 interface One {
-    public function a();
-    public function b();
-    public function c();
-    public function d();
+    public function a():mixed;
+    public function b():mixed;
+    public function c():mixed;
+    public function d():mixed;
 }
 
 interface Two extends One {
     public function a() : stdClass;
     public function c() : callable;
-    public function b() : array;
+    public function b() : AnyArray;
     public function d() : int;
 }
-
-?>
-Done
+<<__EntryPoint>> function main(): void {
+echo "Done\n";
+}

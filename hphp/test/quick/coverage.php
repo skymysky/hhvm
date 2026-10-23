@@ -1,14 +1,14 @@
 <?hh
 
-function b($s) {
+function b($s) :mixed{
   if ($s === 'floo') {
     return 12;
   }
-  $GLOBALS['z'] = 234;
+  \HH\global_set('z', 234);
   return 8;
 }
 
-function a($b) {
+function a($b) :mixed{
   if ($b) {
     $x = 'floo';
   } else {
@@ -17,34 +17,40 @@ function a($b) {
   b($x);
 }
 
-function f() {
+function f() :mixed{
   for ($i = 0; $i < 4; ++$i) {
     a($i < 3);
-    $GLOBALS['tmp'] = $i;
-    $i = $GLOBALS['tmp'];
+    \HH\global_set('tmp', $i);
+    $i = \HH\global_get('tmp');
   }
 }
 
-function enable() {
+function enable() :mixed{
   echo "Going to enable\n";
   fb_enable_code_coverage();
   echo "Enabled\n";
-  $GLOBALS['z'] = 3;
+  \HH\global_set('z', 3);
 }
 
-function doenable() {
-  global $y;
+function doenable() :mixed{
+
   enable();
-  $y += 43;
+  Coverage::$y += 43;
 }
 
-function main() {
+function main() :mixed{
   echo "About to enable\n";
   doenable();
   echo "Done enabling\n";
   f();
   $r = fb_disable_code_coverage();
-  unset($r['/:systemlib.phpfb']);
+  unset($r['/:ext_fb.php']);
   var_dump($r);
 }
-main();
+abstract final class Coverage {
+  public static $y = 0;
+}
+<<__EntryPoint>>
+function main_entry(): void {
+  main();
+}

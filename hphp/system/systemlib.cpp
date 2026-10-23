@@ -15,8 +15,10 @@
 */
 
 #include "hphp/system/systemlib.h"
+
 #include "hphp/runtime/base/array-init.h"
 #include "hphp/runtime/base/builtin-functions.h"
+#include "hphp/runtime/base/coeffects-config.h"
 #include "hphp/runtime/base/execution-context.h"
 #include "hphp/runtime/base/init-fini-node.h"
 #include "hphp/runtime/base/object-data.h"
@@ -24,12 +26,15 @@
 #include "hphp/runtime/base/type-string.h"
 #include "hphp/runtime/base/type-variant.h"
 #include "hphp/runtime/base/types.h"
+
 #include "hphp/runtime/vm/class.h"
 #include "hphp/runtime/vm/unit.h"
+#include "hphp/runtime/vm/unit-emitter.h"
 
+#include <memory>
 #include <vector>
 
-namespace HPHP { namespace SystemLib {
+namespace HPHP::SystemLib {
 /////////////////////////////////////////////////////////////////////////////
 
 namespace {
@@ -40,19 +45,30 @@ const Slot s_messageIdx{0};
 const Slot s_codeIdx{2};
 
 DEBUG_ONLY bool throwable_has_expected_props() {
-  auto const erCls = s_ErrorClass;
-  auto const exCls = s_ExceptionClass;
+  auto const erCls = getErrorClass();
+  auto const exCls = getExceptionClass();
+  if (erCls->lookupDeclProp(s_message.get()) != s_messageIdx ||
+      exCls->lookupDeclProp(s_message.get()) != s_messageIdx ||
+      erCls->lookupDeclProp(s_code.get()) != s_codeIdx ||
+      exCls->lookupDeclProp(s_code.get()) != s_codeIdx) {
+    return false;
+  }
+  // Check that we have the expected type-hints on these props so we don't need
+  // to verify anything.
   return
-    erCls->lookupDeclProp(s_message.get()) == s_messageIdx &&
-    exCls->lookupDeclProp(s_message.get()) == s_messageIdx &&
-    erCls->lookupDeclProp(s_code.get()) == s_codeIdx &&
-    exCls->lookupDeclProp(s_code.get()) == s_codeIdx;
+    erCls->declPropTypeConstraint(s_messageIdx).isString() &&
+    exCls->declPropTypeConstraint(s_messageIdx).isString() &&
+    erCls->declPropTypeConstraint(s_codeIdx).isInt() &&
+    exCls->declPropTypeConstraint(s_codeIdx).isInt();
 }
 
 ALWAYS_INLINE
-Object createAndConstruct(Class* cls, const Variant& args) {
+Object createAndConstruct(Class* cls, const Array& args) {
   Object inst{cls};
-  tvDecRefGen(g_context->invokeFunc(cls->getCtor(), args, inst.get()));
+  // TODO(named_params) this forces all systemlib methods/functions to not
+  // have named parameters.
+  tvDecRefGen(g_context->invokeFunc(cls->getCtor(), args,
+                                    nullptr, inst.get()));
   return inst;
 }
 
@@ -63,8 +79,8 @@ Object createAndConstruct(Class* cls, const Variant& args) {
 ALWAYS_INLINE
 Object createAndConstructThrowable(Class* cls, const Variant& message) {
   assertx(throwable_has_expected_props());
-  assertx(cls->getCtor() == s_ErrorClass->getCtor() ||
-          cls->getCtor() == s_ExceptionClass->getCtor());
+  assertx(cls->getCtor() == getErrorClass()->getCtor() ||
+          cls->getCtor() == getExceptionClass()->getCtor());
 
   Object inst{cls};
   if (debug) {
@@ -75,101 +91,111 @@ Object createAndConstructThrowable(Class* cls, const Variant& message) {
   auto const message_prop = inst->propLvalAtOffset(s_messageIdx);
   assertx(isStringType(message_prop.type()));
   assertx(message_prop.val().pstr == staticEmptyString());
-  cellDup(*message.asCell(), message_prop);
+  tvDup(*message.asTypedValue(), message_prop);
   return inst;
 }
 
 }
 
-bool s_inited = false;
 bool s_anyNonPersistentBuiltins = false;
 std::string s_source;
 Unit* s_unit = nullptr;
-Unit* s_hhas_unit = nullptr;
-Unit* s_nativeFuncUnit = nullptr;
-Unit* s_nativeClassUnit = nullptr;
 Func* s_nullFunc = nullptr;
+Func* s_singleArgNullFunc = nullptr;
 Func* s_nullCtor = nullptr;
 
 /////////////////////////////////////////////////////////////////////////////
 
-#define DEFINE_SYSTEMLIB_CLASS(cls)       \
-  Class* s_ ## cls ## Class = nullptr;
+#define DEFINE_SYSTEMLIB_CLASS(cls, prefix, namespace) \
+  Class* s_ ## prefix ## cls ## Class = nullptr;       \
+  const StaticString s_##prefix##cls(#namespace #cls); \
+  Class* get ## prefix ## cls ## Class() {             \
+    return classLoad(s_ ## prefix ## cls.get(), s_ ## prefix ## cls ## Class); \
+  }
 SYSTEMLIB_CLASSES(DEFINE_SYSTEMLIB_CLASS)
 #undef DEFINE_SYSTEMLIB_CLASS
 
-Class* s_ThrowableClass;
-Class* s_BaseExceptionClass;
-Class* s_ErrorClass;
-Class* s_ArithmeticErrorClass;
-Class* s_ArgumentCountErrorClass;
-Class* s_AssertionErrorClass;
-Class* s_DivisionByZeroErrorClass;
-Class* s_ParseErrorClass;
-Class* s_TypeErrorClass;
-
 Object AllocStdClassObject() {
-  return Object{s_stdclassClass};
+  return Object{getstdClassClass()};
 }
 
 Object AllocPinitSentinel() {
-  return Object{s_pinitSentinelClass};
+  return Object{getpinitSentinelClass()};
 }
 
 Object AllocExceptionObject(const Variant& message) {
-  return createAndConstructThrowable(s_ExceptionClass, message);
+  return createAndConstructThrowable(getExceptionClass(), message);
 }
 
 Object AllocErrorObject(const Variant& message) {
-  return createAndConstructThrowable(s_ErrorClass, message);
+  return createAndConstructThrowable(getErrorClass(), message);
 }
 
 Object AllocArithmeticErrorObject(const Variant& message) {
-  return createAndConstructThrowable(s_ArithmeticErrorClass, message);
+  return createAndConstructThrowable(getArithmeticErrorClass(), message);
 }
 
 Object AllocArgumentCountErrorObject(const Variant& message) {
-  return createAndConstructThrowable(s_ArgumentCountErrorClass, message);
+  return createAndConstructThrowable(getArgumentCountErrorClass(), message);
 }
 
 Object AllocDivisionByZeroErrorObject(const Variant& message) {
-  return createAndConstructThrowable(s_DivisionByZeroErrorClass, message);
+  return createAndConstructThrowable(getDivisionByZeroErrorClass(), message);
 }
 
 Object AllocParseErrorObject(const Variant& message) {
-  return createAndConstructThrowable(s_ParseErrorClass, message);
+  return createAndConstructThrowable(getParseErrorClass(), message);
 }
 
 Object AllocTypeErrorObject(const Variant& message) {
-  return createAndConstructThrowable(s_TypeErrorClass, message);
+  return createAndConstructThrowable(getTypeErrorClass(), message);
 }
 
 Object AllocBadMethodCallExceptionObject(const Variant& message) {
-  return createAndConstructThrowable(s_BadMethodCallExceptionClass, message);
+  return createAndConstructThrowable(getBadMethodCallExceptionClass(), message);
 }
 
 Object AllocInvalidArgumentExceptionObject(const Variant& message) {
-  return createAndConstructThrowable(s_InvalidArgumentExceptionClass, message);
+  return createAndConstructThrowable(getInvalidArgumentExceptionClass(), message);
 }
 
 Object AllocTypeAssertionExceptionObject(const Variant& message) {
-  return createAndConstructThrowable(s_TypeAssertionExceptionClass, message);
+  return createAndConstructThrowable(getTypeAssertionExceptionClass(), message);
 }
 
 Object AllocRuntimeExceptionObject(const Variant& message) {
-  return createAndConstructThrowable(s_RuntimeExceptionClass, message);
+  return createAndConstructThrowable(getRuntimeExceptionClass(), message);
 }
 
 Object AllocOutOfBoundsExceptionObject(const Variant& message) {
-  return createAndConstructThrowable(s_OutOfBoundsExceptionClass, message);
+  return createAndConstructThrowable(getOutOfBoundsExceptionClass(), message);
 }
 
 Object AllocInvalidOperationExceptionObject(const Variant& message) {
-  return createAndConstructThrowable(s_InvalidOperationExceptionClass, message);
+  return createAndConstructThrowable(getInvalidOperationExceptionClass(), message);
+}
+
+Object AllocUnexpectedValueExceptionObject(const Variant& message) {
+  return createAndConstructThrowable(getUnexpectedValueExceptionClass(), message);
 }
 
 Object AllocDOMExceptionObject(const Variant& message) {
-  return createAndConstructThrowable(s_DOMExceptionClass, message);
+  return createAndConstructThrowable(getDOMExceptionClass(), message);
+}
+
+Object AllocDivisionByZeroExceptionObject() {
+  return createAndConstructThrowable(getDivisionByZeroExceptionClass(),
+                                     Strings::DIVISION_BY_ZERO);
+}
+
+Object AllocInvalidForeachArgumentExceptionObject() {
+  return createAndConstructThrowable(getInvalidForeachArgumentExceptionClass(),
+                                     Strings::INVALID_ARGUMENT_FOREACH);
+}
+
+Object AllocUndefinedPropertyExceptionObject(const Variant& message) {
+  return createAndConstructThrowable(getUndefinedPropertyExceptionClass(),
+                                     message);
 }
 
 Object AllocSoapFaultObject(const Variant& code,
@@ -179,106 +205,172 @@ Object AllocSoapFaultObject(const Variant& code,
                                  const Variant& name /* = uninit_variant */,
                                  const Variant& header /* = uninit_variant */) {
   return createAndConstruct(
-    s_SoapFaultClass,
-    make_packed_array(code,
-                      message,
-                      actor,
-                      detail,
-                      name,
-                      header
-                     )
+    getSoapFaultClass(),
+    make_vec_array(code, message, actor, detail, name, header)
   );
 }
 
 Object AllocLazyKVZipIterableObject(const Variant& mp) {
-  return createAndConstruct(s_LazyKVZipIterableClass,
-                            make_packed_array(mp));
+  return createAndConstruct(getLazyKVZipIterableClass(),
+                            make_vec_array(mp));
 }
 
 Object AllocLazyIterableViewObject(const Variant& iterable) {
-  return createAndConstruct(s_LazyIterableViewClass,
-                            make_packed_array(iterable));
+  return createAndConstruct(getLazyIterableViewClass(),
+                            make_vec_array(iterable));
 }
 
 Object AllocLazyKeyedIterableViewObject(const Variant& iterable) {
-  return createAndConstruct(s_LazyKeyedIterableViewClass,
-                            make_packed_array(iterable));
+  return createAndConstruct(getLazyKeyedIterableViewClass(),
+                            make_vec_array(iterable));
 }
 
-void throwExceptionObject(const Variant& message) {
+Object AllocUndefinedVariableExceptionObject(const Variant& message) {
+  return createAndConstructThrowable(getUndefinedVariableExceptionClass(), message);
+}
+
+Object AllocTypecastExceptionObject(const Variant& message) {
+  return createAndConstructThrowable(getTypecastExceptionClass(), message);
+}
+
+Object AllocReadonlyViolationExceptionObject(const Variant& message) {
+  return createAndConstructThrowable(getReadonlyViolationExceptionClass(), message);
+}
+
+Object AllocCoeffectViolationExceptionObject(const Variant& message) {
+  return createAndConstructThrowable(getCoeffectViolationExceptionClass(), message);
+}
+
+Object AllocModuleBoundaryViolationExceptionObject(const Variant& message) {
+  return createAndConstructThrowable(getModuleBoundaryViolationExceptionClass(), message);
+}
+
+Object AllocDeploymentBoundaryViolationExceptionObject(const Variant& message) {
+  return createAndConstructThrowable(getDeploymentBoundaryViolationExceptionClass(), message);
+}
+
+Object AllocRequestFanoutLimitExceededExceptionObject(const Variant& message) {
+  return createAndConstructThrowable(getRequestFanoutLimitExceededExceptionClass(), message);
+}
+
+[[noreturn]] void throwExceptionObject(const Variant& message) {
   throw_object(AllocExceptionObject(message));
 }
 
-void throwErrorObject(const Variant& message) {
+[[noreturn]] void throwErrorObject(const Variant& message) {
   throw_object(AllocErrorObject(message));
 }
 
-void throwArithmeticErrorObject(const Variant& message) {
+[[noreturn]] void throwArithmeticErrorObject(const Variant& message) {
   throw_object(AllocArithmeticErrorObject(message));
 }
 
-void throwArgumentCountErrorObject(const Variant& message) {
+[[noreturn]] void throwArgumentCountErrorObject(const Variant& message) {
   throw_object(AllocArgumentCountErrorObject(message));
 }
 
-void throwDivisionByZeroErrorObject(const Variant& message) {
+[[noreturn]] void throwDivisionByZeroErrorObject(const Variant& message) {
   throw_object(AllocDivisionByZeroErrorObject(message));
 }
 
-void throwParseErrorObject(const Variant& message) {
+[[noreturn]] void throwParseErrorObject(const Variant& message) {
   throw_object(AllocParseErrorObject(message));
 }
 
-void throwTypeErrorObject(const Variant& message) {
+[[noreturn]] void throwTypeErrorObject(const Variant& message) {
   throw_object(AllocTypeErrorObject(message));
 }
 
-void throwBadMethodCallExceptionObject(const Variant& message) {
+[[noreturn]] void throwBadMethodCallExceptionObject(const Variant& message) {
   throw_object(AllocBadMethodCallExceptionObject(message));
 }
 
-void throwInvalidArgumentExceptionObject(const Variant& message) {
+[[noreturn]] void throwInvalidArgumentExceptionObject(const Variant& message) {
   throw_object(AllocInvalidArgumentExceptionObject(message));
 }
 
-void throwTypeAssertionExceptionObject(const Variant& message) {
+[[noreturn]] void throwTypeAssertionExceptionObject(const Variant& message) {
   throw_object(AllocTypeAssertionExceptionObject(message));
 }
 
-void throwRuntimeExceptionObject(const Variant& message) {
+[[noreturn]] void throwRuntimeExceptionObject(const Variant& message) {
   throw_object(AllocRuntimeExceptionObject(message));
 }
 
-void throwOutOfBoundsExceptionObject(const Variant& message) {
+[[noreturn]] void throwOutOfBoundsExceptionObject(const Variant& message) {
   throw_object(AllocOutOfBoundsExceptionObject(message));
 }
 
-void throwInvalidOperationExceptionObject(const Variant& message) {
+[[noreturn]] void throwInvalidOperationExceptionObject(const Variant& message) {
   throw_object(AllocInvalidOperationExceptionObject(message));
 }
 
-void throwDOMExceptionObject(const Variant& message) {
+[[noreturn]] void throwUnexpectedValueExceptionObject(const Variant& message) {
+  throw_object(AllocUnexpectedValueExceptionObject(message));
+}
+
+[[noreturn]] void throwDOMExceptionObject(const Variant& message) {
   throw_object(AllocDOMExceptionObject(message));
 }
 
-void throwSoapFaultObject(const Variant& code,
-                          const Variant& message,
-                          const Variant& actor /* = uninit_variant */,
-                          const Variant& detail /* = uninit_variant */,
-                          const Variant& name /* = uninit_variant */,
-                          const Variant& header /* = uninit_variant */) {
+[[noreturn]] void throwDivisionByZeroExceptionObject() {
+  throw_object(AllocDivisionByZeroExceptionObject());
+}
+
+[[noreturn]] void throwSoapFaultObject(const Variant& code,
+                                       const Variant& message,
+                                       const Variant& actor /* = uninit_variant */,
+                                       const Variant& detail /* = uninit_variant */,
+                                       const Variant& name /* = uninit_variant */,
+                                       const Variant& header /* = uninit_variant */) {
   throw_object(Object{AllocSoapFaultObject(code, message,
                                     actor, detail,
                                     name, header)});
 }
 
+[[noreturn]] void throwInvalidForeachArgumentExceptionObject() {
+  throw_object(AllocInvalidForeachArgumentExceptionObject());
+}
+
+[[noreturn]] void throwUndefinedPropertyExceptionObject(const Variant& message) {
+  throw_object(AllocUndefinedPropertyExceptionObject(message));
+}
+
+[[noreturn]] void throwUndefinedVariableExceptionObject(const Variant& message) {
+  throw_object(AllocUndefinedVariableExceptionObject(message));
+}
+
+[[noreturn]] void throwTypecastExceptionObject(const Variant& message) {
+  throw_object(AllocTypecastExceptionObject(message));
+}
+
+[[noreturn]] void throwReadonlyViolationExceptionObject(const Variant& message) {
+  throw_object(AllocReadonlyViolationExceptionObject(message));
+}
+
+[[noreturn]] void throwCoeffectViolationExceptionObject(const Variant& message) {
+  throw_object(AllocCoeffectViolationExceptionObject(message));
+}
+
+[[noreturn]] void throwModuleBoundaryViolationExceptionObject(const Variant& message) {
+  throw_object(AllocModuleBoundaryViolationExceptionObject(message));
+}
+
+[[noreturn]] void throwDeploymentBoundaryViolationExceptionObject(const Variant& message) {
+  throw_object(AllocDeploymentBoundaryViolationExceptionObject(message));
+}
+
+[[noreturn]] void throwRequestFanoutLimitExceededExceptionObject(const Variant& message) {
+  throw_object(AllocRequestFanoutLimitExceededExceptionObject(message));
+}
+
 #define ALLOC_OBJECT_STUB(name)                                         \
   Object Alloc##name##Object() {                                        \
-    return Object{s_##name##Class};                                     \
+    return Object{get##name##Class()};                                  \
   }
 
-ALLOC_OBJECT_STUB(Directory);
-ALLOC_OBJECT_STUB(PDOException);
+ALLOC_OBJECT_STUB(Directory)
+ALLOC_OBJECT_STUB(PDOException)
 
 #undef ALLOC_OBJECT_STUB
 
@@ -303,23 +395,112 @@ void mergePersistentUnits() {
   }
 }
 
+Unit* findPersistentUnit(const StringData* name) {
+  for (auto unit : s_persistent_units) {
+    if (unit->filepath() == name) return unit;
+  }
+  return nullptr;
+}
+
+namespace {
+
+Func* setupNullClsMethod(Func* f, Class* cls, StringData* name) {
+  assertx(f && f->isPhpLeafFn());
+  auto clone = f->clone(cls, name);
+  clone->setAttrs(static_cast<Attr>(
+                    AttrPublic | AttrNoInjection | AttrDynamicallyCallable));
+  clone->setRequiredCoeffects(RuntimeCoeffects::pure());
+  return clone;
+}
+
+StaticString
+  s___86null("__SystemLib\\__86null"),
+  s___86single_arg_null("__SystemLib\\__86single_arg_null");
+
+Func* setup86ctorMethod(Class* cls) {
+  auto f = funcLoad(s___86null.get(), s_nullFunc);
+  return setupNullClsMethod(f, cls, s_86ctor.get());
+}
+
+Func* setup86ReifiedInitMethod(Class* cls) {
+  auto f = funcLoad(s___86single_arg_null.get(), s_singleArgNullFunc);
+  return setupNullClsMethod(f, cls, s_86reifiedinit.get());
+}
+
+} // namespace
+
 void setupNullCtor(Class* cls) {
   assertx(!s_nullCtor);
-  if (!s_nullFunc) {
-    s_nullFunc =
-      Unit::lookupFunc(makeStaticString("__SystemLib\\__86null"));
-    assertx(s_nullFunc);
-    assertx(s_nullFunc->isPhpLeafFn());
-  }
+  s_nullCtor = setup86ctorMethod(cls);
+  s_nullCtor->setHasForeignThis(true);
+}
 
-  auto clone = s_nullFunc->clone(cls, makeStaticString("86ctor"));
-  clone->setNewFuncId();
-  clone->setAttrs(static_cast<Attr>(
-                    AttrPublic | AttrNoInjection | AttrSkipFrame |
-                    AttrRequiresThis | AttrHasForeignThis |
-                    AttrDynamicallyCallable));
-  s_nullCtor = clone;
+Func* getNull86reifiedinit(Class* cls) {
+  auto f = setup86ReifiedInitMethod(cls);
+  f->setBaseCls(cls);
+  f->setGenerated(true);
+  return f;
+}
+
+Func* funcLoad(const StringData* name, Func*& cache) {
+  if (UNLIKELY(cache == nullptr)) {
+    cache = Func::load(name);
+    assertx(cache);
+    // This should be here but things are broken right now. Katy will fix it
+    // assertx(cache->isPersistent());
+    assertx(cache->unit()->isSystemLib());
+  }
+  return cache;
+}
+
+Class* classLoad(const StringData* name, Class*& cache) {
+  if (UNLIKELY(cache == nullptr)) {
+    cache = Class::load(name);
+    assertx(cache);
+    assertx(cache->isPersistent());
+    assertx(cache->preClass()->unit()->isSystemLib());
+  }
+  return cache;
 }
 
 /////////////////////////////////////////////////////////////////////////////
-}} // namespace HPHP::SystemLib
+
+namespace {
+
+struct Registered {
+  std::atomic<bool> m_keep{false};
+  std::mutex m_lock;
+  std::vector<std::unique_ptr<UnitEmitter>> m_ues;
+};
+
+Registered& registered() {
+  static Registered r;
+  return r;
+}
+
+}
+
+void keepRegisteredUnitEmitters(bool b) {
+  registered().m_keep.store(b);
+}
+
+void registerUnitEmitter(std::unique_ptr<UnitEmitter> ue) {
+  assertx(ue->m_filepath->data()[0] == '/' &&
+          ue->m_filepath->data()[1] == ':');
+  auto& r = registered();
+  if (!r.m_keep) return;
+  std::scoped_lock<std::mutex> _{r.m_lock};
+  r.m_ues.emplace_back(std::move(ue));
+}
+
+std::vector<std::unique_ptr<UnitEmitter>> claimRegisteredUnitEmitters() {
+  auto& r = registered();
+  std::scoped_lock<std::mutex> _{r.m_lock};
+  auto out = std::move(r.m_ues);
+  assertx(r.m_ues.empty());
+  return out;
+}
+
+/////////////////////////////////////////////////////////////////////////////
+
+} // namespace HPHP::SystemLib

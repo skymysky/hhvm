@@ -1,17 +1,17 @@
 <?hh
-function dump($iterable) {
+function dump($iterable) :mixed{
   echo get_class($iterable) . "\n";
   foreach ($iterable as $k => $v) {
     echo "$k => $v\n";
   }
 }
-function dump_set($iterable) {
+function dump_set($iterable) :mixed{
   echo get_class($iterable) . "\n";
   foreach ($iterable as $v) {
     echo "$v\n";
   }
 }
-function main() {
+function main() :mixed{
   $x = Vector {1, 2, 3, 4, 5};
   dump($x->slice(1, 2));
   dump($x->slice(4, 10));
@@ -58,4 +58,8 @@ function main() {
   dump_set($x->slice(4, 10));
   dump_set($x->slice(10, 2));
 }
+
+<<__EntryPoint>>
+function main_slice() :mixed{
 main();
+}

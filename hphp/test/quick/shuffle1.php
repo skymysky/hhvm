@@ -1,6 +1,6 @@
 <?hh
 
-function get($a, $idx) {
+function get(KeyedContainer<arraykey, mixed> $a, arraykey $idx) :mixed{
   $max = 10;
   for ($i = 0; $i < $max; $i++) {
     $r = $a[$idx];
@@ -10,10 +10,10 @@ function get($a, $idx) {
   }
   return $a[$idx];
 }
-
-$a = array('a', 2, false);
+<<__EntryPoint>> function main(): void {
+$a = vec['a', 2, false];
 var_dump(get($a, 1));
 
-$a = array('a'=>'b', 1=>'c', 2=>4, 'c'=>3, 0=>'hello');
+$a = dict['a'=>'b', 1=>'c', 2=>4, 'c'=>3, 0=>'hello'];
 var_dump(get($a, 1));
-
+}

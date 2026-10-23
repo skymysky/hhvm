@@ -3,9 +3,9 @@ string(3) "foo"
 int(1234)
 int(1234)
 logger 0 constructing
-array(2) {
+dict(2) {
   ["x"]=>
-  object(logger)#1 (1) {
+  object(logger) (1) {
     ["idx":"logger":private]=>
     int(0)
   }
@@ -13,15 +13,15 @@ array(2) {
   int(5)
 }
 string(12) "almost there"
-array(2) {
+dict(2) {
   ["foo"]=>
   string(10) "inside foo"
   ["s"]=>
   string(3) "foo"
 }
-array(4) {
+dict(4) {
   ["x"]=>
-  object(logger)#1 (1) {
+  object(logger) (1) {
     ["idx":"logger":private]=>
     int(0)
   }
@@ -32,23 +32,17 @@ array(4) {
   ["z"]=>
   int(5)
 }
-logger 0 destructing
 int(3735928559)
-array(5) {
-  [0]=>
+vec(5) {
   int(1)
-  [1]=>
   int(2)
-  [2]=>
   int(3)
-  [3]=>
   int(4)
-  [4]=>
   int(5)
 }
 int(4)
 string(29) "Generator is already finished"
-array(12) {
+dict(12) {
   ["a"]=>
   int(1)
   ["b"]=>
@@ -74,9 +68,9 @@ array(12) {
   ["l"]=>
   int(12)
 }
-array(12) {
+dict(12) {
   ["a"]=>
-  object(stdClass)#6 (0) {
+  object(stdClass) (0) {
   }
   ["b"]=>
   int(3735928559)
@@ -101,14 +95,14 @@ array(12) {
   ["l"]=>
   int(12)
 }
-array(12) {
+dict(12) {
   ["a"]=>
-  object(stdClass)#6 (0) {
+  object(stdClass) (0) {
   }
   ["b"]=>
   int(3735928559)
   ["c"]=>
-  object(Generator)#5 (0) {
+  object(Generator) (0) {
   }
   ["d"]=>
   int(3126047761)

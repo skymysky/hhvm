@@ -1,0 +1,2 @@
+--enable-supportdyn-hint
+--error-format plain_highlighted

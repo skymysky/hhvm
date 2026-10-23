@@ -9,13 +9,17 @@
  *
  */
 
-function f() {}
+function f() /* : TAny */ {
+  return 42;
+}
 
-function getArr(): array<int> { return array(); }
+function getArr(): varray<int> {
+  return vec[];
+}
 
 function g(): void {
   $a = getArr();
-  $b = array();
+  $b = vec[];
   $idx = f();
 
   // not entirely sure why, but this if statement is needed to trigger an error
@@ -35,4 +39,12 @@ function g(): void {
 function h(?int $a, ?string $b): bool {
   // Not a trivial comparison since both $a and $b can be null
   return $a === $b;
+}
+
+function make_tuple(): (int, string) {
+  return tuple(3, 'a');
+}
+
+function test2(): bool {
+  return make_tuple() === 2;
 }

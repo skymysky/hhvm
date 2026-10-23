@@ -1,0 +1,25 @@
+error: Typing[4208] Expected argument marked `inout` to be contained in a local or a value-typed container (e.g. vec, dict, keyset, array). To use `inout` here, assign to/from a temporary local variable. [1]
+-> This is an object of type ConstMap<string, shape('eggs' => int)> [2]
+
+bad_inout_use_arg16.php:6:11
+3 | function f(inout int $i): void {}
+4 | 
+5 | function test(ConstMap<string, shape('eggs' => int)> $x): void {
+  |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ [2]
+6 |   f(inout $x['foo']['eggs']);
+  |           ^^^^^^^^^^^^^^^^^ [1]
+7 | }
+
+error: Typing[4011] You cannot mutate this [1]
+-> This is an object of type ConstMap<string, shape('eggs' => int)> [2]
+
+bad_inout_use_arg16.php:6:11
+3 | function f(inout int $i): void {}
+4 | 
+5 | function test(ConstMap<string, shape('eggs' => int)> $x): void {
+  |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ [2]
+6 |   f(inout $x['foo']['eggs']);
+  |           ^^^^^^^^^^^^^^^^^ [1]
+7 | }
+
+2 errors found

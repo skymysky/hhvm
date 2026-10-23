@@ -1,4 +1,12 @@
-class classname<this>
-X int
-$x int
-f (function(): _)
+$x
+  INSERT $x
+  int
+class
+  INSERT class
+  class<this>
+f
+  INSERT f()
+  function(): _
+X
+  INSERT X
+  int

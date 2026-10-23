@@ -1,4 +1,4 @@
-<?hh // decl
+<?hh
 /**
  * Copyright (c) 2014, Facebook, Inc.
  * All rights reserved.
@@ -9,9 +9,11 @@
  *
  */
 
-$foo = function(array<string, mixed> $rel): array<string, mixed> {
-  return array(
-    'id'       => $rel['id'],
-    'relation' => $rel['relation_type'],
-  );
-};
+function main(): void {
+  $foo = function(darray<string, mixed> $rel): darray<string, mixed> {
+    return dict[
+      'id'       => $rel['id'],
+      'relation' => $rel['relation_type'],
+    ];
+  };
+}

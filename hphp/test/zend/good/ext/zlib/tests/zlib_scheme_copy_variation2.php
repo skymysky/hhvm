@@ -1,4 +1,4 @@
-<?php
+<?hh <<__EntryPoint>> function main(): void {
 $org_data = <<<EOT
 uncompressed contents of 004.txt.gz is:
 When you're taught through feelings
@@ -9,8 +9,8 @@ as it turns around
 and I know that it descends down on me
 EOT;
 
-$inputFileName = __FILE__.'.org';
-$outputFileName = __FILE__.'.tmp';
+$inputFileName = sys_get_temp_dir().'/'.'org';
+$outputFileName = sys_get_temp_dir().'/'.'tmp';
 
 file_put_contents($inputFileName, $org_data);
 
@@ -37,5 +37,5 @@ else {
 }
 unlink($inputFileName);
 unlink($outputFileName);
-?>
-===DONE===
+echo "===DONE===\n";
+}

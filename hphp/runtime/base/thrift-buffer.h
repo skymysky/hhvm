@@ -14,8 +14,7 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_THRIFT_BUFFER_H_
-#define incl_HPHP_THRIFT_BUFFER_H_
+#pragma once
 
 #include "hphp/runtime/base/type-string.h"
 #include "hphp/runtime/base/variable-serializer.h"
@@ -110,7 +109,7 @@ public:
     a.d = data;
     write(a.c);
   }
-  void write(const String& data);
+  void write(const OptString& data);
 
   // reads
   void read(bool &data) {
@@ -161,11 +160,11 @@ public:
     read(a.c);
     data = a.d;
   }
-  void read(String &data) {
+  void read(OptString &data) {
     int32_t size;
     read(size);
     if (size > 0 && size + 1 > 0) {
-      data = String(size, ReserveString);
+      data = OptString(size, ReserveString);
       char *buf = data.mutableData();
       read(buf, size);
       data.setSize(size);
@@ -253,8 +252,8 @@ public:
   void skip(int8_t type);
 
 protected:
-  virtual String readImpl() = 0;
-  virtual void flushImpl(const String& data) = 0;
+  virtual OptString readImpl() = 0;
+  virtual void flushImpl(const OptString& data) = 0;
   virtual void throwError(const char *msg, int code) = 0;
 
   int   m_size;
@@ -276,7 +275,7 @@ ThriftBuffer& operator=(const ThriftBuffer& /*sb*/) {
 
   VariableSerializer::Type m_serializerType;
 
-  void flush(const String& data);
+  void flush(const OptString& data);
   void read(char *data, int len);
 
   void throwOutOfMemory();
@@ -286,4 +285,3 @@ ThriftBuffer& operator=(const ThriftBuffer& /*sb*/) {
 ///////////////////////////////////////////////////////////////////////////////
 }
 
-#endif // incl_HPHP_THRIFT_BUFFER_H_

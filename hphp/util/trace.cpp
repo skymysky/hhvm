@@ -14,8 +14,6 @@
    +----------------------------------------------------------------------+
 */
 
-// We can't do this on MSVC, it's all debug or all release.
-#ifndef _MSC_VER
 /*
  * Forcibly define USE_TRACE, so we get the debug trace.h interface included
  * here. This allows mixed compilation, where some units were compiled
@@ -24,7 +22,7 @@
 #ifndef USE_TRACE
 #  define USE_TRACE 1
 #endif
-#endif
+
 #include "hphp/util/trace.h"
 
 #include <iostream>
@@ -35,12 +33,13 @@
 #include <string>
 
 #include <folly/portability/PThread.h>
+#include <fmt/core.h>
 
 #include "hphp/util/ringbuffer.h"
 
 namespace HPHP {
 
-TRACE_SET_MOD(tprefix);
+TRACE_SET_MOD(tprefix)
 
 namespace Trace {
 
@@ -57,6 +56,8 @@ static const char *tokNames[] = {
 };
 
 namespace {
+
+const char* kPIDPlaceholder = "%{pid}";
 
 /*
  * Dummy class to get some code to run before main().
@@ -89,28 +90,43 @@ public:
 
   static void EnsureInitFile(const char* file) {
     if (out && out != stderr) return;
-    if (!file) file = "/tmp/hphp.log";
-    out = fopen(file, "w");
+
+    auto const filename = [&] () -> std::string {
+      if (!file) return "/tmp/hphp.log";
+      std::string result{file};
+      size_t idx;
+      if ((idx = result.find(kPIDPlaceholder)) != std::string::npos) {
+        result.replace(idx, strlen(kPIDPlaceholder), std::to_string(getpid()));
+      }
+      return result;
+    }();
+
+    out = fopen(filename.c_str(),
+                getenv("HPHP_TRACE_APPEND") ? "a" : "w");
     if (!out) {
-      fprintf(stderr, "could not create log file (%s); using stderr\n", file);
+      fprintf(
+        stderr,
+        "could not create log file (%s); using stderr\n",
+        filename.c_str()
+      );
       out = stderr;
     }
   }
 
-  static void InitFromSpec(std::string spec, int* levels) {
+  static void InitFromSpec(folly::StringPiece spec, int* levels) {
     std::vector<folly::StringPiece> pieces;
-    folly::split(",", spec, pieces);
+    folly::split(',', spec, pieces);
     for (auto piece : pieces) {
       folly::StringPiece moduleName;
       int level;
       try {
-        if (!folly::split(":", piece, moduleName, level)) {
+        if (!folly::split(':', piece, moduleName, level)) {
           moduleName = piece;
           level = 1;
         }
-      } catch (const std::exception& re) {
+      } catch (const std::exception& ) {
         std::cerr <<
-          folly::format("Ignoring invalid TRACE component: {}\n", piece);
+          fmt::format("Ignoring invalid TRACE component: {}\n", piece);
         continue;
       }
 
@@ -152,9 +168,22 @@ void ensureInit(std::string outFile) {
   Init::EnsureInitFile(outFile.c_str());
 }
 
-void setTraceThread(const std::string& traceSpec) {
+void setTraceThread(folly::StringPiece traceSpec) {
   for (auto& level : tl_levels) level = 0;
   Init::InitFromSpec(traceSpec, tl_levels);
+}
+
+CompactVector<BumpRelease> bumpSpec(folly::StringPiece traceSpec) {
+  std::array<int, NumModules> modules{};
+
+  Init::InitFromSpec(traceSpec, modules.data());
+  CompactVector<BumpRelease> result;
+  for (int i_2 = 0; i_2 < NumModules; i_2++) {
+    if (modules[i_2]) {
+      result.emplace_back(static_cast<Module>(i_2), -modules[i_2]);
+    }
+  }
+  return result;
 }
 
 void vtrace(const char *fmt, va_list ap) {

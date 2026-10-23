@@ -18,11 +18,18 @@
 
 #include <sstream>
 
+#include <folly/functional/Invoke.h>
+
+#include "hphp/runtime/base/bespoke/logging-profile.h"
 #include "hphp/runtime/vm/jit/ssa-tmp.h"
-#include "hphp/runtime/vm/jit/abi-x64.h"
 #include "hphp/util/text-util.h"
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
+
+std::string KeyedIndexData::show() const {
+  auto const escaped = escapeStringForCPP(key->data(), key->size());
+  return folly::format("{},\"{}\"", index, key->data()).str();
+}
 
 std::string NewStructData::show() const {
   std::ostringstream os;
@@ -37,14 +44,49 @@ std::string NewStructData::show() const {
   return os.str();
 }
 
+std::string NewBespokeStructData::show() const {
+  std::ostringstream os;
+  os << layout.describe() << ',';
+  os << offset.offset << ",(";
+  auto delimiter = "";
+  for (auto i = 0; i < numSlots; i++) {
+    os << delimiter << slots[i];
+    delimiter = ",";
+  }
+  os << ')';
+  return os.str();
+}
+
+std::string InitStructPositionsData::show() const {
+  std::ostringstream os;
+  os << layout.describe() << ",(";
+  auto delimiter = "";
+  for (auto i = 0; i < numSlots; i++) {
+    os << delimiter << slots[i];
+    delimiter = ",";
+  }
+  os << ')';
+  return os.str();
+}
+
+size_t LoggingProfileData::stableHash() const {
+  return profile ? profile->key.stableHash() : 0;
+}
+
+size_t SinkProfileData::stableHash() const {
+  if (!profile) return 0;
+  return profile->key.first ^ SrcKey::StableHasher()(profile->key.second);
+}
+
 //////////////////////////////////////////////////////////////////////
 
 namespace {
 
-FOLLY_CREATE_HAS_MEMBER_FN_TRAITS(has_hash,   hash);
-FOLLY_CREATE_HAS_MEMBER_FN_TRAITS(has_equals, equals);
-FOLLY_CREATE_HAS_MEMBER_FN_TRAITS(has_clone,  clone);
-FOLLY_CREATE_HAS_MEMBER_FN_TRAITS(has_show,   show);
+FOLLY_CREATE_MEMBER_INVOKER(invoke_hash,               hash);
+FOLLY_CREATE_MEMBER_INVOKER(invoke_stableHash,         stableHash);
+FOLLY_CREATE_MEMBER_INVOKER(invoke_equals,             equals);
+FOLLY_CREATE_MEMBER_INVOKER(invoke_clone,              clone);
+FOLLY_CREATE_MEMBER_INVOKER(invoke_updateStackOffsets, updateStackOffsets);
 
 /*
  * dispatchExtra translates from runtime values for the Opcode enum
@@ -97,57 +139,70 @@ RetType dispatchExtra(Opcode opc, IRExtraData* data, Args&&... args) {
 }
 
 template<class T>
-typename std::enable_if<
-  has_hash<T,size_t () const>::value,
+std::enable_if_t<
+  std::is_invocable_v<invoke_hash, T const&>,
   size_t
->::type hashExtraImpl(T* t) { return t->hash(); }
+> hashExtraImpl(T* t) { return t->hash(); }
 size_t hashExtraImpl(IRExtraData*) {
   // This probably means we tried to hash an IRInstruction with extra data that
   // had no hash function.
-  always_assert(!"attempted to hash extra data that didn't "
+  always_assert(false && "attempted to hash extra data that didn't "
     "provide a hash function");
 }
 
 template<class T>
-typename std::enable_if<
-  has_equals<T,bool (T const&) const>::value ||
-  has_equals<T,bool (T)        const>::value,
+std::enable_if_t<
+  std::is_invocable_v<invoke_stableHash, T const&>,
+  size_t
+> stableHashExtraImpl(T* t) { return t->stableHash(); }
+size_t stableHashExtraImpl(IRExtraData*) {
+  // This probably means we tried to hash an IRInstruction with extra data that
+  // had no hash function.
+  always_assert(false && "attempted to hash extra data that didn't "
+    "provide a hash function");
+}
+
+template<class T>
+std::enable_if_t<
+  std::is_invocable_v<invoke_equals, T const&, T const&>,
   bool
->::type equalsExtraImpl(T* t, IRExtraData* o) {
+> equalsExtraImpl(T* t, IRExtraData* o) {
   return t->equals(*static_cast<T*>(o));
 }
 bool equalsExtraImpl(IRExtraData*, IRExtraData*) {
   // This probably means we tried to compare IRInstructions with extra data that
   // had no equals function.
-  always_assert(!"attempted to compare extra data that didn't "
+  always_assert(false && "attempted to compare extra data that didn't "
                  "provide an equals function");
 }
 
 // Clone using a data-specific clone function.
 template<class T>
-typename std::enable_if<
-  has_clone<T,T* (Arena&) const>::value,
-  T*
->::type cloneExtraImpl(T* t, Arena& arena) {
-  return t->clone(arena);
-}
-
-// Use the copy constructor if no clone() function was supplied.
-template<class T>
-typename std::enable_if<
-  !has_clone<T,T* (Arena&) const>::value,
-  T*
->::type cloneExtraImpl(T* t, Arena& arena) {
-  return new (arena) T(*t);
+T* cloneExtraImpl(T* t, Arena& arena) {
+  if constexpr (std::is_invocable_v<invoke_clone, T const&, Arena&>) {
+    return t->clone(arena);
+  } else {
+    return new (arena) T(*t);
+  }
 }
 
 template<class T>
 std::string showExtraImpl(const T* extra) { return extra->show(); }
 
-MAKE_DISPATCHER(HashDispatcher, size_t, hashExtraImpl);
-MAKE_DISPATCHER(EqualsDispatcher, bool, equalsExtraImpl);
-MAKE_DISPATCHER(CloneDispatcher, IRExtraData*, cloneExtraImpl);
-MAKE_DISPATCHER(ShowDispatcher, std::string, showExtraImpl);
+
+template<class T>
+void updateStackOffsetsExtraImpl(T* extra, int32_t delta) {
+  if constexpr (std::is_invocable_v<invoke_updateStackOffsets, T&, int32_t>) {
+    extra->updateStackOffsets(delta);
+  }
+}
+
+MAKE_DISPATCHER(HashDispatcher, size_t, hashExtraImpl)
+MAKE_DISPATCHER(StableHashDispatcher, size_t, stableHashExtraImpl)
+MAKE_DISPATCHER(EqualsDispatcher, bool, equalsExtraImpl)
+MAKE_DISPATCHER(CloneDispatcher, IRExtraData*, cloneExtraImpl)
+MAKE_DISPATCHER(ShowDispatcher, std::string, showExtraImpl)
+MAKE_DISPATCHER(UpdateStackOffsetsDispatcher, void, updateStackOffsetsExtraImpl)
 
 }
 
@@ -155,6 +210,11 @@ MAKE_DISPATCHER(ShowDispatcher, std::string, showExtraImpl);
 
 size_t hashExtra(Opcode opc, const IRExtraData* data) {
   return dispatchExtra<size_t,HashDispatcher>(
+    opc, const_cast<IRExtraData*>(data));
+}
+
+size_t stableHashExtra(Opcode opc, const IRExtraData* data) {
+  return dispatchExtra<size_t,StableHashDispatcher>(
     opc, const_cast<IRExtraData*>(data));
 }
 
@@ -177,6 +237,12 @@ std::string showExtra(Opcode opc, const IRExtraData* data) {
   );
 }
 
+void updateStackOffsetsExtra(Opcode opc, IRExtraData* data, int32_t delta) {
+  dispatchExtra<void, UpdateStackOffsetsDispatcher>(
+    opc, data, delta
+  );
+}
+
 //////////////////////////////////////////////////////////////////////
 
-}}
+}

@@ -1,9 +1,9 @@
-<?php
+<?hh
 /* Prototype  : int vfprintf  ( resource $handle  , string $format , array $args  )
  * Description: Write a formatted string to a stream
  * Source code: ext/standard/formatted_print.c
 */
-
+<<__EntryPoint>> function main(): void {
 echo "*** Testing vfprintf() : basic functionality - using bool format ***\n";
 
 // Initialise all required variables
@@ -11,13 +11,14 @@ $format = "format";
 $format1 = "%b";
 $format2 = "%b %b";
 $format3 = "%b %b %b";
-$arg1 = array(TRUE);
-$arg2 = array(TRUE,FALSE);
-$arg3 = array(TRUE,FALSE,TRUE);
+$arg1 = vec[TRUE];
+$arg2 = vec[TRUE,FALSE];
+$arg3 = vec[TRUE,FALSE,TRUE];
 
 /* creating dumping file */
-$data_file = dirname(__FILE__) . '/vfprintf_basic4.txt';
-if (!($fp = fopen($data_file, 'wt')))
+$data_file = sys_get_temp_dir().'/'.'vfprintf_basic4.txt';
+$fp = fopen($data_file, 'wt');
+if (!$fp)
    return;
 
 vfprintf($fp, $format1,$arg1);
@@ -33,5 +34,5 @@ fclose($fp);
 print_r(file_get_contents($data_file));
 
 unlink($data_file);
-?>
-===DONE===
+echo "===DONE===\n";
+}

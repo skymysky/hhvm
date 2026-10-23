@@ -15,8 +15,7 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_EXT_IMAGICK_H_
-#define incl_HPHP_EXT_IMAGICK_H_
+#pragma once
 
 #include <vector>
 
@@ -39,6 +38,7 @@ namespace HPHP {
 struct ImagickExtension final : Extension {
   ImagickExtension();
   void moduleInit() override;
+  void moduleRegisterNative() override;
   void moduleShutdown() override;
   void threadInit() override;
 
@@ -46,56 +46,50 @@ struct ImagickExtension final : Extension {
   static bool hasProgressMonitor();
 
  private:
+  void registerNativeImagickClass();
+  void registerNativeImagickDrawClass();
+  void registerNativeImagickPixelClass();
+  void registerNativeImagickPixelIteratorClass();
+
   struct ImagickIniSetting {
     bool m_locale_fix;
     bool m_progress_monitor;
   };
 
-  static THREAD_LOCAL(ImagickIniSetting, s_ini_setting);
+  static RDS_LOCAL(ImagickIniSetting, s_ini_setting);
 };
 
 //////////////////////////////////////////////////////////////////////////////
 // PHP Exceptions and Classes
+#define IMAGE_MAGIC_CLASSES(X) \
+  X(ImagickException) \
+  X(ImagickDrawException) \
+  X(ImagickPixelException) \
+  X(ImagickPixelIteratorException) \
+  X(Imagick) \
+  X(ImagickDraw) \
+  X(ImagickPixel) \
+  X(ImagickPixelIterator)
+
 #define IMAGICK_DEFINE_CLASS(CLS) \
-  class CLS { \
+  struct CLS : SystemLib::ClassLoader<#CLS> { \
    public: \
     static Object allocObject() { \
-      if (cls == nullptr) { \
-        initClass(); \
-      } \
-      return Object{cls};                       \
+      return Object{ classof() }; \
     } \
     \
     static Object allocObject(const Variant& arg) { \
       Object ret = allocObject(); \
       tvDecRefGen(\
-        g_context->invokeFunc(cls->getCtor(), make_packed_array(arg), \
-                              ret.get()) \
+        g_context->invokeFunc(classof()->getCtor(), make_vec_array(arg), \
+                              nullptr, ret.get()) \
       );\
       return ret; \
     } \
     \
-   private: \
-    static void initClass() {                                   \
-      cls = Unit::lookupClass(                                  \
-        req::ptr<StringData>::attach(                           \
-          StringData::Make(#CLS)                                \
-        ).get()                                                 \
-      );                                                        \
-    }                                                           \
-                                                                \
-    static HPHP::Class* cls; \
   };
 
-IMAGICK_DEFINE_CLASS(ImagickException)
-IMAGICK_DEFINE_CLASS(ImagickDrawException)
-IMAGICK_DEFINE_CLASS(ImagickPixelException)
-IMAGICK_DEFINE_CLASS(ImagickPixelIteratorException)
-
-IMAGICK_DEFINE_CLASS(Imagick)
-IMAGICK_DEFINE_CLASS(ImagickDraw)
-IMAGICK_DEFINE_CLASS(ImagickPixel)
-IMAGICK_DEFINE_CLASS(ImagickPixelIterator)
+IMAGE_MAGIC_CLASSES(IMAGICK_DEFINE_CLASS)
 
 #undef IMAGICK_DEFINE_CLASS
 
@@ -121,7 +115,7 @@ template<typename Wand>
 struct WandResource : SweepableResourceData {
 
 private:
-  DECLARE_RESOURCE_ALLOCATION(WandResource<Wand>);
+  DECLARE_RESOURCE_ALLOCATION(WandResource<Wand>)
 
 public:
   explicit WandResource(Wand* wand, bool owner = true) :
@@ -132,8 +126,8 @@ public:
     clear();
   }
 
-  CLASSNAME_IS("WandResource");
-  const String& o_getClassNameHook() const override {
+  CLASSNAME_IS("WandResource")
+  const OptString& o_getClassNameHook() const override {
     return classnameof();
   }
 
@@ -257,7 +251,7 @@ getPixelIteratorResource(const Object& obj) {
 
 //////////////////////////////////////////////////////////////////////////////
 // IO
-bool isMagickPseudoFormat(const String& path, char mode = '*');
+bool isMagickPseudoFormat(const OptString& path, char mode = '*');
 
 using ImagickFileOp =
   std::function<MagickBooleanType(MagickWand*, const char*)>;
@@ -265,20 +259,20 @@ using ImagickHandleOp =
   std::function<MagickBooleanType(MagickWand*, FILE*)>;
 
 void imagickReadOp(MagickWand* wand,
-                   const String& path,
+                   const OptString& path,
                    const ImagickFileOp& op);
 
 void imagickWriteOp(MagickWand* wand,
-                    const String& path,
+                    const OptString& path,
                     const ImagickFileOp& op);
 
 void imagickReadOp(MagickWand* wand,
-                   const Resource& res,
+                   const OptResource& res,
                    const ImagickHandleOp& op);
 
 void imagickWriteOp(MagickWand* wand,
-                    const Resource& res,
-                    const String& format,
+                    const OptResource& res,
+                    const OptString& format,
                     const ImagickHandleOp& op);
 
 //////////////////////////////////////////////////////////////////////////////
@@ -299,16 +293,19 @@ void freeMagickMemory(T* &resource) {
   }
 }
 
-String convertMagickString(char* &&str);
+OptString convertMagickString(char* &&str);
 
-String convertMagickData(size_t size, unsigned char* &data);
+OptString convertMagickData(size_t size, unsigned char* &data);
 
 template<typename T>
 ALWAYS_INLINE
-Array convertArray(size_t num, const T* arr) {
-  PackedArrayInit ret(num);
+typename std::enable_if<
+  std::is_scalar<typename std::remove_pointer<T>::type>::value,
+  Array
+>::type convertArray(size_t num, const T* arr) {
+  VecInit ret(num);
   for (size_t i = 0; i < num; ++i) {
-    ret.appendWithRef(arr[i]);
+    ret.append(arr[i]);
   }
   return ret.toArray();
 }
@@ -345,7 +342,7 @@ Array magickQueryFonts(const char* pattern = "*");
 
 Array magickQueryFormats(const char* pattern = "*");
 
-String magickResolveFont(const String& fontName);
+OptString magickResolveFont(const OptString& fontName);
 
 //////////////////////////////////////////////////////////////////////////////
 // ImagickPixel Helper
@@ -379,5 +376,3 @@ void loadImagickPixelIteratorClass();
 
 //////////////////////////////////////////////////////////////////////////////
 } // namespace HPHP
-
-#endif // incl_HPHP_EXT_IMAGICK_H_

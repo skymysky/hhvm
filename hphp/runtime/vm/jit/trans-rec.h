@@ -13,10 +13,10 @@
    | license@php.net so we can mail you a copy immediately.               |
    +----------------------------------------------------------------------+
 */
-#ifndef incl_HPHP_TRANS_REC_H_
-#define incl_HPHP_TRANS_REC_H_
+#pragma once
 
-#include "hphp/util/md5.h"
+#include "hphp/runtime/base/types.h"
+#include "hphp/util/sha1.h"
 #include "hphp/runtime/vm/jit/region-selection.h"
 #include "hphp/runtime/vm/jit/types.h"
 
@@ -26,11 +26,12 @@ namespace HPHP { namespace jit {
  * Used to maintain a mapping from the bytecode to its corresponding x86.
  */
 struct TransBCMapping {
-  MD5    md5;
-  Offset bcStart;
-  TCA    aStart;
-  TCA    acoldStart;
-  TCA    afrozenStart;
+  SHA1    sha1;
+  int64_t sn;
+  SrcKey  sk;
+  TCA     aStart;
+  TCA     acoldStart;
+  TCA     afrozenStart;
 };
 
 /*
@@ -38,9 +39,9 @@ struct TransBCMapping {
  */
 struct TransRec {
   struct Block {
-    MD5 md5;
-    Offset bcStart;
-    Offset bcPast;
+    SHA1    sha1;
+    SrcKey  sk;
+    Offset  bcPast;
   };
 
   std::vector<std::string>
@@ -51,14 +52,14 @@ struct TransRec {
   Annotations            annotations;
   std::string            funcName;
   SrcKey                 src;
-  MD5                    md5;
+  SHA1                   sha1;
+  int64_t                sn;
   TCA                    aStart;
   TCA                    acoldStart;
   TCA                    afrozenStart;
   uint32_t               aLen;
   uint32_t               acoldLen;
   uint32_t               afrozenLen;
-  Offset                 bcStart;
   TransID                id{kInvalidTransID};
   TransKind              kind;
   bool                   hasLoop;
@@ -74,15 +75,16 @@ struct TransRec {
            uint32_t                    _acoldLen,
            TCA                         _afrozenStart,
            uint32_t                    _afrozenLen,
+           Annotations&&               _annotations =
+             Annotations(),
            RegionDescPtr               region = RegionDescPtr(),
            std::vector<TransBCMapping> _bcMapping =
              std::vector<TransBCMapping>(),
-           Annotations&&               _annotations =
-             Annotations(),
            bool                        _hasLoop = false);
 
   bool isValid() const { return id != kInvalidTransID; }
   bool isConsistent() const;
+  bool contains(TCA tca) const;
   std::string print() const;
   Offset bcPast() const;
   void optimizeForMemory();
@@ -98,5 +100,3 @@ private:
 };
 
 } }
-
-#endif

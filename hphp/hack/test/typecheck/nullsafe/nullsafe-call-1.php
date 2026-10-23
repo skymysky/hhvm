@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 class C {
   public ?D $prop;
   public function foo(): D {
@@ -36,9 +36,4 @@ function test4(C $c): void {
   if ($c->prop !== null) {
     $c->prop->nar()?->baz();
   }
-}
-function test5(?C $c): int {
-  $x = null;
-  $c?->yar($x = 123);
-  return $x;
 }

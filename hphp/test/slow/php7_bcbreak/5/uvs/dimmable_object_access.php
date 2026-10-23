@@ -1,10 +1,18 @@
-<?php
+<?hh
+<<__EntryPoint>>
+function entrypoint_dimmable_object_access(): void {
 
-error_reporting(-1);
 
-$foo = new stdclass();
-$foo->someprop = array('baz' => 'quux');
+  error_reporting(-1);
 
-$bar = 'someprop';
+  $foo = new stdClass();
+  $foo->someprop = dict['baz' => 'quux'];
 
-var_dump($foo->$bar['baz']);
+  $bar = 'someprop';
+
+  try {
+    var_dump($foo->$bar['baz']);
+  } catch (UndefinedPropertyException $e) {
+    var_dump($e->getMessage());
+  }
+}

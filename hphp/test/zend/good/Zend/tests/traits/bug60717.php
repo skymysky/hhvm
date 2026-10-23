@@ -1,42 +1,42 @@
-<?php
+<?hh
 
 namespace HTML
 {
 	interface Helper
 	{
-		function text($text);
-		function attributes(array $attributes = null);
-		function textArea(array $attributes = null, $value);
+		function text($text):mixed;
+		function attributes(AnyArray $attributes = null):mixed;
+		function textArea(AnyArray $attributes = null, $value):mixed;
 	}
 
 	trait TextUTF8
 	{
-		function text($text) {}
+		function text($text) :mixed{}
 	}
 
 	trait TextArea
 	{
-		function textArea(array $attributes = null, $value) {}
-		abstract function attributes(array $attributes = null);
-		abstract function text($text);
+		function textArea(AnyArray $attributes = null, $value) :mixed{}
+		abstract function attributes(AnyArray $attributes = null):mixed;
+		abstract function text($text):mixed;
 	}
 
 	trait HTMLAttributes
 	{
-		function attributes(array $attributes = null) {	}
-		abstract function text($text);
+		function attributes(AnyArray $attributes = null) :mixed{	}
+		abstract function text($text):mixed;
 	}
 
 	class HTMLHelper implements Helper
 	{
 		use TextArea, HTMLAttributes, TextUTF8;
 	}
-	
+
 	class HTMLHelper2 implements Helper
 	{
 		use TextArea, TextUTF8, HTMLAttributes;
 	}
-	
+
 	class HTMLHelper3 implements Helper
 	{
 		use HTMLAttributes, TextArea, TextUTF8;
@@ -46,17 +46,18 @@ namespace HTML
 	{
 		use HTMLAttributes, TextUTF8, TextArea;
 	}
-	
+
 	class HTMLHelper5 implements Helper
 	{
 		use TextUTF8, TextArea, HTMLAttributes;
 	}
-	
+
 	class HTMLHelper6 implements Helper
 	{
 		use TextUTF8, HTMLAttributes, TextArea;
-	}	
+	}
 
+    <<__EntryPoint>> function main(): void {
 	$o = new HTMLHelper;
     $o = new HTMLHelper2;
     $o = new HTMLHelper3;
@@ -65,4 +66,4 @@ namespace HTML
     $o = new HTMLHelper6;
     echo 'Done';
 }
-
+}

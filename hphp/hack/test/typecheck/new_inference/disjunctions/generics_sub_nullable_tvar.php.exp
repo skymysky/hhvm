@@ -1,0 +1,92 @@
+error: Typing[4323] Invalid argument [1]
+-> `T1` is a constrained type parameter [2]
+-> This type constraint is violated [3]
+-> Expected `string` [3]
+-> But got `int` [4]
+
+generics_sub_nullable_tvar.php:11:5
+ 2 | // Copyright 2004-present Facebook. All Rights Reserved.
+ 3 | 
+ 4 | function g<T1 as string>(?T1 $x): void {}
+   |            ^^ [2]
+   |                  ^^^^^^ [3]
+ 5 | 
+ 6 | function test1<T2 as ?string>(T2 $x): void {
+ 7 |   g($x); // #0 < string && (T2 <: ?#0 || ?string <: ?#0)
+ 8 | }
+ 9 | 
+10 | function test2<T2 as ?int>(T2 $x): void {
+   |                       ^^^ [4]
+11 |   g($x);
+   |     ^^ [1]
+12 | }
+
+error: Typing[4323] Invalid argument [1]
+-> `T1` is a constrained type parameter [2]
+-> This type constraint is violated [3]
+-> Expected `string` [3]
+-> But got `?int` [4]
+->   by the definition of `T2` [5]
+
+generics_sub_nullable_tvar.php:11:5
+ 2 | // Copyright 2004-present Facebook. All Rights Reserved.
+ 3 | 
+ 4 | function g<T1 as string>(?T1 $x): void {}
+   |            ^^ [2]
+   |                  ^^^^^^ [3]
+ 5 | 
+ 6 | function test1<T2 as ?string>(T2 $x): void {
+ 7 |   g($x); // #0 < string && (T2 <: ?#0 || ?string <: ?#0)
+ 8 | }
+ 9 | 
+10 | function test2<T2 as ?int>(T2 $x): void {
+   |                      ^^^^ [5]
+   |                            ^^ [4]
+11 |   g($x);
+   |     ^^ [1]
+12 | }
+
+error: Typing[4323] Invalid argument [1]
+-> `T1` is a constrained type parameter [2]
+-> This type constraint is violated [3]
+-> Expected `string` [3]
+-> But got `T2 as ?int` [4]
+
+generics_sub_nullable_tvar.php:11:5
+ 2 | // Copyright 2004-present Facebook. All Rights Reserved.
+ 3 | 
+ 4 | function g<T1 as string>(?T1 $x): void {}
+   |            ^^ [2]
+   |                  ^^^^^^ [3]
+ 5 | 
+ 6 | function test1<T2 as ?string>(T2 $x): void {
+ 7 |   g($x); // #0 < string && (T2 <: ?#0 || ?string <: ?#0)
+ 8 | }
+ 9 | 
+10 | function test2<T2 as ?int>(T2 $x): void {
+   |                            ^^ [4]
+11 |   g($x);
+   |     ^^ [1]
+12 | }
+
+error: Typing[4110] Invalid argument [1]
+-> Expected `null` or something of type `string` [2]
+-> But got `T2 as ?int` [3]
+
+generics_sub_nullable_tvar.php:11:5
+ 2 | // Copyright 2004-present Facebook. All Rights Reserved.
+ 3 | 
+ 4 | function g<T1 as string>(?T1 $x): void {}
+   |                          ^^^ [2]
+ 5 | 
+ 6 | function test1<T2 as ?string>(T2 $x): void {
+ 7 |   g($x); // #0 < string && (T2 <: ?#0 || ?string <: ?#0)
+ 8 | }
+ 9 | 
+10 | function test2<T2 as ?int>(T2 $x): void {
+   |                            ^^ [3]
+11 |   g($x);
+   |     ^^ [1]
+12 | }
+
+4 errors found

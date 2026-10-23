@@ -1,0 +1,51 @@
+(*
+ * Copyright (c) 2015, Facebook, Inc.
+ * All rights reserved.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the "hack" directory of this source tree.
+ *
+ *)
+
+type params = {
+  informant_managed: bool;
+  state: Server_global_state.t;
+  options: Server_args.options;
+  monitor_pid: int;
+  priority_in_fd: Unix.file_descr;
+  force_dormant_start_only_in_fd: Unix.file_descr;
+}
+
+(* The in/out channels don't actually take type unit -- we write directly
+ * to the underlying file descriptor -- but we have to declare some type for
+ * these phantom types because OCaml doesn't allow polymorphic values that
+ * are not functions. *)
+val entry : (params, unit, unit) Daemon.entry
+
+val run_once :
+  Server_args.options -> Server_config.t -> Server_local_config.t -> 'a
+
+val serve_one_iteration :
+  Server_env.genv -> Server_env.env -> Client_provider.t -> Server_env.env
+
+(* Main loop can choose to batch several rechecks together. Setting this will
+ * disable this behavior, forcing only one recheck per serve_one_iteration
+ * call. This is useful in tests to observe intermediate state. *)
+val force_break_recheck_loop_for_test : bool -> unit
+
+val program_init : Server_env.genv -> Server_env.env -> Server_env.env
+
+(** Does a bunch of operations to get the server up and running, among other things:
+  - Initialize shared memory
+  - Create a unique init ID
+  - Creates a bunch of files for IPC, e.g. for errors and status transmission.
+  - Configure GC
+  - initialize logging
+  - initialize workers *)
+val setup_server :
+  informant_managed:bool ->
+  monitor_pid:int option ->
+  Server_args.options ->
+  Server_config.t ->
+  Server_local_config.t ->
+  Multi_worker.worker list * Server_env.env

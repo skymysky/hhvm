@@ -1,4 +1,4 @@
-(**
+(*
  * Copyright (c) 2016, Facebook, Inc.
  * All rights reserved.
  *
@@ -12,21 +12,21 @@ module Test = Integration_test_base
 
 let foo_name = "foo.php"
 
-let foo_contents = Printf.sprintf
-"<?hh // strict
+let foo_contents =
+  Printf.sprintf "<?hh // strict
 
+/* HH_FIXME[4336] */
 function foo() : %s {
-  //UNSAFE
 }
 "
 
 let foo_returns_int = foo_contents "int"
+
 let foo_returns_string = foo_contents "string"
 
 let bar_name = "bar.php"
 
-let bar_contents =
-"<?hh // strict
+let bar_contents = "<?hh // strict
 
 
 function test(): int {
@@ -34,51 +34,58 @@ function test(): int {
 }
 "
 
-let bar_diagnostics = "
+let bar_diagnostics =
+  "
 /bar.php:
-File \"/bar.php\", line 5, characters 10-14:
+ERROR: File \"/bar.php\", line 5, characters 10-14:
 Invalid return type (Typing[4110])
-File \"/bar.php\", line 4, characters 18-20:
-This is an int
-File \"/foo.php\", line 3, characters 18-23:
-It is incompatible with a string
+  File \"/bar.php\", line 4, characters 18-20:
+  Expected `int`
+  File \"/foo.php\", line 4, characters 18-23:
+  But got `string`
 "
 
-let bar_clear = "
-/bar.php:
-"
+let test () =
+  let po =
+    Parser_options.
+      { default with allowed_decl_fixme_codes = I_set.of_list [4336] }
+  in
+  let global_opts : Global_options.t =
+    Global_options.set
+      ~po
+      ~allowed_fixme_codes_strict:(I_set.of_list [4336])
+      Global_options.default
+  in
+  let custom_config = Server_config.default_config in
+  let custom_config = Server_config.set_tc_options custom_config global_opts in
+  let custom_config = Server_config.set_parser_options custom_config po in
+  Test.Client.with_env ~custom_config:(Some custom_config) @@ fun env ->
+  let env =
+    Test.Client.setup_disk
+      env
+      [(foo_name, foo_returns_int); (bar_name, bar_contents)]
+  in
 
-let () =
-  let env = Test.setup_server () in
-  let env = Test.setup_disk env [
-    foo_name, foo_returns_int;
-    bar_name, bar_contents;
-  ] in
+  (* Bar is clean with respect to foo as it is on disk *)
+  let (env, diagnostics) = Test.Client.open_file env bar_name in
+  Test.Client.assert_no_diagnostics diagnostics;
 
-  let env = Test.connect_persistent_client env in
-  let env = Test.subscribe_diagnostic env in
-  let env, loop_output = Test.(run_loop_once env default_loop_input) in
+  (* If we make an in-editor change to foo, that won't yet affect bar *)
+  let (env, _diagnostics) =
+    Test.Client.edit_file env foo_name foo_returns_string
+  in
+  let (env, diagnostics) = Test.Client.open_file env bar_name in
+  Test.Client.assert_no_diagnostics diagnostics;
 
-  Test.assert_no_errors env;
-  Test.assert_no_diagnostics loop_output;
+  (* If we save the changes to foo, then bar will now exhibit the error *)
+  let env = Test.Client.setup_disk env [(foo_name, foo_returns_string)] in
+  let (env, diagnostics) = Test.Client.open_file env bar_name in
+  Test.Client.assert_diagnostics_string diagnostics bar_diagnostics;
 
-  (* Open both files and make an edit to foo that reslts in errors in bar *)
-  let env = Test.open_file env foo_name in
-  let env = Test.open_file env bar_name in
-  let env, _ = Test.edit_file env foo_name foo_returns_string in
-  let env = Test.wait env in
-  let env, loop_output = Test.(run_loop_once env default_loop_input) in
-  Test.assert_diagnostics loop_output bar_diagnostics;
+  (* And if we fix foo, then bar will now be correct again *)
+  let env = Test.Client.setup_disk env [(foo_name, foo_returns_int)] in
+  let (env, diagnostics) = Test.Client.open_file env bar_name in
+  Test.Client.assert_no_diagnostics diagnostics;
 
-  (* Close bar, make sure that errors is still there, not cleared *)
-  let env, _ = Test.close_file env bar_name in
-  let env = Test.wait env in
-  let env, loop_output = Test.(run_loop_once env default_loop_input) in
-  Test.assert_no_diagnostics loop_output;
-
-  (* Fix foo, check that the error in bar was cleared - even though the
-   * file is not currently open in IDE *)
-  let env, _ = Test.edit_file env foo_name foo_returns_int in
-  let env = Test.wait env in
-  let _, loop_output = Test.(run_loop_once env default_loop_input) in
-  Test.assert_diagnostics loop_output bar_clear
+  ignore env;
+  ()

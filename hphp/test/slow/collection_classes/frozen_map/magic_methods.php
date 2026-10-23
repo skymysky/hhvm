@@ -2,10 +2,7 @@
 
 // Test that ImmMap correctly handled magic methods.
 
-function main() {
-  echo "\n__toString...\n";
-  echo (new ImmMap(Vector {1, 2, 3})) . "\n";
-
+function main() :mixed{
   $cfail = function($f) {
     try {
       $f();
@@ -29,12 +26,10 @@ function main() {
 
   echo "\n__isSet...\n";
   var_dump(isset((new ImmMap (Vector {1, 2, 3}))->notAProp));
-
-  echo "\n__unset...\n";
-  echo $cfail( function () {
-    $fm = new ImmMap(Vector {1, 2, 3});
-    unset($fm->inexistentProperty);
-  });
 }
 
+
+<<__EntryPoint>>
+function main_magic_methods() :mixed{
 main();
+}

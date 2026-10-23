@@ -14,19 +14,59 @@
    +----------------------------------------------------------------------+
 */
 
+#include "hphp/runtime/vm/jit/vasm-gen.h"
 #include "hphp/runtime/vm/jit/vasm-unit.h"
 
 #include <algorithm>
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 ///////////////////////////////////////////////////////////////////////////////
 
-constexpr int Vframe::Top;
+
+void Vunit::allocFrame(const IRInstruction* origin) {
+  assertx(origin->is(DefCalleeFP));
+
+  auto const parentFp = origin->src(1);
+  auto const parentIt = fpToFrame.find(parentFp);
+  assertx(parentIt != fpToFrame.end());
+
+  auto const parent_frame = parentIt->second;
+  auto const extra = origin->extra<DefCalleeFP>();
+  auto const fp = origin->dst();
+  auto const [it, inserted] = fpToFrame.emplace(fp, frames.size());
+  if (!inserted) {
+    always_assert(frames[it->second].parent == parent_frame);
+    return;
+  }
+
+  for (auto f = parent_frame; f != Vframe::Top; f = frames[f].parent) {
+    frames[f].inclusive_cost += extra->cost;
+    frames[f].num_inner_frames++;
+  }
+
+  auto const sbToRootSbOff =
+    frames[parent_frame].sbToRootSbOff +
+    extra->returnSPOff.offset + kNumActRecCells - 1 +
+    extra->func->numSlotsInFrame();
+
+  frames.emplace_back(
+    extra->func,
+    origin->marker().bcOff(),
+    sbToRootSbOff,
+    parent_frame,
+    extra->cost,
+    0
+  );
+}
 
 Vlabel Vunit::makeBlock(AreaIndex area, uint64_t weight) {
   auto i = blocks.size();
   blocks.emplace_back(area, weight);
   return Vlabel{i};
+}
+
+Vlabel Vunit::makeBlock(AreaIndex area) {
+  return makeBlock(area, areaWeightFactor(area));
 }
 
 Vlabel Vunit::makeScratchBlock() {
@@ -80,4 +120,4 @@ bool Vunit::needsRegAlloc() const {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-}}
+}

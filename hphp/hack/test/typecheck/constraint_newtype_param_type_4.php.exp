@@ -1,0 +1,27 @@
+error: Typing[4323] Some type arguments violate their constraints [1]
+-> `T` is a constrained type parameter [2]
+-> This type constraint is violated [3]
+-> Expected `arraykey` [4]
+-> But got `bool` [5]
+->   via this generic `T` [6]
+->   via this generic `T` [7]
+
+constraint_newtype_param_type_4.php:9:15
+ 3 | newtype A = int;
+ 4 | class C<+T> {}
+ 5 | newtype D<T> = C<T>;
+   |                  ^ [7]
+ 6 | newtype X<T as C<arraykey>> = T;
+   |           ^ [2]
+   |                ^^^^^^^^^^^ [3]
+   |                  ^^^^^^^^ [4]
+ 7 | type Y<T> = X<D<T>>;
+   |                 ^ [6]
+ 8 | 
+ 9 | function make(Y<bool> $_): Y<A> {
+   |               ^^^^^^^ [1]
+   |                 ^^^^ [5]
+10 |   return new C();
+11 | }
+
+1 error found

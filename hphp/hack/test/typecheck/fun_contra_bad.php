@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 // Copyright 2004-present Facebook. All Rights Reserved.
 
 function TakeFun((function(arraykey): arraykey) $f): void {
@@ -10,5 +10,7 @@ function Pass((function(int): int) $g): void {
 function DoIt(): void {
   Pass((int $x) ==> 5);
 }
-/* HH_FIXME[1002] */
-DoIt();
+
+function main(): void {
+  DoIt();
+}

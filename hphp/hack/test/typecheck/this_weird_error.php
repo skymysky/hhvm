@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 /**
  * Copyright (c) 2014, Facebook, Inc.
  * All rights reserved.
@@ -15,7 +15,7 @@ abstract class MyVector<T> {
   abstract public function isEmpty(): bool;
 
   static public function newVector(T $x): MyVector<T> {
-    // UNSAFE
+    throw new Exception();
   }
 }
 

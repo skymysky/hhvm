@@ -10,7 +10,7 @@
  */
 
 class A {
-  const array<string> X = array('test');
+  const varray<string> X = vec['test'];
 }
 
 function foo(): bool {

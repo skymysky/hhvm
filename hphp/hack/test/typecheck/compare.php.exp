@@ -1,0 +1,151 @@
+error: Typing[4240] Typing error [1]
+-> Expected `(num | DateTime | DateTimeImmutable | string)` because this is the result of a comparison [1]
+-> But got `null` [2]
+
+compare.php:9:10
+ 5 | }
+ 6 | 
+ 7 | function f_int(?int $nullable_int): void {
+   |                ^^^^ [2]
+ 8 |   take_lambda($nullable_int, $i ==> {
+ 9 |     $_ = $i > 100; // error, $i might be null
+   |          ^^^^^^^^ [1]
+10 |   });
+11 | }
+
+error: Typing[4240] Typing error [1]
+-> Expected `DateTimeImmutable` because this is the result of a comparison [1]
+-> But got `null` [2]
+
+compare.php:9:10
+ 5 | }
+ 6 | 
+ 7 | function f_int(?int $nullable_int): void {
+   |                ^^^^ [2]
+ 8 |   take_lambda($nullable_int, $i ==> {
+ 9 |     $_ = $i > 100; // error, $i might be null
+   |          ^^^^^^^^ [1]
+10 |   });
+11 | }
+
+error: Typing[4240] Typing error [1]
+-> Expected `DateTime` because this is the result of a comparison [1]
+-> But got `null` [2]
+
+compare.php:9:10
+ 5 | }
+ 6 | 
+ 7 | function f_int(?int $nullable_int): void {
+   |                ^^^^ [2]
+ 8 |   take_lambda($nullable_int, $i ==> {
+ 9 |     $_ = $i > 100; // error, $i might be null
+   |          ^^^^^^^^ [1]
+10 |   });
+11 | }
+
+error: Typing[4240] Typing error [1]
+-> Expected `num` because this is the result of a comparison [1]
+-> But got `null` [2]
+
+compare.php:9:10
+ 5 | }
+ 6 | 
+ 7 | function f_int(?int $nullable_int): void {
+   |                ^^^^ [2]
+ 8 |   take_lambda($nullable_int, $i ==> {
+ 9 |     $_ = $i > 100; // error, $i might be null
+   |          ^^^^^^^^ [1]
+10 |   });
+11 | }
+
+error: Typing[4240] Typing error [1]
+-> Expected `string` because this is the result of a comparison [1]
+-> But got `null` [2]
+
+compare.php:9:10
+ 5 | }
+ 6 | 
+ 7 | function f_int(?int $nullable_int): void {
+   |                ^^^^ [2]
+ 8 |   take_lambda($nullable_int, $i ==> {
+ 9 |     $_ = $i > 100; // error, $i might be null
+   |          ^^^^^^^^ [1]
+10 |   });
+11 | }
+
+error: Typing[4240] Typing error [1]
+-> Expected `(num | DateTime | DateTimeImmutable | string)` because this is the result of a comparison [1]
+-> But got `null` [2]
+
+compare.php:15:10
+11 | }
+12 | 
+13 | function f_string(?string $nullable_str): void {
+   |                   ^^^^^^^ [2]
+14 |   take_lambda($nullable_str, $i ==> {
+15 |     $_ = "" > $i; // error, $i might be null
+   |          ^^^^^^^ [1]
+16 |   });
+17 | }
+
+error: Typing[4240] Typing error [1]
+-> Expected `DateTimeImmutable` because this is the result of a comparison [1]
+-> But got `null` [2]
+
+compare.php:15:10
+11 | }
+12 | 
+13 | function f_string(?string $nullable_str): void {
+   |                   ^^^^^^^ [2]
+14 |   take_lambda($nullable_str, $i ==> {
+15 |     $_ = "" > $i; // error, $i might be null
+   |          ^^^^^^^ [1]
+16 |   });
+17 | }
+
+error: Typing[4240] Typing error [1]
+-> Expected `DateTime` because this is the result of a comparison [1]
+-> But got `null` [2]
+
+compare.php:15:10
+11 | }
+12 | 
+13 | function f_string(?string $nullable_str): void {
+   |                   ^^^^^^^ [2]
+14 |   take_lambda($nullable_str, $i ==> {
+15 |     $_ = "" > $i; // error, $i might be null
+   |          ^^^^^^^ [1]
+16 |   });
+17 | }
+
+error: Typing[4240] Typing error [1]
+-> Expected `num` because this is the result of a comparison [1]
+-> But got `null` [2]
+
+compare.php:15:10
+11 | }
+12 | 
+13 | function f_string(?string $nullable_str): void {
+   |                   ^^^^^^^ [2]
+14 |   take_lambda($nullable_str, $i ==> {
+15 |     $_ = "" > $i; // error, $i might be null
+   |          ^^^^^^^ [1]
+16 |   });
+17 | }
+
+error: Typing[4240] Typing error [1]
+-> Expected `string` because this is the result of a comparison [1]
+-> But got `null` [2]
+
+compare.php:15:10
+11 | }
+12 | 
+13 | function f_string(?string $nullable_str): void {
+   |                   ^^^^^^^ [2]
+14 |   take_lambda($nullable_str, $i ==> {
+15 |     $_ = "" > $i; // error, $i might be null
+   |          ^^^^^^^ [1]
+16 |   });
+17 | }
+
+10 errors found

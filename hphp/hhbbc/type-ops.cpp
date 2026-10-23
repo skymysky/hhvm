@@ -15,56 +15,42 @@
 */
 #include "hphp/hhbbc/type-ops.h"
 
-#include <folly/Optional.h>
-
 #include "hphp/runtime/base/tv-conversions.h"
 #include "hphp/runtime/base/tv-arith.h"
 
 #include "hphp/hhbbc/eval-cell.h"
 #include "hphp/hhbbc/type-system.h"
 
-namespace HPHP { namespace HHBBC {
+namespace HPHP::HHBBC {
 
 //////////////////////////////////////////////////////////////////////
 
 namespace {
 
-folly::Optional<Type> usual_arith_conversions(Type t1, Type t2) {
-  /*
-   * TODO(#3577303): some of these could be nothrow, which is probably
-   * information we have want to propagate back out through the return
-   * value here (rather than bundling everything into the
-   * interpreter).
-   */
-  if (t1.subtypeOf(BInt) && t2.subtypeOf(BInt)) return TInt;
-  if (t1.subtypeOf(BInt) && t2.subtypeOf(BDbl)) return TDbl;
-  if (t1.subtypeOf(BDbl) && t2.subtypeOf(BInt)) return TDbl;
-  if (t1.subtypeOf(BDbl) && t2.subtypeOf(BDbl)) return TDbl;
-  if (t1.subtypeOf(BNum) && t2.subtypeOf(BNum)) return TNum;
-  return folly::none;
-}
-
 template<class Fun>
-folly::Optional<Type> eval_const(Type t1, Type t2, Fun fun) {
+Optional<Type> eval_const(Type t1, Type t2, Fun fun) {
   auto const v1 = tv(t1);
   auto const v2 = tv(t2);
   if (v1 && v2) return eval_cell([&] { return fun(*v1, *v2); });
-  return folly::none;
+  return std::nullopt;
 }
 
 template<class Fun>
 Type bitwise_impl(Type t1, Type t2, Fun op) {
-  if (auto t = eval_const(t1, t2, op))          return *t;
+  if (!(t1.couldBe(BInt) && t2.couldBe(BInt)) &&
+      !(t1.couldBe(BStr) && t2.couldBe(BStr))) {
+    return TBottom;
+  }
+  // If operands are strings we raise a warning or error if Eval.WarnOnBitwiseOpInvalidType is set
   if (t1.subtypeOf(BStr) && t2.subtypeOf(BStr)) return TStr;
+  if (auto t = eval_const(t1, t2, op))          return *t;
   if (!t1.couldBe(BStr) || !t2.couldBe(BStr))   return TInt;
   return TInitCell;
 }
 
 template<class Fun>
 Type shift_impl(Type t1, Type t2, Fun op) {
-  t1 = typeToInt(t1);
-  t2 = typeToInt(t2);
-
+  if (!t1.couldBe(BInt) || !t2.couldBe(BInt)) return TBottom;
   if (auto const t = eval_const(t1, t2, op)) return *t;
   return TInt;
 }
@@ -73,129 +59,117 @@ Type shift_impl(Type t1, Type t2, Fun op) {
 //////////////////////////////////////////////////////////////////////
 
 Type typeToInt(Type ty) {
-  if (auto const v = tv(ty)) return ival(cellToInt(*v));
+  if (auto const v = tv(ty)) return ival(tvToInt(*v));
   if (ty.subtypeOf(BNull))   return ival(0);
   return TInt;
 }
 
 //////////////////////////////////////////////////////////////////////
 
-Type typeAdd(Type t1, Type t2) {
-  if (auto t = eval_const(t1, t2, cellAdd))           return *t;
-  if (auto t = usual_arith_conversions(t1, t2))       return *t;
-  if (t1.subtypeOf(BArr) && t2.subtypeOf(BArr))       return TArr;
-  if (t1.subtypeOf(BVec) && t2.subtypeOf(BVec))       return TVec;
-  if (t1.subtypeOf(BDict) && t2.subtypeOf(BDict))     return TDict;
-  if (t1.subtypeOf(BKeyset) && t2.subtypeOf(BKeyset)) return TKeyset;
-  return TInitCell;
-}
-
-Type typeAddO(Type t1, Type t2) {
-  if (auto t = eval_const(t1, t2, cellAddO))          return *t;
-  if (t1.subtypeOf(BInt) && t2.subtypeOf(BInt))       return TNum;
-  if (auto t = usual_arith_conversions(t1, t2))       return *t;
-  if (t1.subtypeOf(BArr) && t2.subtypeOf(BArr))       return TArr;
-  if (t1.subtypeOf(BVec) && t2.subtypeOf(BVec))       return TVec;
-  if (t1.subtypeOf(BDict) && t2.subtypeOf(BDict))     return TDict;
-  if (t1.subtypeOf(BKeyset) && t2.subtypeOf(BKeyset)) return TKeyset;
-  return TInitCell;
-}
-
 template <class CellOp>
-Type typeSubMulImpl(Type t1, Type t2, CellOp op) {
-  if (auto t = eval_const(t1, t2, op))          return *t;
-  if (auto t = usual_arith_conversions(t1, t2)) return *t;
-  return TInitPrim;
-}
+Type typeArithImpl(Type t1, Type t2, CellOp op) {
+  if (!t1.couldBe(BNum) || !t2.couldBe(BNum)) return TBottom;
+  if (auto t = eval_const(t1, t2, op)) return *t;
+  if (op == tvMod) return TInt;
 
-template <class CellOp>
-Type typeSubMulImplO(Type t1, Type t2, CellOp op) {
-  if (auto t = eval_const(t1, t2, op))          return *t;
-  if (t1.subtypeOf(BInt) && t2.subtypeOf(BInt)) return TNum;
-  if (auto t = usual_arith_conversions(t1, t2)) return *t;
-  return TInitPrim;
-}
-
-Type typeSub(Type t1, Type t2)  { return typeSubMulImpl(t1, t2, cellSub); }
-Type typeMul(Type t1, Type t2)  { return typeSubMulImpl(t1, t2, cellMul); }
-
-Type typeSubO(Type t1, Type t2) { return typeSubMulImplO(t1, t2, cellSubO); }
-Type typeMulO(Type t1, Type t2) { return typeSubMulImplO(t1, t2, cellMulO); }
-
-Type typeDiv(Type t1, Type t2) {
-  if (auto t = eval_const(t1, t2, cellDiv)) return *t;
-  return TInitPrim;
-}
-
-Type typeMod(Type t1, Type t2) {
-  if (auto t = eval_const(t1, t2, cellMod)) return *t;
-  return TInitPrim;
-}
-
-Type typePow(Type t1, Type t2) {
-  if (auto t = eval_const(t1, t2, cellPow)) return *t;
+  /*
+   * TODO(#3577303): some of these could be nothrow, which is probably
+   * information we have want to propagate back out through the return
+   * value here (rather than bundling everything into the
+   * interpreter).
+   */
+  if (t1.subtypeOf(BInt) && t2.subtypeOf(BInt)) {
+    // can't switch on pointers, so use template magic
+    auto is_any = [](auto first, auto ...t) { return ((first == t) || ...); };
+    return is_any(op, tvDiv, tvPow) ? TNum : TInt;
+  }
+  if (t1.subtypeOf(BNum) && t2.subtypeOf(BNum) &&
+     (t1.subtypeOf(BDbl) || t2.subtypeOf(BDbl))) return TDbl;
   return TNum;
+}
+
+Type typeAdd(Type t1, Type t2) { return typeArithImpl(t1, t2, tvAdd); }
+Type typeSub(Type t1, Type t2) { return typeArithImpl(t1, t2, tvSub); }
+Type typeMul(Type t1, Type t2) { return typeArithImpl(t1, t2, tvMul); }
+Type typeDiv(Type t1, Type t2) { return typeArithImpl(t1, t2, tvDiv); }
+Type typePow(Type t1, Type t2) { return typeArithImpl(t1, t2, tvPow); }
+Type typeMod(Type t1, Type t2) { return typeArithImpl(t1, t2, tvMod); }
+
+Type typeConcat(Type t1, Type t2) {
+  auto const tv = eval_const(t1, t2, [&] (auto v1, auto v2) {
+    tvConcatEq(&v1, v2);
+    return v1;
+  });
+  if (tv) return loosen_staticness(*tv);
+  return TStr;
 }
 
 //////////////////////////////////////////////////////////////////////
 
-Type typeBitAnd(Type t1, Type t2) { return bitwise_impl(t1, t2, cellBitAnd); }
-Type typeBitOr(Type t1, Type t2)  { return bitwise_impl(t1, t2, cellBitOr); }
-Type typeBitXor(Type t1, Type t2) { return bitwise_impl(t1, t2, cellBitXor); }
+Type typeBitAnd(Type t1, Type t2) { return bitwise_impl(t1, t2, tvBitAnd); }
+Type typeBitOr(Type t1, Type t2)  { return bitwise_impl(t1, t2, tvBitOr); }
+Type typeBitXor(Type t1, Type t2) { return bitwise_impl(t1, t2, tvBitXor); }
 
-Type typeShl(Type t1, Type t2) { return shift_impl(t1, t2, cellShl); }
-Type typeShr(Type t1, Type t2) { return shift_impl(t1, t2, cellShr); }
+Type typeShl(Type t1, Type t2) { return shift_impl(t1, t2, tvShl); }
+Type typeShr(Type t1, Type t2) { return shift_impl(t1, t2, tvShr); }
 
 //////////////////////////////////////////////////////////////////////
 
 Type typeIncDec(IncDecOp op, Type t) {
-  auto const overflowToDbl = isIncDecO(op);
-  auto const val = tv(t);
-
-  if (!val) {
-    // Doubles always stay doubles
-    if (t.subtypeOf(BDbl)) return TDbl;
-
-    // Ints stay ints unless they can overflow to doubles
-    if (t.subtypeOf(BInt)) {
-      return overflowToDbl ? TNum : TInt;
-    }
-
-    // Null goes to 1 on ++, stays null on --. Uninit is folded to init.
-    if (t.subtypeOf(BNull)) {
-      return isInc(op) ? ival(1) : TInitNull;
-    }
-
-    // No-op on bool, array, resource, object.
-    if (t.subtypeOfAny(TBool, TArr, TRes, TObj, TVec, TDict, TKeyset)) return t;
-
-    // Last unhandled case: strings. These result in Int|Str because of the
-    // behavior on strictly-numeric strings, and we can't express that yet.
-    return TInitCell;
+  auto const inc = isInc(op);
+  if (auto const val = tv(t)) {
+    auto resultTy = eval_cell([inc,val] {
+      auto c = *val;
+      inc ? tvInc(&c) : tvDec(&c);
+      return c;
+    });
+    // We may have inferred a TSStr or TSArr with a value here, but at
+    // runtime it will not be static.
+    if (resultTy) return loosen_staticness(*resultTy);
   }
 
-  auto const inc = isInc(op);
+  // Doubles always stay doubles
+  if (t.subtypeOf(BDbl)) return TDbl;
+  if (t.subtypeOf(BOptInt)) {
+    if (t.subtypeOf(BInt)) return TInt;
+    // ++ on null throws, stays null on --. Uninit is folded to init.
+    if (t.subtypeOf(BNull)) return isInc(op) ? TBottom : TInitNull;
+    // Optional integer case. The union of the above two cases.
+    if (isInc(op)) return TInt;
+    return TOptInt;
+  }
 
-  // We can't constprop with this eval_cell, because of the effects
-  // on locals.
-  auto resultTy = eval_cell([inc,overflowToDbl,val] {
-    auto c = *val;
-    if (inc) {
-      (overflowToDbl ? cellIncO : cellInc)(&c);
-    } else {
-      (overflowToDbl ? cellDecO : cellDec)(&c);
-    }
-    return c;
-  });
-  if (!resultTy) resultTy = TInitCell;
-
-  // We may have inferred a TSStr or TSArr with a value here, but at
-  // runtime it will not be static.
-  resultTy = loosen_staticness(*resultTy);
-  return *resultTy;
+  // No-op on bool, array, resource, object.
+  if (t.subtypeOf(BBool | BArrLike | BRes | BObj)) return t;
+  return TInitCell;
 }
 
 Type typeSetOp(SetOpOp op, Type lhs, Type rhs) {
+  auto const lhsV = tv(lhs);
+  auto const rhsV = tv(rhs);
+
+  if (lhsV && rhsV) {
+    // Can't constprop at this eval_cell, because of the effects on
+    // locals.
+    auto resultTy = eval_cell([&] {
+      TypedValue c = *lhsV;
+      TypedValue rhs = *rhsV;
+      setopBody(&c, op, &rhs);
+      return c;
+    });
+    if (resultTy) {
+      // We may have inferred a TSStr or TSArr with a value here, but
+      // at runtime it will not be static.  For now just throw that
+      // away.  TODO(#3696042): should be able to loosen_staticness here.
+      if (resultTy->subtypeOf(BStr)) return TStr;
+      else if (resultTy->subtypeOf(BVec)) return TVec;
+      else if (resultTy->subtypeOf(BDict)) return TDict;
+      else if (resultTy->subtypeOf(BKeyset)) return TKeyset;
+
+      return *resultTy;
+    }
+  }
+
   switch (op) {
   case SetOpOp::PlusEqual:   return typeAdd(lhs, rhs);
   case SetOpOp::MinusEqual:  return typeSub(lhs, rhs);
@@ -209,11 +183,7 @@ Type typeSetOp(SetOpOp op, Type lhs, Type rhs) {
   case SetOpOp::OrEqual:     return typeBitOr(lhs, rhs);
   case SetOpOp::XorEqual:    return typeBitXor(lhs, rhs);
 
-  case SetOpOp::PlusEqualO:  return typeAddO(lhs, rhs);
-  case SetOpOp::MinusEqualO: return typeSubO(lhs, rhs);
-  case SetOpOp::MulEqualO:   return typeMulO(lhs, rhs);
-
-  case SetOpOp::ConcatEqual: return TStr;
+  case SetOpOp::ConcatEqual: return typeConcat(lhs, rhs);
   case SetOpOp::SlEqual:     return typeShl(lhs, rhs);
   case SetOpOp::SrEqual:     return typeShr(lhs, rhs);
   }
@@ -223,15 +193,17 @@ Type typeSetOp(SetOpOp op, Type lhs, Type rhs) {
 //////////////////////////////////////////////////////////////////////
 
 Type typeSame(const Type& a, const Type& b) {
-  auto const nsa = loosen_dvarrayness(a);
-  auto const nsb = loosen_dvarrayness(b);
+  // The comparison will recurse into array values, so we need to
+  // loosen the likeness recursively (unlike normal).
+  auto const nsa = loosen_likeness_recursively(loosen_staticness(a));
+  auto const nsb = loosen_likeness_recursively(loosen_staticness(b));
   if (!nsa.couldBe(nsb)) return TFalse;
   return TBool;
 }
 
 Type typeNSame(const Type& a, const Type& b) {
   auto const ty = typeSame(a, b);
-  assert(ty.subtypeOf(BBool));
+  assertx(ty.subtypeOf(BBool));
   return ty.subtypeOf(BFalse) ? TTrue :
          ty.subtypeOf(BTrue) ? TFalse :
          TBool;
@@ -239,4 +211,4 @@ Type typeNSame(const Type& a, const Type& b) {
 
 //////////////////////////////////////////////////////////////////////
 
-}}
+}

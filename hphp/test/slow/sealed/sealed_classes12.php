@@ -1,10 +1,11 @@
 <?hh
 
+namespace SealedClass12;
+
 <<__Sealed(MyClass::class)>>
 class SomeClass { const FOO = 42; }
 
-var_dump(Class2::FOO);
-
-function __autoload($x) {
-  require_once "sealed_classes12.inc";
+<<__EntryPoint>>
+function main_sealed_classes12() :mixed{
+  var_dump(Class2::FOO);
 }

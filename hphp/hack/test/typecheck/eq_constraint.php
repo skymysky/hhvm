@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 
 class Foo {
   public function assertIsFoo(): void {}
@@ -14,7 +14,7 @@ class Boxing<Tclass> {
   ): Tinner where
     Tclass = ?Tinner,
   {
-    return $this->member ?: $default;
+    return $this->member ?? $default;
   }
 
   public function getOrExcept<Tinner>(): Tinner where Tclass = ?Tinner {

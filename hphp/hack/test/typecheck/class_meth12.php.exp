@@ -1,0 +1,18 @@
+error: Typing[4182] This argument should be annotated with `inout` [1]
+-> Because this is an `inout` parameter [2]
+
+class_meth12.php:16:14
+ 5 | 
+ 6 | class C {
+ 7 |   public static function foo(int $x, inout string $y):void { }
+   |                                                   ^^ [2]
+ 8 | }
+ 9 | 
+   :
+14 |   ];
+15 |   /* HHFIXME[4104] */
+16 |   $v['a'](3, 'b');
+   |              ^^^ [1]
+17 | }
+
+1 error found

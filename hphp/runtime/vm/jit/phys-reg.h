@@ -14,18 +14,15 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_JIT_PHYSREG_H_
-#define incl_HPHP_JIT_PHYSREG_H_
+#pragma once
 
 #include "hphp/util/asm-x64.h"
 #include "hphp/util/bitops.h"
-#include "hphp/vixl/a64/assembler-a64.h"
-
-#include <folly/Optional.h>
+#include "hphp/vixl/hphp-compat.h"
 
 #include <type_traits>
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 
 struct Vreg;
 struct Vout;
@@ -42,17 +39,26 @@ struct Vout;
 struct PhysReg {
 private:
   static constexpr auto kGPOffset = 0;
+
+#ifdef __aarch64__
+  // Arm64 VIXL uses number 63 to represent SP internally, so
+  // kNumGP must be >= 64 for Arm64.
+  static constexpr auto kNumGP = 64;
+  static constexpr auto kNumSIMD = 48;
+#else
+  // TODO: Eventually, we should move to arm64 kNumGP and kNumSIMD
+  // for platform parity.
   static constexpr auto kNumGP = 48;
+  static constexpr auto kNumSIMD = 64;
+#endif
 
   static constexpr auto kSIMDOffset = kNumGP;
-  static constexpr auto kNumSIMD = 64;
-
   static constexpr auto kSFOffset = kNumGP + kNumSIMD;
   static constexpr auto kNumSF = 1;
 
 public:
   /*
-   * 48 GP regs + 64 SIMD regs + 1 SF reg + 15 empty == 128 regs.
+   * 64 GP regs + 48 SIMD regs + 1 SF reg + 15 empty == 128 regs.
    *
    * We can toggle these values, but they need sum to 128 so that RegSet can
    * fit into two registers.
@@ -72,10 +78,6 @@ public:
   explicit constexpr PhysReg(Reg16 r) : n(int(r)) {}
   explicit constexpr PhysReg(Reg8 r) : n(int(r)) {}
 
-  constexpr /* implicit */ PhysReg(vixl::Register r) : n(r.code()) {}
-  constexpr /* implicit */ PhysReg(vixl::FPRegister r)
-    : n(r.code() + kSIMDOffset) {}
-
   /* implicit */ operator Reg64() const {
     assertx(isGP() || n == 0xff);
     return Reg64(n);
@@ -89,6 +91,11 @@ public:
     return RegSF(n - kSFOffset);
   }
 
+  #if defined(__aarch64__)
+  constexpr /* implicit */ PhysReg(vixl::Register r) : n(r.code()) {}
+  constexpr /* implicit */ PhysReg(vixl::VRegister r)
+    : n(r.code() + kSIMDOffset) {}
+
   /* implicit */ operator vixl::CPURegister() const {
     if (n == 0xff) {
       return vixl::NoCPUReg;
@@ -98,13 +105,14 @@ public:
                                  vixl::CPURegister::kRegister);
       } else if (isSIMD()) {
         return vixl::CPURegister(n - kSIMDOffset, vixl::kDRegSize,
-                                 vixl::CPURegister::kFPRegister);
+                                 vixl::CPURegister::kVRegister);
       } else {
         assertx(isSF());
         return vixl::NoCPUReg;
       }
     }
   }
+  #endif
 
   Type type() const {
     assertx(n < kMaxRegs);
@@ -114,6 +122,10 @@ public:
   }
   bool isGP() const {
     static_assert(kGPOffset == 0, "kGPOffset is expected to be zero.");
+  #if defined(__aarch64__)
+    if (n == vixl::kSPRegInternalCode) return true;
+    if (n > vixl::kSpRegCode && n < vixl::kSPRegInternalCode) return false;
+  #endif
     return n < kGPOffset+numGP();
   }
   bool isSIMD() const { return n >= kSIMDOffset && n < kSIMDOffset+numSIMD(); }
@@ -124,6 +136,10 @@ public:
   constexpr bool operator!=(Reg64 r) const { return Reg64(n) != r; }
   constexpr bool operator==(Reg32 r) const { return Reg32(n) == r; }
   constexpr bool operator!=(Reg32 r) const { return Reg32(n) != r; }
+  constexpr bool operator==(RegXMM r) const { return n == PhysReg(r).n; }
+  constexpr bool operator!=(RegXMM r) const { return n != PhysReg(r).n; }
+
+  size_t hash() const { return n; }
 
   MemoryRef operator[](intptr_t p) const {
     assertx(type() == GP);
@@ -149,12 +165,12 @@ public:
   static int getNumGP();
   static int getNumSIMD();
   static int numGP() {
-    static int kNumGP = getNumGP();
-    return kNumGP;
+    static int kNumGP_2 = getNumGP();
+    return kNumGP_2;
   }
   static int numSIMD() {
-    static int kNumSIMD = getNumSIMD();
-    return kNumSIMD;
+    static int kNumSIMD_2 = getNumSIMD();
+    return kNumSIMD_2;
   }
 
   /*
@@ -234,6 +250,7 @@ public:
 private:
   friend struct RegSet;
   friend struct Vreg;
+  friend struct VregSet;
   explicit constexpr PhysReg(int n) : n(n) {}
 
   uint8_t n;
@@ -488,6 +505,14 @@ static_assert(std::is_trivially_destructible<RegSet>::value,
 
 ///////////////////////////////////////////////////////////////////////////////
 
-}}
+}
 
-#endif
+///////////////////////////////////////////////////////////////////////////////
+
+namespace std {
+  template<> struct hash<HPHP::jit::PhysReg> {
+    size_t operator()(HPHP::jit::PhysReg r) const { return r.hash(); }
+  };
+}
+
+///////////////////////////////////////////////////////////////////////////////

@@ -1,14 +1,13 @@
-<?php
+<?hh
 
 namespace foo;
 
 class bar {
-	public function __construct(\stdclass $x = NULL) {
-		var_dump($x);
-	}
+    public function __construct(?\stdClass $x = NULL) {
+        \var_dump($x);
+    }
 }
-
-new bar(new \stdclass);
+<<__EntryPoint>> function main(): void {
+new bar(new \stdClass);
 new bar(null);
-
-?>
+}

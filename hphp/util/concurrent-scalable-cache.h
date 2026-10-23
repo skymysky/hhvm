@@ -14,11 +14,11 @@
  * limitations under the License.
  */
 
-#ifndef incl_HPHP_UTIL_SCALABLE_CACHE_H
-#define incl_HPHP_UTIL_SCALABLE_CACHE_H
+#pragma once
 
 #include "hphp/util/concurrent-lru-cache.h"
 #include "hphp/util/lru-cache-key.h"
+#include <folly/system/HardwareConcurrency.h>
 #include <limits>
 #include <memory>
 
@@ -125,7 +125,7 @@ ConcurrentScalableCache(size_t maxSize, size_t numShards)
   : m_maxSize(maxSize), m_numShards(numShards)
 {
   if (m_numShards == 0) {
-    m_numShards = std::thread::hardware_concurrency();
+    m_numShards = folly::available_concurrency();
   }
   for (size_t i = 0; i < m_numShards; i++) {
     size_t s = maxSize / m_numShards;
@@ -186,4 +186,3 @@ size() const {
 
 } // namespace HPHP
 
-#endif

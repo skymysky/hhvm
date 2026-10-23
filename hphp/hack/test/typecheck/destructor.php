@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 /**
  * Copyright (c) 2014, Facebook, Inc.
  * All rights reserved.
@@ -10,7 +10,6 @@
  */
 
 class Foo {
-  <<__OptionalDestruct>>
   public function __destruct() {
   }
 }

@@ -1,12 +1,11 @@
-array(4) {
+dict(6) {
   ["kind"]=>
   int(101)
   ["classname"]=>
   string(6) "HH\Set"
   ["generic_types"]=>
-  array(1) {
-    [0]=>
-    array(2) {
+  vec(1) {
+    dict(2) {
       ["kind"]=>
       int(13)
       ["name"]=>
@@ -15,16 +14,19 @@ array(4) {
   }
   ["typevars"]=>
   string(1) "T"
+  ["opaque"]=>
+  bool(true)
+  ["alias"]=>
+  string(7) "MyAlias"
 }
-array(5) {
+dict(5) {
   ["kind"]=>
   int(15)
   ["classname"]=>
   string(6) "HH\Set"
   ["generic_types"]=>
-  array(1) {
-    [0]=>
-    array(2) {
+  vec(1) {
+    dict(2) {
       ["kind"]=>
       int(13)
       ["name"]=>
@@ -36,26 +38,24 @@ array(5) {
   ["alias"]=>
   string(7) "MyAlias"
 }
-array(4) {
+dict(6) {
   ["kind"]=>
   int(11)
   ["return_type"]=>
-  array(3) {
+  dict(3) {
     ["kind"]=>
     int(101)
     ["classname"]=>
     string(6) "HH\Map"
     ["generic_types"]=>
-    array(2) {
-      [0]=>
-      array(2) {
+    vec(2) {
+      dict(2) {
         ["kind"]=>
         int(13)
         ["name"]=>
         string(2) "Tk"
       }
-      [1]=>
-      array(2) {
+      dict(2) {
         ["kind"]=>
         int(13)
         ["name"]=>
@@ -64,9 +64,8 @@ array(4) {
     }
   }
   ["param_types"]=>
-  array(1) {
-    [0]=>
-    array(2) {
+  vec(1) {
+    dict(2) {
       ["kind"]=>
       int(13)
       ["name"]=>
@@ -75,27 +74,29 @@ array(4) {
   }
   ["typevars"]=>
   string(5) "Tk,Tv"
+  ["opaque"]=>
+  bool(true)
+  ["alias"]=>
+  string(8) "MyAlias2"
 }
-array(5) {
+dict(5) {
   ["kind"]=>
   int(11)
   ["return_type"]=>
-  array(3) {
+  dict(3) {
     ["kind"]=>
     int(15)
     ["classname"]=>
     string(6) "HH\Map"
     ["generic_types"]=>
-    array(2) {
-      [0]=>
-      array(2) {
+    vec(2) {
+      dict(2) {
         ["kind"]=>
         int(13)
         ["name"]=>
         string(2) "Tk"
       }
-      [1]=>
-      array(2) {
+      dict(2) {
         ["kind"]=>
         int(13)
         ["name"]=>
@@ -104,9 +105,8 @@ array(5) {
     }
   }
   ["param_types"]=>
-  array(1) {
-    [0]=>
-    array(2) {
+  vec(1) {
+    dict(2) {
       ["kind"]=>
       int(13)
       ["name"]=>
@@ -118,32 +118,29 @@ array(5) {
   ["alias"]=>
   string(8) "MyAlias2"
 }
-array(5) {
+dict(5) {
   ["kind"]=>
   int(11)
   ["return_type"]=>
-  array(3) {
+  dict(3) {
     ["kind"]=>
     int(15)
     ["classname"]=>
     string(6) "HH\Map"
     ["generic_types"]=>
-    array(2) {
-      [0]=>
-      array(1) {
+    vec(2) {
+      dict(1) {
         ["kind"]=>
         int(1)
       }
-      [1]=>
-      array(5) {
+      dict(5) {
         ["kind"]=>
         int(15)
         ["classname"]=>
         string(6) "HH\Set"
         ["generic_types"]=>
-        array(1) {
-          [0]=>
-          array(1) {
+        vec(1) {
+          dict(1) {
             ["kind"]=>
             int(4)
           }
@@ -151,9 +148,9 @@ array(5) {
         ["alias"]=>
         string(7) "MyAlias"
         ["typevar_types"]=>
-        array(1) {
+        dict(1) {
           ["T"]=>
-          array(1) {
+          dict(1) {
             ["kind"]=>
             int(4)
           }
@@ -162,9 +159,8 @@ array(5) {
     }
   }
   ["param_types"]=>
-  array(1) {
-    [0]=>
-    array(1) {
+  vec(1) {
+    dict(1) {
       ["kind"]=>
       int(1)
     }
@@ -172,22 +168,21 @@ array(5) {
   ["alias"]=>
   string(8) "MyAlias2"
   ["typevar_types"]=>
-  array(2) {
+  dict(2) {
     ["Tk"]=>
-    array(1) {
+    dict(1) {
       ["kind"]=>
       int(1)
     }
     ["Tv"]=>
-    array(5) {
+    dict(5) {
       ["kind"]=>
       int(15)
       ["classname"]=>
       string(6) "HH\Set"
       ["generic_types"]=>
-      array(1) {
-        [0]=>
-        array(1) {
+      vec(1) {
+        dict(1) {
           ["kind"]=>
           int(4)
         }
@@ -195,9 +190,9 @@ array(5) {
       ["alias"]=>
       string(7) "MyAlias"
       ["typevar_types"]=>
-      array(1) {
+      dict(1) {
         ["T"]=>
-        array(1) {
+        dict(1) {
           ["kind"]=>
           int(4)
         }

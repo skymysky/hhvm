@@ -14,15 +14,14 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_EVAL_DEBUGGER_CMD_BREAK_H_
-#define incl_HPHP_EVAL_DEBUGGER_CMD_BREAK_H_
+#pragma once
 
 #include <vector>
 
 #include "hphp/runtime/debugger/break_point.h"
 #include "hphp/runtime/debugger/debugger_command.h"
 
-namespace HPHP { namespace Eval {
+namespace HPHP::Eval {
 ///////////////////////////////////////////////////////////////////////////////
 
 struct CmdBreak : DebuggerCommand {
@@ -70,6 +69,8 @@ protected:
     int index
   );
 
+  std::string name() const override { return "break"; }
+
 private:
   // Either points to the breakpoint collection of a debugger client
   // or points to m_bps. In the former case the client frees the
@@ -95,6 +96,5 @@ private:
 };
 
 ///////////////////////////////////////////////////////////////////////////////
-}}
+}
 
-#endif // incl_HPHP_EVAL_DEBUGGER_CMD_BREAK_H_

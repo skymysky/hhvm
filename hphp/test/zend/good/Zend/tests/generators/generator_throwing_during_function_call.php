@@ -1,17 +1,17 @@
-<?php
+<?hh
 
-function throwException() {
+function throwException() :mixed{
     throw new Exception('test');
 }
 
-function gen() {
+function gen() :AsyncGenerator<mixed,mixed,void>{
     yield 'foo';
     strlen("foo", "bar", throwException());
     yield 'bar';
 }
-
+<<__EntryPoint>> function main(): void {
 $gen = gen();
-
+$gen->next();
 var_dump($gen->current());
 
 try {
@@ -21,5 +21,4 @@ try {
 }
 
 var_dump($gen->current());
-
-?>
+}

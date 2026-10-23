@@ -18,36 +18,29 @@
 #error "unit-emitter-inl.h should only be included by unit-emitter.h"
 #endif
 
+#include "hphp/runtime/base/file-util.h"
+
+#include "hphp/runtime/ext/extension.h"
+
 #include "hphp/runtime/vm/hhbc-codec.h"
+#include "hphp/runtime/vm/native.h"
 
 namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
 // Basic info.
 
-inline const MD5& UnitEmitter::md5() const {
-  return m_md5;
+inline const SHA1& UnitEmitter::sha1() const {
+  return m_sha1;
 }
 
-inline const unsigned char* UnitEmitter::bc() const {
-  return m_bc;
-}
-
-inline Offset UnitEmitter::bcPos() const {
-  return m_bclen;
-}
-
-inline Offset UnitEmitter::offsetOf(const unsigned char* pc) const {
-  return pc - m_bc;
+inline const SHA1& UnitEmitter::bcSha1() const {
+  return m_bcSha1;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 // FuncEmitters.
 
-inline FuncEmitter* UnitEmitter::getMain() {
-  return m_fes[0];
-}
-
-inline const std::vector<FuncEmitter*>& UnitEmitter::fevec() const {
+inline auto const& UnitEmitter::fevec() const {
   return m_fes;
 }
 
@@ -58,93 +51,81 @@ inline size_t UnitEmitter::numPreClasses() const {
   return m_pceVec.size();
 }
 
-inline PreClassEmitter* UnitEmitter::pce(Id preClassId) {
-  return m_pceVec[preClassId];
-}
-
-inline const PreClassEmitter* UnitEmitter::pce(Id preClassId) const {
-  return m_pceVec[preClassId];
+inline folly::Range<PreClassEmitter* const*> UnitEmitter::preclasses() const {
+  return { m_pceVec.data(), m_pceVec.size() };
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 // Type aliases.
 
-inline const std::vector<TypeAlias>& UnitEmitter::typeAliases() const {
+inline auto const& UnitEmitter::typeAliases() const {
   return m_typeAliases;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// Source locations.
+// Constants.
 
-inline bool UnitEmitter::hasSourceLocInfo() const {
-  return !m_sourceLocTab.empty();
+inline std::vector<Constant>& UnitEmitter::constants() {
+  return m_constants;
 }
 
-inline const LineTable& UnitEmitter::lineTable() const {
-  return m_lineTable;
+inline const std::vector<Constant>& UnitEmitter::constants() const {
+  return m_constants;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// Bytecode emit.
+// Modules.
 
-inline void UnitEmitter::emitOp(Op op) {
-  encode_op(op, [&](uint8_t byte) { emitByte(byte); });
+inline std::vector<Module>& UnitEmitter::modules() {
+  return m_modules;
 }
 
-inline void UnitEmitter::emitByte(unsigned char n, int64_t pos) {
-  emitImpl(n, pos);
-}
-
-inline void UnitEmitter::emitInt32(int n, int64_t pos) {
-  emitImpl(n, pos);
-}
-
-inline void UnitEmitter::emitInt64(int64_t n, int64_t pos) {
-  emitImpl(n, pos);
-}
-
-inline void UnitEmitter::emitDouble(double n, int64_t pos) {
-  emitImpl(n, pos);
-}
-
-template<typename T>
-void UnitEmitter::emitIVA(T n) {
-  if (LIKELY((n & 0x7f) == n)) {
-    emitByte((unsigned char)n);
-  } else {
-    assertx((n & 0x7fffffff) == n);
-    emitInt32((n & 0x7fffff80) << 1 | 0x80 | (n & 0x7f));
-  }
-}
-
-template<class T>
-void UnitEmitter::emitImpl(T n, int64_t pos) {
-  auto c = (unsigned char*)&n;
-  if (pos == -1) {
-    // Make sure m_bc is large enough.
-    while (m_bclen + sizeof(T) > m_bcmax) {
-      m_bc = (unsigned char*)realloc(m_bc, m_bcmax << 1);
-      m_bcmax <<= 1;
-    }
-    memcpy(&m_bc[m_bclen], c, sizeof(T));
-    m_bclen += sizeof(T);
-  } else {
-    assertx(pos + sizeof(T) <= m_bclen);
-    for (uint32_t i = 0; i < sizeof(T); ++i) {
-      m_bc[pos + i] = c[i];
-    }
-  }
+inline const std::vector<Module>& UnitEmitter::modules() const {
+  return m_modules;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 // Other methods.
 
-inline bool UnitEmitter::isASystemLib() const {
-  static const char systemlib_prefix[] = "/:systemlib";
-  return !strncmp(m_filepath->data(),
-                  systemlib_prefix,
-                  sizeof systemlib_prefix - 1);
+inline bool UnitEmitter::isSystemLib() const {
+  return FileUtil::isSystemName(m_filepath->slice());
 }
 
 ///////////////////////////////////////////////////////////////////////////////
+
+template <typename SerDe>
+void UnitEmitterSerdeWrapper::serde(SerDe& sd) {
+  if constexpr (SerDe::deserializing) {
+    assertx(!m_ue);
+
+    bool present;
+    sd(present);
+    if (present) {
+      SHA1 sha1;
+      const StringData* filepath;
+      sd(sha1);
+      sd(filepath);
+      auto ue = UnitEmitter::makeForSerde(
+        sha1, SHA1{}, RepoOptions::defaults().packageInfo()
+      );
+      ue->m_extension = nullptr;
+      ue->m_filepath = makeStaticString(filepath);
+      ue->serde(sd, false);
+
+      m_ue = std::move(ue);
+    }
+  } else {
+    if (m_ue) {
+      sd(true);
+      sd(m_ue->sha1());
+      sd(m_ue->m_filepath);
+      m_ue->serde(sd, false);
+    } else {
+      sd(false);
+    }
+  }
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
 }

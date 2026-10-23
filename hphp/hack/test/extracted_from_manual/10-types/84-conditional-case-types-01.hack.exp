@@ -1,0 +1,16 @@
+error: Typing[4110] Invalid return type [1]
+-> Expected `CT<int>` [2]
+-> But got `float` [3]
+
+84-conditional-case-types-01.hack:13:10
+10 | }
+11 | 
+12 | function violates_super(float $x): CT<int> {
+   |                         ^^^^^ [3]
+   |                                    ^^^^^^^ [2]
+13 |   return $x; // ERROR: int is not a supertype of arraykey
+   |          ^^ [1]
+14 | }
+15 | 
+
+1 error found

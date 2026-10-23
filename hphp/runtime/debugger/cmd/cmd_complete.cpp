@@ -18,10 +18,10 @@
 #include <vector>
 #include "hphp/runtime/debugger/cmd/cmd_info.h"
 
-namespace HPHP { namespace Eval {
+namespace HPHP::Eval {
 ///////////////////////////////////////////////////////////////////////////////
 
-TRACE_SET_MOD(debugger);
+TRACE_SET_MOD(debugger)
 
 void CmdComplete::sendImpl(DebuggerThriftBuffer &thrift) {
   DebuggerCommand::sendImpl(thrift);
@@ -59,4 +59,4 @@ bool CmdComplete::onServer(DebuggerProxy& /*proxy*/) {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-}}
+}

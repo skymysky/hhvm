@@ -1,0 +1,15 @@
+error: Typing[4303] All type arguments must be specified because a type parameter is reified [1]
+-> Definition is here [2]
+
+reified_fun.php:6:3
+1 | <?hh
+2 | 
+3 | function foo<reify T>(): void {}
+  |                    ^ [2]
+4 | 
+5 | function test(): void {
+6 |   foo<>;
+  |   ^^^^^ [1]
+7 | }
+
+1 error found

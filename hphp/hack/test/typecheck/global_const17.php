@@ -1,3 +1,3 @@
 <?hh
 
-const X = "";
+const string X = "";

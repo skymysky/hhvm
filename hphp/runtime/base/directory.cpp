@@ -22,9 +22,6 @@
 #include "hphp/runtime/base/file.h"
 #include "hphp/runtime/server/static-content-cache.h"
 
-#include <sys/types.h>
-#include <tuple>
-
 namespace HPHP {
 
 IMPLEMENT_RESOURCE_ALLOCATION(PlainDirectory)
@@ -45,7 +42,7 @@ const StaticString
   s_r("r");
 
 Array Directory::getMetaData() {
-  return make_map_array(
+  return make_dict_array(
     s_wrapper_type, s_plainfile, // PHP5 compatibility
     s_stream_type,  s_dir,
     s_mode,         s_r,
@@ -63,7 +60,7 @@ PlainDirectory::PlainDirectory(int fd) {
   m_dir = ::fdopendir(fd);
 }
 
-PlainDirectory::PlainDirectory(const String& path) {
+PlainDirectory::PlainDirectory(const OptString& path) {
   m_dir = ::opendir(path.data());
 }
 
@@ -79,16 +76,20 @@ void PlainDirectory::close() {
 }
 
 Variant PlainDirectory::read() {
+  if (!m_dir) return false;
+
   struct dirent entry;
   struct dirent *result;
   int ret = readdir_r(m_dir, &entry, &result);
   if (ret != 0 || !result) {
     return false;
   }
-  return String(entry.d_name, CopyString);
+  return OptString(entry.d_name, CopyString);
 }
 
 void PlainDirectory::rewind() {
+  if (!m_dir) return;
+
   ::rewinddir(m_dir);
 }
 
@@ -115,9 +116,9 @@ bool ArrayDirectory::isEof() const {
   return m_it.end();
 }
 
-String ArrayDirectory::path() {
+OptString ArrayDirectory::path() {
   if (!m_it) {
-    return empty_string();
+    return String::Empty();
   }
 
   auto entry = m_it.second();
@@ -125,9 +126,9 @@ String ArrayDirectory::path() {
   return HHVM_FN(dirname)(entry.toString());
 }
 
-CachedDirectory::CachedDirectory(const String& path) {
+CachedDirectory::CachedDirectory(const OptString& path) {
   assertx(File::IsVirtualDirectory(path));
-  m_files = StaticContentCache::TheFileCache->readDirectory(path.c_str());
+  m_files = StaticContentCache::TheFileCache->listDirectory(path.toCppString());
 }
 
 ///////////////////////////////////////////////////////////////////////////////

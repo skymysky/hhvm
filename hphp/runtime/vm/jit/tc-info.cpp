@@ -18,23 +18,25 @@
 #include "hphp/runtime/vm/jit/tc-internal.h"
 
 #include "hphp/runtime/base/rds.h"
-#include "hphp/runtime/base/runtime-option.h"
-
+#include "hphp/runtime/vm/runtime-compiler.h"
 #include "hphp/runtime/vm/jit/code-cache.h"
 #include "hphp/runtime/vm/jit/mcgen.h"
 #include "hphp/runtime/vm/jit/prof-data.h"
 #include "hphp/runtime/vm/jit/trans-db.h"
 
+#include "hphp/util/configs/eval.h"
 #include "hphp/util/data-block.h"
 #include "hphp/util/build-info.h"
 
 #include <folly/Format.h>
+#include <folly/json/dynamic.h>
+#include <folly/json/json.h>
 
 #include <algorithm>
 #include <string>
 #include <vector>
 
-namespace HPHP { namespace jit { namespace tc {
+namespace HPHP::jit::tc {
 
 namespace {
 
@@ -45,59 +47,57 @@ bool dumpTCCode(folly::StringPiece filename) {
   if (F == nullptr) return false;                                       \
   SCOPE_EXIT{ fclose(F); };
 
-  OPEN_FILE(ahotFile,       "_ahot");
   OPEN_FILE(aFile,          "_a");
-  OPEN_FILE(aprofFile,      "_aprof");
+  // Preserve the three-file dump shape for consumers even though all code is
+  // stored in the sparse unified file.
   OPEN_FILE(acoldFile,      "_acold");
   OPEN_FILE(afrozenFile,    "_afrozen");
 
 #undef OPEN_FILE
 
-  // dump starting from the hot region
+  // Dynamic TC sections are noncontiguous, so preserve each code block's
+  // address as an offset in the sparse unified dump.
   auto result = true;
-  auto writeBlock = [&](const CodeBlock& cb, FILE* file) {
-    if (result) {
-      auto const count = cb.used();
-      result = fwrite(cb.base(), 1, count, file) == count;
+  auto const& all = code().all();
+  auto writeBlock = [&](const CodeBlock& cb) {
+    if (!result) return;
+    assertx(all.contains(cb.base(), cb.frontier()));
+    auto const offset = cb.base() - all.base();
+    if (fseeko(aFile, offset, SEEK_SET) != 0) {
+      result = false;
+      return;
     }
+    auto const count = cb.used();
+    result = fwrite(cb.base(), 1, count, aFile) == count;
   };
 
-  writeBlock(code().hot(), ahotFile);
-  writeBlock(code().main(), aFile);
-  writeBlock(code().prof(), aprofFile);
-  writeBlock(code().cold(), acoldFile);
-  writeBlock(code().frozen(), afrozenFile);
+  code().forEachBlock(writeBlock);
   return result;
 }
 
 bool dumpTCData() {
-  auto const dataPath = RuntimeOption::EvalDumpTCPath + "/tc_data.txt.gz";
+  auto const dataPath = Cfg::Eval::DumpTCPath + "/tc_data.txt.gz";
   gzFile tcDataFile = gzopen(dataPath.c_str(), "w");
   if (!tcDataFile) return false;
+  SCOPE_EXIT { gzclose(tcDataFile); };
+
+  auto const& main = code().all();
 
   if (!gzprintf(tcDataFile,
                 "repo_schema      = %s\n"
-                "ahot.base        = %p\n"
-                "ahot.frontier    = %p\n"
                 "a.base           = %p\n"
-                "a.frontier       = %p\n"
-                "aprof.base       = %p\n"
-                "aprof.frontier   = %p\n"
-                "acold.base       = %p\n"
-                "acold.frontier   = %p\n"
-                "afrozen.base     = %p\n"
-                "afrozen.frontier = %p\n\n",
+                "a.frontier       = %p\n\n",
                 repoSchemaId().begin(),
-                code().hot().base(),    code().hot().frontier(),
-                code().main().base(),   code().main().frontier(),
-                code().prof().base(),   code().prof().frontier(),
-                code().cold().base(),   code().cold().frontier(),
-                code().frozen().base(), code().frozen().frontier())) {
+                main.base(),   main.frontier())) {
     return false;
   }
 
   if (!gzprintf(tcDataFile, "total_translations = %zu\n\n",
                 transdb::getNumTranslations())) {
+    return false;
+  }
+
+  if (!gzprintf(tcDataFile, "block_map = %s\n\n", code().blockMap().data())) {
     return false;
   }
 
@@ -109,68 +109,87 @@ bool dumpTCData() {
     // No need for matching exit call; data is immortal with trans DB enabled.
     requestInitProfData();
   }
+  const TransRec invalid;
+  assertx(!invalid.isValid());
   for (TransID t = 0; t < transdb::getNumTranslations(); t++) {
-    auto const ret = gzputs(
-      tcDataFile, transdb::getTransRec(t)->print().c_str()
-    );
+    auto transRec = transdb::getTransRec(t);
+    if (!transRec) transRec = &invalid;
+    auto const ret = gzputs(tcDataFile, transRec->print().c_str());
     if (ret == -1) {
       return false;
     }
   }
 
-  gzclose(tcDataFile);
   return true;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 }
 
+bool dumpEnabled() {
+  return Cfg::Eval::DumpTC ||
+         Cfg::Eval::DumpIR ||
+         Cfg::Eval::DumpRegion ||
+         Cfg::Eval::DumpInlDecision ||
+         Cfg::Eval::DumpCallTargets ||
+         Cfg::Eval::DumpLayoutCFG ||
+         Cfg::Eval::DumpVBC;
+}
+
 bool dump(bool ignoreLease /* = false */) {
   if (!mcgen::initialized()) return false;
 
-  std::unique_lock<SimpleMutex> codeLock;
-  std::unique_lock<SimpleMutex> metaLock;
-  if (!ignoreLease) {
-    codeLock = lockCode();
-    metaLock = lockMetadata();
+  {
+    std::unique_lock<SimpleMutex> codeLock;
+    std::unique_lock<SimpleMutex> metaLock;
+    if (!ignoreLease) {
+      codeLock = lockCode();
+      metaLock = lockMetadata();
+    }
+    if (!dumpTCData()) return false;
+    if (!dumpTCCode(Cfg::Eval::DumpTCPath + "/tc_dump")) return false;
   }
-  return dumpTCData() &&
-    dumpTCCode(RuntimeOption::EvalDumpTCPath + "/tc_dump");
+
+  if (!Cfg::Repo::Authoritative) {
+    dump_compiled_units(Cfg::Eval::DumpTCPath + "/hhvm.hhbc");
+  }
+
+  return true;
 }
 
 std::vector<UsageInfo> getUsageInfo() {
   std::vector<UsageInfo> tcUsageInfo;
 
-  code().forEachBlock([&] (const char* name, const CodeBlock& a) {
+  code().forEachSection([&] (const char* name, auto const& s) {
     tcUsageInfo.emplace_back(UsageInfo{
       std::string("code.") + name,
-      a.used(),
-      a.capacity(),
+      s.used(),
+      s.capacity(),
       true
     });
   });
   tcUsageInfo.emplace_back(UsageInfo{
     "data",
-    code().data().used(),
-    code().data().capacity(),
+    code().dataUsed(),
+    code().dataCapacity(),
     true
   });
   tcUsageInfo.emplace_back(UsageInfo{
     "RDS",
     rds::usedBytes(),
-    RuntimeOption::EvalJitTargetCacheSize * 3 / 4,
+    rds::capacityBytes(),
     false
   });
   tcUsageInfo.emplace_back(UsageInfo{
     "RDSLocal",
     rds::usedLocalBytes(),
-    RuntimeOption::EvalJitTargetCacheSize * 3 / 4,
+    rds::capacityLocalBytes(),
     false
   });
   tcUsageInfo.emplace_back(UsageInfo{
     "persistentRDS",
     rds::usedPersistentBytes(),
-    RuntimeOption::EvalJitTargetCacheSize / 4,
+    rds::capacityPersistentBytes(),
     false
   });
   return tcUsageInfo;
@@ -205,27 +224,76 @@ std::string getTCSpace() {
 std::string getTCAddrs() {
   std::string addrs;
 
-  code().forEachBlock([&] (const char* name, const CodeBlock& a) {
-    addrs += folly::format("{}: {}\n", name, a.base()).str();
+  code().forEachSection([&] (const char* name, auto const&) {
+    addrs += folly::format("{}: {}\n", name, code().base()).str();
   });
   return addrs;
 }
 
 std::vector<TCMemInfo> getTCMemoryUsage() {
   std::vector<TCMemInfo> ret;
-  code().forEachBlock(
-    [&](const char* name, const CodeBlock& a) {
+  code().forEachSection(
+    [&](const char* name, auto const& s) {
       ret.emplace_back(TCMemInfo{
         name,
-        a.used(),
-        a.numAllocs(),
-        a.numFrees(),
-        a.bytesFree(),
-        a.blocksFree()
+        s.used(),
+        s.numAllocs(),
+        s.numFrees(),
+        s.bytesFree(),
+        s.blocksFree()
       });
     }
   );
   return ret;
 }
 
-}}}
+std::string getRDSUsageJSON() {
+  folly::dynamic summary = folly::dynamic::object
+    ("normal", folly::dynamic::object
+      ("used", rds::usedBytes())
+      ("capacity", rds::capacityBytes()))
+    ("local", folly::dynamic::object
+      ("used", rds::usedLocalBytes())
+      ("capacity", rds::capacityLocalBytes()))
+    ("persistent", folly::dynamic::object
+      ("used", rds::usedPersistentBytes())
+      ("capacity", rds::capacityPersistentBytes()));
+
+  auto const categories = rds::usageByCategory();
+  folly::dynamic catArray = folly::dynamic::array;
+  for (auto const& cat : categories) {
+    auto const modeName = [&] {
+      switch (cat.mode) {
+        case rds::Mode::Normal:     return "Normal";
+        case rds::Mode::Local:      return "Local";
+        case rds::Mode::Persistent: return "Persistent";
+        default:                    return "Unknown";
+      }
+    }();
+
+    size_t regionUsed = 0;
+    switch (cat.mode) {
+      case rds::Mode::Normal:     regionUsed = rds::usedBytes(); break;
+      case rds::Mode::Local:      regionUsed = rds::usedLocalBytes(); break;
+      case rds::Mode::Persistent: regionUsed = rds::usedPersistentBytes(); break;
+      default: break;
+    }
+    double pct = regionUsed > 0
+      ? 100.0 * cat.bytes / regionUsed
+      : 0.0;
+
+    catArray.push_back(folly::dynamic::object
+      ("category", cat.category)
+      ("mode", modeName)
+      ("bytes", cat.bytes)
+      ("count", cat.count)
+      ("pct_of_region", pct));
+  }
+
+  folly::dynamic result = folly::dynamic::object
+    ("summary", std::move(summary))
+    ("categories", std::move(catArray));
+  return folly::toJson(result);
+}
+
+}

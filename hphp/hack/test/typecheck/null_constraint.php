@@ -10,11 +10,21 @@
  */
 
 class MyClass {
-  public function doStuff() {}
+  public ?int $field = 0;
+  public function doStuff(): void {}
 }
+
 
 function test<T as ?MyClass>(T $arg): void {
   if ($arg !== null) {
     $arg->doStuff();
+    $arg->field;
+  }
+}
+
+function expectString(string $_):void { }
+function test2<T as ?string>(T $arg): void {
+  if ($arg !== null) {
+    expectString($arg[0]);
   }
 }

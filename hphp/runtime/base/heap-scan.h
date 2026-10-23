@@ -16,49 +16,40 @@
 #ifndef HPHP_HEAP_SCAN_H
 #define HPHP_HEAP_SCAN_H
 
-#include "hphp/runtime/base/apc-local-array.h"
-#include "hphp/runtime/base/apc-local-array-defs.h"
 #include "hphp/runtime/base/array-data.h"
+#include "hphp/runtime/base/bespoke-array.h"
 #include "hphp/runtime/base/heap-graph.h"
 #include "hphp/runtime/base/memory-manager.h"
-#include "hphp/runtime/base/mixed-array.h"
-#include "hphp/runtime/base/mixed-array-defs.h"
+#include "hphp/runtime/base/memory-manager-defs.h"
 #include "hphp/runtime/base/object-data.h"
-#include "hphp/runtime/base/packed-array.h"
-#include "hphp/runtime/base/packed-array-defs.h"
 #include "hphp/runtime/base/rds-header.h"
-#include "hphp/runtime/base/ref-data.h"
-#include "hphp/runtime/base/req-root.h"
+#include "hphp/runtime/base/request-info.h"
 #include "hphp/runtime/base/resource-data.h"
-#include "hphp/runtime/base/string-data.h"
-#include "hphp/runtime/base/thread-info.h"
+#include "hphp/runtime/base/vanilla-dict.h"
+#include "hphp/runtime/base/vanilla-vec.h"
 
-#include "hphp/runtime/ext/asio/asio-external-thread-event-queue.h"
+#include "hphp/runtime/ext/asio/ext_asio.h"
 #include "hphp/runtime/ext/asio/ext_async-function-wait-handle.h"
 #include "hphp/runtime/ext/asio/ext_async-generator.h"
-#include "hphp/runtime/ext/asio/ext_external-thread-event-wait-handle.h"
-#include "hphp/runtime/ext/asio/ext_reschedule-wait-handle.h"
+#include "hphp/runtime/ext/asio/ext_await-all-wait-handle.h"
+#include "hphp/runtime/ext/asio/ext_concurrent-wait-handle.h"
 #include "hphp/runtime/ext/asio/ext_resumable-wait-handle.h"
-#include "hphp/runtime/ext/asio/ext_sleep-wait-handle.h"
-#include "hphp/runtime/ext/extension-registry.h"
-#include "hphp/runtime/ext/generator/ext_generator.h"
+#include "hphp/runtime/ext/asio/ext_wait-handle.h"
+#include "hphp/runtime/ext/collections/ext_collections-pair.h"
+#include "hphp/runtime/ext/collections/ext_collections-vector.h"
+#include "hphp/runtime/ext/collections/hash-collection.h"
 
-#include "hphp/runtime/server/server-note.h"
-
-#include "hphp/runtime/vm/globals-array.h"
 #include "hphp/runtime/vm/named-entity.h"
-#include "hphp/runtime/vm/named-entity-defs.h"
 #include "hphp/runtime/vm/runtime.h"
 
-#include "hphp/util/hphp-config.h"
-
+#include "hphp/util/rds-local.h"
 #include "hphp/util/type-scan.h"
 
 namespace HPHP {
 
 inline void scanFrameSlots(const ActRec* ar, type_scan::Scanner& scanner) {
-  // layout: [clsrefs][iters][locals][ActRec]
-  //                                 ^ar
+  // layout: [iters][locals][ActRec]
+  //                        ^ar
   auto num_locals = ar->func()->numLocals();
   auto locals = frame_local(ar, num_locals - 1);
   scanner.scan(*locals, num_locals * sizeof(TypedValue));
@@ -109,20 +100,16 @@ inline void scanMemoSlots(const ObjectData* obj,
 
 inline void scanHeapObject(const HeapObject* h, type_scan::Scanner& scanner) {
   switch (h->kind()) {
-    case HeaderKind::Empty:
-      return;
-    case HeaderKind::Packed:
-    case HeaderKind::VecArray:
-      return PackedArray::scan(static_cast<const ArrayData*>(h), scanner);
-    case HeaderKind::Mixed:
+    case HeaderKind::Vec:
+      return VanillaVec::scan(static_cast<const ArrayData*>(h), scanner);
     case HeaderKind::Dict:
-      return static_cast<const MixedArray*>(h)->scan(scanner);
+      return static_cast<const VanillaDict*>(h)->scan(scanner);
     case HeaderKind::Keyset:
-      return static_cast<const SetArray*>(h)->scan(scanner);
-    case HeaderKind::Apc:
-      return static_cast<const APCLocalArray*>(h)->scan(scanner);
-    case HeaderKind::Globals:
-      return static_cast<const GlobalsArray*>(h)->scan(scanner);
+      return static_cast<const VanillaKeyset*>(h)->scan(scanner);
+    case HeaderKind::BespokeVec:
+    case HeaderKind::BespokeDict:
+    case HeaderKind::BespokeKeyset:
+      return static_cast<const BespokeArray*>(h)->scan(scanner);
     case HeaderKind::Closure:
       scanner.scan(*static_cast<const c_Closure*>(h)->hdr());
       return static_cast<const c_Closure*>(h)->scan(scanner);
@@ -137,6 +124,10 @@ inline void scanHeapObject(const HeapObject* h, type_scan::Scanner& scanner) {
       // scan C++ properties after [ObjectData] header. should pick up
       // unioned and bit-packed fields
       return static_cast<const c_AwaitAllWaitHandle*>(h)->scan(scanner);
+    case HeaderKind::ConcurrentWH:
+      // scan C++ properties after [ObjectData] header. should pick up
+      // unioned and bit-packed fields
+      return static_cast<const c_ConcurrentWaitHandle*>(h)->scan(scanner);
     case HeaderKind::AsyncFuncWH:
       return scanAFWH(static_cast<const c_Awaitable*>(h), scanner);
     case HeaderKind::NativeData: {
@@ -173,9 +164,17 @@ inline void scanHeapObject(const HeapObject* h, type_scan::Scanner& scanner) {
       return scanner.scanByIndex(res->typeIndex(), res->data(),
                                  res->heapSize() - sizeof(ResourceHdr));
     }
-    case HeaderKind::Ref:
-      scanner.scan(*static_cast<const RefData*>(h)->tv());
+    case HeaderKind::ClsMeth:
+      // ClsMeth only holds pointers to non-request allocated data
       return;
+    case HeaderKind::RClsMeth: {
+      auto const rclsmeth = static_cast<const RClsMethData*>(h);
+      return scanner.scan(rclsmeth->m_arr);
+    }
+    case HeaderKind::RFunc: {
+      auto const rfunc = static_cast<const RFuncData*>(h);
+      return scanner.scan(rfunc->m_arr);
+    }
     case HeaderKind::Cpp:
     case HeaderKind::SmallMalloc:
     case HeaderKind::BigMalloc: {
@@ -204,8 +203,14 @@ inline void c_AwaitAllWaitHandle::scan(type_scan::Scanner& scanner) const {
   ObjectData::scan(scanner); // in case of dynprops
 }
 
+inline void c_ConcurrentWaitHandle::scan(type_scan::Scanner& scanner) const {
+  scanner.scanByIndex(m_tyindex, this, heapSize());
+  ObjectData::scan(scanner); // in case of dynprops
+}
+
 inline void c_Awaitable::scan(type_scan::Scanner& scanner) const {
-  assertx(kind() != HeaderKind::AwaitAllWH);
+  assertx(kind() != HeaderKind::AwaitAllWH &&
+          kind() != HeaderKind::ConcurrentWH);
   auto const size =
     kind() == HeaderKind::AsyncFuncWH ? sizeof(c_AsyncFunctionWaitHandle) :
               asio_object_size(this);
@@ -214,8 +219,7 @@ inline void c_Awaitable::scan(type_scan::Scanner& scanner) const {
 }
 
 inline void ObjectData::scan(type_scan::Scanner& scanner) const {
-  auto props = propVec();
-  scanner.scan(*props, m_cls->numDeclProperties() * sizeof(*props));
+  props()->scan(m_cls->countablePropsEnd(), scanner);
   if (getAttribute(HasDynPropArr)) {
     // nb: dynamic property arrays are in ExecutionContext::dynPropTable,
     // which is not marked as a root. Scan the entry pair, so both the key
@@ -252,7 +256,7 @@ inline void ObjectData::scan(type_scan::Scanner& scanner) const {
 //     m_sfp                prev ActRec*
 //     m_savedRIP           return addr
 //     m_func               Func*
-//     m_soff               return vmpc
+//     m_callOffAndFlags    caller's vmpc
 //     m_argc_flags
 //     m_this|m_cls         ObjectData* or Class*
 //     m_varenv|extraArgs
@@ -312,9 +316,10 @@ template<class Fn> void iterateConservativeRoots(Fn fn) {
 
   // cpp stack. ensure stack contains callee-saved registers.
   CALLEE_SAVED_BARRIER();
-  auto sp = stack_top_ptr_conservative();
-  fn(sp, s_stackLimit + s_stackSize - uintptr_t(sp),
-     type_scan::getIndexForScan<CppStack>());
+  auto const sp = stack_top_ptr_conservative();
+  auto const stackLen = s_stackLimit + s_stackSize - uintptr_t(sp);
+  assertx(s_stackLimit != 0 && s_stackSize != 0);
+  fn(sp, stackLen, type_scan::getIndexForScan<CppStack>());
 }
 
 template<class Fn> void iterateExactRoots(Fn fn) {
@@ -335,6 +340,8 @@ template<class Fn> void iterateExactRoots(Fn fn) {
   if (rds) {
     rds::forEachLocalAlloc(fn);
   }
+
+  rds::local::iterateRoots(fn);
 
   // Root handles & sweep lists
   tl_heap->iterateRoots(fn);

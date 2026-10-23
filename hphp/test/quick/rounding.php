@@ -1,6 +1,6 @@
 <?hh
 
-function main($v1, $v2, $v3, $v4, $v5, $v6) {
+function main(num $v1, num $v2, num $v3, num $v4, num $v5, num $v6) :void{
   $a = floor($v1);
   $b = ceil($v1);
   $c = floor($v2);
@@ -51,6 +51,6 @@ function main($v1, $v2, $v3, $v4, $v5, $v6) {
   var_dump($w);
   var_dump($x);
 }
-
+<<__EntryPoint>> function main_entry(): void {
 main(3, -3, 3.5, -3.5, 0, 0.0);
-
+}

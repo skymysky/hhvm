@@ -11,9 +11,9 @@
 
 
 class Test {
-  public function bloo() {
+  public function bloo(): void {
     $b = 5;
-    $map = array();
+    $map = dict[];
     {
       // UNSAFE
       $map['a'] = $b;

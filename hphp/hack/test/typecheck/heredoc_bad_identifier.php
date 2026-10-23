@@ -9,6 +9,8 @@
  *
  */
 
+function main(): void {
 $a = <<<9
    Should not work.
 9;
+}

@@ -1,0 +1,63 @@
+(rule
+ (alias sound_dynamic_typing_good)
+ (deps
+  %{exe:../../../src/hh_single_type_check.exe}
+  %{project_root}/hack/test/verify.py
+  %{project_root}/hack/test/review.sh
+  (glob_files %{project_root}/hack/test/sound_dynamic/typing/HH_FLAGS)
+  (glob_files %{project_root}/hack/test/sound_dynamic/typing/*.good.php)
+  (glob_files %{project_root}/hack/test/sound_dynamic/typing/*.good.php.exp)
+  (glob_files
+   %{project_root}/hack/test/sound_dynamic/typing/*.good.php.legacy_decl.exp))
+ (action
+  (run
+   %{project_root}/hack/test/verify.py
+   %{project_root}/hack/test/sound_dynamic/typing
+   --program
+   %{exe:../../../src/hh_single_type_check.exe}
+   --batch
+   --in-extension
+   .good.php
+   --out-extension
+   .out
+   --expect-extension
+   .exp
+   --flags
+   --config
+   everything_sdt=false)))
+
+(rule
+ (alias sound_dynamic_typing_bad)
+ (deps
+  %{exe:../../../src/hh_single_type_check.exe}
+  %{project_root}/hack/test/verify.py
+  %{project_root}/hack/test/review.sh
+  (glob_files %{project_root}/hack/test/sound_dynamic/typing/HH_FLAGS)
+  (glob_files %{project_root}/hack/test/sound_dynamic/typing/*.bad.php)
+  (glob_files %{project_root}/hack/test/sound_dynamic/typing/*.bad.php.exp)
+  (glob_files
+   %{project_root}/hack/test/sound_dynamic/typing/*.bad.php.legacy_decl.exp))
+ (action
+  (run
+   %{project_root}/hack/test/verify.py
+   %{project_root}/hack/test/sound_dynamic/typing
+   --program
+   %{exe:../../../src/hh_single_type_check.exe}
+   --batch
+   --in-extension
+   .bad.php
+   --out-extension
+   .out
+   --expect-extension
+   .exp
+   --flags
+   --config
+   everything_sdt=false
+   --error-format
+   plain_highlighted)))
+
+(alias
+ (name runtest)
+ (deps
+  (alias sound_dynamic_typing_good)
+  (alias sound_dynamic_typing_bad)))

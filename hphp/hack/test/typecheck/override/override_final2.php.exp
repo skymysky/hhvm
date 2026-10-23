@@ -1,0 +1,35 @@
+error: Typing[4070] Some members in class `Bar` are incompatible with those declared in type `Foo` [1]
+-> You cannot override this method [2]
+-> It was declared as final [3]
+
+override_final2.php:16:19
+11 | 
+12 | class Foo {
+13 |   final public function __construct() {
+   |                         ^^^^^^^^^^^ [3]
+14 |   }
+15 | }
+16 | class Bar extends Foo {
+   |                   ^^^ [1]
+17 |   protected function __construct() {
+   |                      ^^^^^^^^^^^ [2]
+18 |     parent::__construct();
+19 |   }
+
+error: Typing[4113] This member visibility is: `protected` [1]
+-> `public` was expected [2]
+
+override_final2.php:17:22
+11 | 
+12 | class Foo {
+13 |   final public function __construct() {
+   |                         ^^^^^^^^^^^ [2]
+14 |   }
+15 | }
+16 | class Bar extends Foo {
+17 |   protected function __construct() {
+   |                      ^^^^^^^^^^^ [1]
+18 |     parent::__construct();
+19 |   }
+
+2 errors found

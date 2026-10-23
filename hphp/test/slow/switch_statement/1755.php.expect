@@ -1,12 +1,10 @@
-"""""0""0"default"0""0""0""123""0""4abc""4abc"default"Evil4"int(1)
+"""""0""0"default"0""0""0""123""0""4abc""4abc"defaultint(1)
   goes to:1int(2)
   goes to:2.0float(2)
   goes to:2.0bool(true)
   goes to:foobool(false)
   goes to:0NULL
-  goes to:{empty str}object(stdClass)#1 (0) {
-}
-  goes to:defaultarray(0) {
+  goes to:{empty str}vec(0) {
 }
   goes to:defaultfloat(3.212)
   goes to:3.212int(0)
@@ -18,4 +16,4 @@
   goes to:string(2) "3a"
   goes to:int(3)
   goes to:3.0float(3)
-  goes to:3.0foobazbarfoobazbazdefaultbarfoobaz
+  goes to:3.0foobazdefaultbarfoobazdefaultbazdefaultdefault

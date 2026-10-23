@@ -1,0 +1,60 @@
+error: Typing[4275] Bad regex pattern; Missing delimiter(s). [1]
+
+simple_re.php:11:14
+ 9 |   $good5 = re"<\>>x";
+10 |   $good6 = re"[<]";
+11 |   $bad0  = re"[][]x";
+   |              ^^^^^^^ [1]
+12 |   $bad1  = re"[\()]x";
+13 |   $bad2  = re"(\)";
+
+error: Typing[4275] Bad regex pattern; unmatched parentheses [2]. [1]
+
+simple_re.php:12:14
+10 |   $good6 = re"[<]";
+11 |   $bad0  = re"[][]x";
+12 |   $bad1  = re"[\()]x";
+   |              ^^^^^^^^ [1]
+13 |   $bad2  = re"(\)";
+14 |   $bad3  = re"(()";
+
+error: Typing[4275] Bad regex pattern; \ at end of pattern [1]. [1]
+
+simple_re.php:13:14
+11 |   $bad0  = re"[][]x";
+12 |   $bad1  = re"[\()]x";
+13 |   $bad2  = re"(\)";
+   |              ^^^^^ [1]
+14 |   $bad3  = re"(()";
+15 |   $bad4  = re"<<<>>";
+
+error: Typing[4275] Bad regex pattern; Missing delimiter(s). [1]
+
+simple_re.php:14:14
+12 |   $bad1  = re"[\()]x";
+13 |   $bad2  = re"(\)";
+14 |   $bad3  = re"(()";
+   |              ^^^^^ [1]
+15 |   $bad4  = re"<<<>>";
+16 |   $bad5  = re"[[]]";
+
+error: Typing[4275] Bad regex pattern; Missing delimiter(s). [1]
+
+simple_re.php:15:14
+13 |   $bad2  = re"(\)";
+14 |   $bad3  = re"(()";
+15 |   $bad4  = re"<<<>>";
+   |              ^^^^^^^ [1]
+16 |   $bad5  = re"[[]]";
+17 | }
+
+error: Typing[4275] Bad regex pattern; missing terminating ] for character class [2]. [1]
+
+simple_re.php:16:14
+14 |   $bad3  = re"(()";
+15 |   $bad4  = re"<<<>>";
+16 |   $bad5  = re"[[]]";
+   |              ^^^^^^ [1]
+17 | }
+
+6 errors found

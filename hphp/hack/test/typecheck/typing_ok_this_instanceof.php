@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 /**
  * Copyright (c) 2014, Facebook, Inc.
  * All rights reserved.
@@ -12,7 +12,7 @@
 class A {
 
   public function foo(): void {
-    if ($this instanceof B) {
+    if ($this is B) {
       $this->bar();
     }
   }

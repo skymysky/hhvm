@@ -18,10 +18,10 @@
 
 #include "hphp/runtime/debugger/debugger_client.h"
 
-namespace HPHP { namespace Eval {
+namespace HPHP::Eval {
 ///////////////////////////////////////////////////////////////////////////////
 
-TRACE_SET_MOD(debugger);
+TRACE_SET_MOD(debugger)
 
 // The text to display when the debugger client processes "help quit".
 void CmdQuit::help(DebuggerClient &client) {
@@ -62,4 +62,4 @@ bool CmdQuit::onServer(DebuggerProxy &proxy) {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-}}
+}

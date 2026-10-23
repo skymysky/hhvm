@@ -36,7 +36,7 @@ enum ShutdownEvent {
   kNumEvents
 };
 
-constexpr char* s_shutdownEventNames[ShutdownEvent::kNumEvents] = {
+constexpr const char* s_shutdownEventNames[ShutdownEvent::kNumEvents] = {
   "prepare",
   "initiate",
   "drain_reads",
@@ -53,7 +53,7 @@ struct ShutdownStat {
   time_t time;
   MemInfo memUsage;
   int64_t rss;
-  int64_t requestsServed;
+  uint64_t requestsServed;
 
   const char* eventName() const {
     assertx(event >= 0 && event < ShutdownEvent::kNumEvents);

@@ -1,0 +1,10 @@
+error: Typing[4087] `Foo` has no parent class with a method `bar` to override [1]
+
+override_attr_13.php:4:19
+2 | abstract class Foo {
+3 |   <<__Override>>
+4 |   public function bar(): void {}
+  |                   ^^^ [1]
+5 | }
+
+1 error found

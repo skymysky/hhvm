@@ -1,4 +1,4 @@
-<?php
+<?hh
 
 /*
  * This test emulates a regpressure case that occurred with inlining
@@ -14,28 +14,24 @@ class IPAddressIsh {
     $this->binary = "asdasd";
   }
 
-  public function __destruct() {
-    echo "dtor" . $this->id . "\n";
-  }
-
-  public function toBinary() {
+  public function toBinary() :mixed{
     return $this->binary;
   }
 
-  public final function inSubnetWithMask(IPAddressIsh $subnet, string $mask) {
+  public final function inSubnetWithMask(IPAddressIsh $subnet, string $mask) :mixed{
     // Test case for inlining from FB's IPAddress class, removed real
     // logic.
     echo "pre1\n";
     return ($this->toBinary() & $mask) === ($subnet->toBinary() & $mask);
   }
 
-  public function foobar() {
+  public function foobar() :mixed{
     echo $this->binary;
     echo "\n";
   }
 }
 
-function main() {
+<<__EntryPoint>> function main(): void {
   $x = new IPAddressIsh('x');
   $y = new IPAddressIsh('y');
   echo $x->inSubnetWithMask($y, "213");
@@ -46,4 +42,3 @@ function main() {
   $y->foobar();
   echo "after3\n";
 }
-main();

@@ -13,17 +13,17 @@
    | license@php.net so we can mail you a copy immediately.               |
    +----------------------------------------------------------------------+
 */
-#ifndef incl_HPHP_PASS_TRACER_H_
-#define incl_HPHP_PASS_TRACER_H_
+#pragma once
 
 #include <string>
 
+#include <fmt/format.h>
 #include <folly/Format.h>
 
 #include "hphp/util/trace.h"
 #include "hphp/runtime/vm/jit/print.h"
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 
 struct IRUnit;
 struct Vunit;
@@ -64,7 +64,7 @@ private:
 private:
   void traceUnit(const char* when) const {
     FTRACE_MOD(m_mod, 0, "{}{}\n{}",
-      banner(folly::sformat("{} {}", when, m_name).c_str()),
+      banner(fmt::format("{} {}", when, m_name).c_str()),
       show(m_unit),
       banner("")
     );
@@ -85,7 +85,6 @@ using VpassTracer = PassTracerImpl<Vunit>;
 
 //////////////////////////////////////////////////////////////////////
 
-}}
+}
 
 
-#endif

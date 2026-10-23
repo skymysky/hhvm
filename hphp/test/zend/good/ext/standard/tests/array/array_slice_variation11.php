@@ -1,6 +1,6 @@
-<?php
+<?hh
 /* Prototype  : array array_slice(array $input, int $offset [, int $length [, bool $preserve_keys]])
- * Description: Returns elements specified by offset and length 
+ * Description: Returns elements specified by offset and length
  * Source code: ext/standard/array.c
  */
 
@@ -8,22 +8,19 @@
  * Pass different arguments as $input argument to array_slice() to test behaviour
  */
 
+// get a class
+class classA
+{
+  public function __toString() :mixed{
+    return "Class A object";
+  }
+}
+<<__EntryPoint>> function main(): void {
 echo "*** Testing array_slice() : usage variations ***\n";
 
 // Initialise function arguments not being substituted
 $offset = 2;
 
-//get an unset variable
-$unset_var = 10;
-unset ($unset_var);
-
-// get a class
-class classA
-{
-  public function __toString() {
-    return "Class A object";
-  }
-}
 
 // heredoc string
 $heredoc = <<<EOT
@@ -34,7 +31,7 @@ EOT;
 $fp = fopen(__FILE__, "r");
 
 // unexpected values to be passed to $input argument
-$inputs = array(
+$inputs = vec[
 
        // int data
 /*1*/  0,
@@ -58,29 +55,25 @@ $inputs = array(
        false,
        TRUE,
        FALSE,
-       
+
        // empty data
 /*16*/ "",
        '',
-       array(),
+       vec[],
 
        // string data
 /*19*/ "string",
        'string',
        $heredoc,
-       
+
        // object data
 /*22*/ new classA(),
 
-       // undefined data
-/*23*/ @$undefined_var,
 
-       // unset data
-/*24*/ @$unset_var,
 
        // resource variable
-/*25*/ $fp
-);
+/*23*/ $fp
+];
 
 // loop through each element of $inputs to check the behavior of array_slice()
 $iterator = 1;
@@ -93,5 +86,4 @@ foreach($inputs as $input) {
 fclose($fp);
 
 echo "Done";
-?>
-
+}

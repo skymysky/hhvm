@@ -1,129 +1,124 @@
-<?php
-/* 
+<?hh
+/*
  * proto string basename(string path [, string suffix])
  * Function is implemented in ext/standard/string.c
- */ 
-$file_paths = array (
+ */
+
+function check_basename( $path_arrays ) :mixed{
+  $loop_counter = 1;
+  foreach ($path_arrays as $path) {
+    echo "\n--Iteration $loop_counter--\n"; $loop_counter++;
+    if( 1 == count($path) ) {
+      // no suffix provided
+      try { var_dump( basename($path[0]) ); } catch (Exception $e) { echo "\n".'Warning: '.$e->getMessage().' in '.__FILE__.' on line '.__LINE__."\n"; }
+    } else {
+      // path as well as suffix provided,
+      try { var_dump( basename($path[0], $path[1]) ); } catch (Exception $e) { echo "\n".'Warning: '.$e->getMessage().' in '.__FILE__.' on line '.__LINE__."\n"; }
+    }
+  }
+}
+
+<<__EntryPoint>> function main(): void {
+$file_paths = vec[
   /* simple paths */
-  array("bar"),
-  array("/foo/bar"),
-  array("foo/bar"),
-  array("/bar"),
-
+  vec["bar"],
+  vec["/foo/bar"],
+  vec["foo/bar"],
+  vec["/bar"],
   /* simple paths with trailing slashes */
-  array("bar/"),
-  array("/bar/"),
-  array("/foo/bar/"),
-  array("foo/bar/"),
-  array("/bar/"),
-
+  vec["bar/"],
+  vec["/bar/"],
+  vec["/foo/bar/"],
+  vec["foo/bar/"],
+  vec["/bar/"],
   /* paths with suffix removal */
-  array("bar.gz", ".gz"),
-  array("bar.gz", "bar.gz"),
-  array("/foo/bar.gz", ".gz"),
-  array("foo/bar.gz", ".gz"),
-  array("/bar.gz", ".gz"),  
-
+  vec["bar.gz", ".gz"],
+  vec["bar.gz", "bar.gz"],
+  vec["/foo/bar.gz", ".gz"],
+  vec["foo/bar.gz", ".gz"],
+  vec["/bar.gz", ".gz"],
   /* paths with suffix and trailing slashes with suffix removal*/
-  array("bar.gz/", ".gz"),
-  array("/bar.gz/", ".gz"),
-  array("/foo/bar.gz/", ".gz"),
-  array("foo/bar.gz/", ".gz"),
-  array("/bar.gz/", ".gz"),  
-  
+  vec["bar.gz/", ".gz"],
+  vec["/bar.gz/", ".gz"],
+  vec["/foo/bar.gz/", ".gz"],
+  vec["foo/bar.gz/", ".gz"],
+  vec["/bar.gz/", ".gz"],
   /* paths with basename only suffix, with suffix removal*/
-  array("/.gz", ".gz"),
-  array(".gz", ".gz"),
-  array("/foo/.gz", ".gz"),
+  vec["/.gz", ".gz"],
+  vec[".gz", ".gz"],
+  vec["/foo/.gz", ".gz"],
 
   /* paths with basename only suffix & trailing slashes, with suffix removal*/
-  array(".gz/", ".gz"),
-  array("/foo/.gz/", ".gz"),
-  array("foo/.gz/", ".gz"),
+  vec[".gz/", ".gz"],
+  vec["/foo/.gz/", ".gz"],
+  vec["foo/.gz/", ".gz"],
 
   /* paths with binary value to check if the function is binary safe*/
-  array("foo".chr(0)."bar"),
-  array("/foo".chr(0)."bar"),
-  array("/foo".chr(0)."bar/"),
-  array("foo".chr(0)."bar/"),
-  array("foo".chr(0)."bar/test"),
-  array("/foo".chr(0)."bar/bar.gz", ".gz"),
-  array("/foo".chr(0)."bar/bar.gz")
-);
+  vec["foo".chr(0)."bar"],
+  vec["/foo".chr(0)."bar"],
+  vec["/foo".chr(0)."bar/"],
+  vec["foo".chr(0)."bar/"],
+  vec["foo".chr(0)."bar/test"],
+  vec["/foo".chr(0)."bar/bar.gz", ".gz"],
+  vec["/foo".chr(0)."bar/bar.gz"]
+];
 
-$file_path_variations = array (
+$file_path_variations = vec[
   /* paths with shortcut home dir char, with suffix variation */
-  array("~/home/user/bar"),
-  array("~/home/user/bar", ""),
-  array("~/home/user/bar", NULL),
-  array("~/home/user/bar", ' '),
-  array("~/home/user/bar.tar", ".tar"),
-  array("~/home/user/bar.tar", "~"),
-  array("~/home/user/bar.tar/", "~"),
-  array("~/home/user/bar.tar/", ""),
-  array("~/home/user/bar.tar", NULL),
-  array("~/home/user/bar.tar", ''),
-  array("~/home/user/bar.tar", " "),
+  vec["~/home/user/bar"],
+  vec["~/home/user/bar", ""],
+  vec["~/home/user/bar", ' '],
+  vec["~/home/user/bar.tar", ".tar"],
+  vec["~/home/user/bar.tar", "~"],
+  vec["~/home/user/bar.tar/", "~"],
+  vec["~/home/user/bar.tar/", ""],
+  vec["~/home/user/bar.tar", ''],
+  vec["~/home/user/bar.tar", " "],
 
   /* paths with hostname:dir notation, with suffix variation */
-  array("hostname:/home/usr/bar.tar"),
-  array("hostname:/home/user/bar.tar", "home"),
-  array("hostname:/home/user/tbar.gz", "bar.gz"),
-  array("hostname:/home/user/tbar.gz", "/bar.gz"),
-  array("hostname:/home/user/tbar.gz", "/bar.gz/"),
-  array("hostname:/home/user/tbar.gz/", "/bar.gz/"),
-  array("hostname:/home/user/tbar.gz/", "/bar.gz/"),
-  array("hostname:/home/user/My Pics.gz/", "/bar.gz/"),
-  array("hostname:/home/user/My Pics.gz/", "Pics.gz/"),
-  array("hostname:/home/user/My Pics.gz/", "Pics.gz"),
-  array("hostname:/home/user/My Pics.gz/", ".gz"),
-  array("hostname:/home/user/My Pics.gz/"),
-  array("hostname:/home/user/My Pics.gz/", NULL),
-  array("hostname:/home/user/My Pics.gz/", ' '),
-  array("hostname:/home/user/My Pics.gz/", ''),
-  array("hostname:/home/user/My Pics.gz/", "My Pics.gz"),
+  vec["hostname:/home/usr/bar.tar"],
+  vec["hostname:/home/user/bar.tar", "home"],
+  vec["hostname:/home/user/tbar.gz", "bar.gz"],
+  vec["hostname:/home/user/tbar.gz", "/bar.gz"],
+  vec["hostname:/home/user/tbar.gz", "/bar.gz/"],
+  vec["hostname:/home/user/tbar.gz/", "/bar.gz/"],
+  vec["hostname:/home/user/tbar.gz/", "/bar.gz/"],
+  vec["hostname:/home/user/My Pics.gz/", "/bar.gz/"],
+  vec["hostname:/home/user/My Pics.gz/", "Pics.gz/"],
+  vec["hostname:/home/user/My Pics.gz/", "Pics.gz"],
+  vec["hostname:/home/user/My Pics.gz/", ".gz"],
+  vec["hostname:/home/user/My Pics.gz/"],
+  vec["hostname:/home/user/My Pics.gz/", ' '],
+  vec["hostname:/home/user/My Pics.gz/", ''],
+  vec["hostname:/home/user/My Pics.gz/", "My Pics.gz"],
 
   /* paths with numeirc strings */
-  array("10.5"),
-  array("10.5", ".5"),
-  array("10.5", "10.5"),
-  array("10"),
-  array("105", "5"),
-  array("/10.5"),
-  array("10.5/"),
-  array("10/10.gz"),
-  array("0"),
-  array('0'),
+  vec["10.5"],
+  vec["10.5", ".5"],
+  vec["10.5", "10.5"],
+  vec["10"],
+  vec["105", "5"],
+  vec["/10.5"],
+  vec["10.5/"],
+  vec["10/10.gz"],
+  vec["0"],
+  vec['0'],
 
   /* paths and suffix given as same */
-  array("bar.gz", "bar.gz"),
-  array("/bar.gz", "/bar.gz"),
-  array("/bar.gz/", "/bar.gz/"),
-  array(" ", " "),
-  array(' ', ' '),
-  array(NULL, NULL),
+  vec["bar.gz", "bar.gz"],
+  vec["/bar.gz", "/bar.gz"],
+  vec["/bar.gz/", "/bar.gz/"],
+  vec[" ", " "],
+  vec[' ', ' '],
 
   /* path with spaces */
-  array(" "),
-  array(' '),
-  
-  /* empty paths */
-  array(""),
-  array(''),
-  array(NULL)
-);
+  vec[" "],
+  vec[' '],
 
-function check_basename( $path_arrays ) {
-   $loop_counter = 1;
-   foreach ($path_arrays as $path) {
-     echo "\n--Iteration $loop_counter--\n"; $loop_counter++;
-     if( 1 == count($path) ) { // no suffix provided
-       var_dump( basename($path[0]) );
-     } else { // path as well as suffix provided,
-       var_dump( basename($path[0], $path[1]) );    
-     } 
-   }
-}
+  /* empty paths */
+  vec[""],
+  vec[''],
+];
 
 echo "*** Testing basic operations ***\n";
 check_basename( $file_paths );
@@ -132,21 +127,11 @@ echo "\n*** Testing possible variations in path and suffix ***\n";
 check_basename( $file_path_variations );
 
 echo "\n*** Testing error conditions ***\n";
-// zero arguments 
-var_dump( basename() );
+// zero arguments
+try { var_dump( basename() ); } catch (Exception $e) { echo "\n".'Warning: '.$e->getMessage().' in '.__FILE__.' on line '.__LINE__."\n"; }
 
 // more than expected no. of arguments
-var_dump( basename("/var/tmp/bar.gz", ".gz", ".gz") );
-
-// passing invalid type arguments 
-$object = new stdclass;
-var_dump( basename( array("string/bar") ) );
-var_dump( basename( array("string/bar"), "bar" ) );
-var_dump( basename( "bar", array("string/bar") ) );
-var_dump( basename( $object, "bar" ) );
-var_dump( basename( $object ) );
-var_dump( basename( $object, $object ) );
-var_dump( basename( "bar", $object ) );
+try { var_dump( basename(sys_get_temp_dir()."/bar.gz", ".gz", ".gz") ); } catch (Exception $e) { echo "\n".'Warning: '.$e->getMessage().' in '.__FILE__.' on line '.__LINE__."\n"; }
 
 echo "Done\n";
-?>
+}

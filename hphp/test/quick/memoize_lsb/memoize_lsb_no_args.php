@@ -18,7 +18,7 @@ class C extends Base { }
 class A1 extends A { }
 class A2 extends A { }
 
-function main() {
+function main() :void{
   Base::$side_effects = vec[];
   var_dump(vec[
     A1::name(),
@@ -30,6 +30,7 @@ function main() {
   ]);
   var_dump(Base::$side_effects);
 }
-
+<<__EntryPoint>> function main_entry(): void {
 main();
 main();
+}

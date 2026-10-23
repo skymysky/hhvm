@@ -1,9 +1,9 @@
 File "try_nested.php", line 24, characters 7-17:
-  ^(F | D | E)
+  (D | E | F)
 File "try_nested.php", line 26, characters 5-15:
-  ^(E | F | D)
+  (D | E | F)
 File "try_nested.php", line 28, characters 5-15:
-  ^(B | F | D | E | C)
+  (B | C | D | E | F)
 File "try_nested.php", line 30, characters 3-13:
-  ^(C | E | F | D | B)
+  (B | C | D | E | F)
 No errors

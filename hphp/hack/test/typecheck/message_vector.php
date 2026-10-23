@@ -14,9 +14,9 @@ class B extends A {}
 
 function foobar2(Vector<B> $x): void {}
 
-function foobar1() {
+function foobar1(): void {
   $v = Vector {};
   $v[] = new B();
   foobar2($v);
   $v[] = new A();
-} 
+}

@@ -1,0 +1,19 @@
+error: Typing[4110] Invalid argument [1]
+-> Expected `int` [2]
+-> But got `string` [3]
+
+poly_error_wrong_type.php:11:15
+ 4 | // Error: passing wrong type for a known field
+ 5 | function needs_int_x<T as shape(...)>(
+ 6 |   shape(...T, 'x' => int) $s,
+   |                      ^^^ [2]
+ 7 | ): void {}
+ 8 | 
+ 9 | function test_wrong_type(): void {
+10 |   $s = shape('x' => 'not_an_int', 'y' => true);
+   |                     ^^^^^^^^^^^^ [3]
+11 |   needs_int_x($s); // Error: 'x' is string, expected int
+   |               ^^ [1]
+12 | }
+
+1 error found

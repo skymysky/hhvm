@@ -4,49 +4,49 @@
 class IterableObj implements Iterator {
   private int $position = 0;
   public function __construct() { $this->position = 0; }
-  public function rewind() { $this->position = 0; }
-  public function current() {
+  public function rewind() :mixed{ $this->position = 0; }
+  public function current() :mixed{
     if ($this->position == 0) return "abc";
     if ($this->position == 1) return "def";
     if ($this->position == 2) return "ghi";
   }
-  public function key() {
+  public function key() :mixed{
     if ($this->position == 0) return 100;
     if ($this->position == 1) return 200;
     if ($this->position == 2) return 300;
   }
-  public function next() { ++$this->position; }
-  public function valid() { return $this->position < 3; }
+  public function next() :mixed{ ++$this->position; }
+  public function valid() :mixed{ return $this->position < 3; }
 }
 
 class ThrowIterableObj implements Iterator {
   private int $position = 0;
   public function __construct() { $this->position = 0; }
-  public function rewind() { $this->position = 0; }
-  public function current() {
+  public function rewind() :mixed{ $this->position = 0; }
+  public function current() :mixed{
     if ($this->position == 0) return "abc";
     if ($this->position == 1) return "def";
     if ($this->position == 2) return "ghi";
   }
-  public function key() {
+  public function key() :mixed{
     if ($this->position == 0) return 100;
     if ($this->position == 1) return 200;
     if ($this->position == 2) return 300;
   }
-  public function next() {
+  public function next() :mixed{
     ++$this->position;
     if ($this->position == 2) throw new Exception("ThrowIterableObj");
   }
-  public function valid() { return $this->position < 3; }
+  public function valid() :mixed{ return $this->position < 3; }
 }
 
 class AggregateObj implements IteratorAggregate {
-  public function getIterator() {
+  public function getIterator() :mixed{
     return new IterableObj();
   }
 }
 
-function test_varray($v) {
+function test_varray($v) :mixed{
   echo "============== test_varray =========================\n";
   try {
     $v2 = varray($v);
@@ -58,7 +58,7 @@ function test_varray($v) {
   }
 }
 
-function test_darray($v) {
+function test_darray($v) :mixed{
   echo "============== test_darray =========================\n";
   try {
     $v2 = darray($v);
@@ -70,23 +70,10 @@ function test_darray($v) {
   }
 }
 
-function test_array($v) {
-  echo "============== test_array =========================\n";
-  try {
-    $v2 = (array)$v;
-    var_dump($v2);
-    var_dump(is_array($v2));
-    var_dump(is_varray($v2));
-    var_dump(is_darray($v2));
-  } catch (Exception $e) {
-    echo "Exception: " . $e->getMessage() . "\n";
-  }
-}
-
-function test_indirect($c, $v) {
+function test_indirect($c, $v) :mixed{
   echo "============== test_indirect ($c) ==================\n";
   try {
-    $v2 = $c($v);
+    $v2 = HH\dynamic_fun($c)($v);
     var_dump($v2);
     var_dump(is_varray($v2));
     var_dump(is_darray($v2));
@@ -95,66 +82,62 @@ function test_indirect($c, $v) {
   }
 }
 
-$values = vec[
-  null,
-  false,
-  true,
-  'abc',
-  123,
-  '123',
-  3.14,
-  [],
-  [1, 2, 3, 4],
-  ['a' => 100, 'b' => 200, 'c' => 300],
-  vec[],
-  vec[1, 2, 3, 4],
-  dict[],
-  dict[1 => 'a', 2 => 'b'],
-  keyset[],
-  keyset[100, 'abc', 200],
-  STDIN,
-  new stdclass,
-  new IterableObj,
-  new ThrowIterableObj,
-  new AggregateObj,
-  dict[100 => 'abc', '100' => 'def'],
-  keyset[100, '100'],
-  Vector{100, 200, 300},
-  Set{'a', 'b', 'c', 'd'},
-  Map{100 => 'a', 200 => 'b', 300 => 'c'},
-  Pair{'a', 100},
-  varray[],
-  varray['a', 'b', 'c'],
-  darray[],
-  darray[0 => 'x', 1 => 'y', 2 => 'z'],
-  darray['key1' => 111, 'key2' => 222]
-];
-$values = __hhvm_intrinsics\launder_value($values);
 
-foreach ($values as $v) {
-  test_varray($v);
-}
-foreach ($values as $v) {
-  test_darray($v);
-}
+<<__EntryPoint>>
+function main_convert(): mixed {
+  set_error_handler(($_, $msg) ==> {
+    throw new Exception($msg);
+  });
 
-$c1 = __hhvm_intrinsics\launder_value('HH\\varray');
-$c2 = __hhvm_intrinsics\launder_value('HH\\darray');
-foreach ($values as $v) {
-  test_indirect($c1, $v);
-}
-foreach ($values as $v) {
-  test_indirect($c2, $v);
-}
+  $values = vec[
+    null,
+    false,
+    true,
+    'abc',
+    123,
+    '123',
+    3.14,
+    dict[],
+    vec[1, 2, 3, 4],
+    dict['a' => 100, 'b' => 200, 'c' => 300],
+    vec[],
+    vec[1, 2, 3, 4],
+    dict[],
+    dict[1 => 'a', 2 => 'b'],
+    keyset[],
+    keyset[100, 'abc', 200],
+    fopen(__FILE__, 'r'),
+    new stdClass,
+    new IterableObj,
+    new ThrowIterableObj,
+    new AggregateObj,
+    dict[100 => 'abc', '100' => 'def'],
+    keyset[100, '100'],
+    Vector{100, 200, 300},
+    Set{'a', 'b', 'c', 'd'},
+    Map{100 => 'a', 200 => 'b', 300 => 'c'},
+    Pair{'a', 100},
+    vec[],
+    vec['a', 'b', 'c'],
+    dict[],
+    dict[0 => 'x', 1 => 'y', 2 => 'z'],
+    dict['key1' => 111, 'key2' => 222]
+  ];
+  $values = __hhvm_intrinsics\launder_value($values);
 
-$dvvalues = vec[
-  varray[],
-  varray['a', 'b', 'c'],
-  darray[],
-  darray[0 => 'x', 1 => 'y', 2 => 'z'],
-  darray['key1' => 111, 'key2' => 222]
-];
-$dvvalues = __hhvm_intrinsics\launder_value($dvvalues);
-foreach ($dvvalues as $v) {
-  test_array($v);
+  foreach ($values as $v) {
+    test_varray($v);
+  }
+  foreach ($values as $v) {
+    test_darray($v);
+  }
+
+  $c1 = __hhvm_intrinsics\launder_value('HH\\varray');
+  $c2 = __hhvm_intrinsics\launder_value('HH\\darray');
+  foreach ($values as $v) {
+    test_indirect($c1, $v);
+  }
+  foreach ($values as $v) {
+    test_indirect($c2, $v);
+  }
 }

@@ -1,4 +1,4 @@
-<?php
+<?hh
 
 class privateBeforeEverythingClass {
   private $privateProperty;
@@ -141,12 +141,15 @@ class cls3 extends cls2 {
   public static $cls3PublicStatic;
 }
 
-function properties_dump($class_name) {
+function properties_dump($class_name) :mixed{
   $reflectionClass = new ReflectionClass($class_name);
   var_dump(array_map(function($prop) { return $prop->getName(); },
                      $reflectionClass->getProperties()));
 }
 
+
+<<__EntryPoint>>
+function main_reflection_class_get_properties() :mixed{
 properties_dump('privateBeforeEverythingClass');
 properties_dump('privateAfterEverythingClass');
 properties_dump('protectedBeforeEverythingClass');
@@ -158,3 +161,4 @@ properties_dump('staticAfterEverythingClass');
 properties_dump('cls1');
 properties_dump('cls2');
 properties_dump('cls3');
+}

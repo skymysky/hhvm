@@ -21,10 +21,10 @@
 #include "hphp/runtime/debugger/debugger_client.h"
 #include "hphp/runtime/vm/debugger-hook.h"
 
-namespace HPHP { namespace Eval {
+namespace HPHP::Eval {
 ///////////////////////////////////////////////////////////////////////////////
 
-TRACE_SET_MOD(debugger);
+TRACE_SET_MOD(debugger)
 
 const char* formats[] = {
   "r", "v", "x", "hex", "oct", "dec", "unsigned", "time", nullptr
@@ -32,17 +32,17 @@ const char* formats[] = {
 
 std::string CmdPrint::FormatResult(const char* format, const Variant& ret) {
   if (format == nullptr) {
-    String sret = DebuggerClient::FormatVariable(ret);
+    OptString sret = DebuggerClient::FormatVariable(ret);
     return std::string(sret.data(), sret.size());
   }
 
   if (strcmp(format, "r") == 0) {
-    String sret = DebuggerClient::FormatVariable(ret, 'r');
+    OptString sret = DebuggerClient::FormatVariable(ret, 'r');
     return std::string(sret.data(), sret.size());
   }
 
   if (strcmp(format, "v") == 0) {
-    String sret = DebuggerClient::FormatVariable(ret, 'v');
+    OptString sret = DebuggerClient::FormatVariable(ret, 'v');
     return std::string(sret.data(), sret.size());
   }
 
@@ -94,7 +94,7 @@ std::string CmdPrint::FormatResult(const char* format, const Variant& ret) {
     assertx(false);
   }
 
-  String sret = DebuggerClient::FormatVariable(ret);
+  OptString sret = DebuggerClient::FormatVariable(ret);
   if (strcmp(format, "hex") == 0 || strcmp(format, "x") == 0 ||
       strcmp(format, "oct") == 0) {
     StringBuffer sb;
@@ -121,7 +121,7 @@ std::string CmdPrint::FormatResult(const char* format, const Variant& ret) {
       bool err;
       ts = dt.toTimeStamp(err);
     }
-    return String(ts).data();
+    return OptString::FromInt64(ts).data();
   }
 
   assertx(false);
@@ -136,7 +136,7 @@ void CmdPrint::sendImpl(DebuggerThriftBuffer &thrift) {
     g_context->debuggerSettings.printLevel = m_printLevel;
   }
   {
-    String sdata;
+    OptString sdata;
     DebuggerWireHelpers::WireSerialize(m_ret, sdata);
     thrift.write(sdata);
   }
@@ -153,12 +153,12 @@ void CmdPrint::sendImpl(DebuggerThriftBuffer &thrift) {
 void CmdPrint::recvImpl(DebuggerThriftBuffer &thrift) {
   DebuggerCommand::recvImpl(thrift);
   {
-    String sdata;
+    OptString sdata;
     thrift.read(sdata);
     auto const error = DebuggerWireHelpers::WireUnserialize(sdata, m_ret);
     if (error == DebuggerWireHelpers::ErrorMsg) {
       assertx(m_ret.isString());
-      m_wireError = m_ret.toCStrRef().data();
+      m_wireError = m_ret.asCStrRef().data();
     }
     if (error != DebuggerWireHelpers::NoError) {
       m_ret = uninit_null();
@@ -344,7 +344,7 @@ void CmdPrint::onClient(DebuggerClient &client) {
 // can occur while we're doing the server-side work for a print.
 bool CmdPrint::onServer(DebuggerProxy &proxy) {
   PCFilter locSave;
-  auto& rid = ThreadInfo::s_threadInfo->m_reqInjectionData;
+  auto& rid = RequestInfo::s_requestInfo->m_reqInjectionData;
   locSave.swap(rid.m_flowFilter);
   g_context->debuggerSettings.bypassCheck = m_bypassAccessCheck;
   {
@@ -363,4 +363,4 @@ bool CmdPrint::onServer(DebuggerProxy &proxy) {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-}}
+}

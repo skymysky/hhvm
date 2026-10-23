@@ -1,0 +1,13 @@
+error: Typing[4108] This shape doesn't have a field `0` [1]
+-> The shape is defined here [2]
+
+shape_bad_index.php:3:19
+1 | <?hh
+2 | function f(): void {
+3 |   $f = ($v ==> $v[0]);
+  |                   ^ [1]
+4 |   $f(shape('a' => 0));
+  |      ^^^^^^^^^^^^^^^ [2]
+5 | }
+
+1 error found

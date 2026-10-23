@@ -14,14 +14,15 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_RUNTIME_VM_TRANSLATOR_HOPT_VECTOR_TRANSLATOR_HELPERS_H_
-#define incl_HPHP_RUNTIME_VM_TRANSLATOR_HOPT_VECTOR_TRANSLATOR_HELPERS_H_
+#pragma once
 
 #include "hphp/runtime/vm/jit/translator.h"
 #include "hphp/runtime/vm/jit/ssa-tmp.h"
 #include "hphp/runtime/vm/member-operations.h"
 
 #include "hphp/util/lock-free-ptr-wrapper.h"
+#include "hphp/runtime/vm/jit/vasm-reg.h"
+#include "hphp/runtime/vm/jit/irlower.h"
 
 #include <memory>
 
@@ -90,7 +91,7 @@ struct assert_same {
   static auto const optabWrapper = [&] {                        \
     auto const n = 1 << multiBitWidth(__VA_ARGS__);             \
     auto optab = std::make_unique<T[]>(n);                      \
-    if (do_assert) memset(optab.get(), 0, n * sizeof(T));       \
+    if (debug) memset(optab.get(), 0, n * sizeof(T));       \
     TABLE(FILL_ROW);                                            \
     return optab;                                               \
   }();                                                          \
@@ -127,6 +128,17 @@ inline KeyType getKeyTypeNoInt(const SSATmp* key) {
   return kt == KeyType::Int ? KeyType::Any : kt;
 }
 
-}}}
+}
 
-#endif
+namespace irlower {
+
+struct LvalPtrs {
+  Vptr type, val;
+};
+
+// implVecElemLval gets the Vptrs for the value in rarr stored at
+// idx (if given and an constant), or at ridx otherwise.
+LvalPtrs implVecElemLval(IRLS& env, Vreg rarr,
+                         Vreg ridx, const SSATmp* idx = nullptr);
+
+}}}

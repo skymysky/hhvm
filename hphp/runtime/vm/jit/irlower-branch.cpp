@@ -16,13 +16,6 @@
 
 #include "hphp/runtime/vm/jit/irlower-internal.h"
 
-#include "hphp/runtime/base/runtime-option.h"
-#include "hphp/runtime/base/tv-comparisons.h"
-#include "hphp/runtime/base/tv-mutate.h"
-#include "hphp/runtime/base/tv-variant.h"
-
-#include "hphp/runtime/vm/resumable.h"
-#include "hphp/runtime/vm/jit/types.h"
 #include "hphp/runtime/vm/jit/abi.h"
 #include "hphp/runtime/vm/jit/arg-group.h"
 #include "hphp/runtime/vm/jit/bc-marker.h"
@@ -35,17 +28,20 @@
 #include "hphp/runtime/vm/jit/target-profile.h"
 #include "hphp/runtime/vm/jit/translator-inline.h"
 #include "hphp/runtime/vm/jit/type.h"
+#include "hphp/runtime/vm/jit/types.h"
 #include "hphp/runtime/vm/jit/vasm-data.h"
 #include "hphp/runtime/vm/jit/vasm-gen.h"
 #include "hphp/runtime/vm/jit/vasm-instr.h"
 #include "hphp/runtime/vm/jit/vasm-reg.h"
+#include "hphp/runtime/vm/resumable.h"
 
 #include "hphp/util/asm-x64.h"
+#include "hphp/util/configs/hhir.h"
 #include "hphp/util/trace.h"
 
-namespace HPHP { namespace jit { namespace irlower {
+namespace HPHP::jit::irlower {
 
-TRACE_SET_MOD(irlower);
+TRACE_SET_MOD(irlower)
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -53,9 +49,9 @@ namespace {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-void maybe_syncsp(Vout& v, BCMarker marker, Vreg sp, IRSPRelOffset off) {
+void maybe_syncsp(Vout& v, const BCMarker& marker, Vreg sp, IRSPRelOffset off) {
   if (marker.resumeMode() == ResumeMode::None) {
-    if (RuntimeOption::EvalHHIRGenerateAsserts) {
+    if (Cfg::HHIR::GenerateAsserts) {
       v << syncvmsp{v.cns(0x42)};
     }
     return;
@@ -65,9 +61,31 @@ void maybe_syncsp(Vout& v, BCMarker marker, Vreg sp, IRSPRelOffset off) {
   v << syncvmsp{sync_sp};
 }
 
-RegSet cross_trace_args(BCMarker marker) {
+RegSet cross_trace_args(const BCMarker& marker, SrcKey target) {
+  if (target.valid() && target.anyFuncEntry()) {
+    auto const func = target.func();
+    auto const withCtx =
+      func->isClosureBody() || func->cls() ||
+      Cfg::HHIR::GenerateAsserts;
+    return func_entry_regs(withCtx);
+  }
+
   return marker.resumeMode() != ResumeMode::None
     ? cross_trace_regs_resumed() : cross_trace_regs();
+}
+
+void popFrameToFuncEntryRegs(Vout& v, const Func* func) {
+  v << unrecordbasenativesp{};
+  if (func->isClosureBody() || func->cls()) {
+    v << load{Vreg(rvmfp()) + AROFF(m_thisUnsafe), r_func_entry_ctx()};
+  } else if (Cfg::HHIR::GenerateAsserts) {
+    v << copy{v.cns(ActRec::kTrashedThisSlot), r_func_entry_ctx()};
+  }
+  v << loadl{Vreg(rvmfp()) + AROFF(m_callOffAndFlags), r_func_entry_ar_flags()};
+  v << loadl{Vreg(rvmfp()) + AROFF(m_funcId), r_func_entry_callee_id()};
+  v << copy{rvmfp(), rvmsp()};
+  v << restoreripm{Vreg(rvmfp()) + AROFF(m_savedRip)};
+  v << load{Vreg(rvmsp()) + AROFF(m_sfp), rvmfp()};
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -119,7 +137,7 @@ void cgJmp(IRLS& env, const IRInstruction* inst) {
 
     // Handle phi for the value.
     auto val = sloc.reg(0);
-    if (src->isA(TBool) && !def.dst(i)->isA(TBool)) {
+    if (src->type().nonTrivialSubtypeOf(TBool) && !def.dst(i)->isA(TBool)) {
       val = v.makeReg();
       v << movzbq{sloc.reg(0), val};
     }
@@ -153,7 +171,7 @@ void cgSelect(IRLS& env, const IRInstruction* inst) {
   }
 
   // First copy the type if the destination needs one. This should only apply to
-  // types <= TGen.
+  // types <= TCell.
   if (dloc.hasReg(1)) {
     assertx(trueTy.isKnownDataType() || tloc.hasReg(1));
     assertx(falseTy.isKnownDataType() || floc.hasReg(1));
@@ -170,14 +188,12 @@ void cgSelect(IRLS& env, const IRInstruction* inst) {
 
   // If the value is statically known (IE, its one of the types with a singleton
   // value), don't bother copying it (this also applies to Bottom).
-  if (!inst->dst(0)->type().subtypeOfAny(TNull, TNullptr)) {
-    if (trueTy <= TBool && falseTy <= TBool) {
-      v << cmovb{CC_NZ, sf, floc.reg(0), tloc.reg(0), dloc.reg(0)};
-    } else {
-      auto const t = zeroExtendIfBool(v, trueTy, tloc.reg(0));
-      auto const f = zeroExtendIfBool(v, falseTy, floc.reg(0));
-      v << cmovq{CC_NZ, sf, f, t, dloc.reg(0)};
-    }
+  if (trueTy <= TBool && falseTy <= TBool) {
+    v << cmovb{CC_NZ, sf, floc.reg(0), tloc.reg(0), dloc.reg(0)};
+  } else {
+    auto const t = zeroExtendIfBool(v, trueTy, tloc.reg(0));
+    auto const f = zeroExtendIfBool(v, falseTy, floc.reg(0));
+    v << cmovq{CC_NZ, sf, f, t, dloc.reg(0)};
   }
 }
 
@@ -228,6 +244,11 @@ void cgCheckNonNull(IRLS& env, const IRInstruction* inst) {
   v << testq{src, src, sf};
   fwdJcc(v, env, CC_Z, sf, inst->taken());
   v << copy{src, dst};
+  auto const regs = inst->dst()->numWords();
+  assertx(regs == 1 || (inst->dst()->isA(TLval) && regs == 2));
+  if (regs == 2) {
+    v << copy{srcLoc(env, inst, 0).reg(1), dstLoc(env, inst, 0).reg(1)};
+  }
 }
 
 void cgAssertNonNull(IRLS& env, const IRInstruction* inst) {
@@ -235,44 +256,12 @@ void cgAssertNonNull(IRLS& env, const IRInstruction* inst) {
   auto src = srcLoc(env, inst, 0).reg();
   auto& v = vmain(env);
 
-  if (RuntimeOption::EvalHHIRGenerateAsserts) {
+  if (Cfg::HHIR::GenerateAsserts) {
     auto const sf = v.makeReg();
     v << testq{src, src, sf};
-    ifThen(v, CC_Z, sf, [&](Vout& v) { v << trap{TRAP_REASON}; });
+    ifThen(v, CC_Z, sf, [&](Vout& v) { v << trap{TRAP_REASON, Fixup::none()}; });
   }
   v << copy{src, dst};
-}
-
-void cgCheckInit(IRLS& env, const IRInstruction* inst) {
-  assertx(inst->taken());
-
-  auto const src = inst->src(0);
-  if (!src->type().maybe(TUninit)) return;
-
-  auto const type = srcLoc(env, inst, 0).reg(1);
-  assertx(type != InvalidReg);
-  auto& v = vmain(env);
-
-  static_assert(KindOfUninit == static_cast<DataType>(0),
-                "cgCheckInit assumes KindOfUninit == 0");
-
-  auto const sf = v.makeReg();
-  v << testb{type, type, sf};
-  v << jcc{CC_Z, sf, {label(env, inst->next()), label(env, inst->taken())}};
-}
-
-void cgCheckInitMem(IRLS& env, const IRInstruction* inst) {
-  assertx(inst->taken());
-
-  auto const src = inst->src(0);
-  if (!src->type().deref().maybe(TUninit)) return;
-
-  auto const ptr = srcLoc(env, inst, 0).reg();
-  auto& v = vmain(env);
-
-  auto const sf = v.makeReg();
-  emitCmpTVType(v, sf, KindOfUninit, ptr[TVOFF(m_type)]);
-  v << jcc{CC_Z, sf, {label(env, inst->next()), label(env, inst->taken())}};
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -301,50 +290,40 @@ void cgProfileSwitchDest(IRLS& env, const IRInstruction* inst) {
   );
 }
 
-void cgJmpSwitchDest(IRLS& env, const IRInstruction* inst) {
-  auto const extra = inst->extra<JmpSwitchDest>();
+void cgLdSwitchDest(IRLS& env, const IRInstruction* inst) {
+  auto const extra = inst->extra<LdSwitchDest>();
   auto const idx = srcLoc(env, inst, 0).reg();
+  auto const dst = dstLoc(env, inst, 0).reg();
   auto const marker = inst->marker();
   auto& v = vmain(env);
 
-  maybe_syncsp(v, marker, srcLoc(env, inst, 1).reg(), extra->spOffBCFromIRSP);
-
   auto const table = v.allocData<TCA>(extra->cases);
   for (int i = 0; i < extra->cases; i++) {
-    v << bindaddr{&table[i], extra->targets[i], extra->spOffBCFromFP};
+    v << bindaddr{&table[i], extra->targets[i], extra->spOffBCFromStackBase};
   }
 
   auto const t = v.makeReg();
   v << lead{table, t};
-  v << jmpm{t[idx * 8], cross_trace_args(marker)};
+  v << load{t[idx * 8], dst};
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 
 namespace {
 
-using SSwitchMap = FixedStringMap<TCA,true>;
+using SSwitchMap = FixedStringMap<TCA>;
 
-TCA sswitchHelperFast(const StringData* val,
+TCA sswitchHelper(const StringData* val,
                       const SSwitchMap* table,
                       TCA* def) {
   auto const dest = table->find(val);
   return dest ? *dest : *def;
 }
 
-TCA sswitchHelperSlow(TypedValue tv, const StringData** strs,
-                      int numCases, TCA* jmptab) {
-  auto const cell = tvToCell(&tv);
-  for (int i = 0; i < numCases; ++i) {
-    if (cellEqual(*cell, strs[i])) return jmptab[i];
-  }
-  return jmptab[numCases]; // default case
 }
 
-}
-
-void cgLdSSwitchDestFast(IRLS& env, const IRInstruction* inst) {
-  auto const extra = inst->extra<LdSSwitchDestFast>();
+void cgLdSSwitchDest(IRLS& env, const IRInstruction* inst) {
+  auto const extra = inst->extra<LdSSwitchDest>();
   auto& v = vmain(env);
 
   auto const table = v.allocData<SSwitchMap>();
@@ -352,8 +331,13 @@ void cgLdSSwitchDestFast(IRLS& env, const IRInstruction* inst) {
   // memory, and we're putting bindaddrs in said heap memory.
   new (table) SSwitchMap(extra->numCases);
 
+  std::unordered_map<const StringData*,TCA> map;
   for (int64_t i = 0; i < extra->numCases; ++i) {
-    table->add(extra->cases[i].str, nullptr);
+    map[extra->cases[i].str] = nullptr;
+  }
+  table->addFrom(map.begin(), map.end());
+
+  for (int64_t i = 0; i < extra->numCases; ++i) {
     auto const addr = table->find(extra->cases[i].str);
 
     // The addresses we're passing to bindaddr{} here live in SSwitchMap's heap
@@ -373,57 +357,53 @@ void cgLdSSwitchDestFast(IRLS& env, const IRInstruction* inst) {
     .dataPtr(table)
     .dataPtr(def);
 
-  cgCallHelper(v, env, CallSpec::direct(sswitchHelperFast),
+  cgCallHelper(v, env, CallSpec::direct(sswitchHelper),
                callDest(env, inst), SyncOptions::None, args);
 }
 
-void cgLdSSwitchDestSlow(IRLS& env, const IRInstruction* inst) {
-  auto const extra = inst->extra<LdSSwitchDestSlow>();
-  auto& v = vmain(env);
 
-  auto strtab = v.allocData<const StringData*>(extra->numCases);
-  auto jmptab = v.allocData<TCA>(extra->numCases + 1);
-
-  for (int64_t i = 0; i < extra->numCases; ++i) {
-    strtab[i] = extra->cases[i].str;
-    v << bindaddr{&jmptab[i], extra->cases[i].dest, extra->bcSPOff};
-  }
-  v << bindaddr{&jmptab[extra->numCases], extra->defaultSk, extra->bcSPOff};
-
-  auto const args = argGroup(env, inst)
-    .typedValue(0)
-    .dataPtr(strtab)
-    .imm(extra->numCases)
-    .dataPtr(jmptab);
-
-  cgCallHelper(v, env, CallSpec::direct(sswitchHelperSlow),
-               callDest(env, inst), SyncOptions::Sync, args);
-}
-
-void cgJmpSSwitchDest(IRLS& env, const IRInstruction* inst) {
-  auto const extra = inst->extra<JmpSSwitchDest>();
+void cgJmpExit(IRLS& env, const IRInstruction* inst) {
+  auto const extra = inst->extra<JmpExit>();
   auto const marker = inst->marker();
   auto& v = vmain(env);
 
   maybe_syncsp(v, marker, srcLoc(env, inst, 1).reg(), extra->offset);
-  v << jmpr{srcLoc(env, inst, 0).reg(), cross_trace_args(marker)};
+  v << jmpr{srcLoc(env, inst, 0).reg(), cross_trace_args(marker, SrcKey{})};
 }
-
-IMPL_OPCODE_CALL(LdSwitchDblIndex)
-IMPL_OPCODE_CALL(LdSwitchStrIndex)
-IMPL_OPCODE_CALL(LdSwitchObjIndex)
 
 ///////////////////////////////////////////////////////////////////////////////
 
 void cgReqBindJmp(IRLS& env, const IRInstruction* inst) {
   auto const extra = inst->extra<ReqBindJmp>();
+  auto const target = extra->target;
   auto& v = vmain(env);
-  maybe_syncsp(v, inst->marker(), srcLoc(env, inst, 0).reg(), extra->irSPOff);
+
+  if (target.anyFuncEntry()) {
+    if (extra->popFrame) {
+      assertx(inst->numSrcs() == 2);
+      popFrameToFuncEntryRegs(v, target.func());
+    } else {
+      assertx(inst->numSrcs() == 5);
+      auto const arFlags = srcLoc(env, inst, 2).reg();
+      auto const calleeId = srcLoc(env, inst, 3).reg();
+      auto const ctx = srcLoc(env, inst, 4).reg();
+      v << copy{arFlags, r_func_entry_ar_flags()};
+      v << copy{calleeId, r_func_entry_callee_id()};
+      if (target.func()->isClosureBody() || target.func()->cls()) {
+        v << copy{ctx, r_func_entry_ctx()};
+      } else if (Cfg::HHIR::GenerateAsserts) {
+        v << copy{v.cns(ActRec::kTrashedThisSlot), r_func_entry_ctx()};
+      }
+    }
+  } else {
+    assertx(inst->numSrcs() == 2);
+    maybe_syncsp(v, inst->marker(), srcLoc(env, inst, 0).reg(), extra->irSPOff);
+  }
+
   v << bindjmp{
-    extra->target,
+    target,
     extra->invSPOff,
-    extra->trflags,
-    cross_trace_args(inst->marker())
+    cross_trace_args(inst->marker(), target)
   };
 }
 
@@ -432,24 +412,47 @@ void cgReqRetranslate(IRLS& env, const IRInstruction* inst) {
   auto const extra  = inst->extra<ReqRetranslate>();
   auto& v = vmain(env);
 
-  maybe_syncsp(v, inst->marker(), srcLoc(env, inst, 0).reg(), extra->irSPOff);
+  if (destSK.anyFuncEntry()) {
+    popFrameToFuncEntryRegs(v, destSK.func());
+  } else {
+    maybe_syncsp(v, inst->marker(), srcLoc(env, inst, 0).reg(), extra->offset);
+  }
+
   v << fallback{
     destSK,
-    inst->marker().spOff(),
-    extra->trflags,
-    cross_trace_args(inst->marker())
+    inst->marker().bcSPOff(),
+    cross_trace_args(inst->marker(), destSK)
   };
 }
 
 void cgReqRetranslateOpt(IRLS& env, const IRInstruction* inst) {
-  auto const extra = inst->extra<ReqRetranslateOpt>();
+  auto const sk = inst->marker().sk();
+  assertx(sk.anyFuncEntry());
+  assertx(inst->marker().bcSPOff() == SBInvOffset{0});
   auto& v = vmain(env);
-  maybe_syncsp(v, inst->marker(), srcLoc(env, inst, 0).reg(), extra->offset);
-  v << retransopt{
-    inst->marker().sk(),
-    inst->marker().spOff(),
-    cross_trace_args(inst->marker())
+  v << copy{v.cns(sk.numEntryArgs()), rarg(0)};
+  // This jmp is not smashable, so the ABI does not need to be compatible with
+  // TC targets. This allows the stub to accept pushed frame.
+  v << jmpi{
+    sk.namedParamsFuncEntry()
+      ? tc::ustubs().handleRetranslateOptNamedFE
+      : tc::ustubs().handleRetranslateOpt,
+    vm_regs_no_sp() | rarg(0)
   };
+}
+
+void cgReqInterpBBNoTranslate(IRLS& env, const IRInstruction* inst) {
+  auto const extra = inst->extra<ReqInterpBBNoTranslate>();
+  auto& v = vmain(env);
+
+  if (extra->target.anyFuncEntry()) {
+    assertx(extra->popFrame);
+    popFrameToFuncEntryRegs(v, extra->target.func());
+  } else {
+    maybe_syncsp(v, inst->marker(), srcLoc(env, inst, 0).reg(), extra->irSPOff);
+  }
+
+  emitInterpReqNoTranslate(v, extra->target, extra->invSPOff);
 }
 
 void cgLdBindAddr(IRLS& env, const IRInstruction* inst) {
@@ -458,11 +461,9 @@ void cgLdBindAddr(IRLS& env, const IRInstruction* inst) {
   auto& v = vmain(env);
 
   // Emit service request to smash address of SrcKey into 'addr'.
-  auto const addrPtr = v.allocData<TCA>();
-  v << bindaddr{addrPtr, extra->sk, extra->bcSPOff};
-  v << loadqd{reinterpret_cast<uint64_t*>(addrPtr), dst};
+  v << ldbindaddr{extra->sk, extra->bcSPOff, dst};
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 
-}}}
+}

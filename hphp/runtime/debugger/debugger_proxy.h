@@ -14,8 +14,7 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_EVAL_DEBUGGER_PROXY_H_
-#define incl_HPHP_EVAL_DEBUGGER_PROXY_H_
+#pragma once
 
 #include <string>
 #include <map>
@@ -29,7 +28,7 @@
 #include "hphp/util/async-func.h"
 #include "hphp/util/synchronizable.h"
 
-namespace HPHP { namespace Eval {
+namespace HPHP::Eval {
 ///////////////////////////////////////////////////////////////////////////////
 
 struct CmdFlowControl;
@@ -40,6 +39,13 @@ struct DummySandbox;
 
 using DebuggerProxyPtr = std::shared_ptr<DebuggerProxy>;
 using DebuggerCommandPtr = std::shared_ptr<DebuggerCommand>;
+
+enum class StreamStatus: int8_t{
+  NOT_STARTED,
+  INITIALIZED,
+  ONGOING,
+  COMPLETED,
+};
 
 /*
  * A DebuggerProxy provides a conection thru which a client may talk to a VM
@@ -106,7 +112,7 @@ struct DebuggerProxy : Synchronizable,
   void stop();
   bool cleanup(int timeout);
 
-  bool getClientConnectionInfo(VRefParam address, VRefParam port);
+  bool getClientConnectionInfo(Variant& address, Variant& port);
 
   enum ExecutePHPFlags {
     ExecutePHPFlagsNone = 0x0, // No logging, not at an interrupt
@@ -115,9 +121,13 @@ struct DebuggerProxy : Synchronizable,
   };
 
   std::pair<bool,Variant>
-  ExecutePHP(const std::string &php, String &output, int frame, int flags);
+  ExecutePHPWithStreaming(const std::string &php, OptString &output, DebuggerCommand& cmd, int frame, StreamStatus& stream_status, int flags);
+
+  std::pair<bool,Variant>
+  ExecutePHP(const std::string &php, OptString &output, int frame, int flags);
 
   std::string requestAuthToken();
+  std::string requestSessionAuth();
 
 private:
   bool blockUntilOwn(CmdInterrupt &cmd, bool check);
@@ -170,6 +180,4 @@ private:
 };
 
 ///////////////////////////////////////////////////////////////////////////////
-}}
-
-#endif // incl_HPHP_EVAL_DEBUGGER_PROXY_H_
+}

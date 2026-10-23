@@ -136,9 +136,6 @@ class Foo {
   public function else(): int {
     return 42;
   }
-  public function elseif(): int {
-    return 43;
-  }
   public function default(): int {
     return 44;
   }
@@ -190,7 +187,7 @@ class Foo {
   public function catch(): int {
     return 60;
   }
-  // public function die(): int {
+  // public function exit(): int {
   //   return 61;
   // }
   public function self(): int {
@@ -204,7 +201,10 @@ class Foo {
   }
 }
 
-echo Bar::forEach();
+
+<<__EntryPoint>>
+function main_object_methods() :mixed{
+echo Bar::foreach();
 $foo = new Foo();
 echo $foo->callable();
 echo $foo->class();
@@ -249,7 +249,6 @@ echo $foo->require();
 echo $foo->require_once();
 echo $foo->return();
 echo $foo->else();
-echo $foo->elseif();
 echo $foo->default();
 echo $foo->break();
 echo $foo->continue();
@@ -267,8 +266,9 @@ echo $foo->do();
 echo $foo->while();
 echo $foo->as();
 echo $foo->catch();
-//echo $foo->die();
+//echo $foo->exit();
 echo $foo->self();
 echo $foo->parent();
 echo $foo->unset();
 echo "Done\n";
+}

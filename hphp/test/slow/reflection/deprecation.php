@@ -1,27 +1,27 @@
 <?hh
 
-function f() {}
+function f() :mixed{}
 <<__Deprecated>>
-function fDep() {}
+function fDep() :mixed{}
 
 class C {
-  public function f() {}
+  public function f() :mixed{}
   <<__Deprecated>>
-  public function fDep() {}
-  public static function sf() {}
+  public function fDep() :mixed{}
+  public static function sf() :mixed{}
   <<__Deprecated>>
-  public static function sfDep() {}
+  public static function sfDep() :mixed{}
 }
 
-function is_deprecated(ReflectionFunctionAbstract $f) {
+function is_deprecated(ReflectionFunctionAbstract $f) :mixed{
   $name =
-    ($f instanceof ReflectionMethod
+    ($f is ReflectionMethod
      ? ($f->getDeclaringClass()->getName().'::')
      : '') . $f->getName();
   echo $name, ": ", $f->isDeprecated() ? 'deprecated' : 'not deprecated', "\n";
 }
 
-function test() {
+function test() :mixed{
   is_deprecated(new ReflectionFunction('f'));
   is_deprecated(new ReflectionFunction('fDep'));
   is_deprecated(new ReflectionMethod(C::class, 'f'));
@@ -31,4 +31,8 @@ function test() {
   echo 'Done', "\n";
 }
 
+
+<<__EntryPoint>>
+function main_deprecation() :mixed{
 test();
+}

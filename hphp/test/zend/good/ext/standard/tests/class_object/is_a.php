@@ -1,15 +1,15 @@
-<?php
+<?hh
 
 interface if_a {
-	function f_a();
+	function f_a():mixed;
 }
 	
 interface if_b extends if_a {
-	function f_b();
+	function f_b():mixed;
 }
 
 class base {
-	function _is_a($sub) {
+	function _is_a($sub) :mixed{
 		
 		echo "\n>>> With Defined class\n";
 		echo str_pad('is_a( OBJECT:'.get_class($this).', '.$sub.') = ', 60) . (is_a($this, $sub) ? 'yes' : 'no')."\n";
@@ -26,7 +26,7 @@ class base {
 		echo  str_pad('is_subclass_of( STRING:undefB, '.$sub.',false) = ', 60). (is_subclass_of('undefB', $sub, false) ? 'yes' : 'no')."\n";
 		echo  str_pad('is_subclass_of( STRING:undefB, '.$sub.') = ', 60). (is_subclass_of('undefB', $sub) ? 'yes' : 'no')."\n";
 	}
-	function test() {
+	function test() :mixed{
 		echo $this->_is_a('base');
 		echo $this->_is_a('derived_a');  
 		echo $this->_is_a('if_a'); 
@@ -36,48 +36,40 @@ class base {
 }
 
 class derived_a extends base implements if_a {
-	function f_a() {}
+	function f_a() :mixed{}
 }
 
 class derived_b extends base implements if_a, if_b {
-	function f_a() {}
-	function f_b() {}
+	function f_a() :mixed{}
+	function f_b() :mixed{}
 }
 
 class derived_c extends derived_a implements if_b {
-	function f_b() {}
+	function f_b() :mixed{}
 }
 
 class derived_d extends derived_c {
 }
-
-$t = new base();
-$t->test();
-
-$t = new derived_a();
-$t->test();
-
-eval('
-  function __autoload($name)
-  {
-      echo ">>>> In __autoload: ";
-      var_dump($name);
-  }
-');
-
-echo "NOW WITH AUTOLOAD\n\n";
-
-$t = new base();
-$t->test();
-
-$t = new derived_a();
-$t->test();
-
-$t = new derived_b();
-$t->test();
  
 
 
 
 
-?>
+<<__EntryPoint>>
+function is_a_entry(): void {
+
+  $t = new base();
+  $t->test();
+
+  $t = new derived_a();
+  $t->test();
+
+  $t = new base();
+  $t->test();
+
+  $t = new derived_a();
+  $t->test();
+
+  $t = new derived_b();
+  $t->test();
+}

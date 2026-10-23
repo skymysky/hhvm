@@ -9,8 +9,8 @@
  *
  */
 
-function f(mixed $x): Indexish<string, string> {
-  if ($x instanceof Indexish) {
+function f(mixed $x): KeyedTraversable<string, string> {
+  if ($x is KeyedTraversable<_, _>) {
     return $x;
   }
 
@@ -21,7 +21,7 @@ class C<T> {}
 class D<T> extends C<T> {}
 
 function g<Tx, Ty>(C<Tx> $x): D<Ty> {
-  if ($x instanceof D) {
+  if ($x is D<_>) {
     return $x;
   }
 

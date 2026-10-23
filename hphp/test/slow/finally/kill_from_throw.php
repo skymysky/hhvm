@@ -1,6 +1,6 @@
-<?php
+<?hh
 
-function foo() {
+function foo() :mixed{
   try {
     try {
       return 0;
@@ -12,4 +12,8 @@ function foo() {
   }
   var_dump("after");
 }
+
+<<__EntryPoint>>
+function main_kill_from_throw() :mixed{
 var_dump(foo());
+}

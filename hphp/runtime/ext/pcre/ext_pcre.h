@@ -15,8 +15,7 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_EXT_PREG_H_
-#define incl_HPHP_EXT_PREG_H_
+#pragma once
 
 #include "hphp/runtime/ext/extension.h"
 
@@ -24,49 +23,8 @@ namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
 // pcre
 
-Variant HHVM_FUNCTION(preg_filter, const Variant& pattern,
-                                   const Variant& replacement,
-                                   const Variant& subject,
-                                   int limit = -1,
-                                   VRefParam count = uninit_null());
-Variant HHVM_FUNCTION(preg_grep, const String& pattern, const Array& input,
-                                 int flags = 0);
 Variant HHVM_FUNCTION(preg_replace, const Variant& pattern, const Variant& replacement,
-                                    const Variant& subject, int limit = -1,
-                                    VRefParam count = uninit_null());
-Variant HHVM_FUNCTION(preg_replace_callback, const Variant& pattern,
-                                             const Variant& callback,
-                                             const Variant& subject,
-                                             int limit = -1,
-                                             VRefParam count = uninit_null());
-Variant HHVM_FUNCTION(
-    preg_replace_callback_array, const Variant& patterns_and_callbacks,
-                                 const Variant& subject, int limit = -1,
-                                 VRefParam count = uninit_null());
-Variant HHVM_FUNCTION(preg_split, const String& pattern, const String& subject,
-                                  const Variant& limit, int flags = 0);
-String HHVM_FUNCTION(preg_quote, const String& str,
-                                 const Variant& = null_string);
-int64_t HHVM_FUNCTION(preg_last_error);
-
-///////////////////////////////////////////////////////////////////////////////
-// deprecating these
-
-String HHVM_FUNCTION(ereg_replace, const String& pattern,
-                                const String& replacement, const String& str);
-String HHVM_FUNCTION(eregi_replace, const String& pattern,
-                                const String& replacement, const String& str);
-Variant HHVM_FUNCTION(ereg, const String& pattern, const String& str,
-                            VRefParam regs = uninit_null());
-Variant HHVM_FUNCTION(eregi, const String& pattern, const String& str,
-                             VRefParam regs = uninit_null());
-Variant HHVM_FUNCTION(split, const String& pattern, const String& str,
-                             int limit = -1);
-Variant HHVM_FUNCTION(spliti, const String& pattern, const String& str,
-                              int limit = -1);
-String HHVM_FUNCTION(sql_regcase, const String& str);
+                                    const Variant& subject, int64_t limit = -1);
 
 ///////////////////////////////////////////////////////////////////////////////
 }
-
-#endif // incl_HPHP_EXT_PREG_H_

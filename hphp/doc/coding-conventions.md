@@ -453,8 +453,8 @@ for (auto const& thing : thingVec) {
   with the beginning of the current parenthesis/brace nesting level. For
   example, here are some long expressions, formatted appropriately:
 ```cpp
-if (RuntimeOption::EvalJitRegionSelector != "" &&
-    (RuntimeOption::EvalHHIRRefcountOpts ||
+if (Cfg::Jit::RegionSelector != "" &&
+    (Cfg::HHIR::RefcountOpts ||
      RuntimeOption::EvalHHITExtraOptPass) &&
     Func::numLoadedFuncs() < 600) {
   // ...
@@ -522,7 +522,7 @@ We don't nest namespaces very deeply, so prefer to keep the scoping to a single
 line:
 
 ```cpp
-namespace HPHP { namespace jit { namespace x64 {
+namespace HPHP::jit::x64 {
 ///////////////////////////////////////////////////////////////////////////////
 
 /*
@@ -533,7 +533,7 @@ struct SomeNiceThing {
 };
 
 ///////////////////////////////////////////////////////////////////////////////
-}}}
+}
 ```
 
 Do not increase the indentation level when entering namespace scope. Instead,

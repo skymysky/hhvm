@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 /**
  * Copyright (c) 2014, Facebook, Inc.
  * All rights reserved.
@@ -28,7 +28,7 @@ class Foo {
   public function duck(): MyVector<Foo> {
     $ret = new MyVector();
     $node = $this;
-    while ($node) {
+    while (true) {
       $ret->add($node);
     }
     return $ret;

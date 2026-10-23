@@ -1,10 +1,10 @@
-<?php
+<?hh
 
-function heh($ar) {
+function heh($ar) :mixed{
   if (!$ar) throw new Exception('a');
   return 42;
 }
-function bar($ar) {
+function bar($ar) :mixed{
   $tmp = 54;
   try {
     $tmp = heh($ar);
@@ -13,6 +13,10 @@ function bar($ar) {
   }
   var_dump($tmp);
 }
-bar(array('a'));
-bar(array());
 
+
+<<__EntryPoint>>
+function main_dce_003() :mixed{
+bar(vec['a']);
+bar(vec[]);
+}

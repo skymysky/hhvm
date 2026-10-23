@@ -14,8 +14,7 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_UTIL_MULTIBITSET_H_
-#define incl_HPHP_UTIL_MULTIBITSET_H_
+#pragma once
 
 #include <cstddef>
 #include <cstdint>
@@ -117,8 +116,6 @@ private:
   size_t m_nwords{0};
 };
 
-template<size_t N>
-constexpr size_t multibitset<N>::npos;
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -192,8 +189,6 @@ private:
   size_t m_lowwater{npos};
 };
 
-template<size_t N>
-constexpr size_t chunked_multibitset<N>::npos;
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -201,4 +196,3 @@ constexpr size_t chunked_multibitset<N>::npos;
 
 #include "hphp/util/multibitset-inl.h"
 
-#endif

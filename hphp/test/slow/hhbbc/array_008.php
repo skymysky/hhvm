@@ -1,25 +1,29 @@
-<?php
+<?hh
 
-function get() {
-  return array(
+function get() :mixed{
+  return dict[
     'foo' => 'bar',
     'baz' => 24,
     13 => 42,
     'heh' => 1.0
-  );
+  ];
 }
 
-function a() { return get()['foo']; }
-function b() { return get()['baz']; }
-function c() { return get()[13]; }
-function d() { return get()['13']; }
-function e() { return get()['13foo']; }
+function a() :mixed{ return get()['foo']; }
+function b() :mixed{ return get()['baz']; }
+function c() :mixed{ return get()[13]; }
+function d() :mixed{ return get()['13']; }
+function e() :mixed{ return get()['13foo']; }
 
-function main() {
+function main() :mixed{
   var_dump(a() === 'bar');
   var_dump(b() === 24);
   var_dump(c() === 42);
-  var_dump(d() === 42);
-  var_dump(e() === null);
+  try { var_dump(d() === null); } catch (Exception $e) { echo $e->getMessage()."\n"; }
+  try { var_dump(e() === null); } catch (Exception $e) { echo $e->getMessage()."\n"; }
 }
+
+<<__EntryPoint>>
+function main_array_008() :mixed{
 main();
+}

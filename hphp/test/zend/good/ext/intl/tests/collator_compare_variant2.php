@@ -1,15 +1,14 @@
-<?php
+<?hh
 
 /*
  * Compare various string pairs using various locales.
  */
 
-
 /*
  * Converts comparison result to a character.
  */
 function cmp_to_char( $comp_res )
-{
+:mixed{
     switch( $comp_res )
     {
     case 0:            // UCOL_EQUAL
@@ -28,7 +27,7 @@ function cmp_to_char( $comp_res )
  * using specified locale.
  */
 function compare_pairs( $locale, $test_array )
-{
+:mixed{
     $res_str = '';
 
     $coll = ut_coll_create( $locale );
@@ -51,56 +50,57 @@ function compare_pairs( $locale, $test_array )
 }
 
 function ut_main()
-{
+:mixed{
     $res_str = '';
 
     // Compare strings using en_US locale.
-    $test_params = array(
-        array( 'abc', 'abc' ),
-        array( 'Abc', 'abc' ),
-        array( 'a'  , 'abc' ),
-        array( 'a'  , ''    ),
-        array( ''  , ''     ),
-        array( 'a'  , 'b'   ),
-        array( 'ab'  , 'b'  ),
-        array( 'ab'  , 'a'  ),
-        array( 123  , 'abc' ),
-        array( 'ac' , null  ),
-        array( '.'  , '.'   ),
+    $test_params = vec[
+        vec[ 'abc', 'abc' ],
+        vec[ 'Abc', 'abc' ],
+        vec[ 'a'  , 'abc' ],
+        vec[ 'a'  , ''    ],
+        vec[ ''  , ''     ],
+        vec[ 'a'  , 'b'   ],
+        vec[ 'ab'  , 'b'  ],
+        vec[ 'ab'  , 'a'  ],
+        vec[ 123  , 'abc' ],
+        vec[ 'ac' , null  ],
+        vec[ '.'  , '.'   ],
         // Try to compare long strings.
-        array( 'abcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcde',
-               'abcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdea'),
-        array( null , null  )
-    );
+        vec[ 'abcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcde',
+               'abcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdea'],
+        vec[ null , null  ]
+    ];
 
     $res_str .= compare_pairs( 'en_US', $test_params );
 
 
     // Compare strings using ru_RU locale.
-    $test_params = array(
-        array( 'а',   'б' ),
-        array( 'а',   'аа' ),
-        array( 'аб', 'ба' ),
-        array( 'а',   ',' ),
-        array( 'а',   'b' ),
-        array( 'а',   'bb' ),
-        array( 'а',   'ab' ),
-        array( 'а',   null )
-    );
+    $test_params = vec[
+        vec[ "\xd0\xb0",   "\xd0\xb1" ],
+        vec[ "\xd0\xb0",   "\xd0\xb0\xd0\xb0" ],
+        vec[ "\xd0\xb0\xd0\xb1", "\xd0\xb1\xd0\xb0" ],
+        vec[ "\xd0\xb0",   ',' ],
+        vec[ "\xd0\xb0",   'b' ],
+        vec[ "\xd0\xb0",   'bb' ],
+        vec[ "\xd0\xb0",   'ab' ],
+        vec[ "\xd0\xb0",   null ]
+    ];
 
     $res_str .= compare_pairs( 'ru_RU', $test_params );
 
 
     // Compare strings using lt_LT locale.
-    $test_params = array(
-        array( 'y', 'k' )
-    );
+    $test_params = vec[
+        vec[ 'y', 'k' ]
+    ];
 
     $res_str .= compare_pairs( 'lt_LT', $test_params );
 
     return $res_str;
 }
-
-include_once( 'ut_common.inc' );
-ut_run();
-?>
+<<__EntryPoint>>
+function main_entry(): void {
+    include_once( 'ut_common.inc' );
+    ut_run();
+}

@@ -1,0 +1,51 @@
+error: Typing[4110] Invalid return type [1]
+-> Expected `shape('a' => int, 'b' => bool, ...)` [2]
+-> But got `T where T as shape('a' => int, ...), T as shape('b' => bool, ...)` [3]
+
+bound_multi_combine_bad_singleton_upper_bounds.php:10:10
+ 5 | // requires both fields at once.
+ 6 | function lone<T as shape(...)>(
+ 7 |   T $s,
+   |   ^ [3]
+ 8 | ): shape('a' => int, 'b' => bool, ...)
+   |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ [2]
+ 9 |   where T as shape('a' => int, ...), T as shape('b' => bool, ...) {
+10 |   return $s;
+   |          ^^ [1]
+11 | }
+
+error: Typing[4163] Invalid return type [1]
+-> The field `b` is **optional** [2]
+-> The field `b` is defined as **required** [3]
+-> `b` is defined here [4]
+
+bound_multi_combine_bad_singleton_upper_bounds.php:10:10
+ 6 | function lone<T as shape(...)>(
+ 7 |   T $s,
+ 8 | ): shape('a' => int, 'b' => bool, ...)
+   |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ [3]
+   |                             ^^^^ [4]
+ 9 |   where T as shape('a' => int, ...), T as shape('b' => bool, ...) {
+   |              ^^^^^^^^^^^^^^^^^^^^^^ [2]
+10 |   return $s;
+   |          ^^ [1]
+11 | }
+
+error: Typing[4163] Invalid return type [1]
+-> The field `a` is **optional** [2]
+-> The field `a` is defined as **required** [3]
+-> `a` is defined here [4]
+
+bound_multi_combine_bad_singleton_upper_bounds.php:10:10
+ 6 | function lone<T as shape(...)>(
+ 7 |   T $s,
+ 8 | ): shape('a' => int, 'b' => bool, ...)
+   |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ [3]
+   |                 ^^^ [4]
+ 9 |   where T as shape('a' => int, ...), T as shape('b' => bool, ...) {
+   |                                           ^^^^^^^^^^^^^^^^^^^^^^^ [2]
+10 |   return $s;
+   |          ^^ [1]
+11 | }
+
+3 errors found

@@ -18,28 +18,25 @@
 
 #include "hphp/runtime/base/datatype.h"
 #include "hphp/runtime/base/execution-context.h"
-#include "hphp/runtime/base/rds.h"
 #include "hphp/runtime/base/rds-util.h"
 #include "hphp/runtime/base/runtime-error.h"
 #include "hphp/runtime/base/static-string-table.h"
 #include "hphp/runtime/base/string-data.h"
-#include "hphp/runtime/base/strings.h"
 #include "hphp/runtime/base/tv-mutate.h"
 #include "hphp/runtime/base/tv-variant.h"
 #include "hphp/runtime/base/type-variant.h"
 #include "hphp/runtime/vm/named-entity.h"
-#include "hphp/runtime/vm/unit.h"
 
 #include "hphp/runtime/vm/jit/types.h"
 #include "hphp/runtime/vm/jit/abi.h"
 #include "hphp/runtime/vm/jit/arg-group.h"
 #include "hphp/runtime/vm/jit/call-spec.h"
 #include "hphp/runtime/vm/jit/cls-cns-profile.h"
+#include "hphp/runtime/vm/jit/code-gen-cf.h"
 #include "hphp/runtime/vm/jit/extra-data.h"
 #include "hphp/runtime/vm/jit/ir-instruction.h"
 #include "hphp/runtime/vm/jit/ir-opcode.h"
 #include "hphp/runtime/vm/jit/ssa-tmp.h"
-#include "hphp/runtime/vm/jit/translator-inline.h"
 #include "hphp/runtime/vm/jit/type.h"
 #include "hphp/runtime/vm/jit/vasm-gen.h"
 #include "hphp/runtime/vm/jit/vasm-instr.h"
@@ -48,9 +45,9 @@
 #include "hphp/util/asm-x64.h"
 #include "hphp/util/trace.h"
 
-namespace HPHP { namespace jit { namespace irlower {
+namespace HPHP::jit::irlower {
 
-TRACE_SET_MOD(irlower);
+TRACE_SET_MOD(irlower)
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -62,38 +59,25 @@ void cgLdCns(IRLS& env, const IRInstruction* inst) {
   auto& v = vmain(env);
   assertx(inst->taken());
 
-  auto checkUninit = [&] {
+  auto const checkUninit = [&] {
     auto const sf = v.makeReg();
-    irlower::emitTypeTest(
-      v, env, TUninit, dst.reg(1), dst.reg(0), sf,
-      [&] (ConditionCode cc, Vreg sfr) {
-        fwdJcc(v, env, cc, sfr, inst->taken());
-      }
-    );
+    emitCmpTVType(v, sf, KindOfUninit, dst.reg(1));
+    fwdJcc(v, env, CC_E, sf, inst->taken());
   };
 
   if (rds::isNormalHandle(ch)) {
     auto const sf = checkRDSHandleInitialized(v, ch);
     fwdJcc(v, env, CC_NE, sf, inst->taken());
+    markRDSAccess(v, ch);
     loadTV(v, inst->dst(), dst, rvmtl()[ch]);
-
-    // When a CLIServer is active requests running in script mode will define
-    // the stdio constants which require lookup via special callbacks. To not
-    // interfere with the server these constants will be defined as
-    // non-persistent.
-    if (!RuntimeOption::RepoAuthoritative) {
-      if (strcasecmp(cnsName->data(), "stdin") == 0 ||
-          strcasecmp(cnsName->data(), "stdout") == 0 ||
-          strcasecmp(cnsName->data(), "stderr") == 0) {
-        checkUninit();
-      }
-    }
+    checkUninit();
     return;
   }
 
   auto const pcns = rds::handleToPtr<TypedValue, rds::Mode::Persistent>(ch);
 
   if (pcns->m_type == KindOfUninit) {
+    markRDSAccess(v, ch);
     loadTV(v, inst->dst(), dst, *v.cns(pcns));
     checkUninit();
   } else {
@@ -111,22 +95,24 @@ void cgLdCns(IRLS& env, const IRInstruction* inst) {
       case KindOfPersistentVec:
       case KindOfPersistentDict:
       case KindOfPersistentKeyset:
-      case KindOfPersistentArray:
       case KindOfString:
       case KindOfVec:
       case KindOfDict:
       case KindOfKeyset:
-      case KindOfArray:
       case KindOfObject:
       case KindOfResource:
-      case KindOfRef:
+      case KindOfRFunc:
+      case KindOfFunc:
+      case KindOfClass:
+      case KindOfLazyClass:
+      case KindOfClsMeth:
+      case KindOfRClsMeth:
+      case KindOfEnumClassLabel:
         v << copy{v.cns(pcns->m_data.num), dst.reg(0)};
         break;
       case KindOfDouble:
         v << copy{v.cns(pcns->m_data.dbl), dst.reg(0)};
         break;
-      case KindOfFunc:
-      // TODO (T29639296)
       case KindOfUninit:
         not_reached();
     }
@@ -136,177 +122,68 @@ void cgLdCns(IRLS& env, const IRInstruction* inst) {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-ALWAYS_INLINE
-tv_rval lookupCnsImpl(StringData* nm) {
-  tv_rval cns;
+namespace {
 
-  if (UNLIKELY(rds::s_constants().get() != nullptr)) {
-    cns = rds::s_constants()->rval(nm);
+TypedValue lookupCnsEHelper(StringData* nm) {
+  auto const cns = Constant::load(nm);
+  if (LIKELY(type(cns) != KindOfUninit)) {
+    return cns;
   }
-  if (!cns) {
-    cns = Unit::loadCns(const_cast<StringData*>(nm));
-  }
-  return cns;
+  raise_error("Undefined constant '%s'", nm->data());
 }
 
-Cell lookupCnsHelper(StringData* nm, bool error) {
-  auto const cns = lookupCnsImpl(nm);
-  if (LIKELY(cns != nullptr)) {
-    Cell c1;
-    cellDup(*cns, c1);
-    return c1;
-  }
-
-  // Undefined constants.
-  if (error) {
-    raise_error("Undefined constant '%s'", nm->data());
-  } else {
-    raise_notice(Strings::UNDEFINED_CONSTANT, nm->data(), nm->data());
-    Cell c1;
-    c1.m_data.pstr = const_cast<StringData*>(nm);
-    c1.m_type = KindOfPersistentString;
-    return c1;
-  }
-  not_reached();
 }
 
-Cell lookupCnsHelperNormal(rds::Handle tv_handle,
-                           StringData* nm, bool error) {
+static TypedValue lookupCnsEHelperNormal(rds::Handle tv_handle,
+                                         StringData* nm) {
   assertx(rds::isNormalHandle(tv_handle));
   if (UNLIKELY(rds::isHandleInit(tv_handle))) {
-    auto const tv = rds::handleToPtr<TypedValue, rds::Mode::Normal>(tv_handle);
-    if (tv->m_data.pref != nullptr) {
-      auto callback = (Native::ConstantCallback)(tv->m_data.pref);
-      const Cell* cns = callback().asTypedValue();
-      if (LIKELY(cns->m_type != KindOfUninit)) {
-        Cell c1;
-        cellDup(*cns, c1);
-        return c1;
-      }
-    }
+    UNUSED auto const tv =
+      rds::handleToPtr<TypedValue, rds::Mode::Normal>(tv_handle);
+    assertx(type(tv) == KindOfUninit);
+    Variant v = Constant::get(nm);
+    const TypedValue cns = v.detach();
+    assertx(tvIsPlausible(cns));
+    assertx(tvAsCVarRef(&cns).isAllowedAsConstantValue() ==
+            Variant::AllowedAsConstantValue::Allowed);
+    tvIncRefGen(cns);
+    rds::handleToRef<TypedValue, rds::Mode::Normal>(tv_handle) = cns;
+    return cns;
   }
-  assertx(!rds::isHandleInit(tv_handle));
-
-  return lookupCnsHelper(nm, error);
+  return lookupCnsEHelper(nm);
 }
 
-Cell lookupCnsHelperPersistent(rds::Handle tv_handle,
-                               StringData* nm, bool error) {
-  assertx(rds::isPersistentHandle(tv_handle));
-  auto tv = rds::handleToPtr<TypedValue, rds::Mode::Persistent>(tv_handle);
-  assertx(tv->m_type == KindOfUninit);
-
-  // Deferred system constants.
-  if (UNLIKELY(tv->m_data.pref != nullptr)) {
-    auto callback = (Native::ConstantCallback)(tv->m_data.pref);
-    const Cell* cns = callback().asTypedValue();
-    if (LIKELY(cns->m_type != KindOfUninit)) {
-      Cell c1;
-      cellDup(*cns, c1);
-      return c1;
-    }
-  }
-  return lookupCnsHelper(nm, error);
-}
-
-Cell lookupCnsUHelperNormal(rds::Handle tv_handle,
-                            StringData* nm, StringData* fallback) {
-  assertx(rds::isNormalHandle(tv_handle));
-
-  // Lookup qualified name in thread-local constants.
-  auto cns = lookupCnsImpl(nm);
-
-  // Try cache handle for unqualified name.
-  if (UNLIKELY(!cns && rds::isHandleInit(tv_handle, rds::NormalTag{}))) {
-    cns = rds::handleToPtr<TypedValue, rds::Mode::Normal>(tv_handle);
-    assertx(type(cns) != KindOfUninit);
-  }
-
-  if (LIKELY(cns != nullptr)) {
-    Cell c1;
-    cellDup(*cns, c1);
-    return c1;
-  }
-
-  // Lookup unqualified name in thread-local constants.
-  return lookupCnsHelper(fallback, false);
-}
-
-Cell lookupCnsUHelperPersistent(rds::Handle tv_handle,
-                                StringData* nm, StringData* fallback) {
+static TypedValue lookupCnsEHelperPersistent(rds::Handle tv_handle,
+                                             StringData* nm) {
   assertx(rds::isPersistentHandle(tv_handle));
 
-  // Lookup qualified name in thread-local constants.
-  auto cns = lookupCnsImpl(nm);
-
-  if (UNLIKELY(!cns)) {
-    // Try cache handle for unqualified name.
-    auto const tv =
-      rds::handleToPtr<TypedValue, rds::Mode::Persistent>(tv_handle);
-    if (tv->m_type != KindOfUninit) cns = tv;
-  }
-
-  if (LIKELY(cns != nullptr)) {
-    Cell c1;
-    cellDup(*cns, c1);
-    return c1;
-  }
-
-  return lookupCnsHelper(fallback, false);
+  UNUSED auto const tv =
+    rds::handleToPtr<TypedValue, rds::Mode::Persistent>(tv_handle);
+  assertx(type(tv) == KindOfUninit);
+  Variant v = Constant::get(nm);
+  const TypedValue cns = v.detach();
+  assertx(tvIsPlausible(cns));
+  assertx(tvAsCVarRef(&cns).isAllowedAsConstantValue() ==
+          Variant::AllowedAsConstantValue::Allowed);
+  return cns;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 
-namespace {
-
-void implLookupCns(IRLS& env, const IRInstruction* inst) {
+void cgLookupCnsE(IRLS& env, const IRInstruction* inst) {
   auto const cnsName = inst->src(0)->strVal();
   auto const ch = makeCnsHandle(cnsName);
   assertx(rds::isHandleBound(ch));
 
   auto const args = argGroup(env, inst)
     .imm(ch)
-    .immPtr(cnsName)
-    .imm(inst->is(LookupCnsE));
+    .immPtr(cnsName);
 
   cgCallHelper(
     vmain(env), env,
     rds::isNormalHandle(ch)
-      ? CallSpec::direct(lookupCnsHelperNormal)
-      : CallSpec::direct(lookupCnsHelperPersistent),
-    callDestTV(env, inst),
-    SyncOptions::Sync,
-    args
-  );
-}
-
-}
-
-void cgLookupCns(IRLS& env, const IRInstruction* inst) {
-  implLookupCns(env, inst);
-}
-
-void cgLookupCnsE(IRLS& env, const IRInstruction* inst) {
-  implLookupCns(env, inst);
-}
-
-void cgLookupCnsU(IRLS& env, const IRInstruction* inst) {
-  auto const cnsName = inst->src(0)->strVal();
-  auto const fallbackName = inst->src(1)->strVal();
-
-  auto const fallbackCh = makeCnsHandle(fallbackName);
-  assertx(rds::isHandleBound(fallbackCh));
-
-  auto const args = argGroup(env, inst)
-    .imm(fallbackCh)
-    .immPtr(cnsName)
-    .immPtr(fallbackName);
-
-  cgCallHelper(
-    vmain(env), env,
-    rds::isNormalHandle(fallbackCh)
-      ? CallSpec::direct(lookupCnsUHelperNormal)
-      : CallSpec::direct(lookupCnsUHelperPersistent),
+      ? CallSpec::direct(lookupCnsEHelperNormal)
+      : CallSpec::direct(lookupCnsEHelperPersistent),
     callDestTV(env, inst),
     SyncOptions::Sync,
     args
@@ -317,24 +194,32 @@ void cgLookupCnsU(IRLS& env, const IRInstruction* inst) {
 
 void cgLdClsCns(IRLS& env, const IRInstruction* inst) {
   auto const extra = inst->extra<LdClsCns>();
-  auto const link = rds::bindClassConstant(extra->clsName, extra->cnsName);
-  auto const dst = dstLoc(env, inst, 0).reg();
+  auto const dst = dstLoc(env, inst, 0);
   auto& v = vmain(env);
+
+  auto const link = rds::bindClassConstant(extra->clsName, extra->cnsName);
+  assertx(link.isNormal());
 
   auto const sf = checkRDSHandleInitialized(v, link.handle());
   fwdJcc(v, env, CC_NE, sf, inst->taken());
-  v << lea{rvmtl()[link.handle()], dst};
+  markRDSAccess(v, link.handle());
+  loadTV(v, inst->dst(), dst, rvmtl()[link.handle()]);
 }
 
 void cgLdSubClsCns(IRLS& env, const IRInstruction* inst) {
   auto const extra = inst->extra<LdSubClsCns>();
-  auto const dst = dstLoc(env, inst, 0).reg();
+  auto const dst = dstLoc(env, inst, 0);
   auto& v = vmain(env);
 
   auto const slot = extra->slot;
   auto const tmp = v.makeReg();
   v << load{srcLoc(env, inst, 0).reg()[Class::constantsVecOff()], tmp};
-  v << lea{tmp[slot * sizeof(Class::Const) + offsetof(Class::Const, val)], dst};
+  loadTV(
+    v,
+    inst->dst(),
+    dst,
+    tmp[slot * sizeof(Class::Const) + offsetof(Class::Const, val)]
+  );
 }
 
 void cgCheckSubClsCns(IRLS& env, const IRInstruction* inst) {
@@ -345,10 +230,31 @@ void cgCheckSubClsCns(IRLS& env, const IRInstruction* inst) {
   auto const tmp = v.makeReg();
   auto const sf = v.makeReg();
   v << load{srcLoc(env, inst, 0).reg()[Class::constantsVecOff()], tmp};
-  emitCmpLowPtr<StringData>(v, sf, v.cns(extra->cnsName),
-                            tmp[slot * sizeof(Class::Const) +
-                                offsetof(Class::Const, name)]);
+
+  auto const constOffset = slot * sizeof(Class::Const);
+
+  emitCmpPackedPtr(
+    v, sf, extra->cnsName,
+    tmp[constOffset + offsetof(Class::Const, name)]
+  );
   fwdJcc(v, env, CC_NE, sf, inst->taken());
+
+  auto const sf2 = v.makeReg();
+  auto const kindOffset =
+    constOffset +
+    offsetof(Class::Const, val) +
+    offsetof(TypedValueAux, m_auxFlags) +
+    offsetof(AuxFlagsUnion, u_constModifierFlags) +
+    offsetof(ConstModifierFlags, kind);
+
+  static_assert((int)ConstModifierFlags::Kind::Value == 0);
+
+  v << testbim{
+    safe_cast<int8_t>(-1),
+    tmp[kindOffset],
+    sf2
+  };
+  fwdJcc(v, env, CC_NZ, sf2, inst->taken());
 }
 
 void cgLdClsCnsVecLen(IRLS& env, const IRInstruction* inst) {
@@ -372,19 +278,27 @@ void cgProfileSubClsCns(IRLS& env, const IRInstruction* inst) {
   auto const args = argGroup(env, inst)
     .addr(rvmtl(), safe_cast<int32_t>(extra->handle))
     .ssa(0)
-    .imm(extra->cnsName);
+    .immPtr(extra->cnsName);
 
-  auto const dst = dstLoc(env, inst, 0).reg();
-
-  cgCallHelper(vmain(env), env, CallSpec::method(&ClsCnsProfile::reportClsCns),
-               callDest(dst), SyncOptions::None, args);
+  cgCallHelper(
+    vmain(env),
+    env,
+    CallSpec::method(&ClsCnsProfile::reportClsCns),
+    callDestTV(env, inst),
+    SyncOptions::Sync,
+    args
+  );
 }
 
-
-Cell lookupClsCnsHelper(TypedValue* cache, const NamedEntity* ne,
-                        const StringData* cls, const StringData* cns) {
+static TypedValue initClsCnsHelper(TypedValue* cache,
+                                   const NamedType* ne,
+                                   const StringData* cls,
+                                   const StringData* cns) {
+  // We need anchor here since lookupClsCns might raise warning or throw an
+  // exception
+  VMRegAnchor _;
   auto const clsCns = g_context->lookupClsCns(ne, cls, cns);
-  cellDup(clsCns, *cache);
+  tvDup(clsCns, *cache);
   return clsCns;
 }
 
@@ -394,55 +308,171 @@ void cgInitClsCns(IRLS& env, const IRInstruction* inst) {
   assertx(link.isNormal());
   auto& v = vmain(env);
 
+  markRDSAccess(v, link.handle());
   auto const args = argGroup(env, inst)
     .addr(rvmtl(), safe_cast<int32_t>(link.handle()))
-    .immPtr(NamedEntity::get(extra->clsName))
+    .immPtr(NamedType::getOrCreate(extra->clsName))
     .immPtr(extra->clsName)
     .immPtr(extra->cnsName);
 
-  cgCallHelper(v, env, CallSpec::direct(lookupClsCnsHelper),
+  cgCallHelper(v, env, CallSpec::direct(initClsCnsHelper),
                callDestTV(env, inst), SyncOptions::Sync, args);
 
   markRDSHandleInitialized(v, link.handle());
 }
 
-void cgLdTypeCns(IRLS& env, const IRInstruction* inst) {
-  auto const cns = srcLoc(env, inst, 0).reg();
-  auto const ret = dstLoc(env, inst, 0).reg();
-
-  auto& v = vmain(env);
-  auto const sf = v.makeReg();
-  v << testqi{0x1, cns, sf};
-  fwdJcc(v, env, CC_Z, sf, inst->taken());
-  v << xorqi{0x1, cns, ret, v.makeReg()};
-}
-
-static ArrayData* loadClsTypeCnsHelper(
-  const Class* cls, const StringData* name
-) {
-  auto typeCns = cls->clsCnsGet(name, true);
-  if (typeCns.m_type == KindOfUninit) {
-    if (cls->hasTypeConstant(name, true)) {
-      raise_error("Type constant %s::%s is abstract",
-                  cls->name()->data(), name->data());
-    } else {
-      raise_error("Non-existent type constant %s::%s",
-                  cls->name()->data(), name->data());
-    }
+static TypedValue initSubClsCnsHelper(const Class* cls,
+                                      const StringData* cnsName) {
+  auto const cns = cls->clsCnsGet(cnsName);
+  if (UNLIKELY(cns.m_type == KindOfUninit)) {
+    raise_error("Couldn't find constant %s::%s",
+                cls->name()->data(), cnsName->data());
   }
-
-  assertx(isArrayLikeType(typeCns.m_type));
-  assertx(typeCns.m_data.parr->isDictOrDArray());
-  assertx(typeCns.m_data.parr->isStatic());
-  return typeCns.m_data.parr;
+  return cns;
 }
 
-void cgLdClsTypeCns(IRLS& env, const IRInstruction* inst) {
-  auto const args = argGroup(env, inst).ssa(0).ssa(1);
-  cgCallHelper(vmain(env), env, CallSpec::direct(loadClsTypeCnsHelper),
-               callDest(env, inst), SyncOptions::Sync, args);
+void cgInitSubClsCns(IRLS& env, const IRInstruction* inst) {
+  auto const extra = inst->extra<InitSubClsCns>();
+  auto const args = argGroup(env, inst)
+    .ssa(0)
+    .immPtr(extra->cnsName);
+  cgCallHelper(vmain(env), env, CallSpec::direct(initSubClsCnsHelper),
+               callDestTV(env, inst), SyncOptions::Sync, args);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 
-}}}
+namespace {
+
+void ldResolvedTypeHelper(Vout& v, Slot slot, Vreg cls, Vreg cns) {
+  auto const cnsVec = v.makeReg();
+  v << load{cls[Class::constantsVecOff()], cnsVec};
+  v << load{
+    cnsVec[slot * sizeof(Class::Const) +
+           offsetof(Class::Const, val) +
+           TVOFF(m_data)],
+    cns
+  };
+}
+
+} // namespace
+
+void cgLdResolvedTypeCns(IRLS& env, const IRInstruction* inst) {
+  auto const cls = srcLoc(env, inst, 0).reg();
+  auto const cns = dstLoc(env, inst, 0).reg();
+  auto const slot = inst->extra<LdResolvedTypeCns>()->slot;
+  auto& v = vmain(env);
+
+  auto const masked = v.makeReg();
+  ldResolvedTypeHelper(v, slot, cls, masked);
+
+  auto const sf = v.makeReg();
+  v << btrq{0, masked, cns, sf};
+  fwdJcc(v, env, CC_AE, sf, inst->taken());
+}
+
+void cgLdResolvedTypeCnsNoCheck(IRLS& env, const IRInstruction* inst) {
+  auto const cls = srcLoc(env, inst, 0).reg();
+  auto const cns = dstLoc(env, inst, 0).reg();
+  auto const slot = inst->extra<LdResolvedTypeCnsNoCheck>()->slot;
+  auto& v = vmain(env);
+
+  auto const masked = v.makeReg();
+  ldResolvedTypeHelper(v, slot, cls, masked);
+
+  if (debug) {
+    // If we've asserted it's always pre-resolved, it had better be!
+    auto const sf = v.makeReg();
+    v << testqi{0x1, masked, sf};
+    unlikelyIfThen(
+      v, vcold(env), CC_Z, sf,
+      [&] (Vout& v) { v << trap{TRAP_REASON, Fixup::none()}; }
+    );
+  }
+
+  v << xorqi{0x1, masked, cns, v.makeReg()};
+}
+
+void cgLdTypeCns(IRLS& env, const IRInstruction* inst) {
+  auto const args = argGroup(env, inst).ssa(0).ssa(1).imm(false);
+  cgCallHelper(vmain(env), env, CallSpec::direct(loadClsTypeCnsHelper),
+               callDest(env, inst), SyncOptions::Sync, args);
+}
+void cgLdTypeCnsNoThrow(IRLS& env, const IRInstruction* inst) {
+  auto const args = argGroup(env, inst).ssa(0).ssa(1).imm(true);
+  cgCallHelper(vmain(env), env, CallSpec::direct(loadClsTypeCnsHelper),
+               callDest(env, inst), SyncOptions::Sync, args);
+}
+
+void cgLdResolvedTypeCnsClsName(IRLS& env, const IRInstruction* inst) {
+  auto const extra = inst->extra<LdResolvedTypeCnsClsName>();
+  auto const cls = srcLoc(env, inst, 0).reg();
+  auto const dst = dstLoc(env, inst, 0).reg();
+  auto& v = vmain(env);
+
+  auto const slot = extra->slot;
+  auto const cnsVec = v.makeReg();
+  v << load{cls[Class::constantsVecOff()], cnsVec};
+  auto const rawAddr = cnsVec[slot * sizeof(Class::Const) +
+                              offsetof(Class::Const, val) +
+                              offsetof(TypedValue, m_aux) +
+                              offsetof(AuxUnion, u_constModifiers) +
+                              offsetof(ConstModifiers, u_clsName)];
+  emitLdPackedPtr(v, rawAddr, dst);
+}
+
+void cgLdTypeCnsClsName(IRLS& env, const IRInstruction* inst) {
+  auto const args = argGroup(env, inst).ssa(0).ssa(1);
+  cgCallHelper(vmain(env), env, CallSpec::direct(loadClsTypeCnsClsNameHelper),
+               callDest(env, inst), SyncOptions::Sync, args);
+}
+
+void cgLdClsCtxCns(IRLS& env, const IRInstruction* inst) {
+  auto const cls = srcLoc(env, inst, 0).reg();
+  auto const dst = dstLoc(env, inst, 0).reg();
+  auto const slot = inst->extra<LdClsCtxCns>()->slot;
+  auto& v = vmain(env);
+
+  auto const cnsVec = v.makeReg();
+  v << load{cls[Class::constantsVecOff()], cnsVec};
+  auto const rawAddr = cnsVec[slot * sizeof(Class::Const) +
+                              offsetof(Class::Const, val) +
+                              offsetof(TypedValue, m_aux) +
+                              offsetof(AuxUnion, u_constModifiers) +
+                              offsetof(ConstModifiers, u_coeffectsData)];
+  v << loadzlq{rawAddr, dst};
+
+  if (debug) {
+    // Lets assert that the slot we are loading is context constant
+    auto const sf = v.makeReg();
+    auto const kindAddr = cnsVec[slot * sizeof(Class::Const) +
+                                 offsetof(Class::Const, val) +
+                                 offsetof(TypedValue, m_auxFlags) +
+                                 offsetof(AuxFlagsUnion, u_constModifierFlags) +
+                                 offsetof(ConstModifierFlags, kind)];
+    v << cmpbim{static_cast<int8_t>(ConstModifierFlags::Kind::Context), kindAddr, sf};
+    unlikelyIfThen(
+      v, vcold(env), CC_NZ, sf,
+      [&] (Vout& v) { v << trap{TRAP_REASON, Fixup::none()}; }
+    );
+    // Lets assert that the upper bits are zero
+    auto const shifted = v.makeReg();
+    auto const sf2 = v.makeReg();
+    // 16 bits for coeffects
+    v << shrqi{16, dst, shifted, v.makeReg()};
+    v << testq{shifted, shifted, sf2};
+    unlikelyIfThen(
+      v, vcold(env), CC_NZ, sf2,
+      [&] (Vout& v) { v << trap{TRAP_REASON, Fixup::none()}; }
+    );
+  }
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
+IMPL_OPCODE_CALL(LookupClsCns)
+IMPL_OPCODE_CALL(LookupClsCtxCns)
+
+///////////////////////////////////////////////////////////////////////////////
+
+}

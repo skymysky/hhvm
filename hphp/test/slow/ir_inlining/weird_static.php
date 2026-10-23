@@ -1,14 +1,14 @@
-<?php
+<?hh
 
 final class Constants {
-  public function gen() {
+  public static function gen() :AsyncGenerator<mixed,mixed,void>{
     yield 'foo';
   }
 }
 
-function main() {
+<<__EntryPoint>>
+function main() :mixed{
   $g = Constants::gen();
+  $g->next();
   var_dump($g->current());
 }
-
-main();

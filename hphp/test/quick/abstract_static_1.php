@@ -1,11 +1,9 @@
 <?hh
 
 abstract class Foo {
-abstract public static function who();
+abstract public static function who():mixed;
 }
 
-function main() {
+<<__EntryPoint>> function main(): void {
   Foo::who();
 }
-
-main();

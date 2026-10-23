@@ -1,0 +1,33 @@
+(*
+ * Copyright (c) 2021, Facebook, Inc.
+ * All rights reserved.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the "hack" directory of this source tree.
+ *
+ *)
+
+open Hh_prelude
+open Worker
+open Worker_controller
+
+let entry_counter = ref 0
+
+let unix_worker ~restore { longlived_workers; entry_state; controller_fd } =
+  (* Explicitly ensure that Folly is initialized (installs signal handlers) *)
+  Folly.ensure_folly_init ();
+  if longlived_workers then
+    unix_worker_main_no_clone restore (entry_state, controller_fd)
+  else
+    unix_worker_main restore (entry_state, controller_fd)
+
+let register ~restore =
+  incr entry_counter;
+  let restore (st, gc_control, heap_handle, worker_id) =
+    restore st ~worker_id;
+    Shared_mem.connect heap_handle ~worker_id;
+    Gc.set gc_control
+  in
+  let name = Printf.sprintf "subprocess_%d" !entry_counter in
+  let worker_main = unix_worker ~restore in
+  Daemon.register_entry_point name worker_main

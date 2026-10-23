@@ -1,22 +1,38 @@
-<?php
+<?hh
+
+function Test()
+:mixed{
+    $c = 1;
+    Lang007::$b = 5;
+    echo TestStatics::$a." ".Lang007::$b." ";
+    TestStatics::$a++;
+    $c++;
+    echo TestStatics::$a." $c ";
+}
+
+abstract final class TestStatics {
+  public static $a = 1;
+}
+
+abstract final class Lang007 {
+  public static $b;
+}
+
+<<__EntryPoint>> function main(): void {
 error_reporting(0);
 $a = 10;
 
-function Test()
-{
-	static $a=1;
-	global $b;
-	$c = 1;
-	$b = 5;
-	echo "$a $b ";
-	$a++;
-	$c++;
-	echo "$a $c ";
-}
-
-Test();	
-echo "$a $b $c ";
-Test();	
-echo "$a $b $c ";
 Test();
-?>
+try {
+  echo "$a ".Lang007::$b." $c ";
+} catch (UndefinedVariableException $e) {
+  var_dump($e->getMessage());
+}
+Test();
+try {
+  echo "$a ".Lang007::$b." $c ";
+} catch (UndefinedVariableException $e) {
+  var_dump($e->getMessage());
+}
+Test();
+}

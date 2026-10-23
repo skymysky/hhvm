@@ -2,11 +2,5 @@
 
 -- Testing date function with no arguments --
 
-Warning: %s
-bool(false)
-
--- Testing date function with more than expected no. of arguments --
-
-Warning: %s
-bool(false)
+Warning: date() expects at least 1 positional parameter, 0 given in %s/date_error.php on line 16
 ===DONE===

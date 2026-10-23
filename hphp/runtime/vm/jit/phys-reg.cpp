@@ -20,12 +20,11 @@
 
 #include "hphp/runtime/vm/jit/abi.h"
 
-#include "hphp/ppc64-asm/asm-ppc64.h"
 #include "hphp/util/arch.h"
 #include "hphp/util/asm-x64.h"
-#include "hphp/vixl/a64/macro-assembler-a64.h"
+#include "hphp/vixl/hphp-compat.h"
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -38,27 +37,22 @@ int PhysReg::getNumSIMD() {
 }
 
 std::string show(PhysReg r) {
-  switch (arch()) {
-    case Arch::X64:
+  return ARCH_MATCH(
+    [&](arch::X64) {
       return r.type() == PhysReg::GP   ? reg::regname(Reg64(r)) :
              r.type() == PhysReg::SIMD ? reg::regname(RegXMM(r)) :
           /* r.type() == PhysReg::SF)  ? */ reg::regname(RegSF(r));
-
-    case Arch::ARM:
-      if (r.isSF()) return "SF";
+    },
+    [&](arch::ARM) {
+      if (r.isSF()) return std::string("SF");
 
       return folly::to<std::string>(
         r.isGP() ? (vixl::Register(r).size() == vixl::kXRegSize ? 'x' : 'w')
-                 : (vixl::FPRegister(r).size() == vixl::kSRegSize ? 's' : 'd'),
+                 : (vixl::VRegister(r).size() == vixl::kSRegSize ? 's' : 'd'),
         ((vixl::CPURegister)r).code()
       );
-
-    case Arch::PPC64:
-      return r.type() == PhysReg::GP   ? ppc64_asm::reg::regname(Reg64(r)) :
-             r.type() == PhysReg::SIMD ? ppc64_asm::reg::regname(RegXMM(r)) :
-          /* r.type() == PhysReg::SF)  ? */ ppc64_asm::reg::regname(RegSF(r));
-  }
-  not_reached();
+    }
+  );
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -79,4 +73,4 @@ std::string show(RegSet regs) {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-}}
+}

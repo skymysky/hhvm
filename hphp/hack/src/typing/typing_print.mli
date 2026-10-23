@@ -1,4 +1,4 @@
-(**
+(*
  * Copyright (c) 2015, Facebook, Inc.
  * All rights reserved.
  *
@@ -7,76 +7,84 @@
  *
  *)
 
+open Typing_env_types
 
 (*****************************************************************************)
 (* Pretty printing of types *)
 (*****************************************************************************)
 
-val error: 'a Typing_defs.ty_ -> string
-val suggest: 'a Typing_defs.ty -> string
-val full: Typing_env.env -> 'a Typing_defs.ty -> string
-val full_rec: Typing_env.env -> int -> 'a Typing_defs.ty -> string
-val full_strip_ns: Typing_env.env -> 'a Typing_defs.ty -> string
+val error : ?ignore_dynamic:bool -> env -> Typing_defs.locl_ty -> string
+
+val full : hide_internals:bool -> env -> Typing_defs.locl_ty -> string
+
+val full_i :
+  hide_internals:bool -> env -> Typing_defs_constraints.internal_type -> string
+
+val full_rec :
+  hide_internals:bool -> env -> Tvid.t -> Typing_defs.locl_ty -> string
+
+val full_strip_ns : hide_internals:bool -> env -> Typing_defs.locl_ty -> string
+
+val full_strip_ns_i :
+  hide_internals:bool -> env -> Typing_defs_constraints.internal_type -> string
+
+(** Print a decl type, stripping backslash namespaces.
+
+  @param msg          if fuel reaches 0, if msg = true, an error message is added to the
+                      type representation. msg is true by default
+
+  @param verbose_fun  print function types verbosely,
+                      with type parameters, `async` keyword,
+                      `where` constraints and disposable attributes.
+  *)
+val full_strip_ns_decl :
+  ?msg:bool -> verbose_fun:bool -> env -> Typing_defs.decl_ty -> string
+
+val full_decl :
+  ?msg:bool -> Typechecker_options.t -> Typing_defs.decl_ty -> string
 
 (** Pretty print a type and all of its associated declaration information. *)
-val full_with_identity:
-  Typing_env.env ->
-  'a Typing_defs.ty ->
-  'b SymbolOccurrence.t ->
-  'b SymbolDefinition.t option ->
+val full_with_identity :
+  hide_internals:bool ->
+  env ->
+  Typing_defs.locl_ty ->
+  'b Symbol_occurrence.t ->
+  'b Symbol_definition.t option ->
   string
-val debug: Typing_env.env -> 'a Typing_defs.ty -> string
-val debug_with_tvars: Typing_env.env -> 'a Typing_defs.ty -> string
-val class_: TypecheckerOptions.t -> Typing_defs.class_type -> string
-val gconst: TypecheckerOptions.t -> Decl_heap.GConst.t -> string
-val fun_: TypecheckerOptions.t -> Decl_heap.Fun.t -> string
-val typedef: TypecheckerOptions.t -> Decl_heap.Typedef.t -> string
-val constraints_for_type: Typing_env.env -> 'a Typing_defs.ty -> string option
-val class_kind: Ast_defs.class_kind -> bool -> string
 
-(* Convert a type to a structured JSON value, as follows:
- * <prim> ::= "int" | "bool" | "float" | "string" | "num" | "arraykey"
- *         | "mixed" | "resource" | "void" | "noreturn"
- * <array-args> ::= [ <type> ] | [ <type>, <type> ]
- * <type> ::=
- *   mixed
- *     { "kind":"mixed" }
- *   this
- *     { "kind":"this" }
- *   any
- *     { "kind":"any" }
- *   Anonymous lambda types
- *     { "kind":"anon" }
- *   Primitives
- *     { "kind":"primitive", "name":<prim> }
- *   Arrays, with 0, 1 or 2 type arguments
- *     { "kind":"array", "args":<array-args> }
- *   Enums (with optional bound)
- *     { "kind":"enum", "name":<identifier> [,"as":<type>] }
- *   Newtype (with optional bound)
- *     { "kind":"newtype", "name":<identifier>, "args":<type-arguments>
- *        [,"as":<type>] }
- *   Nullable types, with singleton type argument
- *     { "kind":"nullable", "args":<type-arguments> }
- *   Classes (or interfaces, or traits) with 0 or more type arguments
- *     { "kind":"class", "name":<identifier>, "args":<type-arguments> }
- *   Generic parameters
- *     { "kind":"generic", "name":<identifier> }
- *   Tuples (and tuple-like arrays)
- *     { "kind":"tuple", "args":<type-arguments> }
- *   Shapes (and shape-like arrays) with fields
- *     { "kind":"shape", "fields":<fields> }
- *   Function types, with 0 or more arguments and possibly-void result type
- *     { "kind":"function", "args":<type-arguments>, "result":<type> }
- *   Unions of types, with 2 or more arguments
- *     { "kind":"union", "args":<type-arguments> }
- *   Type constant paths, with base type and list of identifiers
- *     { "kind":"path", "type":<type>, "path":<identifiers> [,"as":<type>] }
- *     Base type may be
- *         { "kind":"static" }
- *         { "kind":"this" }
- *         { "kind":"class", "name":<identifier>, "args":[]}
- *       Expression-dependent type
- *         { "kind":"expr" }
- *)
-val to_json: Typing_env.env -> 'a Typing_defs.ty -> Hh_json.json
+(** Pretty print a type and all of its associated declaration information. *)
+val full_decl_with_identity :
+  env ->
+  omit_likes:bool ->
+  verbose_fun:bool ->
+  Typing_defs.decl_ty ->
+  'b Symbol_occurrence.t ->
+  'b Symbol_definition.t option ->
+  string
+
+(** Print a locl_type to a string, stripping namespaces, including exact annotations and type variable numbering *)
+val debug : env -> Typing_defs.locl_ty -> string
+
+val debug_decl : env -> Typing_defs.decl_ty -> string
+
+(** Print an internal type to a string, stripping namespaces, including exact annotations and type variable numbering *)
+val debug_i : env -> Typing_defs_constraints.internal_type -> string
+
+val constraints_for_type :
+  hide_internals:bool -> env -> Typing_defs.locl_ty -> string
+
+val classish_kind : Ast_defs.classish_kind -> bool -> string
+
+(** Print a suptype proposition, stripping namespaces, including exact annotations and type variable numbering *)
+val subtype_prop : env -> Typing_logic.subtype_prop -> string
+
+val coeffects : env -> Typing_defs.locl_ty -> string
+
+val strip_ns : string -> string
+
+(* Split type parameters [tparams] into normal user-denoted type
+    parameters, and a list of polymorphic context names that were
+    desugared to type parameters. *)
+
+val split_desugared_ctx_tparams_gen :
+  tparams:'a list -> param_name:('a -> string) -> string list * 'a list

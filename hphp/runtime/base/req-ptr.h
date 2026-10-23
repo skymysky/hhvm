@@ -14,8 +14,7 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_REQ_PTR_H_
-#define incl_HPHP_REQ_PTR_H_
+#pragma once
 
 #include "hphp/runtime/base/countable.h"
 #include "hphp/util/portability.h"
@@ -167,6 +166,17 @@ template<typename T> struct ptr final {
     return py;
   }
 
+  /**
+   * Modify the value contained using the operation provided. The operation is
+   * assumed to decrement the ref count on the old value if it returns a new
+   * pointer.
+   */
+  template <typename X>
+  void mutateInPlace(X op) {
+    auto const newVal = op(m_px);
+    m_px = newVal;
+  }
+
 private:
   // For templatized ptr<Y> move constructor.
   template <typename Y> friend struct ptr;
@@ -253,7 +263,7 @@ inline auto deref(const P& p) -> decltype(P().get()) {
 
 struct ResourceData;
 struct ObjectData;
-struct Resource;
+struct OptResource;
 struct Object;
 struct Variant;
 
@@ -261,7 +271,7 @@ struct Variant;
 [[noreturn]] void throw_invalid_object_type(ResourceData* p);
 [[noreturn]] void throw_invalid_object_type(ObjectData* p);
 [[noreturn]] void throw_invalid_object_type(const Variant& p);
-[[noreturn]] void throw_invalid_object_type(const Resource& p);
+[[noreturn]] void throw_invalid_object_type(const OptResource& p);
 [[noreturn]] void throw_invalid_object_type(const Object& p);
 template <typename T>
 [[noreturn]] void throw_invalid_object_type(const req::ptr<T>& p);
@@ -271,26 +281,26 @@ void throw_invalid_object_type(const req::ptr<T>& p) {
 }
 
 template <typename T>
-inline bool is_null(const T& p) {
+inline bool ptr_is_null(const T& p) {
   return !p;
 }
 
 template <typename T, typename P>
 inline bool isa_non_null(const P& p) {
-  assertx(!is_null(p));
+  assertx(!ptr_is_null(p));
   return p->template instanceof<T>();
 }
 
 // Is pointer contained in p castable to a T?
 template <typename T, typename P>
 inline bool isa(const P& p) {
-  return !is_null(p) && isa_non_null<T>(p);
+  return !ptr_is_null(p) && isa_non_null<T>(p);
 }
 
 // Is pointer contained in p null or castable to a T?
 template <typename T, typename P>
 inline bool isa_or_null(const P& p) {
-  return is_null(p) || isa_non_null<T>(p);
+  return ptr_is_null(p) || isa_non_null<T>(p);
 }
 
 // Perform an unsafe cast operation on p.  The value p is assumed
@@ -317,7 +327,7 @@ inline req::ptr<T> unsafe_cast_or_null(P&& p) {
 // result in an exception.
 template <typename T, typename P>
 inline req::ptr<T> unsafe_cast(P&& p) {
-  if (!is_null(p)) {
+  if (!ptr_is_null(p)) {
     return unsafe_cast_or_null<T>(std::forward<P>(p));
   }
   throw_null_pointer_exception();
@@ -327,7 +337,7 @@ inline req::ptr<T> unsafe_cast(P&& p) {
 // a T, an exception will be thrown.
 template <typename T, typename P>
 inline req::ptr<T> cast(P&& p) {
-  if (!is_null(p)) {
+  if (!ptr_is_null(p)) {
     if (isa_non_null<T>(p)) {
       return unsafe_cast_or_null<T>(std::forward<P>(p));
     }
@@ -340,7 +350,7 @@ inline req::ptr<T> cast(P&& p) {
 // passed through.
 template <typename T, typename P>
 inline req::ptr<T> cast_or_null(P&& p) {
-  if (!is_null(p)) {
+  if (!ptr_is_null(p)) {
     if (isa_non_null<T>(p)) {
       return unsafe_cast_or_null<T>(std::forward<P>(p));
     }
@@ -354,7 +364,7 @@ inline req::ptr<T> cast_or_null(P&& p) {
 // is thrown.
 template <typename T, typename P>
 inline req::ptr<T> dyn_cast(P&& p) {
-  if (!is_null(p)) {
+  if (!ptr_is_null(p)) {
     if (isa_non_null<T>(p)) {
       return unsafe_cast_or_null<T>(std::forward<P>(p));
     }
@@ -387,4 +397,3 @@ struct hash<HPHP::req::ptr<T>> {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-#endif

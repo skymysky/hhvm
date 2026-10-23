@@ -14,8 +14,9 @@
    +----------------------------------------------------------------------+
 */
 
-#include "hphp/runtime/ext/vsdebug/debugger.h"
 #include "hphp/runtime/ext/vsdebug/command.h"
+#include "hphp/runtime/ext/vsdebug/debugger.h"
+#include "hphp/runtime/ext/vsdebug/debugger-request-info.h"
 
 namespace HPHP {
 namespace VSDEBUG {
@@ -23,14 +24,17 @@ namespace VSDEBUG {
 ContinueCommand::ContinueCommand(
   Debugger* debugger,
   folly::dynamic message
-) : VSCommand(debugger, message) {
+) : VSCommand(debugger, message),
+    m_target(CommandTarget::None) {
 }
 
 ContinueCommand::~ContinueCommand() {
 }
 
 ContinueCommand* ContinueCommand::createInstance(Debugger* debugger) {
-  return new ContinueCommand(debugger, folly::dynamic::object);
+  auto* cmd = new ContinueCommand(debugger, folly::dynamic::object);
+  cmd->m_target = CommandTarget::WorkItem;
+  return cmd;
 }
 
 bool ContinueCommand::executeImpl(DebuggerSession* /*session*/,
@@ -43,7 +47,7 @@ bool ContinueCommand::executeImpl(DebuggerSession* /*session*/,
     // If a thread ID was specified, check if the thread with that ID is in
     // the middle of an evaluation - if it was evaluating and hit another bp,
     // resume just that thread. Otherwise, resume all threads.
-    RequestInfo* ri = m_debugger->getRequestInfo(threadId);
+    DebuggerRequestInfo* ri = m_debugger->getRequestInfo(threadId);
     if (ri != nullptr && ri->m_pauseRecurseCount > 1) {
       VSCommand* resumeCommand = ContinueCommand::createInstance(m_debugger);
       ri->m_commandQueue.dispatchCommand(resumeCommand);

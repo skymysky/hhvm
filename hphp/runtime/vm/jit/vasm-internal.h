@@ -14,9 +14,9 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_JIT_VASM_INTERNAL_H_
-#define incl_HPHP_JIT_VASM_INTERNAL_H_
+#pragma once
 
+#include "hphp/runtime/vm/jit/abi.h"
 #include "hphp/runtime/vm/jit/containers.h"
 #include "hphp/runtime/vm/jit/vasm.h"
 #include "hphp/runtime/vm/jit/vasm-instr.h"
@@ -24,7 +24,7 @@
 
 #include "hphp/util/data-block.h"
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 ///////////////////////////////////////////////////////////////////////////////
 
 struct AsmInfo;
@@ -41,13 +41,17 @@ struct Venv {
    * Patch data collected at emit-time for post-processing.
    */
   struct LabelPatch { CodeAddress instr; Vlabel target; };
-  struct SvcReqPatch { CodeAddress jmp, jcc; Vinstr svcreq; };
+  struct AddrPatch { CodeAddress instr; Vaddr target; };
+  struct VaddrBind { Vaddr vaddr; Vlabel target; };
+  struct LdBindRetAddrPatch {
+    CodeAddress instr;
+    SrcKey target;
+    SBInvOffset spOff;
+  };
 
-  Venv(Vunit& unit, Vtext& text, CGMeta& meta)
-    : unit(unit)
-    , text(text)
-    , meta(meta)
-  {}
+  Venv(Vunit& unit, Vtext& text, CGMeta& meta);
+
+  void record_inline_stack(TCA);
 
   Vunit& unit;
   Vtext& text;
@@ -58,35 +62,16 @@ struct Venv {
   Vlabel current{0};
   Vlabel next{0};
 
-  int frame{-1};
-  CodeAddress framestart;
+  const IRInstruction* origin;
 
   jit::vector<CodeAddress> addrs;
-  jit::vector<LabelPatch> jmps, jccs;
+  jit::vector<CodeAddress> vaddrs;
+  jit::vector<AddrPatch> leas;
+  jit::vector<LabelPatch> jmps, jccs, cmpbrs;
   jit::vector<LabelPatch> catches;
-
-  /*
-   * fallThrus allow Vgen::patch to know if a Vunit falls through to the next
-   * translation.  This is important on ARM because Vgen::patch needs to know
-   * if it should insert a jump over the literal pool it inserts.
-   */
-  jit::fast_set<CodeAddress> fallThrus;
-
-  /*
-   * Stubs that need to be emitted and patched into service request callsites.
-   *
-   * In vasm_emit(), we lower service request instructions (e.g., bindjmp) to
-   * their inline functionality (e.g., a smashable jump), and add a record in
-   * `stubs' so that we can emit the requisite stub and patch in its address
-   * after the rest of the unit is emitted.
-   *
-   * The stubs are emitted separately because they are not truly part of the
-   * unit; they are hit once, and then the jump to them is smashed.
-   *
-   * The delayed emit avoids the edge case where we run out of stub space and
-   * both the service request and its stub have the same destination.
-   */
-  jit::vector<SvcReqPatch> stubs;
+  jit::vector<LabelPatch> vveneers;
+  jit::vector<LdBindRetAddrPatch> ldbindretaddrs;
+  jit::vector<std::pair<TCA,IStack>> stacks;
 };
 
 /*
@@ -129,8 +114,15 @@ void vasm_emit(Vunit& u, Vtext& text, CGMeta& fixups,
 const uint64_t* alloc_literal(Venv& env, uint64_t val);
 
 ///////////////////////////////////////////////////////////////////////////////
-}}
+
+/*
+ * When the JIT is serializing profile data, keep track that the `callRetAddr'
+ * corresponds to the outer-most function for which the current translation is
+ * being created.
+ */
+void setCallFuncId(Venv& env, TCA callRetAddr);
+
+///////////////////////////////////////////////////////////////////////////////
+}
 
 #include "hphp/runtime/vm/jit/vasm-internal-inl.h"
-
-#endif

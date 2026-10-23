@@ -1,5 +1,4 @@
-#ifndef incl_HPHP_ICU_UCSDET_H
-#define incl_HPHP_ICU_UCSDET_H
+#pragma once
 
 #include "hphp/runtime/ext/extension.h"
 #include "hphp/runtime/ext/icu/icu.h"
@@ -9,11 +8,10 @@
 
 #include <memory>
 
-namespace HPHP { namespace Intl {
+namespace HPHP::Intl {
 /////////////////////////////////////////////////////////////////////////////
-extern const StaticString s_EncodingDetector;
 
-struct EncodingDetector : IntlError {
+struct EncodingDetector : IntlError, SystemLib::ClassLoader<"EncodingDetector"> {
   EncodingDetector() = default;
   EncodingDetector(const EncodingDetector&) = delete;
   EncodingDetector& operator=(const EncodingDetector& /*src*/) = delete;
@@ -22,29 +20,30 @@ struct EncodingDetector : IntlError {
   bool isValid() const { return true; }
 
   static EncodingDetector* Get(ObjectData* obj) {
-    return GetData<EncodingDetector>(obj, s_EncodingDetector);
+    return GetData<EncodingDetector>(obj, className());
   }
+
+  const OptString& text() const { return m_text; }
+  const OptString& declaredEncoding() const { return m_declaredEncoding; }
 
   std::shared_ptr<UCharsetDetector> detector();
 
-  void setText(const String& text) {
+  void setText(const OptString& text) {
     m_text = text;
   }
 
-  void setDeclaredEncoding(const String& encoding) {
+  void setDeclaredEncoding(const OptString& encoding) {
     m_declaredEncoding = encoding;
   }
 
  private:
-  String m_text;
-  String m_declaredEncoding;
+  OptString m_text;
+  OptString m_declaredEncoding;
 };
 
 /////////////////////////////////////////////////////////////////////////////
 
-extern const StaticString s_EncodingMatch;
-
-struct EncodingMatch : IntlError {
+struct EncodingMatch : IntlError, SystemLib::ClassLoader<"EncodingMatch"> {
   EncodingMatch() {}
   EncodingMatch(const EncodingMatch&) = delete;
   EncodingMatch& operator=(const EncodingMatch& src) {
@@ -54,21 +53,25 @@ struct EncodingMatch : IntlError {
   }
   ~EncodingMatch() = default;
 
+  void sweep() {
+    m_encodingDetector.reset();
+  }
+
   static Object newInstance(const UCharsetMatch* match,
-                            const std::shared_ptr<UCharsetDetector>& det) {
-    if (UNLIKELY(!c_EncodingMatch)) {
-      c_EncodingMatch = Unit::lookupClass(s_EncodingMatch.get());
-      assertx(c_EncodingMatch);
-    }
-    Object ret{c_EncodingMatch};
+                            const std::shared_ptr<UCharsetDetector>& det,
+                            const OptString& text,
+                            const OptString& declaredEncoding) {
+    Object ret{classof()};
     auto const data = Native::data<EncodingMatch>(ret);
     data->m_match = const_cast<UCharsetMatch*>(match);
     data->m_encodingDetector = det;
+    data->m_text = text;
+    data->m_declaredEncoding = declaredEncoding;
     return ret;
   }
 
   static EncodingMatch* Get(ObjectData* obj) {
-    return GetData<EncodingMatch>(obj, s_EncodingMatch);
+    return GetData<EncodingMatch>(obj, className());
   }
 
   bool isValid() const {
@@ -78,12 +81,14 @@ struct EncodingMatch : IntlError {
   UCharsetMatch* match() const { return m_match; }
 
  private:
+  // m_match is owned by m_encodingDetector
   std::shared_ptr<UCharsetDetector> m_encodingDetector;
   UCharsetMatch* m_match{nullptr};
-  static Class* c_EncodingMatch;
+  // m_text and m_declaredEncoding are used by m_encodingDetector
+  OptString m_text;
+  OptString m_declaredEncoding;
 };
 
 /////////////////////////////////////////////////////////////////////////////
-}} // namespace HPHP::Intl
+} // namespace HPHP::Intl
 
-#endif // incl_HPHP_ICU_UCSDET_H

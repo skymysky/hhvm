@@ -1,34 +1,31 @@
 <?hh
 
-function elemNoPromo() {
+function elemNoPromo() :mixed{
   $ret = " ";
   $ret[0] = 'A';
   return $ret;
 }
 
-function elemPromo() {
-  $ret = "";
-  $ret[0] = 'A';
-  return $ret;
-}
-
-function propNoPromo() {
+function propNoPromo() :mixed{
   $ret = " ";
   $ret->prop = 'A';
   return $ret;
 }
 
-function propPromo() {
+function propPromo() :mixed{
   $ret = "";
-  $ret->prop = 'A';
+  try {
+    $ret->prop = 'A';
+  } catch (Exception $e) {
+    print("Error: ".$e->getMessage()."\n");
+  }
   return $ret;
 }
-
-var_dump(elemPromo());
-var_dump(elemPromo());
+<<__EntryPoint>> function main(): void {
 var_dump(elemNoPromo());
 var_dump(elemNoPromo());
 var_dump(propPromo());
 var_dump(propPromo());
 var_dump(propNoPromo());
 var_dump(propNoPromo());
+}

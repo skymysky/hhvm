@@ -1,0 +1,20 @@
+error: Typing[4053] Invalid argument [1]
+-> No property `x` in `A` [2]
+-> This is why I think it is an object of type A [3]
+-> Declaration of `A` is here [4]
+
+prop_access_lambda3.php:8:6
+2 | // Copyright 2004-present Facebook. All Rights Reserved.
+3 | 
+4 | class A {}
+  |       ^ [4]
+5 | 
+6 | function foo(A $a): void {
+  |              ^ [3]
+7 |   $f = $x ==> $x->x;
+  |                   ^ [2]
+8 |   $f($a);
+  |      ^^ [1]
+9 | }
+
+1 error found

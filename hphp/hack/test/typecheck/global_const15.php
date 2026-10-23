@@ -1,4 +1,5 @@
 <?hh
 
-const X = <div/>;
+class :div extends XHPTest {}
 
+const :div X = <div/>;

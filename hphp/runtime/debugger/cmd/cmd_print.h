@@ -14,14 +14,13 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_EVAL_DEBUGGER_CMD_PRINT_H_
-#define incl_HPHP_EVAL_DEBUGGER_CMD_PRINT_H_
+#pragma once
 
 #include "hphp/runtime/base/type-variant.h"
 #include "hphp/runtime/base/req-root.h"
 #include "hphp/runtime/debugger/debugger_command.h"
 
-namespace HPHP { namespace Eval {
+namespace HPHP::Eval {
 ///////////////////////////////////////////////////////////////////////////////
 
 struct CmdPrint : DebuggerCommand {
@@ -41,13 +40,15 @@ struct CmdPrint : DebuggerCommand {
     const std::string& php
   );
 
+  std::string name() const override { return "print"; }
+
 protected:
   void sendImpl(DebuggerThriftBuffer&) override;
   void recvImpl(DebuggerThriftBuffer&) override;
 
 private:
   req::root<Variant> m_ret;
-  req::root<String> m_output;
+  req::root<OptString> m_output;
   int m_frame;
   int m_printLevel;
   bool m_bypassAccessCheck{false};
@@ -59,6 +60,5 @@ private:
 };
 
 ///////////////////////////////////////////////////////////////////////////////
-}}
+}
 
-#endif // incl_HPHP_EVAL_DEBUGGER_CMD_PRINT_H_

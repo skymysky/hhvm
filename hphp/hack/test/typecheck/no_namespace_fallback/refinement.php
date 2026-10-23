@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 /**
  * Copyright (c) 2014, Facebook, Inc.
  * All rights reserved.
@@ -12,22 +12,14 @@
 namespace NS;
 
 function returns_int(mixed $in): ?int {
-  if (is_int($in)) {
-    return $in;
-  }
-  return null;
-}
-
-/* HH_IGNORE_ERROR[4045] array without generics */
-function returns_array(mixed $in): ?array {
-  if (is_array($in)) {
+  if ($in is int) {
     return $in;
   }
   return null;
 }
 
 function returns_vec(mixed $in): ?vec<mixed> {
-  if (is_vec($in)) {
+  if ($in is vec<_>) {
     return $in;
   }
   return null;

@@ -14,8 +14,8 @@
    +----------------------------------------------------------------------+
 */
 #include "hphp/runtime/base/array-init.h"
-#include "hphp/runtime/base/mixed-array-defs.h"
-#include "hphp/runtime/base/runtime-option.h"
+
+#include "hphp/runtime/base/vanilla-dict-defs.h"
 
 namespace HPHP {
 
@@ -28,13 +28,13 @@ DictInit::DictInit(size_t n, CheckAllocation)
     tl_heap->forceOOM();
     check_non_safepoint_surprise();
   }
-  auto const allocsz = MixedArray::computeAllocBytes(
-                         MixedArray::computeScaleFromSize(n)
+  auto const allocsz = VanillaDict::computeAllocBytes(
+                         VanillaDict::computeScaleFromSize(n)
                        );
   if (UNLIKELY(allocsz > kMaxSmallSize && tl_heap->preAllocOOM(allocsz))) {
     check_non_safepoint_surprise();
   }
-  m_arr = MixedArray::MakeReserveDict(n);
+  m_arr = VanillaDict::MakeReserveDict(n);
   assertx(m_arr->hasExactlyOneRef());
   check_non_safepoint_surprise();
 }
@@ -46,37 +46,13 @@ KeysetInit::KeysetInit(size_t n, CheckAllocation)
     tl_heap->forceOOM();
     check_non_safepoint_surprise();
   }
-  auto const allocsz = SetArray::computeAllocBytes(
-                         SetArray::computeScaleFromSize(n)
+  auto const allocsz = VanillaKeyset::computeAllocBytes(
+                         VanillaKeyset::computeScaleFromSize(n)
                        );
   if (UNLIKELY(allocsz > kMaxSmallSize && tl_heap->preAllocOOM(allocsz))) {
     check_non_safepoint_surprise();
   }
-  m_arr = SetArray::MakeReserveSet(n);
-  assertx(m_arr->hasExactlyOneRef());
-  check_non_safepoint_surprise();
-}
-
-DArrayInit::DArrayInit(size_t n, CheckAllocation)
-    : m_arr{nullptr}
-#ifdef DEBUG
-    , m_addCount(0)
-    , m_expectedCount(n)
-#endif
-{
-  if (n > std::numeric_limits<int>::max()) {
-    tl_heap->forceOOM();
-    check_non_safepoint_surprise();
-  }
-  auto const allocsz = MixedArray::computeAllocBytes(
-                         MixedArray::computeScaleFromSize(n)
-                       );
-  if (UNLIKELY(allocsz > kMaxSmallSize && tl_heap->preAllocOOM(allocsz))) {
-    check_non_safepoint_surprise();
-  }
-  m_arr = RuntimeOption::EvalHackArrDVArrs
-    ? MixedArray::MakeReserveDict(n)
-    : MixedArray::MakeReserveDArray(n);
+  m_arr = VanillaKeyset::MakeReserveSet(n);
   assertx(m_arr->hasExactlyOneRef());
   check_non_safepoint_surprise();
 }

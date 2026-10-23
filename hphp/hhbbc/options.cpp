@@ -16,13 +16,164 @@
 
 #include "hphp/hhbbc/options.h"
 
-namespace HPHP { namespace HHBBC {
+#include <mutex>
+#include <fmt/core.h>
+
+#include "hphp/runtime/server/memory-stats.h"
+
+#include "hphp/runtime/vm/repo-global-data.h"
+
+#include "hphp/hhbbc/hhbbc.h"
+
+#include "hphp/util/address-range.h"
+#include "hphp/util/logger.h"
+#include "hphp/util/process.h"
+#include "hphp/util/struct-log.h"
+#include "hphp/util/trace.h"
+
+namespace HPHP::HHBBC {
+
+//////////////////////////////////////////////////////////////////////
+
+namespace {
+
+std::mutex s_maxMemMutex;
+std::string s_maxMemPhase;
+int64_t s_maxMemUsageMb;
+size_t s_maxLowMemMb;
+size_t s_maxSStringMb;
+std::string s_maxLowMemPhase;
+
+void update_memory_stats(const char* what, const char* when,
+                         const std::string& extra) {
+  auto const phase = extra.empty()
+    ? fmt::format("{} {}", what, when)
+    : fmt::format("{} {} ({})", what, when, extra);
+
+  auto const usage = Process::GetMemUsageMb();
+  auto const lowMemUsage = alloc::getLowMapped() / 1024 / 1024;
+  auto const midMemUsage = alloc::getMidMapped() / 1024 / 1024;
+  auto const sstringUsage =
+    MemoryStats::TotalSize(AllocKind::StaticString) / 1024 / 1024;
+
+  {
+    std::lock_guard<std::mutex> _{s_maxMemMutex};
+    if (usage > s_maxMemUsageMb) {
+      s_maxMemUsageMb = usage;
+      s_maxMemPhase = phase;
+    }
+    if (lowMemUsage > s_maxLowMemMb) {
+      s_maxLowMemMb = lowMemUsage;
+      s_maxSStringMb = sstringUsage;
+      s_maxLowMemPhase = phase;
+    }
+  }
+
+  if (Trace::moduleEnabledRelease(Trace::hhbbc_mem, 1)) {
+    Trace::ftraceRelease(
+      "RSS at {}: {} Mb [{} Mb low-mem, {} Mb mid-mem, {} Mb sstrings]\n",
+      phase, usage, lowMemUsage, midMemUsage, sstringUsage
+    );
+  }
+}
+
+}
 
 //////////////////////////////////////////////////////////////////////
 
 struct Options options;
 
+void profile_memory(const char* what, const char* when,
+                    const std::string& extra) {
+  update_memory_stats(what, when, extra);
+
+  if (options.profileMemory.empty()) return;
+
+  auto name = fmt::format(
+    "{}_{}{}_{}",
+    options.profileMemory,
+    what,
+    extra.empty() ? extra : fmt::format("_{}", extra),
+    when
+  );
+
+  while (true) {
+    auto const pos = name.find_first_of(" :\"'");
+    if (pos == std::string::npos) break;
+    name[pos] = '_';
+  }
+  jemalloc_pprof_dump(name, true);
+}
+
+void summarize_memory(StructuredLogEntry* sample) {
+  std::string phase, lowPhase;
+  int64_t usageMb;
+  size_t lowMb, sstrMb;
+
+  {
+    // Snapshot the values to log while holding lock.
+    std::lock_guard<std::mutex> _{s_maxMemMutex};
+    if (!s_maxMemUsageMb) return;
+    phase = s_maxMemPhase;
+    usageMb = s_maxMemUsageMb;
+    lowPhase = s_maxLowMemPhase;
+    lowMb = s_maxLowMemMb;
+    sstrMb = s_maxSStringMb;
+  }
+
+  Logger::FInfo("Max RSS at {}: {} Mb", phase, usageMb);
+  Logger::FInfo(
+    "Max low-mem at {}: {} Mb [{} Mb sstrings]",
+    lowPhase, lowMb, sstrMb
+  );
+
+  if (sample) {
+    sample->setStr("hhbbc_max_rss_phase", phase);
+    sample->setInt("hhbbc_max_rss_bytes", usageMb << 20);
+    sample->setStr("hhbbc_max_lowmem_phase", lowPhase);
+    sample->setInt("hhbbc_max_lowmem_bytes", lowMb << 20);
+    sample->setInt("hhbbc_max_sstr_bytes", sstrMb << 20);
+  }
+}
+
 //////////////////////////////////////////////////////////////////////
 
-}}
+Config Config::get(RepoGlobalData gd) {
+  Config c;
+  c.o = options;
+  c.o.SourceRootForFileBC = gd.SourceRootForFileBC;
+  c.gd = std::move(gd);
+  // Keep things deterministic
+  c.gd.Signature = 0;
+  return c;
+}
 
+//////////////////////////////////////////////////////////////////////
+
+MethodMap Options::init_trace_functions() {
+  MethodMap mm;
+  if (auto const p = getenv("HHBBC_TRACE_FUNCS")) {
+    std::vector<std::string> parts;
+    folly::split(",", p, parts);
+    add_to_method_map(mm, parts);
+  }
+  return mm;
+}
+
+//////////////////////////////////////////////////////////////////////
+
+void add_to_method_map(MethodMap& mm, const std::vector<std::string>& in) {
+  for (auto const& str : in) {
+    std::vector<std::string> parts;
+    folly::split("::", str, parts);
+    if (parts.size() != 2) {
+      mm[str].clear();
+      continue;
+    }
+    mm[parts[0]].insert(parts[1]);
+  }
+}
+
+//////////////////////////////////////////////////////////////////////
+
+}

@@ -1,7 +1,7 @@
-<?hh // strict
+<?hh
 // Copyright 2004-present Facebook. All Rights Reserved.
 
-function backtrace_contains(array $bt, string $fn_name): bool {
+function backtrace_contains(varray $bt, string $fn_name): bool {
   foreach ($bt as $frame) {
     if (idx($frame, 'function') === $fn_name) {
       return true;
@@ -10,7 +10,7 @@ function backtrace_contains(array $bt, string $fn_name): bool {
   return false;
 }
 
-function reschedule($priority = 0) {
+function reschedule($priority = 0) :mixed{
   $queue = RescheduleWaitHandle::QUEUE_DEFAULT;
   return RescheduleWaitHandle::create($queue, $priority);
 }
@@ -69,4 +69,8 @@ async function testAsyncGeneratorBacktrace(): Awaitable<void> {
   }
 }
 
+
+<<__EntryPoint>>
+function main_backtrace_async_generators() :mixed{
 HH\Asio\join(testAsyncGeneratorBacktrace());
+}

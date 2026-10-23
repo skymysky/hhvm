@@ -1,0 +1,24 @@
+(*
+ * Copyright (c) 2015, Facebook, Inc.
+ * All rights reserved.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the "hack" directory of this source tree.
+ *
+ *)
+
+val make_genv :
+  Server_args.options ->
+  Server_config.t ->
+  Server_local_config.t ->
+  Multi_worker.worker list ->
+  Server_env.genv
+
+val default_genv : Server_env.genv
+
+val make_env :
+  init_id:string ->
+  deps_mode:Typing_deps_mode.t ->
+  ?diagnostics:Diagnostics.t ->
+  Server_config.t ->
+  Server_env.env

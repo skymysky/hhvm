@@ -1,0 +1,33 @@
+error: Parsing[1002] Default case in `switch` must be terminal [1]
+
+switch_default.php:12:5
+10 |   $box = null;
+11 |   switch ($enum) {
+12 |     default:
+   |     ^^^^^^^^ [1]
+13 |     case SwitchEnum::A:
+14 |       $box = 1;
+
+error: Typing[4019] This `switch` statement is nonexhaustive. At least the following cases are missing: `SwitchEnum::B` [1]
+-> The scrutinee has type `SwitchEnum`. [2]
+
+switch_default.php:11:3
+ 9 | function default_first(SwitchEnum $enum): int {
+10 |   $box = null;
+11 |   switch ($enum) {
+   |   ^^^^^^^^^^^^^^^^ [1]
+   |           ^^^^^ [2]
+12 |     default:
+   |     ^^^^^^^^ [1]
+13 |     case SwitchEnum::A:
+   |     ^^^^^^^^^^^^^^^^^^^ [1]
+14 |       $box = 1;
+   |       ^^^^^^^^^ [1]
+15 |       break;
+   |       ^^^^^^ [1]
+16 |   }
+   |   ^ [1]
+17 |   return $box;
+18 | }
+
+2 errors found

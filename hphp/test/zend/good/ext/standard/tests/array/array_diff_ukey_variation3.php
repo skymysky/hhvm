@@ -1,41 +1,38 @@
-<?php
+<?hh
 /* Prototype  : array array_diff_ukey(array arr1, array arr2 [, array ...], callback key_comp_func)
- * Description: Returns the entries of arr1 that have keys which are not present in any of the others arguments. 
+ * Description: Returns the entries of arr1 that have keys which are not present in any of the others arguments.
  * Source code: ext/standard/array.c
  */
-
-echo "*** Testing array_diff_ukey() : usage variation ***\n";
-
-// Initialise function arguments not being substituted (if any)
-$array1 = array('green' => 5, 'blue' => 6, 'yellow' => 7, 'cyan'   => 8);
-$array2 = array('blue'  => 1, 'red'  => 2, 'green'  => 3, 'purple' => 4);
-
-function key_compare_func($key1, $key2)
-{
-    if ($key1 == $key2) {
-        return 0;
-    }
-    return ($key1 > $key2)? 1:-1;
-}
-
-//get an unset variable
-$unset_var = 10;
-unset ($unset_var);
-
-// resource variable
-$fp = fopen(__FILE__, "r");
 
 // define some classes
 class classWithToString
 {
-	public function __toString() {
-		return "Class A object";
-	}
+    public function __toString() :mixed{
+        return "Class A object";
+    }
 }
 
 class classWithoutToString
 {
 }
+
+function key_compare_func($key1, $key2)
+:mixed{
+    if ($key1 == $key2) {
+        return 0;
+    }
+    return ($key1 > $key2)? 1:-1;
+}
+<<__EntryPoint>> function main(): void {
+echo "*** Testing array_diff_ukey() : usage variation ***\n";
+
+// Initialise function arguments not being substituted (if any)
+$array1 = dict['green' => 5, 'blue' => 6, 'yellow' => 7, 'cyan'   => 8];
+$array2 = dict['blue'  => 1, 'red'  => 2, 'green'  => 3, 'purple' => 4];
+
+
+// resource variable
+$fp = fopen(__FILE__, "r");
 
 // heredoc string
 $heredoc = <<<EOT
@@ -43,7 +40,7 @@ hello world
 EOT;
 
 //array of values to iterate over
-$inputs = array(
+$inputs = dict[
 
       // int data
       'int 0' => 0,
@@ -82,23 +79,19 @@ $inputs = array(
       'instance of classWithToString' => new classWithToString(),
       'instance of classWithoutToString' => new classWithoutToString(),
 
-      // undefined data
-      'undefined var' => @$undefined_var,
 
-      // unset data
-      'unset var' => @$unset_var,
 
       // resource data
       'resource' => $fp,
-);
+];
 
 // loop through each element of the array for key_comp_func
 
 foreach($inputs as $key =>$value) {
       echo "\n--$key--\n";
-      var_dump( array_diff_ukey($array1, $array2, $value, 'key_compare_func') );
+      var_dump( array_diff_ukey($array1, $array2, $value, key_compare_func<>) );
 };
 
 fclose($fp);
-?>
-===DONE===
+echo "===DONE===\n";
+}

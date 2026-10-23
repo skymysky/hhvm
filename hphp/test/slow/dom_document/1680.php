@@ -1,6 +1,6 @@
-<?php
+<?hh
 
-function foo() {
+function foo() :mixed{
   $html = '<b>Hello</b><i>World</i>';
   $doc = new DOMDocument();
   $element = $doc->createDocumentFragment();
@@ -11,4 +11,8 @@ function foo() {
     var_dump($child->nodeValue);
   }
 }
+
+<<__EntryPoint>>
+function main_1680() :mixed{
 foo();
+}

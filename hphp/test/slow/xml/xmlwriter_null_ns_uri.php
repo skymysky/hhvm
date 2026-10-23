@@ -1,6 +1,6 @@
-<?php
+<?hh
 
-function main() {
+function main() :mixed{
   $x = new XMLWriter();
   $x->openMemory();
   $x->setIndent(true);
@@ -14,4 +14,8 @@ function main() {
   $x->endDocument();
   var_dump($x->outputMemory(true));
 }
+
+<<__EntryPoint>>
+function main_xmlwriter_null_ns_uri() :mixed{
 main();
+}

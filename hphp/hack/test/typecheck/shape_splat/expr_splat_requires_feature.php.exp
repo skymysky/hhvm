@@ -1,0 +1,10 @@
+error: Parsing[1002] Cannot use unstable feature: `shape_splat_expression` [1]
+
+expr_splat_requires_feature.php:8:14
+6 | function f(): void {
+7 |   $a = shape('x' => 1);
+8 |   $s = shape(...$a, 'y' => 2);
+  |              ^^^^^ [1]
+9 | }
+
+1 error found

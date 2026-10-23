@@ -1,0 +1,74 @@
+(library
+ (name file_info)
+ (wrapped false)
+ (modules file_info)
+ (libraries opaque_digest pos symbol_name utils_core)
+ (preprocess
+  (pps
+   ppx_hash
+   ppx_sexp_conv
+   ppx_deriving.std)))
+
+(library
+ (name symbol_name)
+ (wrapped false)
+ (modules symbol_name)
+ (libraries collections utils_core)
+ (preprocess
+  (pps ppx_deriving.std)))
+
+(library
+ (name typing_deps)
+ (wrapped false)
+ (modules
+  typing_deps_types
+  typing_deps
+  typing_deps_mode)
+ (libraries
+  collections
+  decl_reference
+  depgraph_reader
+  file_info
+  heap_shared_mem
+  heap_shared_mem_hash
+  hh_json
+  logging
+  relative_path
+  sqlite3
+  sqlite_utils
+  typing_deps_rust
+  worker_cancel
+  worker_utils
+  yojson)
+ (preprocess
+  (pps ppx_deriving.std)))
+
+(library
+ (name typing_deps_rust)
+ (modules)
+ (wrapped false)
+ (foreign_archives deps_rust_ffi))
+
+(library
+ (name typing_pessimisation_deps)
+ (wrapped false)
+ (modules typing_pessimisation_deps)
+ (libraries
+  typing_deps
+  provider_context
+  relative_path
+  sqlite3
+  sqlite_utils)
+ (preprocess
+  (pps ppx_deriving.std)))
+
+(data_only_dirs cargo deps_rust)
+
+
+(rule
+ (targets libdeps_rust_ffi.a)
+ (deps
+  (source_tree %{workspace_root}/hack/src))
+ (locks /cargo)
+ (action
+  (run %{workspace_root}/hack/scripts/invoke_cargo.sh deps_rust_ffi deps_rust_ffi)))

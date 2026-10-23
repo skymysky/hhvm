@@ -1,9 +1,13 @@
-<?php
+<?hh
 
-function a() { return array(); }
-function main() {
+function a() :mixed{ return vec[]; }
+function main() :mixed{
   $x = a();
-  $x[0] = 2;
+  $x[] = 2;
   return $x;
 }
+
+<<__EntryPoint>>
+function main_empty_array_003() :mixed{
 var_dump(main());
+}

@@ -1,0 +1,25 @@
+error: Typing[4110] Invalid argument [1]
+-> Expected `C2::T` [2]
+->   where the class `C2` was referenced here [3]
+-> But got `int` [4]
+
+class_get_union.php--file1.php:7:11
+ 3 | 
+ 4 | class A {
+ 5 |   public static function test(bool $b, int $x): void {
+   |                                        ^^^ [4]
+ 6 |     $c = $b ? C1::class : C2::class;
+   |                           ^^ [3]
+ 7 |     $c::f($x);
+   |           ^^ [1]
+ 8 |   }
+ 9 | }
+
+class_get_union.php--file2.php:11:28
+ 9 |   abstract const type T;
+10 | 
+11 |   public static function f(this::T $_): void {}
+   |                            ^^^^^^^ [2]
+12 | }
+
+1 error found

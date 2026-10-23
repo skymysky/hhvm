@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 
 interface I {}
 class C implements I {}
@@ -10,5 +10,5 @@ abstract class ALoader {
 
 class CLoader extends ALoader {
   const type Ti = stdClass;
-  const classname<this::Ti> I_NAME = stdClass::class;
+  const classname<this::Ti> I_NAME = nameof stdClass;
 }

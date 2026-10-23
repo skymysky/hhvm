@@ -1,28 +1,7 @@
-<?php
-
-$xmlstr = "<?xml version='1.0' standalone='yes'?>
-<!DOCTYPE chapter SYSTEM '/share/sgml/Norman_Walsh/db3xml10/db3xml10.dtd'
-[ <!ENTITY sp \"spanish\">
-]>
-<!-- lsfj  -->
-<chapter language='en'><title language='en'>Title</title>
-<para language='ge'>
-&sp;
-<!-- comment -->
-<informaltable language='&sp;kkk'>
-<tgroup cols='3'>
-<tbody>
-<row><entry>a1</entry><entry morerows='1'>b1</entry><entry>c1</entry></row>
-<row><entry>a2</entry><entry>c2</entry></row>
-<row><entry>a3</entry><entry>b3</entry><entry>c3</entry></row>
-</tbody>
-</tgroup>
-</informaltable>
-</para>
-</chapter> ";
+<?hh
 
 function print_node($node)
-{
+:mixed{
   print "Node Name: " . $node->nodeName;
   print "
 Node Type: " . $node->nodeType;
@@ -44,17 +23,41 @@ Node Content: " . $node->nodeValue;
 }
 
 function print_node_list($nodelist)
-{
+:mixed{
   foreach($nodelist as $node)
   {
     print_node($node);
   }
 }
 
+
+<<__EntryPoint>>
+function main_1672() :mixed{
+$xmlstr = "<?xml version='1.0' standalone='yes'?>
+<!DOCTYPE chapter SYSTEM '/share/sgml/Norman_Walsh/db3xml10/db3xml10.dtd'
+[ <!ENTITY sp \"spanish\">
+]>
+<!-- lsfj  -->
+<chapter language='en'><title language='en'>Title</title>
+<para language='ge'>
+&sp;
+<!-- comment -->
+<informaltable language='&sp;kkk'>
+<tgroup cols='3'>
+<tbody>
+<row><entry>a1</entry><entry morerows='1'>b1</entry><entry>c1</entry></row>
+<row><entry>a2</entry><entry>c2</entry></row>
+<row><entry>a3</entry><entry>b3</entry><entry>c3</entry></row>
+</tbody>
+</tgroup>
+</informaltable>
+</para>
+</chapter> ";
+
 echo "Test 1: accessing single nodes from php
 ";
-$dom = new domDocument;
-$dom->loadxml($xmlstr);
+$dom = new DOMDocument;
+$dom->loadXML($xmlstr);
 if(!$dom) {
   echo "Error while parsing the document
 ";
@@ -114,7 +117,7 @@ print_node($attr);
 echo "--------- Remove Attribute Node
 ";
 $attr = $rootnode->removeAttribute("src");
-print "Removed " . $attr . " attributes.
+print "Removed " . (string)($attr) . " attributes.
 ";
 
 echo "--------- attributes of rootnode
@@ -129,7 +132,7 @@ print_node_list($children);
 
 echo "--------- Add child to root
 ";
-$myelement = new domElement("Silly", "Symphony");
+$myelement = new DOMElement("Silly", "Symphony");
 $newchild = $rootnode->appendChild($myelement);
 print_node($newchild);
 print $dom->saveXML();
@@ -140,7 +143,7 @@ echo "--------- Find element by tagname
 ";
 echo "    Using dom
 ";
-$children = $dom->getElementsByTagname("Silly");
+$children = $dom->getElementsByTagName("Silly");
 print_node_list($children);
 
 echo "    Using elem
@@ -153,4 +156,5 @@ echo "--------- Unlink Node
 print_node($children->item(0));
 $rootnode->removeChild($children->item(0));
 print_node_list($rootnode->childNodes);
-print $dom->savexml();
+print $dom->saveXML();
+}

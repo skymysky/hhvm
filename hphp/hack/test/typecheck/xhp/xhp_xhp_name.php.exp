@@ -1,0 +1,31 @@
+error: Parsing[1002] An XHP name or category name is expected here. [1]
+
+xhp_xhp_name.php:8:13
+ 6 | 
+ 7 | class :xhpchildren {
+ 8 |   children (xhp)*;
+   |             ^ [1]
+ 9 | }
+10 | 
+
+error: Parsing[1002] Encountered unexpected text `:`, was expecting a class element. [1]
+
+xhp_xhp_name.php:16:16
+14 | 
+15 | class :foobarchildren {
+16 |   children (foo:bar)*;
+   |                ^ [1]
+17 | }
+18 | 
+
+error: Naming[2049] Unbound name: `xhp` (an object type) [1]
+
+xhp_xhp_name.php:8:13
+ 6 | 
+ 7 | class :xhpchildren {
+ 8 |   children (xhp)*;
+   |             ^^^ [1]
+ 9 | }
+10 | 
+
+3 errors found

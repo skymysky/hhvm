@@ -10,16 +10,14 @@ class Foo {
   }
 }
 
-function get_foo(): classname<Foo> {
-  return Foo::class;
-}
-
 function main(): void {
   $c = Foo::class;
   $c::blah();
   Foo::blah();
-  Foo::get_foo()::blah();
-  get_foo()::blah();
 }
 
+
+<<__EntryPoint>>
+function main_val_colon_colon_class_method() :mixed{
 main();
+}

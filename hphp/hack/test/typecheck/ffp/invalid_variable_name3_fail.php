@@ -9,7 +9,7 @@
  *
  */
 
-function test() {
+function test(): void {
   $foo = 5;
   $x = ${foo};
 }

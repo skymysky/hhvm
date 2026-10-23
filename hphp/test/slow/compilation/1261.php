@@ -1,7 +1,12 @@
-<?php
+<?hh
 
 class A {
 }
- $a = new A();
- $a->a = $a->b = 'test';
+
+ <<__EntryPoint>>
+function main_1261() :mixed{
+$a = new A();
+ $a->b = 'test';
+ $a->a = $a->b;
  var_dump($a);
+}

@@ -1,10 +1,46 @@
-File "this_member.php", line 16, characters 5-20:
-Invalid assignment (Typing[4110])
-File "this_member.php", line 15, characters 24-24:
-This is the expression dependent type <expr#1>
-File "this_member.php", line 16, characters 5-6:
-  where '<expr#1>' is a reference to this expression
-File "this_member.php", line 13, characters 38-41:
-It is incompatible with the expression dependent type <static>
-File "this_member.php", line 16, characters 13-17:
-  where '<static>' refers to the late bound type of the enclosing class
+error: Typing[4110] Invalid assignment [1]
+-> Expected `<expr#4> as X` [2]
+->   where `<expr#4>` is a reference to this expression [3]
+-> But got `X` [4]
+->   via this generic `this` [2]
+-> Since `X` is not final [5]
+-> this might not be a `X` [6]
+
+this_member.php:16:13
+10 |  */
+11 | 
+12 | class X {
+   |       ^ [6]
+13 |   public function __construct(public this $y) {}
+   |                                      ^^^^ [2]
+14 | 
+15 |   public function test(X $x): void {
+   |                        ^ [5]
+16 |     $x->y = $this->y;
+   |     ^^^^^ [3]
+   |             ^^^^^^^^ [1]
+   |             ^^^^^ [4]
+17 |   }
+18 | }
+
+error: Typing[4110] Invalid assignment [1]
+-> Expected `<expr#4> as X` [2]
+->   where `<expr#4>` is a reference to this expression [3]
+-> But got `this as X` [4]
+->   via this generic `this` [2]
+
+this_member.php:16:13
+11 | 
+12 | class X {
+13 |   public function __construct(public this $y) {}
+   |                                      ^^^^ [2]
+14 | 
+15 |   public function test(X $x): void {
+16 |     $x->y = $this->y;
+   |     ^^^^^ [3]
+   |             ^^^^^^^^ [1]
+   |             ^^^^^ [4]
+17 |   }
+18 | }
+
+2 errors found

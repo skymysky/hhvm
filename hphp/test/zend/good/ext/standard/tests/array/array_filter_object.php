@@ -1,6 +1,6 @@
-<?php
+<?hh
 /* Prototype  : array array_filter(array $input [, callback $callback])
- * Description: Filters elements from the array via the callback. 
+ * Description: Filters elements from the array via the callback.
  * Source code: ext/standard/array.c
 */
 
@@ -12,13 +12,11 @@
  * object of class containing static member
  */
 
-echo "*** Testing array_filter() : object functionality ***\n";
-
 // simple class with members - variable and method
 class SimpleClass
 {
   public $var1 = 10;
-  public function check() {
+  public function check() :mixed{
     return $var1;
   }
 }
@@ -32,14 +30,14 @@ class EmptyClass
 abstract class AbstractClass
 {
   protected $var2 = 5;
-  abstract function emptyMethod();
+  abstract function emptyMethod():mixed;
 }
 
 // class deriving above abstract class
 class ChildClass extends AbstractClass
 {
   private $var3;
-  public function emptyMethod() { 
+  public function emptyMethod() :mixed{
     echo "defined in child";
   }
 }
@@ -48,7 +46,7 @@ class ChildClass extends AbstractClass
 class FinalClass
 {
   private $var4;
-  final function finalMethod() { 
+  final function finalMethod() :mixed{
     echo 'This can not be overloaded';
   }
 }
@@ -56,42 +54,44 @@ class FinalClass
 // class with static members
 class StaticClass
 {
-  static $var5 = 5;
-  public static function staticMethod() {
+  public static $var5 = 5;
+  public static function staticMethod() :mixed{
     echo 'this is static method';
   }
 }
 
 // Callback function which returns always true
 function always_true($input)
-{
+:mixed{
   return true;
 }
 
 // Callback function which returns always false
 function always_false($input)
-{
+:mixed{
   return false;
 }
+<<__EntryPoint>> function main(): void {
+echo "*** Testing array_filter() : object functionality ***\n";
 
 // 'input' array containing objects as elements
-$input = array(
-  new SimpleClass(), 
-  new EmptyClass(), 
+$input = vec[
+  new SimpleClass(),
+  new EmptyClass(),
   new ChildClass(),
   new FinalClass(),
   new StaticClass()
-);
+];
 
 
 // with default callback
 var_dump( array_filter($input) );
 
 // with always_true callback function
-var_dump( array_filter($input, "always_true") );
+var_dump( array_filter($input, always_true<>) );
 
 // with always_false callback function
-var_dump( array_filter($input, "always_false") );
+var_dump( array_filter($input, always_false<>) );
 
-echo "Done"
-?>
+echo "Done";
+}

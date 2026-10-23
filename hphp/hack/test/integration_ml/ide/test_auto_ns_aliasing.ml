@@ -1,4 +1,4 @@
-(**
+(*
  * Copyright (c) 2016, Facebook, Inc.
  * All rights reserved.
  *
@@ -11,7 +11,7 @@
 module Test = Integration_test_base
 
 let foo_contents =
-"<?hh // strict
+  "<?hh // strict
 
 namespace HH\\LongName\\ShortName;
 
@@ -19,7 +19,7 @@ function foo() : void {}
 "
 
 let autocomplete_contents0 =
-"<?hh // strict
+  "<?hh // strict
 
 function testTypecheck(): void {
   ShortName\\foAUTO332;
@@ -27,7 +27,7 @@ function testTypecheck(): void {
 "
 
 let autocomplete_contents1 =
-"<?hh
+  "<?hh
 
 function testTypecheck(): void {
   \\ShortName\\foAUTO332;
@@ -35,7 +35,7 @@ function testTypecheck(): void {
 "
 
 let autocomplete_contents2 =
-"<?hh // strict
+  "<?hh // strict
 
 function testTypecheck(): void {
   HH\\LongName\\ShortName\\foAUTO332;
@@ -43,7 +43,7 @@ function testTypecheck(): void {
 "
 
 let autocomplete_contents3 =
-"<?hh // strict
+  "<?hh // strict
 
 function testTypecheck(): void {
   \\HH\\LongName\\ShortName\\foAUTO332;
@@ -51,7 +51,7 @@ function testTypecheck(): void {
 "
 
 let autocomplete_contents4 =
-"<?hh // strict
+  "<?hh // strict
 
 namespace Test;
 
@@ -61,7 +61,7 @@ function testTypecheck(): void {
 "
 
 let autocomplete_contents5 =
-"<?hh // strict
+  "<?hh // strict
 
 namespace Test;
 
@@ -71,7 +71,7 @@ function testTypecheck(): void {
 "
 
 let autocomplete_contents6 =
-"<?hh // strict
+  "<?hh // strict
 
 namespace Test;
 
@@ -81,7 +81,7 @@ function testTypecheck(): void {
 "
 
 let autocomplete_contents7 =
-"<?hh // strict
+  "<?hh // strict
 
 namespace Test;
 
@@ -90,81 +90,81 @@ function testTypecheck(): void {
 }
 "
 
-let () =
-
-  let global_opts = GlobalOptions.make
-    ~tco_assume_php: false
-    ~tco_safe_array: false
-    ~tco_safe_vector_array: false
-    ~tco_user_attrs: None
-    ~tco_experimental_features: GlobalOptions.tco_experimental_all
-    ~tco_migration_flags: SSet.empty
-    ~tco_dynamic_view: false
-    ~tco_disallow_array_as_tuple: false
-    ~po_auto_namespace_map:
-      [("ShortName", "HH\\LongName\\ShortName")]
-    ~po_deregister_php_stdlib: true
-    ~po_use_full_fidelity:true
-    ~tco_disallow_ambiguous_lambda:false
-    ~tco_disallow_array_typehint:false
-    ~tco_disallow_array_literal:false
-    ~tco_disallow_return_by_ref:false
-    ~tco_disallow_array_cell_pass_by_ref:false
-    ~tco_language_feature_logging:false
-    ~tco_unsafe_rx:false
-    ~tco_disallow_implicit_returns_in_non_void_functions:true
-    ~ignored_fixme_codes: ISet.empty
-    ~forward_compatibility_level: ForwardCompatibilityLevel.default
+let test () =
+  let po =
+    Parser_options.
+      {
+        default with
+        auto_namespace_map = [("ShortName", "HH\\LongName\\ShortName")];
+        deregister_php_stdlib = true;
+      }
   in
-
-  let custom_config = ServerConfig.default_config in
-  let custom_config = ServerConfig.set_tc_options custom_config global_opts in
-  let custom_config = ServerConfig.set_parser_options custom_config global_opts in
-
-  let env = Test.setup_server ~custom_config () in
-  let env = Test.setup_disk env ["foo.php", foo_contents] in
+  let global_opts : Global_options.t =
+    Global_options.set
+      ~po
+      ~tco_saved_state:Global_options.default_saved_state
+      Global_options.default
+  in
+  let custom_config = Server_config.default_config in
+  let custom_config = Server_config.set_tc_options custom_config global_opts in
+  let custom_config = Server_config.set_parser_options custom_config po in
+  Test.Client.with_env ~custom_config:(Some custom_config) @@ fun env ->
+  let env = Test.Client.setup_disk env [("foo.php", foo_contents)] in
   let env =
-    let get_name i = "test" ^ (string_of_int i) ^ ".php" in
-    Test.setup_disk env @@ List.mapi (fun i contents -> get_name i, contents) [
-      autocomplete_contents0;
-      autocomplete_contents1;
-      autocomplete_contents2;
-      autocomplete_contents3;
-      autocomplete_contents4;
-      autocomplete_contents5;
-      autocomplete_contents6;
-      autocomplete_contents7;
-    ] in
-  let env = Test.connect_persistent_client env in
-
-  let test_legacy env contents expected =
-    let _, loop_output = Test.autocomplete env contents in
-    Test.assert_autocomplete loop_output expected in
-
+    let get_name i = "test" ^ string_of_int i ^ ".php" in
+    Test.Client.setup_disk env
+    @@ List.mapi
+         (fun i contents ->
+           let clean_contents =
+             Str.global_replace (Str.regexp_string "AUTO332") "" contents
+           in
+           (get_name i, clean_contents))
+         [
+           autocomplete_contents0;
+           autocomplete_contents1;
+           autocomplete_contents2;
+           autocomplete_contents3;
+           autocomplete_contents4;
+           autocomplete_contents5;
+           autocomplete_contents6;
+           autocomplete_contents7;
+         ]
+  in
   let test_ide env contents i expected =
-    let path = "test" ^ (string_of_int i) ^ ".php" in
-    let offset = String_utils.substring_index "AUTO332" contents in
+    let path = "test" ^ string_of_int i ^ ".php" in
+    let offset =
+      String_utils.substring_index
+        Autocomplete_types.autocomplete_token
+        contents
+    in
+    let clean_contents =
+      Str.global_replace (Str.regexp_string "AUTO332") "" contents
+    in
     let position = File_content.offset_to_position contents offset in
-    let line = position.File_content.line - 1 in
-    let column = position.File_content.column - 1 in
-    let _, loop_output = Test.ide_autocomplete env (path, line, column) in
-    Test.assert_ide_autocomplete loop_output expected in
-
-  test_legacy env autocomplete_contents0 ["HH\\LongName\\ShortName\\foo"];
-  test_legacy env autocomplete_contents1 [""];
-  test_legacy env autocomplete_contents2 ["HH\\LongName\\ShortName\\foo"];
-  test_legacy env autocomplete_contents3 ["HH\\LongName\\ShortName\\foo"];
-  test_legacy env autocomplete_contents4 [""];
-  test_legacy env autocomplete_contents5 ["HH\\LongName\\ShortName\\foo"];
-  test_legacy env autocomplete_contents6 ["HH\\LongName\\ShortName\\foo"];
-  test_legacy env autocomplete_contents7 [""];
-
-  test_ide env autocomplete_contents0 0 ["HH\\LongName\\ShortName\\foo"];
+    let (line, column) = File_content.Position.line_column_one_based position in
+    let (env, _diagnostics) = Test.Client.open_file env path in
+    let (env, response) =
+      Client_ide_daemon.Test.handle
+        env
+        Client_ide_message.(
+          Completion
+            ( Test.doc path clean_contents,
+              File_content.Position.from_one_based line column,
+              { is_manually_invoked = true } ))
+    in
+    Test.assert_ide_completions response expected;
+    ignore env;
+    ()
+  in
+  (* Note that autocomplete now hides namespaces when you've already typed them!
+   * This means that all tests will simply return "foo" as long as you're in
+   * the correct namespace when autocomplete is triggered. *)
+  test_ide env autocomplete_contents0 0 ["foo"];
   test_ide env autocomplete_contents1 1 [];
-  test_ide env autocomplete_contents2 2 ["HH\\LongName\\ShortName\\foo"];
-  test_ide env autocomplete_contents3 3 ["HH\\LongName\\ShortName\\foo"];
+  test_ide env autocomplete_contents2 2 ["foo"];
+  test_ide env autocomplete_contents3 3 ["foo"];
   test_ide env autocomplete_contents4 4 [];
-  test_ide env autocomplete_contents5 5 ["HH\\LongName\\ShortName\\foo"];
-  test_ide env autocomplete_contents6 6 ["HH\\LongName\\ShortName\\foo"];
+  test_ide env autocomplete_contents5 5 ["foo"];
+  test_ide env autocomplete_contents6 6 ["foo"];
   test_ide env autocomplete_contents7 7 [];
   ()

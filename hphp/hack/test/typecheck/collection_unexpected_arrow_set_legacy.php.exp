@@ -1,0 +1,19 @@
+error: Parsing[1002] Cannot use key value initializer for `Set`. It does not allow keys. [1]
+
+collection_unexpected_arrow_set_legacy.php:5:8
+3 | function test(): void {
+4 |   // Using key => value in a value-only collection (Set)
+5 |   $x = Set {'key' => 'value'};
+  |        ^^^^^^^^^^^^^^^^^^^^^^ [1]
+6 | }
+
+error: Naming[2051] Keys may not be specified for \HH\Set initialization [1]
+
+collection_unexpected_arrow_set_legacy.php:5:13
+3 | function test(): void {
+4 |   // Using key => value in a value-only collection (Set)
+5 |   $x = Set {'key' => 'value'};
+  |             ^^^^^ [1]
+6 | }
+
+2 errors found

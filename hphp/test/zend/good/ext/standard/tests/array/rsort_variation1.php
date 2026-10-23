@@ -1,6 +1,6 @@
-<?php
+<?hh
 /* Prototype  : bool rsort(array &$array_arg [, int $sort_flags])
- * Description: Sort an array in reverse order 
+ * Description: Sort an array in reverse order
  * Source code: ext/standard/array.c
  */
 
@@ -8,19 +8,16 @@
  * Pass different data types as $array_arg argument to rsort() to test behaviour
  */
 
-echo "*** Testing rsort() : variation ***\n";
-
-//get an unset variable
-$unset_var = 10;
-unset ($unset_var);
-
 // get a class
 class classA
 {
-  public function __toString() {
+  public function __toString() :mixed{
     return "Class A object";
   }
 }
+<<__EntryPoint>> function main(): void {
+echo "*** Testing rsort() : variation ***\n";
+
 
 // heredoc string
 $heredoc = <<<EOT
@@ -31,7 +28,7 @@ EOT;
 $fp = fopen(__FILE__, "r");
 
 // unexpected values to be passed to $array_arg argument
-$inputs = array(
+$inputs = vec[
 
        // int data
 /*1*/  0,
@@ -55,7 +52,7 @@ $inputs = array(
        false,
        TRUE,
        FALSE,
-       
+
        // empty data
 /*16*/ "",
        '',
@@ -64,37 +61,32 @@ $inputs = array(
 /*18*/ "string",
        'string',
        $heredoc,
-       
+
        // object data
 /*21*/ new classA(),
 
-       // undefined data
-/*22*/ @$undefined_var,
 
-       // unset data
-/*23*/ @$unset_var,
 
        // resource variable
-/*24*/ $fp
-);
+/*22*/ $fp
+];
 
 // loop through each element of $inputs to check the behavior of rsort()
 $iterator = 1;
 foreach ($inputs as $input) {
   echo "-- Iteration $iterator --\n";
   echo "Flag = default:\n";
-  var_dump( rsort($input) );
+  var_dump( rsort(inout $input) );
   echo "Flag = SORT_REGULAR:\n";
-  var_dump( rsort($input, SORT_REGULAR) );
+  var_dump( rsort(inout $input, SORT_REGULAR) );
   echo "Flag = SORT_NUMERIC:\n";
-  var_dump( rsort($input, SORT_NUMERIC) );
+  var_dump( rsort(inout $input, SORT_NUMERIC) );
   echo "Flag = SORT_STRING:\n";
-  var_dump( rsort($input, SORT_STRING) );
+  var_dump( rsort(inout $input, SORT_STRING) );
   $iterator++;
 }
 
 fclose($fp);
 
 echo "Done";
-?>
-
+}

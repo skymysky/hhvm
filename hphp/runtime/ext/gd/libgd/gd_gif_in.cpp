@@ -1,9 +1,8 @@
 #include <stdio.h>
-#include <math.h>
 #include <string.h>
 #include <stdlib.h>
-#include "gd.h"
-#include "gdhelpers.h"
+#include "hphp/runtime/ext/gd/libgd/gd.h"
+#include "hphp/runtime/ext/gd/libgd/gdhelpers.h"
 
 /* Used only when debugging GIF compression code */
 /* #define DEBUGGING_ENVARS */
@@ -73,12 +72,12 @@ static struct {
 
 #define CSD_BUF_SIZE 280
 
-typedef struct {
+struct CODE_STATIC_DATA {
   unsigned char    buf[CSD_BUF_SIZE];
   int              curbit, lastbit, done, last_byte;
-} CODE_STATIC_DATA;
+};
 
-typedef struct {
+struct LZW_STATIC_DATA {
   int fresh;
   int code_size, set_code_size;
   int max_code, max_code_size;
@@ -87,7 +86,7 @@ typedef struct {
   int table[2][(1<< MAX_LWZ_BITS)];
   int stack[STACK_SIZE], *sp;
   CODE_STATIC_DATA scd;
-} LZW_STATIC_DATA;
+};
 
 static int ReadColorMap (gdIOCtx *fd, int number, unsigned char (*buffer)[256]);
 static int DoExtension (gdIOCtx *fd, int label, int *Transparent, int *ZeroDataBlockP);
@@ -377,7 +376,7 @@ GetCode_(gdIOCtx *fd, CODE_STATIC_DATA *scd, int code_size, int flag, int *ZeroD
   if (flag) {
     scd->curbit = 0;
     scd->lastbit = 0;
-    scd->last_byte = 0;
+    scd->last_byte = 2;
     scd->done = FALSE;
     return 0;
   }
@@ -451,7 +450,7 @@ LWZReadByte_(gdIOCtx *fd, LZW_STATIC_DATA *sd, char flag, int input_code_size, i
       sd->table[1][i] = i;
     }
     for (; i < (1<<MAX_LWZ_BITS); ++i)
-      sd->table[0][i] = sd->table[1][0] = 0;
+      sd->table[0][i] = sd->table[1][i] = 0;
 
     sd->sp = sd->stack;
 
@@ -468,7 +467,7 @@ LWZReadByte_(gdIOCtx *fd, LZW_STATIC_DATA *sd, char flag, int input_code_size, i
   if (sd->sp > sd->stack)
     return *--sd->sp;
 
-    while ((code = GetCode(fd, &sd->scd, sd->code_size, FALSE, ZeroDataBlockP)) >= 0) {
+  while ((code = GetCode(fd, &sd->scd, sd->code_size, FALSE, ZeroDataBlockP)) >= 0) {
     if (code == sd->clear_code) {
       for (i = 0; i < sd->clear_code; ++i) {
         sd->table[0][i] = 0;
@@ -561,7 +560,7 @@ ReadImage(gdImagePtr im, gdIOCtx *fd, int len, int height, unsigned char (*cmap)
   int             v;
   int             xpos = 0, ypos = 0, pass = 0;
   int i;
-  LZW_STATIC_DATA sd;
+  LZW_STATIC_DATA sd = {};
 
 
   /*

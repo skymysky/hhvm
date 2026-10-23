@@ -1,1 +1,19 @@
-No errors
+error: NastCheck[3086] Memoized functions cannot be variadic or use the type-splat operator. [1]
+
+varargs.php:5:39
+3 | class Foo {
+4 |   <<__Memoize>>
+5 |   public function someMethod(mixed ...$_): void {}
+  |                                       ^^ [1]
+6 | }
+7 | 
+
+error: NastCheck[3086] Memoized functions cannot be variadic or use the type-splat operator. [1]
+
+varargs.php:9:33
+7 | 
+8 | <<__Memoize>>
+9 | function some_function(mixed ...$_): void {}
+  |                                 ^^ [1]
+
+2 errors found

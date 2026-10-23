@@ -14,8 +14,7 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_OUTPUT_FILE_H_
-#define incl_HPHP_OUTPUT_FILE_H_
+#pragma once
 
 #include "hphp/runtime/base/file.h"
 
@@ -26,20 +25,20 @@ namespace HPHP {
  * For php://output, a simple wrapper of g_context->out().
  */
 struct OutputFile : File {
-  DECLARE_RESOURCE_ALLOCATION(OutputFile);
+  DECLARE_RESOURCE_ALLOCATION(OutputFile)
 
-  explicit OutputFile(const String& filename);
+  explicit OutputFile(const OptString& filename);
   virtual ~OutputFile();
 
   bool valid() const { return !isClosed(); }
 
-  CLASSNAME_IS("OutputFile");
+  CLASSNAME_IS("OutputFile")
   // overriding ResourceData
-  const String& o_getClassNameHook() const override { return classnameof(); }
+  const OptString& o_getClassNameHook() const override { return classnameof(); }
 
   // implementing File
-  bool open(const String& filename, const String& mode) override;
-  bool close() override;
+  bool open(const OptString& filename, const OptString& mode) override;
+  bool close(int* unused = nullptr) final;
   int64_t readImpl(char *buffer, int64_t length) override;
   int getc() override;
   int64_t writeImpl(const char *buffer, int64_t length) override;
@@ -49,12 +48,7 @@ struct OutputFile : File {
   bool rewind() override;
   bool flush() override;
   bool truncate(int64_t size) override;
-
-protected:
-  bool closeImpl();
 };
 
 ///////////////////////////////////////////////////////////////////////////////
 }
-
-#endif // incl_HPHP_OUTPUT_FILE_H_

@@ -1,13 +1,17 @@
-<?php
+<?hh
 
 abstract class T {
- abstract function test();
+ abstract function test():mixed;
  }
  class R extends T {
- function test() {
+ function test() :mixed{
  var_dump('test');
  }
 }
- $obj = 1;
+
+ <<__EntryPoint>>
+function main_726() :mixed{
+$obj = 1;
  $obj = new R();
  $obj->test();
+}

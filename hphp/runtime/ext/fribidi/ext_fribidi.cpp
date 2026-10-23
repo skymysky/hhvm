@@ -1,5 +1,6 @@
 #include "hphp/runtime/ext/extension.h"
 #include "hphp/runtime/base/runtime-error.h"
+#include "hphp/runtime/base/array-init.h"
 
 #include <fribidi/fribidi.h>
 
@@ -51,7 +52,7 @@ const StaticString s_FRIBIDI_WRTL("FRIBIDI_WRTL");
 
 static Variant HHVM_FUNCTION(
     fribidi_log2vis,
-    const String& logical_str,
+    const OptString& logical_str,
     int64_t direction,
     int64_t charset
   ) {
@@ -100,36 +101,36 @@ static Variant HHVM_FUNCTION(
     return false;
   }
 
-  // Convert back from internal Unicode to original character set
+  // +1 for the trailing NUL fribidi_unicode_to_charset writes.
   visual_str_len = 4 * ustr_len;
-  visual_str = (char *) req::malloc_noptrs(sizeof(char) * visual_str_len);
+  visual_str = (char *) req::malloc_noptrs(sizeof(char) * (visual_str_len + 1));
   SCOPE_EXIT { req::free(visual_str); };
 
   visual_str_len = fribidi_unicode_to_charset(
     (FriBidiCharSet)charset, visual_ustr, ustr_len, visual_str);
 
-  return String(visual_str, visual_str_len, CopyString);
+  return OptString(visual_str, visual_str_len, CopyString);
 }
 
 static Array HHVM_FUNCTION(
   fribidi_charset_info,
   int64_t charset
 ) {
-  Array result;
+  Array result = Array::CreateDict();
 
-  result.add(
-    String("name"),
-    String((char *)fribidi_char_set_name((FriBidiCharSet)charset))
+  result.set(
+    OptString("name"),
+    OptString((char *)fribidi_char_set_name((FriBidiCharSet)charset))
   );
-  result.add(
-    String("title"),
-    String((char *)fribidi_char_set_title((FriBidiCharSet)charset))
+  result.set(
+    OptString("title"),
+    OptString((char *)fribidi_char_set_title((FriBidiCharSet)charset))
   );
 
   if (fribidi_char_set_desc((FriBidiCharSet)charset)) {
-    result.add(
-      String("desc"),
-      String((char *)fribidi_char_set_desc((FriBidiCharSet)charset))
+    result.set(
+      OptString("desc"),
+      OptString((char *)fribidi_char_set_desc((FriBidiCharSet)charset))
     );
   }
 
@@ -139,24 +140,19 @@ static Array HHVM_FUNCTION(
 static Array HHVM_FUNCTION(
   fribidi_get_charsets
 ) {
-  Array result;
-
-  result.add(FRIBIDI_CHAR_SET_UTF8, Variant{s_FRIBIDI_CHARSET_UTF8.get()});
-  result.add(FRIBIDI_CHAR_SET_ISO8859_6,
-             Variant{s_FRIBIDI_CHARSET_8859_6.get()});
-  result.add(FRIBIDI_CHAR_SET_ISO8859_8,
-             Variant{s_FRIBIDI_CHARSET_8859_8.get()});
-  result.add(FRIBIDI_CHAR_SET_CP1255, Variant{s_FRIBIDI_CHARSET_CP1255.get()});
-  result.add(FRIBIDI_CHAR_SET_CP1256, Variant{s_FRIBIDI_CHARSET_CP1256.get()});
-  result.add(FRIBIDI_CHAR_SET_CAP_RTL,
-             Variant{s_FRIBIDI_CHARSET_CAP_RTL.get()});
-
-  return result;
+  return make_dict_array(
+    FRIBIDI_CHAR_SET_UTF8,      Variant{s_FRIBIDI_CHARSET_UTF8.get()},
+    FRIBIDI_CHAR_SET_ISO8859_6, Variant{s_FRIBIDI_CHARSET_8859_6.get()},
+    FRIBIDI_CHAR_SET_ISO8859_8, Variant{s_FRIBIDI_CHARSET_8859_8.get()},
+    FRIBIDI_CHAR_SET_CP1255,    Variant{s_FRIBIDI_CHARSET_CP1255.get()},
+    FRIBIDI_CHAR_SET_CP1256,    Variant{s_FRIBIDI_CHARSET_CP1256.get()},
+    FRIBIDI_CHAR_SET_CAP_RTL,   Variant{s_FRIBIDI_CHARSET_CAP_RTL.get()}
+  );
 }
 
 struct FribidiExtension final : Extension {
-  FribidiExtension() : Extension("fribidi") {}
-  void moduleInit() override {
+  FribidiExtension() : Extension("fribidi", NO_EXTENSION_VERSION_YET, "hphp_hphpi") {}
+  void moduleRegisterNative() override {
     // Charsets
     HHVM_RC_INT(FRIBIDI_CHARSET_UTF8, FRIBIDI_CHAR_SET_UTF8);
     HHVM_RC_INT(FRIBIDI_CHARSET_8859_6, FRIBIDI_CHAR_SET_ISO8859_6);
@@ -175,7 +171,6 @@ struct FribidiExtension final : Extension {
     HHVM_FE(fribidi_log2vis);
     HHVM_FE(fribidi_charset_info);
     HHVM_FE(fribidi_get_charsets);
-    loadSystemlib();
   }
 } s_fribidi_extension;
 

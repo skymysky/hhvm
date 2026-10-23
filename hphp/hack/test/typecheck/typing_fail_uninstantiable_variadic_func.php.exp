@@ -1,0 +1,12 @@
+error: Typing[4002] `CannotBeInstantiatedWithT` is uninstantiable [1]
+-> Declaration is here [2]
+
+typing_fail_uninstantiable_variadic_func.php:12:24
+ 9 |  */
+10 | 
+11 | abstract final class CannotBeInstantiatedWithT<T> {}
+   |                      ^^^^^^^^^^^^^^^^^^^^^^^^^ [2]
+12 | function errorWithT<T>(CannotBeInstantiatedWithT<T> ...$args): void {}
+   |                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ [1]
+
+1 error found

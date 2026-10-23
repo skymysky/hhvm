@@ -16,6 +16,7 @@
 */
 #include "hphp/runtime/ext/posix/ext_posix.h"
 
+#include <algorithm>
 #include <memory>
 
 #include <sys/times.h>
@@ -24,116 +25,52 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <folly/portability/SysResource.h>
-#ifdef __FreeBSD__
-#include <sys/param.h>
-#endif
-#ifdef __linux__
 #include <sys/sysmacros.h>
-#endif
-#include <folly/portability/Unistd.h>
 #include <pwd.h>
 
+#include <folly/container/Array.h>
+#include <folly/portability/Unistd.h>
+#include <folly/system/Pid.h>
 #include <folly/String.h>
 
 #include "hphp/runtime/base/array-init.h"
-#include "hphp/runtime/base/file.h"
+#include "hphp/runtime/base/backtrace.h"
 #include "hphp/runtime/base/file-util.h"
+#include "hphp/runtime/base/file.h"
+#include "hphp/runtime/base/request-injection-data.h"
 #include "hphp/runtime/server/cli-server.h"
+#include "hphp/util/configs/server.h"
+#include "hphp/util/struct-log.h"
+#include "hphp/util/sync-signal.h"
+#include "hphp/util/user-info.h"
 
 namespace HPHP {
 
 ///////////////////////////////////////////////////////////////////////////////
 
 static struct POSIXExtension final : Extension {
-  POSIXExtension() : Extension("posix", NO_EXTENSION_VERSION_YET) {}
-  void moduleInit() override {
-    HHVM_RC_INT(POSIX_S_IFMT, S_IFMT);
-    HHVM_RC_INT(POSIX_S_IFSOCK, S_IFSOCK);
-    HHVM_RC_INT(POSIX_S_IFLNK, S_IFLNK);
-    HHVM_RC_INT(POSIX_S_IFREG, S_IFREG);
-    HHVM_RC_INT(POSIX_S_IFBLK, S_IFBLK);
-    HHVM_RC_INT(POSIX_S_IFDIR, S_IFDIR);
-    HHVM_RC_INT(POSIX_S_IFCHR, S_IFCHR);
-    HHVM_RC_INT(POSIX_S_IFIFO, S_IFIFO);
-    HHVM_RC_INT(POSIX_S_ISUID, S_ISUID);
-    HHVM_RC_INT(POSIX_S_ISGID, S_ISGID);
-    HHVM_RC_INT(POSIX_S_ISVTX, S_ISVTX);
-    HHVM_RC_INT(POSIX_S_IRWXU, S_IRWXU);
-    HHVM_RC_INT(POSIX_S_IRUSR, S_IRUSR);
-    HHVM_RC_INT(POSIX_S_IWUSR, S_IWUSR);
-    HHVM_RC_INT(POSIX_S_IXUSR, S_IXUSR);
-    HHVM_RC_INT(POSIX_S_IRWXG, S_IRWXG);
-    HHVM_RC_INT(POSIX_S_IRGRP, S_IRGRP);
-    HHVM_RC_INT(POSIX_S_IWGRP, S_IWGRP);
-    HHVM_RC_INT(POSIX_S_IXGRP, S_IXGRP);
-    HHVM_RC_INT(POSIX_S_IRWXO, S_IRWXO);
-    HHVM_RC_INT(POSIX_S_IROTH, S_IROTH);
-    HHVM_RC_INT(POSIX_S_IWOTH, S_IWOTH);
-    HHVM_RC_INT(POSIX_S_IXOTH, S_IXOTH);
-    HHVM_RC_INT(POSIX_F_OK, F_OK);
-    HHVM_RC_INT(POSIX_X_OK, X_OK);
-    HHVM_RC_INT(POSIX_W_OK, W_OK);
-    HHVM_RC_INT(POSIX_R_OK, R_OK);
-
-    HHVM_FE(posix_access);
-    HHVM_FE(posix_ctermid);
-    HHVM_FE(posix_get_last_error);
-    HHVM_FE(posix_errno);
-    HHVM_FE(posix_getcwd);
-    HHVM_FE(posix_getegid);
-    HHVM_FE(posix_geteuid);
-    HHVM_FE(posix_getgid);
-    HHVM_FE(posix_getgrgid);
-    HHVM_FE(posix_getgrnam);
-    HHVM_FE(posix_getgroups);
-    HHVM_FE(posix_getlogin);
-    HHVM_FE(posix_getpgid);
-    HHVM_FE(posix_getpgrp);
-    HHVM_FE(posix_getpid);
-    HHVM_FE(posix_getppid);
-    HHVM_FE(posix_getpwnam);
-    HHVM_FE(posix_getpwuid);
-    HHVM_FE(posix_getrlimit);
-    HHVM_FE(posix_getsid);
-    HHVM_FE(posix_getuid);
-    HHVM_FE(posix_initgroups);
-    HHVM_FE(posix_isatty);
-    HHVM_FE(posix_kill);
-    HHVM_FE(posix_mkfifo);
-    HHVM_FE(posix_mknod);
-    HHVM_FE(posix_setegid);
-    HHVM_FE(posix_seteuid);
-    HHVM_FE(posix_setgid);
-    HHVM_FE(posix_setpgid);
-    HHVM_FE(posix_setsid);
-    HHVM_FE(posix_setuid);
-    HHVM_FE(posix_strerror);
-    HHVM_FE(posix_times);
-    HHVM_FE(posix_ttyname);
-    HHVM_FE(posix_uname);
-
-    loadSystemlib();
-  }
+  POSIXExtension() : Extension("posix", "1.0", "hphp_hphpi") {}
+  void moduleRegisterNative() override;
 } s_posix_extension;
 
 ///////////////////////////////////////////////////////////////////////////////
 
 bool HHVM_FUNCTION(posix_access,
-                   const String& file,
-                   int mode /* = 0 */) {
+                   const OptString& file,
+                   int64_t mode /* = 0 */) {
   if (!FileUtil::checkPathAndWarn(file, __FUNCTION__ + 2, 1)) {
     return false;
   }
 
-  String path = File::TranslatePath(file);
+  OptString path = File::TranslatePath(file);
   if (path.empty()) {
     return false;
   }
   return !access(path.data(), mode);
 }
 
-String HHVM_FUNCTION(posix_ctermid) {
-  String s = String(L_ctermid, ReserveString);
+OptString HHVM_FUNCTION(posix_ctermid) {
+  OptString s = OptString(L_ctermid, ReserveString);
   char *buffer = s.mutableData();
   ctermid(buffer);
   s.setSize(strlen(buffer));
@@ -148,8 +85,8 @@ int64_t HHVM_FUNCTION(posix_errno) {
   return errno;
 }
 
-String HHVM_FUNCTION(posix_getcwd) {
-  String s = String(PATH_MAX, ReserveString);
+OptString HHVM_FUNCTION(posix_getcwd) {
+  OptString s = OptString(PATH_MAX, ReserveString);
   char *buffer = s.mutableData();
   if (getcwd(buffer, PATH_MAX) == NULL) {
     return "/";
@@ -186,59 +123,47 @@ const StaticString
   s_dir("dir"),
   s_shell("shell");
 
-static Variant php_posix_group_to_array(int gid,
-                   const String& gname = uninit_variant.toString()) {
-  // Don't pass a gid *and* a gname to this.
-  assertx((gid <  0) || gname.size() == 0);
+static Variant php_posix_group_to_array(group* gr) {
+  // Invalid user.
+  if (gr == nullptr) return false;
 
-  if ((gid < 0) && (gname.size() == 0)) {
-    return false;
+  auto members = Array::CreateVec();
+  for (int count=0; gr->gr_mem[count] != NULL; count++) {
+    members.append(OptString(gr->gr_mem[count], CopyString));
   }
 
-  int grbuflen = sysconf(_SC_GETGR_R_SIZE_MAX);
-  if (grbuflen < 1) {
-    return false;
-  }
-
-  std::unique_ptr<char[]> grbuf(new char[grbuflen]);
-  struct group gr;
-  struct group *retgrptr = NULL;
-
-  // If we somehow reach this point and both gname and gid were
-  // passed, then the gid values will override the gname values,
-  // but it will otherwise function just fine.
-  // The assertx() clause above should prevent that, however.
-  if ((gname.size() > 0) &&
-      (getgrnam_r(gname.data(), &gr, grbuf.get(), grbuflen, &retgrptr) != 0 ||
-      retgrptr == nullptr)) {
-    return false;
-  } else if ((gid >= 0) &&
-      (getgrgid_r(gid, &gr, grbuf.get(), grbuflen, &retgrptr) != 0 ||
-      retgrptr == nullptr)) {
-    return false;
-  }
-
-  Array members = Array::Create();
-  for (int count=0; gr.gr_mem[count] != NULL; count++) {
-    members.append(String(gr.gr_mem[count], CopyString));
-  }
-
-  return make_map_array(
-    s_name, String(gr.gr_name, CopyString),
-    s_passwd, String(gr.gr_passwd, CopyString),
+  return make_dict_array(
+    s_name, OptString(gr->gr_name, CopyString),
+    s_passwd, OptString(gr->gr_passwd, CopyString),
     s_members, members,
-    s_gid, (int)gr.gr_gid
+    s_gid, (int)gr->gr_gid
   );
 }
 
 Variant HHVM_FUNCTION(posix_getgrgid,
-                      int gid) {
-  return php_posix_group_to_array(gid);
+                      int64_t gid) {
+  if (gid < 0) return false;
+
+  auto buf = GroupBuffer{};
+  group* gr;
+  if (getgrgid_r(gid, &buf.ent, buf.data.get(), buf.size, &gr)) {
+    // Failed to obtain the record.
+    return false;
+  }
+  return php_posix_group_to_array(gr);
 }
 
 Variant HHVM_FUNCTION(posix_getgrnam,
-                      const String& name) {
-  return php_posix_group_to_array(-1, name.data());
+                      const OptString& name) {
+  if (name.size() == 0) return false;
+
+  auto buf = GroupBuffer{};
+  group* gr;
+  if (getgrnam_r(name.data(), &buf.ent, buf.data.get(), buf.size, &gr)) {
+    // Failed to obtain the record.
+    return false;
+  }
+  return php_posix_group_to_array(gr);
 }
 
 Variant HHVM_FUNCTION(posix_getgroups) {
@@ -248,27 +173,23 @@ Variant HHVM_FUNCTION(posix_getgroups) {
     return false;
   }
 
-  Array ret;
+  VecInit ret(result);
   for (int i = 0; i < result; i++) {
     ret.append((int)gidlist[i]);
   }
-  return ret;
+  return ret.toVariant();
 }
 
 Variant HHVM_FUNCTION(posix_getlogin) {
-#if !defined(__APPLE__) && !defined(__FreeBSD__)
   char buf[L_cuserid];
-#else
-  char buf[MAXLOGNAME];
-#endif
   if (!getlogin_r(buf, sizeof(buf) - 1)) {
-    return String(buf, CopyString);
+    return OptString(buf, CopyString);
   }
   return false;
 }
 
 Variant HHVM_FUNCTION(posix_getpgid,
-                      int pid) {
+                      int64_t pid) {
   int ret = getpgid(pid);
   if (ret < 0) return false;
   return ret;
@@ -279,67 +200,60 @@ int64_t HHVM_FUNCTION(posix_getpgrp) {
 }
 
 int64_t HHVM_FUNCTION(posix_getpid) {
-  return getpid();
+  return folly::get_cached_pid();
 }
 
 int64_t HHVM_FUNCTION(posix_getppid) {
   return getppid();
 }
 
-static Variant php_posix_passwd_to_array(int uid,
-                   const String& name = uninit_variant.toString()) {
-  // Don't pass a uid *and* a name to this.
-  assertx((uid <  0) || name.size() == 0);
+static Variant php_posix_passwd_to_array(passwd* pw) {
+  // Invalid user.
+  if (pw == nullptr) return false;
 
-  if ((uid < 0) && name.size() == 0) {
-    return false;
-  }
-
-  int pwbuflen = sysconf(_SC_GETPW_R_SIZE_MAX);
-  if (pwbuflen < 1) {
-    return false;
-  }
-
-  std::unique_ptr<char[]> pwbuf(new char[pwbuflen]);
-  struct passwd pw;
-  struct passwd *retpwptr = NULL;
-
-  // If we somehow reach this point and both name and uid were
-  // passed, then the uid values will override the name values,
-  // but it will otherwise function just fine.
-  // The assertx() clauses above should prevent that, however.
-  if ((name.size() > 0) &&
-      getpwnam_r(name.data(), &pw, pwbuf.get(), pwbuflen, &retpwptr)) {
-    return false;
-  } else if ((uid >= 0) &&
-      getpwuid_r(uid, &pw, pwbuf.get(), pwbuflen, &retpwptr)) {
-    return false;
-  }
-
-  if (!retpwptr) return false;
-
-  return make_map_array(
-    s_name,   String(pw.pw_name,   CopyString),
-    s_passwd, String(pw.pw_passwd, CopyString),
-    s_uid,    (int)pw.pw_uid,
-    s_gid,    (int)pw.pw_gid,
-    s_gecos,  String(pw.pw_gecos,  CopyString),
-    s_dir,    String(pw.pw_dir,    CopyString),
-    s_shell,  String(pw.pw_shell,  CopyString)
+  return make_dict_array(
+    s_name,   OptString(pw->pw_name,   CopyString),
+    s_passwd, OptString(pw->pw_passwd, CopyString),
+    s_uid,    (int)pw->pw_uid,
+    s_gid,    (int)pw->pw_gid,
+    s_gecos,  OptString(pw->pw_gecos,  CopyString),
+    s_dir,    OptString(pw->pw_dir,    CopyString),
+    s_shell,  OptString(pw->pw_shell,  CopyString)
   );
 }
 
 Variant HHVM_FUNCTION(posix_getpwnam,
-                      const String& username) {
-  return php_posix_passwd_to_array(-1, username);
+                      const OptString& username) {
+  if (username.size() == 0) return false;
+
+  auto buf = PasswdBuffer{};
+  passwd* pw;
+  if (getpwnam_r(username.data(), &buf.ent, buf.data.get(), buf.size, &pw)) {
+    // Failed to obtain the record.
+    return false;
+  }
+  return php_posix_passwd_to_array(pw);
 }
 
 Variant HHVM_FUNCTION(posix_getpwuid,
-                      int uid) {
-  return php_posix_passwd_to_array(uid);
+                      int64_t uid) {
+  if (uid < 0) return false;
+
+  auto buf = PasswdBuffer{};
+  passwd* pw;
+  if (getpwuid_r(uid, &buf.ent, buf.data.get(), buf.size, &pw)) {
+    // Failed to obtain the record.
+    return false;
+  }
+  return php_posix_passwd_to_array(pw);
 }
 
-static bool posix_addlimit(int limit, const char *name, Array &ret) {
+namespace {
+
+const StaticString s_unlimited{"unlimited"};
+
+template <class T>
+bool posix_addlimit(int limit, const char *name, T &ret) {
   char hard[80]; snprintf(hard, 80, "hard %s", name);
   char soft[80]; snprintf(soft, 80, "soft %s", name);
 
@@ -349,17 +263,17 @@ static bool posix_addlimit(int limit, const char *name, Array &ret) {
     return false;
   }
 
-  String softStr(soft, CopyString);
-  String hardStr(hard, CopyString);
+  OptString softStr(soft, CopyString);
+  OptString hardStr(hard, CopyString);
 
   if (rl.rlim_cur == RLIM_INFINITY) {
-    ret.set(softStr, "unlimited");
+    ret.set(softStr, s_unlimited);
   } else {
     ret.set(softStr, (int)rl.rlim_cur);
   }
 
   if (rl.rlim_max == RLIM_INFINITY) {
-    ret.set(hardStr, "unlimited");
+    ret.set(hardStr, s_unlimited);
   } else {
     ret.set(hardStr, (int)rl.rlim_max);
   }
@@ -367,42 +281,40 @@ static bool posix_addlimit(int limit, const char *name, Array &ret) {
   return true;
 }
 
-static struct limitlist {
-  int limit;
-  const char *name;
-} limits[] = {
-  { RLIMIT_CORE,    "core" },
-  { RLIMIT_DATA,    "data" },
-  { RLIMIT_STACK,   "stack" },
+constexpr auto limits = folly::make_array<std::pair<int, const char *>>(
+  std::make_pair(RLIMIT_CORE,    "core"),
+  std::make_pair(RLIMIT_DATA,    "data"),
+  std::make_pair(RLIMIT_STACK,   "stack"),
   //{ RLIMIT_VMEM,    "virtualmem" },
-  { RLIMIT_AS,      "totalmem" },
+  std::make_pair(RLIMIT_AS,      "totalmem"),
 #ifdef RLIMIT_RSS
-  { RLIMIT_RSS,     "rss" },
+  std::make_pair(RLIMIT_RSS,     "rss"),
 #endif
 #ifdef RLIMIT_NPROC
-  { RLIMIT_NPROC,   "maxproc" },
+  std::make_pair(RLIMIT_NPROC,   "maxproc"),
 #endif
 #ifdef RLIMIT_MEMLOCK
-  { RLIMIT_MEMLOCK, "memlock" },
+  std::make_pair(RLIMIT_MEMLOCK, "memlock"),
 #endif
-  { RLIMIT_CPU,     "cpu" },
-  { RLIMIT_FSIZE,   "filesize" },
-  { RLIMIT_NOFILE,  "openfiles" },
-  { 0, NULL }
-};
+  std::make_pair(RLIMIT_CPU,     "cpu"),
+  std::make_pair(RLIMIT_FSIZE,   "filesize"),
+  std::make_pair(RLIMIT_NOFILE,  "openfiles")
+);
+
+} // namespace
 
 Variant HHVM_FUNCTION(posix_getrlimit) {
-  Array ret;
-  for (struct limitlist *l = limits; l->name; l++) {
-    if (!posix_addlimit(l->limit, l->name, ret)) {
+  DictInit ret{2 * limits.size()};
+  for (auto const& l : limits) {
+    if (!posix_addlimit(l.first, l.second, ret)) {
       return false;
     }
   }
-  return ret;
+  return ret.toVariant();
 }
 
 Variant HHVM_FUNCTION(posix_getsid,
-                      int pid) {
+                      int64_t pid) {
   int ret = getsid(pid);
   if (ret < 0) return false;
   return ret;
@@ -415,8 +327,8 @@ int64_t HHVM_FUNCTION(posix_getuid) {
 }
 
 bool HHVM_FUNCTION(posix_initgroups,
-                   const String& name,
-                   int base_group_id) {
+                   const OptString& name,
+                   int64_t base_group_id) {
   if (name.empty()) return false;
   return !initgroups(name.data(), base_group_id);
 }
@@ -430,7 +342,7 @@ static int php_posix_get_fd(const Variant& fd) {
     }
     nfd = f->fd();
   } else {
-    nfd = fd.toInt32();
+    nfd = (int)fd.toInt64();
   }
   return nfd;
 }
@@ -441,14 +353,37 @@ bool HHVM_FUNCTION(posix_isatty,
 }
 
 bool HHVM_FUNCTION(posix_kill,
-                   int pid,
-                   int sig) {
+                   int64_t pid,
+                   int64_t sig) {
+  auto& blocked = Cfg::Server::PosixKillBlockedSignals;
+  if (std::find(blocked.begin(), blocked.end(), static_cast<int32_t>(sig)) !=
+      blocked.end()) {
+    raise_warning("posix_kill() signal %d is blocked by configuration",
+                  (int)sig);
+    if (StructuredLog::enabled()) {
+      StructuredLogEntry entry;
+      entry.setInt("pid", pid);
+      entry.setInt("signal", sig);
+      addBacktraceToStructLog(createBacktrace(BacktraceArgs()), entry);
+      StructuredLog::log("hhvm_posix_kill_blocked", entry);
+    }
+    return false;
+  }
+
+  if (pid == 0 || pid == getpid()) {
+    if (is_sync_signal(sig)) {
+      // Only send to the current thread, and invoke signal handlers in PHP, if
+      // any.
+      RID().sendSignal(sig);
+      return true;
+    }
+  }
   return kill(pid, sig) >= 0;
 }
 
 bool HHVM_FUNCTION(posix_mkfifo,
-                   const String& pathname,
-                   int mode) {
+                   const OptString& pathname,
+                   int64_t mode) {
   if (!FileUtil::checkPathAndWarn(pathname, __FUNCTION__ + 2, 1)) {
     return false;
   }
@@ -457,10 +392,10 @@ bool HHVM_FUNCTION(posix_mkfifo,
 }
 
 bool HHVM_FUNCTION(posix_mknod,
-                   const String& pathname,
-                   int mode,
-                   int major /* = 0 */,
-                   int minor /* = 0 */) {
+                   const OptString& pathname,
+                   int64_t mode,
+                   int64_t major /* = 0 */,
+                   int64_t minor /* = 0 */) {
   if (!FileUtil::checkPathAndWarn(pathname, __FUNCTION__ + 2, 1)) {
     return false;
   }
@@ -484,23 +419,23 @@ bool HHVM_FUNCTION(posix_mknod,
 }
 
 bool HHVM_FUNCTION(posix_setegid,
-                   int gid) {
+                   int64_t gid) {
   return setegid(gid);
 }
 
 bool HHVM_FUNCTION(posix_seteuid,
-                   int uid) {
+                   int64_t uid) {
   return seteuid(uid);
 }
 
 bool HHVM_FUNCTION(posix_setgid,
-                   int gid) {
+                   int64_t gid) {
   return setgid(gid);
 }
 
 bool HHVM_FUNCTION(posix_setpgid,
-                   int pid,
-                   int pgid) {
+                   int64_t pid,
+                   int64_t pgid) {
   return setpgid(pid, pgid) >= 0;
 }
 
@@ -509,13 +444,13 @@ int64_t HHVM_FUNCTION(posix_setsid) {
 }
 
 bool HHVM_FUNCTION(posix_setuid,
-                   int uid) {
+                   int64_t uid) {
   return setuid(uid);
 }
 
-String HHVM_FUNCTION(posix_strerror,
-                     int errnum) {
-  return String(folly::errnoStr(errnum).toStdString());
+OptString HHVM_FUNCTION(posix_strerror,
+                        int64_t errnum) {
+  return OptString(folly::errnoStr(errnum));
 }
 
 const StaticString
@@ -532,7 +467,7 @@ Variant HHVM_FUNCTION(posix_times) {
     return false;
   }
 
-  return make_map_array(
+  return make_dict_array(
     s_ticks,  (int)ticks,        /* clock ticks */
     s_utime,  (int)t.tms_utime,  /* user time */
     s_stime,  (int)t.tms_stime,  /* system time */
@@ -548,7 +483,7 @@ Variant HHVM_FUNCTION(posix_ttyname,
     return false;
   }
 
-  String ttyname(ttyname_maxlen, ReserveString);
+  OptString ttyname(ttyname_maxlen, ReserveString);
   char *p = ttyname.mutableData();
   if (ttyname_r(php_posix_get_fd(fd), p, ttyname_maxlen)) {
     return false;
@@ -571,16 +506,83 @@ Variant HHVM_FUNCTION(posix_uname) {
     return false;
   }
 
-  Array ret;
-  ret.set(s_sysname,    String(u.sysname,    CopyString));
-  ret.set(s_nodename,   String(u.nodename,   CopyString));
-  ret.set(s_release,    String(u.release,    CopyString));
-  ret.set(s_version,    String(u.version,    CopyString));
-  ret.set(s_machine,    String(u.machine,    CopyString));
+  return make_dict_array(
+    s_sysname,      OptString(u.sysname,    CopyString)
+    , s_nodename,   OptString(u.nodename,   CopyString)
+    , s_release,    OptString(u.release,    CopyString)
+    , s_version,    OptString(u.version,    CopyString)
+    , s_machine,    OptString(u.machine,    CopyString)
 #if defined(_GNU_SOURCE)
-  ret.set(s_domainname, String(u.domainname, CopyString));
+    , s_domainname, OptString(u.domainname, CopyString)
 #endif
-  return ret;
+  );
+}
+
+void POSIXExtension::moduleRegisterNative() {
+  HHVM_RC_INT(POSIX_S_IFMT, S_IFMT);
+  HHVM_RC_INT(POSIX_S_IFSOCK, S_IFSOCK);
+  HHVM_RC_INT(POSIX_S_IFLNK, S_IFLNK);
+  HHVM_RC_INT(POSIX_S_IFREG, S_IFREG);
+  HHVM_RC_INT(POSIX_S_IFBLK, S_IFBLK);
+  HHVM_RC_INT(POSIX_S_IFDIR, S_IFDIR);
+  HHVM_RC_INT(POSIX_S_IFCHR, S_IFCHR);
+  HHVM_RC_INT(POSIX_S_IFIFO, S_IFIFO);
+  HHVM_RC_INT(POSIX_S_ISUID, S_ISUID);
+  HHVM_RC_INT(POSIX_S_ISGID, S_ISGID);
+  HHVM_RC_INT(POSIX_S_ISVTX, S_ISVTX);
+  HHVM_RC_INT(POSIX_S_IRWXU, S_IRWXU);
+  HHVM_RC_INT(POSIX_S_IRUSR, S_IRUSR);
+  HHVM_RC_INT(POSIX_S_IWUSR, S_IWUSR);
+  HHVM_RC_INT(POSIX_S_IXUSR, S_IXUSR);
+  HHVM_RC_INT(POSIX_S_IRWXG, S_IRWXG);
+  HHVM_RC_INT(POSIX_S_IRGRP, S_IRGRP);
+  HHVM_RC_INT(POSIX_S_IWGRP, S_IWGRP);
+  HHVM_RC_INT(POSIX_S_IXGRP, S_IXGRP);
+  HHVM_RC_INT(POSIX_S_IRWXO, S_IRWXO);
+  HHVM_RC_INT(POSIX_S_IROTH, S_IROTH);
+  HHVM_RC_INT(POSIX_S_IWOTH, S_IWOTH);
+  HHVM_RC_INT(POSIX_S_IXOTH, S_IXOTH);
+  HHVM_RC_INT(POSIX_F_OK, F_OK);
+  HHVM_RC_INT(POSIX_X_OK, X_OK);
+  HHVM_RC_INT(POSIX_W_OK, W_OK);
+  HHVM_RC_INT(POSIX_R_OK, R_OK);
+
+  HHVM_FE(posix_access);
+  HHVM_FE(posix_ctermid);
+  HHVM_FE(posix_get_last_error);
+  HHVM_FE(posix_errno);
+  HHVM_FE(posix_getcwd);
+  HHVM_FE(posix_getegid);
+  HHVM_FE(posix_geteuid);
+  HHVM_FE(posix_getgid);
+  HHVM_FE(posix_getgrgid);
+  HHVM_FE(posix_getgrnam);
+  HHVM_FE(posix_getgroups);
+  HHVM_FE(posix_getlogin);
+  HHVM_FE(posix_getpgid);
+  HHVM_FE(posix_getpgrp);
+  HHVM_FE(posix_getpid);
+  HHVM_FE(posix_getppid);
+  HHVM_FE(posix_getpwnam);
+  HHVM_FE(posix_getpwuid);
+  HHVM_FE(posix_getrlimit);
+  HHVM_FE(posix_getsid);
+  HHVM_FE(posix_getuid);
+  HHVM_FE(posix_initgroups);
+  HHVM_FE(posix_isatty);
+  HHVM_FE(posix_kill);
+  HHVM_FE(posix_mkfifo);
+  HHVM_FE(posix_mknod);
+  HHVM_FE(posix_setegid);
+  HHVM_FE(posix_seteuid);
+  HHVM_FE(posix_setgid);
+  HHVM_FE(posix_setpgid);
+  HHVM_FE(posix_setsid);
+  HHVM_FE(posix_setuid);
+  HHVM_FE(posix_strerror);
+  HHVM_FE(posix_times);
+  HHVM_FE(posix_ttyname);
+  HHVM_FE(posix_uname);
 }
 
 ///////////////////////////////////////////////////////////////////////////////

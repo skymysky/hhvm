@@ -1,4 +1,4 @@
-<?hh     /* -*- php -*- */
+<?hh /* -*- php -*- */
 /**
  * Copyright (c) 2014, Facebook, Inc.
  * All rights reserved.
@@ -9,72 +9,90 @@
  */
 
 <<__PHPStdLib>>
-function posix_access($file, $mode = 0) { }
+function posix_access(
+  string $file,
+  int $mode = 0,
+): bool;
 <<__PHPStdLib>>
-function posix_ctermid() { }
+function posix_ctermid(): string;
 <<__PHPStdLib>>
-function posix_get_last_error() { }
+function posix_get_last_error(): int;
 <<__PHPStdLib>>
-function posix_getcwd() { }
+function posix_getcwd(): string;
 <<__PHPStdLib>>
-function posix_getegid() { }
+function posix_getegid(): int;
 <<__PHPStdLib>>
-function posix_geteuid() { }
+function posix_geteuid(): int;
 <<__PHPStdLib>>
-function posix_getgid() { }
+function posix_getgid(): int;
 <<__PHPStdLib>>
-function posix_getgrgid($gid) { }
+function posix_getgrgid(int $gid): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function posix_getgrnam($name) { }
+function posix_getgrnam(string $name): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function posix_getgroups() { }
+function posix_getgroups(): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function posix_getlogin() { }
+function posix_getlogin(): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function posix_getpgid($pid) { }
+function posix_getpgid(int $pid): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function posix_getpgrp() { }
+function posix_getpgrp(): int;
 <<__PHPStdLib>>
-function posix_getpid() { }
+function posix_getpid(): int;
 <<__PHPStdLib>>
-function posix_getppid() { }
+function posix_getppid(): int;
 <<__PHPStdLib>>
-function posix_getpwnam($username) { }
+function posix_getpwnam(string $username): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function posix_getpwuid($uid) { }
+function posix_getpwuid(int $uid): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function posix_getrlimit() { }
+function posix_getrlimit(): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function posix_getsid($pid) { }
+function posix_getsid(int $pid): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function posix_getuid() { }
+function posix_getuid(): int;
 <<__PHPStdLib>>
-function posix_initgroups($name, $base_group_id) { }
+function posix_initgroups(
+  string $name,
+  int $base_group_id,
+): bool;
 <<__PHPStdLib>>
-function posix_isatty($fd) { }
+function posix_isatty(
+  HH\FIXME\MISSING_PARAM_TYPE $fd,
+): bool;
 <<__PHPStdLib>>
-function posix_kill($pid, $sig) { }
+function posix_kill(int $pid, int $sig): bool;
 <<__PHPStdLib>>
-function posix_mkfifo($pathname, $mode) { }
+function posix_mkfifo(
+  string $pathname,
+  int $mode,
+): bool;
 <<__PHPStdLib>>
-function posix_mknod($pathname, $mode, $major = 0, $minor = 0) { }
+function posix_mknod(
+  string $pathname,
+  int $mode,
+  int $major = 0,
+  int $minor = 0,
+): bool;
 <<__PHPStdLib>>
-function posix_setegid($gid) { }
+function posix_setegid(int $gid): bool;
 <<__PHPStdLib>>
-function posix_seteuid($uid) { }
+function posix_seteuid(int $uid): bool;
 <<__PHPStdLib>>
-function posix_setgid($gid) { }
+function posix_setgid(int $gid): bool;
 <<__PHPStdLib>>
-function posix_setpgid($pid, $pgid) { }
+function posix_setpgid(int $pid, int $pgid): bool;
 <<__PHPStdLib>>
-function posix_setsid() { }
+function posix_setsid(): int;
 <<__PHPStdLib>>
-function posix_setuid($uid) { }
+function posix_setuid(int $uid): bool;
 <<__PHPStdLib>>
-function posix_strerror($errnum) { }
+function posix_strerror(int $errnum): string;
 <<__PHPStdLib>>
-function posix_times() { }
+function posix_times(): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function posix_ttyname($fd) { }
+function posix_ttyname(
+  HH\FIXME\MISSING_PARAM_TYPE $fd,
+): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function posix_uname() { }
+function posix_uname(): HH\FIXME\MISSING_RETURN_TYPE;

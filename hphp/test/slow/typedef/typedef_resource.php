@@ -1,24 +1,18 @@
 <?hh
-error_reporting(-1);
-function handler($errno, $errmsg) {
-  if ($errno === E_RECOVERABLE_ERROR) {
-    echo "E_RECOVERABLE_ERROR: $errmsg\n";
-  } else {
-    return false;
-  }
-}
-set_error_handler('handler');
+
 type X = resource;
 newtype Y = ?resource;
 newtype A = resource;
 type B = ?resource;
 newtype C = X;
 type D = Y;
-function a(A $x) {}
-function b(B $x) {}
-function c(C $x) {}
-function d(D $x) {}
-function main() {
+function a(<<__Soft>> A $x) :mixed{}
+function b(<<__Soft>> B $x) :mixed{}
+function c(<<__Soft>> C $x) :mixed{}
+function d(<<__Soft>> D $x) :mixed{}
+
+<<__EntryPoint>>
+function main() :mixed{
   $x = imagecreate(10, 10);
   a(null);
   a(1);
@@ -34,4 +28,3 @@ function main() {
   d($x);
   echo "Done\n";
 }
-main();

@@ -14,18 +14,22 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_JIT_VASM_INFO_H_
-#define incl_HPHP_JIT_VASM_INFO_H_
+#pragma once
 
 #include "hphp/util/asm-x64.h"
 #include "hphp/runtime/vm/jit/vasm-instr.h"
 
-namespace HPHP { namespace jit {
+#include <cstdint>
+#include <utility>
+
+namespace HPHP::jit {
 
 ///////////////////////////////////////////////////////////////////////////////
 
 struct Vreg;
 struct Vinstr;
+struct Vptr;
+struct AliasClass;
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -50,8 +54,41 @@ bool touchesMemory(Vinstr::Opcode op);
  * Returns true if the instruction writes memory.
  */
 bool writesMemory(Vinstr::Opcode op);
+
+/*
+ * Return the memory operand and access size in bytes for an instruction with
+ * exactly one memory operand. A size of 0 means "unknown location": a call, no
+ * memory operand, or more than one.
+ */
+std::pair<Vptr, uint8_t> getMemOpAndSize(const Vinstr& inst);
+
+/*
+ * Return true iff [a, a+aSize) and [b, b+bSize) are provably disjoint, from
+ * Vptr addressing alone. False means "unknown", not "overlapping"; a zero size
+ * is unknown.
+ */
+bool memRangesDisjoint(const Vptr& a, uint8_t aSize,
+                       const Vptr& b, uint8_t bSize);
+
+/*
+ * Return the abstract memory locations the instruction may write to. This uses
+ * Vasm memory behavior when no HHIR origin is available, and HHIR memory
+ * effects otherwise.
+ */
+AliasClass mem_writes_for_inst(const Vinstr& inst);
+
+/*
+ * Returns true if the instruction has some side-effect beyond writing to its
+ * declared outputs (It may still read from memory, for example).
+ */
+bool effectful(const Vinstr& inst);
+
+/*
+ * Returns true if the instruction's behavior depends solely on its declared
+ * inputs and has no side-effects besides writing to its declared outputs.
+ */
+bool isPure(const Vinstr& inst);
+
 ///////////////////////////////////////////////////////////////////////////////
 
-}}
-
-#endif
+}

@@ -1,6 +1,11 @@
-<?php
+<?hh
+
 // Source php weakref extension
-$r = new StdClass;
+<<__EntryPoint>>
+function main_weakref_acquire() :mixed{
+$r = new stdClass;
 $wr1 = new WeakRef($r);
 var_dump($wr1->acquire());
-unset($r);
+__hhvm_intrinsics\launder_value($r);
+$r = null;
+}

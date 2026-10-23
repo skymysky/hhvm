@@ -14,23 +14,25 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_MEMORY_MANAGER_DEFS_H
-#define incl_HPHP_MEMORY_MANAGER_DEFS_H
+#pragma once
 
-#include "hphp/runtime/base/apc-local-array.h"
-#include "hphp/runtime/base/apc-local-array-defs.h"
-#include "hphp/runtime/base/mixed-array-defs.h"
-#include "hphp/runtime/base/packed-array-defs.h"
-#include "hphp/runtime/base/set-array.h"
+#include "hphp/runtime/base/bespoke-array.h"
+#include "hphp/runtime/base/vanilla-dict-defs.h"
+#include "hphp/runtime/base/vanilla-keyset.h"
+#include "hphp/runtime/base/vanilla-vec-defs.h"
 
-#include "hphp/runtime/vm/globals-array.h"
+#include "hphp/runtime/vm/class-meth-data.h"
 #include "hphp/runtime/vm/native-data.h"
 #include "hphp/runtime/vm/resumable.h"
+#include "hphp/runtime/vm/rfunc-data.h"
+#include "hphp/runtime/vm/rclass-meth-data.h"
 
 #include "hphp/runtime/ext/asio/ext_asio.h"
 #include "hphp/runtime/ext/asio/ext_await-all-wait-handle.h"
+#include "hphp/runtime/ext/asio/ext_concurrent-wait-handle.h"
 #include "hphp/runtime/ext/asio/ext_condition-wait-handle.h"
 #include "hphp/runtime/ext/asio/ext_external-thread-event-wait-handle.h"
+#include "hphp/runtime/ext/asio/ext_priority-bridge-wait-handle.h"
 #include "hphp/runtime/ext/asio/ext_reschedule-wait-handle.h"
 #include "hphp/runtime/ext/asio/ext_sleep-wait-handle.h"
 #include "hphp/runtime/ext/asio/ext_static-wait-handle.h"
@@ -42,16 +44,16 @@
 #include "hphp/runtime/ext/collections/ext_collections-set.h"
 #include "hphp/runtime/ext/collections/ext_collections-vector.h"
 #include "hphp/runtime/ext/collections/hash-collection.h"
-#include "hphp/runtime/ext/std/ext_std_closure.h"
+#include "hphp/runtime/ext/core/ext_core_closure.h"
+
 #include "hphp/util/bitset-utils.h"
+#include "hphp/util/configs/gc.h"
 
 #include <algorithm>
 
 namespace HPHP {
 
 ///////////////////////////////////////////////////////////////////////////////
-
-using HdrBlock = MemRange<HeapObject*>;
 
 /*
  * Struct Slab encapsulates the header attached to each large block of memory
@@ -60,34 +62,28 @@ using HdrBlock = MemRange<HeapObject*>;
  * (a pointer to somewhere in the body). The start-bit map marks the location
  * of the start of each object. One bit represents kSmallSizeAlign bytes.
  */
-struct alignas(kSmallSizeAlign) Slab : HeapObject {
+struct Slab : HeapObject {
 
   char* init() {
     initHeader_32(HeaderKind::Slab, 0);
     clearStarts();
     return start();
-    static_assert(sizeof(*this) % kSmallSizeAlign == 0, "");
   }
 
-  /*
-   * call fn(h) on each object in the slab, without calling allocSize(),
-   * by scanning through the start-bits alone.
-   */
-  template<class Fn> void iter_starts(Fn fn) const;
-
-  void setStart(const void* p) {
-    bitvec_set(starts_, start_index(p));
+  void setCachedStart(const void* p) {
+    bitvec_set(startsCache_, start_index(p));
   }
 
-  /*
-   * set start bits for as many objects of size class index, that fit
-   * between [start,end).
-   */
-  void setStarts(const void* start, const void* end, size_t nbytes,
-                 size_t index);
-
-  bool isStart(const void* p) const {
-    return bitvec_test(starts_, start_index(p));
+  bool isCachedStart(const void* p) const {
+    auto const i = start_index(p);
+    auto const res = bitvec_test(startsCache_, i);
+    if (debug && res) {
+      auto const obj = static_cast<const HeapObject*>(p);
+      always_assert_flog(
+        ((unsigned)obj->kind()) < NumHeaderKinds,
+        "Start bits should be unset for heap object with uninitialized header");
+    }
+    return res;
   }
 
   HeapObject* find(const void* ptr) const;
@@ -108,21 +104,23 @@ struct alignas(kSmallSizeAlign) Slab : HeapObject {
     return slab;
   }
 
-  char* start() { return (char*)(this + 1); }
+  static char* align(const void* addr) {
+    auto const a = reinterpret_cast<intptr_t>(addr);
+    auto const mask = Cfg::GC::SlabAllocAlign - 1;
+    assertx((mask & (mask + 1)) == 0);
+    return reinterpret_cast<char*>(a + (-a & mask));
+  }
+
+  char* start() { return align(this + 1); }
   char* end() { return (char*)this + size(); }
-  const char* start() const { return (const char*)(this + 1); }
+  const char* start() const { return align(this + 1); }
   const char* end() const { return (const char*)this + size(); }
 
   struct InitMasks;
 
-  // access whole start-bits word, for testing
-  uint64_t start_bits(const void* p) const {
-    return starts_[start_index(p) / kBitsPerStart];
-  }
-
 private:
   void clearStarts() {
-    memset(starts_, 0, sizeof(starts_));
+    memset(startsCache_, 0, sizeof(startsCache_));
   }
 
   static size_t start_index(const void* p) {
@@ -141,9 +139,12 @@ private:
   static std::array<uint8_t,kNumMasks> shifts_;
 
   // Start-bit state:
-  // 1 = a HeapObject starts at corresponding address
-  // 0 = in the middle of an object or free space
-  uint64_t starts_[kNumStarts];
+  // 1 = a HeapObject starts at corresponding address AND it has had its header
+  //     kind initialized at least once (not necessarily currently accurate but
+  //     definitely does not contain never initialized data)
+  // 0 = in the middle of an object OR free space OR a heap object with
+  //     uninitialized headers OR a heap object not created through split tail
+  uint64_t startsCache_[kNumStarts];
 };
 
 static_assert(kMaxSmallSize < kSlabSize - sizeof(Slab),
@@ -240,35 +241,38 @@ template<class T> constexpr size_t sizeClass() {
  */
 inline size_t allocSize(const HeapObject* h) {
   // Ordering depends on ext_wait-handle.h.
-  static const uint16_t waithandle_sizes[] = {
+  static constexpr uint16_t waithandle_sizes[] = {
     sizeClass<c_StaticWaitHandle>(),
     0, /* AsyncFunction */
     sizeClass<c_AsyncGeneratorWaitHandle>(),
     0, /* AwaitAll */
+    0, /* Concurrent */
     sizeClass<c_ConditionWaitHandle>(),
     sizeClass<c_RescheduleWaitHandle>(),
     sizeClass<c_SleepWaitHandle>(),
     sizeClass<c_ExternalThreadEventWaitHandle>(),
+    sizeClass<c_PriorityBridgeWaitHandle>(),
   };
 
   // Ordering depends on header-kind.h.
   static constexpr uint16_t kind_sizes[] = {
-    0, /* Packed */
-    0, /* Mixed */
-    sizeClass<ArrayData>(), /* Empty */
-    0, /* APCLocalArray */
-    sizeClass<GlobalsArray>(),
+    0, /* Vec */
+    0, /* BespokeVec */
     0, /* Dict */
-    0, /* VecArray */
-    0, /* KeySet */
+    0, /* BespokeDict */
+    0, /* Keyset */
+    0, /* BespokeKeyset */
     0, /* String */
     0, /* Resource */
-    sizeClass<RefData>(),
+    sizeClass<ClsMethData>(),
+    sizeClass<RClsMethData>(),
+    sizeClass<RFuncData>(),
     0, /* Object */
     0, /* NativeObject */
     0, /* WaitHandle */
     sizeClass<c_AsyncFunctionWaitHandle>(),
     0, /* AwaitAllWH */
+    0, /* ConcurrentWH */
     0, /* Closure */
     sizeClass<c_Vector>(),
     sizeClass<c_Map>(),
@@ -290,9 +294,8 @@ inline size_t allocSize(const HeapObject* h) {
   };
 #define CHECKSIZE(knd, type) \
   static_assert(kind_sizes[(int)HeaderKind::knd] == sizeClass<type>(), #knd);
-  CHECKSIZE(Empty, ArrayData)
-  CHECKSIZE(Globals, GlobalsArray)
-  CHECKSIZE(Ref, RefData)
+  CHECKSIZE(ClsMeth, ClsMethData)
+  CHECKSIZE(RClsMeth, RClsMethData)
   CHECKSIZE(AsyncFuncWH, c_AsyncFunctionWaitHandle)
   CHECKSIZE(Vector, c_Vector)
   CHECKSIZE(Map, c_Map)
@@ -301,15 +304,13 @@ inline size_t allocSize(const HeapObject* h) {
   CHECKSIZE(ImmVector, c_ImmVector)
   CHECKSIZE(ImmMap, c_ImmMap)
   CHECKSIZE(ImmSet, c_ImmSet)
+  CHECKSIZE(RFunc, RFuncData)
   static_assert(kind_sizes[(int)HeaderKind::Slab] == sizeof(Slab), "");
 #undef CHECKSIZE
 #define CHECKSIZE(knd)\
   static_assert(kind_sizes[(int)HeaderKind::knd] == 0, #knd);
-  CHECKSIZE(Packed)
-  CHECKSIZE(Mixed)
-  CHECKSIZE(Apc)
+  CHECKSIZE(Vec)
   CHECKSIZE(Dict)
-  CHECKSIZE(VecArray)
   CHECKSIZE(Keyset)
   CHECKSIZE(String)
   CHECKSIZE(Resource)
@@ -317,6 +318,7 @@ inline size_t allocSize(const HeapObject* h) {
   CHECKSIZE(NativeObject)
   CHECKSIZE(WaitHandle)
   CHECKSIZE(AwaitAllWH)
+  CHECKSIZE(ConcurrentWH)
   CHECKSIZE(Closure)
   CHECKSIZE(AsyncFuncFrame)
   CHECKSIZE(NativeData)
@@ -339,41 +341,28 @@ inline size_t allocSize(const HeapObject* h) {
   // return a rounded-up size.
   size_t size = 0;
   switch (kind) {
-    case HeaderKind::Packed:
-    case HeaderKind::VecArray:
-      // size = kSizeIndex2Size[h->aux16]
-      size = PackedArray::heapSize(static_cast<const ArrayData*>(h));
-      break;
-    case HeaderKind::Mixed:
+    case HeaderKind::Vec:
     case HeaderKind::Dict:
-      // size = fn of h->m_scale
-      size = static_cast<const MixedArray*>(h)->heapSize();
-      break;
     case HeaderKind::Keyset:
-      // size = fn of h->m_scale
-      size = static_cast<const SetArray*>(h)->heapSize();
-      break;
-    case HeaderKind::Apc:
-      // size = h->m_size * 16 + sizeof(APCLocalArray)
-      size = static_cast<const APCLocalArray*>(h)->heapSize();
-      break;
+    case HeaderKind::BespokeVec:
+    case HeaderKind::BespokeDict:
+    case HeaderKind::BespokeKeyset:
+      // An array's sizeIndex is m_aux16 >> 8. heapSize is computed from it.
+      return static_cast<const ArrayData*>(h)->heapSize();
     case HeaderKind::String:
-      // size = isFlat ? isRefCounted ? table[aux16] : m_size+C : proxy_size;
+      // size = isRefCounted ? table[aux16] : m_size+C
       size = static_cast<const StringData*>(h)->heapSize();
       break;
-    case HeaderKind::Closure:
+    case HeaderKind::Resource:
+      // size = h->aux16
+      // [ResourceHdr][ResourceData subclass]
+      size = static_cast<const ResourceHdr*>(h)->heapSize();
+      break;
     case HeaderKind::Object:
+    case HeaderKind::Closure:
       // size = h->m_cls->m_declProperties.m_extra * sz(TV) + sz(OD)
       // [ObjectData][props]
       size = static_cast<const ObjectData*>(h)->heapSize();
-      break;
-    case HeaderKind::ClosureHdr:
-      // size = h->aux32
-      // [ClosureHdr][ObjectData][use vars]
-      size = static_cast<const ClosureHdr*>(h)->size();
-      break;
-    case HeaderKind::MemoData:
-      size = static_cast<const MemoNode*>(h)->objOff() + memoObj(h)->heapSize();
       break;
     case HeaderKind::WaitHandle: {
       // size = table[h->whkind & mask]
@@ -381,30 +370,25 @@ inline size_t allocSize(const HeapObject* h) {
       auto obj = static_cast<const ObjectData*>(h);
       auto whKind = wait_handle<c_Awaitable>(obj)->getKind();
       size = waithandle_sizes[(int)whKind];
-      assertx(size != 0); // AsyncFuncFrame or AwaitAllWH
+      assertx(size != 0); // AsyncFuncFrame, AwaitAllWH or ConcurrentWH
       assertx(size == MemoryManager::sizeClass(size));
       return size;
     }
-    case HeaderKind::AwaitAllWH:
-      // size = h->m_cap * sz(Node) + sz(c_AAWH)
-      // [ObjectData][children...]
-      size = static_cast<const c_AwaitAllWaitHandle*>(h)->heapSize();
-      break;
-    case HeaderKind::Resource:
-      // size = h->aux16
-      // [ResourceHdr][ResourceData subclass]
-      size = static_cast<const ResourceHdr*>(h)->heapSize();
-      break;
-    case HeaderKind::Cpp:
-    case HeaderKind::SmallMalloc: // [MallocNode][bytes...]
-      // size = h->nbytes // 64-bit
-      size = static_cast<const MallocNode*>(h)->nbytes;
-      break;
     case HeaderKind::AsyncFuncFrame:
       // size = h->obj_offset + C // 32-bit
       // [NativeNode][locals][Resumable][c_AsyncFunctionWaitHandle]
       size = static_cast<const NativeNode*>(h)->obj_offset +
              sizeof(c_AsyncFunctionWaitHandle);
+      break;
+    case HeaderKind::AwaitAllWH:
+      // size = h->m_cap * sz(Node) + sz(c_AAWH)
+      // [ObjectData][children...]
+      size = static_cast<const c_AwaitAllWaitHandle*>(h)->heapSize();
+      break;
+    case HeaderKind::ConcurrentWH:
+      // size = h->m_cap * sz(Node) + sz(c_CCWH)
+      // [ObjectData][children...]
+      size = static_cast<const c_ConcurrentWaitHandle*>(h)->heapSize();
       break;
     case HeaderKind::NativeData: {
       // h->obj_offset + (h+h->obj_offset)->m_cls->m_extra * sz(TV) + sz(OD)
@@ -415,6 +399,19 @@ inline size_t allocSize(const HeapObject* h) {
       size = native->obj_offset + Native::obj(native)->heapSize();
       break;
     }
+    case HeaderKind::ClosureHdr:
+      // size = h->aux32
+      // [ClosureHdr][ObjectData][use vars]
+      size = static_cast<const ClosureHdr*>(h)->size();
+      break;
+    case HeaderKind::MemoData:
+      size = static_cast<const MemoNode*>(h)->objOff() + memoObj(h)->heapSize();
+      break;
+    case HeaderKind::Cpp:
+    case HeaderKind::SmallMalloc: // [MallocNode][bytes...]
+      // size = h->nbytes // 64-bit
+      size = static_cast<const MallocNode*>(h)->nbytes;
+      break;
     // the following sizes are intentionally not rounded up to size class.
     case HeaderKind::BigMalloc: // [MallocNode][raw bytes...]
       size = static_cast<const MallocNode*>(h)->nbytes;
@@ -432,8 +429,6 @@ inline size_t allocSize(const HeapObject* h) {
     case HeaderKind::Slab:
     case HeaderKind::NativeObject:
     case HeaderKind::AsyncFuncWH:
-    case HeaderKind::Empty:
-    case HeaderKind::Globals:
     case HeaderKind::Vector:
     case HeaderKind::Map:
     case HeaderKind::Set:
@@ -441,7 +436,9 @@ inline size_t allocSize(const HeapObject* h) {
     case HeaderKind::ImmVector:
     case HeaderKind::ImmMap:
     case HeaderKind::ImmSet:
-    case HeaderKind::Ref:
+    case HeaderKind::ClsMeth:
+    case HeaderKind::RClsMeth:
+    case HeaderKind::RFunc:
       not_reached();
   }
   return MemoryManager::sizeClass(size);
@@ -449,84 +446,66 @@ inline size_t allocSize(const HeapObject* h) {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-// call fn(h) on each object in the slab, without calling allocSize()
-template<class Fn>
-void Slab::iter_starts(Fn fn) const {
-  auto ptr = (char*)this;
-  for (auto it = starts_, end = starts_ + kNumStarts; it < end; ++it) {
-    for (auto bits = *it; bits != 0; bits &= (bits - 1)) {
-      auto k = ffs64(bits);
-      auto h = (HeapObject*)(ptr + k * kSmallSizeAlign);
-      fn(h);
-    }
-    ptr += kBitsPerStart * kSmallSizeAlign;
-  }
-}
-
 /*
  * Search from ptr backwards, for a HeapObject that contains ptr.
  * Returns the HeapObject* for the containing object, else nullptr.
  */
 inline HeapObject* Slab::find(const void* ptr) const {
   auto const i = start_index(ptr);
-  if (bitvec_test(starts_, i)) {
+  if (bitvec_test(startsCache_, i)) {
     return reinterpret_cast<HeapObject*>(
         uintptr_t(ptr) & ~(kSmallSizeAlign - 1)
     );
   }
   // compute a mask with 0s at i+1 and higher
   auto const mask = ~0ull >> (kBitsPerStart - 1 - i % kBitsPerStart);
-  auto cursor = starts_ + i / kBitsPerStart;
+  auto cursor = startsCache_ + i / kBitsPerStart;
+  HeapObject* h = nullptr;
   for (auto bits = *cursor & mask;; bits = *cursor) {
     if (bits) {
       auto k = fls64(bits);
-      auto h = reinterpret_cast<HeapObject*>(
-        (char*)this + ((cursor - starts_) * kBitsPerStart + k) * kSmallSizeAlign
+      h = reinterpret_cast<HeapObject*>(
+        (char*)this +
+        ((cursor - startsCache_) * kBitsPerStart + k) * kSmallSizeAlign
       );
       auto size = allocSize(h);
       if ((char*)ptr >= (char*)h + size) break;
       return h;
     }
-    if (--cursor < starts_) break;
+    if (--cursor < startsCache_) break;
   }
+
+  // `ptr` is past the end of the allocation pointed to by `h`.  Walk forward
+  // until we pass `ptr` checking to see if we possibly have missing start
+  // bits we should fill in.
+  if (!h) return nullptr;
+  auto size = allocSize(h);
+  do {
+    h = (HeapObject*)((char*)h + size);
+    if ((char*)h >= end()) break;
+    const_cast<Slab*>(this)->setCachedStart(h);
+    size = allocSize(h);
+
+    if ((char*) ptr < (char*)h + size) {
+      return h;
+    }
+  } while ((char*)h < (char*)ptr);
   return nullptr;
 }
 
-/*
- * Set multiple start bits. See implementation notes near Slab::InitMasks
- * in memory-manager.cpp
- */
-inline void Slab::setStarts(const void* start, const void* end,
-                            size_t nbytes, size_t index) {
-  auto const start_bit = start_index(start);
-  auto const end_bit = start_index((char*)end - kSmallSizeAlign) + 1;
-  auto const nbits = nbytes / kSmallSizeAlign;
-  if (nbits <= kBitsPerStart &&
-      start_bit / kBitsPerStart < end_bit / kBitsPerStart) {
-    assertx(index < kNumMasks);
-    auto const mask = masks_[index];
-    size_t const k = shifts_[index];
-    // initially n = how much mask should be shifted to line up with start_bit
-    auto n = start_bit % kBitsPerStart;
-    // first word (containing start_bit) |= left-shifted mask
-    auto s = &starts_[start_bit / kBitsPerStart];
-    *s++ |= mask << n;
-    // subsequently, n accumulates shifts required by the size class
-    n = (n + k) % nbits;
-    // store middle words with shifted mask, update shift amount each time
-    for (auto e = &starts_[end_bit / kBitsPerStart]; s < e;) {
-      *s++ = mask << n;
-      n = n + k >= nbits ? n + k - nbits : n + k; // n = (n+k) % nbits
-    }
-    // last word (containing end_bit) |= mask with end_bit and higher zeroed
-    *s |= (mask << n) & ~(~0ull << end_bit % kBitsPerStart);
-  } else {
-    // Either the size class is too large to fit 1+ bits per 64bit word,
-    // or the ncontig range was too small. Set one bit at a time.
-    for (auto i = start_bit; i < end_bit; i += nbits) {
-      bitvec_set(starts_, i);
-    }
+inline HeapObject* MemoryManager::find(const void* p) {
+  if (m_lastInitFreeAllocated != m_stats.mmAllocated()
+      || m_lastInitFreeFreed != m_stats.mm_freed) {
+    initFree();
   }
+  if (auto const ptr = m_heap.find(p)) {
+    if (UNLIKELY(ptr->kind() != HeaderKind::Slab)) return ptr;
+    auto const slab = static_cast<Slab*>(ptr);
+    auto const obj = slab->find(p);
+    if (obj) return obj;
+    return slab;
+  }
+  return nullptr;
 }
 
 template<class OnBig, class OnSlab>
@@ -564,6 +543,7 @@ template<class Fn> void SparseHeap::iterate(Fn fn) {
 
 template<class Fn> void MemoryManager::iterate(Fn fn) {
   m_heap.iterate([&](HeapObject* h, size_t allocSize) {
+    assertx(m_stats.mm_freed == m_lastInitFreeFreed);
     if (h->kind() >= HeaderKind::Hole) {
       assertx(unsigned(h->kind()) < NumHeaderKinds);
       // no valid pointer can point here.
@@ -591,31 +571,5 @@ template<class Fn> void MemoryManager::forEachObject(Fn fn) {
   }
 }
 
-template<class Fn> void MemoryManager::sweepApcArrays(Fn fn) {
-  for (size_t i = 0; i < m_apc_arrays.size();) {
-    auto a = m_apc_arrays[i];
-    if (fn(a)) {
-      a->sweep();
-      removeApcArray(a);
-    } else {
-      ++i;
-    }
-  }
-}
-
-template<class Fn> void MemoryManager::sweepApcStrings(Fn fn) {
-  auto& head = getStringList();
-  for (StringDataNode *next, *n = head.next; n != &head; n = next) {
-    next = n->next;
-    assertx(next && uintptr_t(next) != kSmallFreeWord);
-    assertx(next && uintptr_t(next) != kMallocFreeWord);
-    auto const s = StringData::node2str(n);
-    if (fn(s)) {
-      s->unProxy();
-    }
-  }
-}
-
 ///////////////////////////////////////////////////////////////////////////////
 }
-#endif

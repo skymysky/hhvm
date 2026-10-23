@@ -13,11 +13,13 @@
    | license@php.net so we can mail you a copy immediately.               |
    +----------------------------------------------------------------------+
 */
-#ifndef incl_HPHP_HASH_MAP_H_
-#define incl_HPHP_HASH_MAP_H_
+#pragma once
 
 #include "hphp/util/functional.h"
-#include "folly/container/F14Map.h"
+
+#include <folly/concurrency/ConcurrentHashMap.h>
+#include <folly/container/F14Map.h>
+
 #include <functional>
 #include <string>
 
@@ -36,11 +38,17 @@ using hphp_hash_map = folly::F14NodeMap<T,U,V,W>;
 template <class T, class U, class V=std::hash<T>, class W=std::equal_to<T>>
 using hphp_fast_map = folly::F14FastMap<T,U,V,W>;
 
+template <class T, class U, class V=std::hash<T>, class W=std::equal_to<T>>
+using hphp_vector_map = folly::F14VectorMap<T,U,V,W>;
+
 //////////////////////////////////////////////////////////////////////
 
 // std::string keyed tables, stable entries do not move on rehash.
 template<typename T>
 using hphp_string_map = hphp_hash_map<std::string, T, string_hash>;
+
+template<typename T>
+using hphp_fast_string_map = hphp_fast_map<std::string, T, string_hash>;
 
 template<typename T>
 using hphp_string_imap =
@@ -59,6 +67,24 @@ using hphp_const_char_map = hphp_hash_map<const char*, T, cstr_hash, eqstr>;
 
 //////////////////////////////////////////////////////////////////////
 
-}
-
+// folly::ConcurrentHashMapSIMD is only defined on some platforms, so
+// fallback to ConcurrentHashMap if not available.
+#if (FOLLY_SSE_PREREQ(4, 2) || (FOLLY_AARCH64 && FOLLY_F14_CRC_INTRINSIC_AVAILABLE)) && !FOLLY_MOBILE
+template <typename K, typename V,
+          typename H = std::hash<K>,
+          typename C = std::equal_to<K>,
+          typename A = std::allocator<uint8_t>,
+          uint8_t S = 8>
+using folly_concurrent_hash_map_simd = folly::ConcurrentHashMapSIMD<K, V, H, C, A, S>;
+#else
+template <typename K, typename V,
+          typename H = std::hash<K>,
+          typename C = std::equal_to<K>,
+          typename A = std::allocator<uint8_t>,
+          uint8_t S = 8>
+using folly_concurrent_hash_map_simd = folly::ConcurrentHashMap<K, V, H, C, A, S>;
 #endif
+
+//////////////////////////////////////////////////////////////////////
+
+}

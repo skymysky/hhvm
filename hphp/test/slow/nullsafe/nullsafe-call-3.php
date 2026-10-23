@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 class C {
   public function blah(bool $x): ?D {
     return $x ? new D() : null;
@@ -21,7 +21,7 @@ function test1(?C $c, bool $b): ?E {
 function test2(?C $c, bool $b): ?F {
   return $c?->blah($b)->bar()?->baz();
 }
-function main() {
+function main() :mixed{
   $c = new C();
   var_dump(test1($c, true));
   try {
@@ -56,4 +56,8 @@ function main() {
     echo get_class($e), ': ', $e->getMessage(), "\n";
   }
 }
+
+<<__EntryPoint>>
+function main_nullsafe_call_3() :mixed{
 main();
+}

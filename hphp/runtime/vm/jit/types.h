@@ -14,31 +14,36 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_TRANSL_TYPES_H_
-#define incl_HPHP_TRANSL_TYPES_H_
+#pragma once
 
 #include <vector>
 
-#include "hphp/runtime/base/runtime-option.h"
+#include <fmt/format.h>
+
 #include "hphp/runtime/base/types.h"
 
-#include "hphp/util/assertions.h"
-#include "hphp/util/hash-set.h"
+#include "hphp/runtime/vm/jit/containers.h"
 
-namespace HPHP { namespace jit {
+#include "hphp/util/assertions.h"
+#include "hphp/util/compact-tagged-ptrs.h"
+#include "hphp/util/optional.h"
+#include "hphp/util/hash-set.h"
+#include "hphp/util/ptr.h"
+
+namespace HPHP::jit {
 
 ///////////////////////////////////////////////////////////////////////////////
 
 /*
  * Core types.
  */
-typedef unsigned char* TCA; // "Translation cache address."
-typedef const unsigned char* CTCA;
+using TCA = unsigned char*; // "Translation cache address."
+using CTCA = const unsigned char*;
 
-using LowTCA = LowPtr<uint8_t>;
-using AtomicLowTCA = AtomicLowPtr<uint8_t,
-                                  std::memory_order_acquire,
-                                  std::memory_order_release>;
+using TcaRange = folly::Range<TCA>;
+
+using LowTCA = SmallPtr<uint8_t>;
+using AtomicLowTCA = AtomicSmallPtr<uint8_t>;
 
 struct ctca_identity_hash {
   size_t operator()(CTCA val) const {
@@ -53,7 +58,7 @@ struct ctca_identity_hash {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-using TransIDSet = hphp_hash_set<TransID>;
+using TransIDSet = jit::flat_set<TransID>;
 using TransIDVec = std::vector<TransID>;
 
 using Annotation = std::pair<std::string, std::string>;
@@ -105,6 +110,31 @@ inline std::string show(TransKind k) {
   not_reached();
 }
 
+inline Optional<TransKind> nameToTransKind(const std::string& str) {
+#define DO(name) if (str == "Trans" #name) return TransKind::name;
+  TRANS_KINDS
+#undef DO
+  return std::nullopt;
+}
+
+inline bool isLive(TransKind k) {
+  switch (k) {
+    case TransKind::Live:
+    case TransKind::LivePrologue:
+      return true;
+
+    case TransKind::Anchor:
+    case TransKind::Interp:
+    case TransKind::Profile:
+    case TransKind::ProfPrologue:
+    case TransKind::Optimize:
+    case TransKind::OptPrologue:
+    case TransKind::Invalid:
+      return false;
+  }
+  always_assert(false);
+}
+
 inline bool isProfiling(TransKind k) {
   switch (k) {
     case TransKind::Profile:
@@ -141,23 +171,23 @@ inline bool isPrologue(TransKind k) {
   always_assert(false);
 }
 
-/*
- * Compact flags which may be threaded through a service request to provide
- * hints or demands for retranslations.
- */
-struct TransFlags {
-  /* implicit */ TransFlags(uint64_t flags = 0) : packed(flags) {}
+inline bool isOptimized(TransKind k) {
+  switch (k) {
+    case TransKind::Optimize:
+    case TransKind::OptPrologue:
+      return true;
 
-  union {
-    struct {
-      bool noinlineSingleton : 1;
-      bool noProfiledFPush : 1;
-    };
-    uint64_t packed;
-  };
-};
-
-static_assert(sizeof(TransFlags) <= sizeof(uint64_t), "Too many TransFlags!");
+    case TransKind::Profile:
+    case TransKind::ProfPrologue:
+    case TransKind::Anchor:
+    case TransKind::Interp:
+    case TransKind::Live:
+    case TransKind::LivePrologue:
+    case TransKind::Invalid:
+      return false;
+  }
+  always_assert(false);
+}
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -174,6 +204,12 @@ enum class CodeKind : uint8_t {
   Trace,
 
   /*
+   * Code for function prologues. Similar to CrossTrace, but may allow more
+   * registers.
+   */
+  Prologue,
+
+  /*
    * Code at the TC boundaries, e.g., service requests, unique stubs.
    */
   CrossTrace,
@@ -186,6 +222,16 @@ enum class CodeKind : uint8_t {
    */
   Helper,
 };
+
+inline std::string codeKindAsString(CodeKind kind) {
+  switch (kind) {
+    case CodeKind::Trace:      return "trace";
+    case CodeKind::Prologue:   return "prologue";
+    case CodeKind::CrossTrace: return "cross-trace";
+    case CodeKind::Helper:     return "helper";
+  }
+  always_assert(false);
+}
 
 /*
  * Enumeration representing the various areas that we emit code.
@@ -207,19 +253,55 @@ inline std::string areaAsString(AreaIndex area) {
   always_assert(false);
 }
 
-/*
- * Multiplying factors used to compute the block weights for each code area.
- * We multiply the corresponding IR block's profile counter by the following
- * factors, depending on the code area the block is assigned to.
- */
-inline uint64_t areaWeightFactor(AreaIndex area) {
-  switch (area) {
-    case AreaIndex::Main:   return RuntimeOption::EvalJitLayoutMainFactor;
-    case AreaIndex::Cold:   return RuntimeOption::EvalJitLayoutColdFactor;
-    case AreaIndex::Frozen: return 1;
-  };
-  always_assert(false);
+inline Optional<AreaIndex> nameToAreaIndex(const std::string name) {
+  if (name == "Main") return AreaIndex::Main;
+  if (name == "Cold") return AreaIndex::Cold;
+  if (name == "Frozen") return AreaIndex::Frozen;
+  return std::nullopt;
 }
+
+///////////////////////////////////////////////////////////////////////////////
+
+/*
+ * Encapsulates a TCA for a translation, or a "scope" for the failure
+ * to produce one. The scope is a bound for how long the failure is
+ * expected to persistent.
+ */
+struct TranslationResult {
+  enum class Scope : uint16_t {
+    Success,   // Have a TCA
+    Transient, // Transient failure. The next attempt might succeed.
+    Request,   // Attempts will fail until the next request at least.
+    Process    // Attempts will fail for the remainder of the process
+               // lifetime.
+  };
+
+  explicit TranslationResult(TCA tca)
+    : m_ptr{Scope::Success, tca} { assertx(tca); }
+  explicit TranslationResult(Scope s)
+    : m_ptr{s, nullptr} { assertx(s != Scope::Success); }
+
+  static TranslationResult failTransiently() {
+    return TranslationResult{Scope::Transient};
+  }
+  static TranslationResult failForProcess() {
+    return TranslationResult{Scope::Process};
+  }
+
+  TCA addr() const { return m_ptr.ptr(); }
+  Scope scope() const { return m_ptr.tag(); }
+
+  bool isRequestPersistentFailure() const {
+    auto const s = scope();
+    return s == Scope::Request || s == Scope::Process;
+  }
+  bool isProcessPersistentFailure() const {
+    return scope() == Scope::Process;
+  }
+
+private:
+  CompactTaggedPtr<unsigned char, Scope> m_ptr;
+};
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -253,12 +335,57 @@ using Vflags = uint8_t;
 struct Reason {
   const char* file;
   unsigned line;
+
+  bool operator==(const Reason& o) const {
+    return line == o.line && std::string{file} == std::string{o.file};
+  }
+  bool operator!=(const Reason& o) const {
+    return line != o.line || std::string{file} != std::string{o.file};
+  }
 };
 
 inline std::string show(const Reason &r) {
-  return folly::sformat("{}:{}", r.file, r.line);
+  return fmt::format("{}:{}", r.file, r.line);
 }
 
-}}
+#define LDCLS_FALLBACKS                    \
+  FALLBACK(Fatal)                          \
+  FALLBACK(FatalResolveClass)              \
+  FALLBACK(ThrowClassnameToClassString)    \
+  FALLBACK(ThrowClassnameToClassLazyClass) \
+  FALLBACK(Silent)
 
-#endif
+enum class LdClsFallback: uint8_t {
+  #define FALLBACK(name) name,
+  LDCLS_FALLBACKS
+  #undef FALLBACK
+};
+
+inline std::string show(LdClsFallback f) {
+  switch (f) {
+    #define FALLBACK(name) case LdClsFallback::name: return #name;
+    LDCLS_FALLBACKS
+    #undef FALLBACK
+  }
+}
+
+#define STRTOCLASS_KINDS                   \
+  KIND(Expression)                         \
+  KIND(StaticMethod)                       \
+  KIND(TypeStructure)                      \
+  KIND(DynamicClassMeth)
+
+enum class StrToClassKind: uint8_t {
+  #define KIND(k) k,
+  STRTOCLASS_KINDS
+  #undef KIND
+};
+
+inline std::string show(StrToClassKind f) {
+  switch (f) {
+    #define KIND(k) case StrToClassKind::k: return #k;
+    STRTOCLASS_KINDS
+    #undef KIND
+  }
+}
+}

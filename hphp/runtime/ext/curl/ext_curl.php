@@ -10,17 +10,7 @@ namespace {
  * @return void -
  */
 <<__Native>>
-function curl_close(resource $ch): ?bool;
-
-/**
- * Copy a cURL handle along with all of its preferences
- *
- * @param resource $ch -
- *
- * @return resource - Returns a new cURL handle.
- */
-<<__Native>>
-function curl_copy_handle(resource $ch): mixed;
+function curl_close(resource $ch)[leak_safe]: ?bool;
 
 /**
  * Return the last error number
@@ -42,7 +32,7 @@ function curl_errno(resource $ch): mixed;
  *   no error occurred.
  */
 <<__Native>>
-function curl_error(resource $ch): mixed;
+function curl_error(resource $ch)[]: mixed;
 
 /**
  * Returns a string description of a cURL error code
@@ -52,7 +42,7 @@ function curl_error(resource $ch): mixed;
  * @return string - Returns a string description of a cURL error code
  */
 <<__Native>>
-function curl_strerror(int $errno): string;
+function curl_strerror(int $errno): ?string;
 
 /**
  * Perform a cURL session
@@ -129,29 +119,7 @@ function curl_getinfo(resource $ch,
  * @return resource - Returns a cURL handle on success, FALSE on errors.
  */
 <<__Native>>
-function curl_init(?string $url = null): mixed;
-
-
-/**
- * Initialize a cURL session using a pooled curl handle. When this resource
- * is garbage collected, the curl handle will be saved for reuse later.
- * Pooled curl handles persist between requests.
- *
- * @deprecated Use HH\curl_init_pooled instead
- * @param string $poolName - The name of the connection pool to use.
- *  Named connection pools are initialized via the 'curl.namedPools' ini
- *  setting, which is a comma separated list of named pools to create,
- *  or at runtime with curl_create_pool.
- * @param string $url - If provided, the CURLOPT_URL option will be set
- *   to its value. You can manually set this using the curl_setopt()
- *   function.    The file protocol is disabled by cURL if open_basedir is
- *   set.
- *
- * @return resource - Returns a cURL handle on success, FALSE on errors.
- */
-function curl_init_pooled(string $poolName, ?string $url = null): mixed {
-    return HH\curl_init_pooled($poolName, $url);
-}
+function curl_init(?string $url = null)[leak_safe]: mixed;
 
 /**
  * Add a normal cURL handle to a cURL multi handle
@@ -180,8 +148,8 @@ function curl_multi_close(resource $mh): mixed;
  * Run the sub-connections of the current cURL handle
  *
  * @param resource $mh -
- * @param int $still_running - A reference to a flag to tell whether the
- *   operations are still running.
+ * @param int $still_running - A reference to the number of transfers
+ *   that are still running
  *
  * @return int - A cURL code defined in the cURL Predefined Constants.
  *   This only returns errors regarding the whole multi stack. There might
@@ -191,8 +159,7 @@ function curl_multi_close(resource $mh): mixed;
  * See curl_exec() wrt NoFCallBuiltin.
  */
 <<__Native("NoFCallBuiltin")>>
-function curl_multi_exec(resource $mh,
-                         mixed &$still_running): ?int;
+function curl_multi_exec(resource $mh, inout int $still_running): ?int;
 
 /**
  * Return the content of a cURL handle if  is set
@@ -203,7 +170,7 @@ function curl_multi_exec(resource $mh,
  *   CURLOPT_RETURNTRANSFER is set.
  */
 <<__Native>>
-function curl_multi_getcontent(resource $ch): ?string;
+function curl_multi_getcontent(resource $ch): mixed;
 
 /**
  * Get information about the current transfers
@@ -221,7 +188,8 @@ function curl_multi_getcontent(resource $ch): ?string;
  */
 <<__Native>>
 function curl_multi_info_read(resource $mh,
-                              mixed &$msgs_in_queue = NULL): mixed;
+                              <<__OutOnly>>
+                              inout int $msgs_in_queue): mixed;
 
 /**
  * Returns a new cURL multi handle
@@ -280,7 +248,7 @@ function curl_multi_select(resource $mh,
  *
  * @param $mh - A cURL multi handle returned from
  *              [`curl_multi_init`](http://php.net/manual/en/function.curl-multi-init.php).
- * @param $timeout - The time (in seconds) to wait for a response indicating some activity.
+ * @param $timeout - The time to wait for a response indicating some activity.
  *
  * @return Awaitable<int> - An `Awaitable` representing the `int` result of the
  *                          activity. If returned `int` is positive, that
@@ -291,21 +259,12 @@ function curl_multi_select(resource $mh,
  *
  * @guide /hack/async/introduction
  * @guide /hack/async/extensions
+ *
+ * See curl_exec() wrt NoFCallBuiltin.
  */
-async function curl_multi_await(
-  resource $mh,
-  float $timeout = 1.0,
-): Awaitable<int> {
-  $finish_by = \microtime(true) + $timeout;
-  do {
-    $result = \curl_multi_select($mh, 0.0);
-    if ($result !== 0) {
-      return $result;
-    }
-    await \HH\Asio\later();
-  } while (\microtime(true) < $finish_by);
-  return 0;
-}
+<<__Native("NoFCallBuiltin")>>
+function curl_multi_await(resource $mh,
+                          float $timeout = 1.0): Awaitable<int>;
 
 /**
  * Wait for activity on any curl_multi connection
@@ -333,7 +292,7 @@ function curl_multi_setopt(resource $mh, int $option, mixed $value) : bool;
  */
 <<__Native>>
 function curl_setopt_array(resource $ch,
-                           array $options): bool;
+                           darray $options): bool;
 
 /**
  * Set an option for a cURL transfer
@@ -347,7 +306,7 @@ function curl_setopt_array(resource $ch,
 <<__Native>>
 function curl_setopt(resource $ch,
                      int $option,
-                     mixed $value): bool;
+                     mixed $value)[write_props]: bool;
 
 /**
  * Gets cURL version information
@@ -378,7 +337,7 @@ function curl_reset(resource $ch): void;
  * @return mixed - If opt is given, returns its value. Otherwise, returns an
  *    associative array.
  */
-<<__Native, __HipHopSpecific>>
+<<__Native>>
 function fb_curl_getopt(resource $ch, int $opt = 0): mixed;
 
 /**
@@ -394,10 +353,16 @@ function fb_curl_getopt(resource $ch, int $opt = 0): mixed;
  *
  * @return mixed - Returns 0 on success, or one of the CURLM_XXX errors code.
  */
-<<__Native, __HipHopSpecific>>
-function fb_curl_multi_fdset(resource $mh, mixed &$read_fd_set,
-                             mixed &$write_fd_set, mixed &$exc_fd_set,
-                             ?int &$max_fd = null): mixed;
+<<__Native>>
+function fb_curl_multi_fdset(resource $mh,
+                              <<__OutOnly>>
+                             inout vec<resource> $read_fd_set,
+                              <<__OutOnly>>
+                             inout vec<resource> $write_fd_set,
+                              <<__OutOnly>>
+                             inout vec<resource> $exc_fd_set,
+                              <<__OutOnly>>
+                             inout int $max_fd): mixed;
 
 /**
 * Returns a new cURL share handle
@@ -432,66 +397,6 @@ function curl_share_close(resource $sh): void;
 
 } // root namespace
 
-namespace HH {
-
-/**
- * Initialize a cURL session using a pooled curl handle. When this resource
- * is garbage collected, the curl handle will be saved for reuse later.
- * Pooled curl handles persist between requests.
- *
- * @param string $poolName - The name of the connection pool to use.
- *  Named connection pools are initialized via the 'curl.namedPools' ini
- *  setting, which is a comma separated list of named pools to create,
- *  or at runtime with curl_create_pool.
- * @param string $url - If provided, the CURLOPT_URL option will be set
- *   to its value. You can manually set this using the curl_setopt()
- *   function.    The file protocol is disabled by cURL if open_basedir is
- *   set.
- *
- * @return resource - Returns a cURL handle on success, FALSE on errors.
- */
-<<__Native, __HipHopSpecific>>
-function curl_init_pooled(string $poolName, ?string $url = null): mixed;
-
-/**
- * Create a new cURL pool for use with curl_init_pooled. If a pool of
- * this name already exists it will be replaced.
- *
- * @param string $poolName = The name of the connection pool to create.
- * @param int $size - The number of connections the pool will hold
- * @param int $connGetTimeout - The maximum time curl_init_pooled() will wait
- *  for a connection to become available before throwing a RuntimeException
- * @param int $reuseLimit - The number of times a connection will be reused
- *  before being recycled.
- */
-<<__Native, __HipHopSpecific>>
-function curl_create_pool(string $poolName, int $size = 5,
-                          int $connGetTimeout = 5000,
-                          int $reuseLimit = 500): void;
-
-/**
- * Destroys a cURL connection pool. curl_init_pooled() calls that are
- * already waiting on a handle will still complete, but no new calls
- * will receive a pooled handle.
- *
- * @param string $poolName - The name of the connection pool to destroy.
- * @return bool - Returns true on success, or false if the pool does not
- *  exist.
- */
-<<__Native, __HipHopSpecific>>
-function curl_destroy_pool(string $poolName): bool;
-
-/**
- * Lists currently available cURL connection pools and their configuration.
- *
- * @return array
- */
-<<__Native, __HipHopSpecific>>
-function curl_list_pools(): array;
-
-
-} // namespace HH
-
 namespace HH\Asio {
 
 /**
@@ -516,48 +421,49 @@ namespace HH\Asio {
  */
 async function curl_exec(mixed $urlOrHandle,
                          bool $closeHandleIfHandle = false): Awaitable<string> {
-  if (is_string($urlOrHandle)) {
-    $ch = curl_init($urlOrHandle);
-  } else if (is_resource($urlOrHandle) &&
-             (get_resource_type($urlOrHandle) == "curl")) {
+  if (\is_string($urlOrHandle)) {
+    $ch = \curl_init($urlOrHandle);
+  } else if (\is_resource($urlOrHandle) &&
+             (\get_resource_type($urlOrHandle) == "curl")) {
     $ch = $urlOrHandle;
   } else {
-    throw new Exception(__FUNCTION__." expects string of cURL handle");
+    throw new \Exception(__FUNCTION__." expects string of cURL handle");
   }
-  curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+  \curl_setopt($ch, \CURLOPT_RETURNTRANSFER, true);
 
-  $mh = curl_multi_init();
-  curl_multi_add_handle($mh, $ch);
-  $sleep_ms = 10;
+  $mh = \curl_multi_init();
+  \curl_multi_add_handle($mh, $ch);
+
+  $sleep_count = 0;
   do {
     $active = 1;
     do {
-      $status = curl_multi_exec($mh, $active);
-    } while ($status == CURLM_CALL_MULTI_PERFORM);
+      $status = \curl_multi_exec($mh, inout $active);
+    } while ($status == \CURLM_CALL_MULTI_PERFORM);
     if (!$active) break;
-    $select = await curl_multi_await($mh);
+    $select = await \curl_multi_await($mh);
     /* If cURL is built without ares support, DNS queries don't have a socket
      * to wait on, so curl_multi_await() (and curl_select() in PHP5) will return
      * -1, and polling is required.
      */
     if ($select == -1) {
+      // Slow down polling a bit if it's been a while (>100ms) since we had any work to do.
+      $sleep_ms = ($sleep_count >= 10) ? 100 : 10;
       await SleepWaitHandle::create($sleep_ms * 1000);
-      if ($sleep_ms < 1000) {
-        $sleep_ms *= 2;
-      }
+      $sleep_count += 1;
     } else {
-      $sleep_ms = 10;
+      $sleep_count = 0;
     }
-  } while ($status === CURLM_OK);
-  $content = (string)curl_multi_getcontent($ch);
-  curl_multi_remove_handle($mh, $ch);
+  } while ($status === \CURLM_OK);
+  $content = (string)\curl_multi_getcontent($ch);
+  \curl_multi_remove_handle($mh, $ch);
 
   /* close handle if string was passed or argument */
-  if (is_string($urlOrHandle) || ($closeHandleIfHandle === true)) {
-    curl_close($ch);
+  if (\is_string($urlOrHandle) || ($closeHandleIfHandle === true)) {
+    \curl_close($ch);
   }
 
-  curl_multi_close($mh);
+  \curl_multi_close($mh);
   return $content;
 }
 

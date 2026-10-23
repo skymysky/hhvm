@@ -14,8 +14,9 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_JIT_PERF_COUNTERS_H_
-#define incl_HPHP_JIT_PERF_COUNTERS_H_
+#pragma once
+
+#include "hphp/util/rds-local.h"
 
 #include <cstdint>
 
@@ -51,14 +52,12 @@ enum TransPerfCounter {
 };
 #undef TPC
 
-#ifdef __APPLE__
-// See perf-counters.cpp for an explanation of this hack.
-alignas(8)
-#endif
-extern __thread int64_t tl_perf_counters[tpc_num_counters];
+using PerfCounters = std::array<int64_t, tpc_num_counters>;
+
+extern RDS_LOCAL_NO_CHECK(PerfCounters, rl_perf_counters);
 extern const char* const kPerfCounterNames[tpc_num_counters];
 
-#define INC_TPC(n) ++jit::tl_perf_counters[jit::tpc_##n];
+#define INC_TPC(n) ++jit::rl_perf_counters[jit::tpc_##n];
 
 /*
  * Add name-to-perf-counter pairs to `ret', in the same format as hardware
@@ -71,5 +70,3 @@ void getPerfCounters(Array& ret);
 ///////////////////////////////////////////////////////////////////////////////
 
 }}
-
-#endif

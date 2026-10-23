@@ -1,4 +1,4 @@
-(**
+(*
  * Copyright (c) 2017, Facebook, Inc.
  * All rights reserved.
  *
@@ -7,41 +7,87 @@
  *
  *)
 
+open Sexplib.Std
+
 type t = {
   hhvm_compat_mode: bool;
   php5_compat_mode: bool;
   codegen: bool;
-  lang: FileInfo.file_type option;
-  mode: FileInfo.mode option;
-  stats: Stats_container.t option;
-  hacksperimental: bool;
-} [@@deriving show]
-
-let default = {
-  hhvm_compat_mode = false;
-  php5_compat_mode = false;
-  codegen = false;
-  lang = None;
-  mode = None;
-  stats = None;
-  hacksperimental = false;
+  mode: File_info.mode option;
+  rust: bool;
+  leak_rust_tree: bool;
+  enable_xhp_class_modifier: bool;
+  disable_xhp_element_mangling: bool;
+  disable_xhp_children_declarations: bool;
+  interpret_soft_types_as_like_types: bool;
+  is_systemlib: bool;
 }
+[@@deriving show, sexp_of]
+
+let default =
+  {
+    hhvm_compat_mode = false;
+    php5_compat_mode = false;
+    codegen = false;
+    rust = true;
+    mode = None;
+    leak_rust_tree = false;
+    enable_xhp_class_modifier = false;
+    disable_xhp_element_mangling = false;
+    disable_xhp_children_declarations = false;
+    interpret_soft_types_as_like_types = false;
+    is_systemlib = false;
+  }
 
 let make
-  ?(hhvm_compat_mode = default.hhvm_compat_mode)
-  ?(php5_compat_mode = default.php5_compat_mode)
-  ?(codegen = default.codegen)
-  ?lang
-  ?mode
-  ?stats
-  ?(hacksperimental = default.hacksperimental)
-  () =
-  { hhvm_compat_mode; php5_compat_mode; lang; mode; stats; codegen; hacksperimental }
+    ?(hhvm_compat_mode = default.hhvm_compat_mode)
+    ?(php5_compat_mode = default.php5_compat_mode)
+    ?(codegen = default.codegen)
+    ?mode
+    ?(rust = default.rust)
+    ?((* DANGER: if you leak the root tree into OCaml, it's on you to ensure that
+         * it's eventually disposed to avoid memory leak. *)
+      leak_rust_tree = default.leak_rust_tree)
+    ?(enable_xhp_class_modifier = default.enable_xhp_class_modifier)
+    ?(disable_xhp_element_mangling = default.disable_xhp_element_mangling)
+    ?(disable_xhp_children_declarations =
+      default.disable_xhp_children_declarations)
+    ?(interpret_soft_types_as_like_types =
+      default.interpret_soft_types_as_like_types)
+    ?(is_systemlib = default.is_systemlib)
+    () =
+  {
+    hhvm_compat_mode;
+    php5_compat_mode;
+    codegen;
+    mode;
+    rust;
+    leak_rust_tree;
+    enable_xhp_class_modifier;
+    disable_xhp_element_mangling;
+    disable_xhp_children_declarations;
+    interpret_soft_types_as_like_types;
+    is_systemlib;
+  }
 
 let hhvm_compat_mode e = e.hhvm_compat_mode
+
 let php5_compat_mode e = e.php5_compat_mode
+
 let codegen e = e.codegen
-let lang e = e.lang
+
 let mode e = e.mode
-let stats e = e.stats
-let hacksperimental e = e.hacksperimental
+
+let is_strict e = e.mode = Some File_info.Mstrict
+
+let rust e = e.rust
+
+let leak_rust_tree e = e.leak_rust_tree
+
+let enable_xhp_class_modifier e = e.enable_xhp_class_modifier
+
+let disable_xhp_element_mangling e = e.disable_xhp_element_mangling
+
+let disable_xhp_children_declarations e = e.disable_xhp_children_declarations
+
+let interpret_soft_types_as_like_types e = e.interpret_soft_types_as_like_types

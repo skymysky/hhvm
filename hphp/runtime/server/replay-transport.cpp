@@ -17,7 +17,6 @@
 #include <folly/Conv.h>
 
 #include "hphp/runtime/base/string-util.h"
-#include "hphp/runtime/base/zend-functions.h"
 #include "hphp/runtime/base/zend-string.h"
 #include "hphp/runtime/base/config.h"
 #include "hphp/runtime/server/http-protocol.h"
@@ -45,7 +44,10 @@ void ReplayTransport::recordInput(Transport* transport, const char *filename) {
   hdf["remote_host"] = transport->getRemoteHost();
   hdf["remote_port"] = transport->getRemotePort();
 
-  transport->getHeaders(m_requestHeaders);
+  auto const& headers = transport->getHeaders();
+  for (auto const& pair : headers) {
+    m_requestHeaders[pair.first] = pair.second;
+  }
   int index = 0;
   for (HeaderMap::const_iterator iter = m_requestHeaders.begin();
        iter != m_requestHeaders.end(); ++iter) {
@@ -59,7 +61,7 @@ void ReplayTransport::recordInput(Transport* transport, const char *filename) {
   size_t size;
   const void *data = transport->getPostData(size);
   if (size) {
-    String encoded = string_uuencode((const char *)data, safe_cast<int>(size));
+    OptString encoded = string_uuencode((const char *)data, safe_cast<int>(size));
     hdf["post"] = encoded.get()->data();
   } else {
     hdf["post"] = "";
@@ -80,8 +82,8 @@ void ReplayTransport::replayInput(Hdf hdf) {
 }
 
 void ReplayTransport::replayInputImpl() {
-  String postData = StringUtil::UUDecode(Config::GetString(m_ini, m_hdf, "post",
-                                                           "", false));
+  OptString postData = StringUtil::UUDecode(Config::GetString(m_ini, m_hdf, "post",
+                                                              "", false));
   m_postData = std::string(postData.data(), postData.size());
   m_requestHeaders.clear();
   auto headers_callback = [&](const IniSetting::Map& ini_h, const Hdf& hdf_h,
@@ -123,8 +125,8 @@ std::string ReplayTransport::getHeader(const char *name) {
   return "";
 }
 
-void ReplayTransport::getHeaders(HeaderMap &headers) {
-  headers = m_requestHeaders;
+const HeaderMap& ReplayTransport::getHeaders() {
+  return m_requestHeaders;
 }
 
 void ReplayTransport::addHeaderImpl(const char *name, const char *value) {

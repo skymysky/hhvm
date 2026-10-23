@@ -25,22 +25,20 @@ namespace HPHP {
 
 const StaticString s_nl("\n");
 
-Variant HHVM_FUNCTION(wordwrap, const String& str, int64_t linewidth /* = 75 */,
-                      const String& brk /* = s_nl */, bool cut /* = false */) {
+Variant HHVM_FUNCTION(wordwrap, const OptString& str, int64_t linewidth /* = 75 */,
+                      const OptString& brk /* = s_nl */, bool cut /* = false */) {
   const char* brkstr = brk.data();
   size_t textlen = str.size();
   size_t brklen = brk.size();
 
   if (textlen == 0) {
-    return empty_string();
+    return Variant{String::Empty()};
   }
   if (brklen == 0) {
-    raise_warning("Break string cannot be empty");
-    return false;
+    SystemLib::throwInvalidArgumentExceptionObject("Break string cannot be empty");
   }
   if (linewidth == 0 && cut) {
-    raise_warning("Can't force cut when width is zero");
-    return false;
+    SystemLib::throwInvalidArgumentExceptionObject("Can't force cut when width is zero");
   }
   size_t w = linewidth >= 0 ? linewidth : 0;
 
@@ -146,30 +144,30 @@ Variant HHVM_FUNCTION(wordwrap, const String& str, int64_t linewidth /* = 75 */,
 // We take format as a variant in order to get the right conversion
 // failure notice (as opposed to parameter typehint warning)
 Variant HHVM_FUNCTION(sprintf, const Variant& vformat, const Array& args) {
-  String format = vformat.toString();
-  String output = string_printf(format.data(), format.size(), args);
+  OptString format = vformat.toString();
+  OptString output = string_printf(format.data(), format.size(), args);
   if (output.isNull()) return false;
   return output;
 }
 
 Variant HHVM_FUNCTION(vsprintf, const Variant& vformat, const Variant& args) {
-  String format = vformat.toString();
-  String output = string_printf(format.data(), format.size(), args.toArray());
+  OptString format = vformat.toString();
+  OptString output = string_printf(format.data(), format.size(), args.toArray());
   if (output.isNull()) return false;
   return output;
 }
 
 Variant HHVM_FUNCTION(printf, const Variant& vformat, const Array& args) {
-  String format = vformat.toString();
-  String output = string_printf(format.data(), format.size(), args);
+  OptString format = vformat.toString();
+  OptString output = string_printf(format.data(), format.size(), args);
   if (output.isNull()) return false;
   g_context->write(output.data(), output.size());
   return output.size();
 }
 
 Variant HHVM_FUNCTION(vprintf, const Variant& vformat, const Variant& args) {
-  String format = vformat.toString();
-  String output = string_printf(format.data(), format.size(), args.toArray());
+  OptString format = vformat.toString();
+  OptString output = string_printf(format.data(), format.size(), args.toArray());
   if (output.isNull()) return false;
   g_context->write(output.data(), output.size());
   return output.size();
@@ -177,15 +175,13 @@ Variant HHVM_FUNCTION(vprintf, const Variant& vformat, const Variant& args) {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-void StandardExtension::initString() {
+void StandardExtension::registerNativeString() {
   HHVM_FE(wordwrap);
 
   HHVM_FE(sprintf);
   HHVM_FE(vsprintf);
   HHVM_FE(printf);
   HHVM_FE(vprintf);
-
-  loadSystemlib("std_string");
 }
 
 }

@@ -14,15 +14,14 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_RUNTIME_ERROR_H_
-#define incl_HPHP_RUNTIME_ERROR_H_
+#pragma once
 
 #include <cstdarg>
 #include <string>
 
 #include "hphp/util/portability.h"
-#include "hphp/runtime/base/annot-type.h"
 #include "hphp/runtime/base/datatype.h"
+#include "hphp/runtime/vm/jit/types.h"
 
 #ifdef ERROR
 #undef ERROR
@@ -41,8 +40,7 @@ struct Func;
 struct ArrayData;
 struct StringData;
 struct TypeConstraint;
-
-enum class HackStrictOption;
+struct TypedValue;
 
 enum class ErrorMode {
   ERROR = 1,
@@ -110,77 +108,109 @@ void raise_message(ErrorMode mode, const char *fmt, va_list ap);
 void raise_message(ErrorMode mode,
   ATTRIBUTE_PRINTF_STRING const char *fmt, ...) ATTRIBUTE_PRINTF(2, 3);
 void raise_message(ErrorMode mode, bool skipTop, const std::string& msg);
+std::string param_type_error_message(
+    const char* func_name,
+    int param_num,
+    const char* expected_type,
+    TypedValue actual_value);
 void raise_param_type_warning(
     const char* func_name,
     int param_num,
-    DataType expected_type,
-    DataType actual_type);
-void raise_hack_strict(HackStrictOption option, const char *ini_setting,
-                       const std::string& msg);
-void raise_hack_strict(HackStrictOption option, const char *ini_setting,
-                       const char *fmt, ...);
+    const char* expected_type,
+    TypedValue actual_value);
 
 /*
  * raise_typehint_error() is the same as raise_recoverable_error(), except
- * when compiled in RepoAuthoritative mode with HardTypeHints the error
- * handler is not allowed to recover.
+ * the error handler is not allowed to recover.
+ * raise_reified_typehint_error flavor also takes a warn flag that demotes the
+ * error to a warning for reified generics migrations purposes
  */
-void raise_typehint_error(const std::string& msg);
+[[noreturn]] void raise_typehint_error(const std::string& msg);
+void raise_typehint_error_without_first_frame(const std::string& msg);
+void raise_reified_typehint_error(const std::string& msg, bool warn);
+void raise_inline_typehint_error(std::string& givenType, std::string& expectedType, std::string& errorKey);
 
 /*
  * raise_return_typehint_error() is the same as raise_recoverable_error(),
- * except when compiled in RepoAuthoritative mode with CheckReturnTypeHints >= 3
- * the error handler is not allowed to recover.
+ * except the error handler is not allowed to recover.
  */
 void raise_return_typehint_error(const std::string& msg);
 
-void raise_disallowed_dynamic_call(const Func* f);
+/*
+ * Raise the appropriate warning or error (with the given message) for some
+ * violation of a property type-hint. If isSoft is true, than a warning is
+ * always raised.
+ */
+void raise_property_typehint_error(const std::string& msg,
+                                   bool isSoft, bool isUB);
 
-void raise_resolve_undefined(const StringData* name, const Class* c = nullptr);
-void raise_call_to_undefined(const StringData* name, const Class* c = nullptr);
+/*
+ * Raise the appropriate warning or error if we try to unset a property, and
+ * that property has a type-hint which we're enforcing.
+ */
+void raise_property_typehint_unset_error(const Class* declCls,
+                                         const StringData* propName,
+                                         bool isSoft, bool isUB);
 
-void raise_intish_index_cast();
+[[noreturn]] void raise_resolve_func_undefined(const StringData* name, const Class* c = nullptr);
+[[noreturn]] void raise_call_to_undefined(const StringData* name,
+                                          const Class* c = nullptr);
+[[noreturn]] void raise_resolve_class_undefined(const StringData* name);
 
-void raise_hack_arr_compat_serialize_notice(const ArrayData*);
+[[noreturn]] void raise_convert_object_to_string(const char* cls_name);
+[[noreturn]] void throw_convert_rfunc_to_type(const char* typeName);
+[[noreturn]] void throw_convert_rcls_meth_to_type(const char* typeName);
+[[noreturn]] void throw_convert_ecl_to_type(const char* typeName);
 
 ///////////////////////////////////////////////////////////////////////////////
 /*
- * Hack arrays.
+ * Hack arrays compat notices.
  */
 
-void raise_hackarr_type_hint_param_notice(const Func* func,
-                                          const ArrayData* ad,
-                                          AnnotType at,
-                                          int param);
-void raise_hackarr_type_hint_ret_notice(const Func* func,
-                                        const ArrayData* ad,
-                                        AnnotType at);
-void raise_hackarr_type_hint_outparam_notice(const Func* func,
-                                             const ArrayData* ad,
-                                             AnnotType at,
-                                             int param);
+void raise_hack_arr_compat_serialize_notice(const ArrayData*);
+
+void raise_hackarr_compat_is_operator(const char* source, const char* target);
+
+void raise_hackarr_compat_notice(const std::string& msg);
+
+[[noreturn]] void raise_use_of_specialized_array();
+
+void raise_class_to_string_conversion_notice(const char* source);
+void raise_class_to_memokey_conversion_warning();
 
 /*
- * RAII mechanism to temporarily suppress Hack array compat notices within a
- * scope.
+ * RAII mechanism to temporarily suppress lazyclass-to-string conversion notices
+ * within a scope.
  */
-struct SuppressHackArrCompatNotices {
-  SuppressHackArrCompatNotices();
-  ~SuppressHackArrCompatNotices();
-  SuppressHackArrCompatNotices(const SuppressHackArrCompatNotices&) = delete;
-  SuppressHackArrCompatNotices(SuppressHackArrCompatNotices&&) = delete;
-  SuppressHackArrCompatNotices&
-  operator=(const SuppressHackArrCompatNotices&) = delete;
-  SuppressHackArrCompatNotices&
-  operator=(SuppressHackArrCompatNotices&&) = delete;
+struct SuppressClassConversionNotice {
+  SuppressClassConversionNotice();
+  ~SuppressClassConversionNotice();
+  SuppressClassConversionNotice(const SuppressClassConversionNotice&)
+      = delete;
+  SuppressClassConversionNotice(SuppressClassConversionNotice&&) = delete;
+  SuppressClassConversionNotice&
+      operator=(const SuppressClassConversionNotice&) = delete;
+  SuppressClassConversionNotice&
+      operator=(SuppressClassConversionNotice&&) = delete;
 private:
   bool old;
 };
 
-void raise_hackarr_compat_notice(const std::string& msg);
 
 ///////////////////////////////////////////////////////////////////////////////
 
-}
+void raise_str_to_class_notice(const StringData* name, jit::StrToClassKind kind);
 
-#endif // incl_HPHP_RUNTIME_ERROR_H_
+/*
+ * class_meth compact notices.
+ */
+void raise_clsmeth_compat_type_hint(
+  const Func* func, const std::string& displayName, Optional<int> param);
+void raise_clsmeth_compat_type_hint_outparam_notice(
+  const Func* func, const std::string& displayName, int paramNum);
+void raise_clsmeth_compat_type_hint_property_notice(
+  const Class* declCls, const StringData* propName,
+  const std::string& displayName, bool isStatic);
+
+///////////////////////////////////////////////////////////////////////////////
+}

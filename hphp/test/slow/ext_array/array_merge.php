@@ -1,69 +1,72 @@
-<?php
+<?hh
 
-function a() {
-  $array1 = array(
+function a() :mixed{
+  $array1 = dict[
     "color" => "red",
-    2,
-    4
-  );
-  $array2 = array(
-    "a",
-    "b",
+    0 => 2,
+    1 => 4
+  ];
+  $array2 = dict[
+    0 => "a",
+    1 => "b",
     "color" => "green",
     "shape" => "trapezoid",
-    4
-  );
-  $result = array_merge($array1, array($array2));
+    2 => 4
+  ];
+  $result = array_merge($array1, vec[$array2]);
   var_dump($result);
 }
 
-function b() {
-  $array1 = array();
-  $array2 = array(1 => "data");
-  $result = array_merge($array1, array($array2));
+function b() :mixed{
+  $array1 = vec[];
+  $array2 = dict[1 => "data"];
+  $result = array_merge($array1, vec[$array2]);
   var_dump($result);
 }
 
-function c() {
-  $array1 = array();
-  $array2 = array(1 => "data");
-  $result = $array1 + $array2;
+function c() :mixed{
+  $array1 = vec[];
+  $array2 = dict[1 => "data"];
+  $result = array_merge($array1, $array2);
   var_dump($result);
 }
 
-function d() {
+function d() :mixed{
   $beginning = "foo";
-  $end = array(1 => "bar");
-  $result = array_merge((array)$beginning, array($end));
+  $end = dict[1 => "bar"];
+  $result = array_merge(dict[0 => $beginning], vec[$end]);
   var_dump($result);
 }
 
-function e() {
-  $v = 1;
-  $a = array("one" => 1);
-  $b = array("two" => &$v);
-  $r = array_merge($a, array($b));
+function e() :mixed{
   $v = 2;
+  $a = dict["one" => 1];
+  $b = dict["two" => $v];
+  $r = array_merge($a, vec[$b]);
   var_dump($r);
 }
 
-function f() {
+function f() :mixed{
   $id = 100000000000022;
-  $a = array($id => 1);
-  $b = array($id => 2);
-  $r = array_merge($a, array($b));
+  $a = dict[$id => 1];
+  $b = dict[$id => 2];
+  $r = array_merge($a, vec[$b]);
   var_dump($r);
 }
 
-function g() {
-  $a = array(1 => 50, 5 => 60);
+function g() :mixed{
+  $a = dict[1 => 50, 5 => 60];
   $b = null;
-  var_dump(array_merge($a, array($b)));
+  var_dump(array_merge($a, vec[$b]));
 }
 
+
+<<__EntryPoint>>
+function main_array_merge() :mixed{
 a();
 b();
 c();
 d();
 e();
 f();
+}

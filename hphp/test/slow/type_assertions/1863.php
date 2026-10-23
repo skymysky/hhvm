@@ -1,8 +1,12 @@
-<?php
+<?hh
 
-function foo() {
+function foo() :mixed{
     }
-    function main() {
+    function main() :mixed{
       var_dump(is_null(foo()));
     }
-    main();
+
+    <<__EntryPoint>>
+function main_1863() :mixed{
+main();
+}

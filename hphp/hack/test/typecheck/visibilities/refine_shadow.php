@@ -1,11 +1,11 @@
-<?hh // strict
+<?hh
 class A {
 
   private function get(): int {
     return 42;
   }
   public function foo(): int {
-    if ($this instanceof B) {
+    if ($this is B) {
       $x = $this->get(); // we call get() on A
       print $this->bar(); // we call bar() on B
     } else {

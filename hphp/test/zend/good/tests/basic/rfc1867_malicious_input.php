@@ -1,4 +1,4 @@
-<?php
-var_dump($_FILES);
-var_dump($_POST);
-?>
+<?hh <<__EntryPoint>> function main(): void {
+var_dump(\HH\global_get('_FILES'));
+var_dump(\HH\global_get('_POST'));
+}

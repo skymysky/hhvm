@@ -1,6 +1,7 @@
-<?php
-function f($a=namespace\bar) {
-	return $a;
+<?hh
+function f($a=namespace\bar) :mixed{
+    return $a;
 }
+<<__EntryPoint>> function main(): void {
 echo f()."\n";
-?>
+}

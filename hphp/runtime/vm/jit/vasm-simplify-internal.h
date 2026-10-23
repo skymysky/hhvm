@@ -14,8 +14,7 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_JIT_VASM_SIMPLIFY_INTERNAL_H_
-#define incl_HPHP_JIT_VASM_SIMPLIFY_INTERNAL_H_
+#pragma once
 
 #include "hphp/runtime/vm/jit/containers.h"
 #include "hphp/runtime/vm/jit/vasm.h"
@@ -27,11 +26,17 @@
 #include <cstdint>
 #include <utility>
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 
 ///////////////////////////////////////////////////////////////////////////////
 
 struct Env {
+  Env(Vunit& unit, const jit::vector<Vlabel>& labels) : unit(unit) {
+    init(labels);
+  }
+
+  void init(const jit::vector<Vlabel>& labels);
+
   Vunit& unit;
 
   // Number of uses of each Vreg.
@@ -40,6 +45,9 @@ struct Env {
   // Instruction which def'd each Vreg.  Probably only useful when the def
   // instruction only has a single dst, but that's all we need right now.
   jit::vector<Vinstr::Opcode> def_insts;
+
+  // Vregs which are constants, or copies of constants.
+  jit::vector<Optional<Vconst>> consts;
 };
 
 template<Vinstr::Opcode op>
@@ -90,13 +98,24 @@ auto simplify_impl(Env& env, Vlabel b, size_t i, Simplify simplify)
           env.use_counts.resize(size_t{r} + 1);
         }
         ++env.use_counts[r];
+        if (r >= env.consts.size()) {
+          env.consts.resize(size_t{r} + 1);
+        }
+        auto const it = env.unit.regToConst.find(r);
+        if (it != env.unit.regToConst.end()) env.consts[r] = it->second;
       });
       visitDefs(unit, inst, [&] (Vreg r) {
         if (r >= env.def_insts.size()) {
           env.def_insts.resize(size_t{r} + 1, Vinstr::nop);
         }
         env.def_insts[r] = inst.op;
+        if (r >= env.consts.size()) {
+          env.consts.resize(size_t{r} + 1);
+        }
       });
+      if (inst.op == Vinstr::copy && !inst.copy_.d.isPhys()) {
+        env.consts[inst.copy_.d] = env.consts[inst.copy_.s];
+      }
     }
 
     return nremove;
@@ -110,12 +129,16 @@ inline bool simplify_impl(Env& env, Vlabel b, size_t i, const Vinstr& instr) {
   });
 }
 
-namespace x64   { bool simplify(Env& env, Vlabel b, size_t i); }
-namespace arm   { bool simplify(Env& env, Vlabel b, size_t i); }
-namespace ppc64 { bool simplify(Env& env, Vlabel b, size_t i); }
+namespace x64 {
+bool simplify(Env& env, Vlabel b, size_t i);
+bool psimplify(Env& env, const Abi& abi, Vlabel b, size_t i);
+}
+
+namespace arm {
+bool simplify(Env& env, Vlabel b, size_t i);
+bool psimplify(Env& env, const Abi& abi, Vlabel b, size_t i);
+}
 
 ///////////////////////////////////////////////////////////////////////////////
 
-}}
-
-#endif
+}

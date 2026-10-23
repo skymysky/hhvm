@@ -1,6 +1,6 @@
-<?php
-
-$filename = dirname(__FILE__)."/ftruncate.dat";
+<?hh
+<<__EntryPoint>> function main(): void {
+$filename = sys_get_temp_dir().'/'.'ftruncate.dat';
 
 file_put_contents($filename, "some test data inside");
 
@@ -33,6 +33,6 @@ var_dump(ftruncate($fp, -1000000000));
 fclose($fp);
 var_dump(file_get_contents($filename));
 
-@unlink($filename);
+unlink($filename);
 echo "Done\n";
-?>
+}

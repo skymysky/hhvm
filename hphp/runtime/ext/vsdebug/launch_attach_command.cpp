@@ -17,6 +17,8 @@
 #include "hphp/runtime/ext/vsdebug/debugger.h"
 #include "hphp/runtime/ext/vsdebug/command.h"
 
+#include "hphp/util/configs/jit.h"
+
 namespace HPHP {
 namespace VSDEBUG {
 
@@ -56,8 +58,30 @@ bool LaunchAttachCommand::executeImpl(DebuggerSession* /*session*/,
   bool notifyOnBpCalibration =
     tryGetBool(args, "notifyOnBpCalibration", false);
 
+  bool disableUniqueVarRef =
+    tryGetBool(args, "disableUniqueVarRef", false);
+
+  bool disablePostDummyEvalHelper =
+    tryGetBool(args, "disablePostDummyEvalHelper", false) ||
+    // TODO: make clients use the new flag name and remove this legacy version
+    tryGetBool(args, "disableDummyPsPs", false);
+
+  bool disableStdoutRedirection =
+    tryGetBool(args, "disableStdoutRedirection", false);
+
+  bool disableJit =
+    tryGetBool(args, "disableJit", Cfg::Jit::DisabledByVSDebug);
+
+  bool warnOnFileChange = tryGetBool(args, "warnOnFileChange", true);
+
   const auto& logFilePath =
     tryGetString(args, "logFilePath", emptyString);
+
+  const auto debuggerSessionAuthToken =
+    tryGetString(args, "debuggerSessionAuthToken", emptyString);
+
+  auto maxReturnedStringLength =
+    tryGetInt(args, "maxReturnedStringLength", 32 * 1024);
 
   if (!logFilePath.empty()) {
     // Re-open logging using the file path specified by the client.
@@ -74,11 +98,20 @@ bool LaunchAttachCommand::executeImpl(DebuggerSession* /*session*/,
     }
   }
 
+  // Obviously don't log the auth token itself, but log whether or not we've
+  // got one.
+  VSDebugLogger::Log(
+    VSDebugLogger::LogLevelInfo,
+    "Client provided an auth token? %s",
+    debuggerSessionAuthToken.empty() ? "NO" : "YES"
+  );
+
   if (!startupDoc.empty()) {
     m_debugger->startDummyRequest(
       startupDoc,
       sandboxUser,
       sandboxName,
+      debuggerSessionAuthToken,
       displayStartupMsg
     );
   } else {
@@ -86,6 +119,7 @@ bool LaunchAttachCommand::executeImpl(DebuggerSession* /*session*/,
       emptyString,
       sandboxUser,
       sandboxName,
+      debuggerSessionAuthToken,
       displayStartupMsg
     );
   }
@@ -94,6 +128,12 @@ bool LaunchAttachCommand::executeImpl(DebuggerSession* /*session*/,
   options.showDummyOnAsyncPause = showDummyOnAsyncPause;
   options.warnOnInterceptedFunctions = warnOnInterceptedFunctions;
   options.notifyOnBpCalibration = notifyOnBpCalibration;
+  options.disableUniqueVarRef = disableUniqueVarRef;
+  options.disablePostDummyEvalHelper = disablePostDummyEvalHelper;
+  options.maxReturnedStringLength = maxReturnedStringLength;
+  options.disableStdoutRedirection = disableStdoutRedirection;
+  options.disableJit = disableJit;
+  options.warnOnFileChange = warnOnFileChange;
   m_debugger->setDebuggerOptions(options);
 
   // Send the InitializedEvent to indicate to the front-end that we are up

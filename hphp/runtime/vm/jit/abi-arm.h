@@ -14,17 +14,16 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_JIT_ABI_ARM_H
-#define incl_HPHP_JIT_ABI_ARM_H
+#pragma once
 
 #include "hphp/runtime/vm/jit/abi-regs.h"
 #include "hphp/runtime/vm/jit/phys-reg.h"
+#include "hphp/runtime/vm/jit/types.h"
 
 #include "hphp/util/asm-x64.h"
-#include "hphp/vixl/a64/assembler-a64.h"
-#include "hphp/vixl/a64/constants-a64.h"
+#include "hphp/vixl/hphp-compat.h"
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 
 struct Abi;
 
@@ -45,6 +44,17 @@ inline PhysReg rsp()   { return vixl::sp; }
 
 inline RegSet vm_regs_no_sp()   { return rvmfp() | rvmtl(); }
 inline RegSet vm_regs_with_sp() { return vm_regs_no_sp() | rvmsp(); }
+
+/*
+ * Note: d8-d15 are currently marked as reserved.  If we decide to make them
+ * available for the JIT, we need to add them to this set and add support for
+ * saving / restoring them upon entering / leaving the TC.
+*/
+inline RegSet cross_jit_save() {
+  return
+    vixl::x19 | vixl::x20 | vixl::x21 | vixl::x22 | vixl::x23 |
+    vixl::x24 | vixl::x25 | vixl::x26 | vixl::x27 | vixl::x28;
+}
 
 inline PhysReg rret_data() { return vixl::x0; }
 inline PhysReg rret_type() { return vixl::x1; }
@@ -68,6 +78,7 @@ RegSet arg_regs_simd(size_t n);
 RegSet arg_regs_ind_ret(size_t n);
 
 PhysReg r_svcreq_req();
+PhysReg r_svcreq_spoff();
 PhysReg r_svcreq_stub();
 PhysReg r_svcreq_sf();
 PhysReg r_svcreq_arg(size_t i);
@@ -79,15 +90,17 @@ inline vixl::Register x2a(PhysReg x64reg) {
   return vixl::Register(vixl::CPURegister(x64reg));
 }
 
-inline vixl::FPRegister x2f(PhysReg x64reg) {
+inline vixl::VRegister x2f(PhysReg x64reg) {
   always_assert(x64reg.isSIMD());
-  return vixl::FPRegister(vixl::CPURegister(x64reg));
+  return vixl::VRegister(vixl::CPURegister(x64reg));
 }
 
 inline vixl::VRegister x2v(PhysReg x64reg) {
   always_assert(x64reg.isSIMD());
   auto const r = vixl::CPURegister(x64reg);
-  return vixl::VRegister(r.code(), 128);
+  // Use .16b (16 lanes of bytes) format for 128-bit vector operations.
+  // The new VIXL requires an explicit lane count for ld1/st1 encoding.
+  return vixl::VRegister(r.code(), 128, 16);
 }
 
 /*
@@ -239,6 +252,4 @@ const vixl::Register rAsm_w(vixl::w18);
 
 ///////////////////////////////////////////////////////////////////////////////
 
-}}}
-
-#endif
+}}

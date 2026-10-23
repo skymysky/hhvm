@@ -14,15 +14,14 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_GROWABLE_VECTOR_H_
-#define incl_HPHP_GROWABLE_VECTOR_H_
+#pragma once
 
 #include <cstdlib>
 #include <cstdint>
 
 #include "hphp/util/assertions.h"
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 ////////////////////////////////////////////////////////////////////////////////
 
 /*
@@ -141,6 +140,5 @@ private:
 };
 
 ////////////////////////////////////////////////////////////////////////////////
-}}
+}
 
-#endif

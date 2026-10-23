@@ -1,0 +1,19 @@
+error: Typing[4110] Invalid return type [1]
+-> Expected `nonnull` [2]
+-> But got `mixed` [3]
+
+nullable_dict_eq_null.php:7:12
+1 | <?hh
+2 | 
+3 | function nullable_dict_eq_null(?dict<string, mixed> $d): dict<string, nonnull> {
+  |                                              ^^^^^ [3]
+  |                                                                       ^^^^^^^ [2]
+4 |   if ($d === null) {
+5 |     return dict[];
+6 |   } else {
+7 |     return $d;
+  |            ^^ [1]
+8 |   }
+9 | }
+
+1 error found

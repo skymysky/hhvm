@@ -11,6 +11,6 @@
 
 class A {}
 
-function f() {
+function f(): void {
   $a = new A();
 }

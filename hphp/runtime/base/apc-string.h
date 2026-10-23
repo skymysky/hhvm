@@ -14,8 +14,7 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_APC_STRING_H_
-#define incl_HPHP_APC_STRING_H_
+#pragma once
 
 #include "hphp/runtime/base/apc-handle.h"
 #include "hphp/runtime/base/apc-typed-value.h"
@@ -31,44 +30,34 @@ namespace HPHP {
  */
 struct APCString {
 
-  static APCHandle::Pair MakeSharedString(StringData* str) {
-    return MakeSharedString(APCKind::SharedString, str);
-  }
-
-  static APCHandle::Pair MakeSerializedArray(StringData* str) {
-    return MakeSharedString(APCKind::SerializedArray, str);
-  }
-
   static APCHandle::Pair MakeSerializedVec(StringData* str) {
-    return MakeSharedString(APCKind::SerializedVec, str);
+    return MakeSerializedString(APCKind::SerializedVec, str);
   }
 
   static APCHandle::Pair MakeSerializedDict(StringData* str) {
-    return MakeSharedString(APCKind::SerializedDict, str);
+    return MakeSerializedString(APCKind::SerializedDict, str);
   }
 
   static APCHandle::Pair MakeSerializedKeyset(StringData* str) {
-    return MakeSharedString(APCKind::SerializedKeyset, str);
+    return MakeSerializedString(APCKind::SerializedKeyset, str);
   }
 
-  static APCHandle::Pair MakeSerializedObject(const String& str) {
-    return MakeSharedString(APCKind::SerializedObject, str.get());
+  static APCHandle::Pair MakeSerializedObject(const OptString& str) {
+    return MakeSerializedString(APCKind::SerializedObject, str.get());
   }
 
   static void Delete(APCString* s) {
     auto const allocSize = sizeof(APCString) + s->m_str.m_len + 1;
     s->~APCString();
-    uncounted_sized_free(s, allocSize);
+    shared_sized_free(s, allocSize);
   }
 
   static APCString* fromHandle(APCHandle* handle) {
     assertx(handle->checkInvariants());
-    assertx(handle->kind() == APCKind::SharedString ||
-           handle->kind() == APCKind::SerializedArray ||
-           handle->kind() == APCKind::SerializedVec ||
-           handle->kind() == APCKind::SerializedDict ||
-           handle->kind() == APCKind::SerializedKeyset ||
-           handle->kind() == APCKind::SerializedObject);
+    assertx(handle->kind() == APCKind::SerializedVec ||
+            handle->kind() == APCKind::SerializedDict ||
+            handle->kind() == APCKind::SerializedKeyset ||
+            handle->kind() == APCKind::SerializedObject);
     static_assert(
       offsetof(APCString, m_handle) == 0,
       "m_handle must appear first in APCString"
@@ -78,12 +67,10 @@ struct APCString {
 
   static const APCString* fromHandle(const APCHandle* handle) {
     assertx(handle->checkInvariants());
-    assertx(handle->kind() == APCKind::SharedString ||
-           handle->kind() == APCKind::SerializedArray ||
-           handle->kind() == APCKind::SerializedVec ||
-           handle->kind() == APCKind::SerializedDict ||
-           handle->kind() == APCKind::SerializedKeyset ||
-           handle->kind() == APCKind::SerializedObject);
+    assertx(handle->kind() == APCKind::SerializedVec ||
+            handle->kind() == APCKind::SerializedDict ||
+            handle->kind() == APCKind::SerializedKeyset ||
+            handle->kind() == APCKind::SerializedObject);
     static_assert(
       offsetof(APCString, m_handle) == 0,
       "m_handle must appear first in APCString"
@@ -91,9 +78,10 @@ struct APCString {
     return reinterpret_cast<const APCString*>(handle);
   }
 
-  // Used when creating/destroying a local proxy (see StringData).
-  void reference() const { m_handle.referenceNonRoot(); }
-  void unreference() const { m_handle.unreferenceNonRoot(); }
+  // When a request references an APCString, we enqueue it in a
+  // request-local list; when the request is over, unreference them all.
+  void reference() const;
+  static void cleanup();
 
   StringData* getStringData() {
     return &m_str;
@@ -104,7 +92,7 @@ struct APCString {
   }
 
 private:
-  static APCHandle::Pair MakeSharedString(APCKind, StringData*);
+  static APCHandle::Pair MakeSerializedString(APCKind, StringData*);
   explicit APCString(APCKind kind) : m_handle(kind) {}
   ~APCString() {}
   APCString(const APCString&) = delete;
@@ -122,4 +110,3 @@ private:
 
 }
 
-#endif

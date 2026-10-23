@@ -21,10 +21,9 @@
 #include "hphp/runtime/base/header-kind.h"
 #include "hphp/util/trace.h"
 #include "hphp/util/assertions.h"
-#include "hphp/runtime/base/memory-manager-defs.h"
 #include "hphp/runtime/base/container-functions.h"
 
-TRACE_SET_MOD(heapreport);
+TRACE_SET_MOD(heapreport)
 
 namespace HPHP {
 namespace {
@@ -45,28 +44,40 @@ DEBUG_ONLY std::string describe(const HeapGraph& g, int n) {
   }
   out << ":" << header_names[int(h->kind())];
   switch (h->kind()) {
-    case HeaderKind::Packed:
-    case HeaderKind::Mixed:
     case HeaderKind::Dict:
-    case HeaderKind::Empty:
-    case HeaderKind::VecArray:
+    case HeaderKind::Vec:
     case HeaderKind::Keyset:
-    case HeaderKind::Apc:
-    case HeaderKind::Globals:
+    case HeaderKind::BespokeVec:
+    case HeaderKind::BespokeDict:
+    case HeaderKind::BespokeKeyset:
       out << "[" << static_cast<const ArrayData*>(h)->size() << "]";
       break;
     case HeaderKind::String:
       out << "[" << static_cast<const StringData*>(h)->size() << "]";
       break;
-    case HeaderKind::Resource:
-    case HeaderKind::Ref:
+    case HeaderKind::RFunc: {
+      auto const rfunc = static_cast<const RFuncData*>(h);
+      out << ":" << rfunc->m_func->name()->data()
+          << "[" << rfunc->m_arr->size() << "]";
       break;
+    }
+    case HeaderKind::Resource:
+    case HeaderKind::ClsMeth:
+      break;
+    case HeaderKind::RClsMeth: {
+      auto const rclsmeth = static_cast<const RClsMethData*>(h);
+      out << ":" << rclsmeth->m_cls->name()->data()
+          << "::" << rclsmeth->m_func->name()->data()
+          << "[" << rclsmeth->m_arr->size() << "]";
+      break;
+    }
     case HeaderKind::Object:
     case HeaderKind::NativeObject:
     case HeaderKind::Closure:
     case HeaderKind::WaitHandle:
     case HeaderKind::AsyncFuncWH:
     case HeaderKind::AwaitAllWH:
+    case HeaderKind::ConcurrentWH:
       out << ":" << static_cast<const ObjectData*>(h)->classname_cstr();
       break;
     case HeaderKind::Vector:
@@ -113,7 +124,7 @@ std::string describePtr(const HeapGraph& g, const HeapGraph::Ptr& ptr) {
   std::ostringstream out;
   out << " " << ptrSym[(unsigned)ptr.ptr_kind];
   auto& from = g.nodes[ptr.from];
-  if (!from.is_root) out << describe(g, ptr.from);
+  if (!from.is_root()) out << describe(g, ptr.from);
   else out << type_scan::getName(from.tyindex);
   return out.str();
 }

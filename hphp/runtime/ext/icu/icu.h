@@ -14,8 +14,7 @@
    | license@php.net so we can mail you a copy immediately.               |
    +----------------------------------------------------------------------+
 */
-#ifndef incl_HPHP_ICU_H
-#define incl_HPHP_ICU_H
+#pragma once
 
 #include "hphp/runtime/ext/extension.h"
 #include "hphp/runtime/vm/native-data.h"
@@ -23,8 +22,9 @@
 #include <unicode/ucnv.h>
 #include <unicode/unistr.h>
 #include <unicode/ustring.h>
+#include "hphp/runtime/base/execution-context.h"
 #include "hphp/runtime/base/request-event-handler.h"
-#include "hphp/runtime/base/request-local.h"
+#include "hphp/util/rds-local.h"
 
 namespace HPHP {
 /////////////////////////////////////////////////////////////////////////////
@@ -42,7 +42,7 @@ struct IntlError {
 
   UErrorCode getErrorCode() const { return m_errorCode; }
 
-  String getErrorMessage(bool appendCode = true) const {
+  OptString getErrorMessage(bool appendCode = true) const {
     if (!appendCode) {
       return m_errorMessage;
     }
@@ -59,94 +59,138 @@ struct IntlError {
 };
 
 template<class T>
-T* GetData(ObjectData* obj, const String& ctx) {
+T* GetData(ObjectData* obj, const StaticString& name) {
+  auto const okay = [&]{
+    // Avoid looking up the class if possible. We can do a pointer comparison
+    // on the static string names which will succeed if the classes match.
+    auto const cls = obj->getVMClass();
+    if (cls->name() == name.get()) return true;
+
+    // Load the class and do the expensive check instead. We need this fallback
+    // because ext_icu classes are not final.
+    auto const needed = Class::lookup(name.get());
+    if (needed && (cls == needed || cls->classofNonIFace(needed))) return true;
+
+    // Raise a notice, which we'll upgrade to an error after confirming that
+    // this case is rare (or nonexistent) in most codebases.
+    raise_notice("Invalid argument: expected %s, got %s",
+                 name.data(), cls->name()->data());
+    return false;
+  }();
+  if (!okay) return nullptr;
+
   auto const ret = Native::data<T>(obj);
   if (!ret->isValid()) {
     ret->setError(U_ILLEGAL_ARGUMENT_ERROR,
-                  "Found unconstructed %s", ctx.c_str());
+                  "Found unconstructed %s", name.data());
     return nullptr;
   }
   return ret;
 }
 
 template<class T>
-T* GetData(Object, const String&);  // get a link error.
+T* GetData(Object, const OptString&);  // get a link error.
 
 /////////////////////////////////////////////////////////////////////////////
 
-const String GetDefaultLocale();
-inline String localeOrDefault(const String& str) {
+const OptString GetDefaultLocale();
+inline OptString localeOrDefault(const OptString& str) {
   return str.empty() ? GetDefaultLocale() : str;
 }
-bool SetDefaultLocale(const String& locale);
+bool SetDefaultLocale(const OptString& locale);
 double VariantToMilliseconds(const Variant& arg);
 
 // Common encoding conversions UTF8<->UTF16
 icu::UnicodeString u16(const char* u8, int32_t u8_len, UErrorCode &error,
                        UChar32 subst = 0);
-inline icu::UnicodeString u16(const String& u8, UErrorCode& error,
+inline icu::UnicodeString u16(const OptString& u8, UErrorCode& error,
                        UChar32 subst = 0) {
   return u16(u8.c_str(), u8.size(), error, subst);
 }
-String u8(const UChar *u16, int32_t u16_len, UErrorCode &error);
-inline String u8(const icu::UnicodeString& u16, UErrorCode& error) {
+OptString u8(const UChar *u16, int32_t u16_len, UErrorCode &error);
+inline OptString u8(const icu::UnicodeString& u16, UErrorCode& error) {
   return u8(u16.getBuffer(), u16.length(), error);
 }
 
 struct IntlExtension final : Extension {
-  IntlExtension() : Extension("intl", "1.1.0") {}
+  IntlExtension() : Extension("intl", "1.1.0", "hphp_hphpi") {}
 
-  void moduleInit() override {
-    bindConstants();
-    initICU(); // HHVM-specific ICU functions
-    initLocale();
-    initNumberFormatter();
-    initTimeZone();
-    initIterator();
-    initDateFormatter();
-    initDatePatternGenerator();
-    initCalendar();
-    initGrapheme();
-    initBreakIterator(); // Must come after initIterator()
-    initUChar();
-    initUConverter();
-    initUcsDet();
-    initUSpoof();
-    initMisc();
-    initCollator();
-    initMessageFormatter();
-    initNormalizer();
-    initResourceBundle();
-    initTransliterator();
+  void moduleRegisterNative() override {
+    registerNativeConstants();
+    registerNativeICU(); // HHVM-specific ICU functions
+    registerNativeLocale();
+    registerNativeNumberFormatter();
+    registerNativeTimeZone();
+    registerNativeIterator();
+    registerNativeDateFormatter();
+    registerNativeDatePatternGenerator();
+    registerNativeCalendar();
+    registerNativeGrapheme();
+    registerNativeBreakIterator(); // Must come after registerNativeIterator()
+    registerNativeUChar();
+    registerNativeUConverter();
+    registerNativeUcsDet();
+    registerNativeUSpoof();
+    registerNativeMisc();
+    registerNativeCollator();
+    registerNativeMessageFormatter();
+    registerNativeNormalizer();
+    registerNativeResourceBundle();
+    registerNativeTransliterator();
+  }
+
+  std::vector<std::string> hackFiles() const override {
+    return {
+      "ext_icu.php",
+      "ext_icu_locale.php",
+      "ext_icu_num_fmt.php",
+      "ext_icu_timezone.php",
+      "ext_icu_iterator.php",
+      "ext_icu_date_fmt.php",
+      "ext_icu_date_pattern_gen.php",
+      "ext_icu_calendar.php",
+      "ext_icu_grapheme.php",
+      "ext_icu_break_iterator.php",
+      "ext_icu_uchar.php",
+      "ext_icu_uconverter.php",
+      "ext_icu_ucsdet.php",
+      "ext_icu_uspoof.php",
+      "ext_icu_misc.php",
+      "ext_icu_collator.php",
+      "ext_icu_msg_fmt.php",
+      "ext_icu_normalizer.php",
+      "ext_icu_rsrc_bundle.php",
+      "ext_icu_transliterator.php",
+    };
   }
 
   void threadInit() override {
     bindIniSettings();
   }
-  void threadShutdown() override;
  private:
   void bindIniSettings();
-  void bindConstants();
-  void initICU();
-  void initLocale();
-  void initNumberFormatter();
-  void initTimeZone();
-  void initIterator();
-  void initDateFormatter();
-  void initDatePatternGenerator();
-  void initCalendar();
-  void initGrapheme();
-  void initBreakIterator();
-  void initUChar();
-  void initUConverter();
-  void initUcsDet();
-  void initUSpoof();
-  void initMisc();
-  void initCollator();
-  void initMessageFormatter();
-  void initNormalizer();
-  void initResourceBundle();
-  void initTransliterator();
+
+  void registerNativeConstants();
+  void registerNativeICU();
+  void registerNativeLocale();
+  void registerNativeNumberFormatter();
+  void registerNativeTimeZone();
+  void registerNativeIterator();
+  void registerNativeDateFormatter();
+  void registerNativeDatePatternGenerator();
+  void registerNativeCalendar();
+  void registerNativeGrapheme();
+  void registerNativeBreakIterator();
+  void registerNativeUChar();
+  void registerNativeUConverter();
+  void registerNativeUcsDet();
+  void registerNativeUSpoof();
+  void registerNativeMisc();
+  void registerNativeCollator();
+  void registerNativeMessageFormatter();
+  void registerNativeNormalizer();
+  void registerNativeResourceBundle();
+  void registerNativeTransliterator();
 };
 
 } // namespace Intl
@@ -165,5 +209,3 @@ DECLARE_EXTERN_REQUEST_LOCAL(IntlGlobalError, s_intl_error);
 
 /////////////////////////////////////////////////////////////////////////////
 } // namespace HPHP
-
-#endif // incl_HPHP_ICU_H

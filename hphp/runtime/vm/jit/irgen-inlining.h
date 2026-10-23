@@ -13,29 +13,80 @@
    | license@php.net so we can mail you a copy immediately.               |
    +----------------------------------------------------------------------+
 */
-#ifndef incl_HPHP_JIT_IRGEN_INLINING_H_
-#define incl_HPHP_JIT_IRGEN_INLINING_H_
+#pragma once
 
-namespace HPHP { namespace jit { namespace irgen {
+#include "hphp/runtime/vm/srckey.h"
+#include "hphp/runtime/vm/jit/extra-data.h"
+#include "hphp/runtime/vm/jit/region-selection.h"
+
+namespace HPHP {
+
+struct Func;
+
+namespace jit {
+
+struct SSATmp;
+
+namespace irgen {
+
+struct RegionAndLazyUnit {
+  RegionAndLazyUnit(
+    SrcKey callerSk,
+    RegionDescPtr region
+  );
+  ~RegionAndLazyUnit() = default;
+  RegionAndLazyUnit(RegionAndLazyUnit&&) = default;
+  RegionAndLazyUnit& operator=(RegionAndLazyUnit&&) = default;
+  RegionAndLazyUnit(const RegionAndLazyUnit&) = delete;
+  RegionAndLazyUnit& operator=(const RegionAndLazyUnit&) = delete;
+
+  IRUnit* unit() const;
+  RegionDescPtr region() const { return m_region; }
+private:
+  SrcKey m_callerSk;
+  RegionDescPtr m_region;
+  mutable std::unique_ptr<IRUnit> m_unit;
+};
+
 
 struct IRGS;
 
 ///////////////////////////////////////////////////////////////////////////////
 
 /*
- * Return control from an inlined callee to the caller.
- *
- * This also does bookkeeping for `env' to pop the current inlined frame.
- */
-void implInlineReturn(IRGS& env);
-
-/*
  * Emit a return from an inlined function.
  */
 void retFromInlined(IRGS&);
 
+/*
+ * Exit the (now suspended) inline frame. The frame must no longer be live, and
+ * its contents must now reside in waithandle.
+ */
+void suspendFromInlined(IRGS&, SSATmp* waithandle);
+
+/*
+ * Side exit the translation from an inlined frame to the specified target.
+ */
+void sideExitFromInlined(IRGS&, SrcKey target);
+void sideExitFromInlined(IRGS&, SSATmp* target);
+
+/*
+ * Emit an EndCatch equivalent from an inlined function.
+ */
+void endCatchFromInlined(IRGS&, EndCatchData::CatchMode mode, SSATmp* exc);
+
+/*
+ * Make sure all inlined frames are written on the stack and a part of the FP
+ * chain. Returns true iff any frames were spilled.
+ */
+bool spillInlinedFrames(IRGS& env);
+
+/*
+ * Construct a FP that can be used to inline callee. Must be used while the
+ * FCall bytecode is being translated.
+ */
+SSATmp* genCalleeFP(IRGS& env, const Func* callee, int argc);
+
 ///////////////////////////////////////////////////////////////////////////////
 
 }}}
-
-#endif

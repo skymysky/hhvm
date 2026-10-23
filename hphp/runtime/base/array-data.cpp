@@ -15,36 +15,37 @@
 */
 #include "hphp/runtime/base/array-data.h"
 
-#include <vector>
 #include <array>
+#include <fmt/format.h>
 #include <tbb/concurrent_unordered_set.h>
 
-#include "hphp/util/exception.h"
-#include "hphp/runtime/base/array-init.h"
-#include "hphp/runtime/base/empty-array.h"
-#include "hphp/runtime/base/packed-array.h"
 #include "hphp/runtime/base/array-common.h"
+#include "hphp/runtime/base/array-init.h"
 #include "hphp/runtime/base/array-iterator.h"
-#include "hphp/runtime/base/builtin-functions.h"
-#include "hphp/runtime/base/variable-serializer.h"
-#include "hphp/runtime/base/runtime-option.h"
-#include "hphp/runtime/base/apc-local-array.h"
+#include "hphp/runtime/base/bespoke-array.h"
+#include "hphp/runtime/base/bespoke/type-structure.h"
 #include "hphp/runtime/base/comparisons.h"
-#include "hphp/runtime/vm/globals-array.h"
-#include "hphp/runtime/base/thread-info.h"
 #include "hphp/runtime/base/memory-manager.h"
-#include "hphp/runtime/base/mixed-array.h"
-#include "hphp/runtime/base/set-array.h"
-#include "hphp/zend/zend-string.h"
+#include "hphp/runtime/base/request-info.h"
+#include "hphp/runtime/base/vanilla-dict.h"
+#include "hphp/runtime/base/vanilla-keyset.h"
+#include "hphp/runtime/base/vanilla-vec.h"
+#include "hphp/runtime/server/memory-stats.h"
+#include "hphp/runtime/vm/reverse-data-map.h"
+#include "hphp/runtime/vm/unit-emitter.h"
+
+#include "hphp/util/configs/eval.h"
 
 namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
 
 const StaticString
   s_InvalidKeysetOperationMsg{"Invalid operation on keyset"},
+  s_VarrayUnsetMsg{"varrays do not support unsetting non-end elements"},
   s_VecUnsetMsg{"Vecs do not support unsetting non-end elements"};
-
 ///////////////////////////////////////////////////////////////////////////////
+
+__thread std::pair<const ArrayData*, size_t> s_cachedHash;
 
 namespace {
 static_assert(
@@ -52,160 +53,226 @@ static_assert(
   "Performance is sensitive to sizeof(ArrayData)."
   " Make sure you changed it with good reason and then update this assert.");
 
-__thread std::pair<const ArrayData*, size_t> s_cachedHash;
+size_t hashArrayPortion(const ArrayData* arr) {
+  auto hash = folly::hash::hash_128_to_64(arr->kind(), arr->isLegacyArray());
 
-struct ScalarHash {
-  size_t operator()(const ArrayData* arr) const {
-    return hash(arr);
-  }
-  size_t operator()(const ArrayData* ad1, const ArrayData* ad2) const {
-    return equal(ad1, ad2);
-  }
-  size_t hash(const ArrayData* arr) const {
-    if (arr == s_cachedHash.first) return s_cachedHash.second;
-    return raw_hash(arr);
-  }
-  size_t raw_hash(const ArrayData* arr) const {
-    auto ret = uint64_t{
-      arr->isHackArray()
-      ? arr->kind()
-      : ArrayData::ArrayKind::kMixedKind
-    };
-    ret |= (uint64_t{arr->dvArray()} << 32);
+  auto const isBespoke = bespoke::TypeStructure::isBespokeTypeStructure(arr);
+  hash = folly::hash::hash_combine(hash, isBespoke);
 
-    IterateKV(
-      arr,
-      [&](Cell k, TypedValue v) {
-        assertx(!isRefcountedType(k.m_type) ||
-                (k.m_type == KindOfString && k.m_data.pstr->isStatic()));
-        assertx(!isRefcountedType(v.m_type));
-        ret = folly::hash::hash_combine(
-          ret,
-          static_cast<int>(k.m_type), k.m_data.num,
-          static_cast<int>(v.m_type));
-        switch (v.m_type) {
-          case KindOfUninit:
-          case KindOfNull:
-            break;
-          case KindOfBoolean:
-          case KindOfInt64:
-          case KindOfDouble:
-          case KindOfPersistentString:
-          case KindOfPersistentArray:
-          case KindOfPersistentVec:
-          case KindOfPersistentDict:
-          case KindOfPersistentKeyset:
-            ret = folly::hash::hash_combine(ret, v.m_data.num);
-            break;
-          case KindOfString:
-          case KindOfArray:
-          case KindOfVec:
-          case KindOfDict:
-          case KindOfKeyset:
-          case KindOfObject:
-          case KindOfResource:
-          case KindOfRef:
-          case KindOfFunc:
-            always_assert(false);
-        }
+  IterateKV(
+    arr,
+    [&](TypedValue k, TypedValue v) {
+      assertx(tvIsString(k) || tvIsInt(k));
+      assertx(IMPLIES(tvIsString(k), val(k).pstr->isStatic()));
+      hash = folly::hash::hash_combine(
+        hash,
+        dt_with_persistence(k.m_type),
+        k.m_data.num,
+        v.m_type
+      );
+      switch (v.m_type) {
+        case KindOfNull:
+          break;
+        case KindOfBoolean:
+        case KindOfInt64:
+        case KindOfDouble:
+        case KindOfPersistentString:
+        case KindOfPersistentVec:
+        case KindOfPersistentDict:
+        case KindOfPersistentKeyset:
+        case KindOfEnumClassLabel:
+          hash = folly::hash::hash_combine(hash, v.m_data.num);
+          break;
+        case KindOfLazyClass:
+          assertx(v.m_data.plazyclass.name()->isStatic());
+          hash = folly::hash::hash_combine(
+            hash,
+            (uintptr_t)v.m_data.plazyclass.name()
+          );
+          break;
+        case KindOfClass:
+          assertx(v.m_data.pclass->isPersistent());
+          hash = folly::hash::hash_combine(hash, (uintptr_t)v.m_data.pclass);
+          break;
+        case KindOfFunc:
+          assertx(v.m_data.pfunc->isPersistent());
+          hash = folly::hash::hash_combine(hash, (uintptr_t)v.m_data.pfunc);
+          break;
+        case KindOfClsMeth:
+          assertx(v.m_data.pclsmeth->isPersistent());
+          hash =
+            folly::hash::hash_combine(
+              hash, (uintptr_t)v.m_data.pclsmeth->getCls());
+          hash =
+            folly::hash::hash_combine(
+                hash, (uintptr_t)v.m_data.pclsmeth->getFunc());
+          break;
+
+        case KindOfUninit:
+        case KindOfString:
+        case KindOfVec:
+        case KindOfDict:
+        case KindOfKeyset:
+        case KindOfObject:
+        case KindOfResource:
+        case KindOfRFunc:
+        case KindOfRClsMeth:
+          always_assert(false);
       }
-    );
-    return ret;
-  }
-  bool equal(const ArrayData* ad1, const ArrayData* ad2) const {
-    if (ad1 == ad2) return true;
-    if (ad1->size() != ad2->size()) return false;
-    if (!ArrayData::dvArrayEqual(ad1, ad2)) return false;
-    if (ad1->isHackArray()) {
-      if (!ad2->isHackArray()) return false;
-      if (ad1->kind() != ad2->kind()) return false;
-    } else if (ad2->isHackArray()) {
-      return false;
     }
+  );
+  return hash;
+}
 
-    auto check = [] (const TypedValue& tv1, const TypedValue& tv2) {
-      if (tv1.m_type != tv2.m_type) {
-        // String keys from arrays might be KindOfString, even when
-        // the StringData is static.
-        if (!isStringType(tv1.m_type) || !isStringType(tv2.m_type)) {
-          return false;
-        }
-        assertx(tv1.m_data.pstr->isStatic());
-      }
-      if (isNullType(tv1.m_type)) return true;
-      return tv1.m_data.num == tv2.m_data.num;
-    };
+bool compareArrayPortion(const ArrayData* ad1, const ArrayData* ad2) {
+  if (ad1 == ad2) return true;
+  if (ad1->kind() != ad2->kind()) return false;
+  if (ad1->size() != ad2->size()) return false;
+  if (ad1->isLegacyArray() != ad2->isLegacyArray()) return false;
 
-    bool equal = true;
-    ArrayIter iter2{ad2};
-    IterateKV(
-      ad1,
-      [&](Cell k, TypedValue v) {
-        if (!check(k, *iter2.first().asTypedValue()) ||
-            !check(v, iter2.secondVal())) {
-          equal = false;
-          return true;
-        }
-        ++iter2;
+  auto const isBespoke1 = bespoke::TypeStructure::isBespokeTypeStructure(ad1);
+  auto const isBespoke2 = bespoke::TypeStructure::isBespokeTypeStructure(ad2);
+  if (isBespoke1 != isBespoke2) return false;
+
+  auto const check = [] (const TypedValue& tv1, const TypedValue& tv2) {
+    if (tv1.m_type != tv2.m_type) {
+      // String keys from arrays might be KindOfString, even when
+      // the StringData is static.
+      if (!isStringType(tv1.m_type) || !isStringType(tv2.m_type)) {
         return false;
       }
-    );
-    return equal;
+      assertx(tv1.m_data.pstr->isStatic());
+      assertx(tv2.m_data.pstr->isStatic());
+    }
+    if (isNullType(tv1.m_type)) return true;
+    return tv1.m_data.num == tv2.m_data.num;
+  };
+
+  auto equal = true;
+  ArrayIter iter2{ad2};
+  IterateKV(
+    ad1,
+    [&](TypedValue k, TypedValue v) {
+      if (!check(k, iter2.nvFirst()) || !check(v, iter2.secondVal())) {
+        equal = false;
+        return true;
+      }
+      ++iter2;
+      return false;
+    }
+  );
+  return equal;
+}
+
+struct ScalarHash {
+  size_t operator()(ArrayData* arr) const {
+    return s_cachedHash.first == arr
+      ? s_cachedHash.second
+      : hashArrayPortion(arr);
+  }
+  bool operator()(ArrayData* arr1, ArrayData* arr2) const {
+    return compareArrayPortion(arr1, arr2);
   }
 };
 
-using ArrayDataMap = tbb::concurrent_unordered_set<ArrayData*,
-                                                   ScalarHash,
-                                                   ScalarHash>;
+using ArrayDataMap =
+  tbb::concurrent_unordered_set<ArrayData*, ScalarHash, ScalarHash>;
 ArrayDataMap s_arrayDataMap;
 
 }
+
+size_t loadedStaticArrayCount() {
+  return s_arrayDataMap.size();
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 
 void ArrayData::GetScalarArray(ArrayData** parr) {
-  auto const arr = *parr;
-  if (arr->isStatic()) return;
-  auto replace = [&] (ArrayData* rep) {
+  auto const base = *parr;
+  if (base->isStatic()) return;
+
+  auto const arr = [&]{
+    if (base->isVanilla()) return base;
+    // don't escalate for type structures
+    if (bespoke::TypeStructure::isBespokeTypeStructure(base)) return base;
+    *parr = BespokeArray::ToVanilla(base, "ArrayData::GetScalarArray");
+    decRefArr(base);
+    return *parr;
+  }();
+
+  auto const replace = [&] (ArrayData* rep) {
     *parr = rep;
     decRefArr(arr);
     s_cachedHash.first = nullptr;
   };
 
   if (arr->empty()) {
-    if (arr->isVecArray()) return replace(staticEmptyVecArray());
-    if (arr->isDict())     return replace(staticEmptyDictArray());
-    if (arr->isKeyset())   return replace(staticEmptyKeysetArray());
-    if (arr->isVArray())   return replace(staticEmptyVArray());
-    if (arr->isDArray())   return replace(staticEmptyDArray());
-    return replace(staticEmptyArray());
+    return replace([&]{
+      auto const legacy = arr->isLegacyArray();
+      switch (arr->toDataType()) {
+        case KindOfVec:
+          return legacy ? staticEmptyMarkedVec() : staticEmptyVec();
+        case KindOfDict:
+          return legacy ? staticEmptyMarkedDictArray() : staticEmptyDictArray();
+        case KindOfKeyset:
+          return staticEmptyKeysetArray();
+        default:
+          always_assert(false);
+      }
+    }());
   }
 
-  arr->onSetEvalScalar();
+  auto const isBespokeTS = bespoke::TypeStructure::isBespokeTypeStructure(arr);
+
+  if (isBespokeTS) {
+    auto ts = bespoke::TypeStructure::As(arr);
+    bespoke::TypeStructure::OnSetEvalScalar(ts);
+  } else {
+    arr->onSetEvalScalar();
+  }
 
   s_cachedHash.first = arr;
-  s_cachedHash.second = ScalarHash{}.raw_hash(arr);
+  s_cachedHash.second = hashArrayPortion(arr);
 
-  auto it = s_arrayDataMap.find(arr);
-  if (it != s_arrayDataMap.end()) return replace(*it);
+  auto const lookup = [&] (ArrayData* a) -> ArrayData* {
+    if (auto const it = s_arrayDataMap.find(a);
+        it != s_arrayDataMap.end()) {
+      return *it;
+    }
+    return nullptr;
+  };
+
+  if (auto const a = lookup(arr)) return replace(a);
 
   static std::array<std::mutex, 128> s_mutexes;
-
-  std::lock_guard<std::mutex> g {
+  std::lock_guard<std::mutex> g{
     s_mutexes[s_cachedHash.second % s_mutexes.size()]
   };
-  it = s_arrayDataMap.find(arr);
-  if (it != s_arrayDataMap.end()) return replace(*it);
+
+  if (auto const a = lookup(arr)) return replace(a);
 
   ArrayData* ad;
-  if (arr->isVectorData() && !arr->hasPackedLayout() && !arr->isDict() &&
-      !arr->isKeyset() && !arr->isDArray()) {
-    ad = PackedArray::ConvertStatic(arr);
+  if (isBespokeTS) {
+    auto const ts = bespoke::TypeStructure::As(arr);
+    ad = bespoke::TypeStructure::CopyStatic(ts);
   } else {
     ad = arr->copyStatic();
   }
+  // We should clear the sampled bit in the new static array regardless of
+  // whether the input array was sampled, because specializing the input is
+  // not sufficient to specialize this new static array.
+  ad->m_aux16 &= ~kSampledArray;
   assertx(ad->isStatic());
+
+  // TODO(T68458896): heapSize rounds up to size class, which we shouldn't do.
+  MemoryStats::LogAlloc(AllocKind::StaticArray, ad->heapSize());
+  if (Cfg::Eval::EnableReverseDataMap) {
+    data_map::register_start(ad);
+  }
+
   s_cachedHash.first = ad;
-  assertx(ScalarHash{}.raw_hash(ad) == s_cachedHash.second);
+  assertx(hashArrayPortion(ad) == s_cachedHash.second);
+
   auto const DEBUG_ONLY inserted = s_arrayDataMap.insert(ad).second;
   assertx(inserted);
   return replace(ad);
@@ -218,7 +285,7 @@ ArrayData* ArrayData::GetScalarArray(Array&& arr) {
 }
 
 ArrayData* ArrayData::GetScalarArray(Variant&& arr) {
-  assertx(arr.isArray() && !isRefType(arr.getRawType()));
+  assertx(arr.isArray());
   auto a = arr.detach().m_data.parr;
   GetScalarArray(&a);
   return a;
@@ -229,15 +296,13 @@ ArrayData* ArrayData::GetScalarArray(Variant&& arr) {
 static_assert(ArrayFunctions::NK == ArrayData::ArrayKind::kNumKinds,
               "add new kinds here");
 
-#define DISPATCH(entry)                         \
-  { PackedArray::entry,                         \
-    MixedArray::entry,                          \
-    EmptyArray::entry,                          \
-    APCLocalArray::entry,                       \
-    GlobalsArray::entry,                        \
-    MixedArray::entry##Dict,   /* Dict */       \
-    PackedArray::entry##Vec,   /* Vec */        \
-    SetArray::entry,           /* Keyset */     \
+#define DISPATCH(entry)                           \
+  { VanillaVec::entry,       /* vanilla vec */    \
+    BespokeArray::entry,     /* bespoke vec */    \
+    VanillaDict::entry,       /* vanilla dict */   \
+    BespokeArray::entry,     /* bespoke dict */   \
+    VanillaKeyset::entry,    /* vanilla keyset */ \
+    BespokeArray::entry,     /* bespoke keyset */ \
   },
 
 /*
@@ -275,106 +340,76 @@ const ArrayFunctions g_array_funcs = {
   /*
    * void Release(ArrayData*)
    *
-   *   Free memory associated with an array.  Generally called when
-   *   the reference count on an array drops to zero.
+   *   Free the memory associated with a refcounted array. Generally called
+   *   when the reference count on the array drops to zero.
    */
   DISPATCH(Release)
 
   /*
-   * tv_rval NvGetInt(const ArrayData*, int64_t key)
+   * void ReleaseShared(ArrayData*)
    *
-   *   Lookup a value in an array using an integer key.  Returns nullptr if the
-   *   key is not in the array.  Must not throw if key isn't present.
+   *   Free the memory associated with an uncounted array. Generally called
+   *   when the reference count on the array drops to "uncounted zero".
+   */
+  DISPATCH(ReleaseShared)
+
+  /*
+   * TypedValue NvGetInt(const ArrayData*, int64_t key)
+   * TypedValue NvGetStr(const ArrayData*, const StringData*)
+   *
+   *   Lookup a value in an array using an int or string key. Returns Uninit if
+   *   the key is not in the array. This method does not inc-ref the result.
    */
   DISPATCH(NvGetInt)
-
-  /*
-   * tv_rval NvTryGetInt(const ArrayData*, int64_t key)
-   *
-   *   Lookup a value in an array using an integer key.  Either throws or
-   *   returns nullptr if the key is not in the array.
-   */
-  DISPATCH(NvTryGetInt)
-
-  /*
-   * tv_rval NvGetStr(const ArrayData*, const StringData*)
-   *
-   *   Lookup a value in an array using a string key.  The string key must not
-   *   be an integer-like string.  Returns nullptr if the key is not in the
-   *   array.
-   */
   DISPATCH(NvGetStr)
 
   /*
-   * tv_rval NvTryGetStr(const ArrayData*, const StringData*)
+   * TypedValue GetPosKey(const ArrayData*, ssize_t pos)
+   * TypedValue GetPosVal(const ArrayData*, ssize_t pos)
    *
-   *   Lookup a value in an array using a string key.  Either throws or returns
-   *   nullptr if the key is not in the array.
+   *   Look up the key or value at a valid iterator position in this array.
+   *   Both of these methods return the result without inc-ref-ing it.
    */
-  DISPATCH(NvTryGetStr)
+  DISPATCH(GetPosKey)
+  DISPATCH(GetPosVal)
 
   /*
-   * Cell NvGetKey(const ArrayData*, ssize_t pos)
+   * bool PosIsValid(const ArrayData*, ssize_t pos)
    *
-   *   Look up the key for an array position.  `pos' must be a valid
-   *   position for this array.
+   *   Return true if the given iterator position is valid in this
+   *   array.
    */
-  DISPATCH(NvGetKey)
+  DISPATCH(PosIsValid)
 
   /*
-   * ArrayData* SetInt(ArrayData*, int64_t key, Cell v, bool copy)
+   * ArrayData* SetPosMove(ArrayData*, ssize_t pos, TypedValue v)
    *
-   *   Set a value in the array for an integer key.  This function has
-   *   copy/grow semantics.
+   *   Set a value in the array at the given position, which must be valid.
+   *   If copy / escalation is necessary, this operation will dec-ref the
+   *   array and return a new one; else, it'll return the original array.
+   *   It does not inc-ref the value.
    */
-  DISPATCH(SetInt)
+  DISPATCH(SetPosMove)
 
   /*
-   * ArrayData* SetStr(ArrayData*, StringData*, Cell v, bool copy)
+   * ArrayData* SetIntMove(ArrayData*, int64_t key, TypedValue v)
    *
-   *   Set a value in the array for a string key.  The string must not
-   *   be an integer-like string.  This function has copy/grow
-   *   semantics.
+   *   Set a value in the array for an integer key. If copy / escalation is
+   *   necessary, this operation will dec-ref the array and return a new one;
+   *   else, it'll return the original array. It does not inc-ref the value.
    */
-  DISPATCH(SetStr)
+  DISPATCH(SetIntMove)
 
   /*
-   * ArrayData* SetWithRefInt(ArrayData*, int64_t k, Cell v, bool copy)
+   * ArrayData* SetStrMove(ArrayData*, StringData*, TypedValue v)
    *
-   *   Set a value in the array for an integer key, preserving refs unless they
-   *   are singly-referenced.  This function has copy/grow semantics.
+   *   Set a value in the array for a string key. If copy / escalation is
+   *   necessary, this operation will dec-ref the array and return a new one;
+   *   else, it'll return the original array. It does not inc-ref the value.
+   *
+   *   SetStrMove *does* inc-ref the key if it's newly added to the array.
    */
-  DISPATCH(SetWithRefInt)
-
-  /*
-   * ArrayData* SetWithRefStr(ArrayData*, StringData* k, Cell v, bool copy)
-   *
-   *   Set a value in the array for a string key, preserving refs unless they
-   *   are singly-referenced.  This function has copy/grow semantics, and is
-   *   not responsible for intish-string casts.
-   */
-  DISPATCH(SetWithRefStr)
-
-  /*
-   * size_t Vsize(const ArrayData*)
-   *
-   *   This entry point essentially is only for GlobalsArray;
-   *   all the other cases are not_reached().
-   *
-   *   Because of particulars of how GlobalsArray works,
-   *   determining the size of the array is an O(N) operation---we set
-   *   the size field in the generic ArrayData header to -1 in that
-   *   case and dispatch through this entry point.
-   */
-  DISPATCH(Vsize)
-
-  /*
-   * tv_rval GetValueRef(const ArrayData*, ssize_t pos)
-   *
-   *   Return a reference to the value at an iterator position.  `pos' must be
-   *   a valid position for this array.
-   */
-  DISPATCH(GetValueRef)
+  DISPATCH(SetStrMove)
 
   /*
    * bool IsVectorData(const ArrayData*)
@@ -402,91 +437,37 @@ const ArrayFunctions g_array_funcs = {
   DISPATCH(ExistsStr)
 
   /*
-   * arr_lval LvalInt(ArrayData*, int64_t k, bool copy)
-   * arr_lval LvalIntRef(ArrayData*, int64_t k, bool copy)
+   * arr_lval LvalInt(ArrayData*, int64_t k)
+   * arr_lval LvalStr(ArrayData*, StringData* key)
    *
-   *   Look up a value in the array by the supplied integer key, creating it as
-   *   a KindOfNull if it doesn't exist, and return a reference to it.  Use the
-   *   ref variant if the retrieved value will be boxed.  This function has
-   *   copy/grow semantics.
-   */
-  DISPATCH(LvalInt)
-  DISPATCH(LvalIntRef)
-
-  /*
-   * arr_lval LvalStr(ArrayData*, StringData* key, bool copy)
-   * arr_lval LvalStrRef(ArrayData*, StringData* key, bool copy)
-   *
-   *   Look up a value in the array by the supplied string key, creating it as
-   *   a KindOfNull if it doesn't exist, and return a reference to it.  The
-   *   string `key' may not be an integer-like string.  Use the ref variant if
-   *   the retrieved value will be boxed.  This function has copy/grow
+   *   Look up a value in the array by the supplied key, throwing if it doesn't
+   *   exist, and return a reference to it.  This function has copy/grow
    *   semantics.
    */
+  DISPATCH(LvalInt)
   DISPATCH(LvalStr)
-  DISPATCH(LvalStrRef)
 
   /*
-   * arr_lval LvalNew(ArrayData*, bool copy)
-   * arr_lval LvalNewRef(ArrayData*, bool copy)
+   * ArrayData* RemoveIntMove(ArrayData*, int64_t key)
    *
-   *   Insert a new null value in the array at the next available integer key,
-   *   and return a reference to it.  In the case that there is no next
-   *   available integer key, this function returns a reference to the
-   *   lvalBlackHole.  Use the ref variant if the retrieved value will be
-   *   boxed.  This function has copy/grow semantics.
+   *   Remove an array element with an integer key, copying or escalating
+   *   as necessary. If there was no entry for that element, this function
+   *   will not remove it, but it may still copy the array in that case. If
+   *   a copy or escalation was required, there will be a dec-ref of the old
+   *   array.
    */
-  DISPATCH(LvalNew)
-  DISPATCH(LvalNewRef)
+  DISPATCH(RemoveIntMove)
 
   /*
-   * ArrayData* SetRefInt(ArrayData*, int64_t key, tv_lval v, bool copy)
+   * ArrayData* RemoveStr(ArrayData*, const StringData*)
    *
-   *   Binding set with an integer key.  Box `v' if it is not already
-   *   boxed, and then insert a KindOfRef that points to v's RefData.
-   *   This function has copy/grow semantics.
+   *   Remove an array element with a string key, copying or escalating
+   *   as necessary. If there was no entry for that element, this function
+   *   will not remove it, but it may still copy the array in that case. If
+   *   a copy or escalation was required, there will be a dec-ref of the old
+   *   array.
    */
-  DISPATCH(SetRefInt)
-
-  /*
-   * ArrayData* SetRefStr(ArrayData*, StringData* key, tv_lval v, bool copy)
-   *
-   *  Binding set with a string key.  The string `key' must not be an
-   *  integer-like string.  Box `v' if it is not already boxed, and
-   *  then insert a KindOfRef that points to v's RefData.  This
-   *  function has copy/grow semantics.
-   */
-  DISPATCH(SetRefStr)
-
-  /*
-   * ArrayData* AddInt(ArrayData*, int64_t key, Cell, bool copy)
-   * ArrayData* AddStr(ArrayData*, StringData* key, Cell, bool copy)
-   *
-   *   These functions have the same effects as SetInt and SetStr,
-   *   respectively, except that the array may assume that it does not
-   *   already contain a value for the key `key' if it can make the
-   *   operation more efficient.
-   */
-  DISPATCH(SetInt)
-  DISPATCH(SetStr)
-
-  /*
-   * ArrayData* RemoveInt(ArrayData*, int64_t key, bool copy)
-   *
-   *   Remove an array element with an integer key.  If there was no
-   *   entry for that element, this function does not remove it, and
-   *   may or may not cow.  This function has copy/grow semantics.
-   */
-  DISPATCH(RemoveInt)
-
-  /*
-   * ArrayData* RemoveStr(ArrayData*, const StringData*, bool copy)
-   *
-   *   Remove an array element with a string key.  If there was no
-   *   entry for that element, this function does not remove it, and
-   *   may or may not cow.  This function has copy/grow semantics.
-   */
-  DISPATCH(RemoveStr)
+  DISPATCH(RemoveStrMove)
 
   /*
    * ssize_t IterEnd(const ArrayData*)
@@ -528,31 +509,6 @@ const ArrayFunctions g_array_funcs = {
    *   what this method returns.
    */
   DISPATCH(IterRewind)
-
-  /*
-   * bool ValidMArrayIter(const ArrayData*, const MArrayIter& fp)
-   *
-   *    Returns whether a given MArrayIter is pointing at a valid
-   *    position for this array.  This should return false if the
-   *    MArrayIter is in the reset flag state.
-   *
-   *    This function may not be called without first calling
-   *    Escalate.
-   *
-   *    Pre: fp.getContainer() == ad
-   */
-  DISPATCH(ValidMArrayIter)
-
-  /*
-   * bool AdvanceMArrayIter(ArrayData* ad, MArrayIter& fp)
-   *
-   *   Advance a mutable array iterator to the next position.
-   *
-   *   This function may not be called without first calling Escalate.
-   *
-   *   Pre: fp.getContainer() == ad
-   */
-  DISPATCH(AdvanceMArrayIter)
 
   /*
    * ArrayData* EscalateForSort(ArrayData*, SortFunction)
@@ -617,108 +573,33 @@ const ArrayFunctions g_array_funcs = {
   DISPATCH(Uasort)
 
   /*
-   * ArrayData* Copy(const ArrayData*)
-   *
-   *   Explicitly request that an array be copied.  This API does
-   *   /not/ actually guarantee a copy occurs.
-   *
-   *   (E.g. GlobalsArray doesn't copy here.)
-   */
-  DISPATCH(Copy)
-
-  /*
    * ArrayData* CopyStatic(const ArrayData*)
    *
    *   Copy an array, allocating the new array with malloc() instead
    *   of from the request local allocator.  This function does
-   *   guarantee the returned array is a new copy---but it may throw a
-   *   fatal error if this cannot be accomplished (e.g. for $GLOBALS).
+   *   guarantee the returned array is a new copy, but it may throw a
+   *   fatal error if this cannot be accomplished.
    */
   DISPATCH(CopyStatic)
 
   /*
-   * ArrayData* Append(ArrayData*, Cell v, bool copy)
+   * ArrayData* Append(ArrayData*, TypedValue v);
    *
-   *   Append a new value to the array, with the next available
-   *   integer key.  If there is no next available integer key, no
-   *   value is appended.  This function has copy/grow semantics.  The
-   *   value must not be KindOfUninit.
+   *   Append a new value to the array, with the next available integer key.
+   *   If copy / escalation is necessary, this operation will dec-ref the
+   *   array and return a new one; else, it'll return the original array.
+   *   This operation does not inc-ref the value.
    */
-  DISPATCH(Append)
+  DISPATCH(AppendMove)
 
   /*
-   * ArrayData* AppendRef(ArrayData*, tv_lval v, bool copy)
+   * ArrayData* PopMove(ArrayData*, Variant& value);
    *
-   *   Binding append.  This function appends a new KindOfRef to the
-   *   array with the next available integer key, boxes v if it is not
-   *   already boxed, and points the new value to the same RefData.
-   *   If there is no next available integer key, this function does
-   *   not append a value.  This function has copy/grow semantics.
+   *   Remove the last element from the array and assign it to `value'.
+   *   If copy / escalation is necessary, this operation will dec-ref the
+   *   array and return a new one; else, it'll return the original array.
    */
-  DISPATCH(AppendRef)
-
-  /*
-   * ArrayData* AppendWithRef(ArrayData*, TypedValue v, bool copy)
-   *
-   *   "With ref" append.  This function appends a new value to the
-   *   array with the next available integer key, if there is a next
-   *   available integer key.  It either sets the value to `v', or
-   *   binds the value to `v', depending on whether `v' is "observably
-   *   referenced"---i.e. if `v' is already KindOfRef and
-   *   RefData::isReferenced is true.
-   */
-  DISPATCH(AppendWithRef)
-
-  /*
-   * ArrayData* PlusEq(ArrayData*, const ArrayData* elems)
-   *
-   *    Performs array addition, logically mutating the first array.
-   *    It may return a new array if the array needed to grow, or if
-   *    it needed to COW because cowCheck() was true.
-   */
-  DISPATCH(PlusEq)
-
-  /*
-   * ArrayData* Merge(ArrayData*, const ArrayData* elems)
-   *
-   *   Perform part of the semantics of the php function array_merge.
-   *   (Renumbering keys is not done by this routine currently.)
-   */
-  DISPATCH(Merge)
-
-  /*
-   * ArrayData* Pop(ArrayData*, Variant& value);
-   *
-   *   Remove the last element from the array and assign it to `value'.  This
-   *   function may return a new array if it decided to COW due to
-   *   cowCheck().
-   */
-  DISPATCH(Pop)
-
-  /*
-   * ArrayData* Dequeue(ArrayData*, Variant& value)
-   *
-   *   Remove the first element from the array and assign it to `value'.  This
-   *   function may return a new array if it decided to COW due to
-   *   cowCheck().
-   */
-  DISPATCH(Dequeue)
-
-  /*
-   * ArrayData* Prepend(ArrayData*, Cell v, bool copy)
-   *
-   *   Insert `v' as the first element of the array.  Then renumber
-   *   integer keys.  This function has copy/grow semantics.  `v' must
-   *   not be KindOfUninit.
-   */
-  DISPATCH(Prepend)
-
-  /*
-   * void Renumber(ArrayData*)
-   *
-   *   Renumber integer keys on the array in place.
-   */
-  DISPATCH(Renumber)
+  DISPATCH(PopMove)
 
   /*
    * void OnSetEvalScalar(ArrayData*)
@@ -729,77 +610,22 @@ const ArrayFunctions g_array_funcs = {
   DISPATCH(OnSetEvalScalar)
 
   /*
-   * ArrayData* Escalate(const ArrayData*)
+   * void MakeShared(ArrayData*, DataWalker::PointerMap*, bool hasApcTv)
    *
-   *   Arrays must be given a chance to 'escalate' to more general
-   *   kinds prior to some unusual operations.  The operations that
-   *   are only legal after a call to Escalate are:
-   *
-   *      - ValidMArrayIter
-   *      - AdvanceMArrayIter
+   *   Return a copy of the array where all its contents are converted to
+   *   uncounted values. The caller must confirm that its contents can all be
+   *   converted, e.g. by using DataWalker. If hasApcTv is true, this method
+   *   will colocate an ApcTypedValue right before the array.
    */
-  DISPATCH(Escalate)
-
-   /*
-   * ArrayData* ToPHPArray(ArrayData*, bool)
-   *
-   *   Convert to a PHP array. If already a PHP array, it will be returned
-   *   unchange (without copying). If copy is false, it may be converted in
-   *   place.
-   */
-  DISPATCH(ToPHPArray)
-
-   /*
-   * ArrayData* ToDict(ArrayData*, bool)
-   *
-   *   Convert to a dict. If already a dict, it will be returned unchange
-   *   (without copying). If copy is false, it may be converted in place. If the
-   *   input array contains references, an exception will be thrown.
-   */
-  DISPATCH(ToDict)
+  DISPATCH(MakeShared)
 
   /*
-   * ArrayData* ToVec(ArrayData*, bool)
+   * ArrayData* Copy(ArrayData*)
    *
-   *   Convert to a vec. Keys will be discarded and the vec will contain the
-   *   values in iteration order. If already a vec, it will be returned
-   *   unchanged (without copying). If copy is false, it may be converted in
-   *   place. If the input array contains references, an exception will be
-   *   thrown.
+   *  Return a counted copy of the array. A copy is made regardless of
+   *  the array's ref-count.
    */
-  DISPATCH(ToVec)
-
-   /*
-   * ArrayData* ToKeyset(ArrayData*, bool)
-   *
-   *   Convert to a keyset. Keys will be discarded and the keyset will contain
-   *   just the values in iteration order. If already a keyset, it will be
-   *   returned unchange (without copying). If copy is false, it may be
-   *   converted in place. If the input array contains references, or if the
-   *   input contains values that are neither integers or strings, an exception
-   *   will be thrown.
-   */
-  DISPATCH(ToKeyset)
-
-  /*
-   * ArrayData* ToVArray(ArrayData*, bool)
-   *
-   * Convert to a varray (vector-like array). The array will be converted to a
-   * packed array, discarding keys. If already a packed array, it will be
-   * returned with the elements unchanged, but with the DVArray flag updated. If
-   * copy is false, it may be converted in place.
-   */
-  DISPATCH(ToVArray)
-
-  /*
-   * ArrayData* ToDArray(ArrayData*, bool)
-   *
-   * Convert to a darray (dict-like array). The array will be converted to a
-   * mixed array. If already a mixed array, it will be returned with the
-   * elements unchanged, but with the DVArray flag updated. If copy is false, it
-   * may be converted in place.
-   */
-  DISPATCH(ToDArray)
+  DISPATCH(Copy)
 };
 
 #undef DISPATCH
@@ -809,12 +635,7 @@ const ArrayFunctions g_array_funcs = {
 namespace {
 
 DEBUG_ONLY void assertForCreate(TypedValue name) {
-  auto const k = tvToCell(name);
-  int64_t unused;
-  always_assert(isStringType(k.m_type)
-    ? !k.m_data.pstr->isStrictlyInteger(unused)
-    : isIntType(k.m_type)
-  );
+  always_assert(isIntType(name.m_type) || isStringType(name.m_type));
 }
 
 }
@@ -823,53 +644,17 @@ DEBUG_ONLY void assertForCreate(TypedValue name) {
 // access converts them to integers.  non-int-string assertions should go
 // upstream of the ArrayData api.
 
-bool ArrayData::IsValidKey(Cell k) {
+bool ArrayData::IsValidKey(TypedValue k) {
   return isIntType(k.m_type) ||
         (isStringType(k.m_type) && IsValidKey(k.m_data.pstr));
 }
 
 bool ArrayData::IsValidKey(const Variant& k) {
-  return IsValidKey(*k.asCell());
+  return IsValidKey(*k.asTypedValue());
 }
 
-bool ArrayData::IsValidKey(const String& k) {
+bool ArrayData::IsValidKey(const OptString& k) {
   return IsValidKey(k.get());
-}
-
-ArrayData* ArrayData::Create(TypedValue value) {
-  PackedArrayInit pai(1);
-  pai.append(value);
-  return pai.create();
-}
-
-ArrayData* ArrayData::Create(TypedValue name, TypedValue value) {
-  if (debug) assertForCreate(name);
-
-  ArrayInit init(1, ArrayInit::Map{});
-  init.setValidKey(name, value);
-  return init.create();
-}
-
-ArrayData* ArrayData::CreateWithRef(TypedValue name, TypedValue value) {
-  if (debug) assertForCreate(name);
-
-  ArrayInit init(1, ArrayInit::Map{});
-  init.setWithRef(name, value);
-  return init.create();
-}
-
-ArrayData* ArrayData::CreateRef(Variant& value) {
-  PackedArrayInit pai(1);
-  pai.appendRef(value);
-  return pai.create();
-}
-
-ArrayData* ArrayData::CreateRef(TypedValue name, tv_lval value) {
-  if (debug) assertForCreate(name);
-
-  ArrayInit init(1, ArrayInit::Map{});
-  init.setRef(name, value, true);
-  return init.create();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -878,16 +663,7 @@ ArrayData* ArrayData::CreateRef(TypedValue name, tv_lval value) {
 ALWAYS_INLINE
 bool ArrayData::EqualHelper(const ArrayData* ad1, const ArrayData* ad2,
                             bool strict) {
-  assertx(ad1->isPHPArray());
-  assertx(ad2->isPHPArray());
-
   if (ad1 == ad2) return true;
-
-  if (UNLIKELY(RuntimeOption::EvalHackArrCompatDVCmpNotices &&
-               !ArrayData::dvArrayEqual(ad1, ad2))) {
-    raiseHackArrCompatDVArrCmp(ad1, ad2);
-  }
-
   if (ad1->size() != ad2->size()) return false;
 
   // Prevent circular referenced objects/arrays or deep ones.
@@ -896,7 +672,7 @@ bool ArrayData::EqualHelper(const ArrayData* ad1, const ArrayData* ad2,
   if (strict) {
     for (ArrayIter iter1{ad1}, iter2{ad2}; iter1; ++iter1, ++iter2) {
       assertx(iter2);
-      if (!same(iter1.first(), iter2.first()) ||
+      if (!HPHP::same(iter1.first(), iter2.first()) ||
           !tvSame(iter1.secondVal(), iter2.secondVal())) {
         return false;
       }
@@ -906,8 +682,9 @@ bool ArrayData::EqualHelper(const ArrayData* ad1, const ArrayData* ad2,
     bool equal = true;
     IterateKV(
       ad1,
-      [&](Cell k, TypedValue v) {
-        if (!ad2->exists(k) || !tvEqual(v, ad2->get(k).tv())) {
+      [&](TypedValue k, TypedValue v) {
+        auto const v2 = ad2->get(k);
+        if (!v2.is_init() || !tvEqual(v, v2)) {
           equal = false;
           return true;
         }
@@ -920,17 +697,6 @@ bool ArrayData::EqualHelper(const ArrayData* ad1, const ArrayData* ad2,
 
 ALWAYS_INLINE
 int64_t ArrayData::CompareHelper(const ArrayData* ad1, const ArrayData* ad2) {
-  assertx(ad1->isPHPArray());
-  assertx(ad2->isPHPArray());
-
-  if (UNLIKELY(RuntimeOption::EvalHackArrCompatDVCmpNotices)) {
-    if (!ArrayData::dvArrayEqual(ad1, ad2)) {
-      raiseHackArrCompatDVArrCmp(ad1, ad2);
-    } else if (ad1->isDArray()) {
-      raise_hackarr_compat_notice("Comparing two darrays relationally");
-    }
-  }
-
   auto const size1 = ad1->size();
   auto const size2 = ad2->size();
   if (size1 < size2) return -1;
@@ -942,12 +708,13 @@ int64_t ArrayData::CompareHelper(const ArrayData* ad1, const ArrayData* ad2) {
   int result = 0;
   IterateKV(
     ad1,
-    [&](Cell k, TypedValue v) {
-      if (!ad2->exists(k)) {
+    [&](TypedValue k, TypedValue v) {
+      auto const v2 = ad2->get(k);
+      if (!v2.is_init()) {
         result = 1;
         return true;
       }
-      auto const cmp = tvCompare(v, ad2->get(k).tv());
+      auto const cmp = tvCompare(v, v2);
       if (cmp != 0) {
         result = cmp;
         return true;
@@ -984,183 +751,48 @@ bool ArrayData::Lte(const ArrayData* ad1, const ArrayData* ad2) {
 }
 
 bool ArrayData::Gt(const ArrayData* ad1, const ArrayData* ad2) {
-  return 0 > CompareHelper(ad2, ad1); // Not symmetric; Order matters here.
+  return CompareHelper(ad1, ad2) > 0;
 }
 
 bool ArrayData::Gte(const ArrayData* ad1, const ArrayData* ad2) {
-  return 0 >= CompareHelper(ad2, ad1); // Not symmetric; Order matters here.
+  return CompareHelper(ad1, ad2) >= 0;
 }
 
 int64_t ArrayData::Compare(const ArrayData* ad1, const ArrayData* ad2) {
   return CompareHelper(ad1, ad2);
 }
 
-int ArrayData::compare(const ArrayData* v2) const {
+bool ArrayData::same(const ArrayData* v2) const {
   assertx(v2);
 
-  if (isPHPArray()) {
-    if (UNLIKELY(!v2->isPHPArray())) {
-      if (UNLIKELY(checkHACCompare())) {
-        raiseHackArrCompatArrMixedCmp();
-      }
-      if (v2->isVecArray()) throw_vec_compare_exception();
-      if (v2->isDict()) throw_dict_compare_exception();
-      if (v2->isKeyset()) throw_keyset_compare_exception();
-      not_reached();
-    }
-    return Compare(this, v2);
-  }
+  if (toDataType() != v2->toDataType()) return false;
 
-  if (isVecArray()) {
-    if (UNLIKELY(!v2->isVecArray())) {
-      if (UNLIKELY(checkHACCompare() && v2->isPHPArray())) {
-        raiseHackArrCompatArrMixedCmp();
-      }
-      throw_vec_compare_exception();
-    }
-    return PackedArray::VecCmp(this, v2);
-  }
-
-  if (UNLIKELY(checkHACCompare() && v2->isPHPArray())) {
-    raiseHackArrCompatArrMixedCmp();
-  }
-
-  if (isDict()) throw_dict_compare_exception();
-  if (isKeyset()) throw_keyset_compare_exception();
-
-  not_reached();
-}
-
-bool ArrayData::equal(const ArrayData* v2, bool strict) const {
-  assertx(v2);
-
-  auto const mixed = [&]{
-    if (UNLIKELY(checkHACCompare() && v2->isHackArray())) {
-      raiseHackArrCompatArrMixedCmp();
-    }
-    return false;
-  };
-
-  if (isPHPArray()) {
-    if (UNLIKELY(!v2->isPHPArray())) return mixed();
-    return strict ? Same(this, v2) : Equal(this, v2);
-  }
-
-  if (isVecArray()) {
-    if (UNLIKELY(!v2->isVecArray())) return mixed();
-    return strict
-      ? PackedArray::VecSame(this, v2) : PackedArray::VecEqual(this, v2);
-  }
-
-  if (isDict()) {
-    if (UNLIKELY(!v2->isDict())) return mixed();
-    return strict
-      ? MixedArray::DictSame(this, v2) : MixedArray::DictEqual(this, v2);
-  }
-
-  if (isKeyset()) {
-    if (UNLIKELY(!v2->isKeyset())) return mixed();
-    return strict ? SetArray::Same(this, v2) : SetArray::Equal(this, v2);
-  }
-
-  not_reached();
-}
-
-Variant ArrayData::reset() {
-  setPosition(iter_begin());
-  return m_pos != iter_end() ? getValue(m_pos) : Variant(false);
-}
-
-Variant ArrayData::next() {
-  // We call iter_advance() without checking if m_pos is the canonical invalid
-  // position. This is okay, since all IterAdvance() impls handle this
-  // correctly, but it means that EmptyArray::IterAdvance() is reachable.
-  setPosition(iter_advance(m_pos));
-  return m_pos != iter_end() ? getValue(m_pos) : Variant(false);
-}
-
-Variant ArrayData::prev() {
-  // We only call iter_rewind() if m_pos is not the canonical invalid position.
-  // Thus, EmptyArray::IterRewind() is not reachable.
-  auto pos_limit = iter_end();
-  if (m_pos != pos_limit) {
-    setPosition(iter_rewind(m_pos));
-    if (m_pos != pos_limit) {
-      return getValue(m_pos);
-    }
-  }
-  return Variant(false);
-}
-
-Variant ArrayData::end() {
-  setPosition(iter_last());
-  return m_pos != iter_end() ? getValue(m_pos) : Variant(false);
-}
-
-Variant ArrayData::key() const {
-  return m_pos != iter_end() ? getKey(m_pos) : uninit_null();
-}
-
-Variant ArrayData::value(int32_t pos) const {
-  return pos != iter_end() ? getValue(pos) : Variant(false);
-}
-
-Variant ArrayData::current() const {
-  return m_pos != iter_end() ? getValue(m_pos) : Variant(false);
-}
-
-const StaticString
-  s_value("value"),
-  s_key("key");
-
-Variant ArrayData::each() {
-  if (m_pos != iter_end()) {
-    ArrayInit ret(4, ArrayInit::Mixed{});
-    Variant key(getKey(m_pos));
-    Variant value(getValue(m_pos));
-    ret.set(1, value);
-    ret.set(s_value, value);
-    ret.set(0, key);
-    ret.set(s_key, key);
-    setPosition(iter_advance(m_pos));
-    return ret.toVariant();
-  }
-  return Variant(false);
+  if (!bothVanilla(this, v2)) return Same(this, v2);
+  if (isVanillaVec())  return VanillaVec::VecSame(this, v2);
+  if (isVanillaDict()) return VanillaDict::DictSame(this, v2);
+  return VanillaKeyset::Same(this, v2);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 // helpers
 
-tv_rval ArrayData::getNotFound(int64_t k) {
-  raise_notice("Undefined index: %" PRId64, k);
-  return tv_rval::dummy();
+void ArrayData::getNotFound(int64_t k) const {
+  throwOOBArrayKeyException(k, this);
 }
 
-tv_rval ArrayData::getNotFound(const StringData* k) {
-  raise_notice("Undefined index: %s", k->data());
-  return tv_rval::dummy();
-}
-
-tv_rval ArrayData::getNotFound(int64_t k, bool error) const {
-  return error && kind() != kGlobalsKind ? getNotFound(k) :
-         tv_rval::dummy();
-}
-
-tv_rval ArrayData::getNotFound(const StringData* k, bool error) const {
-  return error && kind() != kGlobalsKind ? getNotFound(k) :
-         tv_rval::dummy();
+void ArrayData::getNotFound(const StringData* k) const {
+  if (isVecType()) throwInvalidArrayKeyException(k, this);
+  throwOOBArrayKeyException(k, this);
 }
 
 const char* ArrayData::kindToString(ArrayKind kind) {
-  std::array<const char*,8> names = {{
-    "PackedKind",
-    "MixedKind",
-    "EmptyKind",
-    "ApcKind",
-    "GlobalsKind",
-    "DictKind",
+  std::array<const char*, 6> names = {{
     "VecKind",
-    "KeysetKind"
+    "BespokeVecKind",
+    "DictKind",
+    "BespokeDictKind",
+    "KeysetKind",
+    "BespokeKeysetKind",
   }};
   static_assert(names.size() == kNumKinds, "add new kinds here");
   return names[kind];
@@ -1170,45 +802,13 @@ namespace {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-std::string describeKeyType(const TypedValue* tv) {
-  switch (tv->m_type) {
-  case KindOfUninit:
-  case KindOfNull:             return "null";
-  case KindOfBoolean:          return "bool";
-  case KindOfInt64:            return "int";
-  case KindOfDouble:           return "double";
-  case KindOfPersistentString:
-  case KindOfString:           return "string";
-  case KindOfPersistentVec:
-  case KindOfVec:              return "vec";
-  case KindOfPersistentDict:
-  case KindOfDict:             return "dict";
-  case KindOfPersistentKeyset:
-  case KindOfKeyset:           return "keyset";
-  case KindOfPersistentArray:
-  case KindOfArray:            return "array";
-  case KindOfResource:
-    return tv->m_data.pres->data()->o_getClassName().toCppString();
-
-  case KindOfObject:
-    return tv->m_data.pobj->getClassName().get()->toCppString();
-
-  case KindOfRef:
-    return describeKeyType(tv->m_data.pref->var()->asTypedValue());
-  case KindOfFunc:             return "func";
-  }
-  not_reached();
-}
-
 std::string describeKeyValue(TypedValue tv) {
   switch (tv.m_type) {
   case KindOfPersistentString:
   case KindOfString:
-    return folly::sformat("\"{}\"", tv.m_data.pstr->data());
+    return fmt::format("\"{}\"", tv.m_data.pstr->data());
   case KindOfInt64:
     return folly::to<std::string>(tv.m_data.num);
-  case KindOfRef:
-    return describeKeyValue(*tv.m_data.pref->var()->asTypedValue());
   case KindOfUninit:
   case KindOfNull:
   case KindOfBoolean:
@@ -1219,11 +819,15 @@ std::string describeKeyValue(TypedValue tv) {
   case KindOfDict:
   case KindOfPersistentKeyset:
   case KindOfKeyset:
-  case KindOfPersistentArray:
-  case KindOfArray:
   case KindOfResource:
   case KindOfObject:
+  case KindOfRFunc:
   case KindOfFunc:
+  case KindOfClass:
+  case KindOfLazyClass:
+  case KindOfClsMeth:
+  case KindOfRClsMeth:
+  case KindOfEnumClassLabel:
     return "<invalid key type>";
   }
   not_reached();
@@ -1235,16 +839,15 @@ std::string describeKeyValue(TypedValue tv) {
 
 void throwInvalidArrayKeyException(const TypedValue* key, const ArrayData* ad) {
   std::pair<const char*, const char*> kind_type = [&]{
-    if (ad->isVecArray()) return std::make_pair("vec", "int");
-    if (ad->isDict()) return std::make_pair("dict", "int or string");
-    if (ad->isKeyset()) return std::make_pair("keyset", "int or string");
-    assertx(ad->isPHPArray());
-    return std::make_pair("array", "int or string");
+    if (ad->isVecType()) return std::make_pair("vec", "int");
+    if (ad->isDictType()) return std::make_pair("dict", "int or string");
+    assertx(ad->isKeysetType());
+    return std::make_pair("keyset", "int or string");
   }();
   SystemLib::throwInvalidArgumentExceptionObject(
-    folly::sformat(
+    fmt::format(
       "Invalid {} key: expected a key of type {}, {} given",
-      kind_type.first, kind_type.second, describeKeyType(key)
+      kind_type.first, kind_type.second, describe_actual_type(key)
     )
   );
 }
@@ -1254,18 +857,18 @@ void throwInvalidArrayKeyException(const StringData* key, const ArrayData* ad) {
   throwInvalidArrayKeyException(&tv, ad);
 }
 
-void throwOOBArrayKeyException(TypedValue key, const ArrayData* ad) {
-  const char* type = [&]{
-    if (ad->isVecArray()) return "vec";
-    if (ad->isDict()) return "dict";
-    if (ad->isKeyset()) return "keyset";
-    assertx(ad->isPHPArray());
-    return "array";
-  }();
+void throwFalseyPromoteException(const char* type) {
   SystemLib::throwOutOfBoundsExceptionObject(
-    folly::sformat(
+    fmt::format("Promoting {} to array", type)
+  );
+}
+
+void throwOOBArrayKeyException(TypedValue key, const ArrayData* ad) {
+  SystemLib::throwOutOfBoundsExceptionObject(
+    fmt::format(
       "Out of bounds {} access: invalid index {}",
-      type, describeKeyValue(key)
+      getDataTypeString(ad->toDataType(), ad->isLegacyArray()).data(),
+      describeKeyValue(key)
     )
   );
 }
@@ -1281,38 +884,12 @@ void throwOOBArrayKeyException(const StringData* key, const ArrayData* ad) {
   );
 }
 
-void throwRefInvalidArrayValueException(const ArrayData* ad) {
-  assertx(ad->isHackArray());
-  const char* type = [&]{
-    if (ad->isVecArray()) return "Vecs";
-    if (ad->isDict()) return "Dicts";
-    if (ad->isKeyset()) return "Keysets";
-    not_reached();
-  }();
-  SystemLib::throwInvalidArgumentExceptionObject(
-    folly::sformat("{} cannot contain references", type)
-  );
-}
-
-void throwRefInvalidArrayValueException(const Array& arr) {
-  throwRefInvalidArrayValueException(arr.get());
-}
-
 void throwInvalidKeysetOperation() {
   SystemLib::throwInvalidOperationExceptionObject(s_InvalidKeysetOperationMsg);
 }
 
-void throwInvalidAdditionException(const ArrayData* ad) {
-  assertx(ad->isHackArray());
-  const char* type = [&]{
-    if (ad->isVecArray()) return "Vecs";
-    if (ad->isDict()) return "Dicts";
-    if (ad->isKeyset()) return "Keysets";
-    not_reached();
-  }();
-  SystemLib::throwInvalidOperationExceptionObject(
-    folly::sformat("{} do not support the + operator", type)
-  );
+void throwVarrayUnsetException() {
+  SystemLib::throwInvalidOperationExceptionObject(s_VarrayUnsetMsg);
 }
 
 void throwVecUnsetException() {
@@ -1321,71 +898,305 @@ void throwVecUnsetException() {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-void raiseHackArrCompatRefBind(int64_t k) {
-  raise_hackarr_compat_notice(
-    folly::sformat("Binding ref in array with key {}", k)
-  );
+ArrayData* ArrayData::toDictIntishCast(bool copy) {
+  auto const base = toDict(copy);
+  if (isVecType()) return base;
+
+  // Check if we need to intish-cast any string keys.
+  int64_t i;
+  auto intish = false;
+  IterateKV(base, [&](TypedValue k, TypedValue) {
+    return intish |= tvIsString(k) && val(k).pstr->isStrictlyInteger(i);
+  });
+  if (!intish) return base;
+
+  // Create a new dict with the casted keys.
+  auto result = DictInit(base->size());
+  IterateKV(base, [&](TypedValue k, TypedValue v) {
+    result.setUnknownKey<IntishCast::Cast>(k, tvAsCVarRef(&v));
+  });
+  if (base != this) decRefArr(base);
+  auto ad = result.create();
+  if (!isKeysetType()) return ad;
+
+  // When keysets are intish-casted, we cast the values, too. Do so in place.
+  // This case is rare, so we keep the extra checks out of the loop above.
+  assertx(ad->hasExactlyOneRef());
+  auto elm = VanillaDict::as(ad)->data();
+  for (auto const end = elm + ad->size(); elm != end; elm++) {
+    if (tvIsString(elm->data) && elm->hasIntKey()) {
+      decRefStr(val(elm->data).pstr);
+      tvCopy(make_tv<KindOfInt64>(elm->intKey()), elm->data);
+    }
+  }
+  return ad;
 }
 
-void raiseHackArrCompatRefBind(const StringData* k) {
-  raise_hackarr_compat_notice(
-    folly::sformat("Binding ref in array with key \"{}\"", k)
-  );
+bool ArrayData::IntishCastKey(const StringData* key, int64_t& i) {
+  return key->isStrictlyInteger(i);
 }
 
-void raiseHackArrCompatRefBind(TypedValue tv) {
-  if (isStringType(tv.m_type)) {
-    raiseHackArrCompatRefBind(tv.m_data.pstr);
+ArrayData* ArrayData::setLegacyArray(bool copy, bool legacy) {
+  assertx(IMPLIES(cowCheck(), copy));
+  assertx(isDictType() || isVecType());
+
+  if (legacy == isLegacyArray()) return this;
+
+  if (!isVanilla()) return BespokeArray::SetLegacyArray(this, copy, legacy);
+
+  auto const ad = [&]{
+    if (!copy) return this;
+    return isVanillaVec() ? VanillaVec::Copy(this) : VanillaDict::Copy(this);
+  }();
+  ad->setLegacyArrayInPlace(legacy);
+  return ad;
+}
+
+void ArrayData::setLegacyArrayInPlace(bool legacy) {
+  assertx(hasExactlyOneRef());
+  if (legacy) {
+    m_aux16 |= kLegacyArray;
   } else {
-    assertx(isIntType(tv.m_type));
-    raiseHackArrCompatRefBind(tv.m_data.num);
+    m_aux16 &= ~kLegacyArray;
   }
 }
 
-void raiseHackArrCompatRefNew() {
-  raise_hackarr_compat_notice("Binding new-element ref in array");
+size_t ArrayData::heapSize() const {
+  return kSizeIndex2Size[sizeIndex()];
 }
 
-void raiseHackArrCompatRefIter() {
-  raise_hackarr_compat_notice("Ref binding iteration on array");
+///////////////////////////////////////////////////////////////////////////////
+
+ArrayData* ArrayData::toVec(bool copy) {
+  assertx(IMPLIES(cowCheck(), copy));
+  if (isVecType()) return this;
+
+  if (empty()) return staticEmptyVec();
+  VecInit init{size()};
+  IterateV(this, [&](auto v) { init.append(v); });
+  return init.create();
 }
 
-void raiseHackArrCompatAdd() {
-  raise_hackarr_compat_notice("Using + operator on arrays");
+ArrayData* ArrayData::toDict(bool copy) {
+  assertx(IMPLIES(cowCheck(), copy));
+  if (isDictType()) return this;
+
+  if (empty()) return staticEmptyDictArray();
+  DictInit init{size()};
+  IterateKV(this, [&](auto k, auto v) { init.setValidKey(k, v); });
+  return init.create();
 }
 
-void raiseHackArrCompatArrMixedCmp() {
-  raise_hackarr_compat_notice(Strings::HACKARR_COMPAT_ARR_MIXEDCMP);
+ArrayData* ArrayData::toKeyset(bool copy) {
+  assertx(IMPLIES(cowCheck(), copy));
+  if (isKeysetType()) return this;
+  if (empty()) return staticEmptyKeysetArray();
+  KeysetInit init{size()};
+  IterateV(this, [&](auto v) { init.add(v); });
+  return init.create();
 }
 
-void raiseHackArrCompatDVArrCmp(const ArrayData* ad1, const ArrayData* ad2) {
-  auto const type = [](const ArrayData* a) {
-    if (a->isVArray()) return "varray";
-    if (a->isDArray()) return "darray";
-    return "array";
+
+void* ArrayData::AllocStatic(size_t size) {
+  return Cfg::Eval::LowStaticArrays ? low_malloc(size) : shared_malloc(size);
+}
+
+void ArrayData::FreeStatic(void* ptr) {
+  Cfg::Eval::LowStaticArrays ? low_free(ptr) : shared_free(ptr);
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// Serialization
+
+__thread UnitEmitter* BlobEncoderHelper<const ArrayData*>::tl_unitEmitter{nullptr};
+__thread Unit* BlobEncoderHelper<const ArrayData*>::tl_unit{nullptr};
+__thread bool BlobEncoderHelper<const ArrayData*>::tl_defer{false};
+
+namespace {
+
+enum class ArrayKind {
+  Null = 0,
+  Vec,
+  Dict,
+  Keyset,
+  BespokeTS,
+  VArray,
+  DArray
+};
+
+}
+
+void BlobEncoderHelper<const ArrayData*>::serde(BlobEncoder& encoder,
+                                                const ArrayData* ad) {
+  assertx(!tl_unit);
+
+  if (auto const ue = tl_unitEmitter; ue && !tl_defer) {
+    if (!ad) {
+      encoder(Id{0});
+      return;
+    }
+    Id id = ue->mergeArray(ad);
+    assertx(id != std::numeric_limits<Id>::max());
+    encoder(id+1);
+    return;
+  }
+
+  auto const oldDefer = tl_defer;
+  tl_defer = false;
+  SCOPE_EXIT {
+    assertx(!tl_defer);
+    tl_defer = oldDefer;
   };
-  raise_hackarr_compat_notice(
-    folly::sformat("Comparing {} and {}", type(ad1), type(ad2))
-  );
+
+  using AK = ArrayKind;
+  auto const ak = [&] {
+    if (!ad) return AK::Null;
+    if (ad->isLegacyArray()) {
+      return ad->isVecType() ? AK::VArray : AK::DArray;
+    }
+    if (ad->isDictType()) {
+      return bespoke::TypeStructure::isBespokeTypeStructure(ad)
+        ? AK::BespokeTS
+        : AK::Dict;
+    }
+    if (ad->isVecType()) return AK::Vec;
+    assertx(ad->isKeysetType());
+    return AK::Keyset;
+  }();
+
+  encoder(ak);
+  if (ak == AK::Null) return;
+
+  assertx(ad->size() <= std::numeric_limits<uint32_t>::max());
+  encoder(static_cast<uint32_t>(ad->size()));
+
+  switch (ak) {
+    case AK::Vec:
+    case AK::VArray:
+    case AK::Keyset:
+      IterateV(ad, [&] (TypedValue v) { encoder(v); });
+      break;
+    case AK::Dict:
+    case AK::DArray:
+    case AK::BespokeTS:
+      IterateKV(
+        ad,
+        [&] (TypedValue k, TypedValue v) {
+          assertx(tvIsInt(k) || tvIsString(k));
+          encoder(k)(v);
+        }
+      );
+      break;
+    case AK::Null:
+      not_reached();
+  }
 }
 
-void raiseHackArrCompatMissingIncDec() {
-  raise_hackarr_compat_notice("Inc/dec on missing array element");
-}
+void BlobEncoderHelper<const ArrayData*>::serde(BlobDecoder& decoder,
+                                                const ArrayData*& ad,
+                                                bool makeStatic) {
+  if (auto const ue = tl_unitEmitter; ue && !tl_defer) {
+    Id id;
+    decoder(id);
+    if (!id) {
+      ad = nullptr;
+      return;
+    }
+    if (makeStatic) {
+      ad = ue->lookupArrayId(id-1);
+      assertx(ad->isStatic());
+    } else {
+      ad = ue->lookupArrayIdCopy(id-1).detach();
+    }
+    return;
+  } else if (auto const u = tl_unit; u && !tl_defer) {
+    assertx(makeStatic);
+    Id id;
+    decoder(id);
+    if (!id) {
+      ad = nullptr;
+      return;
+    }
+    ad = u->lookupArrayId(id-1);
+    assertx(ad->isStatic());
+    return;
+  }
 
-void raiseHackArrCompatMissingSetOp() {
-  raise_hackarr_compat_notice("Set-op on missing array element");
-}
+  auto const oldDefer = tl_defer;
+  tl_defer = false;
+  SCOPE_EXIT {
+    assertx(!tl_defer);
+    tl_defer = oldDefer;
+  };
 
-std::string makeHackArrCompatImplicitArrayKeyMsg(const TypedValue* key) {
-  return folly::sformat(
-    "Implicit conversion of {} to array key",
-    describeKeyType(key)
-  );
-}
+  using AK = ArrayKind;
 
-void raiseHackArrCompatImplicitArrayKey(const TypedValue* key) {
-  raise_hackarr_compat_notice(makeHackArrCompatImplicitArrayKeyMsg(key));
+  AK ak;
+  decoder(ak);
+  if (ak == AK::Null) {
+    ad = nullptr;
+    return;
+  }
+
+  uint32_t size;
+  decoder(size);
+
+  switch (ak) {
+    case AK::Vec:
+    case AK::VArray: {
+      VecInit v{size};
+      for (size_t i = 0; i < size; ++i) {
+        TypedValue tv;
+        decoder(tv, makeStatic);
+        v.append(Variant::attach(tv));
+      }
+      if (ak == AK::VArray) v.setLegacyArray(true);
+      auto a = v.toArray();
+      if (makeStatic) a.setEvalScalar();
+      ad = a.detach();
+      break;
+    }
+    case AK::Keyset: {
+      KeysetInit k{size};
+      for (size_t i = 0; i < size; ++i) {
+        TypedValue tv;
+        decoder(tv, makeStatic);
+        k.add(Variant::attach(tv));
+      }
+      auto a = k.toArray();
+      if (makeStatic) a.setEvalScalar();
+      ad = a.detach();
+      break;
+    }
+    case AK::Dict:
+    case AK::DArray:
+    case AK::BespokeTS: {
+      DictInit d{size};
+      for (size_t i = 0; i < size; ++i) {
+        TypedValue k;
+        TypedValue v;
+        decoder(k, makeStatic)(v, makeStatic);
+        if (tvIsString(k)) {
+          d.set(OptString::attach(k.m_data.pstr), Variant::attach(v));
+        } else {
+          assertx(tvIsInt(k));
+          d.set(k.m_data.num, Variant::attach(v));
+        }
+      }
+      if (ak == AK::DArray) d.setLegacyArray();
+      auto a = d.toArray();
+      if (ak == AK::BespokeTS) {
+        auto const ts =
+          bespoke::TypeStructure::MakeFromVanilla(a.get());
+        if (ts) a = Array::attach(ts);
+      }
+      if (makeStatic) a.setEvalScalar();
+      ad = a.detach();
+      break;
+    }
+    case AK::Null:
+      not_reached();
+  }
 }
 
 ///////////////////////////////////////////////////////////////////////////////

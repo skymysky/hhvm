@@ -16,8 +16,8 @@
  * methods. The result will be PHP value for simple resources and
  * ResourceBundle object for complex ones. All resources are read-only.
  */
-<<__NativeData("ResourceBundle")>>
-class ResourceBundle implements \Iterator, \ArrayAccess, \Countable {
+<<__NativeData>>
+class ResourceBundle implements \HH\Iterator, \ArrayAccess, \Countable {
   /**
    * Create a resource bundle
    *
@@ -81,7 +81,7 @@ class ResourceBundle implements \Iterator, \ArrayAccess, \Countable {
    *   call.
    */
   <<__Native>>
-  public function getErrorMessage(): string;
+  public function getErrorMessage(): ?string;
 
   /**
    * Get data from the bundle
@@ -210,6 +210,6 @@ function resourcebundle_get(ResourceBundle $r,
  *
  * @return array - Returns the list of locales supported by the bundle.
  */
-function resourcebundle_locales(string $bundlename): array {
+function resourcebundle_locales(string $bundlename): varray {
   return ResourceBundle::getLocales($bundlename);
 }

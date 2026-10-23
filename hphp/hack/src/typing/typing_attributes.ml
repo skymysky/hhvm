@@ -1,4 +1,4 @@
-(**
+(*
  * Copyright (c) 2015, Facebook, Inc.
  * All rights reserved.
  *
@@ -7,57 +7,147 @@
  *
  *)
 
-open Typing_defs
-open Typing_reason
-
+open Hh_prelude
+open Typing_env_types
 module SN = Naming_special_names
+module MakeType = Typing_make_type
+module Cls = Folded_class
 
-let check_implements check_new_object attr_interface
-  { Nast.ua_name = (attr_pos, attr_name)
-  ; Nast.ua_params = params } env =
-  if String_utils.string_starts_with attr_name "__"
-  then begin
+type attribute_interface_name = string
+
+type new_object_checker =
+  Pos.t -> env -> Typing_defs.pos_string -> Nast.argument list -> env
+
+let check_implements
+    (check_new_object : new_object_checker)
+    (attr_interface : attribute_interface_name)
+    ({ Aast.ua_name = (attr_pos, attr_name); ua_params = params } :
+      Nast.user_attribute)
+    (env : env) : env =
+  let expr_kind =
+    match S_map.find_opt attr_interface SN.AttributeKinds.plain_english_map with
+    | Some ek -> ek
+    | None -> "this expression"
+    (* this case should never execute *)
+  in
+  let is_systemlib =
+    Typechecker_options.is_systemlib (Typing_env.get_tcopt env)
+  in
+  if String.is_prefix attr_name ~prefix:"__" then
     (* Check against builtins *)
-    if not (SSet.mem attr_name SN.UserAttributes.as_set)
-    then Errors.unbound_attribute_name attr_pos attr_name; env end
-  else
-    let attr_class_name = "\\__Attribute__" ^ attr_name in
-    match Typing_env.get_class env attr_class_name, Typing_env.get_class env attr_interface with
-    | Some attr_class, Some intf_class ->
-      (* Found matching class *)
-      let attr_cid = (attr_class.tc_pos, attr_class.tc_name) in
-      let intf_cid = (intf_class.tc_pos, intf_class.tc_name) in
-      (* successful exit condition: attribute class is subtype of correct interface
-       * and its args satisfy the attribute class constructor *)
-     let attr_locl_ty: (Typing_defs.locl Typing_defs.ty) =
-       (Rwitness attr_class.tc_pos, Tclass (attr_cid, [])) in
-     let interface_locl_ty: (Typing_defs.locl Typing_defs.ty) =
-       (Rwitness intf_class.tc_pos, Tclass (intf_cid, [])) in
-      if not (Typing_subtype.is_sub_type env attr_locl_ty interface_locl_ty)
-      then begin
-        let expr_kind =
-          match SMap.get attr_interface SN.AttributeKinds.plain_english_map  with
-          | Some ek -> ek
-          | None -> "this expression" (* this case should never execute *) in
-        Errors.wrong_expression_kind_attribute expr_kind
-          attr_pos attr_name attr_class.tc_pos attr_class.tc_name intf_class.tc_name;
-        env end
+    let check_attr map =
+      match S_map.find_opt attr_name map with
+      | Some attr_info ->
+        if
+          not
+          @@ List.mem
+               attr_info.SN.UserAttributes.contexts
+               attr_interface
+               ~equal:String.equal
+        then
+          Diagnostics.add_diagnostic
+            Nast_check_error.(
+              to_user_diagnostic
+              @@ Wrong_expression_kind_builtin_attribute
+                   { expr_kind; pos = attr_pos; attr_name });
+        true
+      | None -> false
+    in
+    let () =
+      if
+        check_attr SN.UserAttributes.as_map
+        || (is_systemlib && check_attr SN.UserAttributes.systemlib_map)
+      then
+        ()
       else
-        let env, _, _, _, _, _ = check_new_object
-          ~expected:None
-          ~check_parent:false
-          ~check_not_abstract:false
-          ~is_using_clause:false attr_pos env
-          (Nast.CI (attr_cid, []))
-          params (* list of attr parameter literals *)
-          [] (* no variadic arguments *) in
+        let all_valid_user_attributes =
+          let bindings = S_map.bindings SN.UserAttributes.as_map in
+          let filtered_bindings =
+            List.filter
+              ~f:(fun (_, attr_info) ->
+                List.mem
+                  attr_info.SN.UserAttributes.contexts
+                  attr_interface
+                  ~equal:String.equal)
+              bindings
+          in
+          List.map ~f:fst filtered_bindings
+        in
+
+        let closest_attr_name =
+          String_utils.most_similar attr_name all_valid_user_attributes Fn.id
+        in
+
+        let custom_err_config =
+          Typechecker_options.custom_error_config (Typing_env.get_tcopt env)
+        in
+        Diagnostics.add_diagnostic
+          (Naming_error_utils.to_user_diagnostic
+             (Naming_error.Unbound_attribute_name
+                { pos = attr_pos; attr_name; closest_attr_name })
+             custom_err_config)
+    in
+
+    env
+  else
+    match Typing_env.get_class env attr_name with
+    | Decl_entry.Found attr_class ->
+      (* Found matching class *)
+      let attr_cid = (Cls.pos attr_class, Cls.name attr_class) in
+      (* Package-boundary enforcement for attribute classes (strict-isolation
+         targets) is handled uniformly with other class references in
+         `class_id_`'s `should_check_package_boundary`; nothing to do here. *)
+      if not (Cls.has_ancestor attr_class attr_interface) then (
+        Typing_error_utils.add_typing_error
+          ~env
+          Typing_error.(
+            primary
+            @@ Primary.Wrong_expression_kind_attribute
+                 {
+                   expr_kind;
+                   pos = attr_pos;
+                   attr_name;
+                   attr_class_pos = Cls.pos attr_class;
+                   attr_class_name = Cls.name attr_class;
+                   intf_name = attr_interface;
+                 });
         env
+      ) else
+        check_new_object
+          attr_pos
+          env
+          attr_cid
+          (List.map ~f:(fun e -> Aast_defs.Anormal e) params)
+    | Decl_entry.NotYetAvailable ->
+      (* A retry will happen. Don't emit error to avoid error-based backtracking *)
+      env
     | _ ->
-      (* Fall back to legacy .hhconfig check *)
-      let tc_options = Typing_env.get_tcopt env in
-      if not (TypecheckerOptions.allowed_attribute tc_options attr_name)
-      then Errors.unbound_attribute_name attr_pos attr_name;
+      let custom_err_config =
+        Typechecker_options.custom_error_config (Typing_env.get_tcopt env)
+      in
+      Diagnostics.add_diagnostic
+        (Naming_error_utils.to_user_diagnostic
+           (Naming_error.Unbound_attribute_name
+              { pos = attr_pos; attr_name; closest_attr_name = None })
+           custom_err_config);
       env
 
-let check_def env check_new_object kind f_attrs =
-  List.fold_right (check_implements check_new_object kind) f_attrs env
+let check_def env check_new_object (kind : attribute_interface_name) attributes
+    =
+  List.fold_right
+    ~f:(check_implements check_new_object kind)
+    attributes
+    ~init:env
+
+(* TODO(coeffects) change to mixed after changing those constructors to pure *)
+let check_def env check_new_object (kind : attribute_interface_name) attributes
+    =
+  let defaults = MakeType.default_capability Pos_or_decl.none in
+  let (env, _) =
+    Typing_lenv.stash_and_do env (Typing_env.all_continuations env) (fun env ->
+        let env =
+          fst @@ Typing_coeffects.register_capabilities env defaults defaults
+        in
+        (check_def env check_new_object kind attributes, ()))
+  in
+  env

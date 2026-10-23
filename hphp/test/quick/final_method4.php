@@ -1,6 +1,6 @@
 <?hh
 trait T {
-  final static function f() {
+  final static function f() :mixed{
     echo "Hello\n";
   }
 }
@@ -10,5 +10,6 @@ class Foo {
 class Bar extends Foo {
   use T;
 }
-
+<<__EntryPoint>> function main(): void {
 Bar::f();
+}

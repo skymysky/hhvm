@@ -1,109 +1,124 @@
-array(2) {
+dict(3) {
   ["kind"]=>
   int(15)
   ["classname"]=>
   string(4) "Base"
+  ["exact"]=>
+  bool(true)
 }
-array(2) {
+dict(3) {
   ["kind"]=>
   int(15)
   ["classname"]=>
   string(5) "Child"
+  ["exact"]=>
+  bool(true)
 }
-array(3) {
+dict(3) {
   ["kind"]=>
   int(11)
   ["return_type"]=>
-  array(2) {
+  dict(3) {
     ["kind"]=>
     int(15)
     ["classname"]=>
     string(4) "Base"
+    ["exact"]=>
+    bool(true)
   }
   ["param_types"]=>
-  array(1) {
-    [0]=>
-    array(2) {
+  vec(1) {
+    dict(3) {
       ["kind"]=>
       int(15)
       ["classname"]=>
       string(4) "Base"
+      ["exact"]=>
+      bool(true)
     }
   }
 }
-array(3) {
+dict(3) {
   ["kind"]=>
   int(11)
   ["return_type"]=>
-  array(2) {
+  dict(3) {
     ["kind"]=>
     int(15)
     ["classname"]=>
     string(5) "Child"
+    ["exact"]=>
+    bool(true)
   }
   ["param_types"]=>
-  array(1) {
-    [0]=>
-    array(2) {
+  vec(1) {
+    dict(3) {
       ["kind"]=>
       int(15)
       ["classname"]=>
       string(5) "Child"
+      ["exact"]=>
+      bool(true)
     }
   }
 }
-array(3) {
+dict(3) {
   ["kind"]=>
   int(11)
   ["return_type"]=>
-  array(2) {
+  dict(3) {
     ["kind"]=>
     int(15)
     ["classname"]=>
     string(4) "Base"
+    ["exact"]=>
+    bool(true)
   }
   ["param_types"]=>
-  array(1) {
-    [0]=>
-    array(2) {
+  vec(1) {
+    dict(3) {
       ["kind"]=>
       int(15)
       ["classname"]=>
       string(4) "Base"
+      ["exact"]=>
+      bool(true)
     }
   }
 }
-array(2) {
+dict(2) {
   ["kind"]=>
   int(14)
   ["fields"]=>
-  array(2) {
+  dict(2) {
     ["foo"]=>
-    array(2) {
+    dict(3) {
       ["kind"]=>
       int(15)
       ["classname"]=>
       string(5) "Child"
+      ["exact"]=>
+      bool(true)
     }
     ["bar"]=>
-    array(3) {
+    dict(3) {
       ["kind"]=>
       int(15)
       ["classname"]=>
       string(6) "HH\Map"
       ["generic_types"]=>
-      array(2) {
-        [0]=>
-        array(1) {
+      vec(2) {
+        dict(1) {
           ["kind"]=>
           int(4)
         }
-        [1]=>
-        array(2) {
+        dict(3) {
           ["kind"]=>
           int(15)
           ["classname"]=>
           string(5) "Child"
+          ["exact"]=>
+          bool(true)
         }
       }
     }

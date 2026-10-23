@@ -14,7 +14,9 @@ bool(true)
 bool(true)
 bool(true)
 bool(true)
+Error: Cannot perform pre/post inc/dec on null
 NULL
-int(1)
+Error: Cannot perform pre/post inc/dec on null
+NULL
 NULL
 NULL

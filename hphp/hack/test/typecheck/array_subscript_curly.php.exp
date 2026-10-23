@@ -1,0 +1,10 @@
+error: Parsing[1002] A semicolon `;` is expected here. [1]
+
+array_subscript_curly.php:4:12
+2 | 
+3 | function f(dict<arraykey,mixed> $x): mixed {
+4 |   return $x{1};
+  |            ^ [1]
+5 | }
+
+1 error found

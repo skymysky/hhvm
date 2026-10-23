@@ -1,0 +1,10 @@
+error: Typing[4455] UNSAFE_CAST cannot be used as the operand of an await operation [1]
+
+await.php:8:14
+6 | 
+7 | async function f(dynamic $m): Awaitable<void> {
+8 |   $x = await HH\FIXME\UNSAFE_CAST<dynamic, Awaitable<int>>(foo());
+  |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ [1]
+9 | }
+
+1 error found

@@ -1,7 +1,0 @@
-#Tests that verifier rejects NewCol Pair and ColFromArray Pair
-
-.main {
-  NewCol Pair
-  ColFromArray Pair
-  RetC
-}

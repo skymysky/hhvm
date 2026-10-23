@@ -14,8 +14,7 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_JIT_TRANS_DB_H_
-#define incl_HPHP_JIT_TRANS_DB_H_
+#pragma once
 
 #include "hphp/runtime/vm/jit/trans-rec.h"
 #include "hphp/runtime/vm/jit/types.h"
@@ -32,7 +31,7 @@
  * `profTransID', which is just the region block ID (which are globally
  * unique).  This is completely distinct from the Translator's TransID.
  */
-namespace HPHP { namespace jit { namespace transdb {
+namespace HPHP::jit::transdb {
 
 /*
  * Whether the TransDB structures should be used.
@@ -61,6 +60,5 @@ void addTranslation(const TransRec& transRec);
  */
 size_t getNumTranslations();
 
-}}}
+}
 
-#endif

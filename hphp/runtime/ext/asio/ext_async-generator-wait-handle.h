@@ -47,14 +47,20 @@ namespace HPHP {
  */
 struct AsyncGenerator;
 
-struct c_AsyncGeneratorWaitHandle final : c_ResumableWaitHandle {
-  WAITHANDLE_CLASSOF(AsyncGeneratorWaitHandle);
-  WAITHANDLE_DTOR(AsyncGeneratorWaitHandle);
+struct c_AsyncGeneratorWaitHandle final :
+    c_ResumableWaitHandle,
+    SystemLib::ClassLoader<"HH\\AsyncGeneratorWaitHandle"> {
+  using SystemLib::ClassLoader<"HH\\AsyncGeneratorWaitHandle">::classof;
+  using SystemLib::ClassLoader<"HH\\AsyncGeneratorWaitHandle">::className;
+  WAITHANDLE_DTOR(AsyncGeneratorWaitHandle)
 
   c_AsyncGeneratorWaitHandle(AsyncGenerator* gen, c_WaitableWaitHandle* child);
   ~c_AsyncGeneratorWaitHandle();
 
  public:
+  static constexpr ptrdiff_t generatorOff() {
+    return offsetof(c_AsyncGeneratorWaitHandle, m_generator);
+  }
   static constexpr ptrdiff_t blockableOff() {
     return offsetof(c_AsyncGeneratorWaitHandle, m_blockable);
   }
@@ -62,19 +68,19 @@ struct c_AsyncGeneratorWaitHandle final : c_ResumableWaitHandle {
   static c_AsyncGeneratorWaitHandle* Create(
     const ActRec* fp,
     jit::TCA resumeAddr,
-    Offset resumeOffset,
+    Offset suspendOffset,
     c_WaitableWaitHandle* child
   ); // nothrow
 
   void resume();
   void onUnblocked();
   void await(req::ptr<c_WaitableWaitHandle>&& child);
-  void ret(Cell& result);
+  void ret(TypedValue& result);
   void fail(ObjectData* exception);
   void failCpp();
-  String getName();
+  OptString getName();
   c_WaitableWaitHandle* getChild();
-  void exitContext(context_idx_t ctx_idx);
+  void exitContext(ContextIndex contextIdx);
   bool isRunning() { return getState() == STATE_RUNNING; }
 
   Resumable* resumable() const;

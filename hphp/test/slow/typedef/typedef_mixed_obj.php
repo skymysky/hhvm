@@ -2,9 +2,13 @@
 
 newtype MixedObj = mixed;
 
-function foo(MixedObj $obj) {
+function foo(MixedObj $obj) :mixed{
 }
 
-foo(new stdclass);
+
+<<__EntryPoint>>
+function main_typedef_mixed_obj() :mixed{
+foo(new stdClass);
 foo(12);
 echo "done\n";
+}

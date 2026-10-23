@@ -1,6 +1,6 @@
 <?hh
 
-function flip($input) {
+function flip($input) :mixed{
   echo "--------------------\n";
   echo "input: ";
   var_dump($input);
@@ -8,9 +8,9 @@ function flip($input) {
   var_dump(array_flip($input));
 }
 
-function main() {
-  flip(['foo', 'bar', 'baz']);
-  flip(['a' => 10, 'b' => 20, 'c' => 30]);
+function main() :mixed{
+  flip(vec['foo', 'bar', 'baz']);
+  flip(dict['a' => 10, 'b' => 20, 'c' => 30]);
   flip(Vector {'foo', 'bar', 'baz'});
   flip(Set {'foo', 'bar', 'baz'});
   flip(Map { 'a' => 10, 'b' => 20, 'c' => 30});
@@ -22,4 +22,8 @@ function main() {
 
 }
 
+
+<<__EntryPoint>>
+function main_array_flip() :mixed{
 main();
+}

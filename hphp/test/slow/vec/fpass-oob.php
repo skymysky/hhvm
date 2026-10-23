@@ -1,22 +1,23 @@
 <?hh
-
-function ref(&$x) { echo ++$x, "\n"; }
-function non($x) { echo $x, "\n"; }
-
-function foo($f, $ref) {
+<<__DynamicallyCallable>>
+function ref(inout $x, $i, $j) :mixed{ ++$x[$i][$j]; echo $x[$i][$j], "\n"; }
+<<__DynamicallyCallable>>
+function non($x) :mixed{ echo $x, "\n"; }
+function foo($f, $ref) :mixed{
   $x = vec[0, vec[1]];
-  $ref ? $f(&$x[1][0]) : $f($x[1][0]);
+  $ref ? $f(inout $x, 1, 0) : $f($x[1][0]);
   try {
-    $ref ? $f(&$x[1][2]) : $f($x[1][2]);
+    $ref ? $f(inout $x, 1, 2) : $f($x[1][2]);
   } catch (Exception $e) {
     echo "Catch: ", $e->getMessage(), "\n";
   }
   try {
-    $ref ? $f(&$x[1][2][3]) : $f($x[1][2][3]);
+    $ref ? print("skip\n") : $f($x[1][2][3]);
   } catch (Exception $e) {
     echo "Catch: ", $e->getMessage(), "\n";
   }
 }
-
-foo('non', false);
-foo('ref', true);
+<<__EntryPoint>> function main(): void {
+foo(non<>, false);
+foo(ref<>, true);
+}

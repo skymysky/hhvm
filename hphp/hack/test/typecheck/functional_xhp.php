@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 /**
  * Copyright (c) 2014, Facebook, Inc.
  * All rights reserved.
@@ -9,9 +9,7 @@
  *
  */
 
-class Blah {}
-
-class :x:xx extends Blah {
+class :x:xx extends XHPTest {
   attribute Map<string, int> k;
 }
 

@@ -1,0 +1,209 @@
+error: Typing[4323] Some type arguments violate their constraints [1]
+-> `T` is a constrained type parameter [2]
+-> This type constraint is violated [3]
+-> Expected `arraykey` [3]
+-> But got `T` [4]
+
+case_type_wellformed.php:4:40
+ 2 | <<file:__EnableUnstableFeatures('case_types')>>
+ 3 | 
+ 4 | case type GenericBoundsAreChecked<T> = keyset<T> | dict<T, int>;
+   |                                        ^^^^^^^^^ [1]
+   |                                               ^ [4]
+ 5 | 
+ 6 | case type VarianceIsChecked<-Tin as arraykey, +Tout> =
+
+hackarray.hhi:43:50
+41 |    */
+42 |   <<__SupportDynamicType>>
+43 |   abstract final class keyset<<<__NoAutoBound>> +T as arraykey>
+   |                                                  ^ [2]
+   |                                                       ^^^^^^^^ [3]
+44 |     extends AnyArray<T, T> {}
+45 | 
+
+error: Typing[4323] Some type arguments violate their constraints [1]
+-> `T` is a constrained type parameter [2]
+-> This type constraint is violated [3]
+-> Expected `arraykey` [3]
+-> But got `mixed` [4]
+->   by the definition of `T` [5]
+
+case_type_wellformed.php:4:40
+ 2 | <<file:__EnableUnstableFeatures('case_types')>>
+ 3 | 
+ 4 | case type GenericBoundsAreChecked<T> = keyset<T> | dict<T, int>;
+   |                                   ^ [5]
+   |                                        ^^^^^^^^^ [1]
+   |                                               ^ [4]
+ 5 | 
+ 6 | case type VarianceIsChecked<-Tin as arraykey, +Tout> =
+
+hackarray.hhi:43:50
+41 |    */
+42 |   <<__SupportDynamicType>>
+43 |   abstract final class keyset<<<__NoAutoBound>> +T as arraykey>
+   |                                                  ^ [2]
+   |                                                       ^^^^^^^^ [3]
+44 |     extends AnyArray<T, T> {}
+45 | 
+
+error: Typing[4323] Some type arguments violate their constraints [1]
+-> `Tk` is a constrained type parameter [2]
+-> This type constraint is violated [3]
+-> Expected `arraykey` [3]
+-> But got `T` [4]
+
+case_type_wellformed.php:4:52
+ 2 | <<file:__EnableUnstableFeatures('case_types')>>
+ 3 | 
+ 4 | case type GenericBoundsAreChecked<T> = keyset<T> | dict<T, int>;
+   |                                                    ^^^^^^^^^^^^ [1]
+   |                                                         ^ [4]
+ 5 | 
+ 6 | case type VarianceIsChecked<-Tin as arraykey, +Tout> =
+
+hackarray.hhi:33:24
+31 |   <<__SupportDynamicType>>
+32 |   abstract final class dict<
+33 |     <<__NoAutoBound>> +Tk as arraykey,
+   |                        ^^ [2]
+   |                              ^^^^^^^^ [3]
+34 |     <<__NoAutoBound>> +Tv,
+35 |   > extends AnyArray<Tk, Tv> {}
+
+error: Typing[4323] Some type arguments violate their constraints [1]
+-> `Tk` is a constrained type parameter [2]
+-> This type constraint is violated [3]
+-> Expected `arraykey` [3]
+-> But got `mixed` [4]
+->   by the definition of `T` [5]
+
+case_type_wellformed.php:4:52
+ 2 | <<file:__EnableUnstableFeatures('case_types')>>
+ 3 | 
+ 4 | case type GenericBoundsAreChecked<T> = keyset<T> | dict<T, int>;
+   |                                   ^ [5]
+   |                                                    ^^^^^^^^^^^^ [1]
+   |                                                         ^ [4]
+ 5 | 
+ 6 | case type VarianceIsChecked<-Tin as arraykey, +Tout> =
+
+hackarray.hhi:33:24
+31 |   <<__SupportDynamicType>>
+32 |   abstract final class dict<
+33 |     <<__NoAutoBound>> +Tk as arraykey,
+   |                        ^^ [2]
+   |                              ^^^^^^^^ [3]
+34 |     <<__NoAutoBound>> +Tv,
+35 |   > extends AnyArray<Tk, Tv> {}
+
+error: Typing[4120] Illegal usage of a covariant type parameter [1]
+-> This is where the parameter was declared as covariant `+` [2]
+-> This position is contravariant (-) because it is the composition of (-)(+)(+)
+The rest of the error messages decomposes the inference of the variance.
+Check out this link if you don't understand what this is about:
+http://en.wikipedia.org/wiki/Covariance_and_contravariance_(computer_science) [1]
+-> (-) Function parameters are contravariant [1]
+-> (+) This type parameter was declared as covariant (+) (cf 'HH\supportdyn') [3]
+-> (+) Aliased types are covariant [3]
+
+case_type_wellformed.php:7:20
+4 | case type GenericBoundsAreChecked<T> = keyset<T> | dict<T, int>;
+5 | 
+6 | case type VarianceIsChecked<-Tin as arraykey, +Tout> =
+  |                                                ^^^^ [2]
+7 |   | (function(Tin, Tout): int)
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^ [3]
+  |                    ^^^^ [1]
+8 |   | dict<Tin, Tout>;
+9 | 
+
+error: Typing[4121] Illegal usage of a contravariant type parameter [1]
+-> This is where the parameter was declared as contravariant `-` [2]
+-> This position is covariant (+) because it is the composition of (+)(+)
+The rest of the error messages decomposes the inference of the variance.
+Check out this link if you don't understand what this is about:
+http://en.wikipedia.org/wiki/Covariance_and_contravariance_(computer_science) [1]
+-> (+) This type parameter was declared as covariant (+) (cf 'HH\dict') [1]
+-> (+) Aliased types are covariant [3]
+
+case_type_wellformed.php:8:10
+ 4 | case type GenericBoundsAreChecked<T> = keyset<T> | dict<T, int>;
+ 5 | 
+ 6 | case type VarianceIsChecked<-Tin as arraykey, +Tout> =
+   |                              ^^^ [2]
+ 7 |   | (function(Tin, Tout): int)
+ 8 |   | dict<Tin, Tout>;
+   |     ^^^^^^^^^^^^^^^ [3]
+   |          ^^^ [1]
+ 9 | 
+10 | // TODO(T150253169) - Error message mentions `newtype`
+
+error: Typing[4332] Invalid constraint on `newtype` [1]
+-> Expected `num` [2]
+-> But got `bool` [3]
+
+case_type_wellformed.php:11:11
+ 9 | 
+10 | // TODO(T150253169) - Error message mentions `newtype`
+11 | case type BoundsAreChecked as num = int | float | bool;
+   |           ^^^^^^^^^^^^^^^^ [1]
+   |                               ^^^ [2]
+   |                                                   ^^^^ [3]
+12 | 
+13 | // TODO(T150253169) - Should report all bounds that are violated
+
+error: Typing[4332] Invalid constraint on `newtype` [1]
+-> Expected `Stringish` [2]
+-> But got `int` [3]
+
+case_type_wellformed.php:14:11
+12 | 
+13 | // TODO(T150253169) - Should report all bounds that are violated
+14 | case type MultiBoundsAreChecked as XHPChild, Stringish, arraykey = string | int | bool;
+   |           ^^^^^^^^^^^^^^^^^^^^^ [1]
+   |                                              ^^^^^^^^^ [2]
+   |                                                                             ^^^ [3]
+15 | 
+16 | case type Recursive = vec<?Recursive>;
+
+error: Typing[4332] Invalid constraint on `newtype` [1]
+-> Expected `Stringish` [2]
+-> But got `bool` [3]
+
+case_type_wellformed.php:14:11
+12 | 
+13 | // TODO(T150253169) - Should report all bounds that are violated
+14 | case type MultiBoundsAreChecked as XHPChild, Stringish, arraykey = string | int | bool;
+   |           ^^^^^^^^^^^^^^^^^^^^^ [1]
+   |                                              ^^^^^^^^^ [2]
+   |                                                                                   ^^^^ [3]
+15 | 
+16 | case type Recursive = vec<?Recursive>;
+
+error: Typing[4332] Invalid constraint on `newtype` [1]
+-> Expected `arraykey` [2]
+-> But got `bool` [3]
+
+case_type_wellformed.php:14:11
+12 | 
+13 | // TODO(T150253169) - Should report all bounds that are violated
+14 | case type MultiBoundsAreChecked as XHPChild, Stringish, arraykey = string | int | bool;
+   |           ^^^^^^^^^^^^^^^^^^^^^ [1]
+   |                                                         ^^^^^^^^ [2]
+   |                                                                                   ^^^^ [3]
+15 | 
+16 | case type Recursive = vec<?Recursive>;
+
+error: Typing[4498] Cyclic type definition [1]
+-> Cyclic use is here [2]
+
+case_type_wellformed.php:16:11
+14 | case type MultiBoundsAreChecked as XHPChild, Stringish, arraykey = string | int | bool;
+15 | 
+16 | case type Recursive = vec<?Recursive>;
+   |           ^^^^^^^^^ [1]
+   |                            ^^^^^^^^^ [2]
+
+11 errors found

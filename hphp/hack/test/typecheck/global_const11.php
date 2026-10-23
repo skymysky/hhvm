@@ -1,3 +1,3 @@
 <?hh
 
-const X = (int)null;
+const int X = (int)null;

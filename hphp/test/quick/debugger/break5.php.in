@@ -1,8 +1,0 @@
-b 12 if bad()
-continue
-p $x
-s
-p $x
-s
-p $x
-quit

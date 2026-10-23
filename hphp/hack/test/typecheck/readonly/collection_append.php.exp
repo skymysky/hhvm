@@ -1,0 +1,34 @@
+error: Parsing[1002] This expression is readonly, but the collection you're modifying is mutable, which isn't allowed. [1]
+
+collection_append.php:11:10
+ 9 |   // error readonly assigned to mutable vec
+10 |   // todo, update the type of $y instead
+11 |   $y[] = readonly new Foo();
+   |          ^^^^^^^^^^^^^^^^^^ [1]
+12 |   $z['a'] = readonly new Foo();
+13 | 
+
+error: Typing[4411] Invalid collection modification [1]
+-> This expression is readonly [2]
+-> But this value is mutable [3]
+
+collection_append.php:11:3
+ 9 |   // error readonly assigned to mutable vec
+10 |   // todo, update the type of $y instead
+11 |   $y[] = readonly new Foo();
+   |   ^^^^ [1]
+   |   ^^ [3]
+   |          ^^^^^^^^^^^^^^^^^^ [2]
+12 |   $z['a'] = readonly new Foo();
+13 | 
+
+error: Typing[4409] This value is readonly, its properties cannot be modified [1]
+
+collection_append.php:19:3
+17 |   // is readonly
+18 |   $vector = Vector { readonly new Foo() };
+19 |   $vector[] = new Foo(); // error, readonly modified
+   |   ^^^^^^^ [1]
+20 | }
+
+3 errors found

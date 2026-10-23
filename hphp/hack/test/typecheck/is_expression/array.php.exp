@@ -1,36 +1,41 @@
 File "array.php", line 5, characters 5-15:
-  array
+  vec<mixed>
 File "array.php", line 7, characters 5-15:
-  array<_>
+  dict<arraykey, mixed>
 File "array.php", line 9, characters 5-15:
-  array<_, _>
+  nothing
 File "array.php", line 11, characters 5-15:
-  varray<_>
+  nothing
 File "array.php", line 13, characters 5-15:
-  darray<_, _>
-File "array.php", line 15, characters 5-15:
-  varray_or_darray<_>
-File "array.php", line 4, characters 13-17:
-Invalid "is" expression hint (Typing[4195])
-  File "array.php", line 4, characters 13-17:
-  The "is" operator cannot be used with an untyped array
-File "array.php", line 6, characters 20-27:
-Invalid "is" expression hint (Typing[4195])
-  File "array.php", line 6, characters 20-27:
-  The "is" operator cannot be used with an array (used like a vector)
-File "array.php", line 8, characters 20-30:
-Invalid "is" expression hint (Typing[4195])
-  File "array.php", line 8, characters 20-30:
-  The "is" operator cannot be used with an array (used like a hashtable)
-File "array.php", line 10, characters 20-28:
-Invalid "is" expression hint (Typing[4195])
-  File "array.php", line 10, characters 20-28:
-  The "is" operator cannot be used with a varray
-File "array.php", line 12, characters 20-31:
-Invalid "is" expression hint (Typing[4195])
-  File "array.php", line 12, characters 20-31:
-  The "is" operator cannot be used with a darray
-File "array.php", line 14, characters 20-38:
-Invalid "is" expression hint (Typing[4195])
-  File "array.php", line 14, characters 20-38:
-  The "is" operator cannot be used with a varray_or_darray
+  nothing
+warning: Warn[12010] This `is` check is always `false`. The expression on the left has type `?(not dict<_, _> & not vec<_>)` which shares no values with `vec<T#1>`. [1]
+
+array.php:8:14
+ 6 |   } else if ($x is darray<_, _>) {
+ 7 |     hh_show($x);
+ 8 |   } else if ($x is varray<_>) {
+   |              ^^^^^^^^^^^^^^^ [1]
+ 9 |     hh_show($x);
+10 |   } else if ($x is darray<_, _>) {
+
+warning: Warn[12010] This `is` check is always `false`. The expression on the left has type `?(not dict<_, _> & not vec<_>)` which shares no values with `dict<Tk#1, Tv#1>`. [1]
+
+array.php:10:14
+ 8 |   } else if ($x is varray<_>) {
+ 9 |     hh_show($x);
+10 |   } else if ($x is darray<_, _>) {
+   |              ^^^^^^^^^^^^^^^^^^ [1]
+11 |     hh_show($x);
+12 |   } else if ($x is varray_or_darray<_>) {
+
+warning: Warn[12010] This `is` check is always `false`. The expression on the left has type `?(not dict<_, _> & not vec<_>)` which shares no values with `vec_or_dict<_, _>`. [1]
+
+array.php:12:14
+10 |   } else if ($x is darray<_, _>) {
+11 |     hh_show($x);
+12 |   } else if ($x is varray_or_darray<_>) {
+   |              ^^^^^^^^^^^^^^^^^^^^^^^^^ [1]
+13 |     hh_show($x);
+14 |   }
+
+3 errors found

@@ -1,11 +1,11 @@
 <?hh
 
 class A  {
-  const c = 1;
-  static $f1 = "42";
+  const int c = 1;
+  public static string $f1 = "42";
 }
 
-function f() {
+function f(): void {
   $a = A::c; // no errors
   $b = A::$f1; // no errors
 }

@@ -2,7 +2,7 @@
 
 // Test that ImmSets can be compared for equality.
 
-function main() {
+function main() :mixed{
   $fs1 = new ImmSet(Vector {1, 2, 3});
   $fs2 = new ImmSet(Vector {3, 2, 1});
   var_dump($fs1 == $fs2);
@@ -12,4 +12,8 @@ function main() {
   var_dump($fs2 == $s);
 }
 
+
+<<__EntryPoint>>
+function main_eq() :mixed{
 main();
+}

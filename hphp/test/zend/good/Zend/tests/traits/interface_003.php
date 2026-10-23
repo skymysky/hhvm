@@ -1,19 +1,18 @@
-<?php
+<?hh
 
 trait foo {
-	public function serialize() {
-		return 'foobar';
-	}
-	public function unserialize($x) {
-		var_dump($x);
-	}
+    public function serialize() :mixed{
+        return 'foobar';
+    }
+    public function unserialize($x) :mixed{
+        var_dump($x);
+    }
 }
 
 class bar implements Serializable {
-	use foo;
+    use foo;
 }
-
-var_dump($o = serialize(new bar));
+<<__EntryPoint>> function main(): void {
+$o = serialize(new bar); var_dump($o);
 var_dump(unserialize($o));
-
-?>
+}

@@ -1,7 +1,4 @@
 bool(true)
 
-Warning: %s
+Warning: supplied key param cannot be coerced into a private key in %s/test/zend/good/ext/openssl/tests/018.php on line 8
 bool(false)
-
-Warning: %s
-NULL

@@ -1,0 +1,3 @@
+meth
+  INSERT meth()
+  function(): string

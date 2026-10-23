@@ -1,12 +1,12 @@
-<?php
+<?hh
 
-function mytolower($a) {
+function mytolower($a) :mixed{
   return strtolower($a);
 }
 
 // don't print things here, since this tests what accumulates in the
 // output buffer.
-function VS($x, $y) {
+function VS($x, $y) :mixed{
   if ($x !== $y) {
     var_dump($x);
     var_dump($y);
@@ -14,10 +14,13 @@ function VS($x, $y) {
   }
 }
 
+
 //////////////////////////////////////////////////////////////////////
 
+<<__EntryPoint>>
+function main_ext_output() :mixed{
 ob_start();
-ob_start("mytolower");
+ob_start(mytolower<>);
 echo "TEst";
 ob_end_flush();
 VS(ob_get_clean(), "test");
@@ -28,20 +31,20 @@ ob_clean();
 VS(ob_get_clean(), "");
 
 ob_start();
-ob_start("mytolower");
+ob_start(mytolower<>);
 echo "TEst";
 ob_flush();
 VS(ob_get_clean(), "");
 VS(ob_get_clean(), "test");
 
 ob_start();
-ob_start("mytolower");
+ob_start(mytolower<>);
 echo "TEst";
 ob_end_clean();
 VS(ob_get_clean(), "");
 
 ob_start();
-ob_start("mytolower");
+ob_start(mytolower<>);
 echo "TEst";
 ob_end_flush();
 VS(ob_get_clean(), "test");
@@ -82,10 +85,12 @@ VS(ob_get_level(), 0);
 ob_get_status();
 
 ob_start();
-ob_start("mytolower");
+ob_start(mytolower<>);
 $handlers = ob_list_handlers();
 ob_end_clean();
 ob_end_clean();
-VS($handlers, array("default output handler", "mytolower"));
+VS($handlers, vec["default output handler", mytolower<>]);
+VS(is_varray($handlers), true);
 
 echo "\nok\n";
+}

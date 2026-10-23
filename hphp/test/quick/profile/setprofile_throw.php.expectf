@@ -1,0 +1,8 @@
+
+Fatal error: Uncaught exception escaping setprofile callback: exception 'Exception' with message 'yeah' in %s/setprofile_throw.php:6
+Stack trace:
+#0 %s/setprofile_throw.php(10): throwing_profiler()
+#1 %s/setprofile_throw.php(14): bar()
+#2 %s/setprofile_throw.php(21): foo()
+#3 (): setprofile_throw()
+#4 {main} in %s/setprofile_throw.php on line 10

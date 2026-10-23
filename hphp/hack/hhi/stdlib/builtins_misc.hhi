@@ -1,4 +1,4 @@
-<?hh // decl /* -*- php -*- */
+<?hh /* -*- php -*- */
 /**
  * Copyright (c) 2014, Facebook, Inc.
  * All rights reserved.
@@ -9,56 +9,74 @@
  */
 
 namespace HH {
-function server_warmup_status(): string;
-function execution_context(): string;
+  function server_warmup_status(): string;
+  function execution_context()[read_globals]: string;
+
+  <<__NoAutoLikes>>
+  function array_mark_legacy<T>(T $in, bool $recursive = false)[]: T;
+  <<__NoAutoLikes>>
+  function array_unmark_legacy<T>(T $in, bool $recursive = false)[]: T;
+  <<__NoAutoLikes>>
+  function array_mark_legacy_recursive<T>(T $in)[]: T;
+  <<__NoAutoLikes>>
+  function array_unmark_legacy_recursive<T>(T $in)[]: T;
+  function is_array_marked_legacy(mixed $in)[]: bool;
 }
 namespace {
-const INF = 0.0;
-const NAN = 0.0;
-<<__PHPStdLib>>
-function connection_aborted();
-<<__PHPStdLib>>
-function connection_status();
-<<__PHPStdLib>>
-function connection_timeout();
-<<__PHPStdLib>>
-function constant($name);
-<<__PHPStdLib>>
-function define($name, $value, $case_insensitive = false);
-<<__PHPStdLib>>
-function defined(string $name, $autoload = true);
-<<__PHPStdLib>>
-function get_browser($user_agent = null, $return_array = false);
-<<__PHPStdLib>>
-function highlight_file($filename, $ret = false);
-<<__PHPStdLib>>
-function show_source($filename, $ret = false);
-<<__PHPStdLib>>
-function highlight_string($str, $ret = false);
-<<__PHPStdLib>>
-function ignore_user_abort($setting = false);
-<<__PHPStdLib, __Rx>>
-function pack($format, ...);
-<<__PHPStdLib>>
-function php_check_syntax($filename, &$error_message = null);
-<<__PHPStdLib>>
-function php_strip_whitespace($filename);
-<<__PHPStdLib>>
-function sleep($seconds);
-<<__PHPStdLib>>
-function usleep($micro_seconds);
-<<__PHPStdLib>>
-function time_nanosleep($seconds, $nanoseconds);
-<<__PHPStdLib>>
-function time_sleep_until($timestamp);
-<<__PHPStdLib>>
-function uniqid($prefix = null, $more_entropy = false);
-<<__PHPStdLib, __Rx>>
-function unpack($format, $data);
-<<__PHPStdLib>>
-function sys_getloadavg();
-<<__PHPStdLib>>
-function hphp_process_abort($magic);
-<<__PHPStdLib, __Rx>>
-function hphp_to_string($v);
+  const float INF;
+  const float NAN;
+  <<__PHPStdLib>>
+  function connection_aborted(): \HH\FIXME\MISSING_RETURN_TYPE;
+  <<__PHPStdLib>>
+  function connection_status(): \HH\FIXME\MISSING_RETURN_TYPE;
+  <<__PHPStdLib>>
+  function connection_timeout(): \HH\FIXME\MISSING_RETURN_TYPE;
+  <<__PHPStdLib>>
+  function constant(string $name): \HH\FIXME\MISSING_RETURN_TYPE;
+  <<__PHPStdLib>>
+  function defined(
+    string $name,
+    bool $autoload = true,
+  ): \HH\FIXME\MISSING_RETURN_TYPE;
+  <<__PHPStdLib>>
+  function get_browser(
+    HH\FIXME\MISSING_PARAM_TYPE $user_agent = null,
+    HH\FIXME\MISSING_PARAM_TYPE $return_array = false,
+  ): \HH\FIXME\MISSING_RETURN_TYPE;
+  <<__PHPStdLib>>
+  function ignore_user_abort(
+    bool $setting = false,
+  ): \HH\FIXME\MISSING_RETURN_TYPE;
+  <<__PHPStdLib>>
+  function pack(
+    string $format,
+    HH\FIXME\MISSING_PARAM_TYPE ...$args
+  )[]: \HH\FIXME\MISSING_RETURN_TYPE;
+  <<__PHPStdLib>>
+  function sleep(int $seconds): \HH\FIXME\MISSING_RETURN_TYPE;
+  <<__PHPStdLib>>
+  function usleep(int $micro_seconds): \HH\FIXME\MISSING_RETURN_TYPE;
+  <<__PHPStdLib>>
+  function time_nanosleep(
+    int $seconds,
+    int $nanoseconds,
+  ): \HH\FIXME\MISSING_RETURN_TYPE;
+  <<__PHPStdLib>>
+  function time_sleep_until(float $timestamp): \HH\FIXME\MISSING_RETURN_TYPE;
+  <<__PHPStdLib>>
+  function uniqid(
+    string $prefix = "",
+    bool $more_entropy = false,
+  ): \HH\FIXME\MISSING_RETURN_TYPE;
+  <<__PHPStdLib>>
+  function unpack(
+    string $format,
+    string $data,
+  )[]: \HH\FIXME\MISSING_RETURN_TYPE;
+  <<__PHPStdLib>>
+  function sys_getloadavg(): \HH\FIXME\MISSING_RETURN_TYPE;
+  <<__PHPStdLib>>
+  function hphp_to_string(
+    HH\FIXME\MISSING_PARAM_TYPE $v,
+  )[]: \HH\FIXME\MISSING_RETURN_TYPE;
 }

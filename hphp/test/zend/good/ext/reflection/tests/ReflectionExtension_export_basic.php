@@ -1,12 +1,12 @@
-<?php
+<?hh <<__EntryPoint>> function main(): void {
 ob_start();
-ReflectionExtension::export("reflection", true);
+(new ReflectionExtension("reflection"))->__toString();
 $test = ob_get_clean();
-var_dump(empty($test));
-unset($test);
+var_dump(!($test ?? false));
+$test = null;
 ob_start();
-ReflectionExtension::export("reflection", false);
+echo (new ReflectionExtension("reflection"))->__toString();
 $test = ob_get_clean();
-var_dump(empty($test));
-?>
-==DONE==
+var_dump(!($test ?? false));
+echo "==DONE==";
+}

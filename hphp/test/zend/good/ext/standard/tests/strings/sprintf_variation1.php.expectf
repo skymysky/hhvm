@@ -46,58 +46,28 @@ string(3) "0.5"
 string(3) "0.5"
 
 -- Iteration 10 --
-
-Notice: %s
 string(5) "Array"
-
-Notice: %s
 string(5) "Array"
-
-Notice: %s
 string(5) "Array"
 
 -- Iteration 11 --
-
-Notice: %s
 string(5) "Array"
-
-Notice: %s
 string(5) "Array"
-
-Notice: %s
 string(5) "Array"
 
 -- Iteration 12 --
-
-Notice: %s
 string(5) "Array"
-
-Notice: %s
 string(5) "Array"
-
-Notice: %s
 string(5) "Array"
 
 -- Iteration 13 --
-
-Notice: %s
 string(5) "Array"
-
-Notice: %s
 string(5) "Array"
-
-Notice: %s
 string(5) "Array"
 
 -- Iteration 14 --
-
-Notice: %s
 string(5) "Array"
-
-Notice: %s
 string(5) "Array"
-
-Notice: %s
 string(5) "Array"
 
 -- Iteration 15 --
@@ -141,21 +111,6 @@ string(0) ""
 string(0) ""
 
 -- Iteration 23 --
-string(6) "Object"
-string(6) "Object"
-string(6) "Object"
-
--- Iteration 24 --
-string(0) ""
-string(0) ""
-string(0) ""
-
--- Iteration 25 --
-string(0) ""
-string(0) ""
-string(0) ""
-
--- Iteration 26 --
 string(%d) "Resource id #%d"
 string(%d) "Resource id #%d"
 string(%d) "Resource id #%d"

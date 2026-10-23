@@ -1,4 +1,4 @@
-/*
+  /*
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
@@ -17,8 +17,7 @@
 #include "hphp/runtime/ext/icu/icu.h"
 #include "hphp/runtime/base/builtin-functions.h"
 #include "hphp/runtime/base/ini-setting.h"
-#include "hphp/runtime/base/request-local.h"
-#include "hphp/runtime/base/request-event-handler.h"
+#include "hphp/util/rds-local.h"
 #include "hphp/util/string-vsnprintf.h"
 #include "hphp/runtime/ext/datetime/ext_datetime.h"
 
@@ -71,31 +70,24 @@ void IntlError::throwException(const char *format, ...) {
 /////////////////////////////////////////////////////////////////////////////
 // INI Setting
 
-static __thread std::string* s_defaultLocale;
+static RDS_LOCAL(std::string, s_defaultLocale);
 
 void IntlExtension::bindIniSettings() {
-  assertx(!s_defaultLocale);
-  s_defaultLocale = new std::string;
-  IniSetting::Bind(this, IniSetting::PHP_INI_ALL,
+  s_defaultLocale.getCheck();
+  IniSetting::Bind(this, IniSetting::Mode::Request,
                    "intl.default_locale", "",
-                   s_defaultLocale);
+                   s_defaultLocale.get()
+                 );
 }
 
-void IntlExtension::threadShutdown() {
-  delete s_defaultLocale;
-  s_defaultLocale = nullptr;
-}
-
-const String GetDefaultLocale() {
-  assertx(s_defaultLocale);
+const OptString GetDefaultLocale() {
   if (s_defaultLocale->empty()) {
-    return String(uloc_getDefault(), CopyString);
+    return OptString(uloc_getDefault(), CopyString);
   }
-  return *s_defaultLocale;
+  return *(s_defaultLocale.get());
 }
 
-bool SetDefaultLocale(const String& locale) {
-  assertx(s_defaultLocale);
+bool SetDefaultLocale(const OptString& locale) {
   *s_defaultLocale = locale.toCppString();
   return true;
 }
@@ -103,7 +95,7 @@ bool SetDefaultLocale(const String& locale) {
 /////////////////////////////////////////////////////////////////////////////
 // Common extension init
 
-void IntlExtension::bindConstants() {
+void IntlExtension::registerNativeConstants() {
 #ifdef U_ICU_DATA_VERSION
   HHVM_RC_STR(INTL_ICU_DATA_VERSION, U_ICU_DATA_VERSION);
 #endif
@@ -287,22 +279,22 @@ icu::UnicodeString u16(const char *u8, int32_t u8_len, UErrorCode &error,
   return ret;
 }
 
-String u8(const UChar *u16, int32_t u16_len, UErrorCode &error) {
+OptString u8(const UChar *u16, int32_t u16_len, UErrorCode &error) {
   error = U_ZERO_ERROR;
   if (u16_len == 0) {
-    return empty_string();
+    return String::Empty();
   }
   int32_t outlen;
   u_strToUTF8(nullptr, 0, &outlen, u16, u16_len, &error);
   if (error != U_BUFFER_OVERFLOW_ERROR) {
-    return String();
+    return OptString();
   }
-  String ret(outlen + 1, ReserveString);
+  OptString ret(outlen + 1, ReserveString);
   char *out = ret.get()->mutableData();
   error = U_ZERO_ERROR;
   u_strToUTF8(out, outlen + 1, &outlen, u16, u16_len, &error);
   if (U_FAILURE(error)) {
-    return String();
+    return OptString();
   }
   ret.setSize(outlen);
   return ret;
@@ -313,7 +305,7 @@ double VariantToMilliseconds(const Variant& arg) {
     return U_MILLIS_PER_SECOND * arg.toDouble();
   }
   if (arg.isObject() &&
-      arg.toObject()->instanceof(SystemLib::s_DateTimeInterfaceClass)) {
+      arg.toObject()->instanceof(SystemLib::getDateTimeInterfaceClass())) {
     return U_MILLIS_PER_SECOND *
            (double) DateTimeData::getTimestamp(arg.toObject());
   }

@@ -1,0 +1,6 @@
+<?hh
+// @no-wrapper
+<<file: __EnableUnstableFeatures('named_parameters')>>
+class C {
+  public function renamed(named int...): void {}
+}

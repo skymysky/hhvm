@@ -1,43 +1,43 @@
-<?php
-print "Test 11: php:function Support\n";
-  Class foo {
-       function foo() {}
-       function __toString() { return "not a DomNode object";}
+<?hh
+  class foo {
+       function foo() :mixed{}
+       function __toString() :mixed{ return "not a DomNode object";}
   }
-
-$dom = new domDocument();
+<<__EntryPoint>> function main(): void {
+print "Test 11: php:function Support\n";
+$dom = new DOMDocument();
   $dom->load(dirname(__FILE__)."/xslt011.xsl");
-  $proc = new xsltprocessor;
+  $proc = new XSLTProcessor;
   $xsl = $proc->importStylesheet($dom);
-  
-  $xml = new DomDocument();
+
+  $xml = new DOMDocument();
   $xml->load(dirname(__FILE__)."/xslt011.xml");
   $proc->registerPHPFunctions();
-  print $proc->transformToXml($xml);
- 
-  function foobar($id, $secondArg = "" ) {
+  print $proc->transformToXML($xml);
+}
+
+  <<__DynamicallyCallable>> function foobar($id, $secondArg = "" ) :mixed{
     if (is_array($id)) {
         return $id[0]->value . " - " . $secondArg;
     } else {
         return $id . " - " . $secondArg;
     }
   }
-  function nodeSet($id = null) {
-      if ($id and is_array($id)) {
+  <<__DynamicallyCallable>> function nodeSet($id = null) :mixed{
+      if ($id && is_array($id)) {
           return $id[0];
       } else {
-          $dom = new domdocument;
+          $dom = new DOMDocument;
           $dom->loadXML("<root>this is from an external DomDocument</root>");
           return $dom->documentElement;
       }
   }
-  function nonDomNode() {
+  <<__DynamicallyCallable>> function nonDomNode() :mixed{
     return  new foo();
   }
-  
+
   class aClass {
-    static function aStaticFunction($id) {
+    static function aStaticFunction($id) :mixed{
         return $id;
     }
   }
-  

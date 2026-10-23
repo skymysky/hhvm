@@ -14,28 +14,36 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_VM_UNIT_H_
-#define incl_HPHP_VM_UNIT_H_
+#pragma once
 
-#include "hphp/parser/location.h"
-
+#include "hphp/runtime/base/location.h"
+#include "hphp/runtime/base/rds.h"
+#include "hphp/runtime/base/req-bitset.h"
+#include "hphp/runtime/base/req-memory.h"
 #include "hphp/runtime/base/typed-value.h"
-#include "hphp/runtime/base/repo-auth-type-array.h"
+#include "hphp/runtime/base/repo-auth-type.h"
 #include "hphp/runtime/vm/class.h"
+#include "hphp/runtime/vm/constant.h"
+#include "hphp/runtime/vm/containers.h"
+#include "hphp/runtime/vm/decl-dep.h"
 #include "hphp/runtime/vm/hhbc.h"
+#include "hphp/runtime/vm/module.h"
 #include "hphp/runtime/vm/named-entity.h"
-#include "hphp/runtime/vm/named-entity-pair-table.h"
 #include "hphp/runtime/vm/preclass.h"
+#include "hphp/runtime/vm/repo-file.h"
+#include "hphp/runtime/vm/source-location.h"
+#include "hphp/runtime/vm/treadmill.h"
 #include "hphp/runtime/vm/type-alias.h"
 
+#include "hphp/util/check-size.h"
 #include "hphp/util/compact-vector.h"
 #include "hphp/util/fixed-vector.h"
 #include "hphp/util/functional.h"
 #include "hphp/util/hash-map.h"
 #include "hphp/util/lock-free-ptr-wrapper.h"
-#include "hphp/util/md5.h"
 #include "hphp/util/mutex.h"
 #include "hphp/util/service-data.h"
+#include "hphp/util/sha1.h"
 
 #include <map>
 #include <ostream>
@@ -51,7 +59,7 @@ struct ArrayData;
 struct Class;
 struct Func;
 struct PreClass;
-struct String;
+struct OptString;
 struct StringData;
 struct UnitExtended;
 
@@ -66,130 +74,46 @@ enum class UnitOrigin {
   Eval = 1
 };
 
-///////////////////////////////////////////////////////////////////////////////
-// Location tables.
+/////////////////////////////////////////////////////////////////////////////
+//
+// Fatal info
 
 /*
- * Delimiter pairs for a location in the source code.
+ * Information regarding parse/runtime errors in units
  */
-struct SourceLoc {
-  /*
-   * Constructors.
-   */
-  SourceLoc() {}
-  explicit SourceLoc(const Location::Range& l);
-
-  /*
-   * Reset to, or check for, the invalid state.
-   */
-  void reset();
-  bool valid() const;
-
-  /*
-   * Set to a parser Location.
-   */
-  void setLoc(const Location::Range* l);
-
-  /*
-   * Equality.
-   */
-  bool same(const SourceLoc* l) const;
-  bool operator==(const SourceLoc& l) const;
-
-  /*
-   * Start and end lines and characters.
-   *
-   * The default {1, 1, 1, 1} is an invalid sentinel value.
-   */
-  int line0{1};
-  int char0{1};
-  int line1{1};
-  int char1{1};
+struct FatalInfo {
+  Location::Range m_fatalLoc;
+  FatalOp m_fatalOp;
+  std::string m_fatalMsg;
 };
 
-/*
- * Pair of (base, past) offsets.
- */
-struct OffsetRange {
-  OffsetRange() {}
+/////////////////////////////////////////////////////////////////////////////
+//
+// Symbol references
 
-  OffsetRange(Offset base, Offset past)
-    : base(base)
-    , past(past)
-  {}
-
-  Offset base{0};
-  Offset past{0};
+// Symbols referenced by an Unit. Used during prod builds to
+// automatically important files, and in Sandboxes to prefetch units.
+enum class SymbolRef : uint8_t {
+  Include,
+  Class,
+  Function,
+  Constant
 };
 
-using OffsetRangeVec = std::vector<OffsetRange>;
-
-/*
- * Generic entry for representing many-to-one mappings of Offset -> T.
- *
- * Each entry's `pastOffset' is expected to be the offset just past the range
- * of offsets which logically map to its `val'.  In this way, by maintaining a
- * relatively sparse set of entries in a vector, we can use least upper bound
- * searches on an offset key to find its corresponding T.
- *
- * The values of `pastOffset' in such a table are expected to be sorted and
- * unique, but the values of `val' need not be.
- */
-template<typename T>
-struct TableEntry {
-  /*
-   * Constructors.
-   */
-  TableEntry() {}
-
-  TableEntry(Offset pastOffset, T val)
-    : m_pastOffset(pastOffset)
-    , m_val(val)
-  {}
-
-  /*
-   * Accessors.
-   */
-  Offset pastOffset() const;
-  T val() const;
-
-  /*
-   * Comparison.
-   */
-  bool operator<(const TableEntry& other) const;
-
-  template<class SerDe> void serde(SerDe& sd);
-
-private:
-  Offset m_pastOffset{0};
-  T m_val;
-};
+using SymbolRefs =
+  CompactVector<std::pair<SymbolRef, CompactVector<std::string>>>;
 
 /*
  * Table specializations.
  */
-using LineEntry      = TableEntry<int>;
-using SourceLocEntry = TableEntry<SourceLoc>;
-using LineInfo       = std::pair<OffsetRange, int>;
+using FuncTable      = VMCompactVector<const Func*>;
 
-using LineTable      = std::vector<LineEntry>;
-using SourceLocTable = std::vector<SourceLocEntry>;
-using FuncTable      = CompactVector<const Func*>;
-
-/*
- * Get the line number or SourceLoc for Offset `pc' in `table'.
- */
-int getLineNumber(const LineTable& table, Offset pc);
-bool getSourceLoc(const SourceLocTable& table, Offset pc, SourceLoc& sLoc);
-void stashLineTable(const Unit* unit, LineTable table);
-void stashExtendedLineTable(const Unit* unit, SourceLocTable table);
-
-const SourceLocTable& getSourceLocTable(const Unit*);
+using RATArrayOrToken = TokenOrPtr<const RepoAuthType::Array>;
 
 /*
  * Sum of all Unit::m_bclen
  */
-extern ServiceData::ExportedTimeSeries* g_hhbc_size;
+extern ServiceData::ExportedCounter* g_hhbc_size;
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -204,7 +128,6 @@ extern ServiceData::ExportedTimeSeries* g_hhbc_size;
 struct Unit {
   friend struct UnitExtended;
   friend struct UnitEmitter;
-  friend struct UnitRepoProxy;
 
   /////////////////////////////////////////////////////////////////////////////
   // Types.
@@ -224,106 +147,27 @@ private:
    * invoke its pseudomain only if necessary.
    */
   enum MergeState : uint8_t {
-    Unmerged      = 0,
-    Merging       = 1 << 0,
-    Merged        = 1 << 1,
-    UniqueFuncs   = 1 << 2,
-    NeedsCompact  = 1 << 3,
-    Empty         = 1 << 5
+    Unmerged                 = 0,
+    InitialMerged            = 1,
+    NeedsNonPersistentMerged = 2,
+    Merged                   = 3,
   };
 
 public:
   /*
-   * Information on all the mergeable defs within a Unit.
-   *
-   * Allocated with a variable-length pointer array in m_mergeables, structured
-   * as follows:
-   *  - the Unit's pseudomain
-   *  - non-hoistable functions that might be DefFunc'd in the pseudomain
-   *  - hoistable functions (i.e., toplevel functions that need to be available
-   *    from the beginning of the pseudomain)
-   *  - all other mergeable objects, with the bottom three bits of the pointer
-   *    tagged with a MergeKind
-   *
-   * Note that the non-hoistable function list may include functions which are
-   * not mergeable, since DefFunc also uses this list as its mapping from ID's.
-   */
-  struct MergeInfo {
-    using FuncRange = folly::Range<Func* const*>;
-    using MutableFuncRange = folly::Range<Func**>;
-
-    /*
-     * Allocate a new MergeInfo with `num' mergeables.
-     */
-    static MergeInfo* alloc(size_t num);
-
-    /*
-     * Iterators.
-     *
-     * funcHoistableBegin() is in (funcBegin, funcEnd].
-     */
-    Func** funcBegin() const;
-    Func** funcEnd() const;
-    Func** funcHoistableBegin() const;
-
-    /*
-     * Ranges.
-     *
-     * All ranges end at funcEnd().
-     */
-    FuncRange funcs() const;
-    MutableFuncRange mutableFuncs() const;
-    MutableFuncRange nonMainFuncs() const;
-    MutableFuncRange hoistableFuncs() const;
-
-    /*
-     * Get a reference or pointer to the mergeable at index `idx'.
-     */
-    void*& mergeableObj(int idx);
-    void** mergeableData(int idx);
-
-    unsigned m_firstHoistableFunc;
-    unsigned m_firstHoistablePreClass;
-    unsigned m_firstMergeablePreClass;
-    unsigned m_mergeablesSize;
-    void*    m_mergeables[1];
-  };
-
-  /*
-   * Type of a mergeable object.
-   *
-   * This is encoded in the lowest three bits of a pointer to the object.
-   */
-  enum class MergeKind {
-    Class               = 0,  // Class is required to be 0 for correctness.
-    UniqueDefinedClass  = 1,
-    Define              = 2,  // Toplevel scalar define.
-    PersistentDefine    = 3,  // Cross-request persistent toplevel defines.
-    Global              = 4,  // Global variable declarations.
-    TypeAlias           = 5,
-    ReqDoc              = 6,
-    Done                = 7,
-    // We cannot add more kinds here; this has to fit in 3 bits.
-  };
-
-  /*
    * Range types.
    */
-  using FuncRange = MergeInfo::FuncRange;
-  using MutableFuncRange = MergeInfo::MutableFuncRange;
-
-  /*
-   * Cache for pseudomains for this unit, keyed by Class context.
-   */
-  using PseudoMainCacheMap = hphp_hash_map<
-    const Class*, Func*, pointer_hash<Class>
-  >;
+  using PreClassPtrVec = VMCompactVector<PreClassPtr>;
+  using TypeAliasVec = VMCompactVector<PreTypeAlias>;
+  using ConstantVec = VMFixedVector<Constant>;
+  using FuncVec = VMCompactVector<Func*>;
+  using ModuleVec = VMCompactVector<Module>;
 
   /////////////////////////////////////////////////////////////////////////////
   // Construction and destruction.
 
   Unit();
-  ~Unit();
+  virtual ~Unit();
 
   /*
    * New and delete using low memory.
@@ -331,123 +175,204 @@ public:
   void* operator new(size_t sz);
   void operator delete(void* p, size_t sz);
 
+  void destroy();
+
   /////////////////////////////////////////////////////////////////////////////
   // Basic accessors.                                                   [const]
 
   /*
-   * Repo ID and serial number.
+   * Serial number.
    */
-  int repoID() const;
   int64_t sn() const;
 
   /*
-   * MD5 of the Unit.
+   * SHA1 of the source code for Unit.
    */
-  MD5 md5() const;
+  SHA1 sha1() const;
 
   /*
-   * File and directory paths.
+   * SHA1 of the bytecode for Unit.
    */
-  const StringData* filepath() const;
-  const StringData* dirpath() const;
+  SHA1 bcSha1() const;
 
   /*
    * Was this unit created in response to an internal compiler error?
    */
   bool isICE() const;
 
+  /*
+   * Was this unit soft deployed in the current package?
+   * Only available in repo mode
+   * Invariant: Cfg::Repo::Authoritative
+   */
+  bool isSoftDeployedRepoOnly() const;
+
+  bool shouldRaiseStrictPackageDynamicClassLoadError() const;
+
   /////////////////////////////////////////////////////////////////////////////
-  // Bytecode.                                                          [const]
+  // File paths.
 
   /*
-   * Start and size of the bytecode for the Unit.
+   * Obtain the filepath this Unit was original created from. This is
+   * guaranteed to be the same across all requests and never
+   * change. Use this when you're using the path as a key that
+   * shouldn't change.
    */
-  PC entry() const;
-  Offset bclen() const;
+  const StringData* origFilepath() const;
 
   /*
-   * Convert between PC and Offset from entry().
+   * Obtain the filepath this Unit is currently bound to in this
+   * request, or nullptr if none.
    */
-  PC at(Offset off) const;
-  Offset offsetOf(PC pc) const;
+  const StringData* perRequestFilepath() const;
 
   /*
-   * Is `pc' in this Unit?
+   * If this Unit has a per-request filepath bound to it, return
+   * it. Otherwise return origFilepath(). Use this for displaying the
+   * path to the user.
    */
-  bool contains(PC pc) const;
+  const StringData* filepath() const;
 
   /*
-   * Get the Op at `instrOffset'.
+   * If this Unit is using per-request file paths, return the
+   * rds::Handle where the path is bound. If you're in an active
+   * request, the handle is guaranteed to be initialized.
    */
-  Op getOp(Offset instrOffset) const;
+  rds::Handle perRequestFilepathHandle() const;
+
+  /*
+   * If this Unit is using per-request file paths, return true. False
+   * otherwise.
+   */
+  bool hasPerRequestFilepath() const;
+
+  /*
+   * Bind the given filepath as the Unit's pre-request filepath. The
+   * Unit should not have an already bound filepath and
+   * Cfg::Eval::ReuseUnitsByHash should be set.
+   */
+  void bindPerRequestFilepath(const StringData*);
+
+  /*
+   * Mark this Unit as having per-request filepaths. This allocates a
+   * new rds handle to store the path. Cfg::Eval::ReuseUnitsByHash must be
+   * set.
+   */
+  void makeFilepathPerRequest();
+
+  /////////////////////////////////////////////////////////////////////////////
+  // Unit cache ref-counting
+
+  /*
+   * Mark that this Unit is referenced by a cache entry. Only valid
+   * for non-RepoAuth mode.
+   */
+  void acquireCacheRefCount();
+
+  /*
+   * Mark that this Unit is no longer referenced by a cache
+   * entry. Only valid for non-RepoAuth mode. Returns true if the Unit
+   * is no longer referenced by an entries and should be deleted,
+   * false otherwise.
+   */
+  bool releaseCacheRefCount();
+
+  /*
+   * Whether this Unit is referenced by a cache entry. Only valid for
+   * non-RepoAuth mode.
+   */
+  bool hasCacheRef() const;
+
+  /*
+   * When Eval.EnableDecl is set we may have multiple versions of the same unit
+   * cached under a particular SHA-1 because of differing versions of
+   * dependencies in different repos.
+   */
+  Unit* nextCachedByHash() const;
+  void setNextCachedByHash(Unit* u);
+
+  /////////////////////////////////////////////////////////////////////////////
+  // Idle unit reaping
+
+  using TouchClock = std::chrono::steady_clock;
+
+  /*
+   * Mark that this Unit has been touched by the given request.
+   */
+  void setLastTouchRequest(Treadmill::Clock::time_point requestStartTime);
+
+  /*
+   * Mark that this Unit has been touched at the given timestamp.
+   */
+  void setLastTouchTime(TouchClock::time_point);
+
+  /*
+   * Get the newest request which has touched this Unit, and the
+   * latest timestamp of the touch.
+   */
+  std::pair<Treadmill::Clock::time_point, TouchClock::time_point>
+    getLastTouch() const;
 
   /////////////////////////////////////////////////////////////////////////////
   // Code locations.                                                    [const]
 
-  /*
-   * Get the line number corresponding to `pc'.
-   *
-   * Return -1 if not found.
-   */
-  int getLineNumber(Offset pc) const;
+  bool getOffsetRanges(int line, OffsetFuncRangeVec& offsets) const;
 
   /*
-   * Get the SourceLoc corresponding to `pc'.
-   *
-   * Return false if not found, else true.
+   * Check whether the coverage map has been enabled for this unit.
    */
-  bool getSourceLoc(Offset pc, SourceLoc& sLoc) const;
+  bool isCoverageEnabled() const;
 
   /*
-   * Get the Offset range(s) corresponding to `pc' or `line'.
+   * Enable or disable the coverage map for this unit.
    *
-   * Return false if not found, else true.
+   * Pre: !Cfg::Repo::Authoritative && Cfg::Eval::EnablePerFileCoverage
    */
-  bool getOffsetRange(Offset pc, OffsetRange& range) const;
-  bool getOffsetRanges(int line, OffsetRangeVec& offsets) const;
+  void enableCoverage();
+  void disableCoverage();
 
   /*
-   * Get next line with executable code starting from input `line'.
+   * Reset the coverage map.
    *
-   * Return -1 if not found.
+   * Pre: isCoverageEnabled()
    */
-  int getNearestLineWithCode(int line) const;
+  void clearCoverage();
 
   /*
-   * Return the Func* for the code at offset `pc'.
-   *
-   * Return nullptr if the offset is not in a Func body (but this should be
-   * impossible).
+   * Record that the line was covered.
    */
-  const Func* getFunc(Offset pc) const;
+  void recordCoverage(int line);
+
+  /*
+   * Generate a vec array where each entry is an integer indicating a covered
+   * line from this file.
+   */
+  Array reportCoverage() const;
+
+  /*
+   * Return an RDS handle that when initialized indicates that coverage is
+   * enabled for this unit.
+   *
+   * Pre: !Cfg::Repo::Authoritative && Cfg::Eval::EnablePerFileCoverage
+   */
+  rds::Handle coverageDataHandle() const;
 
   /////////////////////////////////////////////////////////////////////////////
-  // Litstrs and NamedEntitys.                                          [const]
+  // Litstrs and NamedTypes/Funcs.                                      [const]
 
   /*
    * Size of the Unit's litstr table.
-   *
-   * This excludes litstrs that are instead found in the global table---thus,
-   * it is not a source of truth for the number of litstrs a Unit needs, only
-   * those it happens to own.
    */
   size_t numLitstrs() const;
 
   /*
-   * Is `id' a valid litstr in LitstrTable or the Unit's local
-   * NamedEntityPairTable?
-   */
-  bool isLitstrId(Id id) const;
-
-  /*
-   * Dispatch to either the global LitstrTable or the Unit's local
-   * NamedEntityPairTable, depending on whether `id' is global.
-   *
-   * @see: NamedEntityPairTable
+   * Lookup a literal string by ID.
    */
   StringData* lookupLitstrId(Id id) const;
-  const NamedEntity* lookupNamedEntityId(Id id) const;
-  NamedEntityPair lookupNamedEntityPairId(Id id) const;
+
+  const NamedType* lookupNamedTypeId(Id id) const;
+  NamedTypePair lookupNamedTypePairId(Id id) const;
+  NamedFuncPair lookupNamedFuncPairId(Id id) const;
 
   /////////////////////////////////////////////////////////////////////////////
   // Arrays.                                                            [const]
@@ -462,51 +387,33 @@ public:
    */
   const ArrayData* lookupArrayId(Id id) const;
 
+  /////////////////////////////////////////////////////////////////////////////
+  // RAT Arrays.
+
   /*
-   * Look up a RepoAuthType::Array by ID
+   * Look up a RAT array by ID.
    */
-   const RepoAuthType::Array* lookupArrayTypeId(Id id) const;
+  const RepoAuthType::Array* lookupRATArray(Id id) const;
 
   /////////////////////////////////////////////////////////////////////////////
-  // Funcs and PreClasses.                                              [const]
+  // PreClasses.
 
-  /*
-   * Look up a Func or PreClass by ID.
-   */
-  Func* lookupFuncId(Id id) const;
-  PreClass* lookupPreClassId(Id id) const;
+  PreClass* lookupPreClass(const StringData*) const;
 
-  /*
-   * Range over all Funcs or PreClasses in the Unit.
-   */
-  FuncRange funcs() const;
   folly::Range<PreClassPtr*> preclasses();
   folly::Range<const PreClassPtr*> preclasses() const;
 
-  /*
-   * Get a pseudomain for the Unit with the context class `cls'.
-   *
-   * We clone the toplevel pseudomain for each context class and cache the
-   * results in m_pseudoMainCache.
-   */
-  Func* getMain(Class* cls) const;
+  /////////////////////////////////////////////////////////////////////////////
+  // Funcs.
 
-  // Return the cached EntryPoint
-  Func* getCachedEntryPoint() const;
-  /*
-   * The first hoistable Func in the Unit.
-   *
-   * This is only used for the create_function() implementation, to access the
-   * __lambda_func() we define for the user.
-   */
-  Func* firstHoistable() const;
+  Func* lookupFuncId(Id id) const;
+  folly::Range<Func**> funcs();
+  folly::Range<Func* const*> funcs() const;
 
   /*
-   * Rename the Func in this Unit given by `oldName' to `newName'.
-   *
-   * This should only be called by ExecutionContext::createFunction().
+   * Return the cached EntryPoint
    */
-  void renameFunc(const StringData* oldName, const StringData* newName);
+  Func* getEntryPoint() const;
 
   /*
    * Visit all functions and methods in this unit.
@@ -514,204 +421,35 @@ public:
   template<class Fn> void forEachFunc(Fn fn) const;
 
   /////////////////////////////////////////////////////////////////////////////
-  // Func lookup.                                                      [static]
+  // Constants.
 
-  /*
-   * Define `func' for this request by initializing its RDS handle.
-   */
-  static void defFunc(Func* func, bool debugger);
-
-  /*
-   * Look up the defined Func in this request with name `name', or with the name
-   * mapped to the NamedEntity `ne'.
-   *
-   * Return nullptr if the function is not yet defined in this request.
-   */
-  static Func* lookupFunc(const NamedEntity* ne);
-  static Func* lookupFunc(const StringData* name);
-
-  /*
-   * Look up, or autoload and define, the Func in this request with name `name',
-   * or with the name mapped to the NamedEntity `ne'.
-   *
-   * @requires: NamedEntity::get(name) == ne
-   */
-  static Func* loadFunc(const NamedEntity* ne, const StringData* name);
-  static Func* loadFunc(const StringData* name);
-
-  /*
-   * bind (or rebind) a func to the NamedEntity corresponding to its
-   * name.
-   */
-  static void bindFunc(Func* func);
-
-  /*
-   * Lookup the builtin in this request with name `name', or nullptr if none
-   * exists. This does not access RDS so it is safe to use from within the
-   * compiler. Note that does not mean imply that the name binding for the
-   * builtin is immutable. The builtin could be renamed or intercepted.
-   */
-  static Func* lookupBuiltin(const StringData* name);
+  const Constant* lookupConstantId(Id id) const;
+  folly::Range<Constant*> constants();
+  folly::Range<const Constant*> constants() const;
 
   /////////////////////////////////////////////////////////////////////////////
-  // Class lookup.                                                     [static]
+  // Modules.
 
-  /*
-   * Define a new Class from `preClass' for this request.
-   *
-   * Raises a fatal error in various conditions (e.g., Class already defined,
-   * parent Class not defined, etc.) if `failIsFatal' is set).
-   *
-   * Also always fatals if a type alias already exists in this request with the
-   * same name as that of `preClass', regardless of the value of `failIsFatal'.
-   */
-  static Class* defClass(const PreClass* preClass, bool failIsFatal = true);
-
-  /*
-   * Define a closure from preClass. Closures have unique names, so unlike
-   * defClass, this is a one time operation.
-   */
-  static Class* defClosure(const PreClass* preClass);
-
-  /*
-   * Set the NamedEntity for `alias' to refer to the class `original' in this
-   * request.
-   *
-   * Raises a warning and returns false if `alias' already refers to a
-   * Class in this request, or if original is not loaded, and autoload
-   * is false, or it can't be autoloaded. Returns true otherwise.
-   */
-  static bool aliasClass(const StringData* original, const StringData* alias,
-                         bool autoload);
-
-  /*
-   * Look up the Class in this request with name `name', or with the name
-   * mapped to the NamedEntity `ne'.
-   *
-   * Return nullptr if the class is not yet defined in this request.
-   */
-  static Class* lookupClass(const NamedEntity* ne);
-  static Class* lookupClass(const StringData* name);
-
-  /*
-   * Finds a class which is guaranteed to be unique in the specified
-   * context. The class has not necessarily been loaded in the
-   * current request.
-   *
-   * Return nullptr if there is no such class.
-   */
-  static const Class* lookupUniqueClassInContext(const NamedEntity* ne,
-                                                 const Class* ctx);
-  static const Class* lookupUniqueClassInContext(const StringData* name,
-                                                 const Class* ctx);
-
-  /*
-   * Look up, or autoload and define, the Class in this request with name
-   * `name', or with the name mapped to the NamedEntity `ne'.
-   *
-   * @requires: NamedEntity::get(name) == ne
-   */
-  static Class* loadClass(const NamedEntity* ne, const StringData* name);
-  static Class* loadClass(const StringData* name);
-
-  /*
-   * Autoload the Class with name `name' and bind it `ne' in this request.
-   *
-   * @requires: NamedEntity::get(name) == ne
-   */
-  static Class* loadMissingClass(const NamedEntity* ne, const StringData* name);
-
-  /*
-   * Same as lookupClass(), but if `tryAutoload' is set, call and return
-   * loadMissingClass().
-   */
-  static Class* getClass(const NamedEntity* ne, const StringData* name,
-                         bool tryAutoload);
-  static Class* getClass(const StringData* name, bool tryAutoload);
-
-  /*
-   * Whether a Class with name `name' of type `kind' has been defined in this
-   * request, autoloading it if `autoload' is set.
-   */
-  static bool classExists(const StringData* name,
-                          bool autoload, ClassKind kind);
-
-  /////////////////////////////////////////////////////////////////////////////
-  // Constant lookup.                                                  [static]
-
-  /*
-   * Look up the value of the defined constant in this request with name
-   * `cnsName'.
-   *
-   * Return nullptr if no such constant is defined.
-   */
-  static tv_rval lookupCns(const StringData* cnsName);
-
-  /*
-   * Look up the value of the persistent constant with name `cnsName'.
-   *
-   * Return nullptr if no such constant exists, or the constant is not
-   * persistent.
-   */
-  static const Cell* lookupPersistentCns(const StringData* cnsName);
-
-  /*
-   * Look up, or autoload and define, the value of the constant with name
-   * `cnsName' for this request.
-   */
-  static tv_rval loadCns(const StringData* cnsName);
-
-  /*
-   * Define a constant (either request-local or persistent) with name `cnsName'
-   * and value `value'.
-   *
-   * May raise notices or warnings if a constant with the given name is already
-   * defined or if value is invalid.
-   */
-  static bool defCns(const StringData* cnsName, const TypedValue* value);
-
-  /*
-   * Define a constant with name `cnsName' with a magic callback. The
-   * Cell should be KindOfUninit, with a Native::ConstantCallback in
-   * its m_data.pref.
-   *
-   * The canonical examples are STDIN, STDOUT, and STDERR.
-   */
-  static bool defNativeConstantCallback(const StringData* cnsName, Cell cell);
+  const Module* lookupModuleId(Id id) const;
+  folly::Range<Module*> modules();
+  folly::Range<const Module*> modules() const;
 
   /////////////////////////////////////////////////////////////////////////////
   // Type aliases.
 
-  folly::Range<TypeAlias*> typeAliases();
-  folly::Range<const TypeAlias*> typeAliases() const;
+  const PreTypeAlias* lookupTypeAliasId(Id id) const;
+  folly::Range<PreTypeAlias*> typeAliases();
+  folly::Range<const PreTypeAlias*> typeAliases() const;
 
-  /*
-   * Look up without autoloading a type alias named `name'. Returns nullptr
-   * if one cannot be found.
-   *
-   * If the type alias is found and `persistent' is provided, it will be set to
-   * whether or not the TypeAliasReq's RDS handle is persistent.
-   */
-  static const TypeAliasReq* lookupTypeAlias(const StringData* name,
-                                             bool* persistent = nullptr);
+  /////////////////////////////////////////////////////////////////////////////
+  // File attributes.
 
-  /*
-   * Look up or attempt to autoload a type alias named `name'. Returns nullptr
-   * if one cannot be found or autoloaded.
-   *
-   * If the type alias is found and `persistent' is provided, it will be set to
-   * whether or not the TypeAliasReq's RDS handle is persistent.
-   */
-  static const TypeAliasReq* loadTypeAlias(const StringData* name,
-                                           bool* persistent = nullptr);
+  const UserAttributeMap& fileAttributes() const;
 
-  /*
-   * Define the type alias given by `id', binding it to the appropriate
-   * NamedEntity for this request.
-   *
-   * returns true iff the bound type alias is persistent.
-   */
-  bool defTypeAlias(Id id);
+  /////////////////////////////////////////////////////////////////////////////
+  // Modules.
+
+  const StringData* moduleName() const;
 
   /////////////////////////////////////////////////////////////////////////////
   // Merge.
@@ -720,11 +458,8 @@ public:
    * Merge the Unit if it is not already merged.
    */
   void merge();
-
-  /*
-   * Is it sufficient to merge the Unit, and skip invoking its pseudomain?
-   */
-  bool isMergeOnly() const;
+  bool preMerge();
+  void finalMerge();
 
   /*
    * Is this Unit empty---i.e., does it define nothing and have no
@@ -732,13 +467,7 @@ public:
    */
   bool isEmpty() const;
 
-  /*
-   * Get the return value of the pseudomain, or KindOfUninit if not
-   * known.
-   *
-   * @requires: isMergeOnly()
-   */
-  const TypedValue* getMainReturn() const;
+  bool isSystemLib() const;
 
   /////////////////////////////////////////////////////////////////////////////
   // Info arrays.                                                      [static]
@@ -759,63 +488,10 @@ public:
   /////////////////////////////////////////////////////////////////////////////
   // Pretty printer.                                                    [const]
 
-  struct PrintOpts {
-    PrintOpts()
-      : startOffset(kInvalidOffset)
-      , stopOffset(kInvalidOffset)
-      , showLines(true)
-      , showFuncs(true)
-      , indentSize(1)
-    {}
-
-    PrintOpts& range(Offset start, Offset stop) {
-      startOffset = start;
-      stopOffset = stop;
-      return *this;
-    }
-
-    PrintOpts& noLineNumbers() {
-      showLines = false;
-      return *this;
-    }
-
-    PrintOpts& noFuncs() {
-      showFuncs = false;
-      return *this;
-    }
-
-    PrintOpts& indent(int i) {
-      indentSize = i;
-      return *this;
-    }
-
-    Offset startOffset;
-    Offset stopOffset;
-    bool showLines;
-    bool showFuncs;
-    int indentSize;
-  };
-
-  void prettyPrint(std::ostream&, PrintOpts = PrintOpts()) const;
   std::string toString() const;
 
   /////////////////////////////////////////////////////////////////////////////
   // Other methods.
-
-  /*
-   * Is this Unit a compile-time fatal?
-   *
-   * A compile-time fatal is encoded as a pseudomain that contains precisely:
-   *
-   *   String <id>; Fatal;
-   *
-   * Decode enough of pseudomain to determine whether it contains a
-   * compile-time fatal, and if so, extract the error message and line number.
-   *
-   * Parse-time fatals are a subset of compile-time fatals.
-   */
-  bool compileTimeFatal(const StringData*& msg, int& line) const;
-  bool parseFatal(const StringData*& msg, int& line) const;
 
   /*
    * Get or set whether this Unit is interpret-only.
@@ -827,60 +503,69 @@ public:
   void setInterpretOnly();
 
   /*
-   * Replace the Unit?
+   * Log any units which were changed on disk after having been loaded by the
+   * current request.
    */
-  void* replaceUnit() const;
+  void logTearing(int64_t nsecs);
 
   /*
-   * Does this unit correspond to a file with "<?hh" at the top, irrespective of
-   * EnableHipHopSyntax?
-   */
-  bool isHHFile() const;
-
-  /*
-   * Should calls from this unit use strict types? (This is always true for HH
-   * units).
+   * Log information about decls observed during compilation and any potential
+   * tearing that may be occurring.
    *
-   * With strict types enabled only lossless int->float conversions are allowed
+   * For a given unit `U' we say that:
+   *   - rdep tearing has occurred if we previously loaded decls from different
+   *     version of U in the same request. We have `torn' a reverse-dependency
+   *     of U.
+   *   - dep tearing has occurred if for a dependency `D' of U, we had
+   *     previously loaded bytecode from a different version of `D' in the same
+   *     request.
    */
-  bool useStrictTypes() const;
+  void logDeclInfo() const;
 
   /*
-   * Should calls from this unit to builtins use strict types?
-   *
-   * This is true for PHP7 files with declare(strict_types=1), but not for Hack
-   * files or force_hh */
-  bool useStrictTypesForBuiltins() const;
+   * Get parse/runtime failure information if this unit is created as
+   * a result of one.
+   */
+  const FatalInfo* getFatalInfo() const;
 
   UserAttributeMap metaData() const;
 
-  // Return true, and set the m_serialized flag, iff this Unit hasn't
-  // been serialized yet (see prof-data-serialize.cpp).
-  bool serialize() const {
-    if (m_serialized) return false;
-    const_cast<Unit*>(this)->m_serialized = true;
-    return true;
+  /*
+   * Atomically "claim" the symbol refs in this Unit for
+   * prefetching. Returns nullptr if no symbol refs are present, or if
+   * they have already been claimed. If a valid pointer is returned,
+   * you have exclusive access to the symbol refs and no future call
+   * to this function will return them.
+   */
+  SymbolRefs* claimSymbolRefsForPrefetch();
+
+  // Total number of Units ever created
+  static size_t createdUnitCount() { return s_createdUnits; }
+
+  // Total number of currently allocated Units
+  static size_t liveUnitCount() { return s_liveUnits; }
+
+  static constexpr ptrdiff_t moduleNameOff() {
+    return offsetof(Unit, m_moduleName);
   }
 
-  /////////////////////////////////////////////////////////////////////////////
-  // Offset accessors.                                                 [static]
-
-  static constexpr ptrdiff_t bcOff() {
-    return offsetof(Unit, m_bc);
+  static constexpr ptrdiff_t isSoftDeployedRepoOnlyOff() {
+    return offsetof(Unit, m_softDeployedRepoOnly);
   }
+
+  const std::vector<DeclDep>& deps() const { return m_deps; }
+
+  const Extension* extension() const { return m_extension; }
 
   /////////////////////////////////////////////////////////////////////////////
   // Internal methods.
 
 private:
   void initialMerge();
-  template<bool debugger>
-  void mergeImpl(MergeInfo* mi);
+  template<bool mergeOnlyNonPersistentFuncs, bool skipClassesAndAliases = false>
+  void mergeImpl();
   UnitExtended* getExtended();
   const UnitExtended* getExtended() const;
-  MergeInfo* mergeInfo() const {
-    return m_mergeInfo.load(std::memory_order_acquire);
-  }
 
   /////////////////////////////////////////////////////////////////////////////
   // Data members.
@@ -888,47 +573,68 @@ private:
   // These are organized in reverse order of frequency of use.  Do not re-order
   // without checking perf!
 private:
-  unsigned char const* m_bc{nullptr};
-  Offset m_bclen{0};
-  LowStringPtr m_filepath{nullptr};
-  std::atomic<MergeInfo*> m_mergeInfo{nullptr};
+  PackedStringPtr m_origFilepath{nullptr};
 
-  int8_t m_repoId{-1};
   /*
    * m_mergeState is read without a lock, but only written to under
    * unitInitLock (see unit.cpp).
    */
   std::atomic<uint8_t> m_mergeState{MergeState::Unmerged};
-  bool m_mergeOnly: 1;
-  bool m_interpretOnly : 1;
-  bool m_isHHFile : 1;
-  bool m_useStrictTypes : 1;
-  bool m_useStrictTypesForBuiltins : 1;
-  bool m_extended : 1;
-  bool m_serialized : 1;
-  bool m_ICE : 1; // was this unit the result of an internal compiler error
-  LowStringPtr m_dirpath{nullptr};
 
-  TypedValue m_mainReturn;
-  CompactVector<PreClassPtr> m_preClasses;
-  FixedVector<TypeAlias> m_typeAliases;
-  /*
-   * Cached the EntryPoint for an unit, since compactMergeInfo() inside of
-   * mergeImpl will drop the original EP.
+  /* was this unit soft deployed (only set in repo mode)
+   * can't be a bitfield because we need to get its offset in irlower-call
    */
-  Func* m_cachedEntryPoint{nullptr};
+  bool m_softDeployedRepoOnly{false};
+  bool m_interpretOnly : 1;
+  bool m_extended : 1;
+  bool m_ICE : 1; // was this unit the result of an internal compiler error
+  bool m_raiseStrictPackageDynamicClassLoadError : 1;
+
+  FuncVec m_funcs;
+  PreClassPtrVec m_preClasses;
+  TypeAliasVec m_typeAliases;
+  ConstantVec m_constants;
+  ModuleVec m_modules;
+
+  mutable VMCompactVector<UnsafeLockFreePtrWrapper<StringOrToken>> m_litstrs;
+  mutable VMCompactVector<UnsafeLockFreePtrWrapper<ArrayOrToken>> m_arrays;
+  mutable VMCompactVector<UnsafeLockFreePtrWrapper<RATArrayOrToken>> m_rats;
 
   /*
    * The remaining fields are cold, and arbitrarily ordered.
    */
 
+  hphp_fast_map<
+    const StringData*,
+    PreClassPtr,
+    string_data_hash,
+    string_data_tsame
+  > m_nameToPreClass; // Lookup PreClass by name
+
   int64_t m_sn{-1};             // Note: could be 32-bit
-  MD5 m_md5;
-  FixedVector<const ArrayData*> m_arrays;
-  mutable PseudoMainCacheMap* m_pseudoMainCache{nullptr};
-  mutable LockFreePtrWrapper<CompactVector<LineInfo>> m_lineMap;
+  SHA1 m_sha1;
+  SHA1 m_bcSha1;
   UserAttributeMap m_metaData;
+  UserAttributeMap m_fileAttributes;
+  std::unique_ptr<FatalInfo> m_fatalInfo{nullptr};
+  PackedStringPtr m_moduleName{makeStaticString(Module::DEFAULT)};
+  std::vector<DeclDep> m_deps;
+
+  mutable rds::Link<req::unique_ptr<req::dynamic_bitset>, rds::Mode::Normal>
+    m_coverage;
+
+  Id m_entryPointId{kInvalidId};
+
+  static std::atomic<size_t> s_createdUnits;
+  static std::atomic<size_t> s_liveUnits;
+
+  /*
+   * Extension this unit is part of. Can be used to get the native func impl
+   */
+  const Extension* m_extension{nullptr};
 };
+
+static_assert(CheckSize<Unit, 224>(), "");
 
 struct UnitExtended : Unit {
   friend struct Unit;
@@ -936,10 +642,23 @@ struct UnitExtended : Unit {
 
   UnitExtended() { m_extended = true; }
 
-  NamedEntityPairTable m_namedInfo;
-  ArrayTypeTable m_arrayTypeTable;
-  FuncTable m_funcTable;
+  // Used by Unit prefetcher:
+  SymbolRefs m_symbolRefsForPrefetch;
+  std::atomic_flag m_symbolRefsPrefetched;
+
+  std::atomic<int64_t> m_cacheRefCount{0};
+
+  // Used by Eval.ReuseUnitsByHash:
+  rds::Link<PackedStringPtr, rds::Mode::Normal> m_perRequestFilepath;
+
+  // Used by Eval.IdleUnitTimeoutSecs:
+  std::atomic<Treadmill::Clock::time_point> m_lastTouchRequestStartTime{};
+  std::atomic<TouchClock::time_point> m_lastTouchTime{};
+
+  std::atomic<Unit*> m_nextCachedByHash{nullptr};
 };
+
+static_assert(CheckSize<UnitExtended, 280>(), "");
 
 ///////////////////////////////////////////////////////////////////////////////
 }
@@ -947,5 +666,3 @@ struct UnitExtended : Unit {
 #define incl_HPHP_VM_UNIT_INL_H_
 #include "hphp/runtime/vm/unit-inl.h"
 #undef incl_HPHP_VM_UNIT_INL_H_
-
-#endif // incl_HPHP_VM_UNIT_H_

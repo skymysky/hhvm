@@ -15,14 +15,22 @@
 */
 #include "hphp/runtime/base/tv-comparisons.h"
 
+#include <folly/Random.h>
 #include <type_traits>
 
-#include "hphp/runtime/base/tv-conversions.h"
 #include "hphp/runtime/base/comparisons.h"
-#include "hphp/runtime/base/mixed-array.h"
-#include "hphp/runtime/base/packed-array.h"
-#include "hphp/runtime/base/set-array.h"
+#include "hphp/runtime/base/datatype.h"
+#include "hphp/runtime/base/opaque-resource.h"
+#include "hphp/runtime/base/tv-conversions.h"
+#include "hphp/runtime/base/tv-conv-throw.h"
+#include "hphp/runtime/base/vanilla-dict.h"
+#include "hphp/runtime/base/vanilla-keyset.h"
+#include "hphp/runtime/base/vanilla-vec.h"
 #include "hphp/runtime/ext/datetime/ext_datetime.h"
+#include "hphp/runtime/vm/class-meth-data-ref.h"
+#include "hphp/runtime/vm/rclass-meth-data.h"
+
+#include "hphp/util/random.h"
 
 namespace HPHP {
 
@@ -37,522 +45,88 @@ namespace {
 //////////////////////////////////////////////////////////////////////
 
 /*
- * Family of relative op functions.
- *
- * These are used to implement the common parts of the php operators
- * ==, <, and >.  They handle some of the php behavior with regard to
- * numeric-ish strings, and delegate to the 'op' functor to perform
- * the actual comparison on primitive types, and between complex php
- * types of the same type.
- *
- * See below for the implementations of the Op template parameter.
+ * Strict equality check between two vecs, accounting for bespoke vecs.
  */
+bool vecSameHelper(const ArrayData* ad1, const ArrayData* ad2) {
+  assertx(ad1->isVecType());
+  assertx(ad2->isVecType());
+  return ArrayData::bothVanilla(ad1, ad2)
+    ? VanillaVec::VecSame(ad1, ad2)
+    : ArrayData::Same(ad1, ad2);
+}
 
-template<class Op>
-typename Op::RetType cellRelOp(Op op, Cell cell, bool val) {
-  if (UNLIKELY(isVecType(cell.m_type))) {
-    return op.vecVsNonVec();
-  } else if (UNLIKELY(isDictType(cell.m_type))) {
-    return op.dictVsNonDict();
-  } else if (UNLIKELY(isKeysetType(cell.m_type))) {
-    return op.keysetVsNonKeyset();
-  } else {
-    if (UNLIKELY(op.noticeOnArrNonArr() && isArrayType(cell.m_type))) {
-      raiseHackArrCompatArrMixedCmp();
-    }
-    return op(cellToBool(cell), val);
+bool isStringOrClassish(DataType t) {
+  return isStringType(t) || isClassType(t) || isLazyClassType(t);
+}
+
+const StringData* convStringishToStringData(TypedValue cell, bool warn = true) {
+  assertx(isStringOrClassish(cell.type()));
+  auto const op = "comparison";
+  if (tvIsClass(cell)) {
+    return warn
+      ? classToStringHelper(cell.m_data.pclass, op)
+      : cell.m_data.pclass->name();
   }
-}
-
-template<class Op>
-typename Op::RetType cellRelOp(Op op, Cell cell, int64_t val) {
-  assertx(cellIsPlausible(cell));
-
-  switch (cell.m_type) {
-    case KindOfUninit:
-    case KindOfNull:
-      return op(false, !!val);
-
-    case KindOfBoolean:
-      return op(!!cell.m_data.num, val != 0);
-
-    case KindOfInt64:
-      return op(cell.m_data.num, val);
-
-    case KindOfDouble:
-      return op(cell.m_data.dbl, val);
-
-    case KindOfPersistentString:
-    case KindOfString: {
-      auto const num = stringToNumeric(cell.m_data.pstr);
-      return num.m_type == KindOfInt64  ? op(num.m_data.num, val) :
-             num.m_type == KindOfDouble ? op(num.m_data.dbl, val) :
-             op(0, val);
-    }
-
-    case KindOfPersistentVec:
-    case KindOfVec:
-      return op.vecVsNonVec();
-
-    case KindOfPersistentDict:
-    case KindOfDict:
-      return op.dictVsNonDict();
-
-    case KindOfPersistentKeyset:
-    case KindOfKeyset:
-      return op.keysetVsNonKeyset();
-
-    case KindOfPersistentArray:
-    case KindOfArray:
-      if (UNLIKELY(op.noticeOnArrNonArr())) {
-        raiseHackArrCompatArrMixedCmp();
-      }
-      return op(true, false);
-
-    case KindOfObject:
-      return cell.m_data.pobj->isCollection()
-        ? op.collectionVsNonObj()
-        : op(cell.m_data.pobj->toInt64(), val);
-
-    case KindOfResource:
-      return op(cell.m_data.pres->data()->o_toInt64(), val);
-
-    case KindOfRef:
-    // TODO (T29639296)
-    case KindOfFunc:
-      break;
+  if (tvIsLazyClass(cell)) {
+    return warn
+      ? lazyClassToStringHelper(cell.m_data.plazyclass, op)
+      : cell.m_data.plazyclass.name();
   }
-  not_reached();
+  return cell.m_data.pstr;
 }
 
+/*
+ * Return whether two DataTypes for primitive types are "equivalent" including
+ * testing for in-progress migrations
+ */
+bool equivDataTypesIncludingMigrations(DataType t1, DataType t2) {
+  return equivDataTypes(t1, t2) ||
+          (isStringOrClassish(t1) && isStringOrClassish(t2));
+}
+
+struct Eq;
+
 template<class Op>
-typename Op::RetType cellRelOp(Op op, Cell cell, double val) {
-  assertx(cellIsPlausible(cell));
+typename Op::RetType tvRelOp(Op op, TypedValue c1, TypedValue c2) {
+  assertx(tvIsPlausible(c1));
+  assertx(tvIsPlausible(c2));
+  assertx(IMPLIES((std::is_same_v<Op, Eq>), equivDataTypesIncludingMigrations(c1.m_type, c2.m_type)));
 
-  switch (cell.m_type) {
-    case KindOfUninit:
-    case KindOfNull:
-      return op(false, val != 0);
-
-    case KindOfBoolean:
-      return op(!!cell.m_data.num, val != 0);
-
-    case KindOfInt64:
-      return op(cell.m_data.num, val);
-
-    case KindOfDouble:
-      return op(cell.m_data.dbl, val);
-
-    case KindOfPersistentString:
-    case KindOfString: {
-      auto const num = stringToNumeric(cell.m_data.pstr);
-      return num.m_type == KindOfInt64  ? op(num.m_data.num, val) :
-             num.m_type == KindOfDouble ? op(num.m_data.dbl, val) :
-             op(0, val);
-    }
-
-    case KindOfPersistentVec:
-    case KindOfVec:
-      return op.vecVsNonVec();
-
-    case KindOfPersistentDict:
-    case KindOfDict:
-      return op.dictVsNonDict();
-
-    case KindOfPersistentKeyset:
-    case KindOfKeyset:
-      return op.keysetVsNonKeyset();
-
-    case KindOfPersistentArray:
-    case KindOfArray:
-      if (UNLIKELY(op.noticeOnArrNonArr())) {
-        raiseHackArrCompatArrMixedCmp();
-      }
-      return op(true, false);
-
-    case KindOfObject:
-      return cell.m_data.pobj->isCollection()
-        ? op.collectionVsNonObj()
-        : op(cell.m_data.pobj->toDouble(), val);
-
-    case KindOfResource:
-      return op(cell.m_data.pres->data()->o_toDouble(), val);
-
-    case KindOfRef:
-    // TODO (T29639296)
-    case KindOfFunc:
-      break;
+  if (UNLIKELY(!(equivDataTypesIncludingMigrations(c1.m_type, c2.m_type) ||
+      (tvIsInt(c1) && tvIsDouble(c2)) || (tvIsDouble(c1) && tvIsInt(c2))))) {
+    throwCmpBadTypesException(&c1, &c2);
   }
-  not_reached();
-}
-
-template<class Op>
-typename Op::RetType cellRelOp(Op op, Cell cell, const StringData* val) {
-  assertx(cellIsPlausible(cell));
-  assertx(val != nullptr);
-
-  switch (cell.m_type) {
-    case KindOfUninit:
-    case KindOfNull:
-      return op(staticEmptyString(), val);
-
-    case KindOfInt64: {
-      auto const num = stringToNumeric(val);
-      return num.m_type == KindOfInt64  ? op(cell.m_data.num, num.m_data.num) :
-             num.m_type == KindOfDouble ? op(cell.m_data.num, num.m_data.dbl) :
-             op(cell.m_data.num, 0);
-    }
-    case KindOfBoolean:
-      return op(!!cell.m_data.num, val->toBoolean());
-
-    case KindOfDouble: {
-      auto const num = stringToNumeric(val);
-      return num.m_type == KindOfInt64  ? op(cell.m_data.dbl, num.m_data.num) :
-             num.m_type == KindOfDouble ? op(cell.m_data.dbl, num.m_data.dbl) :
-             op(cell.m_data.dbl, 0);
-    }
-
-    case KindOfPersistentString:
-    case KindOfString:
-      return op(cell.m_data.pstr, val);
-
-    case KindOfPersistentVec:
-    case KindOfVec:
-      return op.vecVsNonVec();
-
-    case KindOfPersistentDict:
-    case KindOfDict:
-      return op.dictVsNonDict();
-
-    case KindOfPersistentKeyset:
-    case KindOfKeyset:
-      return op.keysetVsNonKeyset();
-
-    case KindOfPersistentArray:
-    case KindOfArray:
-      if (UNLIKELY(op.noticeOnArrNonArr())) {
-        raiseHackArrCompatArrMixedCmp();
-      }
-      return op(true, false);
-
-    case KindOfObject: {
-      auto od = cell.m_data.pobj;
-      if (od->isCollection()) return op.collectionVsNonObj();
-      if (od->hasToString()) {
-        String str(od->invokeToString());
-        return op(str.get(), val);
-      }
-      return op(true, false);
-    }
-
-    case KindOfResource: {
-      auto const rd = cell.m_data.pres;
-      return op(rd->data()->o_toDouble(), val->toDouble());
-    }
-
-    case KindOfRef:
-    // TODO (T29639296)
-    case KindOfFunc:
-      break;
-  }
-  not_reached();
-}
-
-template<class Op>
-typename Op::RetType cellRelOp(Op op, Cell cell, const ArrayData* ad) {
-  assertx(cellIsPlausible(cell));
-
-  assertx(ad->isPHPArray());
-
-  auto const nonArr = [&]{
-    if (UNLIKELY(op.noticeOnArrNonArr())) {
-      raiseHackArrCompatArrMixedCmp();
-    }
-  };
-  auto const hackArr = [&]{
-    if (UNLIKELY(op.noticeOnArrHackArr())) {
-      raiseHackArrCompatArrMixedCmp();
-    }
-  };
-
-  switch (cell.m_type) {
-    case KindOfUninit:
-    case KindOfNull:
-      nonArr();
-      return op(false, !ad->empty());
-
-    case KindOfBoolean:
-      nonArr();
-      return op(cell.m_data.num, !ad->empty());
-
-    case KindOfInt64:
-      nonArr();
-      return op(false, true);
-
-    case KindOfDouble:
-      nonArr();
-      return op(false, true);
-
-    case KindOfPersistentString:
-    case KindOfString:
-      nonArr();
-      return op(false, true);
-
-    case KindOfPersistentVec:
-    case KindOfVec:
-      hackArr();
-      return op.vecVsNonVec();
-
-    case KindOfPersistentDict:
-    case KindOfDict:
-      hackArr();
-      return op.dictVsNonDict();
-
-    case KindOfPersistentKeyset:
-    case KindOfKeyset:
-      hackArr();
-      return op.keysetVsNonKeyset();
-
-    case KindOfPersistentArray:
-    case KindOfArray:
-      return op(cell.m_data.parr, ad);
-
-    case KindOfObject: {
-      nonArr();
-      auto const od = cell.m_data.pobj;
-      return od->isCollection()
-        ? op.collectionVsNonObj()
-        : op(true, false);
-    }
-
-    case KindOfResource:
-      nonArr();
-      return op(false, true);
-
-    case KindOfRef:
-    // TODO (T29639296)
-    case KindOfFunc:
-      break;
-  }
-  not_reached();
-}
-
-template<class Op>
-typename Op::RetType cellRelOp(Op op, Cell cell, const ObjectData* od) {
-  assertx(cellIsPlausible(cell));
-
-  switch (cell.m_type) {
-    case KindOfUninit:
-    case KindOfNull:
-      return op(false, true);
-
-    case KindOfBoolean:
-      return op(!!cell.m_data.num, od->toBoolean());
-
-    case KindOfInt64:
-      return od->isCollection() ? op.collectionVsNonObj()
-                                : op(cell.m_data.num, od->toInt64());
-
-    case KindOfDouble:
-      return od->isCollection() ? op.collectionVsNonObj()
-                                : op(cell.m_data.dbl, od->toDouble());
-
-    case KindOfPersistentString:
-    case KindOfString: {
-      auto obj = const_cast<ObjectData*>(od);
-      if (obj->isCollection()) return op.collectionVsNonObj();
-      if (obj->hasToString()) {
-        String str(obj->invokeToString());
-        return op(cell.m_data.pstr, str.get());
-      }
-      return op(false, true);
-    }
-
-    case KindOfPersistentVec:
-    case KindOfVec:
-      return op.vecVsNonVec();
-
-    case KindOfPersistentDict:
-    case KindOfDict:
-      return op.dictVsNonDict();
-
-    case KindOfPersistentKeyset:
-    case KindOfKeyset:
-      return op.keysetVsNonKeyset();
-
-    case KindOfPersistentArray:
-    case KindOfArray:
-      if (UNLIKELY(op.noticeOnArrNonArr())) {
-        raiseHackArrCompatArrMixedCmp();
-      }
-      return od->isCollection() ? op.collectionVsNonObj() : op(false, true);
-
-    case KindOfObject:
-      return op(cell.m_data.pobj, od);
-
-    case KindOfResource:
-      return op(false, true);
-
-    case KindOfRef:
-    // TODO (T29639296)
-    case KindOfFunc:
-      break;
-  }
-  not_reached();
-}
-
-template<class Op>
-typename Op::RetType cellRelOp(Op op, Cell cell, const ResourceData* rd) {
-  assertx(cellIsPlausible(cell));
-
-  switch (cell.m_type) {
-    case KindOfUninit:
-    case KindOfNull:
-      return op(false, true);
-
-    case KindOfBoolean:
-      return op(!!cell.m_data.num, rd->o_toBoolean());
-
-    case KindOfInt64:
-      return op(cell.m_data.num, rd->o_toInt64());
-
-    case KindOfDouble:
-      return op(cell.m_data.dbl, rd->o_toDouble());
-
-    case KindOfPersistentString:
-    case KindOfString: {
-      auto const str = cell.m_data.pstr;
-      return op(str->toDouble(), rd->o_toDouble());
-    }
-
-    case KindOfPersistentVec:
-    case KindOfVec:
-      return op.vecVsNonVec();
-
-    case KindOfPersistentDict:
-    case KindOfDict:
-      return op.dictVsNonDict();
-
-    case KindOfPersistentKeyset:
-    case KindOfKeyset:
-      return op.keysetVsNonKeyset();
-
-    case KindOfPersistentArray:
-    case KindOfArray:
-      if (UNLIKELY(op.noticeOnArrNonArr())) {
-        raiseHackArrCompatArrMixedCmp();
-      }
-      return op(true, false);
-
-    case KindOfObject:
-      return op(true, false);
-
-    case KindOfResource:
-      return op(cell.m_data.pres->data(), rd);
-
-    case KindOfRef:
-    // TODO (T29639296)
-    case KindOfFunc:
-      break;
-  }
-  not_reached();
-}
-template<class Op>
-typename Op::RetType cellRelOp(Op op, Cell cell, const ResourceHdr* r) {
-  return cellRelOp(op, cell, r->data());
-}
-
-template<class Op>
-typename Op::RetType cellRelOpVec(Op op, Cell cell, const ArrayData* a) {
-  assertx(cellIsPlausible(cell));
-  assertx(a->isVecArray());
-
-  if (UNLIKELY(!isVecType(cell.m_type))) {
-    if (isDictType(cell.m_type)) return op.dictVsNonDict();
-    if (isKeysetType(cell.m_type)) return op.keysetVsNonKeyset();
-    if (UNLIKELY(op.noticeOnArrHackArr() && isArrayType(cell.m_type))) {
-      raiseHackArrCompatArrMixedCmp();
-    }
-    return op.vecVsNonVec();
-  }
-  return op.vec(cell.m_data.parr, a);
-}
-
-template<class Op>
-typename Op::RetType cellRelOpDict(Op op, Cell cell, const ArrayData* a) {
-  assertx(cellIsPlausible(cell));
-  assertx(a->isDict());
-
-  if (UNLIKELY(!isDictType(cell.m_type))) {
-    if (isVecType(cell.m_type)) return op.vecVsNonVec();
-    if (isKeysetType(cell.m_type)) return op.keysetVsNonKeyset();
-    if (UNLIKELY(op.noticeOnArrHackArr() && isArrayType(cell.m_type))) {
-      raiseHackArrCompatArrMixedCmp();
-    }
-    return op.dictVsNonDict();
-  }
-
-  return op.dict(cell.m_data.parr, a);
-}
-
-template<class Op>
-typename Op::RetType cellRelOpKeyset(Op op, Cell cell, const ArrayData* a) {
-  assertx(cellIsPlausible(cell));
-  assertx(a->isKeyset());
-
-  if (UNLIKELY(!isKeysetType(cell.m_type))) {
-    if (isVecType(cell.m_type)) return op.vecVsNonVec();
-    if (isDictType(cell.m_type)) return op.dictVsNonDict();
-    if (UNLIKELY(op.noticeOnArrHackArr() && isArrayType(cell.m_type))) {
-      raiseHackArrCompatArrMixedCmp();
-    }
-    return op.keysetVsNonKeyset();
-  }
-
-  return op.keyset(cell.m_data.parr, a);
-}
-
-template<class Op>
-typename Op::RetType cellRelOp(Op op, Cell c1, Cell c2) {
-  assertx(cellIsPlausible(c1));
-  assertx(cellIsPlausible(c2));
 
   switch (c2.m_type) {
-  case KindOfUninit:
-  case KindOfNull:
-    return isStringType(c1.m_type) ? op(c1.m_data.pstr, staticEmptyString()) :
-           c1.m_type == KindOfObject ? op(true, false) :
-           cellRelOp(op, c1, false);
-
-  case KindOfInt64:        return cellRelOp(op, c1, c2.m_data.num);
-  case KindOfBoolean:      return cellRelOp(op, c1, !!c2.m_data.num);
-  case KindOfDouble:       return cellRelOp(op, c1, c2.m_data.dbl);
-  case KindOfPersistentString:
-  case KindOfString:       return cellRelOp(op, c1, c2.m_data.pstr);
-  case KindOfPersistentVec:
-  case KindOfVec:          return cellRelOpVec(op, c1, c2.m_data.parr);
-  case KindOfPersistentDict:
-  case KindOfDict:         return cellRelOpDict(op, c1, c2.m_data.parr);
-  case KindOfPersistentKeyset:
-  case KindOfKeyset:       return cellRelOpKeyset(op, c1, c2.m_data.parr);
-  case KindOfPersistentArray:
-  case KindOfArray:        return cellRelOp(op, c1, c2.m_data.parr);
-  case KindOfObject:       return cellRelOp(op, c1, c2.m_data.pobj);
-  case KindOfResource:     return cellRelOp(op, c1, c2.m_data.pres);
-
-  case KindOfRef:
-  // TODO (T29639296)
-  case KindOfFunc:
-    break;
+    case KindOfUninit:
+    case KindOfNull:         return op(false, false);
+    case KindOfBoolean:      return op(!!c1.m_data.num, !!c2.m_data.num);
+    case KindOfInt64:        return tvIsInt(c1)
+                                      ? op(c1.m_data.num, c2.m_data.num)
+                                      : op(c1.m_data.dbl, c2.m_data.num);
+    case KindOfDouble:       return tvIsInt(c1)
+                                      ? op(c1.m_data.num, c2.m_data.dbl)
+                                      : op(c1.m_data.dbl, c2.m_data.dbl);
+    case KindOfPersistentString:
+    case KindOfString:       return op(convStringishToStringData(c1), c2.m_data.pstr);
+    case KindOfClass:        return op(c1, c2.m_data.pclass);
+    case KindOfLazyClass:    return op(c1, c2.m_data.plazyclass);
+    case KindOfPersistentVec:
+    case KindOfVec:
+    case KindOfPersistentDict:
+    case KindOfDict:
+    case KindOfPersistentKeyset:
+    case KindOfKeyset:       return op(c1.m_data.parr, c2.m_data.parr);
+    case KindOfObject:       return op(c1.m_data.pobj, c2.m_data.pobj);
+    case KindOfResource:     return op(c1.m_data.pres, c2.m_data.pres);
+    case KindOfEnumClassLabel: return op(ECLString{c1.m_data.pstr},
+                                         ECLString{c2.m_data.pstr});
+    case KindOfRFunc:        return op(c1.m_data.prfunc, c2.m_data.prfunc);
+    case KindOfFunc:         return op(c1.m_data.pfunc, c2.m_data.pfunc);
+    case KindOfClsMeth:      return op(c1.m_data.pclsmeth, c2.m_data.pclsmeth);
+    case KindOfRClsMeth:     return op(c1.m_data.prclsmeth, c2.m_data.prclsmeth);
   }
   not_reached();
-}
-
-template<class Op>
-typename Op::RetType tvRelOp(Op op, TypedValue tv1, TypedValue tv2) {
-  assertx(tvIsPlausible(tv1));
-  assertx(tvIsPlausible(tv2));
-  return cellRelOp(op, *tvToCell(&tv1), *tvToCell(&tv2));
 }
 
 /*
@@ -560,504 +134,355 @@ typename Op::RetType tvRelOp(Op op, TypedValue tv1, TypedValue tv2) {
  * each primitive type, and for the case of a complex type being
  * compared with itself (that is obj with obj, string with string,
  * array with array).
- *
- * They must also define a function called collectionVsNonObj() which
- * is used when comparing collections with non-object types.  (The obj
- * vs obj function should handle the collection vs collection and
- * collection vs non-collection object cases.)  This is just to handle
- * that php operator == returns false in these cases, while the Lt/Gt
- * operators throw an exception.
  */
+
+template<typename T>
+using remove_ptr_const = std::remove_const_t<std::remove_pointer_t<T>>*;
+
+template<class T1, class T2, class RetType>
+using enable_if_same_ptr_ty = typename std::enable_if_t<
+  std::is_pointer_v<T1> && std::is_pointer_v<T2> &&
+  std::is_same_v<remove_ptr_const<T1>, remove_ptr_const<T2>>,
+  RetType
+>;
 
 struct Eq {
   using RetType = bool;
 
   template<class T, class U>
-  typename std::enable_if<
-    !std::is_pointer<T>::value &&
-    !std::is_pointer<U>::value,
-    bool
-  >::type operator()(T t, U u) const { return t == u; }
+  std::enable_if_t<!std::is_pointer_v<T> && !std::is_pointer_v<U>, bool>
+  operator()(T t, U u) const { return t == u; }
 
-  bool operator()(const StringData* sd1, const StringData* sd2) const {
-    return sd1->equal(sd2);
-  }
-
-  bool operator()(const ArrayData* ad1, const ArrayData* ad2) const {
-    assertx(ad1->isPHPArray());
-    assertx(ad2->isPHPArray());
-    return ArrayData::Equal(ad1, ad2);
-  }
-
-  bool operator()(const ObjectData* od1, const ObjectData* od2) const {
-    assertx(od1);
-    assertx(od2);
-    return od1->equal(*od2);
-  }
-
-  bool operator()(const ResourceData* od1, const ResourceData* od2) const {
-    return od1 == od2;
-  }
-  bool operator()(const ResourceHdr* od1, const ResourceHdr* od2) const {
-    return od1 == od2;
+  template<class T1, class T2>
+  enable_if_same_ptr_ty<T1, T2, bool> operator()(T1 t1, T2 t2) const {
+    using U = remove_ptr_const<T1>;
+    if constexpr (std::is_same_v<U, Func*>)         return t1 == t2;
+    if constexpr (std::is_same_v<U, ResourceHdr*>)  return t1 == t2;
+    if constexpr (std::is_same_v<U, StringData*>)   return t1->equal(t2);
+    if constexpr (std::is_same_v<U, ObjectData*>)   return t1->equal(*t2);
+    if constexpr (std::is_same_v<U, RFuncData*>)    return RFuncData::Same(t1, t2);
+    if constexpr (std::is_same_v<U, RClsMethData*>) return RClsMethData::Same(t1, t2);
+    if constexpr (std::is_same_v<U, ArrayData*>) {
+      if (t1->toDataType() != t2->toDataType()) return false;
+      switch (t1->toDataType()) {
+        case KindOfVec:    return arrImpl<VanillaVec::VecEqual>(t1, t2);
+        case KindOfDict:   return arrImpl<VanillaDict::DictEqual>(t1, t2);
+        case KindOfKeyset: return arrImpl<VanillaKeyset::Equal>(t1, t2);
+        default: always_assert(false);
+      }
+    }
   }
 
-  bool vec(const ArrayData* ad1, const ArrayData* ad2) const {
-    assertx(ad1->isVecArray());
-    assertx(ad2->isVecArray());
-    return PackedArray::VecEqual(ad1, ad2);
-  }
-  bool dict(const ArrayData* ad1, const ArrayData* ad2) const {
-    assertx(ad1->isDict());
-    assertx(ad2->isDict());
-    return MixedArray::DictEqual(ad1, ad2);
-  }
-  bool keyset(const ArrayData* ad1, const ArrayData* ad2) const {
-    assertx(ad1->isKeyset());
-    assertx(ad2->isKeyset());
-    return SetArray::Equal(ad1, ad2);
+  bool eqStringishTypes(TypedValue lhs, const StringData* rhs) const {
+    assertx(tvIsLazyClass(lhs) || tvIsString(lhs));
+    if (tvIsLazyClass(lhs)) return lhs.m_data.plazyclass.name() == rhs;
+    if (folly::Random::oneIn(Cfg::Eval::RaiseClassConversionNoticeSampleRate, threadLocalRng64())) {
+      raise_class_to_string_conversion_notice("comparison");
+    }
+    return lhs.m_data.pstr->equal(rhs);
   }
 
-  bool vecVsNonVec() const { return false; }
-  bool dictVsNonDict() const { return false; }
-  bool keysetVsNonKeyset() const { return false; }
-  bool collectionVsNonObj() const { return false; }
+  bool operator()(TypedValue t, LazyClassData u) const {
+    if (tvIsClass(t)) return t.m_data.pclass->name() == u.name();
+    return eqStringishTypes(t, u.name());
+  }
+  bool operator()(TypedValue t, Class* u) const {
+    if (tvIsClass(t)) return t.m_data.pclass == u;
+    return eqStringishTypes(t, u->name());
+  }
 
-  bool noticeOnArrNonArr() const { return false; }
-  bool noticeOnArrHackArr() const {
-    return checkHACCompare();
+private:
+  template<bool (*vanillaCmp)(const ArrayData* ad1, const ArrayData* ad2)>
+  bool arrImpl(const ArrayData* ad1, const ArrayData* ad2) const {
+    return ArrayData::bothVanilla(ad1, ad2)
+      ? vanillaCmp(ad1, ad2)
+      : ArrayData::Equal(ad1, ad2);
   }
 };
 
-struct Lt {
-  using RetType = bool;
+template<
+  class RetTy,
+  class PrimitiveCmpOp,
+  RetTy (ObjectData::*objCmp)(const ObjectData&) const,
+  RetTy (*arrCmp)(const ArrayData*, const ArrayData*)>
+struct CompareBase {
+  using RetType = RetTy;
 
   template<class T, class U>
-  typename std::enable_if<
-    !std::is_pointer<T>::value &&
-    !std::is_pointer<U>::value,
-    bool
-  >::type operator()(T t, U u) const { return t < u; }
+  std::enable_if_t<!std::is_pointer_v<T> && !std::is_pointer_v<U>, RetType>
+  operator()(T t, U u) const { return PrimitiveCmpOp()(t, u); }
 
-  bool operator()(const StringData* sd1, const StringData* sd2) const {
-    return sd1->compare(sd2) < 0;
-  }
-
-  bool operator()(const ArrayData* ad1, const ArrayData* ad2) const {
-    assertx(ad1->isPHPArray());
-    assertx(ad2->isPHPArray());
-    return ArrayData::Lt(ad1, ad2);
-  }
-
-  bool operator()(const ObjectData* od1, const ObjectData* od2) const {
-    assertx(od1);
-    assertx(od2);
-    return od1->less(*od2);
-  }
-
-  bool operator()(const ResourceData* rd1, const ResourceData* rd2) const {
-    return rd1->o_toInt64() < rd2->o_toInt64();
-  }
-  bool operator()(const ResourceHdr* rd1, const ResourceHdr* rd2) const {
-    return rd1->data()->o_toInt64() < rd2->data()->o_toInt64();
-  }
-
-  bool vec(const ArrayData* ad1, const ArrayData* ad2) const {
-    assertx(ad1->isVecArray());
-    assertx(ad2->isVecArray());
-    return PackedArray::VecLt(ad1, ad2);
-  }
-  bool dict(const ArrayData* ad1, const ArrayData* ad2) const {
-    assertx(ad1->isDict());
-    assertx(ad2->isDict());
-    throw_dict_compare_exception();
-  }
-  bool keyset(const ArrayData* ad1, const ArrayData* ad2) const {
-    assertx(ad1->isKeyset());
-    assertx(ad2->isKeyset());
-    throw_keyset_compare_exception();
+  template<class T1, class T2>
+  enable_if_same_ptr_ty<T1, T2, RetType> operator()(T1 t1, T2 t2) const {
+    using U = remove_ptr_const<T1>;
+    if constexpr (std::is_same_v<U, ResourceHdr*>) {
+      if (t1->data()->template instanceof<OpaqueResource>() ||
+          t2->data()->template instanceof<OpaqueResource>()) {
+        throw_opaque_resource_compare_exception();
+      }
+      return operator()(t1->data()->o_toInt64(), t2->data()->o_toInt64());
+    }
+    if constexpr (std::is_same_v<U, StringData*>)   return operator()(t1->compare(t2), 0);
+    if constexpr (std::is_same_v<U, ObjectData*>)   return (t1->*objCmp)(*t2);
+    if constexpr (std::is_same_v<U, Func*>)         throw_func_compare_exception();
+    if constexpr (std::is_same_v<U, RFuncData*>)    throw_rfunc_compare_exception();
+    if constexpr (std::is_same_v<U, RClsMethData*>) throw_rclsmeth_compare_exception();
+    if constexpr (std::is_same_v<U, ArrayData*>) {
+      assertx(t1->toDataType() == t2->toDataType());
+      switch (t1->toDataType()) {
+        case KindOfVec:    return arrCmp(t1, t2);
+        case KindOfDict:   throw_dict_compare_exception();
+        case KindOfKeyset: throw_keyset_compare_exception();
+        default: always_assert(false);
+      }
+    }
   }
 
-  bool vecVsNonVec() const {
-    throw_vec_compare_exception();
-  }
-  bool dictVsNonDict() const {
-    throw_dict_compare_exception();
-  }
-  bool keysetVsNonKeyset() const {
-    throw_keyset_compare_exception();
-  }
-  bool collectionVsNonObj() const {
-    throw_collection_compare_exception();
+  RetType operator()(ClsMethDataRef c1, ClsMethDataRef c2) const {
+    throw_clsmeth_compare_exception();
   }
 
-  bool noticeOnArrNonArr() const {
-    return checkHACCompare();
+  RetType operator()(ECLString c1, ECLString c2) const {
+    throw_ecl_compare_exception();
   }
-  bool noticeOnArrHackArr() const {
-    return checkHACCompare();
+
+  bool operator()(TypedValue t, LazyClassData u) const {
+    assertx(isStringOrClassish(t.type()));
+    // this seems like an oversight?
+    if (tvIsLazyClass(t)) return operator()(t.m_data.plazyclass.name(), u.name());
+    return operator()(convStringishToStringData(t),
+                      lazyClassToStringHelper(u, "comparison"));
+  }
+  bool operator()(TypedValue t, Class* u) const {
+    assertx(isStringOrClassish(t.type()));
+    return operator()(convStringishToStringData(t),
+                      classToStringHelper(u, "comparison"));
   }
 };
 
-struct Gt {
-  using RetType = bool;
-
+struct PHPPrimitiveCmp {
   template<class T, class U>
-  typename std::enable_if<
-    !std::is_pointer<T>::value &&
-    !std::is_pointer<U>::value,
-    bool
-  >::type operator()(T t, U u) const { return t > u; }
-
-  bool operator()(const StringData* sd1, const StringData* sd2) const {
-    return sd1->compare(sd2) > 0;
-  }
-
-  bool operator()(const ArrayData* ad1, const ArrayData* ad2) const {
-    assertx(ad1->isPHPArray());
-    assertx(ad2->isPHPArray());
-    return ArrayData::Gt(ad1, ad2);
-  }
-
-  bool operator()(const ObjectData* od1, const ObjectData* od2) const {
-    assertx(od1);
-    assertx(od2);
-    return od1->more(*od2);
-  }
-
-  bool operator()(const ResourceData* rd1, const ResourceData* rd2) const {
-    return rd1->o_toInt64() > rd2->o_toInt64();
-  }
-  bool operator()(const ResourceHdr* rd1, const ResourceHdr* rd2) const {
-    return rd1->data()->o_toInt64() > rd2->data()->o_toInt64();
-  }
-
-  bool vec(const ArrayData* ad1, const ArrayData* ad2) const {
-    assertx(ad1->isVecArray());
-    assertx(ad2->isVecArray());
-    return PackedArray::VecGt(ad1, ad2);
-  }
-  bool dict(const ArrayData* ad1, const ArrayData* ad2) const {
-    assertx(ad1->isDict());
-    assertx(ad2->isDict());
-    throw_dict_compare_exception();
-  }
-  bool keyset(const ArrayData* ad1, const ArrayData* ad2) const {
-    assertx(ad1->isKeyset());
-    assertx(ad2->isKeyset());
-    throw_keyset_compare_exception();
-  }
-
-  bool vecVsNonVec() const {
-    throw_vec_compare_exception();
-  }
-  bool dictVsNonDict() const {
-    throw_dict_compare_exception();
-  }
-  bool keysetVsNonKeyset() const {
-    throw_keyset_compare_exception();
-  }
-  bool collectionVsNonObj() const {
-    throw_collection_compare_exception();
-  }
-
-  bool noticeOnArrNonArr() const {
-    return checkHACCompare();
-  }
-  bool noticeOnArrHackArr() const {
-    return checkHACCompare();
-  }
-};
-
-struct Cmp {
-  using RetType = int64_t;
-
-  template<class T, class U>
-  typename std::enable_if<
-    !std::is_pointer<T>::value &&
-    !std::is_pointer<U>::value,
-    int64_t
-  >::type operator()(T t, U u) const {
+  constexpr int64_t operator()(const T& t, const U& u) const {
     // This ordering is required so that -1 is returned for NaNs (to match PHP7
     // behavior).
     return (t == u) ? 0 : ((t > u) ? 1 : -1);
   }
-
-  int64_t operator()(const StringData* sd1, const StringData* sd2) const {
-    return HPHP::compare(sd1, sd2);
-  }
-
-  int64_t operator()(const ArrayData* ad1, const ArrayData* ad2) const {
-    assertx(ad1->isPHPArray());
-    assertx(ad2->isPHPArray());
-    return ArrayData::Compare(ad1, ad2);
-  }
-
-  int64_t operator()(const ObjectData* od1, const ObjectData* od2) const {
-    return HPHP::compare(od1, od2);
-  }
-
-  int64_t operator()(const ResourceData* rd1, const ResourceData* rd2) const {
-    return HPHP::compare(rd1->hdr(), rd2->hdr());
-  }
-  int64_t operator()(const ResourceHdr* rd1, const ResourceHdr* rd2) const {
-    return HPHP::compare(rd1, rd2);
-  }
-
-  int64_t vec(const ArrayData* ad1, const ArrayData* ad2) const {
-    assertx(ad1->isVecArray());
-    assertx(ad2->isVecArray());
-    return PackedArray::VecCmp(ad1, ad2);
-  }
-  int64_t dict(const ArrayData* ad1, const ArrayData* ad2) const {
-    assertx(ad1->isDict());
-    assertx(ad2->isDict());
-    throw_dict_compare_exception();
-  }
-  int64_t keyset(const ArrayData* ad1, const ArrayData* ad2) const {
-    assertx(ad1->isKeyset());
-    assertx(ad2->isKeyset());
-    throw_keyset_compare_exception();
-  }
-
-  bool vecVsNonVec() const {
-    throw_vec_compare_exception();
-  }
-  bool dictVsNonDict() const {
-    throw_dict_compare_exception();
-  }
-  bool keysetVsNonKeyset() const {
-    throw_keyset_compare_exception();
-  }
-  int64_t collectionVsNonObj() const {
-    throw_collection_compare_exception();
-  }
-
-  bool noticeOnArrNonArr() const {
-    return checkHACCompare();
-  }
-  bool noticeOnArrHackArr() const {
-    return checkHACCompare();
-  }
 };
 
-//////////////////////////////////////////////////////////////////////
+using Lt  = CompareBase<bool, std::less<>, &ObjectData::less, ArrayData::Lt>;
+using Lte = CompareBase<bool, std::less_equal<>, &ObjectData::lessEqual, ArrayData::Lte>;
+using Gt  = CompareBase<bool, std::greater<>, &ObjectData::more, ArrayData::Gt>;
+using Gte = CompareBase<bool, std::greater_equal<>, &ObjectData::moreEqual, ArrayData::Gte>;
+using Cmp = CompareBase<int64_t, struct PHPPrimitiveCmp, &ObjectData::compare, ArrayData::Compare>;
 
 }
 
-bool cellSame(Cell c1, Cell c2) {
-  assertx(cellIsPlausible(c1));
-  assertx(cellIsPlausible(c2));
+bool tvSame(TypedValue c1, TypedValue c2) {
+  assertx(tvIsPlausible(c1));
+  assertx(tvIsPlausible(c2));
 
   bool const null1 = isNullType(c1.m_type);
   bool const null2 = isNullType(c2.m_type);
   if (null1 && null2) return true;
   if (null1 || null2) return false;
 
-  auto const phpArrayCheck = [&]{
-    if (UNLIKELY(checkHACCompare() && isArrayType(c2.m_type))) {
-      raiseHackArrCompatArrMixedCmp();
-    }
-  };
+  if (!equivDataTypesIncludingMigrations(c1.m_type, c2.m_type)) return false;
 
   switch (c1.m_type) {
     case KindOfBoolean:
     case KindOfInt64:
-      if (c2.m_type != c1.m_type) return false;
       return c1.m_data.num == c2.m_data.num;
-
     case KindOfDouble:
-      if (c2.m_type != c1.m_type) return false;
       return c1.m_data.dbl == c2.m_data.dbl;
-
     case KindOfPersistentString:
     case KindOfString:
-      if (!isStringType(c2.m_type)) return false;
-      return c1.m_data.pstr->same(c2.m_data.pstr);
-
+      return c1.m_data.pstr->same(convStringishToStringData(c2));
+    case KindOfRFunc:
+      return RFuncData::Same(c1.m_data.prfunc, c2.m_data.prfunc);
+    case KindOfFunc:
+      return c1.m_data.pfunc == c2.m_data.pfunc;
+    case KindOfClass:
+      if (tvIsClass(c2)) return c1.m_data.pclass == c2.m_data.pclass;
+      [[fallthrough]];
+    case KindOfLazyClass: {
+      const auto warn_on_conv = tvIsString(c2);
+      return convStringishToStringData(c1, warn_on_conv)
+              ->same(convStringishToStringData(c2, warn_on_conv));
+    } break;
     case KindOfPersistentVec:
     case KindOfVec:
-      if (!isVecType(c2.m_type)) {
-        phpArrayCheck();
-        return false;
-      }
-      return PackedArray::VecSame(c1.m_data.parr, c2.m_data.parr);
-
+      return vecSameHelper(c1.m_data.parr, c2.m_data.parr);
     case KindOfPersistentDict:
-    case KindOfDict:
-      if (!isDictType(c2.m_type)) {
-        phpArrayCheck();
-        return false;
-      }
-      return MixedArray::DictSame(c1.m_data.parr, c2.m_data.parr);
-
+    case KindOfDict: {
+      auto const ad1 = c1.m_data.parr;
+      auto const ad2 = c2.m_data.parr;
+      return ArrayData::bothVanilla(ad1, ad2)
+        ? VanillaDict::DictSame(ad1, ad2)
+        : ArrayData::Same(ad1, ad2);
+    }
     case KindOfPersistentKeyset:
-    case KindOfKeyset:
-      if (!isKeysetType(c2.m_type)) {
-        phpArrayCheck();
-        return false;
-      }
-      return SetArray::Same(c1.m_data.parr, c2.m_data.parr);
-
-    case KindOfPersistentArray:
-    case KindOfArray:
-      if (!isArrayType(c2.m_type)) {
-        if (UNLIKELY(checkHACCompare() && isHackArrayType(c2.m_type))) {
-          raiseHackArrCompatArrMixedCmp();
-        }
-        return false;
-      }
-      return ArrayData::Same(c1.m_data.parr, c2.m_data.parr);
-
+    case KindOfKeyset: {
+      auto const ad1 = c1.m_data.parr;
+      auto const ad2 = c2.m_data.parr;
+      return ArrayData::bothVanilla(ad1, ad2)
+        ? VanillaKeyset::Same(ad1, ad2)
+        : ArrayData::Same(ad1, ad2);
+    }
     case KindOfObject:
-      return c2.m_type == KindOfObject &&
-        c1.m_data.pobj == c2.m_data.pobj;
-
+      return c1.m_data.pobj == c2.m_data.pobj;
     case KindOfResource:
-      return c2.m_type == KindOfResource &&
-        c1.m_data.pres == c2.m_data.pres;
-
+     return c1.m_data.pres == c2.m_data.pres;
+    case KindOfEnumClassLabel:
+      return c1.m_data.pstr == c2.m_data.pstr;
+    case KindOfClsMeth:
+      return c1.m_data.pclsmeth == c2.m_data.pclsmeth;
+    case KindOfRClsMeth:
+      return RClsMethData::Same(c1.m_data.prclsmeth, c2.m_data.prclsmeth);
     case KindOfUninit:
     case KindOfNull:
-    case KindOfRef:
-    // TODO (T29639296)
-    case KindOfFunc:
       break;
   }
   not_reached();
 }
 
-bool tvSame(TypedValue tv1, TypedValue tv2) {
-  assertx(tvIsPlausible(tv1));
-  assertx(tvIsPlausible(tv2));
-  return cellSame(*tvToCell(&tv1), *tvToCell(&tv2));
-}
-
 //////////////////////////////////////////////////////////////////////
 
-bool cellEqual(Cell cell, bool val) {
-  return cellRelOp(Eq(), cell, val);
+namespace {
+
+template <DataType DT>
+void checkForBadComparison(TypedValue cell) {
+ auto check = [cell]() {
+    switch (DT) {
+      case DataType::Boolean:  return tvIsBool(cell);
+      case DataType::Int64:    return tvIsInt(cell);
+      case DataType::Double:   return tvIsDouble(cell);
+      case DataType::String:   return isStringOrClassish(cell.type());
+      case DataType::Resource: return tvIsResource(cell);
+      case DataType::ClsMeth:  return tvIsClsMeth(cell);
+      case DataType::Vec:      return tvIsVec(cell);
+      case DataType::Dict:     return tvIsDict(cell);
+      case DataType::Keyset:   return tvIsKeyset(cell);
+    }
+  }();
+  if (!check) throwCmpBadTypesException(&cell, DT);
 }
 
-bool cellEqual(Cell cell, int64_t val) {
-  return cellRelOp(Eq(), cell, val);
+void checkForBadComparisonObj(TypedValue lhs, const ObjectData* rhs) {
+  if (tvIsObject(lhs)) return;
+  const auto rhsStr = make_tv<DataType::Object>(const_cast<ObjectData*>(rhs));
+  throwCmpBadTypesException(&lhs, &rhsStr);
 }
 
-bool cellEqual(Cell cell, double val) {
-  return cellRelOp(Eq(), cell, val);
 }
 
-bool cellEqual(Cell cell, const StringData* val) {
-  return cellRelOp(Eq(), cell, val);
+bool tvEqual(TypedValue cell, bool val) {
+  if (!tvIsBool(cell)) return false;
+  return val == cell.m_data.num;
 }
 
-bool cellEqual(Cell cell, const ArrayData* val) {
-  if (val->isPHPArray()) return cellRelOp(Eq(), cell, val);
-  if (val->isVecArray()) return cellRelOpVec(Eq(), cell, val);
-  if (val->isDict()) return cellRelOpDict(Eq(), cell, val);
-  if (val->isKeyset()) return cellRelOpKeyset(Eq(), cell, val);
-  not_reached();
+bool tvEqual(TypedValue cell, int64_t val) {
+  if (!tvIsInt(cell)) return false;
+  return val == cell.m_data.num;
 }
 
-bool cellEqual(Cell cell, const ObjectData* val) {
-  return cellRelOp(Eq(), cell, val);
+bool tvEqual(TypedValue cell, double val) {
+  if (!tvIsDouble(cell)) return false;
+  return val == cell.m_data.dbl;
 }
 
-bool cellEqual(Cell cell, const ResourceData* val) {
-  return cellRelOp(Eq(), cell, val);
-}
-bool cellEqual(Cell cell, const ResourceHdr* val) {
-  return cellRelOp(Eq(), cell, val);
+bool tvEqual(TypedValue cell, const StringData* val) {
+  if (!isStringOrClassish(cell.type())) return false;
+  return convStringishToStringData(cell)->equal(val);
 }
 
-bool cellEqual(Cell c1, Cell c2) {
-  return cellRelOp(Eq(), c1, c2);
+bool tvEqual(TypedValue cell, const ArrayData* val) {
+  if (!tvIsArrayLike(cell)) return false;
+  return Eq()(cell.m_data.parr, val);
 }
 
-bool tvEqual(TypedValue tv1, TypedValue tv2) {
-  return tvRelOp(Eq(), tv1, tv2);
+bool tvEqual(TypedValue cell, const ObjectData* val) {
+  if (!tvIsObject(cell)) return false;
+  return Eq()(cell.m_data.pobj, val);
 }
 
-bool cellLess(Cell cell, bool val) {
-  return cellRelOp(Lt(), cell, val);
+bool tvEqual(TypedValue c1, TypedValue c2) {
+  if (!equivDataTypesIncludingMigrations(c1.m_type, c2.m_type)) return false;
+  return tvRelOp(Eq(), c1, c2);
 }
 
-bool cellLess(Cell cell, int64_t val) {
-  return cellRelOp(Lt(), cell, val);
+template<class Op>
+typename Op::RetType tvRelOpArr(TypedValue cell, const ArrayData* val) {
+  if (val->isVecType()) checkForBadComparison<DataType::Vec>(cell);
+  else if (val->isDictType()) checkForBadComparison<DataType::Dict>(cell);
+  else checkForBadComparison<DataType::Keyset>(cell);
+
+  return Op()(cell.m_data.parr, val);
 }
 
-bool cellLess(Cell cell, double val) {
-  return cellRelOp(Lt(), cell, val);
+bool tvLess(TypedValue cell, bool val) {
+  checkForBadComparison<DataType::Boolean>(cell);
+  return cell.m_data.num < val;
 }
 
-bool cellLess(Cell cell, const StringData* val) {
-  return cellRelOp(Lt(), cell, val);
+bool tvLess(TypedValue cell, int64_t val) {
+  if (tvIsDouble(cell)) return cell.m_data.dbl < val;
+  checkForBadComparison<DataType::Int64>(cell);
+  return cell.m_data.num < val;
 }
 
-bool cellLess(Cell cell, const ArrayData* val) {
-  if (val->isPHPArray()) return cellRelOp(Lt(), cell, val);
-  if (val->isVecArray()) return cellRelOpVec(Lt(), cell, val);
-  if (val->isDict()) return cellRelOpDict(Lt(), cell, val);
-  if (val->isKeyset()) return cellRelOpKeyset(Lt(), cell, val);
-  not_reached();
+bool tvLess(TypedValue cell, double val) {
+  if (tvIsInt(cell)) return cell.m_data.num < val;
+  checkForBadComparison<DataType::Double>(cell);
+  return cell.m_data.dbl < val;
 }
 
-bool cellLess(Cell cell, const ObjectData* val) {
-  return cellRelOp(Lt(), cell, val);
+bool tvLess(TypedValue cell, const StringData* val) {
+  checkForBadComparison<DataType::String>(cell);
+  return Lt()(convStringishToStringData(cell), val);
 }
 
-bool cellLess(Cell cell, const ResourceData* val) {
-  return cellRelOp(Lt(), cell, val);
-}
-bool cellLess(Cell cell, const ResourceHdr* val) {
-  return cellRelOp(Lt(), cell, val);
+bool tvLess(TypedValue cell, const ArrayData* val) {
+  return tvRelOpArr<Lt>(cell, val);
 }
 
-bool cellLess(Cell c1, Cell c2) {
-  return cellRelOp(Lt(), c1, c2);
+bool tvLess(TypedValue cell, const ObjectData* val) {
+  checkForBadComparisonObj(cell, val);
+  return Lt()(cell.m_data.pobj, val);
 }
 
 bool tvLess(TypedValue tv1, TypedValue tv2) {
   return tvRelOp(Lt(), tv1, tv2);
 }
 
-bool cellGreater(Cell cell, bool val) {
-  return cellRelOp(Gt(), cell, val);
+bool tvGreater(TypedValue cell, bool val) {
+  checkForBadComparison<DataType::Boolean>(cell);
+  return cell.m_data.num > val;
 }
 
-bool cellGreater(Cell cell, int64_t val) {
-  return cellRelOp(Gt(), cell, val);
+bool tvGreater(TypedValue cell, int64_t val) {
+  if (tvIsDouble(cell)) return cell.m_data.dbl > val;
+  checkForBadComparison<DataType::Int64>(cell);
+  return cell.m_data.num > val;
 }
 
-bool cellGreater(Cell cell, double val) {
-  return cellRelOp(Gt(), cell, val);
+bool tvGreater(TypedValue cell, double val) {
+  if (tvIsInt(cell)) return cell.m_data.num > val;
+  checkForBadComparison<DataType::Double>(cell);
+  return cell.m_data.dbl > val;
 }
 
-bool cellGreater(Cell cell, const StringData* val) {
-  return cellRelOp(Gt(), cell, val);
+bool tvGreater(TypedValue cell, const StringData* val) {
+  checkForBadComparison<DataType::String>(cell);
+  return Gt()(convStringishToStringData(cell), val);
 }
 
-bool cellGreater(Cell cell, const ArrayData* val) {
-  if (val->isPHPArray()) return cellRelOp(Gt(), cell, val);
-  if (val->isVecArray()) return cellRelOpVec(Gt(), cell, val);
-  if (val->isDict()) return cellRelOpDict(Gt(), cell, val);
-  if (val->isKeyset()) return cellRelOpKeyset(Gt(), cell, val);
-  not_reached();
+bool tvGreater(TypedValue cell, const ArrayData* val) {
+  return tvRelOpArr<Gt>(cell, val);
 }
 
-bool cellGreater(Cell cell, const ObjectData* val) {
-  return cellRelOp(Gt(), cell, val);
-}
-
-bool cellGreater(Cell cell, const ResourceData* val) {
-  return cellRelOp(Gt(), cell, val);
-}
-bool cellGreater(Cell cell, const ResourceHdr* val) {
-  return cellRelOp(Gt(), cell, val);
-}
-
-bool cellGreater(Cell c1, Cell c2) {
-  return cellRelOp(Gt(), c1, c2);
+bool tvGreater(TypedValue cell, const ObjectData* val) {
+  checkForBadComparisonObj(cell, val);
+  return Gt()(cell.m_data.pobj, val);
 }
 
 bool tvGreater(TypedValue tv1, TypedValue tv2) {
@@ -1066,43 +491,35 @@ bool tvGreater(TypedValue tv1, TypedValue tv2) {
 
 //////////////////////////////////////////////////////////////////////
 
-int64_t cellCompare(Cell cell, bool val) {
-  return cellRelOp(Cmp(), cell, val);
+int64_t tvCompare(TypedValue cell, bool val) {
+  checkForBadComparison<DataType::Boolean>(cell);
+  return Cmp()(cell.m_data.num, val);
 }
 
-int64_t cellCompare(Cell cell, int64_t val) {
-  return cellRelOp(Cmp(), cell, val);
+int64_t tvCompare(TypedValue cell, int64_t val) {
+  if (tvIsDouble(cell)) return Cmp()(cell.m_data.dbl, val);
+  checkForBadComparison<DataType::Int64>(cell);
+  return Cmp()(cell.m_data.num, val);
 }
 
-int64_t cellCompare(Cell cell, double val) {
-  return cellRelOp(Cmp(), cell, val);
+int64_t tvCompare(TypedValue cell, double val) {
+  if (tvIsInt(cell)) return Cmp()(cell.m_data.num, val);
+  checkForBadComparison<DataType::Double>(cell);
+  return Cmp()(cell.m_data.dbl, val);
 }
 
-int64_t cellCompare(Cell cell, const StringData* val) {
-  return cellRelOp(Cmp(), cell, val);
+int64_t tvCompare(TypedValue cell, const StringData* val) {
+  checkForBadComparison<DataType::String>(cell);
+  return Cmp()(convStringishToStringData(cell), val);
 }
 
-int64_t cellCompare(Cell cell, const ArrayData* val) {
-  if (val->isPHPArray()) return cellRelOp(Cmp(), cell, val);
-  if (val->isVecArray()) return cellRelOpVec(Cmp(), cell, val);
-  if (val->isDict()) return cellRelOpDict(Cmp(), cell, val);
-  if (val->isKeyset()) return cellRelOpKeyset(Cmp(), cell, val);
-  not_reached();
+int64_t tvCompare(TypedValue cell, const ArrayData* val) {
+  return tvRelOpArr<Cmp>(cell, val);
 }
 
-int64_t cellCompare(Cell cell, const ObjectData* val) {
-  return cellRelOp(Cmp(), cell, val);
-}
-
-int64_t cellCompare(Cell cell, const ResourceData* val) {
-  return cellRelOp(Cmp(), cell, val);
-}
-int64_t cellCompare(Cell cell, const ResourceHdr* val) {
-  return cellRelOp(Cmp(), cell, val);
-}
-
-int64_t cellCompare(Cell c1, Cell c2) {
-  return cellRelOp(Cmp(), c1, c2);
+int64_t tvCompare(TypedValue cell, const ObjectData* val) {
+  checkForBadComparisonObj(cell, val);
+  return cell.m_data.pobj->compare(*val);
 }
 
 int64_t tvCompare(TypedValue tv1, TypedValue tv2) {
@@ -1111,39 +528,16 @@ int64_t tvCompare(TypedValue tv1, TypedValue tv2) {
 
 //////////////////////////////////////////////////////////////////////
 
-bool cellLessOrEqual(Cell c1, Cell c2) {
-  assertx(cellIsPlausible(c1));
-  assertx(cellIsPlausible(c2));
-
-  if ((isArrayLikeType(c1.m_type) && isArrayLikeType(c2.m_type)) ||
-      (c1.m_type == KindOfObject && c2.m_type == KindOfObject) ||
-      (c1.m_type == KindOfResource && c2.m_type == KindOfResource)) {
-    return cellLess(c1, c2) || cellEqual(c1, c2);
-  }
-
-  // We have to treat NaN specially: NAN <= NAN is false, for example, so we
-  // can't just say !(NAN > NAN).
-  if ((c1.m_type == KindOfDouble && std::isnan(c1.m_data.dbl)) ||
-      (c2.m_type == KindOfDouble && std::isnan(c2.m_data.dbl))) {
-    return cellLess(c1, c2) || cellEqual(c1, c2);
-  }
-  return !cellGreater(c1, c2);
+bool tvLessOrEqual(TypedValue c1, TypedValue c2) {
+  assertx(tvIsPlausible(c1));
+  assertx(tvIsPlausible(c2));
+  return tvRelOp(Lte(), c1, c2);
 }
 
-bool cellGreaterOrEqual(Cell c1, Cell c2) {
-  assertx(cellIsPlausible(c1));
-  assertx(cellIsPlausible(c2));
-
-  if ((isArrayLikeType(c1.m_type) && isArrayLikeType(c2.m_type)) ||
-      (c1.m_type == KindOfObject && c2.m_type == KindOfObject) ||
-      (c1.m_type == KindOfResource && c2.m_type == KindOfResource)) {
-    return cellGreater(c1, c2) || cellEqual(c1, c2);
-  }
-  if ((c1.m_type == KindOfDouble && std::isnan(c1.m_data.dbl)) ||
-      (c2.m_type == KindOfDouble && std::isnan(c2.m_data.dbl))) {
-    return cellGreater(c1, c2) || cellEqual(c1, c2);
-  }
-  return !cellLess(c1, c2);
+bool tvGreaterOrEqual(TypedValue c1, TypedValue c2) {
+  assertx(tvIsPlausible(c1));
+  assertx(tvIsPlausible(c2));
+  return tvRelOp(Gte(), c1, c2);
 }
 
 //////////////////////////////////////////////////////////////////////

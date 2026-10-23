@@ -20,6 +20,7 @@ namespace jit {
 struct OpInfo {
   const char* name;
   uint64_t flags;
+  std::vector<IRSrcFlag> srcFlags;
 };
 extern OpInfo g_opInfo[];
 
@@ -37,6 +38,13 @@ inline bool hasEdges(Opcode opcode) {
 
 inline bool opHasExtraData(Opcode op) {
   return opcodeHasFlags(op, HasExtra);
+}
+
+inline Optional<Opcode> nameToOpcode(const std::string& str) {
+#define O(name, ...) if (str == #name) return Opcode::name;
+  IR_OPCODES
+#undef O
+  return std::nullopt;
 }
 
 } // namespace jit

@@ -1,13 +1,9 @@
-<?php
+<?hh
 
 class A {
   public $a = 3;
   public function __construct($a) {
     $this->a = $a + 1;
-  }
-  public function __destruct() {
-    $this->a += 2;
-    var_dump($this->a);
   }
 }
 class B extends A {
@@ -19,10 +15,14 @@ class C extends A {
     parent::__construct($a);
   }
 }
+
+<<__EntryPoint>>
+function main_645() :mixed{
 $obj = new A(1);
  var_dump($obj->a);
 $obj = new B(1);
  var_dump($obj->a);
 $obj = new C(1);
  var_dump($obj->a);
-unset($obj);
+$obj = null;
+}

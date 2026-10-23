@@ -1,0 +1,21 @@
+error: Parsing[1002] You cannot use this syntax as the iterator variable in a `foreach` loop. [1]
+
+foreach_expected_variable.php:7:28
+5 | function test(): void {
+6 |   // Using a constant instead of a variable in foreach value
+7 |   foreach (vec[1, 2, 3] as MY_CONST) {
+  |                            ^^^^^^^^ [1]
+8 |   }
+9 | }
+
+error: Naming[2014] Was expecting a variable name [1]
+
+foreach_expected_variable.php:7:28
+5 | function test(): void {
+6 |   // Using a constant instead of a variable in foreach value
+7 |   foreach (vec[1, 2, 3] as MY_CONST) {
+  |                            ^^^^^^^^ [1]
+8 |   }
+9 | }
+
+2 errors found

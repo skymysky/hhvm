@@ -1,4 +1,4 @@
-(**
+(*
  * Copyright (c) 2015, Facebook, Inc.
  * All rights reserved.
  *
@@ -7,9 +7,7 @@
  *
  *)
 
-type t = int
-
-val compare : t -> t -> int
+type t = int [@@deriving eq, hash, ord, show]
 
 val track_names : bool ref
 
@@ -17,12 +15,4 @@ val tmp : unit -> t
 
 val to_string : t -> string
 
-val debug : ?normalize:(int -> int) -> t -> string
-
-val get_name : t -> string
-
-val set_name : t -> string -> unit
-
 val make : string -> t
-
-val pp : Format.formatter -> t -> unit

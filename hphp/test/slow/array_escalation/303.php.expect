@@ -1,4 +1,10 @@
-array(2) {
+dict(2) {
+  [0]=>
+  string(4) "test"
+  [2]=>
+  string(4) "test"
+}
+dict(2) {
   [0]=>
   string(4) "test"
   [2]=>

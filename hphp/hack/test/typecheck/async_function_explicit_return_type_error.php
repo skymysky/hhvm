@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 /**
  * Copyright (c) 2014, Facebook, Inc.
  * All rights reserved.
@@ -9,6 +9,10 @@
  *
  */
 
-async function foo<T>(T $x): T {
+async function foo<T>(T $x): Awaitable<T> {
+  return $x;
+}
+
+async function foo_error<T>(T $x): T {
   return $x;
 }

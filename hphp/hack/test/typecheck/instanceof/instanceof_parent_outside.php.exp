@@ -1,2 +1,21 @@
-File "instanceof_parent_outside.php", line 4, characters 21-26:
-'parent' is undefined outside of a class (Typing[4075])
+error: Parsing[1002] A type specifier is expected here. [1]
+
+instanceof_parent_outside.php:4:13
+2 | 
+3 | function f(mixed $x): void {
+4 |   if ($x is parent) {
+  |             ^^^^^^ [1]
+5 |     echo 'huh?';
+6 |   }
+
+error: Parsing[1002] Encountered unexpected text `parent`, was expecting a type hint. [1]
+
+instanceof_parent_outside.php:4:13
+2 | 
+3 | function f(mixed $x): void {
+4 |   if ($x is parent) {
+  |             ^^^^^^ [1]
+5 |     echo 'huh?';
+6 |   }
+
+2 errors found

@@ -1,2 +1,0 @@
-
-Fatal error: Cannot re-declare abstract method A::f() abstract in class B in %s on line 7

@@ -1,11 +1,18 @@
-File "cannot_override_tconst.php", line 7, characters 7-11:
-Class Child does not correctly implement all required methods  (Typing[4110])
-File "cannot_override_tconst.php", line 7, characters 21-31:
-Some methods are incompatible with those declared in type ParentClass
-Read the following to see why:
-File "cannot_override_tconst.php", line 8, characters 14-15:
-The assigned type of this type constant is inconsistent with its parent
-File "cannot_override_tconst.php", line 8, characters 19-21:
-This is an int
-File "cannot_override_tconst.php", line 4, characters 19-26:
-It is incompatible with an array key (int/string)
+error: Typing[4110] The assigned type of this type constant is inconsistent with its parent [1]
+-> Expected `int` [2]
+-> But got `arraykey` [3]
+
+cannot_override_tconst.php:8:14
+2 | 
+3 | class ParentClass {
+4 |   const type ID = arraykey;
+  |                   ^^^^^^^^ [3]
+5 | }
+6 | 
+7 | class Child extends ParentClass {
+8 |   const type ID = int;
+  |              ^^ [1]
+  |                   ^^^ [2]
+9 | }
+
+1 error found

@@ -1,5 +1,20 @@
-<?php
+<?hh
 
-$date = date_create_immutable();
-var_dump(dom_import_simplexml($date));
-var_dump(simplexml_import_dom($date));
+<<__EntryPoint>>
+function main_simplexml_null(): void {
+  set_error_handler(($errno, $errstr, ...$_rest)==> {
+    throw new Exception($errstr);
+  });
+
+  $date = date_create_immutable();
+  try {
+    dom_import_simplexml($date);
+  } catch (Exception $e) {
+    echo $e->getMessage()."\n";
+  }
+  try {
+    simplexml_import_dom($date);
+  } catch (Exception $e) {
+    echo $e->getMessage()."\n";
+  }
+}

@@ -1,0 +1,11 @@
+error: Parsing[1002] Wildcard patterns must begin with the `_` character. To bind a variable, use a `$` character (`$unused`). [1]
+
+wildcard_pattern_invalid_name.php:7:5
+5 | function f(arraykey $v): void {
+6 |   match ($v) {
+7 |     unused => echo "arraykey $v\n";
+  |     ^^^^^^ [1]
+8 |   }
+9 | }
+
+1 error found

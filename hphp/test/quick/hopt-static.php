@@ -1,19 +1,18 @@
 <?hh
 
 class Foo {
-  public static $z = 0;
+  public static int $z = 0;
 
-  public static function setZ($a) {
+  public static function setZ(int $a) :void{
     Foo::$z = $a;
   }
 
-  public static function getZ() {
+  public static function getZ(): int{
     return Foo::$z;
   }
 }
+<<__EntryPoint>> function main(): void {
+Foo::setZ(4);
 
-$a = new Foo();
-
-$a->setZ(4);
-
-var_dump($a->getZ());
+var_dump(Foo::getZ());
+}

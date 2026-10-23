@@ -1,7 +1,7 @@
-<?php
+<?hh
 
 
-function foo(bool $x, int $n, string $y) {
+function foo(bool $x, int $n, string $y) :mixed{
   if ($x) {
     $y = tuple($n);
   } else {
@@ -10,4 +10,8 @@ function foo(bool $x, int $n, string $y) {
   }
   return $y[0];
 }
+
+<<__EntryPoint>>
+function main_tuple_types() :mixed{
 var_dump(foo(false, 4, 'hi'));
+}

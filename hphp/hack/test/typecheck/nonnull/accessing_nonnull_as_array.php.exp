@@ -1,4 +1,14 @@
-File "accessing_nonnull_as_array.php", line 4, characters 8-16:
-This is not an object of type KeyedContainer, this is a nonnull value (Typing[4005])
-File "accessing_nonnull_as_array.php", line 3, characters 12-18:
-You might want to check this out
+error: Typing[4110] Typing error [1]
+-> Expected an array that can be indexed [1]
+-> But got `nonnull` [2]
+
+accessing_nonnull_as_array.php:4:8
+1 | <?hh
+2 | 
+3 | function f(nonnull $x): void {
+  |            ^^^^^^^ [2]
+4 |   $_ = $x['foo'];
+  |        ^^^^^^^^^ [1]
+5 | }
+
+1 error found

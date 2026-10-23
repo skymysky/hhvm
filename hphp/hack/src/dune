@@ -1,0 +1,311 @@
+(env
+ (_
+  (flags
+   ; Disable warning 40 (which was only there for compatibility with an older inference algo)
+   ; https://www.lexifi.com/blog/ocaml/type-based-selection-label-and-constructors/
+   (:standard -w @a-4-29-35-41-42-44-45-48-50-70-40 \ -strict-sequence))))
+
+(executable
+ (name hh_single_type_check)
+ (modules hh_single_type_check)
+ (modes exe byte_complete)
+ (link_flags
+  (:standard
+   (:include dune_config/ld-opts.sexp)))
+ (libraries
+  camlp-streams
+  classish_positions_cli_lib
+  client_get_definition
+  client_highlight_refs
+  code_actions_cli_lib
+  count_imprecise_types
+  custom_error_types
+  decl_fold_options
+  decl_parser_options
+  default_injector_config
+  dep_hash_to_symbol
+  direct_decl_parser
+  direct_decl_utils
+  gen_deps
+  hh_server_provider_backend_stubs
+  hh_single_common
+  hhi
+  hhi_get
+  naming_ast_print
+  memtrace
+  outline_for_agents
+  package_info
+  package_config
+  parent
+  rust_provider_backend_stubs
+  refactor_sd
+  remove_dead_unsafe_casts
+  server_env
+  server_enforcement_at_pos
+  server_env_build
+  code_actions_services
+  server_file_outline
+  server_find_refs
+  server_go_to
+  ide_highlight_refs
+  ide_diagnostics_cli_lib
+  server_symbol_info_service_utils
+  sys_utils
+  temp_file
+  typing
+  utils_core
+  utils_multifile
+  write_symbol_info
+  yojson
+  hover_service
+  ide_services
+  server_rpc_services))
+
+(executable
+ (name hh_single_ai)
+ (modules hh_single_ai)
+ (modes exe byte_complete)
+ (link_flags
+  (:standard
+   (:include dune_config/ld-opts.sexp)))
+ (libraries
+  ai
+  default_injector_config
+  folly_stubs
+  hhi
+  sys_utils
+  temp_file
+  typing
+  utils_core
+  utils_multifile))
+
+(executable
+ (name hh_single_complete)
+ (modules hh_single_complete)
+ (modes exe byte_complete)
+ (link_flags
+  (:standard
+   (:include dune_config/ld-opts.sexp)))
+ (libraries
+  default_injector_config
+  file_content
+  folly_stubs
+  hh_single_common
+  hhi
+  search
+  server_autocomplete_services
+  ide_search
+  server_services
+  string
+  sys_utils
+  utils_core
+  ide_services))
+
+(executable
+ (name hh_single_ide_format)
+ (modules hh_single_ide_format)
+ (modes
+  exe
+  byte_complete)
+ (link_flags
+  (:standard
+   (:include dune_config/ld-opts.sexp)))
+ (libraries
+  build_options
+  default_injector_config
+  ide_format
+  ide_rpc_api_types
+  exec_command
+  lwt_utils
+  server_command_types
+  utils_core))
+
+(library
+  (name hh_single_common)
+  (modules hh_single_common)
+  (libraries server_files))
+
+; for rapid iteration only: in prod we use hh_client
+(executable
+ (name hack_notebook_convert)
+ (modules hack_notebook_convert)
+ (modes exe byte_complete)
+ (link_flags
+  (:standard
+   (:include dune_config/ld-opts.sexp)))
+ (libraries
+  default_injector_config
+  notebook_convert))
+
+(executable
+ (name hh_server)
+ (modules hh_server)
+ (modes exe byte_complete)
+ (link_flags
+  (:standard
+   (:include dune_config/ld-opts.sexp)))
+ (libraries
+  client
+  default_injector_config
+  file_content
+  gen_deps
+  hhi
+  hh_server_monitor
+  parent
+  server
+  server_env
+  sys_utils
+  typing
+  utils_core))
+
+(executable
+ (name hh_client)
+ (modules hh_client)
+ (modes exe byte_complete)
+ (link_flags
+  (:standard
+   (:include dune_config/ld-opts.sexp)))
+ (libraries
+  agent_session_id_stubs
+  client
+  default_injector_config
+  file_content
+  gen_deps
+  hhi
+  monitor_client_api
+  lwt_utils
+  parent
+  server
+  server_env
+  server_local_config_qe_stubs
+  sys_utils
+  typing
+  utils_core
+  utils_exit))
+
+(library
+ (name full_fidelity_parse_args)
+ (wrapped false)
+ (modules full_fidelity_parse_args)
+ (libraries global_options parser_options parser))
+
+(executable
+ (name hh_parse)
+ (modes exe byte_complete)
+ (modules hh_parse generate_hhi)
+ (link_flags
+  (:standard
+   (:include dune_config/ld-opts.sexp)))
+ (libraries
+  default_injector_config
+  full_fidelity_parse_args
+  global_config
+  hackfmt
+  parser
+  utils_core
+  yojson))
+
+(executable
+ (name hh_single_decl)
+ (modes exe byte_complete)
+ (modules hh_single_decl)
+ (link_flags
+  (:standard
+   (:include dune_config/ld-opts.sexp)))
+ (libraries
+  decl_fold_options
+  decl_parser_options
+  decl_provider
+  default_injector_config
+  direct_decl_parser
+  file_provider
+  hh_server_provider_backend_stubs
+  ocamlrep_marshal_ffi
+  package_info
+  ppxlib.print_diff
+  provider_context
+  provider_utils
+  server_env
+  utils_core))
+
+(executable
+ (name hackfmt)
+ (modules hackfmt)
+ (modes exe byte_complete)
+ (link_flags
+  (:standard
+   (:include dune_config/ld-opts.sexp)))
+ (libraries
+  default_injector_config
+  folly_stubs
+  hackfmt
+  hg
+  linttool
+  hackfmt_debug
+  config_file
+  utils_ocaml_overrides))
+
+(executable
+ (name generate_full_fidelity)
+ (modules generate_full_fidelity generate_full_fidelity_data)
+ (link_flags
+  (:standard
+   (:include dune_config/ld-opts.sexp)))
+ (libraries core_kernel str parser_schema collections utils_core yojson))
+
+ (executable
+  (name hh_single_fanout)
+  (modules hh_single_fanout)
+  (modes exe byte_complete)
+  (link_flags
+   (:standard
+    (:include dune_config/ld-opts.sexp)))
+ (libraries
+    decl_redecl_service
+    default_injector_config
+    dep_hash_to_symbol
+    direct_decl_service
+    naming_table
+    server_incremental
+    typing_check_job
+    typing_deps)
+  (preprocess
+    (pps ppx_deriving.std)))
+
+(alias
+ (name exe)
+ (deps
+  hackfmt.exe
+  hh_client.exe
+  hh_parse.exe
+  hh_server.exe
+  hh_single_decl.exe
+  hh_single_type_check.exe
+  hh_single_complete.exe
+  hh_single_ai.exe
+  hh_single_fanout.exe
+  ai/zoncolan.exe))
+
+(alias
+ (name hh)
+ (deps hh_server.exe hh_client.exe))
+
+(alias
+ (name single)
+ (deps hh_single_type_check.exe))
+
+(alias
+ (name debug-single)
+ (deps hh_single_type_check.bc.exe))
+
+(alias
+ (name debug)
+ (deps
+  hackfmt.bc.exe
+  hh_client.bc.exe
+  hh_parse.bc.exe
+  hh_server.bc.exe
+  hh_single_type_check.bc.exe
+  hh_single_complete.bc.exe
+  hh_single_fanout.bc.exe
+  hh_single_ai.bc.exe))

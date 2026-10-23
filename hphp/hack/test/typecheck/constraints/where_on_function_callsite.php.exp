@@ -1,8 +1,21 @@
-File "where_on_function_callsite.php", line 11, characters 8-10:
-A 'where' type constraint is violated here (Typing[4110])
-  File "where_on_function_callsite.php", line 4, characters 10-12:
-  This is the method with 'where' type constraints
-  File "where_on_function_callsite.php", line 4, characters 40-42:
-  This is an int
-  File "where_on_function_callsite.php", line 10, characters 8-14:
-  It is incompatible with a string
+error: Typing[4110] Invalid argument [1]
+-> Expected `int` [2]
+-> But got `string` [3]
+
+where_on_function_callsite.php:11:12
+ 2 | 
+ 3 | 
+ 4 | function foo<T> (T $x) : int where T = int {
+   |                                        ^^^ [2]
+ 5 |   return $x;
+ 6 | }
+ 7 | 
+ 8 | function test() : void {
+ 9 |   $x = 5;
+10 |   $y = "hello";
+   |        ^^^^^^^ [3]
+11 |   $z = foo($y); // error
+   |            ^^ [1]
+12 | }
+
+1 error found

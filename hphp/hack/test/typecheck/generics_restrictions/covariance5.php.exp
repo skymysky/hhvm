@@ -1,0 +1,14 @@
+error: Typing[4120] Illegal usage of a covariant type parameter [1]
+-> This is where the parameter was declared as covariant `+` [2]
+-> A non private class property is always invariant [1]
+
+covariance5.php:4:10
+1 | <?hh
+2 | 
+3 | class X<+T> {
+  |          ^ [2]
+4 |   public ?T $x;
+  |          ^^ [1]
+5 | }
+
+1 error found

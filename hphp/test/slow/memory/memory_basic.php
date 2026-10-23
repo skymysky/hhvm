@@ -1,6 +1,6 @@
-<?php
+<?hh
 
-function main() {
+function main() :mixed{
   $alloc = memory_get_usage();
   $usage = memory_get_usage(true);
   $total_alloc = memory_get_allocation();
@@ -9,7 +9,7 @@ function main() {
     var_dump('memory stats should never be negative!');
   }
 
-  if ($alloc >= $total_alloc) {
+  if ($alloc > $total_alloc) {
     var_dump(
       'slab allocations should be less than total jemalloc allocations!'
     );
@@ -20,4 +20,8 @@ function main() {
   var_dump($total_alloc);
 }
 
+
+<<__EntryPoint>>
+function main_memory_basic() :mixed{
 main();
+}

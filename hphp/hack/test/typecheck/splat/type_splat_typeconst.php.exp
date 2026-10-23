@@ -1,0 +1,145 @@
+error: Typing[4323] Some type arguments violate their constraints [1]
+-> Expected `(mixed...)` [2]
+-> But got `Bad::TInputs` [1]
+
+type_splat_typeconst.php:18:38
+16 |   abstract const type TInputs;
+17 | 
+18 |   public function test1((function(...this::TInputs): void) $x):void { }
+   |                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ [2]
+   |                                      ^^^^^^^^^^^^^ [1]
+19 |   public function test2(...this::TInputs $args):void { }
+20 |   public function test3(Other<this::TInputs> $a):void { }
+
+error: Typing[4323] Some type arguments violate their constraints [1]
+-> Expected `(mixed...)` [2]
+-> But got `mixed` [1]
+
+type_splat_typeconst.php:18:38
+16 |   abstract const type TInputs;
+17 | 
+18 |   public function test1((function(...this::TInputs): void) $x):void { }
+   |                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ [2]
+   |                                      ^^^^^^^^^^^^^ [1]
+19 |   public function test2(...this::TInputs $args):void { }
+20 |   public function test3(Other<this::TInputs> $a):void { }
+
+error: Typing[4323] Some type arguments violate their constraints [1]
+-> Expected `(mixed...)` [2]
+-> But got `this::TInputs` [1]
+
+type_splat_typeconst.php:18:38
+16 |   abstract const type TInputs;
+17 | 
+18 |   public function test1((function(...this::TInputs): void) $x):void { }
+   |                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ [2]
+   |                                      ^^^^^^^^^^^^^ [1]
+19 |   public function test2(...this::TInputs $args):void { }
+20 |   public function test3(Other<this::TInputs> $a):void { }
+
+error: Typing[4323] Some type arguments violate their constraints [1]
+-> Expected `(mixed...)` [2]
+-> But got `Bad::TInputs` [1]
+
+type_splat_typeconst.php:19:28
+17 | 
+18 |   public function test1((function(...this::TInputs): void) $x):void { }
+19 |   public function test2(...this::TInputs $args):void { }
+   |                            ^^^^^^^^^^^^^ [1]
+   |                                          ^^^^^ [2]
+20 |   public function test3(Other<this::TInputs> $a):void { }
+21 | }
+
+error: Typing[4323] Some type arguments violate their constraints [1]
+-> Expected `(mixed...)` [2]
+-> But got `mixed` [1]
+
+type_splat_typeconst.php:19:28
+17 | 
+18 |   public function test1((function(...this::TInputs): void) $x):void { }
+19 |   public function test2(...this::TInputs $args):void { }
+   |                            ^^^^^^^^^^^^^ [1]
+   |                                          ^^^^^ [2]
+20 |   public function test3(Other<this::TInputs> $a):void { }
+21 | }
+
+error: Typing[4323] Some type arguments violate their constraints [1]
+-> Expected `(mixed...)` [2]
+-> But got `this::TInputs` [1]
+
+type_splat_typeconst.php:19:28
+17 | 
+18 |   public function test1((function(...this::TInputs): void) $x):void { }
+19 |   public function test2(...this::TInputs $args):void { }
+   |                            ^^^^^^^^^^^^^ [1]
+   |                                          ^^^^^ [2]
+20 |   public function test3(Other<this::TInputs> $a):void { }
+21 | }
+
+error: Typing[4323] Some type arguments violate their constraints [1]
+-> `T` is a constrained type parameter [2]
+-> This type constraint is violated [3]
+-> Expected `(mixed...)` [3]
+-> But got `Bad::TInputs super this::TInputs` [4]
+
+type_splat_typeconst.php:20:25
+ 3 | 
+ 4 | 
+ 5 | class Other<T as (mixed...)> { }
+   |             ^ [2]
+   |                  ^^^^^^^^^^ [3]
+ 6 | 
+ 7 | abstract class Good {
+   :
+18 |   public function test1((function(...this::TInputs): void) $x):void { }
+19 |   public function test2(...this::TInputs $args):void { }
+20 |   public function test3(Other<this::TInputs> $a):void { }
+   |                         ^^^^^^^^^^^^^^^^^^^^ [1]
+   |                               ^^^^^^^^^^^^^ [4]
+21 | }
+
+error: Typing[4323] Some type arguments violate their constraints [1]
+-> `T` is a constrained type parameter [2]
+-> This type constraint is violated [3]
+-> Expected `(mixed...)` [3]
+-> But got `mixed` [4]
+
+type_splat_typeconst.php:20:25
+ 3 | 
+ 4 | 
+ 5 | class Other<T as (mixed...)> { }
+   |             ^ [2]
+   |                  ^^^^^^^^^^ [3]
+ 6 | 
+ 7 | abstract class Good {
+   :
+18 |   public function test1((function(...this::TInputs): void) $x):void { }
+19 |   public function test2(...this::TInputs $args):void { }
+20 |   public function test3(Other<this::TInputs> $a):void { }
+   |                         ^^^^^^^^^^^^^^^^^^^^ [1]
+   |                               ^^^^^^^^^^^^^ [4]
+21 | }
+
+error: Typing[4323] Some type arguments violate their constraints [1]
+-> `T` is a constrained type parameter [2]
+-> This type constraint is violated [3]
+-> Expected `(mixed...)` [3]
+-> But got `this::TInputs as Bad::TInputs` [4]
+
+type_splat_typeconst.php:20:25
+ 3 | 
+ 4 | 
+ 5 | class Other<T as (mixed...)> { }
+   |             ^ [2]
+   |                  ^^^^^^^^^^ [3]
+ 6 | 
+ 7 | abstract class Good {
+   :
+18 |   public function test1((function(...this::TInputs): void) $x):void { }
+19 |   public function test2(...this::TInputs $args):void { }
+20 |   public function test3(Other<this::TInputs> $a):void { }
+   |                         ^^^^^^^^^^^^^^^^^^^^ [1]
+   |                               ^^^^^^^^^^^^^ [4]
+21 | }
+
+9 errors found

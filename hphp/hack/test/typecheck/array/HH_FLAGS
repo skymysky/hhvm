@@ -1,1 +1,1 @@
---parser ffp --safe_array
+--error-format plain_highlighted

@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 // Copyright 2004-present Facebook. All Rights Reserved.
 
 abstract class MyList<T> {
@@ -48,8 +48,9 @@ function TestIt():void {
   $ll = Copies(2, $l);
   $r = $ll->Flatten();
   $n = $r->Sum();
-  echo $n;
+  echo (string) $n;
 }
 
-/* HH_FIXME[1002] */
-TestIt();
+function main(): void {
+  TestIt();
+}

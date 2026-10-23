@@ -1,40 +1,29 @@
 *** Testing lstat() for error conditions ***
 
-Warning: %s
-NULL
+Warning: lstat() expects exactly 1 positional parameter, 0 given in %s/test/zend/good/ext/standard/tests/file/lstat_stat_error.php on line 11
 
-Warning: %s
-NULL
+Warning: lstat() expects exactly 1 positional parameter, 2 given in %s/test/zend/good/ext/standard/tests/file/lstat_stat_error.php on line 12
 
-Warning: %s
+Warning: lstat(): No such file or directory in %s/test/zend/good/ext/standard/tests/file/lstat_stat_error.php on line 13
 bool(false)
 
-Warning: %s
+Warning: lstat(): No such file or directory in %s/test/zend/good/ext/standard/tests/file/lstat_stat_error.php on line 14
 bool(false)
-
-Warning: %s
-NULL
 
 *** Testing stat() for error conditions ***
 
-Warning: %s
-NULL
+Warning: stat() expects exactly 1 positional parameter, 0 given in %s/test/zend/good/ext/standard/tests/file/lstat_stat_error.php on line 18
 
-Warning: %s
-NULL
+Warning: stat() expects exactly 1 positional parameter, 2 given in %s/test/zend/good/ext/standard/tests/file/lstat_stat_error.php on line 19
 
-Warning: %s
-NULL
+Warning: stat() expects exactly 1 positional parameter, 2 given in %s/test/zend/good/ext/standard/tests/file/lstat_stat_error.php on line 20
 
-Warning: %s
+Warning: stat(): stat failed for %s/test/zend/good/ext/standard/tests/file/temp.tmp in %s/test/zend/good/ext/standard/tests/file/lstat_stat_error.php on line 22
 bool(false)
 
-Warning: %s
+Warning: stat(): stat failed for %s/test/zend/good/ext/standard/tests/file/temp/ in %s/test/zend/good/ext/standard/tests/file/lstat_stat_error.php on line 23
 bool(false)
 
-Warning: %s
+Warning: stat(): stat failed for 22 in %s/test/zend/good/ext/standard/tests/file/lstat_stat_error.php on line 24
 bool(false)
-
-Warning: %s
-NULL
 Done

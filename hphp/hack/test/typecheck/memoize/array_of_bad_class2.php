@@ -1,8 +1,8 @@
-<?hh // strict
+<?hh
 
 class Bar {}
 
 <<__Memoize>>
-function some_function(array<Bar> $arg): string {
+function some_function(varray<Bar> $arg): string {
   return 'hello';
 }

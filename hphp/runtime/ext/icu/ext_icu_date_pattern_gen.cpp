@@ -1,13 +1,11 @@
 #include "hphp/runtime/ext/icu/ext_icu_date_pattern_gen.h"
 #include "hphp/runtime/ext/icu/ext_icu_iterator.h"
 
-namespace HPHP { namespace Intl {
+namespace HPHP::Intl {
 //////////////////////////////////////////////////////////////////////////////
 // Internal Resource Data
 
 const StaticString s_IntlDatePatternGenerator("IntlDatePatternGenerator");
-
-Class* IntlDatePatternGenerator::c_IntlDatePatternGenerator = nullptr;
 
 #define GENERATOR_GET(dest, src) \
   auto dest = IntlDatePatternGenerator::Get(src); \
@@ -44,7 +42,7 @@ static UDateTimePatternField cast_ptn_field(IntlError *errorHandler,
 // class IntlDatePatternGenerator
 
 static Object HHVM_STATIC_METHOD(IntlDatePatternGenerator, createInstance,
-                                 const String& locale) {
+                                 const OptString& locale) {
   if (locale.empty()) {
     s_intl_error->throwException("No locale provided");
   }
@@ -70,9 +68,9 @@ static Object HHVM_STATIC_METHOD(IntlDatePatternGenerator,
   return IntlDatePatternGenerator::newInstance(std::move(generator));
 }
 
-static String HHVM_METHOD(IntlDatePatternGenerator,
-                          getSkeleton,
-                          const String& pattern) {
+static OptString HHVM_METHOD(IntlDatePatternGenerator,
+                             getSkeleton,
+                             const OptString& pattern) {
   GENERATOR_GET(data, this_);
 
   UErrorCode error = U_ZERO_ERROR;
@@ -82,15 +80,15 @@ static String HHVM_METHOD(IntlDatePatternGenerator,
   icu::UnicodeString ret = data->generator().getSkeleton(ptn, error);
   ICU_ERR_CHECK_MSG(data, error, "Error getting skeleton");
 
-  String out(u8(ret, error));
+  OptString out(u8(ret, error));
   ICU_ERR_CHECK(data, error);
 
   return out;
 }
 
-static String HHVM_METHOD(IntlDatePatternGenerator,
-                          getBaseSkeleton,
-                          const String& pattern) {
+static OptString HHVM_METHOD(IntlDatePatternGenerator,
+                             getBaseSkeleton,
+                             const OptString& pattern) {
   GENERATOR_GET(data, this_);
 
   UErrorCode error = U_ZERO_ERROR;
@@ -100,7 +98,7 @@ static String HHVM_METHOD(IntlDatePatternGenerator,
   icu::UnicodeString ret = data->generator().getBaseSkeleton(ptn, error);
   ICU_ERR_CHECK_MSG(data, error, "Error getting base skeleton");
 
-  String out(u8(ret, error));
+  OptString out(u8(ret, error));
   ICU_ERR_CHECK(data, error);
 
   return out;
@@ -108,7 +106,7 @@ static String HHVM_METHOD(IntlDatePatternGenerator,
 
 static int64_t HHVM_METHOD(IntlDatePatternGenerator,
                            addPattern,
-                           const String& pattern,
+                           const OptString& pattern,
                            bool override) {
   GENERATOR_GET(data, this_);
 
@@ -127,7 +125,7 @@ static int64_t HHVM_METHOD(IntlDatePatternGenerator,
 static void HHVM_METHOD(IntlDatePatternGenerator,
                         setAppendItemFormat,
                         int64_t fieldInt,
-                        const String& format) {
+                        const OptString& format) {
   GENERATOR_GET(data, this_);
 
   UErrorCode error = U_ZERO_ERROR;
@@ -138,16 +136,16 @@ static void HHVM_METHOD(IntlDatePatternGenerator,
   ICU_ERR_CHECK_MSG(data, error, "Error setting append item format");
 }
 
-static String HHVM_METHOD(IntlDatePatternGenerator,
-                          getAppendItemFormat,
-                          int64_t fieldInt) {
+static OptString HHVM_METHOD(IntlDatePatternGenerator,
+                             getAppendItemFormat,
+                             int64_t fieldInt) {
   GENERATOR_GET(data, this_);
 
   icu::UnicodeString ret;
   ret = data->generator().getAppendItemFormat(cast_ptn_field(data, fieldInt));
 
   UErrorCode error = U_ZERO_ERROR;
-  String out(u8(ret, error));
+  OptString out(u8(ret, error));
   ICU_ERR_CHECK(data, error);
 
   return out;
@@ -156,7 +154,7 @@ static String HHVM_METHOD(IntlDatePatternGenerator,
 static void HHVM_METHOD(IntlDatePatternGenerator,
                         setAppendItemName,
                         int64_t fieldInt,
-                        const String& name) {
+                        const OptString& name) {
   GENERATOR_GET(data, this_);
 
   UErrorCode error = U_ZERO_ERROR;
@@ -167,16 +165,16 @@ static void HHVM_METHOD(IntlDatePatternGenerator,
   ICU_ERR_CHECK_MSG(data, error, "Error setting append item name");
 }
 
-static String HHVM_METHOD(IntlDatePatternGenerator,
-                          getAppendItemName,
-                          int64_t fieldInt) {
+static OptString HHVM_METHOD(IntlDatePatternGenerator,
+                             getAppendItemName,
+                             int64_t fieldInt) {
   GENERATOR_GET(data, this_);
 
   icu::UnicodeString ret;
   ret = data->generator().getAppendItemName(cast_ptn_field(data, fieldInt));
 
   UErrorCode error = U_ZERO_ERROR;
-  String out(u8(ret, error));
+  OptString out(u8(ret, error));
   ICU_ERR_CHECK(data, error);
 
   return out;
@@ -184,7 +182,7 @@ static String HHVM_METHOD(IntlDatePatternGenerator,
 
 static void HHVM_METHOD(IntlDatePatternGenerator,
                         setDateTimeFormat,
-                        const String& dateTimeFormat) {
+                        const OptString& dateTimeFormat) {
   GENERATOR_GET(data, this_);
 
   UErrorCode error = U_ZERO_ERROR;
@@ -195,21 +193,21 @@ static void HHVM_METHOD(IntlDatePatternGenerator,
   ICU_ERR_CHECK_MSG(data, error, "Error setting date time format");
 }
 
-static String HHVM_METHOD(IntlDatePatternGenerator, getDateTimeFormat) {
+static OptString HHVM_METHOD(IntlDatePatternGenerator, getDateTimeFormat) {
   GENERATOR_GET(data, this_);
 
   icu::UnicodeString ret = data->generator().getDateTimeFormat();
 
   UErrorCode error = U_ZERO_ERROR;
-  String out(u8(ret, error));
+  OptString out(u8(ret, error));
   ICU_ERR_CHECK(data, error);
 
   return out;
 }
 
-static String HHVM_METHOD(IntlDatePatternGenerator,
-                          getBestPattern,
-                          const String& skeleton) {
+static OptString HHVM_METHOD(IntlDatePatternGenerator,
+                             getBestPattern,
+                             const OptString& skeleton) {
   GENERATOR_GET(data, this_);
 
   UErrorCode error = U_ZERO_ERROR;
@@ -219,16 +217,16 @@ static String HHVM_METHOD(IntlDatePatternGenerator,
   icu::UnicodeString ret = data->generator().getBestPattern(skel, error);
   ICU_ERR_CHECK_MSG(data, error, "Error getting best pattern");
 
-  String out(u8(ret, error));
+  OptString out(u8(ret, error));
   ICU_ERR_CHECK(data, error);
 
   return out;
 }
 
-static String HHVM_METHOD(IntlDatePatternGenerator,
-                          replaceFieldTypes,
-                          const String& pattern,
-                          const String& skeleton) {
+static OptString HHVM_METHOD(IntlDatePatternGenerator,
+                             replaceFieldTypes,
+                             const OptString& pattern,
+                             const OptString& skeleton) {
   GENERATOR_GET(data, this_);
 
   UErrorCode error = U_ZERO_ERROR;
@@ -242,7 +240,7 @@ static String HHVM_METHOD(IntlDatePatternGenerator,
   ret = data->generator().replaceFieldTypes(ptn, skel, error);
   ICU_ERR_CHECK_MSG(data, error, "Error replacing field types");
 
-  String out(u8(ret, error));
+  OptString out(u8(ret, error));
   ICU_ERR_CHECK(data, error);
 
   return out;
@@ -258,9 +256,9 @@ static Object HHVM_METHOD(IntlDatePatternGenerator, getSkeletons) {
   return IntlIterator::newInstance(se);
 }
 
-static String HHVM_METHOD(IntlDatePatternGenerator,
-                          getPatternForSkeleton,
-                          const String& skeleton) {
+static OptString HHVM_METHOD(IntlDatePatternGenerator,
+                             getPatternForSkeleton,
+                             const OptString& skeleton) {
   GENERATOR_GET(data, this_);
 
   UErrorCode error = U_ZERO_ERROR;
@@ -269,7 +267,7 @@ static String HHVM_METHOD(IntlDatePatternGenerator,
 
   icu::UnicodeString ret = data->generator().getPatternForSkeleton(skel);
 
-  String out(u8(ret, error));
+  OptString out(u8(ret, error));
   ICU_ERR_CHECK(data, error);
 
   return out;
@@ -287,7 +285,7 @@ static Object HHVM_METHOD(IntlDatePatternGenerator, getBaseSkeletons) {
 
 static void HHVM_METHOD(IntlDatePatternGenerator,
                         setDecimal,
-                        const String& decimal) {
+                        const OptString& decimal) {
   GENERATOR_GET(data, this_);
 
   UErrorCode error = U_ZERO_ERROR;
@@ -297,13 +295,13 @@ static void HHVM_METHOD(IntlDatePatternGenerator,
   data->generator().setDecimal(dec);
 }
 
-static String HHVM_METHOD(IntlDatePatternGenerator, getDecimal) {
+static OptString HHVM_METHOD(IntlDatePatternGenerator, getDecimal) {
   GENERATOR_GET(data, this_);
 
   icu::UnicodeString ret = data->generator().getDecimal();
 
   UErrorCode error = U_ZERO_ERROR;
-  String out(u8(ret, error));
+  OptString out(u8(ret, error));
   ICU_ERR_CHECK(data, error);
 
   return out;
@@ -314,7 +312,7 @@ static int64_t HHVM_METHOD(IntlDatePatternGenerator, getErrorCode) {
   return data->getErrorCode();
 }
 
-static String HHVM_METHOD(IntlDatePatternGenerator, getErrorMessage) {
+static OptString HHVM_METHOD(IntlDatePatternGenerator, getErrorMessage) {
   GENERATOR_GET(data, this_);
   return data->getErrorMessage();
 }
@@ -327,7 +325,7 @@ HHVM_RCC_INT(IntlDatePatternGenerator, nm##_PATTERN_FIELD, UDATPG_##nm##_FIELD);
 #define UDATPG_CONST(nm) \
   HHVM_RCC_INT(IntlDatePatternGenerator, PATTERN_##nm, UDATPG_##nm);
 
-void IntlExtension::initDatePatternGenerator() {
+void IntlExtension::registerNativeDatePatternGenerator() {
   // UDateTimePatternField
   UDATPG_CONST_FIELD(ERA);
   UDATPG_CONST_FIELD(YEAR);
@@ -374,11 +372,8 @@ void IntlExtension::initDatePatternGenerator() {
   HHVM_ME(IntlDatePatternGenerator, getErrorCode);
   HHVM_ME(IntlDatePatternGenerator, getErrorMessage);
 
-  auto gen = s_IntlDatePatternGenerator.get();
-  Native::registerNativeDataInfo<IntlDatePatternGenerator>(gen);
-
-  loadSystemlib("icu_date_pattern_gen");
+  Native::registerNativeDataInfo<IntlDatePatternGenerator>();
 }
 
 //////////////////////////////////////////////////////////////////////////////
-}} // namespace HPHP::Intl
+} // namespace HPHP::Intl

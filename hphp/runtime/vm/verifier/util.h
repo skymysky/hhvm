@@ -14,12 +14,15 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_VM_VERIFIER_UTIL_H_
-#define incl_HPHP_VM_VERIFIER_UTIL_H_
+#pragma once
 
 #include <cstddef> // for size_t
 #include <stdint.h>
+
+#include "hphp/runtime/base/string-data.h"
+
 #include "hphp/util/arena.h"
+#include "hphp/util/hash-map.h"
 
 namespace HPHP {
 namespace Verifier {
@@ -57,6 +60,11 @@ inline bool contains(const C &c, T e) {
   return c.find(e) != c.end();
 }
 
-}} // namespace HPHP::Verifier
+using StringToStringTMap = hphp_fast_map<
+  const StringData*,
+  const StringData*,
+  string_data_hash,
+  string_data_tsame
+>;
 
-#endif // incl_HPHP_VM_VERIFIER_UTIL_H
+}} // namespace HPHP::Verifier

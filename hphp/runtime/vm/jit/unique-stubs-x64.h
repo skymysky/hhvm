@@ -14,8 +14,7 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_JIT_UNIQUE_STUBS_X64_H_
-#define incl_HPHP_JIT_UNIQUE_STUBS_X64_H_
+#pragma once
 
 #include "hphp/runtime/vm/jit/types.h"
 #include "hphp/runtime/vm/jit/abi-x64.h"
@@ -25,7 +24,7 @@
 #include "hphp/util/asm-x64.h"
 #include "hphp/util/data-block.h"
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -42,6 +41,5 @@ TCA emitCallToExit(CodeBlock& cb, DataBlock& data, const UniqueStubs& us);
 
 ///////////////////////////////////////////////////////////////////////////////
 
-}}}
+}}
 
-#endif

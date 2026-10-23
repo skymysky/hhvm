@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2013 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-present Facebook, Inc. (http://www.facebook.com)  |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -16,14 +16,15 @@
 
 #include "hphp/runtime/base/apc-stats.h"
 
-#include "hphp/runtime/base/typed-value.h"
-#include "hphp/runtime/base/array-data.h"
-#include "hphp/runtime/base/packed-array.h"
-#include "hphp/runtime/base/packed-array-defs.h"
-#include "hphp/runtime/base/mixed-array-defs.h"
-#include "hphp/runtime/base/apc-handle.h"
 #include "hphp/runtime/base/apc-array.h"
+#include "hphp/runtime/base/apc-handle.h"
 #include "hphp/runtime/base/apc-object.h"
+#include "hphp/runtime/base/apc-rclass-meth.h"
+#include "hphp/runtime/base/apc-rfunc.h"
+#include "hphp/runtime/base/array-data.h"
+#include "hphp/runtime/base/tv-val.h"
+#include "hphp/runtime/base/typed-value.h"
+#include "hphp/runtime/base/vanilla-vec.h"
 #include "hphp/runtime/ext/apc/ext_apc.h"
 
 #include "hphp/util/trace.h"
@@ -31,28 +32,33 @@
 
 namespace HPHP {
 
-TRACE_SET_MOD(apc);
+TRACE_SET_MOD(apc)
 
 
 ///////////////////////////////////////////////////////////////////////////////
 
 namespace {
 
-size_t getMemSize(const TypedValue* tv, bool recurse = true) {
-  const auto& v = tvAsCVarRef(tv);
-  auto type = v.getType();
+// NEVER includes the size of TypedValue pointed to by the lval. The type and
+// value may be stored in some exotic layout instead of in a TypedValue shape,
+// so we only want to account for any memory pointed to from the value.
+//
+// (For example, for an int lval, we should return 0, and for a string lval,
+// we should return the number of bytes in the string's payload.)
+size_t getIndirectMemSize(tv_rval lval, bool recurse = true) {
+  const auto type = lval.type();
   if (isArrayLikeType(type)) {
     if (!recurse) return 0;
-    auto a = v.getArrayData();
-    return a->isStatic() ? sizeof(v) : getMemSize(a);
+    auto a = val(lval).parr;
+    return a->isStatic() ? 0 : getMemSize(a);
   }
   if (type == KindOfString) {
-    return getMemSize(v.getStringData());
+    return getMemSize(val(lval).pstr);
   }
   if (!isRefcountedType(type)) {
-    return sizeof(Variant);
+    return 0;
   }
-  assertx(!"Unsupported Variant type for getMemSize()");
+  assertx(false && "Unsupported Variant type for getMemSize()");
   return 0;
 }
 
@@ -65,73 +71,68 @@ size_t getMemSize(const APCHandle* handle) {
     case APCKind::Bool:
     case APCKind::Int:
     case APCKind::Double:
-    case APCKind::StaticString:
+    case APCKind::PersistentClass:
+    case APCKind::LazyClass:
+    case APCKind::PersistentFunc:
+    case APCKind::PersistentClsMeth:
+    case APCKind::FuncEntity:
+    case APCKind::ClsMeth:
     case APCKind::StaticArray:
-    case APCKind::StaticVec:
-    case APCKind::StaticDict:
-    case APCKind::StaticKeyset:
+    case APCKind::StaticBespoke:
+    case APCKind::StaticString:
       return sizeof(APCHandle);
 
-    case APCKind::UncountedString:
+    case APCKind::SharedString:
       return sizeof(APCTypedValue) +
              getMemSize(APCTypedValue::fromHandle(handle)->getStringData());
-    case APCKind::SharedString:
-      return getMemSize(APCString::fromHandle(handle));
 
-    case APCKind::SerializedArray:
     case APCKind::SerializedVec:
     case APCKind::SerializedDict:
     case APCKind::SerializedKeyset:
       return getMemSize(APCString::fromHandle(handle));
 
-    case APCKind::UncountedArray:
-      return sizeof(APCTypedValue) +
-             getMemSize(APCTypedValue::fromHandle(handle)->getArrayData());
-    case APCKind::UncountedVec:
-      return sizeof(APCTypedValue) +
-             getMemSize(APCTypedValue::fromHandle(handle)->getVecData());
-    case APCKind::UncountedDict:
-      return sizeof(APCTypedValue) +
-             getMemSize(APCTypedValue::fromHandle(handle)->getDictData());
-    case APCKind::UncountedKeyset:
-      return sizeof(APCTypedValue) +
-             getMemSize(APCTypedValue::fromHandle(handle)->getKeysetData());
-
     case APCKind::SharedArray:
-    case APCKind::SharedPackedArray:
-    case APCKind::SharedVec:
-    case APCKind::SharedDict:
-    case APCKind::SharedKeyset:
-    case APCKind::SharedVArray:
-    case APCKind::SharedDArray:
+    case APCKind::SharedBespoke: {
+      auto const ad = APCTypedValue::fromHandle(handle)->getArrayData();
+      return sizeof(APCTypedValue) + getMemSize(ad);
+    }
+
+    case APCKind::CopiedVec:
+    case APCKind::CopiedLegacyVec:
+    case APCKind::CopiedDict:
+    case APCKind::CopiedLegacyDict:
+    case APCKind::CopiedKeyset:
       return getMemSize(APCArray::fromHandle(handle));
 
     case APCKind::SerializedObject:
       return getMemSize(APCString::fromHandle(handle));
 
-    case APCKind::SharedObject:
-    case APCKind::SharedCollection:
+    case APCKind::CopiedObject:
+    case APCKind::CopiedCollection:
       return getMemSize(APCObject::fromHandle(handle));
+
+    case APCKind::RFunc:
+      return getMemSize(APCRFunc::fromHandle(handle));
+    case APCKind::RClsMeth:
+      return getMemSize(APCRClsMeth::fromHandle(handle));
   }
-  assertx(!"Unsupported APCHandle Type in getMemSize");
+  assertx(false && "Unsupported APCHandle Type in getMemSize");
   return 0;
 }
 
 size_t getMemSize(const APCArray* arr) {
   auto memSize = sizeof(APCArray);
-  auto size = arr->size();
+  auto const size = arr->size();
   if (arr->isPacked()) {
     memSize += sizeof(APCHandle*) * size;
     for (auto i = 0; i < size; i++) {
-      memSize += getMemSize(arr->getValue(i));
+      memSize += getMemSize(arr->getPackedVal(i));
     }
   } else {
-    memSize += sizeof(int) * (arr->m.m_capacity_mask + 1) +
-               sizeof(APCArray::Bucket) * size;
-    auto b = arr->buckets();
+    memSize += sizeof(APCHandle*) * size * 2;
     for (auto i = 0; i < size; i++) {
-      memSize += getMemSize(b[i].key);
-      memSize += getMemSize(b[i].val);
+      memSize += getMemSize(arr->getHashedKey(i));
+      memSize += getMemSize(arr->getHashedVal(i));
     }
   }
   return memSize;
@@ -161,56 +162,63 @@ size_t getMemSize(const APCObject* obj) {
   return size;
 }
 
+size_t getMemSize(const APCRFunc* rfunc) {
+  return sizeof(APCRFunc) + getMemSize(rfunc->m_generics);
+}
+
+size_t getMemSize(const APCRClsMeth* rclsmeth) {
+  return sizeof(APCRClsMeth) + getMemSize(rclsmeth->m_generics);
+}
+
 size_t getMemSize(const ArrayData* arr, bool recurse) {
   switch (arr->kind()) {
-  case ArrayData::ArrayKind::kPackedKind:
   case ArrayData::ArrayKind::kVecKind: {
-    // we want to measure just the overhead of the array
-    auto size = PackedArray::heapSize(arr) - (sizeof(TypedValue) * arr->m_size);
-    auto const values = packedData(arr);
-    auto const last = values + arr->m_size;
-    for (auto ptr = values; ptr != last; ++ptr) {
-      size += getMemSize(ptr, recurse);
+    auto size = arr->heapSize();
+    for (uint32_t i = 0; i < arr->m_size; ++i) {
+      auto const tv = VanillaVec::NvGetInt(arr, i);
+      size += getIndirectMemSize(&tv);
     }
     return size;
   }
-  case ArrayData::ArrayKind::kDictKind:
-  case ArrayData::ArrayKind::kMixedKind: {
-    auto const mixed = MixedArray::asMixed(arr);
-    auto size = sizeof(MixedArray) +
-                sizeof(MixedArray::Elm) * (mixed->capacity() - mixed->m_used);
+  case ArrayData::ArrayKind::kDictKind: {
+    auto const mixed = VanillaDict::as(arr);
+    auto size = sizeof(VanillaDict) +
+                sizeof(VanillaDict::Elm) * (mixed->capacity() - mixed->m_used);
     auto elms = mixed->data();
     auto last = elms + mixed->m_used;
     for (auto ptr = elms; ptr != last; ++ptr) {
-      if (MixedArray::isTombstone(ptr->data.m_type)) {
-        size += sizeof(MixedArray::Elm);
+      if (VanillaDict::isTombstone(ptr->data.m_type)) {
+        size += sizeof(VanillaDict::Elm);
         continue;
       }
+      // TODO(kshaunak): I think our key-size accounting is wrong. We count the
+      // direct size within the VanillaDict for int64 keys but only the indirect
+      // size for string keys. We should use the object's heap size to get all
+      // the direct memory sizes, like we do for arrays, above.
       size += ptr->hasStrKey() ? getMemSize(ptr->skey) : sizeof(int64_t);
-      size += getMemSize(&ptr->data, recurse);
+      size += getIndirectMemSize(&ptr->data, recurse);
+      size += sizeof(TypedValueAux);
     }
     return size;
   }
   case ArrayData::ArrayKind::kKeysetKind: {
-    auto const set = SetArray::asSet(arr);
-    auto size = sizeof(SetArray) +
-                sizeof(SetArray::Elm) + (set->capacity() - set->m_used);
+    auto const set = VanillaKeyset::asSet(arr);
+    auto size = sizeof(VanillaKeyset) +
+                sizeof(VanillaKeyset::Elm) + (set->capacity() - set->m_used);
     auto const elms = set->data();
     auto const used = set->m_used;
     for (uint32_t i = 0; i < used; ++i) {
       auto const& elm = elms[i];
       if (elm.isTombstone()) {
-        size += sizeof(SetArray::Elm);
+        size += sizeof(VanillaKeyset::Elm);
       } else {
         size += elm.hasStrKey() ? getMemSize(elm.strKey()) : sizeof(int64_t);
       }
     }
     return size;
   }
-  case ArrayData::ArrayKind::kEmptyKind:
-    return sizeof(ArrayData);
   default:
-    assertx(!"Unsupported Array type in getMemSize");
+    assertx(false && "Unsupported Array type in getMemSize");
   }
   return 0;
 }
@@ -227,29 +235,20 @@ void APCStats::Create() {
 
 APCStats::APCStats() : m_valueSize(nullptr)
                      , m_keySize(nullptr)
-                     , m_inFileSize(nullptr)
-                     , m_livePrimedSize(nullptr)
                      , m_pendingDeleteSize(nullptr)
                      , m_entries(nullptr)
-                     , m_primedEntries(nullptr)
-                     , m_livePrimedEntries(nullptr)
-                     , m_uncountedEntries(nullptr)
-                     , m_uncountedBlocks(nullptr)
+                     , m_sharedEntries(nullptr)
+                     , m_sharedBlocks(nullptr)
                      , m_detailedStats(nullptr) {
   m_valueSize = ServiceData::createCounter("apc.value_size.sum");
   m_keySize = ServiceData::createCounter("apc.key_size.sum");
-  m_inFileSize = ServiceData::createCounter("apc.in_file_size.sum");
-  m_livePrimedSize = ServiceData::createCounter("apc.primed_live_size.sum");
   m_pendingDeleteSize =
     ServiceData::createCounter("apc.pending_delete_size.sum");
   m_entries = ServiceData::createCounter("apc.entries");
-  m_primedEntries = ServiceData::createCounter("apc.primed_entries");
-  m_livePrimedEntries =
-      ServiceData::createCounter("apc.primed_live_entries");
-  m_uncountedEntries = ServiceData::createCounter("apc.uncounted_entries");
-  m_uncountedBlocks =
+  m_sharedEntries = ServiceData::createCounter("apc.uncounted_entries");
+  m_sharedBlocks =
     ServiceData::createCounter("apc.uncounted_blocks.mayNotBeAPCValues");
-  if (RuntimeOption::EnableAPCStats) {
+  if (Cfg::Stats::APC) {
     m_detailedStats = new APCDetailedStats();
   }
 }
@@ -263,20 +262,12 @@ std::string APCStats::getStatsInfo() const {
   info += std::to_string(m_valueSize->getValue()) +
           "\nKey size: " +
           std::to_string(m_keySize->getValue()) +
-          "\nMapped to file data size: " +
-          std::to_string(m_inFileSize->getValue()) +
-          "\nIn memory primed data size: " +
-          std::to_string(m_livePrimedSize->getValue()) +
           "\nEntries count: " +
           std::to_string(m_entries->getValue()) +
-          "\nPrimed entries count: " +
-          std::to_string(m_primedEntries->getValue()) +
-          "\nIn memory primed entries count: " +
-          std::to_string(m_livePrimedEntries->getValue()) +
           "\nIn total uncounted entries count: " +
-          std::to_string(m_uncountedEntries->getValue()) +
+          std::to_string(m_sharedEntries->getValue()) +
           "\nIn memory uncounted blocks: " +
-          std::to_string(m_uncountedBlocks->getValue());
+          std::to_string(m_sharedBlocks->getValue());
   if (apcExtension::UseUncounted) {
     info += "\nPending deletes via treadmill size: " +
             std::to_string(m_pendingDeleteSize->getValue());
@@ -288,44 +279,28 @@ std::string APCStats::getStatsInfo() const {
 }
 
 const StaticString s_num_entries("num_entries");
-const StaticString s_primedEntries("primed_entries");
-const StaticString s_primedLiveEntries("primed_live_entries");
 const StaticString s_valuesSize("values_size");
 const StaticString s_keysSize("keys_size");
-const StaticString s_primedInFileSize("primed_in_file_size");
-const StaticString s_primeLiveSize("primed_live_size");
 const StaticString s_pendingDeleteSize("pending_delete_size");
-const StaticString s_uncountedEntries("uncounted_entires");
-const StaticString s_uncountedBlocks("uncounted_blocks");
+const StaticString s_sharedEntries("uncounted_entries");
+const StaticString s_sharedBlocks("uncounted_blocks");
 
 void APCStats::collectStats(std::map<const StringData*, int64_t>& stats) const {
   stats.insert(
       std::pair<const StringData*, int64_t>(s_num_entries.get(),
                                             m_entries->getValue()));
   stats.insert(
-      std::pair<const StringData*, int64_t>(s_primedEntries.get(),
-                                            m_primedEntries->getValue()));
+      std::pair<const StringData*, int64_t>( s_sharedEntries.get(),
+                                            m_sharedEntries->getValue()));
   stats.insert(
-      std::pair<const StringData*, int64_t>(s_primedLiveEntries.get(),
-                                            m_livePrimedEntries->getValue()));
-  stats.insert(
-      std::pair<const StringData*, int64_t>( s_uncountedEntries.get(),
-                                            m_uncountedEntries->getValue()));
-  stats.insert(
-    std::pair<const StringData*, int64_t> ( s_uncountedBlocks.get(),
-                                      m_uncountedBlocks->getValue()));
+    std::pair<const StringData*, int64_t> ( s_sharedBlocks.get(),
+                                      m_sharedBlocks->getValue()));
   stats.insert(
       std::pair<const StringData*, int64_t>(s_valuesSize.get(),
                                             m_valueSize->getValue()));
   stats.insert(
       std::pair<const StringData*, int64_t>(s_keysSize.get(),
                                             m_keySize->getValue()));
-  stats.insert(
-      std::pair<const StringData*, int64_t>(s_primedInFileSize.get(),
-                                            m_inFileSize->getValue()));
-  stats.insert(
-      std::pair<const StringData*, int64_t>(s_primeLiveSize.get(),
-                                            m_livePrimedSize->getValue()));
   stats.insert(
       std::pair<const StringData*, int64_t>(s_pendingDeleteSize.get(),
                                             m_pendingDeleteSize->getValue()));
@@ -336,42 +311,40 @@ void APCStats::collectStats(std::map<const StringData*, int64_t>& stats) const {
 
 APCDetailedStats::APCDetailedStats() : m_uncounted(nullptr)
                                      , m_apcString(nullptr)
-                                     , m_uncString(nullptr)
-                                     , m_serArray(nullptr)
+                                     , m_sharedString(nullptr)
                                      , m_serVec(nullptr)
                                      , m_serDict(nullptr)
                                      , m_serKeyset(nullptr)
-                                     , m_apcArray(nullptr)
                                      , m_apcVec(nullptr)
                                      , m_apcDict(nullptr)
                                      , m_apcKeyset(nullptr)
-                                     , m_uncArray(nullptr)
-                                     , m_uncVec(nullptr)
-                                     , m_uncDict(nullptr)
-                                     , m_uncKeyset(nullptr)
+                                     , m_sharedVec(nullptr)
+                                     , m_sharedDict(nullptr)
+                                     , m_sharedKeyset(nullptr)
                                      , m_serObject(nullptr)
                                      , m_apcObject(nullptr)
+                                     , m_apcRFunc(nullptr)
+                                     , m_apcRClsMeth(nullptr)
                                      , m_setValues(nullptr)
                                      , m_delValues(nullptr)
                                      , m_replValues(nullptr)
                                      , m_expValues(nullptr) {
   m_uncounted = ServiceData::createCounter("apc.type_uncounted");
   m_apcString = ServiceData::createCounter("apc.type_apc_string");
-  m_uncString = ServiceData::createCounter("apc.type_unc_string");
-  m_serArray = ServiceData::createCounter("apc.type_ser_array");
+  m_sharedString = ServiceData::createCounter("apc.type_unc_string");
   m_serVec = ServiceData::createCounter("apc.type_ser_vec");
   m_serDict = ServiceData::createCounter("apc.type_ser_dict");
   m_serKeyset = ServiceData::createCounter("apc.type_ser_keyset");
-  m_apcArray = ServiceData::createCounter("apc.type_apc_array");
   m_apcVec = ServiceData::createCounter("apc.type_apc_vec");
   m_apcDict = ServiceData::createCounter("apc.type_apc_dict");
   m_apcKeyset = ServiceData::createCounter("apc.type_apc_keyset");
-  m_uncArray = ServiceData::createCounter("apc.type_unc_array");
-  m_uncVec = ServiceData::createCounter("apc.type_unc_vec");
-  m_uncDict = ServiceData::createCounter("apc.type_unc_dict");
-  m_uncKeyset = ServiceData::createCounter("apc.type_unc_keyset");
+  m_sharedVec = ServiceData::createCounter("apc.type_unc_vec");
+  m_sharedDict = ServiceData::createCounter("apc.type_unc_dict");
+  m_sharedKeyset = ServiceData::createCounter("apc.type_unc_keyset");
   m_serObject = ServiceData::createCounter("apc.type_ser_object");
   m_apcObject = ServiceData::createCounter("apc.type_apc_object");
+  m_apcRFunc = ServiceData::createCounter("apc.type_apc_rfunc");
+  m_apcRClsMeth = ServiceData::createCounter("apc.type_apc_rclsmeth");
 
   m_setValues = ServiceData::createCounter("apc.set_values");
   m_delValues = ServiceData::createCounter("apc.deleted_values");
@@ -379,63 +352,60 @@ APCDetailedStats::APCDetailedStats() : m_uncounted(nullptr)
   m_expValues = ServiceData::createCounter("apc.expired_values");
 }
 
-const StaticString s_typeUncounted("type_uncounted");
+const StaticString s_typeShared("type_uncounted");
 const StaticString s_typeAPCString("type_apc_string");
-const StaticString s_typeUncountedString("type_unc_string");
-const StaticString s_typeSerArray("type_ser_array");
+const StaticString s_typeSharedString("type_unc_string");
 const StaticString s_typeSerVec("type_ser_vec");
 const StaticString s_typeSerDict("type_ser_dict");
 const StaticString s_typeSerKeyset("type_ser_keyset");
-const StaticString s_typeAPCArray("type_apc_array");
 const StaticString s_typeAPCVec("type_apc_vec");
 const StaticString s_typeAPCDict("type_apc_dict");
 const StaticString s_typeAPCKeyset("type_apc_keyset");
-const StaticString s_typUncountedArray("type_unc_array");
-const StaticString s_typUncountedVec("type_unc_vec");
-const StaticString s_typUncountedDict("type_unc_dict");
-const StaticString s_typUncountedKeyset("type_unc_keyset");
+const StaticString s_typSharedVec("type_unc_vec");
+const StaticString s_typSharedDict("type_unc_dict");
+const StaticString s_typSharedKeyset("type_unc_keyset");
 const StaticString s_typeSerObject("type_ser_object");
 const StaticString s_typeAPCObject("type_apc_object");
+const StaticString s_typeAPCRFunc("type_apc_rfunc");
+const StaticString s_typeAPCRClsMeth("type_apc_rclsmeth");
 const StaticString s_setValueCount("set_values_count");
 const StaticString s_deleteValuesCount("deleted_values_count");
 const StaticString s_replacedValueCount("replaced_values_count");
 const StaticString s_expiredValueCount("expired_values_count");
 
 std::string APCDetailedStats::getStatsInfo() const {
-  return "\nPrimitve and static strings count: " +
+  return "\nPrimitive and static strings count: " +
          std::to_string(m_uncounted->getValue()) +
          "\nAPC strings count: " +
          std::to_string(m_apcString->getValue()) +
-         "\nUncounted strings count: " +
-         std::to_string(m_uncString->getValue()) +
-         "\nSerialized array count: " +
-         std::to_string(m_serArray->getValue()) +
+         "\nShared strings count: " +
+         std::to_string(m_sharedString->getValue()) +
          "\nSerialized vec count: " +
          std::to_string(m_serVec->getValue()) +
          "\nSerialized dict count: " +
          std::to_string(m_serDict->getValue()) +
          "\nSerialized keyset count: " +
          std::to_string(m_serKeyset->getValue()) +
-         "\nAPC array count: " +
-         std::to_string(m_apcArray->getValue()) +
          "\nAPC vec count: " +
          std::to_string(m_apcVec->getValue()) +
          "\nAPC dict count: " +
          std::to_string(m_apcDict->getValue()) +
          "\nAPC keyset count: " +
          std::to_string(m_apcKeyset->getValue()) +
-         "\nUncounted array count: " +
-         std::to_string(m_uncArray->getValue()) +
-         "\nUncounted vec count: " +
-         std::to_string(m_uncVec->getValue()) +
-         "\nUncounted dict count: " +
-         std::to_string(m_uncDict->getValue()) +
-         "\nUncounted keyset count: " +
-         std::to_string(m_uncKeyset->getValue()) +
+         "\nShared vec count: " +
+         std::to_string(m_sharedVec->getValue()) +
+         "\nShared dict count: " +
+         std::to_string(m_sharedDict->getValue()) +
+         "\nShared keyset count: " +
+         std::to_string(m_sharedKeyset->getValue()) +
          "\nSerialized object count: " +
          std::to_string(m_serObject->getValue()) +
          "\nAPC object count: " +
          std::to_string(m_apcObject->getValue()) +
+         "\nAPC rfunc count: " +
+         std::to_string(m_apcRFunc->getValue()) +
+         "\nAPC rclsmeth count: " +
+         std::to_string(m_apcRClsMeth->getValue()) +
          "\add count: " +
          std::to_string(m_setValues->getValue()) +
          "\ndelete count: " +
@@ -450,17 +420,14 @@ std::string APCDetailedStats::getStatsInfo() const {
 void APCDetailedStats::collectStats(
     std::map<const StringData*, int64_t>& stats) const {
   stats.insert(
-        std::pair<const StringData*, int64_t>(s_typeUncounted.get(),
+        std::pair<const StringData*, int64_t>(s_typeShared.get(),
                                               m_uncounted->getValue()));
   stats.insert(
         std::pair<const StringData*, int64_t>(s_typeAPCString.get(),
                                               m_apcString->getValue()));
   stats.insert(
-        std::pair<const StringData*, int64_t>(s_typeUncountedString.get(),
-                                              m_uncString->getValue()));
-  stats.insert(
-        std::pair<const StringData*, int64_t>(s_typeSerArray.get(),
-                                              m_serArray->getValue()));
+        std::pair<const StringData*, int64_t>(s_typeSharedString.get(),
+                                              m_sharedString->getValue()));
   stats.insert(
         std::pair<const StringData*, int64_t>(s_typeSerVec.get(),
                                               m_serVec->getValue()));
@@ -471,9 +438,6 @@ void APCDetailedStats::collectStats(
         std::pair<const StringData*, int64_t>(s_typeSerKeyset.get(),
                                               m_serKeyset->getValue()));
   stats.insert(
-        std::pair<const StringData*, int64_t>(s_typeAPCArray.get(),
-                                              m_apcArray->getValue()));
-  stats.insert(
         std::pair<const StringData*, int64_t>(s_typeAPCVec.get(),
                                               m_apcVec->getValue()));
   stats.insert(
@@ -483,23 +447,26 @@ void APCDetailedStats::collectStats(
         std::pair<const StringData*, int64_t>(s_typeAPCKeyset.get(),
                                               m_apcKeyset->getValue()));
   stats.insert(
-        std::pair<const StringData*, int64_t>(s_typUncountedArray.get(),
-                                              m_uncArray->getValue()));
+        std::pair<const StringData*, int64_t>(s_typSharedVec.get(),
+                                              m_sharedVec->getValue()));
   stats.insert(
-        std::pair<const StringData*, int64_t>(s_typUncountedVec.get(),
-                                              m_uncVec->getValue()));
+        std::pair<const StringData*, int64_t>(s_typSharedDict.get(),
+                                              m_sharedDict->getValue()));
   stats.insert(
-        std::pair<const StringData*, int64_t>(s_typUncountedDict.get(),
-                                              m_uncDict->getValue()));
-  stats.insert(
-        std::pair<const StringData*, int64_t>(s_typUncountedKeyset.get(),
-                                              m_uncKeyset->getValue()));
+        std::pair<const StringData*, int64_t>(s_typSharedKeyset.get(),
+                                              m_sharedKeyset->getValue()));
   stats.insert(
         std::pair<const StringData*, int64_t>(s_typeSerObject.get(),
                                               m_serObject->getValue()));
   stats.insert(
         std::pair<const StringData*, int64_t>(s_typeAPCObject.get(),
                                               m_apcObject->getValue()));
+  stats.insert(
+        std::pair<const StringData*, int64_t>(s_typeAPCRFunc.get(),
+                                              m_apcRFunc->getValue()));
+  stats.insert(
+        std::pair<const StringData*, int64_t>(s_typeAPCRClsMeth.get(),
+                                              m_apcRClsMeth->getValue()));
   stats.insert(
         std::pair<const StringData*, int64_t>(s_setValueCount.get(),
                                               m_setValues->getValue()));
@@ -548,33 +515,29 @@ APCDetailedStats::counterFor(const APCHandle* handle) {
     case APCKind::Bool:
     case APCKind::Int:
     case APCKind::Double:
-    case APCKind::StaticString:
+    case APCKind::PersistentClass:
+    case APCKind::PersistentFunc:
+    case APCKind::PersistentClsMeth:
+    case APCKind::FuncEntity:
+    case APCKind::LazyClass:
+    case APCKind::ClsMeth:
     case APCKind::StaticArray:
-    case APCKind::StaticVec:
-    case APCKind::StaticDict:
-    case APCKind::StaticKeyset:
+    case APCKind::StaticBespoke:
+    case APCKind::StaticString:
       return m_uncounted;
 
-    case APCKind::UncountedString:
-      return m_uncString;
-
     case APCKind::SharedString:
-      return m_apcString;
+      return m_sharedString;
 
-    case APCKind::UncountedArray:
-      return m_uncArray;
-
-    case APCKind::UncountedVec:
-      return m_uncVec;
-
-    case APCKind::UncountedDict:
-      return m_uncDict;
-
-    case APCKind::UncountedKeyset:
-      return m_uncKeyset;
-
-    case APCKind::SerializedArray:
-      return m_serArray;
+    case APCKind::SharedArray:
+    case APCKind::SharedBespoke: {
+      switch (handle->type()) {
+        case KindOfPersistentVec:    return m_sharedVec;
+        case KindOfPersistentDict:   return m_sharedDict;
+        case KindOfPersistentKeyset: return m_sharedKeyset;
+        default: always_assert(false);
+      }
+    }
 
     case APCKind::SerializedVec:
       return m_serVec;
@@ -585,27 +548,29 @@ APCDetailedStats::counterFor(const APCHandle* handle) {
     case APCKind::SerializedKeyset:
       return m_serKeyset;
 
-    case APCKind::SharedArray:
-    case APCKind::SharedPackedArray:
-    case APCKind::SharedVArray:
-    case APCKind::SharedDArray:
-      return m_apcArray;
-
-    case APCKind::SharedVec:
+    case APCKind::CopiedVec:
+    case APCKind::CopiedLegacyVec:
       return m_apcVec;
 
-    case APCKind::SharedDict:
+    case APCKind::CopiedDict:
+    case APCKind::CopiedLegacyDict:
       return m_apcDict;
 
-    case APCKind::SharedKeyset:
+    case APCKind::CopiedKeyset:
       return m_apcKeyset;
 
     case APCKind::SerializedObject:
       return m_serObject;
 
-    case APCKind::SharedObject:
-    case APCKind::SharedCollection:
+    case APCKind::CopiedObject:
+    case APCKind::CopiedCollection:
       return m_apcObject;
+
+    case APCKind::RFunc:
+      return m_apcRFunc;
+
+    case APCKind::RClsMeth:
+      return m_apcRClsMeth;
   }
   not_reached();
 }

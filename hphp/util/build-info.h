@@ -14,9 +14,9 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_BUILD_INFO_H_
-#define incl_HPHP_BUILD_INFO_H_
+#pragma once
 
+#include "hphp/util/hash-map.h"
 #include <folly/Range.h>
 
 namespace HPHP {
@@ -36,6 +36,13 @@ folly::StringPiece repoSchemaId();
 folly::StringPiece compilerId();
 
 /*
+ * Unix timestamp of the commit from which the compiler was built. Normally this
+ * is the commit associated with compilerId but when no commit information was
+ * available it may be the unix time of the build.
+ */
+int64_t compilerTimestamp();
+
+/*
  * Unique identifier for this hhvm binary, determined at build-time. Unlike
  * compilerId(), this is computed based on the contents of the executable and
  * thus varies depending on the type of build. It cannot be overridden and
@@ -44,10 +51,15 @@ folly::StringPiece compilerId();
 folly::StringPiece buildId();
 
 /*
- * Replace %{schema} with the repo schema in path.
+ * Replace supported %{xxx} placeholders.  These include:
+ *
+ *  - %{schema} -> repo schema
+ *  - %{uid} -> user id
+ *  - %{euid} -> effective user id
  */
-std::string insertSchema(const char* path);
+void replacePlaceholders(std::string&,
+                         const hphp_fast_string_map<std::string>& replaces);
+void replacePlaceholders(std::string&);
 
 }
 
-#endif

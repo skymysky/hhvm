@@ -6,7 +6,7 @@ class Foo {
   ) {}
 }
 
-function f() {
+function f(): void {
   $x = new Foo();
 
   // This should raise an error because we are incrementing a string.

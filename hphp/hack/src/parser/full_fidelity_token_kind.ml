@@ -1,4 +1,4 @@
-(**
+(*
  * Copyright (c) 2016, Facebook, Inc.
  * All rights reserved.
  *
@@ -22,8 +22,6 @@ type t =
   | EndOfFile
   (* Given text tokens *)
   | Abstract
-  | And
-  | Array
   | Arraykey
   | As
   | Async
@@ -41,41 +39,33 @@ type t =
   | Class
   | Classname
   | Clone
+  | Concurrent
   | Const
   | Construct
   | Continue
-  | Coroutine
+  | Ctx
   | Darray
-  | Declare
   | Default
-  | Define
-  | Destruct
+  | Delay
   | Dict
   | Do
   | Double
   | Echo
   | Else
-  | Elseif
   | Empty
-  | Endfor
-  | Endforeach
-  | Enddeclare
   | Endif
-  | Endswitch
-  | Endwhile
   | Enum
   | Eval
   | Extends
   | Fallthrough
   | Float
+  | File
   | Final
   | Finally
   | For
   | Foreach
-  | From
   | Function
   | Global
-  | Goto
   | If
   | Implements
   | Include
@@ -89,22 +79,26 @@ type t =
   | Is
   | Isset
   | Keyset
-  | Let
+  | Lateinit
   | List
+  | Match
   | Mixed
+  | Module
+  | Named
+  | Nameof
   | Namespace
   | New
+  | Newctx
   | Newtype
   | Noreturn
   | Num
-  | Object
-  | Or
   | Parent
   | Print
   | Private
   | Protected
   | Public
   | Real
+  | Reify
   | Require
   | Require_once
   | Required
@@ -115,7 +109,6 @@ type t =
   | Static
   | String
   | Super
-  | Suspend
   | Switch
   | This
   | Throw
@@ -124,16 +117,18 @@ type t =
   | Tuple
   | Type
   | Unset
+  | Upcast
   | Use
   | Using
   | Var
   | Varray
   | Vec
   | Void
+  | With
   | Where
   | While
-  | Xor
   | Yield
+  | NullLiteral
   | LeftBracket
   | RightBracket
   | LeftParen
@@ -153,7 +148,6 @@ type t =
   | Dollar
   | Slash
   | Percent
-  | LessThanGreaterThan
   | LessThanEqualGreaterThan
   | LessThanLessThan
   | GreaterThanGreaterThan
@@ -199,12 +193,19 @@ type t =
   | DotDotDot
   | DollarDollar
   | BarGreaterThan
-  | NullLiteral
+  | BarQuestionGreaterThan
   | SlashGreaterThan
   | LessThanSlash
   | LessThanQuestion
-  | QuestionGreaterThan
-  | HaltCompiler
+  | Backtick
+  | XHP
+  | Hash
+  | Readonly
+  | Internal
+  | Package
+  | Let
+  | Optional
+  | Absent
   (* Variable text tokens *)
   | ErrorToken
   | Name
@@ -214,9 +215,6 @@ type t =
   | HexadecimalLiteral
   | BinaryLiteral
   | FloatingLiteral
-  | ExecutionStringLiteral
-  | ExecutionStringLiteralHead
-  | ExecutionStringLiteralTail
   | SingleQuotedStringLiteral
   | DoubleQuotedStringLiteral
   | DoubleQuotedStringLiteralHead
@@ -233,419 +231,416 @@ type t =
   | XHPStringLiteral
   | XHPBody
   | XHPComment
-  | Markup
+  | Hashbang
+[@@deriving show, eq, sexp_of]
 
-  [@@deriving show]
-
-let from_string keyword ~is_hack ~allow_xhp =
+let from_string keyword ~only_reserved =
   match keyword with
-  | "true"         -> Some BooleanLiteral
-  | "false"        -> Some BooleanLiteral
-  | "abstract"                                    -> Some Abstract
-  | "and"                                         -> Some And
-  | "array"                                       -> Some Array
-  | "arraykey"        when is_hack                -> Some Arraykey
-  | "as"                                          -> Some As
-  | "async"           when is_hack                -> Some Async
-  | "attribute"       when (is_hack || allow_xhp) -> Some Attribute
-  | "await"           when is_hack                -> Some Await
-  | "\\"                                         -> Some Backslash
-  | "binary"                                      -> Some Binary
-  | "bool"                                        -> Some Bool
-  | "boolean"                                     -> Some Boolean
-  | "break"                                       -> Some Break
-  | "case"                                        -> Some Case
-  | "catch"                                       -> Some Catch
-  | "category"        when (is_hack || allow_xhp) -> Some Category
-  | "children"        when (is_hack || allow_xhp) -> Some Children
-  | "class"                                       -> Some Class
-  | "classname"       when is_hack                -> Some Classname
-  | "clone"                                       -> Some Clone
-  | "const"                                       -> Some Const
-  | "__construct"                                 -> Some Construct
-  | "continue"                                    -> Some Continue
-  | "coroutine"       when is_hack                -> Some Coroutine
-  | "darray"          when is_hack                -> Some Darray
-  | "declare"                                     -> Some Declare
-  | "default"                                     -> Some Default
-  | "define"                                      -> Some Define
-  | "__destruct"                                  -> Some Destruct
-  | "dict"                                        -> Some Dict
-  | "do"                                          -> Some Do
-  | "double"                                      -> Some Double
-  | "echo"                                        -> Some Echo
-  | "else"                                        -> Some Else
-  | "elseif"                                      -> Some Elseif
-  | "empty"                                       -> Some Empty
-  | "endfor"                                      -> Some Endfor
-  | "endforeach"                                  -> Some Endforeach
-  | "enddeclare"                                  -> Some Enddeclare
-  | "endif"                                       -> Some Endif
-  | "endswitch"                                   -> Some Endswitch
-  | "endwhile"                                    -> Some Endwhile
-  | "enum"            when (is_hack || allow_xhp) -> Some Enum
-  | "eval"                                        -> Some Eval
-  | "extends"                                     -> Some Extends
-  | "fallthrough"     when is_hack                -> Some Fallthrough
-  | "float"                                       -> Some Float
-  | "final"                                       -> Some Final
-  | "finally"                                     -> Some Finally
-  | "for"                                         -> Some For
-  | "foreach"                                     -> Some Foreach
-  | "from"                                        -> Some From
-  | "function"                                    -> Some Function
-  | "global"                                      -> Some Global
-  | "goto"                                        -> Some Goto
-  | "if"                                          -> Some If
-  | "implements"                                  -> Some Implements
-  | "include"                                     -> Some Include
-  | "include_once"                                -> Some Include_once
-  | "inout"           when is_hack                -> Some Inout
-  | "instanceof"                                  -> Some Instanceof
-  | "insteadof"                                   -> Some Insteadof
-  | "int"                                         -> Some Int
-  | "integer"                                     -> Some Integer
-  | "interface"                                   -> Some Interface
-  | "is"              when is_hack                -> Some Is
-  | "isset"                                       -> Some Isset
-  | "keyset"                                      -> Some Keyset
-  | "let"             when is_hack                -> Some Let
-  | "list"                                        -> Some List
-  | "mixed"           when is_hack                -> Some Mixed
-  | "namespace"                                   -> Some Namespace
-  | "new"                                         -> Some New
-  | "newtype"         when is_hack                -> Some Newtype
-  | "noreturn"        when is_hack                -> Some Noreturn
-  | "num"             when is_hack                -> Some Num
-  | "object"                                      -> Some Object
-  | "or"                                          -> Some Or
-  | "parent"                                      -> Some Parent
-  | "print"                                       -> Some Print
-  | "private"                                     -> Some Private
-  | "protected"                                   -> Some Protected
-  | "public"                                      -> Some Public
-  | "real"                                        -> Some Real
-  | "require"                                     -> Some Require
-  | "require_once"                                -> Some Require_once
-  | "required"        when (is_hack || allow_xhp) -> Some Required
-  | "resource"                                    -> Some Resource
-  | "return"                                      -> Some Return
-  | "self"                                        -> Some Self
-  | "shape"           when is_hack                -> Some Shape
-  | "static"                                      -> Some Static
-  | "string"                                      -> Some String
-  | "super"                                       -> Some Super
-  | "suspend"         when is_hack                -> Some Suspend
-  | "switch"                                      -> Some Switch
-  | "this"            when is_hack                -> Some This
-  | "throw"                                       -> Some Throw
-  | "trait"                                       -> Some Trait
-  | "try"                                         -> Some Try
-  | "tuple"           when is_hack                -> Some Tuple
-  | "type"            when is_hack                -> Some Type
-  | "unset"                                       -> Some Unset
-  | "use"                                         -> Some Use
-  | "using"           when is_hack                -> Some Using
-  | "var"                                         -> Some Var
-  | "varray"          when is_hack                -> Some Varray
-  | "vec"                                         -> Some Vec
-  | "void"                                        -> Some Void
-  | "where"           when is_hack                -> Some Where
-  | "while"                                       -> Some While
-  | "xor"                                         -> Some Xor
-  | "yield"                                       -> Some Yield
-  | "["                                           -> Some LeftBracket
-  | "]"                                           -> Some RightBracket
-  | "("                                           -> Some LeftParen
-  | ")"                                           -> Some RightParen
-  | "{"                                           -> Some LeftBrace
-  | "}"                                           -> Some RightBrace
-  | "."                                           -> Some Dot
-  | "->"                                          -> Some MinusGreaterThan
-  | "++"                                          -> Some PlusPlus
-  | "--"                                          -> Some MinusMinus
-  | "**"                                          -> Some StarStar
-  | "*"                                           -> Some Star
-  | "+"                                           -> Some Plus
-  | "-"                                           -> Some Minus
-  | "~"                                           -> Some Tilde
-  | "!"                                           -> Some Exclamation
-  | "$"                                           -> Some Dollar
-  | "/"                                           -> Some Slash
-  | "%"                                           -> Some Percent
-  | "<>"                                          -> Some LessThanGreaterThan
-  | "<=>"                                         -> Some LessThanEqualGreaterThan
-  | "<<"                                          -> Some LessThanLessThan
-  | ">>"                                          -> Some GreaterThanGreaterThan
-  | "<"                                           -> Some LessThan
-  | ">"                                           -> Some GreaterThan
-  | "<="                                          -> Some LessThanEqual
-  | ">="                                          -> Some GreaterThanEqual
-  | "=="                                          -> Some EqualEqual
-  | "==="                                         -> Some EqualEqualEqual
-  | "!="                                          -> Some ExclamationEqual
-  | "!=="                                         -> Some ExclamationEqualEqual
-  | "^"                                           -> Some Carat
-  | "|"                                           -> Some Bar
-  | "&"                                           -> Some Ampersand
-  | "&&"                                          -> Some AmpersandAmpersand
-  | "||"                                          -> Some BarBar
-  | "?"                                           -> Some Question
-  | "?as"                                         -> Some QuestionAs
-  | "?:"                                          -> Some QuestionColon
-  | "??"                                          -> Some QuestionQuestion
-  | "??="                                         -> Some QuestionQuestionEqual
-  | ":"                                           -> Some Colon
-  | ";"                                           -> Some Semicolon
-  | "="                                           -> Some Equal
-  | "**="                                         -> Some StarStarEqual
-  | "*="                                          -> Some StarEqual
-  | "/="                                          -> Some SlashEqual
-  | "%="                                          -> Some PercentEqual
-  | "+="                                          -> Some PlusEqual
-  | "-="                                          -> Some MinusEqual
-  | ".="                                          -> Some DotEqual
-  | "<<="                                         -> Some LessThanLessThanEqual
-  | ">>="                                         -> Some GreaterThanGreaterThanEqual
-  | "&="                                          -> Some AmpersandEqual
-  | "^="                                          -> Some CaratEqual
-  | "|="                                          -> Some BarEqual
-  | ","                                           -> Some Comma
-  | "@"                                           -> Some At
-  | "::"                                          -> Some ColonColon
-  | "=>"                                          -> Some EqualGreaterThan
-  | "==>"                                         -> Some EqualEqualGreaterThan
-  | "?->"                                         -> Some QuestionMinusGreaterThan
-  | "..."                                         -> Some DotDotDot
-  | "$$"                                          -> Some DollarDollar
-  | "|>"                                          -> Some BarGreaterThan
-  | "null"                                        -> Some NullLiteral
-  | "/>"                                          -> Some SlashGreaterThan
-  | "</"                                          -> Some LessThanSlash
-  | "<?"                                          -> Some LessThanQuestion
-  | "?>"                                          -> Some QuestionGreaterThan
-  | "__halt_compiler"                             -> Some HaltCompiler
-  | _              -> None
+  | "true" when not only_reserved -> Some BooleanLiteral
+  | "false" when not only_reserved -> Some BooleanLiteral
+  | "abstract" -> Some Abstract
+  | "arraykey" when not only_reserved -> Some Arraykey
+  | "as" -> Some As
+  | "async" -> Some Async
+  | "attribute" when not only_reserved -> Some Attribute
+  | "await" -> Some Await
+  | "\\" -> Some Backslash
+  | "binary" when not only_reserved -> Some Binary
+  | "bool" when not only_reserved -> Some Bool
+  | "boolean" when not only_reserved -> Some Boolean
+  | "break" -> Some Break
+  | "case" -> Some Case
+  | "catch" -> Some Catch
+  | "category" when not only_reserved -> Some Category
+  | "children" when not only_reserved -> Some Children
+  | "class" -> Some Class
+  | "classname" when not only_reserved -> Some Classname
+  | "clone" -> Some Clone
+  | "concurrent" -> Some Concurrent
+  | "const" -> Some Const
+  | "__construct" -> Some Construct
+  | "continue" -> Some Continue
+  | "ctx" -> Some Ctx
+  | "darray" when not only_reserved -> Some Darray
+  | "default" -> Some Default
+  | "delay" -> Some Delay
+  | "dict" when not only_reserved -> Some Dict
+  | "do" -> Some Do
+  | "double" when not only_reserved -> Some Double
+  | "echo" -> Some Echo
+  | "else" -> Some Else
+  | "empty" -> Some Empty
+  | "endif" -> Some Endif
+  | "enum" when not only_reserved -> Some Enum
+  | "eval" -> Some Eval
+  | "extends" -> Some Extends
+  | "fallthrough" when not only_reserved -> Some Fallthrough
+  | "float" when not only_reserved -> Some Float
+  | "file" when not only_reserved -> Some File
+  | "final" -> Some Final
+  | "finally" -> Some Finally
+  | "for" -> Some For
+  | "foreach" -> Some Foreach
+  | "function" -> Some Function
+  | "global" -> Some Global
+  | "if" -> Some If
+  | "implements" -> Some Implements
+  | "include" -> Some Include
+  | "include_once" -> Some Include_once
+  | "inout" -> Some Inout
+  | "instanceof" -> Some Instanceof
+  | "insteadof" -> Some Insteadof
+  | "int" when not only_reserved -> Some Int
+  | "integer" when not only_reserved -> Some Integer
+  | "interface" -> Some Interface
+  | "is" when not only_reserved -> Some Is
+  | "isset" -> Some Isset
+  | "keyset" when not only_reserved -> Some Keyset
+  | "lateinit" -> Some Lateinit
+  | "list" -> Some List
+  | "match" when not only_reserved -> Some Match
+  | "mixed" when not only_reserved -> Some Mixed
+  | "module" -> Some Module
+  | "named" -> Some Named
+  | "nameof" -> Some Nameof
+  | "namespace" -> Some Namespace
+  | "new" -> Some New
+  | "newctx" when not only_reserved -> Some Newctx
+  | "newtype" when not only_reserved -> Some Newtype
+  | "noreturn" when not only_reserved -> Some Noreturn
+  | "num" when not only_reserved -> Some Num
+  | "parent" when not only_reserved -> Some Parent
+  | "print" -> Some Print
+  | "private" -> Some Private
+  | "protected" -> Some Protected
+  | "public" -> Some Public
+  | "real" when not only_reserved -> Some Real
+  | "reify" when not only_reserved -> Some Reify
+  | "require" -> Some Require
+  | "require_once" -> Some Require_once
+  | "required" -> Some Required
+  | "resource" when not only_reserved -> Some Resource
+  | "return" -> Some Return
+  | "self" when not only_reserved -> Some Self
+  | "shape" -> Some Shape
+  | "static" -> Some Static
+  | "string" when not only_reserved -> Some String
+  | "super" when not only_reserved -> Some Super
+  | "switch" -> Some Switch
+  | "this" when not only_reserved -> Some This
+  | "throw" -> Some Throw
+  | "trait" -> Some Trait
+  | "try" -> Some Try
+  | "tuple" -> Some Tuple
+  | "type" when not only_reserved -> Some Type
+  | "unset" -> Some Unset
+  | "upcast" when not only_reserved -> Some Upcast
+  | "use" -> Some Use
+  | "using" -> Some Using
+  | "var" -> Some Var
+  | "varray" when not only_reserved -> Some Varray
+  | "vec" when not only_reserved -> Some Vec
+  | "void" when not only_reserved -> Some Void
+  | "with" when not only_reserved -> Some With
+  | "where" when not only_reserved -> Some Where
+  | "while" -> Some While
+  | "yield" -> Some Yield
+  | "null" when not only_reserved -> Some NullLiteral
+  | "[" -> Some LeftBracket
+  | "]" -> Some RightBracket
+  | "(" -> Some LeftParen
+  | ")" -> Some RightParen
+  | "{" -> Some LeftBrace
+  | "}" -> Some RightBrace
+  | "." -> Some Dot
+  | "->" -> Some MinusGreaterThan
+  | "++" -> Some PlusPlus
+  | "--" -> Some MinusMinus
+  | "**" -> Some StarStar
+  | "*" -> Some Star
+  | "+" -> Some Plus
+  | "-" -> Some Minus
+  | "~" -> Some Tilde
+  | "!" -> Some Exclamation
+  | "$" -> Some Dollar
+  | "/" -> Some Slash
+  | "%" -> Some Percent
+  | "<=>" -> Some LessThanEqualGreaterThan
+  | "<<" -> Some LessThanLessThan
+  | ">>" -> Some GreaterThanGreaterThan
+  | "<" -> Some LessThan
+  | ">" -> Some GreaterThan
+  | "<=" -> Some LessThanEqual
+  | ">=" -> Some GreaterThanEqual
+  | "==" -> Some EqualEqual
+  | "===" -> Some EqualEqualEqual
+  | "!=" -> Some ExclamationEqual
+  | "!==" -> Some ExclamationEqualEqual
+  | "^" -> Some Carat
+  | "|" -> Some Bar
+  | "&" -> Some Ampersand
+  | "&&" -> Some AmpersandAmpersand
+  | "||" -> Some BarBar
+  | "?" -> Some Question
+  | "?as" -> Some QuestionAs
+  | "?:" -> Some QuestionColon
+  | "??" -> Some QuestionQuestion
+  | "??=" -> Some QuestionQuestionEqual
+  | ":" -> Some Colon
+  | ";" -> Some Semicolon
+  | "=" -> Some Equal
+  | "**=" -> Some StarStarEqual
+  | "*=" -> Some StarEqual
+  | "/=" -> Some SlashEqual
+  | "%=" -> Some PercentEqual
+  | "+=" -> Some PlusEqual
+  | "-=" -> Some MinusEqual
+  | ".=" -> Some DotEqual
+  | "<<=" -> Some LessThanLessThanEqual
+  | ">>=" -> Some GreaterThanGreaterThanEqual
+  | "&=" -> Some AmpersandEqual
+  | "^=" -> Some CaratEqual
+  | "|=" -> Some BarEqual
+  | "," -> Some Comma
+  | "@" -> Some At
+  | "::" -> Some ColonColon
+  | "=>" -> Some EqualGreaterThan
+  | "==>" -> Some EqualEqualGreaterThan
+  | "?->" -> Some QuestionMinusGreaterThan
+  | "..." -> Some DotDotDot
+  | "$$" -> Some DollarDollar
+  | "|>" -> Some BarGreaterThan
+  | "|?>" -> Some BarQuestionGreaterThan
+  | "/>" -> Some SlashGreaterThan
+  | "</" -> Some LessThanSlash
+  | "<?" -> Some LessThanQuestion
+  | "`" -> Some Backtick
+  | "xhp" when not only_reserved -> Some XHP
+  | "#" -> Some Hash
+  | "readonly" -> Some Readonly
+  | "internal" when not only_reserved -> Some Internal
+  | "package" -> Some Package
+  | "let" when not only_reserved -> Some Let
+  | "optional" when not only_reserved -> Some Optional
+  | "absent" when not only_reserved -> Some Absent
+  | _ -> None
 
 let to_string kind =
   match kind with
-(* No text tokens *)
-  | EndOfFile                     -> "end_of_file"
+  (* No text tokens *)
+  | EndOfFile -> "end_of_file"
   (* Given text tokens *)
-  | Abstract                      -> "abstract"
-  | And                           -> "and"
-  | Array                         -> "array"
-  | Arraykey                      -> "arraykey"
-  | As                            -> "as"
-  | Async                         -> "async"
-  | Attribute                     -> "attribute"
-  | Await                         -> "await"
-  | Backslash                     -> "\\"
-  | Binary                        -> "binary"
-  | Bool                          -> "bool"
-  | Boolean                       -> "boolean"
-  | Break                         -> "break"
-  | Case                          -> "case"
-  | Catch                         -> "catch"
-  | Category                      -> "category"
-  | Children                      -> "children"
-  | Class                         -> "class"
-  | Classname                     -> "classname"
-  | Clone                         -> "clone"
-  | Const                         -> "const"
-  | Construct                     -> "__construct"
-  | Continue                      -> "continue"
-  | Coroutine                     -> "coroutine"
-  | Darray                        -> "darray"
-  | Declare                       -> "declare"
-  | Default                       -> "default"
-  | Define                        -> "define"
-  | Destruct                      -> "__destruct"
-  | Dict                          -> "dict"
-  | Do                            -> "do"
-  | Double                        -> "double"
-  | Echo                          -> "echo"
-  | Else                          -> "else"
-  | Elseif                        -> "elseif"
-  | Empty                         -> "empty"
-  | Endfor                        -> "endfor"
-  | Endforeach                    -> "endforeach"
-  | Enddeclare                    -> "enddeclare"
-  | Endif                         -> "endif"
-  | Endswitch                     -> "endswitch"
-  | Endwhile                      -> "endwhile"
-  | Enum                          -> "enum"
-  | Eval                          -> "eval"
-  | Extends                       -> "extends"
-  | Fallthrough                   -> "fallthrough"
-  | Float                         -> "float"
-  | Final                         -> "final"
-  | Finally                       -> "finally"
-  | For                           -> "for"
-  | Foreach                       -> "foreach"
-  | From                          -> "from"
-  | Function                      -> "function"
-  | Global                        -> "global"
-  | Goto                          -> "goto"
-  | If                            -> "if"
-  | Implements                    -> "implements"
-  | Include                       -> "include"
-  | Include_once                  -> "include_once"
-  | Inout                         -> "inout"
-  | Instanceof                    -> "instanceof"
-  | Insteadof                     -> "insteadof"
-  | Int                           -> "int"
-  | Integer                       -> "integer"
-  | Interface                     -> "interface"
-  | Is                            -> "is"
-  | Isset                         -> "isset"
-  | Keyset                        -> "keyset"
-  | Let                           -> "let"
-  | List                          -> "list"
-  | Mixed                         -> "mixed"
-  | Namespace                     -> "namespace"
-  | New                           -> "new"
-  | Newtype                       -> "newtype"
-  | Noreturn                      -> "noreturn"
-  | Num                           -> "num"
-  | Object                        -> "object"
-  | Or                            -> "or"
-  | Parent                        -> "parent"
-  | Print                         -> "print"
-  | Private                       -> "private"
-  | Protected                     -> "protected"
-  | Public                        -> "public"
-  | Real                          -> "real"
-  | Require                       -> "require"
-  | Require_once                  -> "require_once"
-  | Required                      -> "required"
-  | Resource                      -> "resource"
-  | Return                        -> "return"
-  | Self                          -> "self"
-  | Shape                         -> "shape"
-  | Static                        -> "static"
-  | String                        -> "string"
-  | Super                         -> "super"
-  | Suspend                       -> "suspend"
-  | Switch                        -> "switch"
-  | This                          -> "this"
-  | Throw                         -> "throw"
-  | Trait                         -> "trait"
-  | Try                           -> "try"
-  | Tuple                         -> "tuple"
-  | Type                          -> "type"
-  | Unset                         -> "unset"
-  | Use                           -> "use"
-  | Using                         -> "using"
-  | Var                           -> "var"
-  | Varray                        -> "varray"
-  | Vec                           -> "vec"
-  | Void                          -> "void"
-  | Where                         -> "where"
-  | While                         -> "while"
-  | Xor                           -> "xor"
-  | Yield                         -> "yield"
-  | LeftBracket                   -> "["
-  | RightBracket                  -> "]"
-  | LeftParen                     -> "("
-  | RightParen                    -> ")"
-  | LeftBrace                     -> "{"
-  | RightBrace                    -> "}"
-  | Dot                           -> "."
-  | MinusGreaterThan              -> "->"
-  | PlusPlus                      -> "++"
-  | MinusMinus                    -> "--"
-  | StarStar                      -> "**"
-  | Star                          -> "*"
-  | Plus                          -> "+"
-  | Minus                         -> "-"
-  | Tilde                         -> "~"
-  | Exclamation                   -> "!"
-  | Dollar                        -> "$"
-  | Slash                         -> "/"
-  | Percent                       -> "%"
-  | LessThanGreaterThan           -> "<>"
-  | LessThanEqualGreaterThan      -> "<=>"
-  | LessThanLessThan              -> "<<"
-  | GreaterThanGreaterThan        -> ">>"
-  | LessThan                      -> "<"
-  | GreaterThan                   -> ">"
-  | LessThanEqual                 -> "<="
-  | GreaterThanEqual              -> ">="
-  | EqualEqual                    -> "=="
-  | EqualEqualEqual               -> "==="
-  | ExclamationEqual              -> "!="
-  | ExclamationEqualEqual         -> "!=="
-  | Carat                         -> "^"
-  | Bar                           -> "|"
-  | Ampersand                     -> "&"
-  | AmpersandAmpersand            -> "&&"
-  | BarBar                        -> "||"
-  | Question                      -> "?"
-  | QuestionAs                    -> "?as"
-  | QuestionColon                 -> "?:"
-  | QuestionQuestion              -> "??"
-  | QuestionQuestionEqual         -> "??="
-  | Colon                         -> ":"
-  | Semicolon                     -> ";"
-  | Equal                         -> "="
-  | StarStarEqual                 -> "**="
-  | StarEqual                     -> "*="
-  | SlashEqual                    -> "/="
-  | PercentEqual                  -> "%="
-  | PlusEqual                     -> "+="
-  | MinusEqual                    -> "-="
-  | DotEqual                      -> ".="
-  | LessThanLessThanEqual         -> "<<="
-  | GreaterThanGreaterThanEqual   -> ">>="
-  | AmpersandEqual                -> "&="
-  | CaratEqual                    -> "^="
-  | BarEqual                      -> "|="
-  | Comma                         -> ","
-  | At                            -> "@"
-  | ColonColon                    -> "::"
-  | EqualGreaterThan              -> "=>"
-  | EqualEqualGreaterThan         -> "==>"
-  | QuestionMinusGreaterThan      -> "?->"
-  | DotDotDot                     -> "..."
-  | DollarDollar                  -> "$$"
-  | BarGreaterThan                -> "|>"
-  | NullLiteral                   -> "null"
-  | SlashGreaterThan              -> "/>"
-  | LessThanSlash                 -> "</"
-  | LessThanQuestion              -> "<?"
-  | QuestionGreaterThan           -> "?>"
-  | HaltCompiler                  -> "__halt_compiler"
+  | Abstract -> "abstract"
+  | Arraykey -> "arraykey"
+  | As -> "as"
+  | Async -> "async"
+  | Attribute -> "attribute"
+  | Await -> "await"
+  | Backslash -> "\\"
+  | Binary -> "binary"
+  | Bool -> "bool"
+  | Boolean -> "boolean"
+  | Break -> "break"
+  | Case -> "case"
+  | Catch -> "catch"
+  | Category -> "category"
+  | Children -> "children"
+  | Class -> "class"
+  | Classname -> "classname"
+  | Clone -> "clone"
+  | Concurrent -> "concurrent"
+  | Const -> "const"
+  | Construct -> "__construct"
+  | Continue -> "continue"
+  | Ctx -> "ctx"
+  | Darray -> "darray"
+  | Default -> "default"
+  | Delay -> "delay"
+  | Dict -> "dict"
+  | Do -> "do"
+  | Double -> "double"
+  | Echo -> "echo"
+  | Else -> "else"
+  | Empty -> "empty"
+  | Endif -> "endif"
+  | Enum -> "enum"
+  | Eval -> "eval"
+  | Extends -> "extends"
+  | Fallthrough -> "fallthrough"
+  | Float -> "float"
+  | File -> "file"
+  | Final -> "final"
+  | Finally -> "finally"
+  | For -> "for"
+  | Foreach -> "foreach"
+  | Function -> "function"
+  | Global -> "global"
+  | If -> "if"
+  | Implements -> "implements"
+  | Include -> "include"
+  | Include_once -> "include_once"
+  | Inout -> "inout"
+  | Instanceof -> "instanceof"
+  | Insteadof -> "insteadof"
+  | Int -> "int"
+  | Integer -> "integer"
+  | Interface -> "interface"
+  | Is -> "is"
+  | Isset -> "isset"
+  | Keyset -> "keyset"
+  | Lateinit -> "lateinit"
+  | List -> "list"
+  | Match -> "match"
+  | Mixed -> "mixed"
+  | Module -> "module"
+  | Named -> "named"
+  | Nameof -> "nameof"
+  | Namespace -> "namespace"
+  | New -> "new"
+  | Newctx -> "newctx"
+  | Newtype -> "newtype"
+  | Noreturn -> "noreturn"
+  | Num -> "num"
+  | Parent -> "parent"
+  | Print -> "print"
+  | Private -> "private"
+  | Protected -> "protected"
+  | Public -> "public"
+  | Real -> "real"
+  | Reify -> "reify"
+  | Require -> "require"
+  | Require_once -> "require_once"
+  | Required -> "required"
+  | Resource -> "resource"
+  | Return -> "return"
+  | Self -> "self"
+  | Shape -> "shape"
+  | Static -> "static"
+  | String -> "string"
+  | Super -> "super"
+  | Switch -> "switch"
+  | This -> "this"
+  | Throw -> "throw"
+  | Trait -> "trait"
+  | Try -> "try"
+  | Tuple -> "tuple"
+  | Type -> "type"
+  | Unset -> "unset"
+  | Upcast -> "upcast"
+  | Use -> "use"
+  | Using -> "using"
+  | Var -> "var"
+  | Varray -> "varray"
+  | Vec -> "vec"
+  | Void -> "void"
+  | With -> "with"
+  | Where -> "where"
+  | While -> "while"
+  | Yield -> "yield"
+  | NullLiteral -> "null"
+  | LeftBracket -> "["
+  | RightBracket -> "]"
+  | LeftParen -> "("
+  | RightParen -> ")"
+  | LeftBrace -> "{"
+  | RightBrace -> "}"
+  | Dot -> "."
+  | MinusGreaterThan -> "->"
+  | PlusPlus -> "++"
+  | MinusMinus -> "--"
+  | StarStar -> "**"
+  | Star -> "*"
+  | Plus -> "+"
+  | Minus -> "-"
+  | Tilde -> "~"
+  | Exclamation -> "!"
+  | Dollar -> "$"
+  | Slash -> "/"
+  | Percent -> "%"
+  | LessThanEqualGreaterThan -> "<=>"
+  | LessThanLessThan -> "<<"
+  | GreaterThanGreaterThan -> ">>"
+  | LessThan -> "<"
+  | GreaterThan -> ">"
+  | LessThanEqual -> "<="
+  | GreaterThanEqual -> ">="
+  | EqualEqual -> "=="
+  | EqualEqualEqual -> "==="
+  | ExclamationEqual -> "!="
+  | ExclamationEqualEqual -> "!=="
+  | Carat -> "^"
+  | Bar -> "|"
+  | Ampersand -> "&"
+  | AmpersandAmpersand -> "&&"
+  | BarBar -> "||"
+  | Question -> "?"
+  | QuestionAs -> "?as"
+  | QuestionColon -> "?:"
+  | QuestionQuestion -> "??"
+  | QuestionQuestionEqual -> "??="
+  | Colon -> ":"
+  | Semicolon -> ";"
+  | Equal -> "="
+  | StarStarEqual -> "**="
+  | StarEqual -> "*="
+  | SlashEqual -> "/="
+  | PercentEqual -> "%="
+  | PlusEqual -> "+="
+  | MinusEqual -> "-="
+  | DotEqual -> ".="
+  | LessThanLessThanEqual -> "<<="
+  | GreaterThanGreaterThanEqual -> ">>="
+  | AmpersandEqual -> "&="
+  | CaratEqual -> "^="
+  | BarEqual -> "|="
+  | Comma -> ","
+  | At -> "@"
+  | ColonColon -> "::"
+  | EqualGreaterThan -> "=>"
+  | EqualEqualGreaterThan -> "==>"
+  | QuestionMinusGreaterThan -> "?->"
+  | DotDotDot -> "..."
+  | DollarDollar -> "$$"
+  | BarGreaterThan -> "|>"
+  | BarQuestionGreaterThan -> "|?>"
+  | SlashGreaterThan -> "/>"
+  | LessThanSlash -> "</"
+  | LessThanQuestion -> "<?"
+  | Backtick -> "`"
+  | XHP -> "xhp"
+  | Hash -> "#"
+  | Readonly -> "readonly"
+  | Internal -> "internal"
+  | Package -> "package"
+  | Let -> "let"
+  | Optional -> "optional"
+  | Absent -> "absent"
   (* Variable text tokens *)
-  | ErrorToken                    -> "error_token"
-  | Name                          -> "name"
-  | Variable                      -> "variable"
-  | DecimalLiteral                -> "decimal_literal"
-  | OctalLiteral                  -> "octal_literal"
-  | HexadecimalLiteral            -> "hexadecimal_literal"
-  | BinaryLiteral                 -> "binary_literal"
-  | FloatingLiteral               -> "floating_literal"
-  | ExecutionStringLiteral        -> "execution_string_literal"
-  | ExecutionStringLiteralHead    -> "execution_string_literal_head"
-  | ExecutionStringLiteralTail    -> "execution_string_literal_tail"
-  | SingleQuotedStringLiteral     -> "single_quoted_string_literal"
-  | DoubleQuotedStringLiteral     -> "double_quoted_string_literal"
+  | ErrorToken -> "error_token"
+  | Name -> "name"
+  | Variable -> "variable"
+  | DecimalLiteral -> "decimal_literal"
+  | OctalLiteral -> "octal_literal"
+  | HexadecimalLiteral -> "hexadecimal_literal"
+  | BinaryLiteral -> "binary_literal"
+  | FloatingLiteral -> "floating_literal"
+  | SingleQuotedStringLiteral -> "single_quoted_string_literal"
+  | DoubleQuotedStringLiteral -> "double_quoted_string_literal"
   | DoubleQuotedStringLiteralHead -> "double_quoted_string_literal_head"
-  | StringLiteralBody             -> "string_literal_body"
+  | StringLiteralBody -> "string_literal_body"
   | DoubleQuotedStringLiteralTail -> "double_quoted_string_literal_tail"
-  | HeredocStringLiteral          -> "heredoc_string_literal"
-  | HeredocStringLiteralHead      -> "heredoc_string_literal_head"
-  | HeredocStringLiteralTail      -> "heredoc_string_literal_tail"
-  | NowdocStringLiteral           -> "nowdoc_string_literal"
-  | BooleanLiteral                -> "boolean_literal"
-  | XHPCategoryName               -> "XHP_category_name"
-  | XHPElementName                -> "XHP_element_name"
-  | XHPClassName                  -> "XHP_class_name"
-  | XHPStringLiteral              -> "XHP_string_literal"
-  | XHPBody                       -> "XHP_body"
-  | XHPComment                    -> "XHP_comment"
-  | Markup                        -> "markup"
-
+  | HeredocStringLiteral -> "heredoc_string_literal"
+  | HeredocStringLiteralHead -> "heredoc_string_literal_head"
+  | HeredocStringLiteralTail -> "heredoc_string_literal_tail"
+  | NowdocStringLiteral -> "nowdoc_string_literal"
+  | BooleanLiteral -> "boolean_literal"
+  | XHPCategoryName -> "XHP_category_name"
+  | XHPElementName -> "XHP_element_name"
+  | XHPClassName -> "XHP_class_name"
+  | XHPStringLiteral -> "XHP_string_literal"
+  | XHPBody -> "XHP_body"
+  | XHPComment -> "XHP_comment"
+  | Hashbang -> "hashbang"
 
 let is_variable_text kind =
   match kind with
@@ -657,9 +652,6 @@ let is_variable_text kind =
   | HexadecimalLiteral -> true
   | BinaryLiteral -> true
   | FloatingLiteral -> true
-  | ExecutionStringLiteral -> true
-  | ExecutionStringLiteralHead -> true
-  | ExecutionStringLiteralTail -> true
   | SingleQuotedStringLiteral -> true
   | DoubleQuotedStringLiteral -> true
   | DoubleQuotedStringLiteralHead -> true
@@ -676,5 +668,5 @@ let is_variable_text kind =
   | XHPStringLiteral -> true
   | XHPBody -> true
   | XHPComment -> true
-  | Markup -> true
+  | Hashbang -> true
   | _ -> false

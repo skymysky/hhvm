@@ -29,13 +29,13 @@ bool(false)
 bool(true)
 bool(false)
 bool(true)
-Cannot use relational comparison operators (<, <=, >, >=, <=>) to compare keysets
-Cannot use relational comparison operators (<, <=, >, >=, <=>) to compare keysets
-Cannot use relational comparison operators (<, <=, >, >=, <=>) to compare keysets
-Cannot use relational comparison operators (<, <=, >, >=, <=>) to compare keysets
-Cannot use relational comparison operators (<, <=, >, >=, <=>) to compare keysets
+Cannot compare HH\keyset and int using a relational operator
+Cannot compare HH\keyset and int using a relational operator
+Cannot compare HH\keyset and int using a relational operator
+Cannot compare HH\keyset and int using a relational operator
+Cannot compare HH\keyset and int using a relational operator
 Invalid keyset key: expected a key of type int or string, bool given
-Invalid keyset key: expected a key of type int or string, double given
+Invalid keyset key: expected a key of type int or string, float given
 Invalid keyset key: expected a key of type int or string, null given
 bool(false)
 bool(true)
@@ -50,8 +50,8 @@ bool(false)
 bool(true)
 bool(false)
 bool(true)
-Cannot use relational comparison operators (<, <=, >, >=, <=>) to compare keysets
-Cannot use relational comparison operators (<, <=, >, >=, <=>) to compare keysets
-Cannot use relational comparison operators (<, <=, >, >=, <=>) to compare a vec with a non-vec
-Cannot use relational comparison operators (<, <=, >, >=, <=>) to compare a vec with a non-vec
-Cannot use relational comparison operators (<, <=, >, >=, <=>) to compare keysets
+Cannot compare HH\keyset and HH\vec using a relational operator
+Cannot compare HH\keyset and HH\vec using a relational operator
+Cannot compare HH\keyset and HH\vec using a relational operator
+Cannot compare HH\keyset and HH\vec using a relational operator
+Cannot compare HH\keyset and HH\vec using a relational operator

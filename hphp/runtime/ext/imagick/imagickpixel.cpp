@@ -37,9 +37,9 @@ Array createImagickPixelArray(size_t num, PixelWand* wands[], bool owner) {
   if (wands == nullptr) {
     return Array();
   } else {
-    PackedArrayInit ret(num);
+    VecInit ret(num);
     for (int i = 0; i < num; ++i) {
-      ret.appendWithRef(createImagickPixel(wands[i], owner));
+      ret.append(createImagickPixel(wands[i], owner));
     }
     return ret.toArray();
   }
@@ -53,7 +53,7 @@ req::ptr<WandResource<PixelWand>> getPixelWand(const Variant& obj) {
     IMAGICKPIXEL_THROW(
       "The parameter must be an instance of ImagickPixel or a string");
   } else {
-    auto wand = getPixelWandResource(obj.toCObjRef());
+    auto wand = getPixelWandResource(obj.asCObjRef());
     return req::make<WandResource<PixelWand>>(wand->getWand(), false);
   }
 }
@@ -71,7 +71,7 @@ req::ptr<WandResource<PixelWand>> buildColorWand(const Variant& color) {
     return getPixelWand(color);
   }
   auto ret = newPixelWand();
-  auto status = PixelSetColor(ret->getWand(), color.toCStrRef().c_str());
+  auto status = PixelSetColor(ret->getWand(), color.asCStrRef().c_str());
   if (status == MagickFalse) {
     IMAGICKPIXEL_THROW("Unrecognized color string");
   }
@@ -95,7 +95,7 @@ static bool HHVM_METHOD(ImagickPixel, clear) {
   return true;
 }
 
-static void HHVM_METHOD(ImagickPixel, __construct, const String& color) {
+static void HHVM_METHOD(ImagickPixel, __construct, const OptString& color) {
   auto wand = NewPixelWand();
   if (wand == nullptr) {
     IMAGICKPIXEL_THROW("Failed to allocate PixelWand structure");
@@ -122,7 +122,7 @@ static Array HHVM_METHOD(ImagickPixel, getColor, bool normalized) {
   };
   auto wand = getPixelWandResource(Object{this_});
 
-  ArrayInit ret(4, ArrayInit::Map{});
+  DictInit ret(4);
   for (int i = 0; i < 4; ++i) {
     double color = pixelGet[i](wand->getWand());
     if (i < 3 && !normalized) {
@@ -135,7 +135,7 @@ static Array HHVM_METHOD(ImagickPixel, getColor, bool normalized) {
   return ret.toArray();
 }
 
-static String HHVM_METHOD(ImagickPixel, getColorAsString) {
+static OptString HHVM_METHOD(ImagickPixel, getColorAsString) {
   auto wand = getPixelWandResource(Object{this_});
   return convertMagickString(PixelGetColorAsString(wand->getWand()));
 }
@@ -171,7 +171,7 @@ static Array HHVM_METHOD(ImagickPixel, getHSL) {
   auto wand = getPixelWandResource(Object{this_});
   double hue, saturation, luminosity;
   PixelGetHSL(wand->getWand(), &hue, &saturation, &luminosity);
-  return make_map_array(
+  return make_dict_array(
     s_hue, hue,
     s_saturation, saturation,
     s_luminosity, luminosity);
@@ -201,7 +201,7 @@ static bool HHVM_METHOD(ImagickPixel, isSimilar,
 }
 
 static bool HHVM_METHOD(ImagickPixel, setColor,
-    const String& color) {
+    const OptString& color) {
   auto wand = getPixelWandResource(Object{this_});
   if (PixelSetColor(wand->getWand(), color.c_str()) == MagickFalse) {
     IMAGICKPIXEL_THROW("Unable to set ImagickPixel color");
@@ -242,7 +242,7 @@ static bool HHVM_METHOD(ImagickPixel, setHSL,
 
 #undef IMAGICKPIXEL_THROW
 
-void loadImagickPixelClass() {
+void ImagickExtension::registerNativeImagickPixelClass() {
   HHVM_ME(ImagickPixel, clear);
   HHVM_ME(ImagickPixel, __construct);
   HHVM_ME(ImagickPixel, destroy);

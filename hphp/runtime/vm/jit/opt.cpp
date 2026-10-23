@@ -17,20 +17,23 @@
 #include "hphp/runtime/vm/jit/opt.h"
 
 #include "hphp/runtime/base/array-data.h"
+#include "hphp/runtime/base/tracing.h"
 #include "hphp/runtime/vm/jit/check.h"
-#include "hphp/runtime/vm/jit/ir-builder.h"
+#include "hphp/runtime/vm/jit/irgen-bespoke.h"
 #include "hphp/runtime/vm/jit/ir-unit.h"
 #include "hphp/runtime/vm/jit/mutation.h"
+#include "hphp/runtime/vm/jit/pass-tracer.h"
 #include "hphp/runtime/vm/jit/print.h"
+#include "hphp/runtime/vm/jit/simple-propagation.h"
 #include "hphp/runtime/vm/jit/simplify.h"
 #include "hphp/runtime/vm/jit/timer.h"
+#include "hphp/runtime/vm/jit/type-array-elem.h"
 #include "hphp/runtime/vm/jit/dce.h"
 
+#include "hphp/util/configs/hhir.h"
 #include "hphp/util/trace.h"
 
-#include <boost/dynamic_bitset.hpp>
-
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 
 namespace {
 
@@ -43,18 +46,10 @@ bool doPass(IRUnit& unit, PassFN fn, DCE dce) {
   auto result = ArrayData::call_helper(fn, unit);
   switch (dce) {
   case DCE::Minimal:  mandatoryDCE(unit); break;
-  case DCE::Full:     fullDCE(unit); // fallthrough
+  case DCE::Full:     fullDCE(unit); [[fallthrough]];
   case DCE::None:     assertx(checkEverything(unit)); break;
   }
   return result;
-}
-
-void removeExitPlaceholders(IRUnit& unit) {
-  for (auto& block : rpoSortCfg(unit)) {
-    if (block->back().is(ExitPlaceholder)) {
-      unit.replace(&block->back(), Jmp, block->next());
-    }
-  }
 }
 
 void simplifyOrdStrIdx(IRUnit& unit) {
@@ -120,11 +115,72 @@ void simplifyOrdStrIdx(IRUnit& unit) {
 //////////////////////////////////////////////////////////////////////
 
 /*
+ * During irgen, we might have lacked type information which let us
+ * lower a generic bespoke array access into a more specialized
+ * sequence. During optimization, we may gain that type information,
+ * so we can lower (some) bespoke operations after the fact.
+ *
+ * This is analagous to a simplifier rule, except we need to modify
+ * the CFG.
+ *
+ * It is a good idea to run the simplifier and cfg-clean after this
+ * pass if successful, as the sequence it produces may be further
+ * simplified away.
+ */
+bool lowerBespokes(IRUnit& unit) {
+  PassTracer tracer{&unit, Trace::hhir_lowerbespokes, "lowerBespokes"};
+  Timer t{Timer::optimize_lowerBespokes, unit.logEntry().get_pointer()};
+
+  jit::fast_set<IRInstruction*> structDictInsts;
+  jit::fast_set<IRInstruction*> typeStructInsts;
+
+  auto blocks = rpoSortCfg(unit);
+  for (auto& block : blocks) {
+    for (auto& inst : *block) {
+      if (!inst.is(BespokeGet, BespokeGetThrow)) continue;
+      auto const arr = inst.src(0);
+      if (!inst.src(1)->isA(TStr)) continue;
+      if (arr->type().arrSpec().is_struct()) {
+        structDictInsts.emplace(&inst);
+      } else if (arr->type().arrSpec().is_type_structure()) {
+        typeStructInsts.emplace(&inst);
+      }
+    }
+  }
+
+  if (structDictInsts.empty() && typeStructInsts.empty()) return false;
+
+  for (auto inst : structDictInsts) {
+    if (inst->is(BespokeGet)) {
+      lowerStructBespokeGet(unit, inst);
+    } else if (inst->is(BespokeGetThrow)) {
+      lowerStructBespokeGetThrow(unit, inst);
+    } else {
+      always_assert(false);
+    }
+  }
+
+  for (auto inst : typeStructInsts) {
+    if (inst->is(BespokeGet)) {
+      lowerTypeStructureBespokeGet(unit, inst);
+    } else if (inst->is(BespokeGetThrow)) {
+      lowerTypeStructureBespokeGetThrow(unit, inst);
+    } else {
+      always_assert(false);
+    }
+  }
+
+  return true;
+}
+
+//////////////////////////////////////////////////////////////////////
+
+/*
  * This pass fixes the hints in the blocks to make sure that a block is not
  * marked as hotter (i.e. more likely to execute) than any of its predecessors.
  */
 void fixBlockHints(IRUnit& unit) {
-  TRACE_SET_MOD(hhir_fixhint);
+  TRACE_SET_MOD(hhir_fixhint)
   bool changed = false;
   auto blocks = rpoSortCfg(unit);
   do {
@@ -154,10 +210,35 @@ void fixBlockHints(IRUnit& unit) {
 
 //////////////////////////////////////////////////////////////////////
 
+void mandatoryPropagation(IRUnit& unit) {
+  forEachInst(
+    rpoSortCfg(unit),
+    [&] (IRInstruction* inst) {
+      copyProp(inst);
+      constProp(unit, inst);
+      retypeDests(inst, &unit);
+     }
+  );
+}
+
+//////////////////////////////////////////////////////////////////////
+
+void refineTmpsPass(IRUnit& unit) {
+  splitCriticalEdges(unit);
+  refineTmps(unit);
+}
+
+//////////////////////////////////////////////////////////////////////
+
 }
 
 void optimize(IRUnit& unit, TransKind kind) {
   Timer timer(Timer::optimize, unit.logEntry().get_pointer());
+
+  tracing::Block _{
+    "hhir-optimize",
+    [&] { return traceProps(unit).add("trans_kind", show(kind)); }
+  };
 
   assertx(checkEverything(unit));
 
@@ -165,76 +246,133 @@ void optimize(IRUnit& unit, TransKind kind) {
   printUnit(6, unit, " after initial DCE ");
   assertx(checkEverything(unit));
 
-  if (RuntimeOption::EvalHHIRPredictionOpts) {
-    doPass(unit, optimizePredictions, DCE::None);
-  }
+  auto const doCheckTypes = [&] {
+    if (!isProfiling(kind) && Cfg::HHIR::OptimizeCheckTypes) {
+      rqtrace::EventGuard trace{"OPT_OPTIMIZE_CHECK_TYPES"};
+      while (true) {
+        if (!doPass(unit, optimizeCheckTypes, DCE::None)) {
+          printUnit(6, unit, "  after optimizeCheckTypes ");
+          break;
+        }
+        doPass(unit, simplifyPass, DCE::Minimal);
+        doPass(unit, optimizePhis, DCE::Full);
+        doPass(unit, cleanCfg, DCE::None);
+        printUnit(6, unit, "  after optimizeCheckTypes ");
+      }
+    }
+  };
 
-  if (RuntimeOption::EvalHHIRSimplification) {
+  if (Cfg::HHIR::Simplification) {
+    rqtrace::EventGuard trace{"OPT_SIMPLIFY"};
     doPass(unit, simplifyPass, DCE::Full);
     doPass(unit, cleanCfg, DCE::None);
   }
 
-  if (RuntimeOption::EvalHHIRGlobalValueNumbering) {
-    doPass(unit, gvn, DCE::Full);
+  doCheckTypes();
+
+  if (Cfg::HHIR::GlobalValueNumbering) {
+    rqtrace::EventGuard trace{"OPT_GVN"};
+    if (doPass(unit, gvn, DCE::Full)) {
+      doPass(unit, refineTmps, DCE::None);
+    }
   }
 
   while (true) {
-    if (kind != TransKind::Profile && RuntimeOption::EvalHHIRMemoryOpts) {
+    auto again = false;
+
+    if (!isProfiling(kind) && Cfg::HHIR::MemoryOpts) {
+      rqtrace::EventGuard trace{"OPT_LOAD"};
       doPass(unit, optimizeLoads, DCE::Full);
       printUnit(6, unit, " after optimizeLoads ");
+
+      doPass(unit, refineTmpsPass, DCE::None);
+
+      // Load-elim may have propagated array layout information where
+      // it wasn't before.
+      if (Cfg::HHIR::LowerBespokesPostIRGen) {
+        if (doPass(unit, lowerBespokes, DCE::None)) {
+          doPass(unit, simplifyPass, DCE::Full);
+          doPass(unit, cleanCfg, DCE::None);
+          doCheckTypes();
+          again = true;
+        }
+      }
     }
 
-    if (kind != TransKind::Profile && RuntimeOption::EvalHHIRMemoryOpts) {
+    if (!isProfiling(kind) && Cfg::HHIR::MemoryOpts) {
+      rqtrace::EventGuard trace{"OPT_STORE"};
       doPass(unit, optimizeStores, DCE::Full);
       printUnit(6, unit, " after optimizeStores ");
     }
 
-    if (RuntimeOption::EvalHHIRPartialInlineFrameOpts) {
-      doPass(unit, optimizeInlineReturns, DCE::Full);
-      printUnit(6, unit, " after optimizeInlineReturns ");
+    rqtrace::EventGuard trace{"OPT_PHI"};
+    if (!doPass(unit, optimizePhis, DCE::Full)) {
+      if (again) continue;
+      break;
     }
 
-    if (!doPass(unit, optimizePhis, DCE::Full)) break;
     doPass(unit, cleanCfg, DCE::None);
     printUnit(6, unit, " after optimizePhis ");
   }
 
-  if (kind != TransKind::Profile && RuntimeOption::EvalHHIRRefcountOpts) {
+  if (!isProfiling(kind) && Cfg::HHIR::RefcountOpts) {
+    rqtrace::EventGuard trace{"OPT_REFS"};
     doPass(unit, optimizeRefcounts, DCE::Full);
     printUnit(6, unit, " after optimizeRefCounts ");
-  }
-
-  if (RuntimeOption::EvalHHIRLICM && cfgHasLoop(unit) &&
-      kind != TransKind::Profile) {
-    doPass(unit, optimizeLoopInvariantCode, DCE::Minimal);
-    printUnit(6, unit, " after optimizeLoopInvariantCode ");
+    doPass(unit, optimizePhis, DCE::Full);
+    printUnit(6, unit, " after optimizePhis ");
   }
 
   doPass(unit, simplifyOrdStrIdx, DCE::Minimal);
 
-  doPass(unit, removeExitPlaceholders, DCE::Full);
-
-  if (RuntimeOption::EvalHHIRGenerateAsserts) {
+  if (Cfg::HHIR::GenerateAsserts) {
     doPass(unit, insertAsserts, DCE::None);
+  }
+
+  if (!isProfiling(kind) && Cfg::HHIR::SinkDefs) {
+    doPass(unit, sinkDefs, DCE::Full);
+  }
+
+  if (!isProfiling(kind) && Cfg::HHIR::LowerBespokesPostIRGen) {
+    if (doPass(unit, lowerBespokes, DCE::None)) {
+      doPass(unit, simplifyPass, DCE::Full);
+    }
   }
 
   // Perform final cleanup passes to collapse any critical edges that were
   // split, and simplify our instructions before shipping off to codegen.
   doPass(unit, cleanCfg, DCE::None);
 
-  if (kind != TransKind::Profile &&
-      RuntimeOption::EvalHHIRGlobalValueNumbering) {
-    doPass(unit, gvn, DCE::Full);
+  if (!isProfiling(kind)) {
+    if (Cfg::HHIR::GlobalValueNumbering) {
+      rqtrace::EventGuard trace{"OPT_GVN"};
+      doPass(unit, gvn, DCE::Full);
+    }
+
+    doPass(unit, refineTmpsPass, DCE::None);
+    doPass(unit, cleanCfg, DCE::None);
   }
 
-  if (kind != TransKind::Profile && RuntimeOption::EvalHHIRSimplification) {
+  doCheckTypes();
+
+  if (!isProfiling(kind) && Cfg::HHIR::Simplification) {
+    rqtrace::EventGuard trace{"OPT_SIMPLIFY"};
     doPass(unit, simplifyPass, DCE::Full);
+  } else {
+    // If we don't run the simplifier, we still need to run mandatory
+    // propagation at least to remove the use of non-DefConst
+    // constants.
+    mandatoryPropagation(unit);
   }
+
   doPass(unit, fixBlockHints, DCE::None);
 
+  if (isOptimized(kind)) {
+    doPass(unit, selectiveWeakenDecRefs, DCE::Full);
+  }
   printUnit(6, unit, " after optimize ");
 }
 
 //////////////////////////////////////////////////////////////////////
 
-}}
+}

@@ -1,22 +1,17 @@
 <?hh
 
 abstract class Base {
-  abstract public function foo(string $x, string $y);
+  abstract public function foo(string $x, string $y):mixed;
 }
 
 class D1 extends Base {
-  public function foo(string $x, string $y) { return $x; }
+  public function foo(string $x, string $y) :mixed{ return $x; }
 }
 class D2 extends Base {
-  public function foo(string $x, string& $y) { return $x; }
+  public function foo(string $x, inout string $y) :mixed{ return $x; }
 }
 
-function main(Base $b, string $l, bool $ref) {
-  $x = $ref ? $b->foo('a', &$l) : $b->foo('a', $l);
-  var_dump($x);
+<<__EntryPoint>>
+function main(): void {
+  echo "Done.\n";
 }
-
-$l = (string)mt_rand();
-main(new D2, $l, true);
-main(new D1, $l, false);
-

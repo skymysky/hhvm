@@ -14,8 +14,9 @@
    +----------------------------------------------------------------------+
 */
 
-#include "hphp/runtime/ext/vsdebug/debugger.h"
 #include "hphp/runtime/ext/vsdebug/command.h"
+#include "hphp/runtime/ext/vsdebug/debugger.h"
+#include "hphp/runtime/ext/vsdebug/debugger-request-info.h"
 
 namespace HPHP {
 namespace VSDEBUG {
@@ -35,7 +36,7 @@ bool StepCommand::executeImpl(DebuggerSession* /*session*/,
   const folly::dynamic& message = getMessage();
   const std::string& command = tryGetString(message, "command", "");
 
-  RequestInfo* ri = m_debugger->getRequestInfo();
+  DebuggerRequestInfo* ri = m_debugger->getRequestInfo();
 
   if (command == "next") {
     // Step over.

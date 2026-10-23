@@ -1,25 +1,25 @@
-<?php
-error_reporting(E_ALL);
+<?hh
 
 abstract class Base {
-  abstract function sayWorld();
+  abstract function sayWorld():mixed;
 }
 
 trait Hello {
-   public function sayHello() {
+   public function sayHello() :mixed{
      echo 'Hello';
    }
-   public function sayWorld() {
+   public function sayWorld() :mixed{
      echo ' World!';
    }
- }
-
-class MyHelloWorld extends Base {
-	use Hello;
 }
 
+class MyHelloWorld extends Base {
+    use Hello;
+}
+
+<<__EntryPoint>> function main(): void {
+error_reporting(E_ALL);
 $o = new MyHelloWorld();
 $o->sayHello();
 $o->sayWorld();
-
-?>
+}

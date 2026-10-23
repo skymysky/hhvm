@@ -1,12 +1,9 @@
-array(0) {
+vec(0) {
 }
-array(1) {
-  [0]=>
+vec(1) {
   int(1)
 }
-array(2) {
-  [0]=>
+vec(2) {
   int(2)
-  [1]=>
   int(3)
 }

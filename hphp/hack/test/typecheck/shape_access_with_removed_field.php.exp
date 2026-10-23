@@ -1,0 +1,14 @@
+error: Typing[4321] You are accessing a field known to not exist [1]
+-> The type of the field `f` in this shape doesn't allow any values [2]
+-> It is nothing because the field `f` was unset here [2]
+
+shape_access_with_removed_field.php:6:3
+3 | 
+4 | function test(shape('f' => int, ...) $s): void {
+5 |   Shapes::removeKey(inout $s, 'f');
+  |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ [2]
+6 |   $s['f'] ?? null;
+  |   ^^^^^^^^^^^^^^^ [1]
+7 | }
+
+1 error found

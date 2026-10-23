@@ -1,2 +1,28 @@
-File "elseif3.php", line 14, characters 12-11:
-A left parenthesis ('(') is expected here. (Parsing[1002])
+error: Parsing[1002] Encountered unexpected token `0`. [1]
+
+elseif3.php:14:12
+12 | function test(): void {
+13 |   if(true) {
+14 |   } elseif 0;
+   |            ^ [1]
+15 | }
+
+error: Naming[2049] Unbound name: `elseif` (a global constant) [1]
+
+elseif3.php:14:5
+12 | function test(): void {
+13 |   if(true) {
+14 |   } elseif 0;
+   |     ^^^^^^ [1]
+15 | }
+
+error: Typing[4106] Unbound global constant (Typing) [1]
+
+elseif3.php:14:5
+12 | function test(): void {
+13 |   if(true) {
+14 |   } elseif 0;
+   |     ^^^^^^ [1]
+15 | }
+
+3 errors found

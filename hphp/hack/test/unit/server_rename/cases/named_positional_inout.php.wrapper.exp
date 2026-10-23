@@ -1,0 +1,6 @@
+<?hh
+// @no-wrapper
+<<file: __EnableUnstableFeatures('named_parameters')>>
+function renamed(named int $b, inout int $a): void {
+  $a += $b;
+}

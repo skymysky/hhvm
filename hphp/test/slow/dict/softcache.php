@@ -5,7 +5,7 @@ final class SimpleSoftCache2<Tk1, Tk2, Tv> {
 
   private dict<Tk1, dict<Tk2, Tv>> $cache = dict[];
 
-  public function __construct() {}
+  public function __construct()[] {}
 
   public function get(Tk1 $key): ?dict<Tk2, Tv> {
     return idx($this->cache, $key);
@@ -42,6 +42,9 @@ final class SimpleSoftCache2<Tk1, Tk2, Tv> {
   }
 }
 
+
+<<__EntryPoint>>
+function main_softcache() :mixed{
 $c = new SimpleSoftCache2;
 $c->set('a', dict[1=>2,'1'=>'2']);
 $c->set2('a', 'b', 'c');
@@ -53,3 +56,4 @@ var_dump($c->get('a'));
 var_dump($c->get2('x', 'y'));
 $c->nuke();
 var_dump($c->get('a'));
+}

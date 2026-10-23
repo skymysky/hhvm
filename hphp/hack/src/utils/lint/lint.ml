@@ -1,4 +1,4 @@
-(**
+(*
  * Copyright (c) 2015, Facebook, Inc.
  * All rights reserved.
  *
@@ -7,126 +7,70 @@
  *
  *)
 
-open Hh_core
-open Utils
+open Lints_core
+module Codes = Lint_codes
 
-(* These severity levels are based on those provided by Arcanist. "Advice"
- * means notify the user of the lint without requiring confirmation if the lint
- * is benign; "Warning" will raise a confirmation prompt if the lint applies to
- * a line that was changed in the given diff; and "Error" will always raise a
- * confirmation prompt, regardless of where the lint occurs in the file. *)
-type severity =
-  | Lint_error
-  | Lint_warning
-  | Lint_advice
-
-let string_of_severity = function
-  | Lint_error -> "error"
-  | Lint_warning -> "warning"
-  | Lint_advice -> "advice"
-
-type 'a t = {
-  code : int;
-  severity : severity;
-  pos : 'a Pos.pos;
-  message : string;
-  (* Normally, lint warnings and lint advice only get shown by arcanist if the
-   * lines they are raised on overlap with lines changed in a diff. This
-   * flag bypasses that behavior *)
-  bypass_changed_lines : bool;
-  autofix : (string * string)
-}
-
-let (lint_list: Relative_path.t t list option ref) = ref None
-
-let get_code {code; _} = code
-let get_pos {pos; _} = pos
-
-let add
-  ?(bypass_changed_lines=false)
-  ?(autofix=("", ""))
-  code
-  severity
-  pos
-  message =
-  match !lint_list with
-    | Some lst ->
-      if !Errors.is_hh_fixme pos code then () else begin
-        let lint =
-          { code; severity; pos; message; bypass_changed_lines; autofix } in
-        lint_list := Some (lint :: lst)
-      end
-    (* by default, we ignore lint errors *)
-    | None -> ()
-
-let to_absolute ({pos; _} as lint) =
-  {lint with pos = Pos.to_absolute pos}
-
-let to_string lint =
-  let code = Errors.error_code_to_string lint.code in
-  Printf.sprintf "%s\n%s (%s)" (Pos.string lint.pos) lint.message code
-
-let to_json {pos; code; severity; message; bypass_changed_lines;
-    autofix=(original, replacement)} =
-  let line, scol, ecol = Pos.info_pos pos in
-  Hh_json.JSON_Object [
-      "descr", Hh_json.JSON_String message;
-      "severity", Hh_json.JSON_String (string_of_severity severity);
-      "path",  Hh_json.JSON_String (Pos.filename pos);
-      "line",  Hh_json.int_ line;
-      "start", Hh_json.int_ scol;
-      "end",   Hh_json.int_ ecol;
-      "code",  Hh_json.int_ code;
-      "bypass_changed_lines", Hh_json.JSON_Bool bypass_changed_lines;
-      "original", Hh_json.JSON_String original;
-      "replacement", Hh_json.JSON_String replacement;
-  ]
-
-module Codes = struct
-  let lowercase_constant                    = 5001 (* DONT MODIFY!!!! *)
-  let use_collection_literal                = 5002 (* DONT MODIFY!!!! *)
-  let static_string                         = 5003 (* DONT MODIFY!!!! *)
-  let shape_idx_required_field              = 5005 (* DONT MODIFY!!!! *)
-
-  (* Values 5501 - 5999 are reserved for FB-internal use *)
-
-  (* EXTEND HERE WITH NEW VALUES IF NEEDED *)
-end
-
-let internal_error pos msg =
-  add 0 Lint_error pos ("Internal error: "^msg)
-
-let lowercase_constant pos cst =
-  let lower = String.lowercase_ascii cst in
-  add Codes.lowercase_constant Lint_warning pos
-    (spf "Please use '%s' instead of '%s'" lower cst)
+let internal_error pos msg = add 0 Lint_error pos ("Internal error: " ^ msg)
 
 let use_collection_literal pos coll =
-  let coll = strip_ns coll in
-  add Codes.use_collection_literal Lint_warning pos
-    (spf "Use `%s {...}` instead of `new %s(...)`" coll coll)
+  let coll = Utils.strip_ns coll in
+  add
+    (Codes.to_enum Codes.UseCollectionLiteral)
+    Lint_warning
+    pos
+    ("Use "
+    ^ Markdown_lite.md_codify (coll ^ " {...}")
+    ^ " instead of "
+    ^ Markdown_lite.md_codify ("new " ^ coll ^ "(...)"))
 
-let static_string ?(no_consts=false) pos =
-  add Codes.static_string Lint_warning pos begin
-    if no_consts
-    then
-      "This should be a string literal so that lint can analyze it."
-    else
-      "This should be a string literal or string constant so that lint can "^
-      "analyze it."
-  end
+let static_string ?(no_consts = false) pos =
+  add
+    (Codes.to_enum Codes.StaticString)
+    Lint_warning
+    pos
+    begin
+      if no_consts then
+        "This should be a string literal so that lint can analyze it."
+      else
+        "This should be a string literal or string constant so that lint can "
+        ^ "analyze it."
+    end
 
 let shape_idx_access_required_field field_pos name =
-  add Codes.shape_idx_required_field Lint_warning field_pos
-    ("The field '"^name^"' is required to exist in the shape. Consider using a \
-    subscript-expression instead, such as $myshape['"^name^"']")
+  add
+    (Codes.to_enum Codes.ShapeIdxRequiredField)
+    Lint_warning
+    field_pos
+    ("The field "
+    ^ Markdown_lite.md_codify name
+    ^ " is required to exist in the shape. Consider using a subscript-expression instead, such as "
+    ^ Markdown_lite.md_codify ("$myshape['" ^ name ^ "']"))
 
-let do_ f =
-  let list_copy = !lint_list in
-  lint_list := Some [];
-  let result = f () in
-  let out = match !lint_list with
-    | Some lst -> lst
-    | None -> assert false in
-  lint_list := list_copy;
-  List.rev out, result
+let option_mixed pos =
+  add
+    (Codes.to_enum Codes.OptionMixed)
+    Lint_warning
+    pos
+    "`?mixed` is a redundant typehint - just use `mixed`"
+
+let option_null pos =
+  add
+    (Codes.to_enum Codes.OptionNull)
+    Lint_warning
+    pos
+    "`?null` is a redundant typehint - just use `null`"
+
+let class_const_to_string pos cid_str =
+  let cid_str = Utils.strip_ns cid_str in
+  let nameof = "nameof " ^ cid_str in
+  let nameof_md = Markdown_lite.md_codify nameof in
+  let autofix = Some (nameof, pos) in
+  add
+    (Codes.to_enum Codes.ClassPointerToString)
+    Lint_warning
+    pos
+    ~autofix
+    ("Using `"
+    ^ cid_str
+    ^ "::class` in this position will trigger an implicit runtime conversion to string, please use "
+    ^ nameof_md)

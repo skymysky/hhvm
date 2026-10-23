@@ -1,4 +1,4 @@
-(**
+(*
  * Copyright (c) 2017, Facebook, Inc.
  * All rights reserved.
  *
@@ -7,116 +7,171 @@
  *
  *)
 
+open Hh_prelude
 open Typing_defs
-module T = Tast
-
-module ExpandedTypeAnnotations = struct
-  module ExprAnnotation = T.Annotations.ExprAnnotation
-  module EnvAnnotation = Nast.UnitAnnotation
-  module ClassIdAnnotation = T.Annotations.ClassIdAnnotation
-end
-
-module ExpandedTypeAnnotatedAST = Nast.AnnotatedAST(ExpandedTypeAnnotations)
-module ETast = ExpandedTypeAnnotatedAST
 
 (* Eliminate residue of type inference:
  *   1. Tvars are replaced (deep) by the expanded type
- *   2. Tanon is replaced by a Tfun function type
- *   3. Singleton unions are eliminated
+ *   2. Singleton unions are eliminated
  * TODO TAST:
  *   Transform completely unconstrained types to Tmixed
  *   Consider using a fresh datatype for TAST types.
  *)
-let expand_ty env ty =
+let expand_ty ?var_hook ?pos env ty =
   let rec exp_ty ty =
-    let _, ety = Tast_env.expand_type env ty in
-    match ety with
-    | (_, (Tany | Tmixed | Tnonnull | Tprim _ | Tobject | Tdynamic)) -> ety
-    | (p, Tclass(n, tyl)) -> (p, Tclass(n, exp_tys tyl))
-    | (_, Tunresolved [ty]) -> exp_ty ty
-    | (p, Tunresolved tyl) -> (p, Tunresolved (exp_tys tyl))
-    | (p, Toption ty) -> (p, Toption (exp_ty ty))
-    | (p, Ttuple tyl) -> (p, Ttuple (exp_tys tyl))
-    | (p, Tfun ft) -> (p, Tfun (exp_fun_type ft))
-    | (p, Tabstract (ak, tyopt)) ->
-      (p, Tabstract (exp_abstract_kind ak, Option.map tyopt exp_ty))
-    | (p, Tshape (fk, fields)) ->
-      (p, Tshape (fk, Nast.ShapeMap.map exp_sft fields))
-    | (p, Tarraykind ak) ->
-      (p, Tarraykind (exp_array_kind ak))
-      (* TODO TAST: replace with a user error *)
-    | (p, Tvar v) -> (p, Tvar v)
-      (* TODO TAST: replace with Tfun type *)
-    | (p, Tanon(x, y)) -> (p, Tanon(x,y))
-    | (p, Terr) -> (p, Terr)
-
-  and exp_tys tyl = List.map exp_ty tyl
-
-  and exp_fun_type { ft_pos; ft_deprecated; ft_arity; ft_abstract; ft_tparams;
-                     ft_where_constraints; ft_ret; ft_params;
-                     ft_reactive; ft_return_disposable;
-                     ft_mutability; ft_returns_mutable;
-                     ft_is_coroutine; ft_ret_by_ref; ft_decl_errors;
-                     ft_returns_void_to_rx } =
-  { ft_pos; ft_deprecated; ft_arity; ft_abstract; ft_reactive; ft_is_coroutine;
-    ft_return_disposable; ft_ret_by_ref; ft_mutability; ft_returns_mutable;
-    ft_tparams = List.map exp_tparam ft_tparams;
-    ft_where_constraints = List.map exp_where_constraint ft_where_constraints;
-    ft_ret = exp_ty ft_ret;
-    ft_params = List.map exp_fun_param ft_params;
-    ft_decl_errors; ft_returns_void_to_rx;
-  }
-
-  and exp_fun_param { fp_pos; fp_name; fp_kind; fp_type; fp_mutability;
-                      fp_accept_disposable; fp_rx_condition; } =
-  { fp_pos; fp_name; fp_kind; fp_accept_disposable; fp_mutability;
-    fp_type = exp_ty fp_type; fp_rx_condition;
-  }
-
+    begin
+      match (get_node ty, var_hook) with
+      | (Tvar var, Some hook) -> hook var
+      | _ -> ()
+    end;
+    let (_, ety) = Tast_env.expand_type env ty in
+    let ety =
+      match deref ety with
+      | ( _,
+          ( Tany _ | Tnonnull | Tprim _ | Tdynamic _ | Tneg _ | Tlabel _
+          | Tgeneric _ ) ) ->
+        ety
+      | (p, Tclass (n, e, tyl)) -> mk (p, Tclass (n, e, exp_tys tyl))
+      | (p, Tunion tyl) -> mk (p, Tunion (exp_tys tyl))
+      | (p, Tintersection tyl) -> mk (p, Tintersection (exp_tys tyl))
+      | (p, Toption ty) -> mk (p, Toption (exp_ty ty))
+      | (p, Ttuple { t_required; t_optional; t_extra }) ->
+        let t_required = exp_tys t_required in
+        let t_optional = exp_tys t_optional in
+        let t_extra =
+          match t_extra with
+          | Tvariadic t_variadic -> Tvariadic (exp_ty t_variadic)
+          | Tsplat t_splat -> Tsplat (exp_ty t_splat)
+        in
+        mk (p, Ttuple { t_required; t_optional; t_extra })
+      | (p, Tfun ft) -> mk (p, Tfun (exp_fun_type ft))
+      | (p, Tnewtype (n, tyl, ty)) ->
+        mk (p, Tnewtype (n, exp_tys tyl, exp_ty ty))
+      | (p, Tdependent (n, ty)) -> mk (p, Tdependent (n, exp_ty ty))
+      | (p, Tshape (Shape_simple s)) ->
+        mk (p, Tshape (Shape_simple (exp_shape_type s)))
+      | (p, Tshape (Shape_splat { ss_elems })) ->
+        let expanded = exp_tys ss_elems in
+        let Equal = Tast_env.eq_typing_env in
+        let (menv, _errs, result) =
+          Typing_shape_normalize.merge ~on_error:None expanded env
+        in
+        let (ty, sd) =
+          match result with
+          | Full (ty, sd) -> (ty, sd)
+          | Empty_shape sd ->
+            let shape =
+              {
+                s_origin = Missing_origin;
+                s_unknown_value = Typing_make_type.nothing p;
+                s_fields = TShapeMap.empty;
+              }
+            in
+            (mk (p, Tshape (Shape_simple shape)), sd)
+          | Partial (ss_elems, sd) ->
+            (mk (p, Tshape (Shape_splat { ss_elems })), sd)
+          | Union tys ->
+            (* Union operand distributed: members already finalised. This is a
+               TAST-expansion (display) pass, so use the merge-returned env for
+               the union and discard it. *)
+            let (_menv, ty) = Typing_union.union_list menv p tys in
+            (ty, false)
+          | Intersection tys ->
+            let (_menv, ty) = Typing_intersection.intersect_list menv p tys in
+            (ty, false)
+        in
+        if sd then
+          Typing_make_type.supportdyn (get_reason ty) ty
+        else
+          ty
+      | (p, Tvec_or_dict (ty1, ty2)) ->
+        mk (p, Tvec_or_dict (exp_ty ty1, exp_ty ty2))
+      | (p, Tvar v) ->
+        (match pos with
+        | None -> mk (p, Tvar v)
+        | Some pos ->
+          (if
+           Typechecker_options.disallow_unresolved_type_variables
+             (Tast_env.get_tcopt env)
+          then
+            let Equal = Tast_env.eq_typing_env in
+            Typing_error_utils.add_typing_error
+              ~env
+              Typing_error.(primary @@ Primary.Unresolved_tyvar pos));
+          mk (p, Tvar v))
+      | (_, Taccess _) -> ety
+      | (p, Tclass_ptr ty) -> mk (p, Tclass_ptr (exp_ty ty))
+    in
+    ety
+  and exp_tys tyl = List.map ~f:exp_ty tyl
+  and exp_fun_type
+      {
+        ft_tparams;
+        ft_where_constraints;
+        ft_ret;
+        ft_flags;
+        ft_params;
+        ft_implicit_params;
+        ft_instantiated;
+      } =
+    {
+      ft_flags;
+      ft_instantiated;
+      ft_tparams = List.map ~f:exp_tparam ft_tparams;
+      ft_where_constraints =
+        List.map ~f:exp_where_constraint ft_where_constraints;
+      ft_ret = exp_ty ft_ret;
+      ft_params = List.map ~f:exp_fun_param ft_params;
+      ft_implicit_params = exp_fun_implicit_params ft_implicit_params;
+    }
+  and exp_fun_param { fp_pos; fp_name; fp_type; fp_flags; fp_def_value } =
+    { fp_pos; fp_name; fp_type = exp_ty fp_type; fp_flags; fp_def_value }
+  and exp_fun_implicit_params { capability } =
+    let capability =
+      match capability with
+      | CapTy ty -> CapTy (exp_ty ty)
+      | CapDefaults p -> CapDefaults p
+    in
+    { capability }
   and exp_sft { sft_optional; sft_ty } =
-  { sft_optional;
-    sft_ty = exp_ty sft_ty;
-  }
-
-  and exp_array_kind ak =
-    match ak with
-    | AKany -> AKany
-    | AKvarray ty -> AKvarray (exp_ty ty)
-    | AKvec ty -> AKvec (exp_ty ty)
-    | AKdarray (ty1, ty2) -> AKdarray (exp_ty ty1, exp_ty ty2)
-    | AKvarray_or_darray ty -> AKvarray_or_darray (exp_ty ty)
-    | AKmap (ty1, ty2) -> AKmap (exp_ty ty1, exp_ty ty2)
-    | AKempty -> AKempty
-    | AKtuple tm -> AKtuple (IMap.map exp_ty tm)
-    | AKshape s -> AKshape (Nast.ShapeMap.map
-      (fun (ty1, ty2) -> (exp_ty ty1, exp_ty ty2)) s)
-
-  and exp_abstract_kind ak =
-    match ak with
-    | AKnewtype(n, tyl) -> AKnewtype(n, exp_tys tyl)
-    | AKenum _ | AKgeneric _ | AKdependent _ -> ak
-
-  and exp_tparam (var, id, cstrs, reified) =
-    (var, id, List.map (fun (ck, ty) -> (ck, exp_ty ty)) cstrs, reified)
-
+    { sft_optional; sft_ty = exp_ty sft_ty }
+  and exp_shape_type
+      {
+        s_origin = shape_origin;
+        s_unknown_value = shape_kind;
+        s_fields = fields;
+      } =
+    {
+      s_origin = shape_origin;
+      s_unknown_value = shape_kind;
+      (* TODO(shapes) exp_ty s_unknown_value *)
+      s_fields = TShapeMap.map exp_sft fields;
+    }
+  and exp_tparam t =
+    {
+      t with
+      tp_constraints =
+        List.map ~f:(fun (ck, ty) -> (ck, exp_ty ty)) t.tp_constraints;
+    }
   and exp_where_constraint (ty1, ck, ty2) = (exp_ty ty1, ck, exp_ty ty2) in
   exp_ty ty
 
-let expand_annotation env (pos, ty) = (pos, expand_ty env ty)
+let make_expander () =
+  object (self)
+    inherit Tast_visitor.endo
 
-let expander = object
-  inherit Tast_visitor.endo
-  method! on_expr_annotation = expand_annotation
-  method! on_class_id_annotation = expand_ty
-end
+    method! on_expr env (ty, pos, expr_) =
+      (expand_ty ~pos env ty, pos, self#on_expr_ env expr_)
 
-module ExpandAST =
-  Aast_mapper.MapAnnotatedAST(Tast.Annotations)(ExpandedTypeAnnotations)
+    method! on_class_id env (ty, pos, cid_) =
+      (expand_ty ~pos env ty, pos, self#on_class_id_ env cid_)
+
+    method! on_'ex env ty = expand_ty env ty
+  end
 
 (* Replace all types in a program AST by their expansions *)
-let expand_program tast =
-  let tast = expander#go tast in
-  ExpandAST.map_program tast
-    ~map_env_annotation:(fun _ -> ())
-    ~map_class_id_annotation:(fun _ x -> x)
-    ~map_expr_annotation:(fun _ x -> x)
+let expander = lazy (make_expander ())
+
+let expand_program ctx tast = (Lazy.force expander)#go ctx tast
+
+let expand_def ctx def = (Lazy.force expander)#go_def ctx def

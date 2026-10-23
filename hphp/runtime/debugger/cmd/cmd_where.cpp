@@ -18,19 +18,17 @@
 
 #include "hphp/runtime/base/array-iterator.h"
 #include "hphp/runtime/base/backtrace.h"
-#include "hphp/runtime/base/comparisons.h"
-#include "hphp/runtime/base/tv-type.h"
 #include "hphp/runtime/debugger/debugger_client.h"
 
-namespace HPHP { namespace Eval {
+namespace HPHP::Eval {
 ///////////////////////////////////////////////////////////////////////////////
 
-TRACE_SET_MOD(debugger);
+TRACE_SET_MOD(debugger)
 
 void CmdWhere::sendImpl(DebuggerThriftBuffer &thrift) {
   DebuggerCommand::sendImpl(thrift);
   {
-    String sdata;
+    OptString sdata;
     DebuggerWireHelpers::WireSerialize(m_stacktrace, sdata);
     thrift.write(sdata);
   }
@@ -40,7 +38,7 @@ void CmdWhere::sendImpl(DebuggerThriftBuffer &thrift) {
 void CmdWhere::recvImpl(DebuggerThriftBuffer &thrift) {
   DebuggerCommand::recvImpl(thrift);
   {
-    String sdata;
+    OptString sdata;
     thrift.read(sdata);
     if (DebuggerWireHelpers::WireUnserialize(sdata, m_stacktrace) !=
         DebuggerWireHelpers::NoError) {
@@ -60,8 +58,6 @@ void CmdWhere::help(DebuggerClient &client) {
     nullptr
   );
   client.helpBody(
-    "Use '[u]p {num}' or '[d]own {num}' to walk up or down the stacktrace. "
-    "Use '[f]rame {index}' to jump to one particular frame. At any frame, "
     "Use '[v]ariable' command to display all local variables."
   );
 }
@@ -150,4 +146,4 @@ bool CmdWhere::onServer(DebuggerProxy &proxy) {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-}}
+}

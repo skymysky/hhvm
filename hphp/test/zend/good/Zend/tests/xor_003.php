@@ -1,11 +1,11 @@
-<?php
-
+<?hh
+<<__EntryPoint>> function main(): void {
 $t = true;
 $f = false;
 
-var_dump($t ^ $f);
-var_dump($t ^ $t);
-var_dump($f ^ $f);
+var_dump((int)$t ^ (int)$f);
+var_dump((int)$t ^ (int)$t);
+var_dump((int)$f ^ (int)$f);
 
 echo "Done\n";
-?>
+}

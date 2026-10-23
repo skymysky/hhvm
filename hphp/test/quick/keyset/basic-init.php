@@ -1,22 +1,15 @@
-<?php
+<?hh
 
 class ToString {
-  function __toString() {
+  function __toString() :mixed{
     return "foobaz";
   }
 }
 
 class Noisy {
-  public $id;
-  function __construct($id) {
-    $this->id = $id;
-  }
-  function __destruct() {
-    echo $this->id . " Noisy::__destruct()\n";
-  }
 }
 
-function create($a, $b, $c) {
+function create($a, $b, $c) :mixed{
   try {
     var_dump(keyset[$a, $b, $c]);
   } catch (Exception $e) {
@@ -24,7 +17,7 @@ function create($a, $b, $c) {
   }
 }
 
-function main() {
+<<__EntryPoint>> function main(): void {
   // These should succeed:
   var_dump(keyset[]);
   var_dump(keyset['a', 'b', 'c']);
@@ -45,19 +38,17 @@ function main() {
   create('a', null, 'b');
   create(1, 2, false);
   create(1, 2, 3.14);
-  create('a', 'b', []);
+  create('a', 'b', vec[]);
   create(4, 3, vec[2, 1]);
   create(dict['a' => 1], 'a', 5);
   create(100, keyset['a', 'b'], 200);
-  create('a', new stdclass, 'c');
+  create('a', new stdClass, 'c');
   create(1, Vector{1, 2, 3}, 2);
   create('a', new ToString, 'c');
 
   try {
-    var_dump(keyset['a', 1, 'b', 2, new Noisy(1), new Noisy(2)]);
+    var_dump(keyset['a', 1, 'b', 2, new Noisy, new Noisy]);
   } catch (Exception $e) {
     echo "Exception: " . $e->getMessage() . "\n";
   }
 }
-
-main();

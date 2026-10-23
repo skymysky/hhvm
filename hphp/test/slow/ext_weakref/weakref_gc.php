@@ -1,12 +1,12 @@
-<?php
+<?hh
 // Source php weakref extension
 class Foo {
   private $ptr = null;
-  public function set($p) {
+  public function set($p) :mixed{
     $this->ptr = $p;
   }
 }
-function foo() {
+function foo() :mixed{
   $a = new Foo();
   $b = new Foo();
   $a->set($b);
@@ -15,11 +15,11 @@ function foo() {
 }
 class Leaker {
   private $ptr = null;
-  public function set($p) {
+  public function set($p) :mixed{
     $this->ptr = $p;
   }
 };
-function leaker($acquire) {
+function leaker($acquire) :mixed{
   $a = new Leaker();
   $b = new Leaker();
   $a->set($b);
@@ -30,18 +30,18 @@ function leaker($acquire) {
   }
   return $wr;
 }
-function factorial($n) {
+function factorial($n) :mixed{
   if ($n <= 1) return 1;
   return $n * factorial($n-1);
 }
 // Test if unreachable.
+<<__EntryPoint>> function main(): void {
 $wr = leaker(false);
-
 // Test if only reachable throuh WR.
 $wr2 = leaker(true);
 
 // Test that we don't release if object is marked.
-$a = new StdClass();
+$a = new stdClass();
 $wr3 = new WeakRef($a);
 
 // Test x2 WRs on same object.
@@ -70,3 +70,4 @@ var_dump($wr4->valid(), $wr4->get());  // NULL
 var_dump($wr5->valid(), $wr5->get());  // NULL
 var_dump($wr6->valid(), $wr6->get());  // NULL
 var_dump($wr7->valid(), $wr7->get());  // !NULL
+}

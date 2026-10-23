@@ -15,7 +15,7 @@ namespace Some\Other\Dict {
 namespace {
   use namespace Some\Other\Dict;
 
-  function main() {
+  function main(): void {
     expect_int(Dict\foo()); // ok
   }
 

@@ -20,12 +20,10 @@
 #include "hphp/runtime/vm/jit/translator.h"
 #include "hphp/util/eh-frame.h"
 
-#include <folly/Optional.h>
-
 #include <string>
 #include <vector>
 
-namespace HPHP { namespace Debug {
+namespace HPHP::Debug {
 
 using jit::TCA;
 
@@ -52,7 +50,7 @@ typedef enum {
 const int DWARF_CODE_ALIGN = 1;
 const int DWARF_DATA_ALIGN = 8;
 
-#if (defined(FACEBOOK) || defined(LIBDWARF_CONST_NAME))
+#if (defined(HHVM_FACEBOOK) || defined(LIBDWARF_CONST_NAME))
 #define LIBDWARF_CALLBACK_NAME_TYPE const char*
 #else
 #define LIBDWARF_CALLBACK_NAME_TYPE char*
@@ -86,7 +84,7 @@ struct TCRange {
   }
   bool isAcold() const { return m_isAcold; }
   TCA begin() const { V(); return m_start; }
-  TCA end() const   { V(); return m_end; };
+  TCA end() const   { V(); return m_end; }
   uint32_t size() const   { V(); return m_end - m_start; }
 
   void extend(const TCA newEnd) {
@@ -156,35 +154,33 @@ struct DwarfChunk {
   bool isSynced() const { return m_synced; }
 };
 
-typedef std::map<TCA, FunctionInfo* > FuncDB;
-typedef std::vector<FunctionInfo* > FuncPtrDB;
+using FuncDB = std::map<TCA, FunctionInfo* >;
+using FuncPtrDB = std::vector<FunctionInfo* >;
 
 struct DwarfInfo {
-  typedef std::map<TCA, jit::TransRec> TransDB;
+  using TransDB = std::map<TCA, jit::TransRec>;
 
   std::vector<DwarfChunk*> m_dwarfChunks;
   /* Array of chunks indexed by lg(#functions in chunk) + 1.
    * i.e. m_dwarfChunk[i] = pointer to chunk with
-   * 2^(i-1) * RuntimeOption::EvalGdbSyncChunks functions, or NULL if
+   * 2^(i-1) * Cfg::Eval::GdbSyncChunks functions, or NULL if
    * there is no such chunk. The first chunk m_dwarfChunks[0] is special in
    * that it can be partially full. All other chunks are completely full.
    */
   FuncDB m_functions;
 
   const char *lookupFile(const Unit *unit);
-  void addLineEntries(TCRange range, const Unit *unit,
-                      PC instr, FunctionInfo* f);
+  void addLineEntries(TCRange range, int lineNumber, FunctionInfo* f);
   void transferFuncs(DwarfChunk* from, DwarfChunk* to);
   void compactChunks();
   DwarfChunk* addTracelet(TCRange range,
-                          folly::Optional<std::string> name,
+                          Optional<std::string> name,
                           const Func* func,
-                          PC instr,
-                          bool exit,
+                          int lineNumber,
                           bool inPrologue);
   void syncChunks();
 };
 
-}}
+}
 
 #endif

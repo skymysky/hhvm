@@ -1,0 +1,20 @@
+error: Typing[4110] Invalid argument [1]
+-> Expected `dynamic` [2]
+-> Type `(int, ...T)` is not a subtype of `dynamic` under dynamic-aware subtyping [3]
+
+tuple_splat_dynamic.bad.php:11:14
+ 3 | 
+ 4 | 
+ 5 | function expect_dyn(dynamic $_):void { }
+   |                     ^^^^^^^ [2]
+ 6 | 
+ 7 | <<__NoAutoDynamic>>
+ 8 | class C { }
+ 9 | 
+10 | function test<<<__NoAutoBound>> T as (C...)>((int, ...T) $tup):void {
+   |                                              ^^^^^^^^^^^ [3]
+11 |   expect_dyn($tup);
+   |              ^^^^ [1]
+12 | }
+
+1 error found

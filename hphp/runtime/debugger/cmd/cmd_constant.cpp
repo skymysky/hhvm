@@ -16,13 +16,14 @@
 
 #include "hphp/runtime/debugger/cmd/cmd_constant.h"
 
+#include "hphp/runtime/base/array-iterator.h"
 #include "hphp/runtime/debugger/debugger_client.h"
 #include "hphp/runtime/ext/array/ext_array.h"
 
-namespace HPHP { namespace Eval {
+namespace HPHP::Eval {
 ///////////////////////////////////////////////////////////////////////////////
 
-TRACE_SET_MOD(debugger);
+TRACE_SET_MOD(debugger)
 
 void CmdConstant::sendImpl(DebuggerThriftBuffer &thrift) {
   DebuggerCommand::sendImpl(thrift);
@@ -37,8 +38,8 @@ void CmdConstant::recvImpl(DebuggerThriftBuffer &thrift) {
 void CmdConstant::help(DebuggerClient &client) {
   client.helpTitle("Constant Command");
   client.helpCmds(
-    "[k]onstant",           "lists all constants",
-    "[k]onstant {text}",    "full-text search constants",
+    "[c]onstant",           "lists all constants",
+    "[c]onstant {text}",    "full-text search constants",
     nullptr
   );
   client.helpBody(
@@ -52,7 +53,7 @@ void CmdConstant::help(DebuggerClient &client) {
 void CmdConstant::onClient(DebuggerClient &client) {
   if (DebuggerCommand::displayedHelp(client)) return;
 
-  String text;
+  OptString text;
   if (client.argCount() == 1) {
     text = client.argValue(1);
   } else if (client.argCount() != 0) {
@@ -69,9 +70,9 @@ void CmdConstant::onClient(DebuggerClient &client) {
 
     {
       Variant forSort(cmd->m_constants);
-      HHVM_FN(ksort)(ref(forSort));
+      HHVM_FN(ksort)(forSort);
       assertx(forSort.isArray());
-      m_constants = forSort.asCell()->m_data.parr;
+      m_constants = forSort.asTypedValue()->m_data.parr;
     }
 
     for (ArrayIter iter(m_constants); iter; ++iter) {
@@ -109,4 +110,4 @@ bool CmdConstant::onServer(DebuggerProxy &proxy) {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-}}
+}

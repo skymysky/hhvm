@@ -1,35 +1,20 @@
-<?php
+<?hh
 /* Prototype: bool is_null ( mixed $var );
- * Description: Finds whether the given variable is NULL 
+ * Description: Finds whether the given variable is NULL
  */
-
+<<__EntryPoint>> function main(): void {
 echo "*** Testing is_null() with valid null values ***\n";
-// different valid  null vlaues 
-$unset_array = array();
-$unset_int = 10;
-$unset_float = 10.5;
-$unset_bool = true;
-$unset_object = new stdclass;
-$unset_resource = fopen(__FILE__, "r");
-// unset them to make it null.
-unset ($unset_array, $unset_int, $unset_float, $unset_bool, $unset_object, $unset_resource); 
+// different valid  null vlaues
 $null_var1 = NULL;
 $null_var2 = null;
 
-$valid_nulls = array(
+$valid_nulls = vec[
   NULL,
   null,
-  @$null_var1,
-  @$null_var2,
-  @$unset_array,
-  @$unset_int,
-  @$unset_float,
-  @$unset_bool,
-  @$unset_object,
-  @$unset_resource,
-  @$undefined_var,
-);
-/* loop to check that is_null() recognizes different 
+  $null_var1,
+  $null_var2,
+];
+/* loop to check that is_null() recognizes different
    null values, expected output: bool(true) */
 $loop_counter = 1;
 foreach ($valid_nulls as $null_val ) {
@@ -43,8 +28,8 @@ echo "\n*** Testing is_bool() on non null values ***\n";
 $fp = fopen (__FILE__, "r");
 $dfp = opendir ( dirname(__FILE__) );
 
-// other types in a array 
-$not_null_types = array (
+// other types in a array
+$not_null_types = vec[
 /* integers */
   0,
   1,
@@ -96,27 +81,27 @@ $not_null_types = array (
   -1E7,
 
   /* objects */
-  new stdclass,
+  new stdClass,
 
   /* resources */
   $fp,
   $dfp,
 
   /* arrays */
-  array(),
-  array(0),
-  array(1),
-  array(NULL),
-  array(null),
-  array("string"),
-  array(true),
-  array(TRUE),
-  array(false),
-  array(FALSE),
-  array(1,2,3,4),
-  array(1 => "One", "two" => 2),
-);
-/* loop through the $not_null_types to see working of 
+  vec[],
+  vec[0],
+  vec[1],
+  vec[NULL],
+  vec[null],
+  vec["string"],
+  vec[true],
+  vec[TRUE],
+  vec[false],
+  vec[FALSE],
+  vec[1,2,3,4],
+  dict[1 => "One", "two" => 2],
+];
+/* loop through the $not_null_types to see working of
    is_null() on non null types, expected output: bool(false) */
 $loop_counter = 1;
 foreach ($not_null_types as $type ) {
@@ -126,15 +111,14 @@ foreach ($not_null_types as $type ) {
 
 echo "\n*** Testing error conditions ***\n";
 //Zero argument
-var_dump( is_null() );
+try { var_dump( is_null() ); } catch (Exception $e) { echo "\n".'Warning: '.$e->getMessage().' in '.__FILE__.' on line '.__LINE__."\n"; }
 
-//arguments more than expected 
-var_dump( is_null(NULL, null) );
- 
+//arguments more than expected
+try { var_dump( is_null(NULL, null) ); } catch (Exception $e) { echo "\n".'Warning: '.$e->getMessage().' in '.__FILE__.' on line '.__LINE__."\n"; }
+
 echo "Done\n";
 
 // close the resources used
 fclose($fp);
 closedir($dfp);
-
-?>
+}

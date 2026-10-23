@@ -14,3 +14,7 @@ class Dude {
     return <fbt project="blah">Some Text</fbt>;
   }
 }
+
+class :fbt extends XHPTest {
+  attribute string project;
+}

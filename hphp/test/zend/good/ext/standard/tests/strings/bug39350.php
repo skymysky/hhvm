@@ -1,8 +1,8 @@
-<?php
-
-implode('', array(null));
-implode('', array(false));
-implode('', array(""));
+<?hh
+<<__EntryPoint>> function main(): void {
+implode('', vec[null]);
+implode('', vec[false]);
+implode('', vec[""]);
 
 echo "Done\n";
-?>
+}

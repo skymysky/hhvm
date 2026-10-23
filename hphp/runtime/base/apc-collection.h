@@ -13,8 +13,7 @@
    | license@php.net so we can mail you a copy immediately.               |
    +----------------------------------------------------------------------+
 */
-#ifndef incl_HPHP_APC_COLLECTION_H_
-#define incl_HPHP_APC_COLLECTION_H_
+#pragma once
 
 #include "hphp/runtime/base/apc-handle.h"
 
@@ -28,17 +27,19 @@ struct Object;
 struct APCCollection {
   static APCHandle::Pair Make(const ObjectData*,
                               APCHandleLevel level,
-                              bool unserializeObj);
+                              bool unserializeObj,
+                              bool pure);
   static void Delete(APCHandle*);
 
   static const APCCollection* fromHandle(const APCHandle* handle) {
     assertx(handle->checkInvariants());
-    assertx(handle->kind() == APCKind::SharedCollection);
+    assertx(handle->kind() == APCKind::CopiedCollection);
     static_assert(offsetof(APCCollection, m_handle) == 0, "");
     return reinterpret_cast<const APCCollection*>(handle);
   }
 
-  Object createObject() const;
+  Object createObject(bool pure) const;
+  bool toLocalMayRaise() const;
 
 private:
   APCCollection();
@@ -54,5 +55,3 @@ private:
 //////////////////////////////////////////////////////////////////////
 
 }
-
-#endif

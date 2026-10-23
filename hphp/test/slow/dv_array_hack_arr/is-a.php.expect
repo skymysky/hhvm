@@ -29,7 +29,7 @@ is_varray => FALSE
 is_darray => FALSE
 gettype => double
 ============= direct_test_dv_arrays ================
-value => object(stdClass)#1 (0) {
+value => object(stdClass) (0) {
 }
 is_varray => FALSE
 is_darray => FALSE
@@ -85,36 +85,6 @@ value => keyset(3) {
 is_varray => FALSE
 is_darray => FALSE
 gettype => keyset
-============= direct_test_dv_arrays ================
-value => array(0) {
-}
-is_varray => FALSE
-is_darray => FALSE
-gettype => array
-============= direct_test_dv_arrays ================
-value => array(3) {
-  [0]=>
-  int(1)
-  [1]=>
-  int(2)
-  [2]=>
-  int(3)
-}
-is_varray => FALSE
-is_darray => FALSE
-gettype => array
-============= direct_test_dv_arrays ================
-value => array(3) {
-  ["a"]=>
-  int(100)
-  ["b"]=>
-  int(200)
-  ["c"]=>
-  int(300)
-}
-is_varray => FALSE
-is_darray => FALSE
-gettype => array
 ============= direct_test_dv_arrays ================
 value => vec(0) {
 }
@@ -234,7 +204,7 @@ HH\is_varray => FALSE
 HH\is_darray => FALSE
 gettype => double
 ============= indirect_test_dv_arrays ==============
-value => object(stdClass)#1 (0) {
+value => object(stdClass) (0) {
 }
 HH\is_varray => FALSE
 HH\is_darray => FALSE
@@ -291,36 +261,6 @@ HH\is_varray => FALSE
 HH\is_darray => FALSE
 gettype => keyset
 ============= indirect_test_dv_arrays ==============
-value => array(0) {
-}
-HH\is_varray => FALSE
-HH\is_darray => FALSE
-gettype => array
-============= indirect_test_dv_arrays ==============
-value => array(3) {
-  [0]=>
-  int(1)
-  [1]=>
-  int(2)
-  [2]=>
-  int(3)
-}
-HH\is_varray => FALSE
-HH\is_darray => FALSE
-gettype => array
-============= indirect_test_dv_arrays ==============
-value => array(3) {
-  ["a"]=>
-  int(100)
-  ["b"]=>
-  int(200)
-  ["c"]=>
-  int(300)
-}
-HH\is_varray => FALSE
-HH\is_darray => FALSE
-gettype => array
-============= indirect_test_dv_arrays ==============
 value => vec(0) {
 }
 HH\is_varray => TRUE
@@ -418,7 +358,7 @@ is_string => FALSE
 is_float => FALSE
 is_resource => FALSE
 is_object => FALSE
-is_array => FALSE
+HH\is_php_array => FALSE
 is_vec => TRUE
 is_dict => FALSE
 is_keyset => FALSE
@@ -436,7 +376,7 @@ is_string => FALSE
 is_float => FALSE
 is_resource => FALSE
 is_object => FALSE
-is_array => FALSE
+HH\is_php_array => FALSE
 is_vec => TRUE
 is_dict => FALSE
 is_keyset => FALSE
@@ -451,7 +391,7 @@ is_string => FALSE
 is_float => FALSE
 is_resource => FALSE
 is_object => FALSE
-is_array => FALSE
+HH\is_php_array => FALSE
 is_vec => FALSE
 is_dict => TRUE
 is_keyset => FALSE
@@ -470,7 +410,7 @@ is_string => FALSE
 is_float => FALSE
 is_resource => FALSE
 is_object => FALSE
-is_array => FALSE
+HH\is_php_array => FALSE
 is_vec => FALSE
 is_dict => TRUE
 is_keyset => FALSE
@@ -491,7 +431,7 @@ is_string => FALSE
 is_float => FALSE
 is_resource => FALSE
 is_object => FALSE
-is_array => FALSE
+HH\is_php_array => FALSE
 is_vec => FALSE
 is_dict => TRUE
 is_keyset => FALSE
@@ -509,7 +449,7 @@ is_string => FALSE
 is_float => FALSE
 is_resource => FALSE
 is_object => FALSE
-is_array => FALSE
+HH\is_php_array => FALSE
 is_vec => TRUE
 is_dict => FALSE
 is_keyset => FALSE
@@ -530,7 +470,7 @@ is_string => FALSE
 is_float => FALSE
 is_resource => FALSE
 is_object => FALSE
-is_array => FALSE
+HH\is_php_array => FALSE
 is_vec => FALSE
 is_dict => TRUE
 is_keyset => FALSE
@@ -551,7 +491,7 @@ is_string => FALSE
 is_float => FALSE
 is_resource => FALSE
 is_object => FALSE
-is_array => FALSE
+HH\is_php_array => FALSE
 is_vec => FALSE
 is_dict => TRUE
 is_keyset => FALSE
@@ -572,7 +512,7 @@ is_string => FALSE
 is_float => FALSE
 is_resource => FALSE
 is_object => FALSE
-is_array => FALSE
+HH\is_php_array => FALSE
 is_vec => FALSE
 is_dict => TRUE
 is_keyset => FALSE
@@ -587,7 +527,7 @@ is_string => FALSE
 is_float => FALSE
 is_resource => FALSE
 is_object => FALSE
-is_array => FALSE
+HH\is_php_array => FALSE
 HH\is_vec => TRUE
 HH\is_dict => FALSE
 HH\is_keyset => FALSE
@@ -605,7 +545,7 @@ is_string => FALSE
 is_float => FALSE
 is_resource => FALSE
 is_object => FALSE
-is_array => FALSE
+HH\is_php_array => FALSE
 HH\is_vec => TRUE
 HH\is_dict => FALSE
 HH\is_keyset => FALSE
@@ -620,7 +560,7 @@ is_string => FALSE
 is_float => FALSE
 is_resource => FALSE
 is_object => FALSE
-is_array => FALSE
+HH\is_php_array => FALSE
 HH\is_vec => FALSE
 HH\is_dict => TRUE
 HH\is_keyset => FALSE
@@ -639,7 +579,7 @@ is_string => FALSE
 is_float => FALSE
 is_resource => FALSE
 is_object => FALSE
-is_array => FALSE
+HH\is_php_array => FALSE
 HH\is_vec => FALSE
 HH\is_dict => TRUE
 HH\is_keyset => FALSE
@@ -660,7 +600,7 @@ is_string => FALSE
 is_float => FALSE
 is_resource => FALSE
 is_object => FALSE
-is_array => FALSE
+HH\is_php_array => FALSE
 HH\is_vec => FALSE
 HH\is_dict => TRUE
 HH\is_keyset => FALSE
@@ -678,7 +618,7 @@ is_string => FALSE
 is_float => FALSE
 is_resource => FALSE
 is_object => FALSE
-is_array => FALSE
+HH\is_php_array => FALSE
 HH\is_vec => TRUE
 HH\is_dict => FALSE
 HH\is_keyset => FALSE
@@ -699,7 +639,7 @@ is_string => FALSE
 is_float => FALSE
 is_resource => FALSE
 is_object => FALSE
-is_array => FALSE
+HH\is_php_array => FALSE
 HH\is_vec => FALSE
 HH\is_dict => TRUE
 HH\is_keyset => FALSE
@@ -720,7 +660,7 @@ is_string => FALSE
 is_float => FALSE
 is_resource => FALSE
 is_object => FALSE
-is_array => FALSE
+HH\is_php_array => FALSE
 HH\is_vec => FALSE
 HH\is_dict => TRUE
 HH\is_keyset => FALSE
@@ -741,16 +681,12 @@ is_string => FALSE
 is_float => FALSE
 is_resource => FALSE
 is_object => FALSE
-is_array => FALSE
+HH\is_php_array => FALSE
 HH\is_vec => FALSE
 HH\is_dict => TRUE
 HH\is_keyset => FALSE
 is_scalar => FALSE
 ============= constant-folding ===================
-bool(false)
-bool(false)
-bool(false)
-bool(false)
 bool(false)
 bool(false)
 bool(true)

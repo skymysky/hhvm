@@ -1,6 +1,6 @@
-<?php
+<?hh
 
-function row_dump($row, $pixels) {
+function row_dump($row, $pixels) :mixed{
   printf("[%d] ", $row);
   if ($pixels === null) {
     var_dump($pixels);
@@ -13,13 +13,13 @@ function row_dump($row, $pixels) {
     printf("\n");
   }
 }
-
+<<__EntryPoint>> function main(): void {
 $magick = new Imagick(__DIR__.'/facebook.png');
 
-$iterators = array(
+$iterators = vec[
   ImagickPixelIterator::getPixelIterator($magick),
   ImagickPixelIterator::getPixelRegionIterator($magick, 40, 30, 20, 10),
-);
+];
 
 foreach ($iterators as $iterator) {
   for ($i = 0; $i < 5; ++$i) {
@@ -48,5 +48,6 @@ foreach ($iterators as $iterator) {
     }
   }
 }
-?>
-==DONE==
+
+echo "==DONE==\n";
+}

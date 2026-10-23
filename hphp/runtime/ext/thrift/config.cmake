@@ -1,13 +1,23 @@
 HHVM_DEFINE_EXTENSION("thrift"
   SOURCES
+    adapter.cpp
+    field_wrapper.cpp
     binary.cpp
     compact.cpp
     ext_thrift.cpp
     spec-holder.cpp
+    type_wrapper.cpp
   HEADERS
+    adapter.h
+    field_wrapper.h
+    util.h
     ext_thrift.h
     spec-holder.h
     transport.h
+    type_wrapper.h
+    IOBufFreeCallBack.h
+  DEPENDS
+    libThrift
   SYSTEMLIB
     ext_thrift.php
 )

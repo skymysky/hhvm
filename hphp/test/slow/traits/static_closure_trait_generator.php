@@ -1,13 +1,17 @@
-<?php
-class Foo { const Bar = 12; };
+<?hh
 
+class Ref {
+  public function __construct(public $val)[] {}
+}
+
+class Foo { const Bar = 12; }
 trait Yoyo {
-  function cl($k) {
-    return function() use ($k) {
-      static $x = "asd";
-      yield $x++ . "2\n";
-      yield $x++ . "2\n";
-      yield $x++ . "2\n";
+  function cl($k) :mixed{
+    $ref = new Ref(42);
+    return function() use ($k, $ref) {
+      $t=$ref->val; $ref->val++; yield $t . "2\n";
+      $t=$ref->val; $ref->val++; yield $t . "2\n";
+      $t=$ref->val; $ref->val++; yield $t . "2\n";
     };
   }
 }
@@ -16,7 +20,7 @@ class Blah {
   use Yoyo;
 }
 
-function main() {
+function main() :mixed{
   $k = (new Blah)->cl(1);
   foreach ($k() as $x) {
     echo $x . "\n";
@@ -30,4 +34,9 @@ function main() {
   }
 }
 
+<<__EntryPoint>>
+function main_static_closure_trait_generator() :mixed{
+;
+
 main();
+}

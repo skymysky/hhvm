@@ -1,0 +1,64 @@
+(*
+ * Copyright (c) 2016, Facebook, Inc.
+ * All rights reserved.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the "hack" directory of this source tree.
+ *
+ *)
+
+(* Abstracts over the particular shared memory implementation used for decl
+   information.
+*)
+
+type class_members = {
+  m_properties: Typing_defs.decl_ty S_map.t;
+  m_static_properties: Typing_defs.decl_ty S_map.t;
+  m_methods: Typing_defs.fun_elt S_map.t;
+  m_static_methods: Typing_defs.fun_elt S_map.t;
+  m_constructor: Typing_defs.fun_elt option;
+}
+
+type class_entries = Decl_defs.decl_class_type * class_members option
+
+module ClassEltKey : Shared_mem.Key with type t = string * string
+
+type decl_store = {
+  add_class: string -> Decl_defs.decl_class_type -> unit;
+  get_class: string -> Decl_defs.decl_class_type option;
+  add_prop: ClassEltKey.t -> Typing_defs.decl_ty -> unit;
+  get_prop: ClassEltKey.t -> Typing_defs.decl_ty option;
+  add_static_prop: ClassEltKey.t -> Typing_defs.decl_ty -> unit;
+  get_static_prop: ClassEltKey.t -> Typing_defs.decl_ty option;
+  add_method: ClassEltKey.t -> Typing_defs.fun_elt -> unit;
+  get_method: ClassEltKey.t -> Typing_defs.fun_elt option;
+  add_static_method: ClassEltKey.t -> Typing_defs.fun_elt -> unit;
+  get_static_method: ClassEltKey.t -> Typing_defs.fun_elt option;
+  add_constructor: string -> Typing_defs.fun_elt -> unit;
+  get_constructor: string -> Typing_defs.fun_elt option;
+  add_fun: string -> Typing_defs.fun_elt -> unit;
+  get_fun: string -> Typing_defs.fun_elt option;
+  add_typedef: string -> Typing_defs.typedef_type -> unit;
+  get_typedef: string -> Typing_defs.typedef_type option;
+  add_gconst: string -> Typing_defs.const_decl -> unit;
+  get_gconst: string -> Typing_defs.const_decl option;
+  add_module: string -> Typing_defs.module_def_type -> unit;
+  get_module: string -> Typing_defs.module_def_type option;
+  push_local_changes: unit -> unit;
+  pop_local_changes: unit -> unit;
+}
+
+type ('k, 'v) kind =
+  | Constructor : (string, Typing_defs.fun_elt) kind
+  | Method : (ClassEltKey.t, Typing_defs.fun_elt) kind
+  | Static_method : (ClassEltKey.t, Typing_defs.fun_elt) kind
+  | Property : (ClassEltKey.t, Typing_defs.decl_ty) kind
+  | Static_property : (ClassEltKey.t, Typing_defs.decl_ty) kind
+
+val get : unit -> decl_store
+
+val set : decl_store -> unit
+
+val shared_memory_store : decl_store
+
+val lookup_or : bypass:bool -> ('k, 'v) kind -> 'k -> ('k -> 'v) -> 'v

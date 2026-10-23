@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 
 namespace HH\Lib\Dict\Dict {
 
@@ -14,6 +14,7 @@ namespace HH\Lib\Dict {
     echo __FUNCTION__."\n";
   }
 
+  <<__EntryPoint>> function main(): void {
   Dict\f(); // HH\Lib\Dict\f
-
+  }
 }

@@ -46,24 +46,24 @@ function f($x){
 /*
 function g($x){
   $x['d'];
-  
+
   if (true){
     $x['h'] = 1;
   }
-  
+
   return $x;
 }
 */
 /*
 function g($x){
   $x['d'];
-  
+
   if (true){
     $x['h'] = 1;
   } else {
     $x['h'] = 0;
   }
-  
+
   return $x;
 }
 */
@@ -81,12 +81,12 @@ function g($x){
 }
 */
 
-function g($x){
-  $x = array('gg' => 0);
+function g(): darray<string,int> {
+  $x = dict['gg' => 0];
 
   if (true) {
     $x['d'] = 0;
-  } 
-  
+  }
+
   return $x;
 }

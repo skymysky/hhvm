@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 
 bake_bread(
   // rye
@@ -51,7 +51,6 @@ punch_dough(
    */
 );
 
-
 brush_with(
   $cooking_oil,
   $generousness,
@@ -68,16 +67,16 @@ slash_top(
    */
 );
 
-empty($oven /* yep */);
+emptee($oven /* yep */);
 
-empty(
-  $tin
+emptee(
+  $tin,
   /* nope */
 );
 
-empty(
+emptee(
   /* let */
-  $bread
+  $bread,
   /* rise */
 );
 

@@ -14,28 +14,31 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_JIT_VASM_PRINT_H_
-#define incl_HPHP_JIT_VASM_PRINT_H_
+#pragma once
 
 #include "hphp/runtime/vm/jit/vasm.h"
 #include "hphp/runtime/vm/jit/vasm-reg.h"
 
-#include <vector>
+#include <cstdint>
 #include <iostream>
 #include <string>
+#include <vector>
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 ///////////////////////////////////////////////////////////////////////////////
 
 struct Vinstr;
 struct Vunit;
 struct Vconst;
+struct VregSet;
 
 ///////////////////////////////////////////////////////////////////////////////
 
 std::string show(Vreg r);
 std::string show(Vptr p);
 std::string show(Vconst c);
+std::string show(const VregSet&);
+std::string show(const VregList&);
 std::string show(const Vunit& unit);
 std::string show(const Vunit& unit, const Vinstr& inst);
 
@@ -52,6 +55,7 @@ constexpr int kVasmFusionLevel = 2;
 constexpr int kVasmCodeGenLevel = 2;
 constexpr int kVasmAnnotateSFLevel = 2;
 constexpr int kVasmRegAllocLevel = 3;
+constexpr int kVasmRegAllocDetailLevel = 4;
 constexpr int kVasmCopyPropLevel = 4;
 constexpr int kVasmARMFoldLevel = 4;
 constexpr int kVasmJumpsLevel = 4;
@@ -59,7 +63,10 @@ constexpr int kVasmExitsLevel = 4;
 constexpr int kVasmHoistFbccsLevel = 4;
 constexpr int kVasmDCELevel = 4;
 constexpr int kVasmLowerLevel = 4;
+constexpr int kVasmSinkDefsLevel = 4;
+constexpr int kVasmLoadElimLevel = 4;
 constexpr int kVasmUnreachableLevel = 6;
+constexpr int kVasmBlockCountLevel = 5;
 
 // Print the cfg digraph followed by a vasm code listing, if the trace level is
 // above `level'.
@@ -75,6 +82,4 @@ void printInstrs(std::ostream& out,
 extern const char* area_names[];
 
 ///////////////////////////////////////////////////////////////////////////////
-}}
-
-#endif
+}

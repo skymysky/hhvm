@@ -1,6 +1,6 @@
-<?php
+<?hh
 
-function error_handler($errno, $errstr) {
+function error_handler($errno, $errstr) :mixed{
  echo "Error\n";
  }
 class f {
@@ -13,14 +13,18 @@ class c {
       $this->foo = new f;
     }
   }
-  function get() {
+  function get() :mixed{
     return $this->foo->bar;
   }
 }
-function main() {
-  set_error_handler('error_handler');
+function main() :mixed{
+  set_error_handler(error_handler<>);
   $c = new c(false);
   $c->get();
   echo "Error\n";
 }
+
+<<__EntryPoint>>
+function main_720() :mixed{
 main();
+}

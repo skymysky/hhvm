@@ -1,4 +1,4 @@
-(**
+(*
  * Copyright (c) 2015, Facebook, Inc.
  * All rights reserved.
  *
@@ -7,4 +7,8 @@
  *
  *)
 
-let lint _ _ _ = ()
+let untyped_linters = []
+
+let typed_linters = []
+
+let lint_tast _ _ = ()

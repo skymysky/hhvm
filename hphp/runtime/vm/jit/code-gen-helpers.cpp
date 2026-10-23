@@ -15,47 +15,45 @@
 */
 
 #include "hphp/runtime/vm/jit/code-gen-helpers.h"
+#include "hphp/runtime/vm/jit/code-gen-tls.h"
 
 #include "hphp/runtime/base/countable.h"
 #include "hphp/runtime/base/datatype.h"
 #include "hphp/runtime/base/header-kind.h"
 #include "hphp/runtime/base/rds-header.h"
-#include "hphp/runtime/base/runtime-option.h"
-#include "hphp/runtime/base/tv-mutate.h"
-#include "hphp/runtime/base/tv-variant.h"
 #include "hphp/runtime/vm/class.h"
 
 #include "hphp/runtime/vm/jit/abi.h"
 #include "hphp/runtime/vm/jit/call-spec.h"
 #include "hphp/runtime/vm/jit/code-gen-cf.h"
 #include "hphp/runtime/vm/jit/ssa-tmp.h"
-#include "hphp/runtime/vm/jit/trans-db.h"
+#include "hphp/runtime/vm/jit/translator-inline.h"
 #include "hphp/runtime/vm/jit/type.h"
 #include "hphp/runtime/vm/jit/vasm-gen.h"
 #include "hphp/runtime/vm/jit/vasm-instr.h"
 #include "hphp/runtime/vm/jit/vasm-reg.h"
 
+#include "hphp/util/arch.h"
 #include "hphp/util/asm-x64.h"
-#include "hphp/util/abi-cxx.h"
+#include "hphp/util/configs/hhir.h"
 #include "hphp/util/immed.h"
-#include "hphp/util/low-ptr.h"
 #include "hphp/util/ringbuffer.h"
-#include "hphp/util/thread-local.h"
+#include "hphp/util/roar.h"
 #include "hphp/util/trace.h"
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-TRACE_SET_MOD(hhir);
+TRACE_SET_MOD(hhir)
 
 namespace {
 
 ///////////////////////////////////////////////////////////////////////////////
 
 void assertSFNonNegative(Vout& v, Vreg sf, Reason reason) {
-  if (!RuntimeOption::EvalHHIRGenerateAsserts) return;
-  ifThen(v, CC_NGE, sf, [&] (Vout& v) { v << trap{reason}; });
+  if (!Cfg::HHIR::GenerateAsserts) return;
+  ifThen(v, CC_NGE, sf, [&] (Vout& v) { v << trap{reason, Fixup::none()}; });
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -90,28 +88,86 @@ void emitImmStoreq(Vout& v, Immed64 imm, Vptr ref) {
   }
 }
 
-void emitLdLowPtr(Vout& v, Vptr mem, Vreg reg, size_t size) {
-  if (size == 8) {
-    v << load{mem, reg};
-  } else if (size == 4) {
-    v << loadzlq{mem, reg};
-  } else {
-    not_implemented();
-  }
+#ifdef HHVM_RECORD_JIT_CFA
+void emitStoreCFAForIndirectFixup(Vout& v) {
+  // BL does not adjust sp, so its value immediately before the call is the
+  // callee's CFA. AArch64 lowering uses rAsm to materialize sp, so this must
+  // remain after argument setup.
+  v << store{rsp(), rvmtl()[rds::kVmJitCfaOff]};
+}
+#endif
+
+template <>
+void emitDecodePtr<32>(Vout& v, Vreg src, Vreg dst) {
+  v << copy{src, dst};
 }
 
-void emitStLowPtr(Vout& v, Vreg reg, Vptr mem, size_t size) {
-  if (size == 8) {
-    v << store{reg, mem};
-  } else if (size == 4) {
-    auto const temp = emitMovtql(v, reg);
-    v << storel{temp, mem};
-  } else {
-    not_implemented();
-  }
+template <>
+void emitDecodePtr<35>(Vout& v, Vreg src, Vreg dst) {
+  v << shlqi{3, src, dst, v.makeReg()};
+}
+
+template <>
+void emitDecodePtr<64>(Vout& v, Vreg src, Vreg dst) {
+  v << copy{src, dst};
+}
+
+template <>
+void emitLdPtr<32>(Vout& v, Vptr src, Vreg dst) {
+  v << loadzlq{src, dst};
+}
+
+template <>
+void emitLdPtr<35>(Vout& v, Vptr src, Vreg dst) {
+  auto const packed = v.makeReg();
+  v << loadzlq{src, packed};
+  emitDecodePtr<35>(v, packed, dst);
+}
+
+template <>
+void emitLdPtr<64>(Vout& v, Vptr src, Vreg dst) {
+  v << load{src, dst};
+}
+
+template <>
+void emitEncodePtr<32>(Vout& v, Vreg src, Vreg dst) {
+  v << copy{src, dst};
+}
+
+template <>
+void emitEncodePtr<35>(Vout& v, Vreg src, Vreg dst) {
+  v << shrqi{3, src, dst, v.makeReg()};
+}
+
+template <>
+void emitEncodePtr<64>(Vout& v, Vreg src, Vreg dst) {
+  v << copy{src, dst};
+}
+
+template <>
+void emitStPtr<32>(Vout& v, Vreg src, Vptr dst) {
+  auto const temp = emitMovtql(v, src);
+  v << storel{temp, dst};
+}
+
+template <>
+void emitStPtr<35>(Vout& v, Vreg src, Vptr dst) {
+  auto const packed = v.makeReg();
+  emitEncodePtr<35>(v, src, packed);
+  auto const temp = emitMovtql(v, packed);
+  v << storel{temp, dst};
+}
+
+template <>
+void emitStPtr<64>(Vout& v, Vreg src, Vptr dst) {
+  v << store{src, dst};
 }
 
 void pack2(Vout& v, Vreg s0, Vreg s1, Vreg d0) {
+  if (arch::any<arch::ARM>()) {
+    v << pack2q{s0, s1, d0}; // s0,s1 -> d0[0],d0[1]
+    return;
+  }
   auto prep = [&] (Vreg r) {
     if (VregDbl::allowable(r)) return r;
     auto t = v.makeReg();
@@ -133,61 +189,193 @@ Vreg zeroExtendIfBool(Vout& v, Type ty, Vreg reg) {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-void storeTV(Vout& v, Vptr dst, Vloc srcLoc, const SSATmp* src) {
-  auto const type = src->type();
+Vreg materializeConstVal(Vout& v, Type ty) {
+  if (ty <= TNull) return v.cns(Vconst::Quad);
+  if (ty <= TNullptr) return v.cns(0);
+  if (!ty.hasConstVal()) return InvalidReg;
+  if (ty <= TBool) return v.cns(ty.boolVal());
+  if (ty <= TDbl) return v.cns(ty.dblVal());
+  return v.cns(ty.rawVal());
+}
 
-  if (srcLoc.isFullSIMD()) {
-    // The whole TV is stored in a single SIMD reg.
-    assertx(RuntimeOption::EvalHHIRAllocSIMDRegs);
-    v << storeups{srcLoc.reg(), dst};
-    return;
-  }
+///////////////////////////////////////////////////////////////////////////////
 
-  if (type.needsReg()) {
-    assertx(srcLoc.hasReg(1));
-    v << storeb{srcLoc.reg(1), dst + TVOFF(m_type)};
-  } else {
-    v << storeb{v.cns(type.toDataType()), dst + TVOFF(m_type)};
-  }
+namespace {
 
+constexpr auto kTVTypeDataOffset = TVOFF(m_type) - TVOFF(m_data);
+static_assert(kTVTypeDataOffset == 8, "");
+
+// A TV whose value slot carries nothing to store: a statically-null type (TNull)
+// or the TNullptr sentinel. storeTV and friends skip the value store for these.
+bool isNullish(Type type) {
+  return type <= TNull || type <= TNullptr;
+}
+
+Vreg tvValRegForStore(Vout& v, Type type, Vloc srcLoc) {
+  // Nullish TVs have no value to store; callers must skip them before calling.
+  assertx(!isNullish(type));
+  if (type.hasConstVal()) return v.cns(type.rawVal());
+
+  assertx(srcLoc.hasReg(0));
+  return zeroExtendIfBool(v, type, srcLoc.reg(0));
+}
+
+Vreg tvTypeRegForStore(Vout& v, Type type, Vloc srcLoc) {
+  if (!type.needsReg()) return v.cns(type.toDataType());
+
+  assertx(srcLoc.hasReg(1));
+  return srcLoc.reg(1);
+}
+
+// Whether storeTV may fuse a TV's value and its 8-byte type word into a single
+// storepair. Pairing is ARM-only (arch::any<arch::ARM>() is a compile-time
+// constant, so this is always false -- and the pairing dropped -- on x64) and
+// requires:
+//   - !isNullish: a nullish TV has no value to store, so there's no pair to form.
+//   - !(type <= TDbl): exclude only a *definitely*-Dbl value, whose data is in a
+//     SIMD reg; the type word is always GP, so a definite Dbl can't form a
+//     same-bank STP. Everything else pairs -- general cells (GP raw bits) and
+//     unions like {Dbl|Int}. The latter have a SIMD value reg, so they form a
+//     mixed-bank pair that the emitter splits and the post-RA writeback
+//     simplifier skips (correct, just not fused). We deliberately do NOT tighten
+//     this to type.maybe(TDbl): a prod tc-dump showed `<= TDbl` yields ~1.7M
+//     fewer bytes of optimized code, because `maybe(TDbl)` also drops general
+//     cells (GP value) that pair beneficially in cold paths.
+//   - valid base. An index reg is fine here: lower(storepair)/lower(loadpair)
+//     flatten base+index into a temp before emit, so STP/LDP only ever see
+//     base+disp. We deliberately do NOT reject an index at vasm-emission time --
+//     a later vasm pass can fold a constant index into the displacement, and
+//     rejecting here would permanently forfeit those pairs.
+//   - adjacent slots: m_type immediately follows m_data.
+// STP immediate-range is intentionally not checked: the storepair emitter falls
+// back to two single stores when the displacement doesn't fit.
+bool storeTVPairable(Type type, Vptr typePtr, Vptr valPtr) {
+  return arch::any<arch::ARM>() &&
+         !isNullish(type) &&
+         !(type <= TDbl) &&
+         valPtr.base.isValid() &&
+         typePtr == valPtr + kTVTypeDataOffset;
+}
+
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
+void storeTVVal(Vout& v, Type type, Vloc srcLoc, Vptr valPtr) {
   // We ignore the values of statically nullish types.
-  if (src->isA(TNull) || src->isA(TNullptr)) return;
+  if (isNullish(type)) return;
 
   // Store the value.
-  if (src->hasConstVal()) {
-    // Skip potential zero-extend if we know the value.
-    v << store{v.cns(src->rawVal()), dst + TVOFF(m_data)};
+  v << store{tvValRegForStore(v, type, srcLoc), valPtr};
+}
+
+void storeTVType(Vout& v, Type type, Vloc srcLoc, Vptr typePtr, bool aux) {
+  auto const typeReg = tvTypeRegForStore(v, type, srcLoc);
+  if (aux) {
+    v << store{typeReg, typePtr};
   } else {
-    assertx(srcLoc.hasReg(0));
-    auto const extended = zeroExtendIfBool(v, src->type(), srcLoc.reg(0));
-    v << store{extended, dst + TVOFF(m_data)};
+    v << storeb{typeReg, typePtr};
   }
+}
+
+void storeTV(Vout& v, Vptr dst, Vloc srcLoc, const SSATmp* src,
+             Type ty, bool aux) {
+  if (ty == TBottom) ty = src->type();
+  storeTV(v, ty, srcLoc, dst + TVOFF(m_type), dst + TVOFF(m_data), aux);
+}
+
+void storeTV(Vout& v, Type type, Vloc srcLoc,
+             Vptr typePtr, Vptr valPtr, bool aux) {
+  if (srcLoc.isFullSIMD()) {
+    // The whole TV is stored in a single SIMD reg.
+    assertx(Cfg::HHIR::AllocSIMDRegs);
+    always_assert(typePtr == valPtr + kTVTypeDataOffset);
+    v << storeups{srcLoc.reg(), valPtr};
+    return;
+  }
+  // A full 8-byte type store (aux) can fuse with the value into a storepair on
+  // ARM; the aux=false path stores a 1-byte type via storeb, which can't fuse.
+  if (aux && storeTVPairable(type, typePtr, valPtr)) {
+    v << storepair{tvValRegForStore(v, type, srcLoc),
+                   tvTypeRegForStore(v, type, srcLoc), valPtr};
+    return;
+  }
+  storeTVVal(v, type, srcLoc, valPtr);
+  storeTVType(v, type, srcLoc, typePtr, aux);
+}
+
+void storeTVWithAux(Vout& v,
+                    Vptr dst,
+                    Vloc srcLoc,
+                    const SSATmp* src,
+                    AuxUnion aux) {
+  static_assert(TVOFF(m_type) == 8, "");
+  static_assert(TVOFF(m_aux) == 12, "");
+  assertx(!srcLoc.isFullSIMD());
+
+  auto const type = src->type();
+  auto const auxMask = auxToMask(aux);
+
+  // Materialize the full 8-byte type word with m_aux OR'd into the upper bytes.
+  Vreg typeReg;
+  if (type.needsReg()) {
+    assertx(srcLoc.hasReg(1));
+
+    // DataType is signed. We're using movzbq here to clear out the upper 7
+    // bytes of the register, not to actually extend the type value.
+    auto const extended = v.makeReg();
+    auto const result = v.makeReg();
+    v << movzbq{srcLoc.reg(1), extended};
+    v << orq{extended, v.cns(auxMask), result, v.makeReg()};
+    typeReg = result;
+  } else {
+    auto const dt = static_cast<std::make_unsigned<data_type_t>::type>(
+      type.toDataType()
+    );
+    static_assert(std::numeric_limits<decltype(dt)>::digits <= 32, "");
+    typeReg = v.cns(dt | auxMask);
+  }
+
+  // Fuse the type+aux word with the value into a storepair on ARM when possible;
+  // otherwise store them separately.
+  auto const typePtr = dst + TVOFF(m_type);
+  auto const valPtr = dst + TVOFF(m_data);
+  if (storeTVPairable(type, typePtr, valPtr)) {
+    v << storepair{tvValRegForStore(v, type, srcLoc), typeReg, valPtr};
+    return;
+  }
+  storeTVVal(v, type, srcLoc, valPtr);
+  v << store{typeReg, typePtr};
 }
 
 void loadTV(Vout& v, const SSATmp* dst, Vloc dstLoc, Vptr src,
             bool aux /* = false */) {
-  auto const type = dst->type();
+  loadTV(v, dst->type(), dstLoc, src + TVOFF(m_type), src + TVOFF(m_data), aux);
+}
 
+void loadTV(Vout& v, Type type, Vloc dstLoc, Vptr typePtr, Vptr valPtr,
+            bool aux) {
   if (dstLoc.isFullSIMD()) {
     // The whole TV is loaded into a single SIMD reg.
-    assertx(RuntimeOption::EvalHHIRAllocSIMDRegs);
-    v << loadups{src, dstLoc.reg()};
+    assertx(Cfg::HHIR::AllocSIMDRegs);
+    always_assert(typePtr == valPtr + kTVTypeDataOffset);
+    v << loadups{valPtr, dstLoc.reg()};
     return;
   }
 
-  if (type.needsReg()) {
+  if (type.needsReg() || aux) {
     assertx(dstLoc.hasReg(1));
     if (aux) {
-      v << load{src + TVOFF(m_type), dstLoc.reg(1)};
+      v << load{typePtr, dstLoc.reg(1)};
     } else {
-      v << loadb{src + TVOFF(m_type), dstLoc.reg(1)};
+      v << loadb{typePtr, dstLoc.reg(1)};
     }
   }
 
   if (type <= TBool) {
-    v << loadtqb{src + TVOFF(m_data), dstLoc.reg(0)};
+    v << loadtqb{valPtr, dstLoc.reg(0)};
   } else {
-    v << load{src + TVOFF(m_data), dstLoc.reg(0)};
+    v << load{valPtr, dstLoc.reg(0)};
   }
 }
 
@@ -221,7 +409,10 @@ void copyTV(Vout& v, Vloc src, Vloc dst, Type destType) {
 
   if (dst_arity == 2) {
     always_assert(src_arity == 2);
-    v << copy2{src.reg(0), src.reg(1), dst.reg(0), dst.reg(1)};
+    v << copyargs{
+      v.makeTuple({src.reg(0), src.reg(1)}),
+      v.makeTuple({dst.reg(0), dst.reg(1)})
+    };
     return;
   }
   always_assert(dst_arity == 1);
@@ -239,14 +430,30 @@ void copyTV(Vout& v, Vloc src, Vloc dst, Type destType) {
   }
 }
 
-void trashTV(Vout& v, Vreg ptr, int32_t offset, char byte) {
+void trashBytes(Vout& v, Vptr ptr, size_t bytes, char byte) {
   int32_t trash32;
   memset(&trash32, byte, sizeof(trash32));
-  static_assert(sizeof(TypedValue) == 16, "");
-  v << storeli{trash32, ptr[offset + 0x0]};
-  v << storeli{trash32, ptr[offset + 0x4]};
-  v << storeli{trash32, ptr[offset + 0x8]};
-  v << storeli{trash32, ptr[offset + 0xc]};
+  assertx(bytes % sizeof(trash32) == 0);
+
+  for (size_t offset = 0; offset < bytes;
+       offset += sizeof(trash32)) {
+    v << storeli{trash32, ptr + safe_cast<int32_t>(offset)};
+  }
+}
+
+void trashFullTV(Vout& v, Vptr ptr, char byte) {
+  trashBytes(v, ptr, sizeof(TypedValue), byte);
+}
+
+void trashTV(Vout& v, Vptr typePtr, Vptr valPtr, char byte) {
+  int32_t trash32;
+  memset(&trash32, byte, sizeof(trash32));
+  static_assert(sizeof(Value) == 8, "");
+  v << storeli{trash32, valPtr};
+  v << storeli{trash32, valPtr + 4};
+
+  static_assert(sizeof(DataType) == 1, "");
+  v << storebi{byte, typePtr};
 }
 
 void emitAssertRefCount(Vout& v, Vreg data, Reason reason) {
@@ -254,29 +461,37 @@ void emitAssertRefCount(Vout& v, Vreg data, Reason reason) {
 
   ifThen(v, CC_NLE, sf, [&] (Vout& v) {
     auto const sf = emitCmpRefCount(v, RefCountMaxRealistic, data);
-    ifThen(v, CC_NBE, sf, [&] (Vout& v) { v << trap{reason}; });
+    ifThen(v, CC_NBE, sf, [&] (Vout& v) { v << trap{reason, Fixup::none()}; });
   });
 }
 
 void emitIncRef(Vout& v, Vreg base, Reason reason) {
-  if (RuntimeOption::EvalHHIRGenerateAsserts) {
+  if (Cfg::HHIR::GenerateAsserts) {
     emitAssertRefCount(v, base, reason);
   }
 
-  if (one_bit_refcount) {
-    emitStoreRefCount(v, MultiReference, base);
-  } else {
-    auto const sf = v.makeReg();
-    v << inclm{base[FAST_REFCOUNT_OFFSET], sf};
-    assertSFNonNegative(v, sf, reason);
-  }
+  auto const sf = v.makeReg();
+  v << inclm{base[FAST_REFCOUNT_OFFSET], sf};
+  assertSFNonNegative(v, sf, reason);
 }
 
 Vreg emitDecRef(Vout& v, Vreg base, Reason reason) {
-  auto const sf = one_bit_refcount ?
-    emitCmpRefCount(v, OneReference, base) :
-    emitDecRefCount(v, base);
+  auto const sf = emitDecRefCount(v, base);
+  assertSFNonNegative(v, sf, reason);
+  return sf;
+}
 
+Vreg emitDecRef(Vout& v, Vreg base, Vreg preloadedCount, Reason reason) {
+  if (Cfg::HHIR::GenerateAsserts) {
+    auto const actual = v.makeReg();
+    auto const cmpSf = v.makeReg();
+    v << loadl{base[FAST_REFCOUNT_OFFSET], actual};
+    v << cmpl{actual, preloadedCount, cmpSf};
+    ifThen(v, CC_NE, cmpSf, [&](Vout& v) {
+      v << trap{reason, Fixup::none()};
+    });
+  }
+  auto const sf = emitDecRefCount(v, base, preloadedCount);
   assertSFNonNegative(v, sf, reason);
   return sf;
 }
@@ -289,7 +504,7 @@ void emitIncRefWork(Vout& v, Vreg data, Vreg type, Reason reason) {
     // One-bit mode: do the IncRef if m_count == OneReference (0). Normal mode:
     // do the IncRef if m_count >= 0.
     auto const sf2 = emitCmpRefCount(v, 0, data);
-    auto const cc = one_bit_refcount ? CC_E : CC_GE;
+    auto const cc = CC_GE;
     ifThen(v, cc, sf2, [&] (Vout& v) { emitIncRef(v, data, reason); });
   });
 }
@@ -315,7 +530,7 @@ void emitIncRefWork(Vout& v, Vloc loc, Type type, Reason reason) {
   // We do know the type, but it might be persistent or counted. Check the
   // ref-count.
   auto const sf = emitCmpRefCount(v, 0, loc.reg());
-  auto const cc = one_bit_refcount ? CC_E : CC_GE;
+  auto const cc = CC_GE;
   ifThen(v, cc, sf, [&] (Vout& v) { emitIncRef(v, loc.reg(), reason); });
 }
 
@@ -325,8 +540,10 @@ void emitDecRefWorkObj(Vout& v, Vreg obj, Reason reason) {
     v, CC_E, shouldRelease,
     [&] (Vout& v) {
       // Put fn inside vcall{} triggers a compiler internal error (gcc 4.4.7)
-      auto const fn = CallSpec::method(&ObjectData::release);
-      v << vcall{fn, v.makeVcallArgs({{obj}}), v.makeTuple({})};
+      auto const cls = emitLdObjClass(v, obj, v.makeReg());
+      auto const fn = CallSpec::objDestruct(cls);
+      v << vcall{fn, v.makeVcallArgs({{obj, cls}}), v.makeTuple({}),
+                 Fixup::none()};
     },
     [&] (Vout& v) {
       emitDecRef(v, obj, reason);
@@ -341,32 +558,33 @@ void emitCall(Vout& v, CallSpec target, RegSet args) {
 
   switch (target.kind()) {
     case K::Direct:
-      v << call{static_cast<TCA>(target.address()), args};
+      // When using ROAR, we emit all native calls as smashable ones via the
+      // fallthru below, so that ROAR can patch them when it re-JITs native
+      // functions.
+      if (use_roar) {
+        v << calls{static_cast<TCA>(target.address()), args};
+      } else {
+        v << call{static_cast<TCA>(target.address()), args};
+      }
       return;
 
     case K::Smashable:
       v << calls{static_cast<TCA>(target.address()), args};
       return;
 
-    case K::ArrayVirt: {
-      auto const addr = reinterpret_cast<intptr_t>(target.arrayTable());
-
-      auto const arrkind = v.makeReg();
-      v << loadzbl{rarg(0)[HeaderKindOffset], arrkind};
-
-      if (deltaFits(addr, sz::dword)) {
-        v << callm{baseless(arrkind * 8 + addr), args};
-      } else {
-        auto const base = v.makeReg();
-        v << ldimmq{addr, base};
-        v << callm{base[arrkind * 8], args};
-      }
-      static_assert(sizeof(HeaderKind) == 1, "");
-    } return;
-
     case K::Destructor: {
       auto dtor = lookupDestructor(v, target.reg());
       v << callm{dtor, args};
+    } return;
+
+    case K::ObjDestructor: {
+      auto const func = v.makeReg();
+      emitLdPtr<ObjReleaseFunc::bits>(
+        v,
+        target.reg()[Class::releaseFuncOff()],
+        func
+      );
+      v << callr{func, args};
     } return;
 
     case K::Stub:
@@ -378,7 +596,7 @@ void emitCall(Vout& v, CallSpec target, RegSet args) {
 
 Vptr lookupDestructor(Vout& v, Vreg type, bool typeIsQuad) {
   auto const elem_sz = static_cast<int>(sizeof(g_destructors[0]) / 2);
-  auto const table = reinterpret_cast<intptr_t>(g_destructors) -
+  auto const table = reinterpret_cast<intptr_t>(&g_destructors[0]) -
     kMinRefCountedDataType * elem_sz;
 
   auto const index = [&] {
@@ -399,61 +617,69 @@ Vptr lookupDestructor(Vout& v, Vreg type, bool typeIsQuad) {
 ///////////////////////////////////////////////////////////////////////////////
 
 Vreg emitLdObjClass(Vout& v, Vreg obj, Vreg d) {
-  emitLdLowPtr(v, obj[ObjectData::getVMClassOffset()], d,
-               sizeof(LowPtr<Class>));
+  emitLdPackedPtr(v, obj[ObjectData::getVMClassOffset()], d);
   return d;
 }
 
-Vreg emitLdClsCctx(Vout& v, Vreg src, Vreg dst) {
-  static_assert(ActRec::kHasClassBit == 1,
-                "Fix the decq if you change kHasClassBit");
-  v << decq{src, dst, v.makeReg()};
-  return dst;
+template <>
+void emitCmpPtr<32>(Vout& v, Vreg sf, const void* ptr, Vptr mem) {
+  auto const ptrImm = safe_cast<uint32_t>(reinterpret_cast<intptr_t>(ptr));
+  v << cmplm{v.cns(ptrImm), mem, sf};
+}
+template <>
+void emitCmpPtr<32>(Vout& v, Vreg sf, const void* ptr, Vreg reg) {
+  auto const ptrImm = safe_cast<uint32_t>(reinterpret_cast<intptr_t>(ptr));
+  auto low = emitMovtql(v, reg);
+  v << cmpl{v.cns(ptrImm), low, sf};
+}
+template <>
+void emitCmpPtr<32>(Vout& v, Vreg sf, Vreg reg, Vptr mem) {
+  auto low = emitMovtql(v, reg);
+  v << cmplm{low, mem, sf};
+}
+template <>
+void emitCmpPtr<32>(Vout& v, Vreg sf, Vreg reg1, Vreg reg2) {
+  auto const l1 = emitMovtql(v, reg1);
+  auto const l2 = emitMovtql(v, reg2);
+  v << cmpl{l1, l2, sf};
 }
 
-void cmpLowPtrImpl(Vout& v, Vreg sf, const void* ptr, Vptr mem, size_t size) {
-  if (size == 8) {
-    v << cmpqm{v.cns(ptr), mem, sf};
-  } else if (size == 4) {
-    auto const ptrImm = safe_cast<uint32_t>(reinterpret_cast<intptr_t>(ptr));
-    v << cmplm{v.cns(ptrImm), mem, sf};
-  } else {
-    not_implemented();
-  }
+template <>
+void emitCmpPtr<35>(Vout& v, Vreg sf, const void* ptr, Vptr mem) {
+  auto const ptrImm = PackedPtr<const void>::toRaw(ptr);
+  v << cmplm{v.cns(ptrImm), mem, sf};
+}
+template <>
+void emitCmpPtr<35>(Vout& v, Vreg sf, const void* ptr, Vreg reg) {
+  v << cmpq{v.cns(ptr), reg, sf};
+}
+template <>
+void emitCmpPtr<35>(Vout& v, Vreg sf, Vreg reg, Vptr mem) {
+  auto shifted = v.makeReg();
+  emitEncodePtr<35>(v, reg, shifted);
+  auto low = emitMovtql(v, shifted);
+  v << cmplm{low, mem, sf};
+}
+template <>
+void emitCmpPtr<35>(Vout& v, Vreg sf, Vreg reg1, Vreg reg2) {
+  v << cmpq{reg1, reg2, sf};
 }
 
-void cmpLowPtrImpl(Vout& v, Vreg sf, Vreg reg, Vptr mem, size_t size) {
-  if (size == 8) {
-    v << cmpqm{reg, mem, sf};
-  } else if (size == 4) {
-    auto low = emitMovtql(v, reg);
-    v << cmplm{low, mem, sf};
-  } else {
-    not_implemented();
-  }
+template <>
+void emitCmpPtr<64>(Vout& v, Vreg sf, const void* ptr, Vptr mem) {
+  v << cmpqm{v.cns(ptr), mem, sf};
 }
-
-void cmpLowPtrImpl(Vout& v, Vreg sf, Vreg reg1, Vreg reg2, size_t size) {
-  if (size == 8) {
-    v << cmpq{reg1, reg2, sf};
-  } else if (size == 4) {
-    auto const l1 = emitMovtql(v, reg1);
-    auto const l2 = emitMovtql(v, reg2);
-    v << cmpl{l1, l2, sf};
-  } else {
-    not_implemented();
-  }
+template <>
+void emitCmpPtr<64>(Vout& v, Vreg sf, const void* ptr, Vreg reg) {
+  v << cmpq{v.cns(ptr), reg, sf};
 }
-
-void emitCmpVecLen(Vout& v, Vreg sf, Immed val, Vptr mem) {
-  auto const size = sizeof(Class::veclen_t);
-  if (size == 2) {
-    v << cmpwim{val, mem, sf};
-  } else if (size == 4) {
-    v << cmplim{val, mem, sf};
-  } else {
-    not_implemented();
-  }
+template <>
+void emitCmpPtr<64>(Vout& v, Vreg sf, Vreg reg, Vptr mem) {
+  v << cmpqm{reg, mem, sf};
+}
+template <>
+void emitCmpPtr<64>(Vout& v, Vreg sf, Vreg reg1, Vreg reg2) {
+  v << cmpq{reg1, reg2, sf};
 }
 
 /*
@@ -474,23 +700,28 @@ Vreg emitIsCollection(Vout& v, Vreg obj) {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-void emitEagerSyncPoint(Vout& v, PC pc, Vreg rds, Vreg vmfp, Vreg vmsp) {
-  v << store{vmfp, rds[rds::kVmfpOff]};
-  v << store{vmsp, rds[rds::kVmspOff]};
-  emitImmStoreq(v, intptr_t(pc), rds[rds::kVmpcOff]);
+void emitSetVMRegState(Vout& v, VMRegState state) {
+  auto const regstate = rvmtl()[rds::kVmRegStateOff];
+  v << storeqi{static_cast<int32_t>(state), regstate};
 }
 
 void emitRB(Vout& v, Trace::RingBufferType t, const char* msg) {
   if (!Trace::moduleEnabled(Trace::ringbuffer, 1)) return;
   v << vcall{CallSpec::direct(Trace::ringbufferMsg),
              v.makeVcallArgs({{v.cns(msg), v.cns(strlen(msg)), v.cns(t)}}),
-             v.makeTuple({})};
+             v.makeTuple({}),
+             Fixup::none()};
 }
 
 void emitIncStat(Vout& v, Stats::StatCounter stat) {
   if (!Stats::enabled()) return;
-  intptr_t disp = uintptr_t(&Stats::tl_counters[stat]) - tlsBase();
-  v << incqm{Vptr{baseless(disp), Vptr::FS}, v.makeReg()};
+  auto rdslocalBase = v.makeReg();
+  auto datum = tls_datum(rds::local::detail::rl_hotSection.rdslocal_base);
+  auto offset = Stats::rl_counters.getRawOffset() +
+                offsetof(Stats::StatCounters, counters) +
+                sizeof(Stats::StatCounters::counters[0])*stat;
+  v << load{emitTLSAddr(v, datum), rdslocalBase};
+  v << incqm{rdslocalBase[offset], v.makeReg()};
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -505,6 +736,7 @@ static Vptr getRDSHandleGenNumberAddr(Vreg handle) {
 
 template<typename HandleT>
 Vreg doCheckRDSHandleInitialized(Vout& v, HandleT ch) {
+  markRDSAccess(v, ch);
   auto const gen = v.makeReg();
   auto const sf = v.makeReg();
   v << loadb{getRDSHandleGenNumberAddr(ch), gen};
@@ -521,7 +753,8 @@ Vreg checkRDSHandleInitialized(Vout& v, Vreg ch) {
 }
 
 template<typename HandleT>
-void doMarkRDSHandleInitialized(Vout &v, HandleT ch) {
+void doMarkRDSHandleInitialized(Vout& v, HandleT ch) {
+  markRDSAccess(v, ch);
   auto const gen = v.makeReg();
   v << loadb{rvmtl()[rds::currentGenNumberHandle()], gen};
   v << storeb{gen, getRDSHandleGenNumberAddr(ch)};
@@ -536,6 +769,77 @@ void markRDSHandleInitialized(Vout& v, Vreg ch) {
   doMarkRDSHandleInitialized(v, ch);
 }
 
+void markRDSAccess(Vout& v, rds::Handle ch) {
+  if (!rds::shouldProfileAccesses()) return;
+  auto const& vunit = v.unit();
+  if (vunit.context && !isProfiling(vunit.context->kind)) return;
+  auto const profile = rds::profileForHandle(ch);
+  if (profile == rds::kUninitHandle) return;
+  v << incqm{rvmtl()[profile], v.makeReg()};
+}
+
+void markRDSAccess(Vout& v, Vreg ch) {
+  if (!rds::shouldProfileAccesses()) return;
+  auto const& vunit = v.unit();
+  if (vunit.context && !isProfiling(vunit.context->kind)) return;
+  v << vcall{
+    CallSpec::direct(rds::markAccess),
+    v.makeVcallArgs({{ch}}),
+    v.makeTuple({}),
+    Fixup::none()
+  };
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 
-}}
+int offsetToLocalType(int id) {
+  return TVOFF(m_type) - cellsToBytes(id + 1);
+}
+int offsetToLocalData(int id) {
+  return TVOFF(m_data) - cellsToBytes(id + 1);
+}
+
+Vptr ptrToLocalType(Vreg fp, int id) {
+  return fp[offsetToLocalType(id)];
+}
+Vptr ptrToLocalData(Vreg fp, int id) {
+  return fp[offsetToLocalData(id)];
+}
+
+void nextLocal(Vout& v,
+               Vreg typeIn,
+               Vreg dataIn,
+               Vreg typeOut,
+               Vreg dataOut,
+               unsigned distance) {
+  v << subqi{(int32_t)(sizeof(TypedValue) * distance), typeIn, typeOut,
+      v.makeReg()};
+  v << subqi{(int32_t)(sizeof(TypedValue) * distance), dataIn, dataOut,
+      v.makeReg()};
+}
+
+void prevLocal(Vout& v,
+               Vreg typeIn,
+               Vreg dataIn,
+               Vreg typeOut,
+               Vreg dataOut) {
+  v << addqi{(int32_t)sizeof(TypedValue), typeIn, typeOut, v.makeReg()};
+  v << addqi{(int32_t)sizeof(TypedValue), dataIn, dataOut, v.makeReg()};
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+uint64_t auxToMask(AuxUnion aux) {
+  if (!aux.u_raw) return 0;
+  if (aux.u_raw == static_cast<uint32_t>(-1)) {
+    return static_cast<uint64_t>(-1) <<
+      std::numeric_limits<
+        std::make_unsigned<data_type_t>::type
+      >::digits;
+  }
+  return uint64_t{aux.u_raw} << 32;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+}

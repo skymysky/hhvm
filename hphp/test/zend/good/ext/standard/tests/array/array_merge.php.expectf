@@ -2,30 +2,30 @@
 
 --- Iteration 0 ---
 -- Inner iteration 0 of Iteration 0 --
-Array
+Dict
 (
 )
 
 -- Inner iteration 1 of Iteration 0 --
-Array
+Dict
 (
     [0] => string
 )
 
 -- Inner iteration 2 of Iteration 0 --
-Array
+Dict
 (
     [] => string
 )
 
 -- Inner iteration 3 of Iteration 0 --
-Array
+Dict
 (
     [0] => 12
 )
 
 -- Inner iteration 4 of Iteration 0 --
-Array
+Dict
 (
     [a] => 1
     [b] => string
@@ -34,21 +34,22 @@ Array
 )
 
 -- Inner iteration 5 of Iteration 0 --
-Array
+Dict
 (
     [0] => 1
-    [1] => string
+    [1] => -2.344
+    [3] => string
     [2] => 
-    [3] => -2.344
+    [2] => -2.344
 )
 
 -- Inner iteration 6 of Iteration 0 --
-Array
+Dict
 (
     [0] => 
     [1] => Hi
     [string] => hello
-    [2] => Array
+    [2] => Dict
         (
             [] => World
             [-2.34] => a
@@ -60,34 +61,34 @@ Array
 
 --- Iteration 1 ---
 -- Inner iteration 0 of Iteration 1 --
-Array
+Dict
 (
     [0] => string
 )
 
 -- Inner iteration 1 of Iteration 1 --
-Array
+Dict
 (
     [0] => string
     [1] => string
 )
 
 -- Inner iteration 2 of Iteration 1 --
-Array
+Dict
 (
     [0] => string
     [] => string
 )
 
 -- Inner iteration 3 of Iteration 1 --
-Array
+Dict
 (
     [0] => string
     [1] => 12
 )
 
 -- Inner iteration 4 of Iteration 1 --
-Array
+Dict
 (
     [0] => string
     [a] => 1
@@ -97,23 +98,24 @@ Array
 )
 
 -- Inner iteration 5 of Iteration 1 --
-Array
+Dict
 (
     [0] => string
     [1] => 1
-    [2] => string
-    [3] => 
-    [4] => -2.344
+    [2] => -2.344
+    [3] => string
+    [2] => 
+    [3] => -2.344
 )
 
 -- Inner iteration 6 of Iteration 1 --
-Array
+Dict
 (
     [0] => string
     [1] => 
     [2] => Hi
     [string] => hello
-    [3] => Array
+    [3] => Dict
         (
             [] => World
             [-2.34] => a
@@ -125,33 +127,33 @@ Array
 
 --- Iteration 2 ---
 -- Inner iteration 0 of Iteration 2 --
-Array
+Dict
 (
     [] => string
 )
 
 -- Inner iteration 1 of Iteration 2 --
-Array
+Dict
 (
     [] => string
     [0] => string
 )
 
 -- Inner iteration 2 of Iteration 2 --
-Array
+Dict
 (
     [] => string
 )
 
 -- Inner iteration 3 of Iteration 2 --
-Array
+Dict
 (
     [] => string
     [0] => 12
 )
 
 -- Inner iteration 4 of Iteration 2 --
-Array
+Dict
 (
     [] => string
     [a] => 1
@@ -161,23 +163,24 @@ Array
 )
 
 -- Inner iteration 5 of Iteration 2 --
-Array
+Dict
 (
     [] => string
     [0] => 1
-    [1] => string
+    [1] => -2.344
+    [3] => string
     [2] => 
-    [3] => -2.344
+    [2] => -2.344
 )
 
 -- Inner iteration 6 of Iteration 2 --
-Array
+Dict
 (
     [] => string
     [0] => 
     [1] => Hi
     [string] => hello
-    [2] => Array
+    [2] => Dict
         (
             [] => World
             [-2.34] => a
@@ -189,34 +192,34 @@ Array
 
 --- Iteration 3 ---
 -- Inner iteration 0 of Iteration 3 --
-Array
+Dict
 (
     [0] => 12
 )
 
 -- Inner iteration 1 of Iteration 3 --
-Array
+Dict
 (
     [0] => 12
     [1] => string
 )
 
 -- Inner iteration 2 of Iteration 3 --
-Array
+Dict
 (
     [0] => 12
     [] => string
 )
 
 -- Inner iteration 3 of Iteration 3 --
-Array
+Dict
 (
     [0] => 12
     [1] => 12
 )
 
 -- Inner iteration 4 of Iteration 3 --
-Array
+Dict
 (
     [0] => 12
     [a] => 1
@@ -226,23 +229,24 @@ Array
 )
 
 -- Inner iteration 5 of Iteration 3 --
-Array
+Dict
 (
     [0] => 12
     [1] => 1
-    [2] => string
-    [3] => 
-    [4] => -2.344
+    [2] => -2.344
+    [3] => string
+    [2] => 
+    [3] => -2.344
 )
 
 -- Inner iteration 6 of Iteration 3 --
-Array
+Dict
 (
     [0] => 12
     [1] => 
     [2] => Hi
     [string] => hello
-    [3] => Array
+    [3] => Dict
         (
             [] => World
             [-2.34] => a
@@ -254,7 +258,7 @@ Array
 
 --- Iteration 4 ---
 -- Inner iteration 0 of Iteration 4 --
-Array
+Dict
 (
     [a] => 1
     [b] => string
@@ -263,7 +267,7 @@ Array
 )
 
 -- Inner iteration 1 of Iteration 4 --
-Array
+Dict
 (
     [a] => 1
     [b] => string
@@ -273,7 +277,7 @@ Array
 )
 
 -- Inner iteration 2 of Iteration 4 --
-Array
+Dict
 (
     [a] => 1
     [b] => string
@@ -283,7 +287,7 @@ Array
 )
 
 -- Inner iteration 3 of Iteration 4 --
-Array
+Dict
 (
     [a] => 1
     [b] => string
@@ -293,7 +297,7 @@ Array
 )
 
 -- Inner iteration 4 of Iteration 4 --
-Array
+Dict
 (
     [a] => 1
     [b] => string
@@ -302,20 +306,21 @@ Array
 )
 
 -- Inner iteration 5 of Iteration 4 --
-Array
+Dict
 (
     [a] => 1
     [b] => string
     [c] => 
     [d] => -2.344
     [0] => 1
-    [1] => string
+    [1] => -2.344
+    [3] => string
     [2] => 
-    [3] => -2.344
+    [2] => -2.344
 )
 
 -- Inner iteration 6 of Iteration 4 --
-Array
+Dict
 (
     [a] => 1
     [b] => string
@@ -324,7 +329,7 @@ Array
     [0] => 
     [1] => Hi
     [string] => hello
-    [2] => Array
+    [2] => Dict
         (
             [] => World
             [-2.34] => a
@@ -336,7 +341,7 @@ Array
 
 --- Iteration 5 ---
 -- Inner iteration 0 of Iteration 5 --
-Array
+Dict
 (
     [0] => 1
     [1] => string
@@ -345,7 +350,7 @@ Array
 )
 
 -- Inner iteration 1 of Iteration 5 --
-Array
+Dict
 (
     [0] => 1
     [1] => string
@@ -355,7 +360,7 @@ Array
 )
 
 -- Inner iteration 2 of Iteration 5 --
-Array
+Dict
 (
     [0] => 1
     [1] => string
@@ -365,7 +370,7 @@ Array
 )
 
 -- Inner iteration 3 of Iteration 5 --
-Array
+Dict
 (
     [0] => 1
     [1] => string
@@ -375,7 +380,7 @@ Array
 )
 
 -- Inner iteration 4 of Iteration 5 --
-Array
+Dict
 (
     [0] => 1
     [1] => string
@@ -388,20 +393,21 @@ Array
 )
 
 -- Inner iteration 5 of Iteration 5 --
-Array
+Dict
 (
     [0] => 1
     [1] => string
     [2] => 
     [3] => -2.344
     [4] => 1
-    [5] => string
-    [6] => 
-    [7] => -2.344
+    [5] => -2.344
+    [3] => string
+    [2] => 
+    [6] => -2.344
 )
 
 -- Inner iteration 6 of Iteration 5 --
-Array
+Dict
 (
     [0] => 1
     [1] => string
@@ -410,7 +416,7 @@ Array
     [4] => 
     [5] => Hi
     [string] => hello
-    [6] => Array
+    [6] => Dict
         (
             [] => World
             [-2.34] => a
@@ -422,12 +428,12 @@ Array
 
 --- Iteration 6 ---
 -- Inner iteration 0 of Iteration 6 --
-Array
+Dict
 (
     [0] => 
     [1] => Hi
     [string] => hello
-    [2] => Array
+    [2] => Dict
         (
             [] => World
             [-2.34] => a
@@ -437,12 +443,12 @@ Array
 )
 
 -- Inner iteration 1 of Iteration 6 --
-Array
+Dict
 (
     [0] => 
     [1] => Hi
     [string] => hello
-    [2] => Array
+    [2] => Dict
         (
             [] => World
             [-2.34] => a
@@ -453,12 +459,12 @@ Array
 )
 
 -- Inner iteration 2 of Iteration 6 --
-Array
+Dict
 (
     [0] => 
     [1] => Hi
     [string] => hello
-    [2] => Array
+    [2] => Dict
         (
             [] => World
             [-2.34] => a
@@ -469,12 +475,12 @@ Array
 )
 
 -- Inner iteration 3 of Iteration 6 --
-Array
+Dict
 (
     [0] => 
     [1] => Hi
     [string] => hello
-    [2] => Array
+    [2] => Dict
         (
             [] => World
             [-2.34] => a
@@ -485,12 +491,12 @@ Array
 )
 
 -- Inner iteration 4 of Iteration 6 --
-Array
+Dict
 (
     [0] => 
     [1] => Hi
     [string] => hello
-    [2] => Array
+    [2] => Dict
         (
             [] => World
             [-2.34] => a
@@ -504,12 +510,12 @@ Array
 )
 
 -- Inner iteration 5 of Iteration 6 --
-Array
+Dict
 (
     [0] => 
     [1] => Hi
     [string] => hello
-    [2] => Array
+    [2] => Dict
         (
             [] => World
             [-2.34] => a
@@ -517,18 +523,19 @@ Array
         )
 
     [3] => 1
-    [4] => string
-    [5] => 
-    [6] => -2.344
+    [4] => -2.344
+    [3] => string
+    [2] => 
+    [5] => -2.344
 )
 
 -- Inner iteration 6 of Iteration 6 --
-Array
+Dict
 (
     [0] => 
     [1] => Hi
     [string] => hello
-    [2] => Array
+    [2] => Dict
         (
             [] => World
             [-2.34] => a
@@ -537,7 +544,7 @@ Array
 
     [3] => 
     [4] => Hi
-    [5] => Array
+    [5] => Dict
         (
             [] => World
             [-2.34] => a
@@ -547,14 +554,16 @@ Array
 )
 
 *** Testing array_merge() with three or more arrays ***
-array(12) {
+dict(13) {
   [0]=>
   int(1)
   [1]=>
+  float(-2.344)
+  ["3"]=>
   string(6) "string"
-  [2]=>
+  ["2"]=>
   NULL
-  [3]=>
+  [2]=>
   float(-2.344)
   ["a"]=>
   int(1)
@@ -564,42 +573,44 @@ array(12) {
   NULL
   ["d"]=>
   float(-2.344)
-  [4]=>
+  [3]=>
   NULL
-  [5]=>
+  [4]=>
   string(2) "Hi"
   ["string"]=>
   string(5) "hello"
-  [6]=>
-  array(3) {
+  [5]=>
+  dict(3) {
     [""]=>
     string(5) "World"
     ["-2.34"]=>
     string(1) "a"
-    [0]=>
+    ["0"]=>
     string(1) "b"
   }
 }
-array(6) {
+dict(7) {
   [0]=>
   int(1)
   [1]=>
-  string(6) "string"
-  [2]=>
-  NULL
-  [3]=>
   float(-2.344)
-  [4]=>
+  ["3"]=>
+  string(6) "string"
+  ["2"]=>
+  NULL
+  [2]=>
+  float(-2.344)
+  [3]=>
   string(12) "array on fly"
   ["nullarray"]=>
-  array(0) {
+  vec(0) {
   }
 }
 
 *** Testing single array argument ***
-array(0) {
+dict(0) {
 }
-array(4) {
+dict(4) {
   ["a"]=>
   int(1)
   ["b"]=>
@@ -609,7 +620,7 @@ array(4) {
   ["d"]=>
   float(-2.344)
 }
-array(4) {
+dict(4) {
   [0]=>
   int(1)
   [1]=>
@@ -619,7 +630,7 @@ array(4) {
   [3]=>
   float(-2.344)
 }
-array(4) {
+dict(4) {
   [0]=>
   NULL
   [1]=>
@@ -627,46 +638,23 @@ array(4) {
   ["string"]=>
   string(5) "hello"
   [2]=>
-  array(3) {
+  dict(3) {
     [""]=>
     string(5) "World"
     ["-2.34"]=>
     string(1) "a"
-    [0]=>
+    ["0"]=>
     string(1) "b"
   }
 }
 
-*** Testing array_merge() with typecasting non-array to array ***
-array(7) {
-  ["a"]=>
-  int(1)
-  ["b"]=>
-  string(6) "string"
-  ["c"]=>
-  NULL
-  ["d"]=>
-  float(-2.344)
-  [0]=>
-  string(5) "type1"
-  [1]=>
-  int(10)
-  [2]=>
-  float(12.34)
-}
-
 *** Testing error conditions ***
-Warning: %s
+Warning: array_merge() expects at least 1 positional parameter, 0 given in %s/test/zend/good/ext/standard/tests/array/array_merge.php on line 75
+
+Warning: Invalid operand type was used: %S expects array(s) or collection(s) in %s/test/zend/good/ext/standard/tests/array/array_merge.php on line 76
 NULL
 
-Warning: %s
+Warning: Invalid operand type was used: %S expects array(s) in %s/test/zend/good/ext/standard/tests/array/array_merge.php on line 77
 NULL
-
-Warning: %s
-NULL
-
-Notice: %s
-
-Warning: %s
-NULL
+string(24) "Undefined variable: arr4"
 Done

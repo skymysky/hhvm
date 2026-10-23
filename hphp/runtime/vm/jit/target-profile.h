@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2013 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-present Facebook, Inc. (http://www.facebook.com)  |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -14,19 +14,23 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_JIT_TARGET_PROFILE_H_
-#define incl_HPHP_JIT_TARGET_PROFILE_H_
+#pragma once
 
 #include "hphp/runtime/base/rds.h"
-#include "hphp/runtime/base/runtime-option.h"
 #include "hphp/runtime/base/types.h"
 
 #include "hphp/runtime/vm/jit/bc-marker.h"
+#include "hphp/runtime/vm/jit/print.h"
+#include "hphp/runtime/vm/jit/prof-data.h"
 #include "hphp/runtime/vm/jit/translator.h"
 #include "hphp/runtime/vm/jit/types.h"
 
 #include "hphp/util/assertions.h"
 
+#include <folly/ScopeGuard.h>
+
+#include <cstdlib>
+#include <new>
 #include <utility>
 
 namespace HPHP {
@@ -39,7 +43,7 @@ namespace jit {
 ///////////////////////////////////////////////////////////////////////////////
 
 namespace detail {
-void addTargetProfileInfo(const rds::Profile<void>& key,
+void addTargetProfileInfo(const rds::Profile& key,
                           const std::string& dbgInfo);
 
 template<typename T>
@@ -105,7 +109,7 @@ auto call_tostring(const T& t, uint64_t size) -> decltype(auto) {
  * is the actual size allocated in rds (see SwitchProfile for an
  * example of a variably sized profiler).
  *
- * rds::Profile<MyType> also needs to be added to rds::Symbol.
+ * MyType also needs to be added to the RDS_PROFILE_SYMBOLS macro.
  *
  * If the MyType contains pointers, or other data that needs updating
  * when serializing/deserializing, it should also define
@@ -118,27 +122,55 @@ auto call_tostring(const T& t, uint64_t size) -> decltype(auto) {
  */
 template<class T>
 struct TargetProfile {
-  TargetProfile(TransID profTransID,
+  TargetProfile(const TransIDSet& profTransIDs,
                 TransKind kind,
-                Offset bcOff,
+                SrcKey sk,
                 const StringData* name,
                 size_t extraSize = 0)
-    : m_link(createLink(profTransID, kind, bcOff, name, extraSize))
-    , m_kind(kind)
-    , m_key{profTransID, bcOff, name}
+    : TargetProfile(profTransIDs, kind, bcOffForProfileKey(sk), name, extraSize)
   {}
 
   TargetProfile(const TransContext& context,
-                BCMarker marker,
+                const BCMarker& marker,
                 const StringData* name,
                 size_t extraSize = 0)
-    : TargetProfile(context.kind == TransKind::Profile ? context.transID
-                                                       : marker.profTransID(),
+    : TargetProfile(isProfiling(context.kind)
+                      ? context.transIDs : marker.profTransIDs(),
                     context.kind,
-                    marker.bcOff(),
+                    marker.sk(),
                     name,
                     extraSize)
   {}
+
+  static TargetProfile deserialize(const TransIDSet& profTransIDs,
+                                   TransKind kind,
+                                   Offset bcOff,
+                                   const StringData* name,
+                                   size_t extraSize) {
+    return TargetProfile{profTransIDs, kind, bcOff, name, extraSize};
+  }
+
+  /*
+   * Invoke f with a temporary T{}, including zeroed trailing storage for a
+   * variable-sized profile. The reference is valid only during the callback.
+   * Returns false if the temporary allocation fails.
+   */
+  template<class F>
+  static bool withTemporary(uint32_t size, F&& f) {
+    assertx(size >= sizeof(T));
+    if (size == sizeof(T)) {
+      T out{};
+      f(out);
+    } else {
+      auto const memory = std::calloc(1, size);
+      if (!memory) return false;
+      SCOPE_EXIT { std::free(memory); };
+      auto& out = *new (memory) T{};
+      SCOPE_EXIT { out.~T(); };
+      f(out);
+    }
+    return true;
+  }
 
   /*
    * Calls T::reduce to fold the data from each local RDS slot.
@@ -157,7 +189,9 @@ struct TargetProfile {
   /*
    * Access the data we collected during profiling.
    *
-   * It calls reduce to populate out (see description above).
+   * If any imported key matches, it is used exclusively. Otherwise data is
+   * reduced from live RDS slots, but only when the imported store allows a
+   * live fallback; jumpstart treats its import as exhaustive.
    *
    * Most callers want the second overload, for simplicity. This
    * version is just for variable-sized T (and has the same
@@ -167,15 +201,37 @@ struct TargetProfile {
    */
   void data(T& out, uint32_t size) const {
     assertx(optimizing());
-    reduce(out, handle(), size);
-    if (RuntimeOption::EvalDumpTargetProfiles) {
-      detail::addTargetProfileInfo(m_key, detail::call_tostring(out, size));
+
+    auto const profiles = profDataTargetProfile();
+
+    auto foundImported = false;
+    if (profiles) {
+      for (auto const& key : m_keys) {
+        if (auto const value = profiles->get<T>(key)) {
+          detail::call_reduce(out, *value, size);
+          foundImported = true;
+        }
+      }
+    }
+
+    if (!foundImported && (!profiles || profiles->liveFallback())) {
+      for (auto const& link : getLinks()) {
+        if (link.bound()) {
+          reduce(out, link.handle(), size);
+        }
+      }
+    }
+
+    if (Cfg::Eval::DumpTargetProfiles) {
+      for (auto const& key : m_keys) {
+        detail::addTargetProfileInfo(key, detail::call_tostring(out, size));
+      }
     }
   }
 
-  T data(uint32_t size = sizeof(T)) const {
+  T data() const {
     auto accum = T{};
-    data(accum, size);
+    data(accum, sizeof(T));
     return accum;
   }
 
@@ -186,58 +242,152 @@ struct TargetProfile {
    * attached for some reason.).
    */
   bool profiling() const {
-    return m_kind == TransKind::Profile;
-  }
-  bool optimizing() const {
-    return m_kind == TransKind::Optimize && m_link.bound();
+    return isProfiling(m_kind);
   }
 
   /*
-   * Access the handle to the link.  You generally should only need to do this
-   * if profiling().
+   * Whether there is any data to optimize from, imported or live. Live slots
+   * are consulted in addition to imported keys, subject to the same
+   * liveFallback rule as data().
    */
-  rds::Handle handle() const { return m_link.handle(); }
-  T& value() const { return *m_link; }
+  bool optimizing() const {
+    if (!isOptimized(m_kind)) return false;
+
+    auto const profiles = profDataTargetProfile();
+
+    if (profiles) {
+      for (auto const& key : m_keys) {
+        if (profiles->get<T>(key)) return true;
+      }
+    }
+
+    if (!profiles || profiles->liveFallback()) {
+      for (auto const& link : getLinks()) {
+        if (link.bound()) return true;
+      }
+    }
+
+    return false;
+  }
+
+  /*
+   * Access the handle to the link.  You can only do this if profiling().
+   */
+  rds::Handle handle() const {
+    assertx(profiling());
+    assertx(getLinks().size() == 1);
+    return getLinks().front().handle();
+  }
+  T& value() const {
+    assertx(profiling());
+    assertx(getLinks().size() == 1);
+    return *getLinks().front();
+  }
 
 private:
+  TargetProfile(const TransIDSet& profTransIDs,
+                TransKind kind,
+                Offset bcOff,
+                const StringData* name,
+                size_t extraSize)
+    : m_kind(kind)
+    , m_keys(createKeys(profTransIDs, bcOff, name))
+    , m_extraSize(extraSize)
+  {}
+
+  static constexpr Offset kPrologueOffset = -1;
+  static constexpr Offset kFuncEntryOffset = -2;
+  static constexpr Offset kNamedParamsFuncEntryOffset = -3;
+
+  static Offset bcOffForProfileKey(SrcKey sk) {
+    // Use a placeholder value for prologues and function entries, as they
+    // are not part of a bytecode at any offset. Profiling of prologues for
+    // different number of arguments is still differentiated by profTransID.
+    if (sk.prologue()) return kPrologueOffset;
+    if (sk.namedParamsFuncEntry()) return kNamedParamsFuncEntryOffset;
+    if (sk.funcEntry()) return kFuncEntryOffset;
+    return sk.offset();
+  }
+
   static rds::Link<T, rds::Mode::Local>
   createLink(TransID profTransID,
              TransKind kind,
              Offset bcOff,
              const StringData* name,
              size_t extraSize) {
-    auto const rdsKey = rds::Profile<T>{profTransID, bcOff, name};
+    auto const rdsKey = rds::Profile((T*)nullptr, profTransID, bcOff, name);
 
     switch (kind) {
     case TransKind::Profile:
+    case TransKind::ProfPrologue:
       return rds::bind<T, rds::Mode::Local>(rdsKey, extraSize);
 
     case TransKind::Optimize:
+    case TransKind::OptPrologue:
       if (isValidTransID(profTransID)) {
         return rds::attach<T, rds::Mode::Local>(rdsKey);
       }
+      [[fallthrough]];
 
-      // fallthrough
     case TransKind::Anchor:
     case TransKind::Interp:
     case TransKind::Live:
     case TransKind::LivePrologue:
-    case TransKind::ProfPrologue:
-    case TransKind::OptPrologue:
     case TransKind::Invalid:
       return rds::Link<T, rds::Mode::Local>{};
     }
     not_reached();
   }
 
+  static jit::vector<rds::Link<T, rds::Mode::Local>>
+  createLinks(const jit::vector<rds::Profile>& keys,
+              TransKind kind,
+              size_t extraSize) {
+    assertx(!keys.empty());
+    jit::vector<rds::Link<T, rds::Mode::Local>> links;
+    links.reserve(keys.size());
+    for (auto key : keys) {
+      links.push_back(createLink(key.transId, kind, key.bcOff, key.name, extraSize));
+    }
+    return links;
+  }
+
+  static jit::vector<rds::Profile>
+  createKeys(const TransIDSet& profTransIDs,
+             Offset bcOff,
+             const StringData* name) {
+    auto const size = profTransIDs.size();
+    // NB: size can be zero during tracelet formation. In this case, create a
+    // dummy key corresponding to kInvalidTransID.
+    if (size == 0) {
+      jit::vector<rds::Profile> keys;
+      keys.push_back({(T*)nullptr, kInvalidTransID, bcOff, name});
+      return keys;
+    }
+    jit::vector<rds::Profile> keys;
+    keys.reserve(size);
+    for (auto tid : profTransIDs) {
+      keys.push_back({(T*)nullptr, tid, bcOff, name});
+    }
+    return keys;
+  }
+
+  jit::vector<rds::Link<T, rds::Mode::Local>> getLinks() const {
+    if (!m_links.empty()) {
+      return m_links;
+    }
+
+    m_links = createLinks(m_keys, m_kind, m_extraSize);
+    return m_links;
+  }
+
 private:
-  rds::Link<T, rds::Mode::Local> const m_link;
-  TransKind const m_kind;
-  rds::Profile<void> const m_key;
+  const TransKind m_kind;
+  mutable jit::vector<rds::Link<T, rds::Mode::Local>> m_links = {};
+  const jit::vector<rds::Profile> m_keys;
+  const uint32_t m_extraSize;
 };
 
 ///////////////////////////////////////////////////////////////////////////////
 
 }}
-
-#endif

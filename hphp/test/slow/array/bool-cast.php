@@ -1,11 +1,14 @@
-<?php
+<?hh
 
 
-function f($a) {
+function f($a) :mixed{
   var_dump((bool)$a);
 }
 
-f($GLOBALS);
-f(array('a' => 'b'));
-f(array('a'));
-f(array());
+
+<<__EntryPoint>>
+function main_bool_cast() :mixed{
+f(dict['a' => 'b']);
+f(vec['a']);
+f(vec[]);
+}

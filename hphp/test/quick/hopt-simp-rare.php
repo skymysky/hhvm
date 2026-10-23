@@ -1,18 +1,20 @@
 <?hh
 
-function f1($x) {
-  return true < $x;
+function f1(mixed $x) :mixed{
+  return HH\Lib\Legacy_FIXME\lt(true, $x);
 }
-var_dump(f1(4));
 
-function f2($x) {
+function f2(mixed $x) :mixed{
   return "0.0" == $x;
 }
-var_dump(f2(false));
 
-function f3($x) {
-  $y = array(1);
+function f3(mixed $x) :mixed{
+  $y = vec[1];
   return $x == $y;
 }
-var_dump(f3(3));
 
+<<__EntryPoint>> function main(): void {
+var_dump(f1(4));
+var_dump(f2(false));
+var_dump(f3(3));
+}

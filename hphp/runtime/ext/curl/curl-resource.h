@@ -1,11 +1,9 @@
-#ifndef incl_HPHP_CURL_RESOURCE_H
-#define incl_HPHP_CURL_RESOURCE_H
+#pragma once
 
 #include "hphp/runtime/base/file.h"
 #include "hphp/runtime/base/req-optional.h"
 #include "hphp/runtime/base/string-buffer.h"
 #include "hphp/runtime/ext/extension.h"
-#include "hphp/runtime/ext/curl/curl-pool.h"
 
 #include "hphp/util/type-scan.h"
 
@@ -15,16 +13,17 @@ namespace HPHP {
 /////////////////////////////////////////////////////////////////////////////
 // CurlResource
 
+struct CurlMultiResource;
 
 struct CurlResource : SweepableResourceData {
-  using ExceptionType = req::Optional<boost::variant<Object,Exception*>>;
+  using ExceptionType = req::Optional<std::variant<Object,Exception*>>;
 
   struct WriteHandler {
     int                method{0};
     Variant            callback;
     req::ptr<File>     fp;
     StringBuffer       buf;
-    String             content;
+    OptString             content;
     int                type{0};
   };
 
@@ -50,12 +49,11 @@ struct CurlResource : SweepableResourceData {
   };
 
   CLASSNAME_IS("curl")
-  const String& o_getClassNameHook() const override { return classnameof(); }
+  const OptString& o_getClassNameHook() const override { return classnameof(); }
   DECLARE_RESOURCE_ALLOCATION(CurlResource)
   bool isInvalid() const override { return !m_cp; }
 
-  explicit CurlResource(const String& url, CurlHandlePoolPtr pool = nullptr);
-  explicit CurlResource(req::ptr<CurlResource> src);
+  explicit CurlResource(const OptString& url);
   ~CurlResource() { close(); }
 
   void closeForSweep();
@@ -64,31 +62,32 @@ struct CurlResource : SweepableResourceData {
   void reset();
 
   Variant execute();
-  String getUrl() { return m_url; }
-  String getHeader() { return m_header; }
-  String getContents();
+  OptString getUrl() { return m_url; }
+  OptString getHeader() { return m_header; }
+  OptString getContents();
 
   bool setOption(long option, const Variant& value);
   Variant getOption(long option);
 
   int getError() { return m_error_no; }
-  String getErrorString() { return String(m_error_str, CopyString); }
+  OptString getErrorString() { return OptString(m_error_str, CopyString); }
 
-  CURL *get(bool nullOkay = false);
+  CURL *get();
 
   void check_exception();
   ExceptionType getAndClearException() { return std::move(m_exception); }
   static bool isPhpException(const ExceptionType& e) {
-    return e && boost::get<Object>(&e.value()) != nullptr;
+    return e && std::get_if<Object>(&e.value()) != nullptr;
   }
   static Object getPhpException(const ExceptionType& e) {
     assertx(e && isPhpException(e));
-    return boost::get<Object>(*e);
+    return std::get<Object>(*e);
   }
   static Exception* getCppException(const ExceptionType& e) {
     assertx(e && !isPhpException(e));
-    return boost::get<Exception*>(*e);
+    return std::get<Exception*>(*e);
   }
+  void prepare();
 
  private:
   void setDefaultOptions();
@@ -100,7 +99,7 @@ struct CurlResource : SweepableResourceData {
   bool setLongOption(long option, long value);
   static bool isStringOption(long option);
   static bool isStringFilePathOption(long option);
-  bool setStringOption(long option, const String& value);
+  bool setStringOption(long option, const OptString& value);
   static bool isNullableStringOption(long option);
   bool setNullableStringOption(long option, const Variant& value);
   bool setPostFieldsOption(const Variant& value);
@@ -110,6 +109,8 @@ struct CurlResource : SweepableResourceData {
   bool setStringListOption(long option, const Variant& value);
   static bool isNonCurlOption(long option);
   bool setNonCurlOption(long option, const Variant& value);
+  static bool isBlobOption(long option);
+  bool setBlobOption(long option, const OptString& value);
 
   void handle_exception();
   static size_t curl_read(char *data, size_t size, size_t nmemb, void *ctx);
@@ -125,8 +126,15 @@ struct CurlResource : SweepableResourceData {
   static CURLcode ssl_ctx_callback(CURL *curl, void *sslctx, void *parm);
 
  private:
+  friend struct CurlMultiResource;
+
+  bool useCertCache() const;
+  OptString cainfo(bool proxy) const;
+
   CURL *m_cp;
   TYPE_SCAN_IGNORE_FIELD(m_cp);
+  CurlMultiResource* m_multi;
+  TYPE_SCAN_IGNORE_FIELD(m_multi);
   ExceptionType m_exception;
 
   char m_error_str[CURL_ERROR_SIZE + 1];
@@ -134,8 +142,9 @@ struct CurlResource : SweepableResourceData {
 
   req::shared_ptr<ToFree> m_to_free;
 
-  String m_url;
-  String m_header;
+  OptString m_url;
+  OptString m_cainfo;
+  OptString m_header;
   Array  m_opts;
 
   WriteHandler m_write;
@@ -147,11 +156,7 @@ struct CurlResource : SweepableResourceData {
   bool m_in_exec{false};
   bool m_emptyPost;
   bool m_safeUpload;
-  CurlHandlePoolPtr m_connPool;
-  PooledCurlHandle* m_pooledHandle;
-  friend struct CurlMultiResource;
 };
 
 /////////////////////////////////////////////////////////////////////////////
 }
-#endif

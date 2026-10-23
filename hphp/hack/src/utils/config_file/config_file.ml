@@ -1,4 +1,4 @@
-(**
+(*
  * Copyright (c) 2015, Facebook, Inc.
  * All rights reserved.
  *
@@ -7,75 +7,61 @@
  *
  *)
 
-open Hh_core
-open Sys_utils
+include Config_file_version
 
-type t = string SMap.t
+type t = Config_file_common.t
 
-let file_path_relative_to_repo_root = ".hhconfig"
+let file_path_relative_to_repo_root =
+  Config_file_common.file_path_relative_to_repo_root
 
-(*
- * Config file format:
- * # Some comment. Indicate by a pound sign at the start of a new line
- * key = a possibly space-separated value
- *)
-let parse_contents contents =
-  let lines = Str.split (Str.regexp "\n") contents in
-  List.fold_left lines ~f:begin fun acc line ->
-    if String.trim line = "" || (String.length line > 0 && line.[0] = '#')
-    then acc
-    else
-      let parts = Str.bounded_split (Str.regexp "=") line 2 in
-      match parts with
-      | [k; v] -> SMap.add (String.trim k) (String.trim v) acc
-      | [k] -> SMap.add (String.trim k) "" acc
-      | _ -> failwith "failed to parse config";
-  end ~init:SMap.empty
+let empty = Config_file_common.empty
 
-let parse fn =
-  let contents = try cat fn
-    with e ->
-      Hh_logger.exc ~prefix:".hhconfig deleted: " e;
-      Exit_status.(exit Hhconfig_deleted) in
-  let parsed = parse_contents contents in
-  let hash = Sha1.digest contents in
-  hash, parsed
+let print_to_stderr = Config_file_common.print_to_stderr
 
-module Getters = struct
+let apply_overrides = Config_file_common.apply_overrides
 
-  let string_opt key config =
-    SMap.get key config
+let parse_contents = Config_file_common.parse_contents
 
-  let string_ key ~default config =
-    Option.value (SMap.get key config) ~default
+module Getters = Config_file_common.Getters
 
-  let int_ key ~default config =
-    Option.value_map (SMap.get key config) ~default ~f:int_of_string
+let cat_packages_file (fn : string) =
+  if Disk.file_exists fn then (
+    try Sys_utils.cat fn with
+    | exn ->
+      let e = Exception.wrap exn in
+      Hh_logger.exception_ ~prefix:(Printf.sprintf "%s deleted: " fn) e;
+      ""
+  ) else
+    ""
 
-  let bool_ key ~default config =
-    Option.value_map (SMap.get key config) ~default ~f:bool_of_string
+let cat_hhconfig_file (fn : string) =
+  try Sys_utils.cat fn with
+  | exn ->
+    let e = Exception.wrap exn in
+    Hh_logger.exception_ ~prefix:".hhconfig deleted: " e;
+    Exit.exit Exit_status.Hhconfig_deleted
 
-  let string_list ~delim key ~default config =
-    Option.value_map (SMap.get key config) ~default ~f:(Str.split delim)
-  (*
-    Version aware toggling for boolean parameters:
-    take in either:
-    - a single boolean, true or false. Then this acts just like bool_
-    - a string list of version hashes, e.g.
-       use_watchman = 8a0f4290c3fd218988864e06b7dea3aaf447efaf, master
-      this would enable watchman for hack versions
-        8a0f4290c3fd218988864e06b7dea3aaf447efaf and master.
-      master is a special string to represent master in fbcode
-      (master's build revision is the empty string, but master is a lot \
-       cleaner to write)
-  *)
-  let bool_if_version key ~default config =
-      let versions = string_list ~delim:(Str.regexp ",")
-        key ~default:([string_of_bool default]) config in
-      match versions with
-      | ["true"] -> true
-      | ["false"] -> false
-      | x -> List.exists ~f:(fun s ->
-          let s = if s = "master" then "" else s in
-          s = Build_id.build_revision) x
+let parse_hhconfig (fn : string) : t =
+  let contents = cat_hhconfig_file fn in
+  Config_file_common.parse_contents contents
+
+let parse_local_config = Config_file_common.parse_local_config
+
+let of_list = Config_file_common.of_list
+
+let keys = Config_file_common.keys
+
+module Utils = struct
+  let parse_hhconfig_and_hh_conf_to_json
+      ~(root : Path.t) ~(server_local_config_path : string) =
+    let server_local_config = parse_local_config server_local_config_path in
+    let hh_config =
+      parse_local_config
+        (Path.to_string (Path.concat root file_path_relative_to_repo_root))
+    in
+    `Assoc
+      [
+        ("hh.conf", Config_file_common.to_json server_local_config);
+        ("hhconfig", Config_file_common.to_json hh_config);
+      ]
 end

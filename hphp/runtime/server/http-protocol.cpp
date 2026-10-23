@@ -15,22 +15,26 @@
 */
 #include "hphp/runtime/server/http-protocol.h"
 
-#include <map>
 #include <string>
 
 #include <folly/Conv.h>
 #include <folly/portability/SysTime.h>
 
 #include "hphp/util/arch.h"
+#include "hphp/util/configs/debug.h"
+#include "hphp/util/configs/eval.h"
+#include "hphp/util/configs/jit.h"
+#include "hphp/util/configs/log.h"
 #include "hphp/util/logger.h"
 #include "hphp/util/stack-trace.h"
 #include "hphp/util/text-util.h"
 
 #include "hphp/runtime/base/array-init.h"
+#include "hphp/runtime/base/array-iterator.h"
 #include "hphp/runtime/base/builtin-functions.h"
 #include "hphp/runtime/base/http-client.h"
+#include "hphp/runtime/base/php-globals.h"
 #include "hphp/runtime/base/program-functions.h"
-#include "hphp/runtime/base/request-injection-data.h"
 #include "hphp/runtime/base/runtime-option.h"
 #include "hphp/runtime/base/string-util.h"
 #include "hphp/runtime/base/zend-string.h"
@@ -43,12 +47,8 @@
 #include "hphp/runtime/server/transport.h"
 #include "hphp/runtime/server/upload.h"
 #include "hphp/runtime/server/virtual-host.h"
-#include "hphp/runtime/vm/globals-array.h"
 
 #define DEFAULT_POST_CONTENT_TYPE "application/x-www-form-urlencoded"
-
-using std::map;
-using std::string;
 
 namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
@@ -71,12 +71,6 @@ static bool read_all_post_data(Transport *transport,
   return false;
 }
 
-static void CopyParams(Array& dest, Array& src) {
-  for (ArrayIter iter(src); iter; ++iter) {
-    dest.set(iter.first(), iter.second());
-  }
-}
-
 ///////////////////////////////////////////////////////////////////////////////
 
 const VirtualHost *HttpProtocol::GetVirtualHost(Transport *transport) {
@@ -92,13 +86,11 @@ const VirtualHost *HttpProtocol::GetVirtualHost(Transport *transport) {
 }
 
 const StaticString
-  s_REQUEST_START_TIME("REQUEST_START_TIME"),
   s_HPHP("HPHP"),
   s_HHVM("HHVM"),
   s_HHVM_JIT("HHVM_JIT"),
   s_HHVM_ARCH("HHVM_ARCH"),
   s_HPHP_SERVER("HPHP_SERVER"),
-  s_HPHP_HOTPROFILER("HPHP_HOTPROFILER"),
   s_HTTP_HOST("HTTP_HOST"),
   s_CONTENT_TYPE("CONTENT_TYPE"),
   s_CONTENT_LENGTH("CONTENT_LENGTH"),
@@ -118,10 +110,7 @@ const StaticString
   s__SERVER("_SERVER"),
   s__GET("_GET"),
   s__POST("_POST"),
-  s__REQUEST("_REQUEST"),
-  s__SESSION("_SESSION"),
   s__ENV("_ENV"),
-  s__COOKIE("_COOKIE"),
   s_HTTP_RAW_POST_DATA("HTTP_RAW_POST_DATA"),
   s__FILES("_FILES"),
   s_GATEWAY_INTERFACE("GATEWAY_INTERFACE"),
@@ -139,8 +128,6 @@ const StaticString
   s_POST("POST"),
   s_HTTPS("HTTPS"),
   s_on("on"),
-  s_REQUEST_TIME("REQUEST_TIME"),
-  s_REQUEST_TIME_FLOAT("REQUEST_TIME_FLOAT"),
   s_QUERY_STRING("QUERY_STRING"),
   s_REMOTE_ADDR("REMOTE_ADDR"),
   s_REMOTE_HOST("REMOTE_HOST"),
@@ -152,99 +139,53 @@ const StaticString
   s_HTTP_("HTTP_"),
   s_forwardslash("/");
 
-static auto const s_arraysToClear = {
-  s__SERVER,
-  s__GET,
-  s__POST,
-  s__FILES,
-  s__REQUEST,
-  s__ENV,
-  s__COOKIE,
-};
-
-static auto const s_arraysToUnset = {
-  s__SESSION,
-};
-
 static void PrepareEnv(Array& env, Transport *transport) {
   // $_ENV
   process_env_variables(env);
   env.set(s_HPHP, 1);
   env.set(s_HHVM, 1);
-  if (RuntimeOption::EvalJit) {
+  if (Cfg::Jit::Enabled) {
     env.set(s_HHVM_JIT, 1);
   }
-  switch (arch()) {
-  case Arch::X64:
-    env.set(s_HHVM_ARCH, "x64");
-    break;
-  case Arch::ARM:
-    env.set(s_HHVM_ARCH, "arm");
-    break;
-  case Arch::PPC64:
-    env.set(s_HHVM_ARCH, "ppc64");
-    break;
-  }
+  ARCH_MATCH(
+    [&](arch::X64) {
+      env.set(s_HHVM_ARCH, "x64");
+    },
+    [&](arch::ARM) {
+      env.set(s_HHVM_ARCH, "arm");
+    }
+  );
 
-  bool isServer =
-    RuntimeOption::ServerExecutionMode() && !is_cli_mode();
-  if (isServer) {
+  if (!is_any_cli_mode()) {
     env.set(s_HPHP_SERVER, 1);
-    env.set(s_HPHP_HOTPROFILER, 1);
   }
 
   // Do this last so it can overwrite all the previous settings
   HeaderMap transportParams;
   transport->getTransportParams(transportParams);
   for (auto const& header : transportParams) {
-    String key(header.first);
-    String value(header.second.back());
+    OptString key(header.first);
+    OptString value(header.second.back());
     g_context->setenv(key, value);
-    env.set(key, value);
+    env.set(env.convertKey<IntishCast::Cast>(key),
+            make_tv<KindOfString>(value.get()));
   }
 }
 
-static void StartRequest(Array& server) {
-  server.set(s_REQUEST_START_TIME, time(nullptr));
-  time_t now;
-  struct timeval tp = {0};
-  double now_double;
-  if (!gettimeofday(&tp, nullptr)) {
-    now_double = (double)(tp.tv_sec + tp.tv_usec / 1000000.00);
-    now = tp.tv_sec;
-  } else {
-    now = time(nullptr);
-    now_double = (double)now;
-  }
-  server.set(s_REQUEST_TIME, now);
-  server.set(s_REQUEST_TIME_FLOAT, now_double);
-}
-
-/**
- * PHP has "EGPCS" processing order of these global variables, and this
- * order is important in preparing $_REQUEST that needs to know which to
- * overwrite what when name happens to be the same.
- */
 void HttpProtocol::PrepareSystemVariables(Transport *transport,
-                                          const RequestURI &r,
-                                          const SourceRootInfo &sri) {
-  SuppressHackArrCompatNotices suppress;
-
+                                          const RequestURI &r) {
   auto const vhost = VirtualHost::GetCurrent();
-  auto const g = get_global_variables()->asArrayData();
-  Variant emptyArr(staticEmptyArray());
-  for (auto& key : s_arraysToClear) {
-    g->remove(key.get(), false);
-    g->set(key.get(), emptyArr, false);
-  }
-  for (auto& key : s_arraysToUnset) {
-    g->remove(key.get(), false);
-  }
+  auto const emptyArr = empty_dict_array();
+  php_global_set(s__SERVER, emptyArr);
+  php_global_set(s__GET, emptyArr);
+  php_global_set(s__POST, emptyArr);
+  php_global_set(s__FILES, emptyArr);
+  php_global_set(s__ENV, emptyArr);
 
   // according to doc if content type is multipart/form-data
   // $HTTP_RAW_POST_DATA should always not available
   bool shouldSetHttpRawPostData = false;
-  if (RuntimeOption::AlwaysPopulateRawPostData) {
+  if (Cfg::Server::AlwaysPopulateRawPostData) {
     std::string dummy;
     if (!IsRfc1867(transport->getHeader("Content-Type"), dummy)) {
       shouldSetHttpRawPostData = true;
@@ -252,113 +193,43 @@ void HttpProtocol::PrepareSystemVariables(Transport *transport,
   }
 
   if (shouldSetHttpRawPostData) {
-    g->set(s_HTTP_RAW_POST_DATA, empty_string_variant_ref, false);
+    php_global_set(s_HTTP_RAW_POST_DATA, Variant{String::Empty()});
   }
 
 #define X(name)                                       \
-  Array name##arr(Array::Create());                   \
-  SCOPE_EXIT { g->set(s__##name, name##arr, false); };
+  auto name##arr = empty_dict_array();                    \
+  SCOPE_EXIT { php_global_set(s__##name, name##arr); };
 
   X(ENV)
   X(GET)
   X(POST)
-  X(COOKIE)
   X(FILES)
   X(SERVER)
-  X(REQUEST)
 
 #undef X
 
   Variant HTTP_RAW_POST_DATA;
   SCOPE_EXIT {
     if (shouldSetHttpRawPostData) {
-      g->set(s_HTTP_RAW_POST_DATA.get(), HTTP_RAW_POST_DATA, false);
+      php_global_set(s_HTTP_RAW_POST_DATA, std::move(HTTP_RAW_POST_DATA));
     }
   };
 
-  auto variablesOrder = ThreadInfo::s_threadInfo.getNoCheck()
-    ->m_reqInjectionData.getVariablesOrder();
+  // Env
+  PrepareEnv(ENVarr, transport);
 
-  auto requestOrder = ThreadInfo::s_threadInfo.getNoCheck()
-    ->m_reqInjectionData.getRequestOrder();
-
-  if (requestOrder.empty()) {
-    requestOrder = variablesOrder;
+  // Get
+  if (!r.queryString().empty()) {
+    PrepareGetVariable(GETarr, r);
   }
 
-  bool postPopulated = false;
+  // Post
+  PreparePostVariables(POSTarr, HTTP_RAW_POST_DATA,
+                        FILESarr, transport, r);
 
-  for (char& c : variablesOrder) {
-    switch(c) {
-      case 'e':
-      case 'E':
-        PrepareEnv(ENVarr, transport);
-        break;
-      case 'g':
-      case 'G':
-        if (!r.queryString().empty()) {
-          PrepareGetVariable(GETarr, r);
-        }
-        break;
-      case 'p':
-      case 'P':
-        postPopulated = true;
-        PreparePostVariables(POSTarr, HTTP_RAW_POST_DATA,
-                             FILESarr, transport, r);
-        break;
-      case 'c':
-      case 'C':
-        PrepareCookieVariable(COOKIEarr, transport);
-        break;
-      case 's':
-      case 'S':
-        StartRequest(SERVERarr);
-        PrepareServerVariable(SERVERarr,
-            transport,
-            r,
-            sri,
-            vhost);
-        break;
-    }
-  }
-
-  if (!postPopulated && shouldSetHttpRawPostData) {
-    // Always try to populate $HTTP_RAW_POST_DATA if not populated
-    Array dummyPost(Array::Create());
-    Array dummyFiles(Array::Create());
-    PreparePostVariables(dummyPost, HTTP_RAW_POST_DATA,
-                         dummyFiles, transport, r);
-  }
-
-  PrepareRequestVariables(REQUESTarr,
-                          GETarr,
-                          POSTarr,
-                          COOKIEarr,
-                          requestOrder);
-}
-
-void HttpProtocol::PrepareRequestVariables(Array& request,
-                                           Array& get,
-                                           Array& post,
-                                           Array& cookie,
-                                           const std::string& requestOrder) {
-  for (const char& c : requestOrder) {
-    switch(c) {
-      case 'g':
-      case 'G':
-        CopyParams(request, get);
-        break;
-      case 'p':
-      case 'P':
-        CopyParams(request, post);
-        break;
-      case 'c':
-      case 'C':
-        CopyParams(request, cookie);
-        break;
-    }
-  }
-
+  // Server
+  init_server_request_time(SERVERarr);
+  PrepareServerVariable(SERVERarr, transport, r, vhost);
 }
 
 void HttpProtocol::PrepareGetVariable(Array& get,
@@ -373,7 +244,7 @@ void HttpProtocol::PreparePostVariables(Array& post,
                                         Array& files,
                                         Transport *transport,
                                         const RequestURI& r) {
-  if (transport->getMethod() != Transport::Method::POST) {
+  if (!transport->shouldReadPostData()) {
     return;
   }
 
@@ -409,7 +280,7 @@ void HttpProtocol::PreparePostVariables(Array& post,
           // iff we're trying to coalesce the entire POST body.  Otherwise,
           // data may be invalid when DecodeRfc1867 returns.  See
           // upload.cpp:read_post.
-          if (RuntimeOption::AlwaysPopulateRawPostData) {
+          if (Cfg::Server::AlwaysPopulateRawPostData) {
             needDelete = true;
             data = buffer_duplicate(data, size);
           } else {
@@ -466,28 +337,14 @@ void HttpProtocol::PreparePostVariables(Array& post,
       }
     } else {
       auto string_data = needDelete ?
-        String((char*)data, size, AttachString) :
-        String((char*)data, size, CopyString);
+        OptString((char*)data, size, AttachString) :
+        OptString((char*)data, size, CopyString);
       g_context->setRawPostData(string_data);
-      if (RuntimeOption::AlwaysPopulateRawPostData || ! needDelete) {
-        // For literal we disregard RuntimeOption::AlwaysPopulateRawPostData
+      if (Cfg::Server::AlwaysPopulateRawPostData || ! needDelete) {
+        // For literal we disregard Cfg::Server::AlwaysPopulateRawPostData
         raw_post = string_data;
       }
     }
-  }
-}
-
-bool HttpProtocol::PrepareCookieVariable(Array& cookie,
-                                         Transport *transport) {
-
-  string cookie_data = transport->getHeader("Cookie");
-  if (!cookie_data.empty()) {
-    StringBuffer sb;
-    sb.append(cookie_data);
-    DecodeCookies(cookie, (char*)sb.data());
-    return true;
-  } else {
-    return false;
   }
 }
 
@@ -509,19 +366,19 @@ static void CopyHeaderVariables(Array& server,
     // header past a proxy that would either overwrite or filter it
     // otherwise.  Client code should use apache_request_headers() to
     // retrieve the original headers if they are security-critical.
-    if (RuntimeOption::LogHeaderMangle != 0 && server.exists(normalizedKey)) {
+    if (Cfg::Log::HeaderMangle != 0 && server.exists(normalizedKey)) {
       badHeaders.push_back(key);
     }
 
     if (!values.empty()) {
       // When a header has multiple values, we always take the last one.
-      server.set(normalizedKey, String(values.back()));
+      server.set(normalizedKey, OptString(values.back()));
     }
   }
 
   if (!badHeaders.empty()) {
     auto reqId = badRequests.fetch_add(1, std::memory_order_acq_rel) + 1;
-    if (!(reqId % RuntimeOption::LogHeaderMangle)) {
+    if (!(reqId % Cfg::Log::HeaderMangle)) {
       std::string badNames = folly::join(", ", badHeaders);
       std::string allHeaders;
 
@@ -539,8 +396,8 @@ static void CopyHeaderVariables(Array& server,
         "The header(s) [%s] overwrote other headers which mapped to the same "
         "key. This happens because PHP normalises - to _, ie AN_EXAMPLE "
         "and AN-EXAMPLE are equivalent. You should treat this as "
-        "malicious. All headers from this request:\n%s",
-        badNames.c_str(), allHeaders.c_str());
+        "malicious.",
+        badNames.c_str());
     }
   }
 }
@@ -553,7 +410,7 @@ static void CopyTransportParams(Array& server, Transport* transport) {
   for (auto const& header : transportParams) {
     // These overwrite anything already set in the $_SERVER
     // When a header has multiple values, we always take the last one.
-    server.set(String(header.first), String(header.second.back()));
+    server.set(OptString(header.first), OptString(header.second.back()));
   }
 }
 
@@ -561,9 +418,9 @@ static void CopyServerInfo(Array& server,
                            Transport *transport,
                            const VirtualHost *vhost) {
 
-  string hostHeader = transport->getHeader("Host");
-  String hostName(vhost->serverName(hostHeader));
-  String serverNameHeader(transport->getServerName());
+  std::string hostHeader = transport->getHeader("Host");
+  OptString hostName(vhost->serverName(hostHeader));
+  OptString serverNameHeader(transport->getServerName());
   if (hostHeader.empty()) {
     server.set(s_HTTP_HOST, hostName);
     StackTraceNoHeap::AddExtraLogging("Server", hostName.data());
@@ -576,13 +433,13 @@ static void CopyServerInfo(Array& server,
   // Use the header from the transport if it is available
   if (!serverNameHeader.empty()) {
     hostName = serverNameHeader;
-  } else if (hostName.empty() || RuntimeOption::ForceServerNameToHeader) {
+  } else if (hostName.empty() || Cfg::Server::ForceServerNameToHeader) {
     hostName = hostHeader;
   }
 
   // _SERVER['SERVER_NAME'] shouldn't contain the port number
   int colonPos = hostName.find(':');
-  if (colonPos != String::npos) {
+  if (colonPos != OptString::npos) {
     hostName = hostName.substr(0, colonPos);
   }
 
@@ -594,13 +451,13 @@ static void CopyServerInfo(Array& server,
   server.set(s_SERVER_PORT, transport->getServerPort());
   server.set(s_SERVER_SOFTWARE, transport->getServerSoftware());
   server.set(s_SERVER_PROTOCOL, "HTTP/" + transport->getHTTPVersion());
-  server.set(s_SERVER_ADMIN, empty_string_variant_ref);
-  server.set(s_SERVER_SIGNATURE, empty_string_variant_ref);
+  server.set(s_SERVER_ADMIN, empty_string_tv());
+  server.set(s_SERVER_SIGNATURE, empty_string_tv());
 }
 
 static void CopyRemoteInfo(Array& server, Transport *transport) {
-  String remoteAddr(transport->getRemoteAddr(), CopyString);
-  String remoteHost(transport->getRemoteHost(), CopyString);
+  OptString remoteAddr(transport->getRemoteAddr(), CopyString);
+  OptString remoteHost(transport->getRemoteHost(), CopyString);
   if (remoteAddr.empty()) {
     remoteAddr = remoteHost;
   }
@@ -614,20 +471,20 @@ static void CopyRemoteInfo(Array& server, Transport *transport) {
 
 static void CopyAuthInfo(Array& server, Transport *transport) {
   // APE processes Authorization: Basic into PHP_AUTH_USER and PHP_AUTH_PW
-  string authorization = transport->getHeader("Authorization");
+  std::string authorization = transport->getHeader("Authorization");
   if (!authorization.empty()) {
     if (strncmp(authorization.c_str(), "Basic ", 6) == 0) {
       // it's safe to pass this as a string literal since authorization
       // outlives decodedAuth; this saves us a superfluous copy.
-      String decodedAuth =
-        StringUtil::Base64Decode(String(authorization.c_str() + 6));
+      OptString decodedAuth =
+        StringUtil::Base64Decode(OptString(authorization.c_str() + 6));
       int colonPos = decodedAuth.find(':');
-      if (colonPos != String::npos) {
+      if (colonPos != OptString::npos) {
         server.set(s_PHP_AUTH_USER, decodedAuth.substr(0, colonPos));
         server.set(s_PHP_AUTH_PW, decodedAuth.substr(colonPos + 1));
       }
     } else if (strncmp(authorization.c_str(), "Digest ", 7) == 0) {
-      server.set(s_PHP_AUTH_DIGEST, String(authorization.c_str() + 7));
+      server.set(s_PHP_AUTH_DIGEST, OptString(authorization.c_str() + 7));
     }
   }
 }
@@ -636,9 +493,9 @@ static void CopyPathInfo(Array& server,
                          Transport *transport,
                          const RequestURI& r,
                          const VirtualHost *vhost) {
-  server.set(s_REQUEST_URI, String(transport->getUrl(), CopyString));
+  server.set(s_REQUEST_URI, OptString(transport->getUrl(), CopyString));
   server.set(s_SCRIPT_URL, r.originalURL());
-  String prefix(transport->isSSL() ? "https://" : "http://");
+  OptString prefix(transport->isSSL() ? "https://" : "http://");
 
   // Need to append port
   assertx(server.exists(s_SERVER_PORT));
@@ -647,44 +504,47 @@ static void CopyPathInfo(Array& server,
     Variant port = server[s_SERVER_PORT];
     always_assert(port.isInteger() || port.isString());
     if (port.isInteger()) {
-      serverPort = folly::to<std::string>(port.toInt32());
+      serverPort = folly::to<std::string>((int)port.toInt64());
     } else {
       serverPort = port.toString().data();
     }
   }
 
-  String port_suffix("");
+  OptString port_suffix("");
   if (!transport->isSSL() && serverPort != "80") {
     port_suffix = folly::format(":{}", serverPort).str();
   }
 
-  string hostHeader;
+  std::string hostHeader;
   if (server.exists(s_HTTP_HOST)) {
-    hostHeader = server[s_HTTP_HOST].toCStrRef().data();
+    hostHeader = server[s_HTTP_HOST].asCStrRef().data();
   }
-  String hostName;
+  OptString hostName;
   if (server.exists(s_SERVER_NAME)) {
     assertx(server[s_SERVER_NAME].isString());
-    hostName = server[s_SERVER_NAME].toCStrRef();
+    hostName = server[s_SERVER_NAME].asCStrRef();
   }
   server.set(s_SCRIPT_URI,
-             String(prefix + (hostHeader.empty() ? hostName + port_suffix :
-                              String(hostHeader)) + r.originalURL()));
+             OptString(prefix + (hostHeader.empty() ? hostName + port_suffix :
+                                 OptString(hostHeader)) + r.originalURL()));
 
   if (r.rewritten()) {
     // when URL is rewritten, PHP decided to put original URL as SCRIPT_NAME
-    String name = r.originalURL();
+    OptString name = r.originalURL();
     if (!r.pathInfo().empty()) {
       int pos = name.find(r.pathInfo());
       if (pos >= 0) {
         name = name.substr(0, pos);
       }
     }
+    if (r.globalDoc()) {
+      name = OptString(Cfg::Server::GlobalDocument);
+    }
     if (r.defaultDoc()) {
       if (!name.empty() && name[name.length() - 1] != '/') {
         name += "/";
       }
-      name += String(RuntimeOption::DefaultDocument);
+      name += OptString(Cfg::Server::DefaultDocument);
     }
     server.set(s_SCRIPT_NAME, name);
   } else {
@@ -697,9 +557,9 @@ static void CopyPathInfo(Array& server,
     server.set(s_PHP_SELF, r.resolvedURL() + r.origPathInfo());
   }
 
-  String documentRoot = transport->getDocumentRoot();
+  OptString documentRoot = transport->getDocumentRoot();
   if (documentRoot.empty()) {
-    // Right now this is just RuntimeOption::SourceRoot but mwilliams wants to
+    // Right now this is just Cfg::Server::SourceRoot but mwilliams wants to
     // fix it so it is settable, so I'll leave this for now
     documentRoot = vhost->getDocumentRoot();
   }
@@ -720,17 +580,17 @@ static void CopyPathInfo(Array& server,
     if (!pathTranslated.empty()) {
       if (documentRoot == s_forwardslash) {
         // path outside document root or / is document root
-        server.set(s_PATH_TRANSLATED, String(pathTranslated));
+        server.set(s_PATH_TRANSLATED, OptString(pathTranslated));
       } else {
         server.set(s_PATH_TRANSLATED,
-                   String(server[s_DOCUMENT_ROOT].toCStrRef() +
-                          s_forwardslash + pathTranslated));
+                   OptString(server[s_DOCUMENT_ROOT].asCStrRef() +
+                             s_forwardslash + pathTranslated));
       }
     } else {
       server.set(s_PATH_TRANSLATED,
-                 String(server[s_DOCUMENT_ROOT].toCStrRef() +
-                        server[s_SCRIPT_NAME].toCStrRef() +
-                        r.pathInfo().data()));
+                 OptString(server[s_DOCUMENT_ROOT].asCStrRef() +
+                           server[s_SCRIPT_NAME].asCStrRef() +
+                           r.pathInfo().data()));
     }
     server.set(s_PATH_INFO, r.pathInfo());
   }
@@ -746,33 +606,36 @@ static void CopyPathInfo(Array& server,
     }
     break;
   default:
-    server.set(s_REQUEST_METHOD, empty_string_variant_ref); break;
+    server.set(s_REQUEST_METHOD, empty_string_tv()); break;
   }
-  server.set(s_HTTPS, transport->isSSL() ? Variant(s_on) :
-                                           empty_string_variant_ref);
+  if (transport->isSSL()) {
+    server.set(s_HTTPS, s_on);
+  } else {
+    server.set(s_HTTPS, empty_string_tv());
+  }
   server.set(s_QUERY_STRING, r.queryString());
 
-  server.set(s_argv, make_packed_array(r.queryString()));
+  server.set(s_argv, make_vec_array(r.queryString()));
   server.set(s_argc, 1);
 }
 
 void HttpProtocol::PrepareServerVariable(Array& server,
                                          Transport *transport,
                                          const RequestURI &r,
-                                         const SourceRootInfo &sri,
                                          const VirtualHost *vhost) {
   // $_SERVER
 
-  string contentType = transport->getHeader("Content-Type");
-  string contentLength = transport->getHeader("Content-Length");
+  std::string contentType = transport->getHeader("Content-Type");
+  std::string contentLength = transport->getHeader("Content-Length");
 
-  // HTTP_ headers -- we don't exclude headers we handle elsewhere (e.g.,
-  // Content-Type, Authorization), since the CGI "spec" merely says the server
-  // "may" exclude them; this is not what APE does, but it's harmless.
-  HeaderMap headers;
-  transport->getHeaders(headers);
-  // Do this first so other methods can overwrite them
-  CopyHeaderVariables(server, headers);
+  if (Cfg::Eval::SetHeadersInServerSuperGlobal) {
+    // HTTP_ headers -- we don't exclude headers we handle elsewhere (e.g.,
+    // Content-Type, Authorization), since the CGI "spec" merely says the server
+    // "may" exclude them; this is not what APE does, but it's harmless.
+    auto const& headers = transport->getHeaders();
+    // Do this first so other methods can overwrite them
+    CopyHeaderVariables(server, headers);
+  }
   CopyServerInfo(server, transport, vhost);
   // Do this last so it can overwrite all the previous settings
   CopyTransportParams(server, transport);
@@ -782,19 +645,27 @@ void HttpProtocol::PrepareServerVariable(Array& server,
 
   // APE sets CONTENT_TYPE and CONTENT_LENGTH without HTTP_
   if (!contentType.empty()) {
-    server.set(s_CONTENT_TYPE, String(contentType));
+    server.set(s_CONTENT_TYPE, OptString(contentType));
   }
   if (!contentLength.empty()) {
-    server.set(s_CONTENT_LENGTH, String(contentLength));
+    server.set(s_CONTENT_LENGTH, OptString(contentLength));
   }
 
   for (auto& kv : RuntimeOption::ServerVariables) {
-    server.set(String(kv.first), String(kv.second));
+    OptString idx(kv.first);
+    const auto arrkey =
+      server.convertKey<IntishCast::Cast>(idx);
+    OptString str(kv.second);
+    server.set(arrkey, make_tv<KindOfString>(str.get()), true);
   }
   for (auto& kv : vhost->getServerVars()) {
-    server.set(String(kv.first), String(kv.second));
+    OptString idx(kv.first);
+    const auto arrkey =
+      server.convertKey<IntishCast::Cast>(idx);
+    OptString str(kv.second);
+    server.set(arrkey, make_tv<KindOfString>(str.get()), true);
   }
-  server = sri.setServerVariables(std::move(server));
+  server = SourceRootInfo::SetServerVariables(std::move(server));
 
   const char *threadType = transport->getThreadTypeName();
   server.set(s_THREAD_TYPE, threadType);
@@ -803,7 +674,7 @@ void HttpProtocol::PrepareServerVariable(Array& server,
 
 std::string HttpProtocol::RecordRequest(Transport *transport) {
   char tmpfile[PATH_MAX + 1];
-  if (RuntimeOption::RecordInput) {
+  if (Cfg::Debug::RecordInput) {
     strcpy(tmpfile, "/tmp/hphp_request_XXXXXX");
     close(mkstemp(tmpfile));
 
@@ -816,7 +687,7 @@ std::string HttpProtocol::RecordRequest(Transport *transport) {
 }
 
 void HttpProtocol::ClearRecord(bool success, const std::string &tmpfile) {
-  if (success && RuntimeOption::ClearInputOnSuccess && !tmpfile.empty()) {
+  if (success && Cfg::Debug::ClearInputOnSuccess && !tmpfile.empty()) {
     unlink(tmpfile.c_str());
     Logger::Info("request %s deleted", tmpfile.c_str());
   }
@@ -837,16 +708,15 @@ void HttpProtocol::DecodeParameters(Array& variables, const char *data,
   while (s < e && (p = (const char *)memchr(s, '&', (e - s)))) {
   last_value:
     if ((val = (const char *)memchr(s, '=', (p - s)))) {
-      String sname = url_decode(s, val - s);
+      OptString sname = url_decode(s, val - s);
 
       val++;
-      String value = url_decode(val, p - val);
+      OptString value = url_decode(val, p - val);
 
       register_variable(variables, (char*)sname.data(), value);
     } else if (!post) {
-      String sname = url_decode(s, p - s);
-      register_variable(variables, (char*)sname.data(),
-                        empty_string_variant_ref);
+      OptString sname = url_decode(s, p - s);
+      register_variable(variables, (char*)sname.data(), Variant{String::Empty()});
     }
     s = p + 1;
   }
@@ -872,17 +742,17 @@ void HttpProtocol::DecodeCookies(Array& variables, char *data) {
 
     if (var != val && *var != '\0') {
       if (val) { /* have a value */
-        String sname = url_decode(var, val - var);
+        OptString sname = url_decode(var, val - var);
 
         ++val;
-        String value = url_decode(val, strlen(val));
+        OptString value = url_decode(val, strlen(val));
 
         register_variable(variables, (char*)sname.data(), value, false);
       } else {
-        String sname = url_decode(var, strlen(var));
+        OptString sname = url_decode(var, strlen(var));
 
         register_variable(variables, (char*)sname.data(),
-                          empty_string_variant_ref, false);
+                          Variant{String::Empty()}, false);
       }
     }
 
@@ -890,7 +760,7 @@ void HttpProtocol::DecodeCookies(Array& variables, char *data) {
   }
 }
 
-bool HttpProtocol::IsRfc1867(const string contentType, string &boundary) {
+bool HttpProtocol::IsRfc1867(const std::string contentType, std::string &boundary) {
   if (contentType.empty()) return false;
   const char *ctstr = contentType.c_str();
   char *s;
@@ -929,7 +799,7 @@ void HttpProtocol::DecodeRfc1867(Transport *transport,
                                  size_t contentLength,
                                  const void *&data,
                                  size_t &size,
-                                 string boundary) {
+                                 std::string boundary) {
   rfc1867PostHandler(transport,
                      post,
                      files,
@@ -999,13 +869,14 @@ bool HttpProtocol::ProxyRequest(Transport *transport, bool force,
     return false;
   }
 
-  HeaderMap requestHeaders;
-  transport->getHeaders(requestHeaders);
+  auto requestHeaders = transport->getHeaders();
   if (extraHeaders) {
     for (HeaderMap::const_iterator iter = extraHeaders->begin();
          iter != extraHeaders->end(); ++iter) {
-      std::vector<std::string> &values = requestHeaders[iter->first];
-      values.insert(values.end(), iter->second.begin(), iter->second.end());
+      auto& values = requestHeaders[iter->first];
+      for (auto& h : iter->second) {
+        values.push_back(h);
+      }
     }
   }
 
@@ -1015,7 +886,7 @@ bool HttpProtocol::ProxyRequest(Transport *transport, bool force,
     data = (const char *)transport->getPostData(size);
   }
 
-  req::vector<String> responseHeaders;
+  req::vector<OptString> responseHeaders;
   HttpClient http;
   code = http.request(transport->getMethodName(),
                       url.c_str(), data, size, response, &requestHeaders,
@@ -1030,8 +901,8 @@ bool HttpProtocol::ProxyRequest(Transport *transport, bool force,
   }
 
   for (unsigned int i = 0; i < responseHeaders.size(); i++) {
-    String &header = responseHeaders[i];
-    if (header.find(":") != String::npos &&
+    OptString &header = responseHeaders[i];
+    if (header.find(":") != OptString::npos &&
         header.find("Content-Length: ") != 0 &&
         header.find("Client-Transfer-Encoding: ") != 0 &&
         header.find("Transfer-Encoding: ") != 0 &&

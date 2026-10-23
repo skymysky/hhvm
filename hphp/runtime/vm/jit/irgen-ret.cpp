@@ -15,16 +15,17 @@
 */
 #include "hphp/runtime/vm/jit/irgen-ret.h"
 
-
 #include "hphp/runtime/vm/resumable.h"
-#include "hphp/runtime/vm/jit/types.h"
+#include "hphp/runtime/vm/jit/analysis.h"
 #include "hphp/runtime/vm/jit/irgen.h"
 #include "hphp/runtime/vm/jit/irgen-exit.h"
 #include "hphp/runtime/vm/jit/irgen-inlining.h"
-
 #include "hphp/runtime/vm/jit/irgen-internal.h"
+#include "hphp/runtime/vm/jit/irgen-types.h"
 
-namespace HPHP { namespace jit { namespace irgen {
+#include "hphp/util/configs/hhir.h"
+
+namespace HPHP::jit::irgen {
 
 namespace {
 
@@ -34,62 +35,44 @@ const StaticString s_returnHook("SurpriseReturnHook");
 
 template<class AH>
 void retSurpriseCheck(IRGS& env, SSATmp* retVal, AH afterHook) {
-  /*
-   * This is a weird situation for throwing: we've partially torn down the
-   * ActRec (decref'd all the frame's locals), and we've popped the return
-   * value.  If we throw, the unwinder needs to know the return value is not on
-   * the eval stack, so we need to sync the marker after the pop---the return
-   * value will be decref'd by the return hook while unwinding, in this case.
-   */
-  updateMarker(env);
-  env.irb->exceptionStackBoundary();
-
-  ifThenElse(
+  ringbufferMsg(env, Trace::RBTypeFuncExit, curFunc(env)->fullName());
+  ifThen(
     env,
     [&] (Block* taken) {
-      auto const ptr = resumeMode(env) != ResumeMode::None ? sp(env) : fp(env);
-      gen(env, CheckSurpriseFlags, taken, ptr);
+      gen(env, CheckSurpriseFlags, taken, anyStackRegister(env));
     },
     [&] {
-      ringbufferMsg(env, Trace::RBTypeFuncExit, curFunc(env)->fullName());
-    },
-    [&] {
+      // Return value is no longer on the stack. If the ReturnHook throws, it
+      // is responsible for decrefing it.
       hint(env, Block::Hint::Unlikely);
       ringbufferMsg(env, Trace::RBTypeMsg, s_returnHook.get());
       gen(env, ReturnHook, fp(env), retVal);
-      ringbufferMsg(env, Trace::RBTypeFuncExit, curFunc(env)->fullName());
       afterHook();
     }
   );
 }
 
 void freeLocalsAndThis(IRGS& env) {
+  // GenericRetDecRefs below doesn't work in inlined frames.
+  assertx(!isInlining(env));
+
   auto const localCount = curFunc(env)->numLocals();
 
   auto const shouldFreeInline = [&]() -> bool {
-    // In a pseudomain, we have to do a non-inline DecRef, because we can't
-    // side-exit in the middle of the sequence of LdLocPseudoMains.
-    if (curFunc(env)->isPseudoMain()) return false;
     // We don't want to specialize on arg types for builtins
     if (curFunc(env)->arFuncPtr()) return false;
 
-    if (localCount > RuntimeOption::EvalHHIRInliningMaxReturnLocals) {
-      return false;
-    }
     auto numRefCounted = int{0};
     for (auto i = uint32_t{0}; i < localCount; ++i) {
       if (env.irb->local(i, DataTypeGeneric).type.maybe(TCounted)) {
         ++numRefCounted;
       }
     }
-    return numRefCounted <= RuntimeOption::EvalHHIRInliningMaxReturnDecRefs;
+    return numRefCounted <= Cfg::HHIR::InliningMaxReturnDecRefs;
   }();
 
   if (shouldFreeInline) {
     decRefLocalsInline(env);
-    for (unsigned i = 0; i < localCount; ++i) {
-      env.irb->constrainLocal(i, DataTypeCountness, "inlined RetC/V");
-    }
   } else {
     gen(env, GenericRetDecRefs, fp(env));
   }
@@ -97,36 +80,43 @@ void freeLocalsAndThis(IRGS& env) {
   decRefThis(env);
 }
 
-void normalReturn(IRGS& env, SSATmp* retval) {
-  if (RuntimeOption::EvalHHIRGenerateAsserts) {
-    gen(env, DbgTrashRetVal, fp(env));
-  }
+void normalReturn(IRGS& env, SSATmp* retval, bool suspended) {
+  assertx(resumeMode(env) == ResumeMode::None);
+  assertx(!isInlining(env));
+
   // If we're on the eager side of an async function, we have to zero-out the
-  // TV aux of the return value, because it might be used as a flag if we were
-  // called with FCallAwait.
-  auto const aux =
-    (curFunc(env)->isAsyncFunction() && resumeMode(env) == ResumeMode::None)
-      ? folly::make_optional(AuxUnion{0})
-      : folly::none;
+  // TV aux of the return value, because it might be used as a flag if async
+  // eager return was requested.
+  auto const aux = [&] {
+    if (suspended) return AuxUnion{0};
+    if (curFunc(env)->isAsyncFunction()) {
+      return AuxUnion{std::numeric_limits<uint32_t>::max()};
+    }
+    return AuxUnion{0};
+  }();
 
   auto const data = RetCtrlData { offsetToReturnSlot(env), false, aux };
   gen(env, RetCtrl, data, sp(env), fp(env), retval);
 }
 
-void asyncFunctionReturn(IRGS& env, SSATmp* retVal) {
+void asyncFunctionReturn(IRGS& env, SSATmp* retVal, bool suspended) {
+  assertx(!isInlining(env));
+
   if (resumeMode(env) == ResumeMode::None) {
     retSurpriseCheck(env, retVal, []{});
 
+    if (suspended) return normalReturn(env, retVal, true);
+
     // Return from an eagerly-executed async function: wrap the return value in
-    // a StaticWaitHandle object and return that normally, unless we were called
-    // via FCallAwait
+    // a StaticWaitHandle object and return that normally, unless async eager
+    // return was requested.
     auto const wrapped = cond(
       env,
       [&] (Block* taken) {
-        auto flags = gen(env, LdARNumArgsAndFlags, fp(env));
+        auto flags = gen(env, LdARFlags, fp(env));
         auto test = gen(
           env, AndInt, flags,
-          cns(env, static_cast<int32_t>(ActRec::Flags::IsFCallAwait)));
+          cns(env, static_cast<int32_t>(1 << ActRec::AsyncEagerRet)));
         gen(env, JmpNZero, taken, test);
       },
       [&] {
@@ -135,9 +125,10 @@ void asyncFunctionReturn(IRGS& env, SSATmp* retVal) {
       [&] {
         return retVal;
       });
-    normalReturn(env, wrapped);
+    normalReturn(env, wrapped, false);
     return;
   }
+  assertx(!suspended);
 
   auto const spAdjust = offsetFromIRSP(env, BCSPRelOffset{-1});
 
@@ -150,69 +141,87 @@ void asyncFunctionReturn(IRGS& env, SSATmp* retVal) {
   // Call stub that will mark this AFWH as finished, unblock parents and
   // possibly take fast path to resume parent. Leave SP pointing to a single
   // uninitialized cell which will be filled by the stub.
-  gen(env, AsyncFuncRet, IRSPRelOffsetData { spAdjust }, sp(env), fp(env),
-      retVal);
+  // Always use the slow path if `FastMethodInterceptNoAsyncOpt` is set.
+  if (LIKELY(!Cfg::Eval::FastMethodInterceptNoAsyncOpt)) {
+    gen(env, AsyncFuncRet, IRSPRelOffsetData { spAdjust }, sp(env), fp(env),
+        retVal);
+  } else {
+    gen(env, AsyncFuncRetSlow, IRSPRelOffsetData { spAdjust }, sp(env), fp(env),
+        retVal);
+  }
 }
 
 void generatorReturn(IRGS& env, SSATmp* retval) {
-  // Clear generator's key.
-  auto const oldKey = gen(env, LdContArKey, TCell, fp(env));
-  gen(env, StContArKey, fp(env), cns(env, TInitNull));
-  decRef(env, oldKey);
+  assertx(curFunc(env)->isGenerator());
+  assertx(!isInlining(env));
+  // A generator returns null.
+  assertx(retval->type().maybe(TInitNull));
 
-  // Populate the generator's value with retval to support `getReturn`
-  auto const oldValue = gen(env, LdContArValue, TCell, fp(env));
-  gen(env, StContArValue, fp(env), retval);
-  decRef(env, oldValue);
+  retSurpriseCheck(env, retval, []{});
 
   gen(env,
       StContArState,
       GeneratorState { BaseGenerator::State::Done },
       fp(env));
 
+  if (!curFunc(env)->isAsync()) {
+    // Clear generator's key.
+    auto const oldKey = gen(env, LdContArKey, TInitCell, fp(env));
+    gen(env, StContArKey, fp(env), cns(env, TInitNull));
+    decRef(env, oldKey, DecRefProfileId::GeneratorReturnOldKey);
+
+    // Clear generator's value.
+    auto const oldValue = gen(env, LdContArValue, TInitCell, fp(env));
+    gen(env, StContArValue, fp(env), cns(env, TInitNull));
+    decRef(env, oldValue, DecRefProfileId::GeneratorReturnOldValue);
+
+    retval = cns(env, TInitNull);
+  } else {
+    if (resumeMode(env) == ResumeMode::Async) {
+      auto const spAdjust = offsetFromIRSP(env, BCSPRelOffset{-1});
+      gen(env, AsyncGenRetR, IRSPRelOffsetData { spAdjust }, sp(env), fp(env));
+      return;
+    }
+
+    retval = gen(env, CreateSSWH, cns(env, TInitNull));
+  }
+
+  // Return control to the caller (Gen::next()).
+  assertx(resumeMode(env) == ResumeMode::GenIter);
   auto const spAdjust = offsetFromIRSP(env, BCSPRelOffset{-1});
-  gen(
-    env,
-    RetCtrl,
-    RetCtrlData { spAdjust, true },
-    sp(env),
-    fp(env),
-    cns(env, TInitNull)
-  );
+  auto const retData = RetCtrlData { spAdjust, true, AuxUnion{0} };
+  gen(env, RetCtrl, retData, sp(env), fp(env), retval);
 }
 
-void implRet(IRGS& env) {
-  auto func = curFunc(env);
+void implRet(IRGS& env, bool suspended) {
+  auto const func = curFunc(env);
+  assertx(!suspended || func->isAsyncFunction());
+  assertx(!suspended || resumeMode(env) == ResumeMode::None);
+  assertx(!isInlining(env));
+
+  if (func->isAsyncFunction() && resumeMode(env) != ResumeMode::None) {
+    gen(env, AsyncFuncRetPrefetch, fp(env));
+  }
+
+  freeLocalsAndThis(env);
 
   // Pop the return value. Since it will be teleported to its place in memory,
   // we don't care about the type.
   auto const retval = pop(env, DataTypeGeneric);
-
-  if (func->attrs() & AttrMayUseVV) {
-    ifElse(
-      env,
-      [&] (Block* skip) {
-        gen(env, ReleaseVVAndSkip, skip, fp(env));
-      },
-      [&] { freeLocalsAndThis(env); }
-    );
-  } else {
-    freeLocalsAndThis(env);
-  }
+  updateStackOffsetAndExceptionBoundary(env);
 
   // Async function has its own surprise check.
   if (func->isAsyncFunction()) {
-    return asyncFunctionReturn(env, retval);
+    return asyncFunctionReturn(env, retval, suspended);
   }
 
-  retSurpriseCheck(env, retval, []{});
-
-  if (resumeMode(env) == ResumeMode::GenIter) {
-    assertx(curFunc(env)->isNonAsyncGenerator());
+  if (func->isGenerator()) {
     return generatorReturn(env, retval);
   }
+
   assertx(resumeMode(env) == ResumeMode::None);
-  return normalReturn(env, retval);
+  retSurpriseCheck(env, retval, []{});
+  return normalReturn(env, retval, false);
 }
 
 //////////////////////////////////////////////////////////////////////
@@ -220,39 +229,39 @@ void implRet(IRGS& env) {
 }
 
 IRSPRelOffset offsetToReturnSlot(IRGS& env) {
-  auto const retOff = FPRelOffset { kArRetOff / int32_t{sizeof(Cell)} };
-  return retOff.to<IRSPRelOffset>(env.irb->fs().irSPOff());
+  assertx(resumeMode(env) == ResumeMode::None);
+  auto const fpOff = offsetOfFrame(fp(env));
+  assertx(fpOff);
+  return *fpOff + kArRetOff / int32_t{sizeof(TypedValue)};
 }
 
-void emitRetC(IRGS& env) {
-  if (curFunc(env)->isAsyncGenerator()) PUNT(RetC-AsyncGenerator);
+void emitVerifyReturn(IRGS& env, HPHP::VerifyRetKind kind, int32_t ind) {
+  auto const func = curFunc(env);
+  if (func->trustReturnType()) {
+    assertx(kind == VerifyRetKind::None);
+    return;
+  }
+  verifyRetType(env, TypeConstraint::ReturnId, BCSPRelOffset{ind}, kind);
+}
 
+void emitRetC(IRGS& env, HPHP::VerifyRetKind kind) {
+  emitVerifyReturn(env, kind, 0);
   if (isInlining(env)) {
     assertx(resumeMode(env) == ResumeMode::None);
     retFromInlined(env);
   } else {
-    implRet(env);
+    implRet(env, false);
   }
 }
 
-void emitRetV(IRGS& env) {
-  assertx(resumeMode(env) == ResumeMode::None);
-  assertx(!curFunc(env)->isResumable());
-  if (isInlining(env)) {
-    retFromInlined(env);
-  } else {
-    implRet(env);
-  }
-}
-
-void emitRetM(IRGS& env, uint32_t nvals) {
-  assertx(!isInlining(env));
+void emitRetM(IRGS& env, uint32_t nvals, HPHP::VerifyRetKind kind) {
   assertx(resumeMode(env) == ResumeMode::None);
   assertx(!curFunc(env)->isResumable());
   assertx(nvals > 1);
 
-  if (!RuntimeOption::EvalHHIRGenerateRetM) {
-    interpOne(env, *env.currentNormalizedInstruction);
+  emitVerifyReturn(env, kind, nvals - 1);
+  if (isInlining(env)) {
+    retFromInlined(env);
     return;
   }
 
@@ -262,9 +271,25 @@ void emitRetM(IRGS& env, uint32_t nvals) {
     gen(env, StOutValue, IndexData(i), fp(env), pop(env, DataTypeGeneric));
   }
 
-  implRet(env);
+  implRet(env, false);
+}
+
+void emitRetCSuspended(IRGS& env) {
+  assertx(curFunc(env)->isAsyncFunction());
+  assertx(resumeMode(env) == ResumeMode::None);
+
+  if (curFunc(env)->isEagerOnly()) {
+    gen(env, Unreachable, ASSERT_REASON);
+    return;
+  }
+
+  if (isInlining(env)) {
+    suspendFromInlined(env, pop(env, DataTypeGeneric));
+  } else {
+    implRet(env, true);
+  }
 }
 
 //////////////////////////////////////////////////////////////////////
 
-}}}
+}

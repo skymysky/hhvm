@@ -1,6 +1,6 @@
-<?php
+<?hh
 
-function test($a){
+function test($a):mixed{
   if ($a > 0) {
     $sql = 'foo';
   }
@@ -10,4 +10,8 @@ function test($a){
   $sql .= ' baz';
   return $sql;
 }
+
+<<__EntryPoint>>
+function main_1587() :mixed{
 echo test(1),test(-1),"\n";
+}

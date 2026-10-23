@@ -1,2 +1,0 @@
-File "intrinsic.php", line 5, characters 12-14:
-Binding a reference in an array is no longer supported in Hack. (Typing[4225])

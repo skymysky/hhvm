@@ -1,2 +1,11 @@
-File "async_hint8.php", line 4, characters 16-25:
-Was expecting an Awaitable return type hint (Typing[4174])
+error: Parsing[1002] `async` functions must have an `Awaitable` return type. [1]
+
+async_hint8.php:4:30
+2 | 
+3 | // Testing function
+4 | async function right_hint(): ?Awaitable<int> {
+  |                              ^^^^^^^^^^^^^^^ [1]
+5 |   throw new Exception();
+6 | }
+
+1 error found

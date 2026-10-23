@@ -2,5 +2,5 @@
 class B {}
 class C extends B {}
 
-function foo(ImmVector<B> $x) {}
-function test(ConstVector<C> $x) { foo($x); }
+function foo(ImmVector<B> $x): void {}
+function test(ConstVector<C> $x): void { foo($x); }

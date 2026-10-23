@@ -15,20 +15,20 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_THRIFT_TRANSPORT_H_
-#define incl_HPHP_THRIFT_TRANSPORT_H_
+#pragma once
 
 #include "hphp/runtime/ext/extension.h"
 #include "hphp/runtime/base/builtin-functions.h"
 #include "hphp/util/logger.h"
 #include "hphp/util/htonll.h"
 
+#include <folly/lang/Bits.h>
 #include <sys/types.h>
 #include <stdexcept>
 
 #include <folly/portability/Unistd.h>
 
-namespace HPHP { namespace thrift {
+namespace HPHP::thrift {
 ///////////////////////////////////////////////////////////////////////////////
 
 enum TType {
@@ -54,28 +54,18 @@ enum TType {
 };
 
 extern const StaticString
+  s_getBuffer,
   s_getTransport,
   s_flush,
   s_onewayFlush,
   s_write,
   s_putBack,
   s_read,
-  s_class,
-  s_key,
-  s_val,
-  s_elem,
-  s_var,
-  s_union,
-  s_type,
   s__type,
-  s_ktype,
-  s_vtype,
-  s_etype,
-  s_format,
   s_collection,
   s_harray,
-  s_TSPEC,
   s_TProtocolException,
+  s_TTransportException,
   s_TApplicationException;
 
 const size_t SIZE = 8192;
@@ -83,23 +73,8 @@ const size_t SIZE = 8192;
 struct PHPOutputTransport {
 public:
   explicit PHPOutputTransport(const Object& protocol)
-    : m_transport(protocol->o_invoke_few_args(s_getTransport, 0).toObject())
+    : m_transport(protocol->o_invoke_few_args(s_getTransport, RuntimeCoeffects::fixme(), 0).toObject())
   {}
-
-  ~PHPOutputTransport() {
-    // Because this is a destructor, we might already be
-    // in the process of unwinding when this function is called, so we
-    // need to ensure that no exceptions can escape so that the unwinder
-    // does not terminate the process.
-    try {
-      if (buffer_used != 0) {
-        raise_warning("runtime/ext_thrift: "
-                      "Output buffer has %lu unflushed bytes", buffer_used);
-      }
-    } catch (...) {
-      handle_destructor_exception();
-    }
-  }
 
   void write(const char* data, size_t len) {
     if ((len + buffer_used) > SIZE) {
@@ -112,6 +87,10 @@ public:
       buffer_used += len;
       buffer_ptr += len;
     }
+  }
+
+  void push(const uint8_t* data, size_t len) {
+    write((const char*)data, len);
   }
 
   void writeI64(int64_t i) {
@@ -161,15 +140,23 @@ public:
     directOnewayFlush();
   }
 
+  OptString getPHPBuffer() {
+    if (buffer_used != 0) {
+      raise_warning("runtime/ext_thrift: Output buffer has %lu unflushed bytes", buffer_used);
+    }
+    return m_transport->o_invoke_few_args(s_getBuffer, RuntimeCoeffects::fixme(), 0).toString();
+  }
+
 private:
   void directFlush() {
-    m_transport->o_invoke_few_args(s_flush, 0);
+    m_transport->o_invoke_few_args(s_flush, RuntimeCoeffects::fixme(), 0);
   }
   void directOnewayFlush() {
-    m_transport->o_invoke_few_args(s_onewayFlush, 0);
+    m_transport->o_invoke_few_args(s_onewayFlush, RuntimeCoeffects::fixme(), 0);
   }
   void directWrite(const char* data, size_t len) {
-    m_transport->o_invoke_few_args(s_write, 1, String(data, len, CopyString));
+    m_transport->o_invoke_few_args(s_write, RuntimeCoeffects::fixme(),
+                                   1, OptString(data, len, CopyString));
   }
 
   char buffer[SIZE];
@@ -181,7 +168,9 @@ private:
 
 struct PHPInputTransport {
   explicit PHPInputTransport(const Object& protocol)
-    : m_transport(protocol->o_invoke_few_args(s_getTransport, 0).toObject())
+    : m_transport(protocol->o_invoke_few_args(s_getTransport,
+                                              RuntimeCoeffects::fixme(),
+                                              0).toObject())
   {}
 
   ~PHPInputTransport() {
@@ -191,7 +180,7 @@ struct PHPInputTransport {
       Logger::Error(e.getMessage());
     } catch (Object &e) {
       try {
-        Logger::Error(e.toString().toCppString());
+        Logger::Error(throwable_to_string(e.get()).toCppString());
       } catch (...) {
         Logger::Error("(e.toString() failed)");
       }
@@ -202,10 +191,10 @@ struct PHPInputTransport {
 
   void put_back() {
     if (buffer_used) {
-      m_transport->o_invoke_few_args(s_putBack,
-                           1, String(buffer_ptr, buffer_used, CopyString));
+      m_transport->o_invoke_few_args(s_putBack, RuntimeCoeffects::fixme(),
+                           1, OptString(buffer_ptr, buffer_used, CopyString));
     }
-    buffer = String();
+    buffer = OptString();
     buffer_used = 0;
     buffer_ptr = nullptr;
   }
@@ -223,55 +212,71 @@ struct PHPInputTransport {
     }
   }
 
-  void readBytes(void* buf, size_t len) {
-    while (len) {
-      size_t chunk_size = len < buffer_used ? len : buffer_used;
-      if (chunk_size) {
-        memcpy(buf, buffer_ptr, chunk_size);
-        buffer_ptr += chunk_size;
-        buffer_used -= chunk_size;
-        buf = reinterpret_cast<char*>(buf) + chunk_size;
-        len -= chunk_size;
+  void skipNoAdvance(size_t len) {
+    DCHECK_LE(len, length());
+    buffer_ptr += len;
+    buffer_used -= len;
+  }
+
+  size_t length() noexcept {
+    return buffer_used;
+  }
+
+  const uint8_t* data() noexcept {
+    return reinterpret_cast<const uint8_t*>(buffer_ptr);
+  }
+
+  void pull(void* buf, size_t len) {
+    if (LIKELY(len < buffer_used)) {
+      // Fast path if we have enough data
+      memcpy(buf, buffer_ptr, len);
+      buffer_ptr += len;
+      buffer_used -= len;
+    } else {
+      // Slow path at the end of the buffer
+      while (len) {
+        size_t chunk_size = len < buffer_used ? len : buffer_used;
+        if (chunk_size) {
+          memcpy(buf, buffer_ptr, chunk_size);
+          buffer_ptr += chunk_size;
+          buffer_used -= chunk_size;
+          buf = reinterpret_cast<char*>(buf) + chunk_size;
+          len -= chunk_size;
+        }
+        if (! len) break;
+        refill(len);
       }
-      if (! len) break;
-      refill(len);
     }
   }
 
-  int8_t readI8() {
-    int8_t c;
-    readBytes(&c, 1);
-    return c;
+  template<typename T>
+  T readBE() {
+    return folly::Endian::big(read<T>());
   }
 
-  int16_t readI16() {
-    int16_t c;
-    readBytes(&c, 2);
-    return (int16_t)ntohs(c);
-  }
-
-  uint32_t readU32() {
-    uint32_t c;
-    readBytes(&c, 4);
-    return (uint32_t)ntohl(c);
-  }
-
-  int32_t readI32() {
-    int32_t c;
-    readBytes(&c, 4);
-    return (int32_t)ntohl(c);
+  template<typename T>
+  T readLE() {
+    return folly::Endian::little(read<T>());
   }
 
 private:
+  template<typename T>
+  T read() {
+    T ret;
+    pull(&ret, sizeof(T));
+    return ret;
+  }
+
   void refill(size_t len) {
     assertx(buffer_used == 0);
     len = std::max<size_t>(len, SIZE);
-    buffer = m_transport->o_invoke_few_args(s_read, 1, (int64_t)len).toString();
+    buffer = m_transport->o_invoke_few_args(s_read, RuntimeCoeffects::fixme(),
+                                            1, (int64_t)len).toString();
     buffer_used = buffer.size();
     buffer_ptr = buffer.data();
   }
 
-  String buffer;
+  OptString buffer;
   const char* buffer_ptr{nullptr};
   size_t buffer_used{0};
 
@@ -279,6 +284,4 @@ private:
 };
 
 ///////////////////////////////////////////////////////////////////////////////
-}}
-
-#endif
+}

@@ -1,10 +1,14 @@
-<?php
-
-var_dump(ini_get('hhvm.enable_xhp'));
+<?hh
 
 class :foo {
-  public function __toString() {
+  public function __toString()[] :mixed{
     return "it works";
   }
 }
-var_dump((string) <foo />);
+
+
+<<__EntryPoint>>
+function main_enable_xhp() :mixed{
+var_dump(ini_get('hhvm.enable_xhp'));
+var_dump((<foo />)->__toString());
+}

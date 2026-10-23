@@ -1,0 +1,9 @@
+error: Parsing[1002] Traits are not valid xhp classes. [1]
+
+xhp_modifier_not_on_trait.php:4:1
+2 | 
+3 | // XHP keyword is not allowed for traits
+4 | xhp trait Foo {}
+  | ^^^^^^^^^^^^^^^^ [1]
+
+1 error found

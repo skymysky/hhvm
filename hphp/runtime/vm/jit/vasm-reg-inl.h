@@ -14,9 +14,10 @@
    +----------------------------------------------------------------------+
 */
 
+#include "hphp/runtime/vm/jit/vasm-print.h"
 #include "hphp/util/safe-cast.h"
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 ///////////////////////////////////////////////////////////////////////////////
 // Vreg casting.
 
@@ -93,6 +94,13 @@ inline Vptr Vreg::operator+(intptr_t d) const {
   return Vptr(*this, safe_cast<int32_t>(d));
 }
 
+inline Vptr Vreg::operator-(int32_t d) const {
+  return Vptr(*this, safe_cast<int32_t>(-static_cast<int64_t>(d)));
+}
+inline Vptr Vreg::operator-(intptr_t d) const {
+  return Vptr(*this, safe_cast<int32_t>(-d));
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 // Vr casting.
 
@@ -106,7 +114,7 @@ inline bool allowable(Vr<RegXMM>*, Vreg r) { return r.isVirt() || r.isSIMD(); }
 template<class Reg>
 /* implicit */ Vr<Reg>::Vr(Vreg r)
   : rn(size_t(r)) {
-  assertx(allowable(this, r) || !r.isValid());
+  assert_flog(allowable(this, r) || !r.isValid(), "r = {}\n", show(r));
 }
 
 template<class Reg>
@@ -180,21 +188,28 @@ inline VscaledDisp operator+(Vscaled vs, int32_t disp) {
   return {vs, disp};
 }
 
+inline VscaledDisp operator+(VscaledDisp vsd, int32_t disp) {
+  return {vsd.vs, vsd.disp + disp};
+}
+
+inline VscaledDisp operator-(Vscaled vs, int32_t disp) {
+  return {vs, -disp};
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 // Vptr.
 
 inline MemoryRef Vptr::mr() const {
   if (index.isValid()) {
-    return base.isValid() ? r64(base)[r64(index) * scale + disp] :
-           *(IndexedDispReg{r64(index) * scale + disp});
+    return base.isValid() ? SegReg(seg)[r64(base) + r64(index) * scale + disp] :
+           SegReg(seg)[r64(index) * scale + disp];
   } else {
-    return base.isValid() ? r64(base)[disp] :
-           *(DispReg{disp});
+    return base.isValid() ? SegReg(seg)[r64(base) + disp] :
+           SegReg(seg)[disp];
   }
 }
 
 inline Vptr::operator MemoryRef() const {
-  assertx(seg == DS);
   return mr();
 }
 
@@ -272,4 +287,4 @@ inline bool Vloc::operator!=(Vloc other) const {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-}}
+}

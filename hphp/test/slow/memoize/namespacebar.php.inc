@@ -4,9 +4,9 @@
 namespace Bar {
   trait TN {
     use \Foo\TN;
+    public static $j = 30;
     <<__Memoize>>public function test($a = 0) {
-      static $i = 30;
-      return $a + $i++;
+      $t = self::$j; self::$j++; return $a + $t;
     }
   }
 }

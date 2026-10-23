@@ -1,2 +1,19 @@
-File "class_as_enum_constant2.php", line 14, characters 3-16:
-Enum element cannot be named 'class' (Parsing[1002])
+error: Parsing[1002] Enum element cannot be named `class` [1]
+
+class_as_enum_constant2.php:14:3
+12 | enum DerpyEnum: string as string {
+13 |   LOL = "haha";
+14 |   class = "DERP";
+   |   ^^^^^^^^^^^^^^^ [1]
+15 | }
+
+error: Naming[2070] Cannot declare a constant named `class`. The name `class` is reserved for the class constant that represents the name of the class [1]
+
+class_as_enum_constant2.php:14:3
+12 | enum DerpyEnum: string as string {
+13 |   LOL = "haha";
+14 |   class = "DERP";
+   |   ^^^^^ [1]
+15 | }
+
+2 errors found

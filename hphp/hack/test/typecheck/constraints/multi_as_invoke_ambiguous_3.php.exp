@@ -1,0 +1,14 @@
+error: Typing[4482] It is no longer allowed to use a `classname<Tg>` in this position. Please use a `class<Tg>` instead. [1]
+-> Definition is here [2]
+
+multi_as_invoke_ambiguous_3.php:15:15
+12 | 
+13 | class G<Tg as I as J> {
+14 |   public function AnotherBoo(classname<Tg> $x): void {
+   |                              ^^^^^^^^^^^^^ [2]
+15 |     ExpectInt($x::Bar('c'));
+   |               ^^ [1]
+16 |   }
+17 | }
+
+1 error found

@@ -1,0 +1,151 @@
+(library
+ (name config_file_test)
+ (wrapped false)
+ (modules config_file_test)
+ (libraries
+  asserter
+  collections
+  test_injector_config
+  unit_test
+  config_file))
+
+(library
+ (name timeout_test)
+ (wrapped false)
+ (modules timeout_test)
+ (libraries sys_utils default_injector_config unit_test))
+
+(library
+ (name timer_test)
+ (wrapped false)
+ (modules timer_test)
+ (libraries asserter default_injector_config sys_utils unit_test))
+
+(library
+ (name findUtils_test)
+ (wrapped false)
+ (modules findUtils_test)
+ (libraries test_injector_config unit_test utils_find))
+
+(library
+ (name hh_json_test)
+ (wrapped false)
+ (modules hh_json_test)
+ (libraries
+  asserter
+  hh_json
+  string
+  test_injector_config
+  unit_test
+  utils_core
+  yojson))
+
+(library
+ (name sys_utils_test)
+ (wrapped false)
+ (modules sys_utils_test)
+ (libraries
+  asserter
+  string
+  test_injector_config
+  sys_utils
+  temp_file
+  unit_test))
+
+(executable
+ (name diagnostics_test)
+ (modules diagnostics_test)
+ (modes exe byte_complete)
+ (libraries
+  asserter
+  errors
+  parsing_error
+  nast_check_error
+  heap_libc
+  pos
+  pos_or_decl
+  relative_path
+  sys_utils
+  test_injector_config
+  unit_test
+  utils_core))
+
+(executable
+ (name marshal_tools_test)
+ (modules
+  marshal_tools_test)
+ (libraries
+  libancillary
+  marshal_tools
+  unix)
+ (preprocess
+  (pps ppx_deriving.std)))
+
+(executable
+ (name file_content_test)
+ (modules
+  file_content_test)
+ (libraries
+  file_content
+  full_fidelity
+  relative_path
+  test_injector_config
+  unit_test
+  utils_core))
+
+(library
+ (name approxset_tag_domain)
+ (wrapped false)
+ (modules approxset_tag_domain)
+ (libraries
+  approx_set
+  utils_core)
+ (preprocess
+  (pps ppx_deriving.std ppx_compare ppx_sexp_conv ppx_hash ppx_let)))
+
+(executable
+ (name approxset_test_refinement)
+ (modules approxset_test_refinement)
+ (libraries
+  approx_set
+  approxset_tag_domain
+  ounit2
+  test_injector_config
+  utils_core)
+ (preprocess
+  (pps ppx_deriving.std ppx_compare ppx_sexp_conv ppx_hash ppx_let)))
+
+(executable
+ (name approxset_test_variant_filter)
+ (modules approxset_test_variant_filter)
+ (libraries
+  approx_set
+  approxset_tag_domain
+  ounit2
+  test_injector_config
+  utils_core)
+ (preprocess
+  (pps ppx_deriving.std ppx_compare ppx_sexp_conv ppx_hash ppx_let)))
+
+(executable
+ (name approxset_test_subtype_disj)
+ (modules approxset_test_subtype_disj)
+ (libraries
+  approx_set
+  approxset_tag_domain
+  ounit2
+  test_injector_config
+  utils_core)
+ (preprocess
+  (pps ppx_deriving.std ppx_compare ppx_sexp_conv ppx_hash ppx_let)))
+
+(executable
+ (name approxset_bench)
+ (modules approxset_bench)
+ (libraries
+  approx_set
+  approxset_tag_domain
+  unix
+  utils_core)
+ (preprocess
+  (pps ppx_deriving.std ppx_sexp_conv ppx_hash ppx_let)))

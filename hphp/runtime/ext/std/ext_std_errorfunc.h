@@ -15,8 +15,7 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_EXT_ERROR_H_
-#define incl_HPHP_EXT_ERROR_H_
+#pragma once
 
 #include "hphp/runtime/ext/std/ext_std.h"
 
@@ -26,42 +25,28 @@ namespace HPHP {
 extern const int64_t k_DEBUG_BACKTRACE_PROVIDE_OBJECT;
 extern const int64_t k_DEBUG_BACKTRACE_IGNORE_ARGS;
 extern const int64_t k_DEBUG_BACKTRACE_PROVIDE_METADATA;
+extern const int64_t k_DEBUG_BACKTRACE_ONLY_METADATA_FRAMES;
+
+extern const int64_t k_DEBUG_BACKTRACE_HASH_CONSIDER_METADATA;
+
+// Run a single step of hphp_debug_caller_info. This function is called on
+// each frame in the backtrace, starting at the deepest one. We stop when it
+// returns true (i.e. when it has found a non-skip-frame caller.)
+bool hphp_debug_caller_info_impl(
+    Array& result, bool& skipped, const Func* func, Offset offset);
+
+bool hphp_debug_caller_identifier_impl(
+    OptString& result, bool& skipped, const Func* func);
 
 Array HHVM_FUNCTION(debug_backtrace,
                     int64_t options = k_DEBUG_BACKTRACE_PROVIDE_OBJECT,
                     int64_t limit = 0);
-Array HHVM_FUNCTION(hphp_debug_caller_info);
-int64_t HHVM_FUNCTION(hphp_debug_backtrace_hash);
-void HHVM_FUNCTION(debug_print_backtrace, int64_t options = 0,
-                                          int64_t limit = 0);
-Array HHVM_FUNCTION(error_get_last);
-bool HHVM_FUNCTION(error_log, const String& message, int message_type = 0,
-                              const Variant& destination = uninit_variant,
-                              const Variant& extra_headers = uninit_variant);
 int64_t HHVM_FUNCTION(error_reporting, const Variant& level = uninit_variant);
-bool HHVM_FUNCTION(restore_error_handler);
-bool HHVM_FUNCTION(restore_exception_handler);
-Variant HHVM_FUNCTION(set_error_handler, const Variant& error_handler,
-                      int error_types = ((int)ErrorMode::PHP_ALL |
-                                         (int)ErrorMode::STRICT));
-Variant HHVM_FUNCTION(set_exception_handler, const Variant& exception_handler);
-void HHVM_FUNCTION(hphp_set_error_page, const String& page);
-void HHVM_FUNCTION(hphp_throw_fatal_error, const String& error_msg);
-void HHVM_FUNCTION(hphp_clear_unflushed);
-bool HHVM_FUNCTION(trigger_error, const String& error_msg,
-                                  int error_type = (int)ErrorMode::USER_NOTICE);
-bool HHVM_FUNCTION(trigger_sampled_error, const String& error_msg,
-                   int sample_rate,
-                   int error_type = (int)ErrorMode::USER_NOTICE);
-bool HHVM_FUNCTION(user_error, const String& error_msg,
-                               int error_type = (int)ErrorMode::USER_NOTICE);
 
 ArrayData* debug_backtrace_jit(int64_t options);
-ResourceHdr* debug_backtrace_fast();
-String debug_string_backtrace(bool skip, bool ignore_args = false,
-                              int64_t limit = 0);
+OptString debug_string_backtrace(bool skip, bool ignore_args = false,
+                                 int64_t limit = 0);
+OptString stringify_backtrace(const Array& bt, bool ignore_args);
 
 ///////////////////////////////////////////////////////////////////////////////
 }
-
-#endif // incl_HPHP_EXT_ERROR_H_

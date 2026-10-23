@@ -1,25 +1,30 @@
-<?php
+<?hh
 
-function thing_get() {
+function thing_get() :mixed{
   return thing::get();
 }
 
 final class thing {
-  function x() { echo "ok\n"; }
+  function x() :mixed{ echo "ok\n"; }
 
-  public static function get() {
-    static $instance = null;
-    if ($instance === null) {
-      $instance = new self();
+  private static $getInstance = null;
+
+  public static function get() :mixed{
+    if (self::$getInstance === null) {
+      self::$getInstance = new self();
     }
-    return $instance;
+    return self::$getInstance;
   }
 }
 
-function go() {
+function go() :mixed{
   $z = thing_get();
   mt_rand();
   return $z->x();
 }
 
+
+<<__EntryPoint>>
+function main_singleton_fail() :mixed{
 go();
+}

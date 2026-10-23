@@ -1,0 +1,18 @@
+error: Typing[4464] `meth_caller` does not support methods that return `readonly` objects [1]
+-> This is why I think this method returns a `readonly` object [2]
+
+meth_caller.php:12:8
+ 4 | 
+ 5 | class B {
+ 6 |   public function returns_readonly(): readonly A {
+   |                   ^^^^^^^^^^^^^^^^ [2]
+ 7 |     invariant_violation('');
+ 8 |   }
+ 9 | }
+10 | 
+11 | function test(): void {
+12 |   $x = meth_caller(B::class, 'returns_readonly');
+   |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ [1]
+13 | }
+
+1 error found

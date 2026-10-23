@@ -18,108 +18,52 @@
 #include "hphp/runtime/vm/jit/irgen-exit.h"
 #include "hphp/runtime/vm/jit/irgen-internal.h"
 #include "hphp/runtime/vm/jit/location.h"
-#include "hphp/runtime/vm/jit/target-profile.h"
 
-namespace HPHP { namespace jit { namespace irgen {
+namespace HPHP::jit::irgen {
 
 namespace {
 
 //////////////////////////////////////////////////////////////////////
 
-// If its known that the location doesn't contain a boxed value, then everything
-// after the check should be unreachable. Bail out now to avoid asserting on
-// incompatible types. This can happen if we're inlining and one of the
-// arguments has a type which doesn't match what we previously profiled (the
-// guard will always fail).
-bool haltIfNotBoxed(IRGS& env, const Location& loc) {
-  auto const knownType = env.irb->fs().typeOf(loc);
-  if (!knownType.maybe(TBoxedInitCell)) {
-    gen(env, Unreachable, ASSERT_REASON);
-    return true;
-  }
-  return false;
-}
-
-void checkTypeLocal(IRGS& env, uint32_t locId, Type type,
-                    Offset dest, bool outerOnly) {
-  auto exit = env.irb->guardFailBlock();
-  if (exit == nullptr) exit = makeExit(env, dest);
-
-  if (type <= TCell) {
-    gen(env, CheckLoc, type, LocalId(locId), exit, fp(env));
-    return;
-  }
-  assertx(type <= TBoxedInitCell);
-
-  gen(env, CheckLoc, TBoxedInitCell, LocalId(locId), exit, fp(env));
-
-  if (haltIfNotBoxed(env, Location::Local{locId})) return;
-
-  gen(env, HintLocInner, type, LocalId { locId }, fp(env));
-
-  auto const innerType = env.irb->predictedLocalInnerType(locId);
-  if (!outerOnly && innerType < TInitCell) {
-    env.irb->constrainLocal(locId, DataTypeSpecific, "HintLocInner");
-    auto const ldPMExit = makePseudoMainExit(env);
-    auto const val = ldLoc(env, locId, ldPMExit, DataTypeSpecific);
-    gen(env, CheckRefInner, innerType, exit, val);
+template<typename Check, typename Ld>
+void checkTypeImpl(IRGS& env, Type type, Block* exit, Check check, Ld ld) {
+  if (env.formingRegion || !type.isSpecialized()) {
+    check(type, exit);
+  } else {
+    auto const test = type.unspecialize();
+    check(test, exit);
+    gen(env, CheckType, type, exit, ld(test));
   }
 }
 
-void checkTypeStack(IRGS& env, BCSPRelOffset idx, Type type,
-                    Offset dest, bool outerOnly) {
-  auto exit = env.irb->guardFailBlock();
-  if (exit == nullptr) exit = makeExit(env, dest);
+void checkTypeImpl(IRGS& env, Type type, Block* exit, SSATmp* val) {
+  if (type.isSpecialized()) {
+    val = gen(env, CheckType, type.unspecialize(), exit, val);
+  }
+  gen(env, CheckType, type, exit, val);
+}
 
+void checkTypeLocal(IRGS& env, uint32_t locId, Type type, Block* exit) {
+  checkTypeImpl(env, type, exit,
+    [&](Type test, Block* exit) {
+      gen(env, CheckLoc, test, LocalId(locId), exit, fp(env));
+    },
+    [&](Type test) {
+      test &= env.irb->fs().local(locId).type;
+      return gen(env, LdLoc, test, LocalId(locId), fp(env));
+    }
+  );
+}
+
+void checkTypeStack(IRGS& env, BCSPRelOffset idx, Type type, Block* exit) {
   auto const soff = IRSPRelOffsetData { offsetFromIRSP(env, idx) };
-
-  if (type <= TCell) {
-    gen(env, CheckStk, type, soff, exit, sp(env));
-    return;
-  }
-  assertx(type <= TBoxedInitCell);
-
-  gen(env, CheckStk, TBoxedInitCell, soff, exit, sp(env));
-
-  if (haltIfNotBoxed(env, Location::Stack{offsetFromFP(env, soff.offset)})) {
-    return;
-  }
-
-  gen(env, HintStkInner, type, soff, sp(env));
-
-  auto const innerType = env.irb->predictedStackInnerType(soff.offset);
-  if (!outerOnly && innerType < TInitCell) {
-    env.irb->constrainStack(soff.offset, DataTypeSpecific);
-    auto const stk = gen(env, LdStk, TBoxedInitCell, soff, sp(env));
-    gen(env, CheckRefInner, innerType, exit, stk);
-  }
+  auto const val = gen(env, LdStk, TCell, soff, sp(env));
+  checkTypeImpl(env, type, exit, val);
 }
 
-void checkTypeMBase(IRGS& env, Type type, Offset dest, bool outerOnly) {
-  auto exit = env.irb->guardFailBlock();
-  if (exit == nullptr) exit = makeExit(env, dest);
-
-  auto const mbr = gen(env, LdMBase, TPtrToGen);
-
-  if (type <= TCell) {
-    gen(env, CheckMBase, type, exit, mbr);
-    return;
-  }
-  assertx(type <= TBoxedInitCell);
-
-  gen(env, CheckMBase, TBoxedInitCell, exit, mbr);
-
-  if (haltIfNotBoxed(env, Location::MBase{})) return;
-
-  gen(env, HintMBaseInner, type);
-
-  auto const innerType = env.irb->predictedMBaseInnerType();
-  if (!outerOnly && innerType < TInitCell) {
-    env.irb->constrainLocation(Location::MBase{}, DataTypeSpecific);
-    auto const basePtr = gen(env, LdMBase, TPtrToGen);
-    auto const base = gen(env, LdMem, TBoxedInitCell, basePtr);
-    gen(env, CheckRefInner, innerType, exit, base);
-  }
+void checkTypeMBase(IRGS& env, Type type, Block* exit) {
+  auto const val = gen(env, LdMem, TCell, ldMBase(env));
+  checkTypeImpl(env, type, exit, val);
 }
 
 //////////////////////////////////////////////////////////////////////
@@ -140,7 +84,7 @@ static void assertTypeMBase(IRGS& env, Type type) {
 }
 
 void assertTypeLocation(IRGS& env, const Location& loc, Type type) {
-  assertx(type <= TGen);
+  assertx(type <= TCell);
 
   switch (loc.tag()) {
     case LTag::Stack:
@@ -152,45 +96,42 @@ void assertTypeLocation(IRGS& env, const Location& loc, Type type) {
     case LTag::MBase:
       assertTypeMBase(env, type);
       break;
-    case LTag::CSlot:
-      assertx("Attempting to emit assert-type for class-ref slot" && false);
-      break;
-  }
+   }
 }
 
-void checkType(IRGS& env, const Location& loc,
-               Type type, Offset dest, bool outerOnly) {
-  assertx(type <= TGen);
+void checkType(IRGS& env, const Location& loc, Type type, Block* exit) {
+  assertx(type <= TCell);
 
   switch (loc.tag()) {
     case LTag::Stack:
-      checkTypeStack(env, offsetFromBCSP(env, loc.stackIdx()),
-                     type, dest, outerOnly);
+      checkTypeStack(env, offsetFromBCSP(env, loc.stackIdx()), type, exit);
       break;
     case LTag::Local:
-      checkTypeLocal(env, loc.localId(), type, dest, outerOnly);
+      checkTypeLocal(env, loc.localId(), type, exit);
       break;
     case LTag::MBase:
-      checkTypeMBase(env, type, dest, outerOnly);
-      break;
-    case LTag::CSlot:
-      assertx("Attempting to emit check-type for class-ref slot" && false);
+      checkTypeMBase(env, type, exit);
       break;
   }
 }
 
-void predictType(IRGS& env, const Location& loc, Type type) {
-  FTRACE(1, "predictType {}: {}\n", show(loc), type);
-  assertx(type <= TGen);
-  env.irb->fs().refinePredictedType(loc, type);
+SSATmp* loadLocation(IRGS& env, const Location& loc) {
+  switch (loc.tag()) {
+    case LTag::Local:
+      return gen(env, LdLoc, TCell, LocalId(loc.localId()), fp(env));
+    case LTag::Stack: {
+      auto const soff = IRSPRelOffsetData {
+        offsetFromIRSP(env, loc.stackIdx()) };
+      return gen(env, LdStk, TCell, soff, sp(env));
+    }
+    case LTag::MBase: {
+      auto const mbr = ldMBase(env);
+      return gen(env, LdMem, env.irb->fs().mbase().type, mbr);
+    }
+  }
+  not_reached();
 }
 
 //////////////////////////////////////////////////////////////////////
 
-void makeExitPlaceholder(IRGS& env) {
-  gen(env, ExitPlaceholder, makeGuardExit(env, TransFlags{}));
 }
-
-//////////////////////////////////////////////////////////////////////
-
-}}}

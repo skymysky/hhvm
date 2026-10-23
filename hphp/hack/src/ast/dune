@@ -1,0 +1,17 @@
+(library
+ (name ast)
+ (wrapped false)
+ (modules ast_defs)
+ (libraries
+  file_info
+  namespace_env
+  naming_special_names
+  visitors_runtime)
+ (preprocess
+  (pps
+   ppx_deriving.std
+   ppx_hash
+   ppx_sexp_conv
+   ppx_transform
+   ppx_yojson_conv
+   visitors.ppx)))

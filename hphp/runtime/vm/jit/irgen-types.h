@@ -13,18 +13,25 @@
    | license@php.net so we can mail you a copy immediately.               |
    +----------------------------------------------------------------------+
 */
-#ifndef incl_HPHP_JIT_IRGEN_TYPES_H_
-#define incl_HPHP_JIT_IRGEN_TYPES_H_
+#pragma once
 
-#include <folly/Optional.h>
+#include "hphp/runtime/vm/containers.h"
+#include "hphp/runtime/vm/jit/stack-offsets.h"
+#include "hphp/runtime/vm/jit/types.h"
+#include "hphp/runtime/vm/hhbc-shared.h"
 
 namespace HPHP {
 
+struct MysteryBoxConstraint;
 struct RepoAuthType;
 struct StringData;
+struct TypeConstraint;
+struct TypeIntersectionConstraint;
+struct Func;
 
 namespace jit {
 
+struct Block;
 struct SSATmp;
 struct Type;
 
@@ -34,10 +41,29 @@ struct IRGS;
 
 //////////////////////////////////////////////////////////////////////
 
+void verifyParamType(IRGS& env, const Func* callee, int32_t id,
+                     BCSPRelOffset offset, SSATmp* prologueCtx);
+
+SSATmp* verifyPropType(IRGS& env,
+                       SSATmp* cls,
+                       const TypeIntersectionConstraint* tcs,
+                       Slot slot,
+                       SSATmp* val,
+                       SSATmp* name,
+                       bool isSProp);
+
+void verifyRetType(IRGS& env, int32_t id, BCSPRelOffset stackOffset, HPHP::VerifyRetKind kind);
+
+void verifyMysteryBoxConstraint(IRGS& env, const MysteryBoxConstraint& c,
+                                SSATmp* val, Block* fail);
+
+void raiseClsmethCompatTypeHint(
+  IRGS& env, int32_t id, const Func* func, const TypeConstraint& tc);
+
+//////////////////////////////////////////////////////////////////////
+
 SSATmp* implInstanceOfD(IRGS& env, SSATmp* src, const StringData* className);
 
 //////////////////////////////////////////////////////////////////////
 
 }}}
-
-#endif

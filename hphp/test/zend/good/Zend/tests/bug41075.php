@@ -1,18 +1,19 @@
-<?php
+<?hh
 
 function err($errno, $errstr, $errfile, $errline)
-{
-	    throw new Exception($errstr);
+:mixed{
+        throw new Exception($errstr);
 }
 
-set_error_handler("err");
-
 class test {
-    function foo() {
-        $var = $this->blah->prop = "string";
+    function foo() :mixed{
+        $this->blah->prop = "string";
+        $var = $this->blah->prop;
         var_dump($this->blah);
     }
 }
+<<__EntryPoint>> function main(): void {
+set_error_handler(err<>);
 
 $t = new test;
 try {
@@ -22,4 +23,4 @@ try {
 }
 
 echo "Done\n";
-?>
+}

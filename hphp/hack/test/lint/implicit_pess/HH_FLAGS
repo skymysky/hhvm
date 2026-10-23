@@ -1,0 +1,3 @@
+--lint
+--error-format plain_highlighted
+--extra-builtin ../../hhi/XHPTest.hhi

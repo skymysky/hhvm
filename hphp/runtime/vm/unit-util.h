@@ -14,13 +14,14 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_VM_UNIT_UTIL_H_
-#define incl_HPHP_VM_UNIT_UTIL_H_
+#pragma once
 
+#include <string_view>
 #include <folly/Range.h>
 
 #include "hphp/runtime/base/static-string-table.h"
 #include "hphp/runtime/base/type-string.h"
+#include "hphp/runtime/base/type-structure.h"
 
 namespace HPHP {
 
@@ -29,16 +30,24 @@ namespace HPHP {
 /*
  * Returns true if the class or function name is normalized wrt namespaces.
  */
+inline bool isNSNormalized(std::string_view name) {
+  return name.data()[0] != '\\';
+}
+
 inline bool isNSNormalized(const StringData* name) {
-  return name->data()[0] != '\\';
+  return isNSNormalized(name->slice());
 }
 
 /*
  * Returns true if the class or function name needs to be normalized.
  */
+inline bool needsNSNormalization(std::string_view name) {
+  auto const data = name.data();
+  return name.size() >= 2 && data[0] == '\\' && data[1] != '\\';
+}
+
 inline bool needsNSNormalization(const StringData* name) {
-  auto const data = name->data();
-  return name->size() >= 2 && data[0] == '\\' && data[1] != '\\';
+  return needsNSNormalization(name->slice());
 }
 
 /*
@@ -48,74 +57,47 @@ inline bool notClassMethodPair(const StringData* name) {
   return strstr(name->data(), "::") == nullptr;
 }
 
-const char kInOutSuffix[] = "$inout";
-inline bool needsStripInOut(const StringData* name) {
-  return
-    name->size() > sizeof(kInOutSuffix) &&
-    !strcmp(name->data() + name->size() - strlen(kInOutSuffix), kInOutSuffix);
-}
-
 /*
  * Normalizes a given class or function name removing the leading '\'.
  * Leaves the name unchanged if more than one '\' is leading.
  * So '\name' becomes 'name' but '\\name' stays '\\name'.
  */
+
+inline std::string_view normalizeNS(std::string_view name) {
+  if (needsNSNormalization(name)) {
+    return {name.data() + 1, name.size() - 1};
+  }
+  return name;
+}
+
 inline const StringData* normalizeNS(const StringData* name) {
   if (needsNSNormalization(name)) {
-    assertx(name->size() != 0);
-    auto const size  = static_cast<size_t>(name->size() - 1);
-    auto const piece = folly::StringPiece{name->data() + 1, size};
-    return makeStaticString(piece);
+    assertx(!name->empty());
+    return makeStaticString(normalizeNS(name->slice()));
   }
   return name;
 }
 
-inline String normalizeNS(const String& name) {
+inline OptString normalizeNS(const OptString& name) {
   if (needsNSNormalization(name.get())) {
-    return String(name.data() + 1, name.size() - 1, CopyString);
+    std::string_view normalized = normalizeNS(std::string_view{name.slice()});
+    return OptString(normalized);
   }
   return name;
 }
 
-inline const StringData* stripInOutSuffix(const StringData* name) {
-  if (UNLIKELY(needsStripInOut(name))) {
-    assertx(name->size() > sizeof(kInOutSuffix));
-    auto const s = name->data();
-    size_t len = name->size() - sizeof(kInOutSuffix);
-    for (; s[len] != '$'; --len) assertx(len != 0);
-    return makeStaticString(folly::StringPiece(name->data(), len));
-  }
-  return name;
-}
+std::string mangleReifiedGenericsName(const ArrayData* tsList);
 
-inline StringData* stripInOutSuffix(StringData* name) {
-  return const_cast<StringData*>(
-    stripInOutSuffix((const StringData*)name)
-  );
-}
-
-inline String stripInOutSuffix(String& s) {
-  return String(stripInOutSuffix(s.get()));
-}
-
-inline std::string mangleInOutFuncName(const char* name,
-                                       std::vector<uint32_t> params) {
-  return folly::sformat("{}${}$inout", name, folly::join(";", params));
-}
-
-inline std::string mangleInOutFuncName(const std::string& name,
-                                       std::vector<uint32_t> params) {
-  return mangleInOutFuncName(name.data(), std::move(params));
-}
-
-inline String mangleInOutFuncName(const StringData* name,
-                                  std::vector<uint32_t> params) {
-  return String(makeStaticString(
-    mangleInOutFuncName(name->data(), std::move(params))
-  ));
+inline bool isMangledReifiedGenericInClosure(const StringData* name) {
+  // mangled name is of the form
+  // __captured$reifiedgeneric$class$ or __captured$reifiedgeneric$function$
+  // so it must be longer than 32 characters
+  return name->size() > 32 &&
+         folly::qfind(name->slice(),
+                      folly::StringPiece("__captured$reifiedgeneric$"))
+          != std::string::npos;
 }
 
 //////////////////////////////////////////////////////////////////////
 
 }
-#endif

@@ -10,18 +10,6 @@ vec(1) {
   int(2)
 }
 bool(true)
-================== A::__call =====================
-vec(2) {
-  int(1)
-  int(2)
-}
-bool(true)
-================== A::__callStatic ===============
-vec(2) {
-  int(1)
-  int(2)
-}
-bool(true)
 ================== variadic ======================
 vec(3) {
   int(2)
@@ -45,52 +33,6 @@ vec(2) {
 bool(true)
 ================== variadic ======================
 vec(2) {
-  int(4)
-  int(5)
-}
-bool(true)
-================== A::__call =====================
-vec(3) {
-  int(3)
-  int(4)
-  int(5)
-}
-bool(true)
-================== A::__call =====================
-vec(5) {
-  int(1)
-  int(2)
-  int(3)
-  int(4)
-  int(5)
-}
-bool(true)
-================== A::__call =====================
-vec(3) {
-  int(3)
-  int(4)
-  int(5)
-}
-bool(true)
-================== A::__callStatic ===============
-vec(3) {
-  int(3)
-  int(4)
-  int(5)
-}
-bool(true)
-================== A::__callStatic ===============
-vec(5) {
-  int(1)
-  int(2)
-  int(3)
-  int(4)
-  int(5)
-}
-bool(true)
-================== A::__callStatic ===============
-vec(3) {
-  int(3)
   int(4)
   int(5)
 }
@@ -107,18 +49,6 @@ vec(1) {
   int(2)
 }
 bool(true)
-================== A::__call =====================
-vec(2) {
-  int(1)
-  int(2)
-}
-bool(true)
-================== A::__callStatic ===============
-vec(2) {
-  int(1)
-  int(2)
-}
-bool(true)
 ================== variadic ======================
 vec(3) {
   int(2)
@@ -142,52 +72,6 @@ vec(2) {
 bool(true)
 ================== variadic ======================
 vec(2) {
-  int(4)
-  int(5)
-}
-bool(true)
-================== A::__call =====================
-vec(3) {
-  int(3)
-  int(4)
-  int(5)
-}
-bool(true)
-================== A::__call =====================
-vec(5) {
-  int(1)
-  int(2)
-  int(3)
-  int(4)
-  int(5)
-}
-bool(true)
-================== A::__call =====================
-vec(3) {
-  int(3)
-  int(4)
-  int(5)
-}
-bool(true)
-================== A::__callStatic ===============
-vec(3) {
-  int(3)
-  int(4)
-  int(5)
-}
-bool(true)
-================== A::__callStatic ===============
-vec(5) {
-  int(1)
-  int(2)
-  int(3)
-  int(4)
-  int(5)
-}
-bool(true)
-================== A::__callStatic ===============
-vec(3) {
-  int(3)
   int(4)
   int(5)
 }
@@ -219,52 +103,6 @@ vec(2) {
   int(5)
 }
 bool(true)
-================== A::__call =====================
-vec(3) {
-  int(3)
-  int(4)
-  int(5)
-}
-bool(true)
-================== A::__call =====================
-vec(5) {
-  int(1)
-  int(2)
-  int(3)
-  int(4)
-  int(5)
-}
-bool(true)
-================== A::__call =====================
-vec(3) {
-  int(3)
-  int(4)
-  int(5)
-}
-bool(true)
-================== A::__callStatic ===============
-vec(3) {
-  int(3)
-  int(4)
-  int(5)
-}
-bool(true)
-================== A::__callStatic ===============
-vec(5) {
-  int(1)
-  int(2)
-  int(3)
-  int(4)
-  int(5)
-}
-bool(true)
-================== A::__callStatic ===============
-vec(3) {
-  int(3)
-  int(4)
-  int(5)
-}
-bool(true)
 ================== variadic ======================
 vec(3) {
   int(2)
@@ -292,52 +130,6 @@ vec(2) {
   int(5)
 }
 bool(true)
-================== A::__call =====================
-vec(3) {
-  int(3)
-  int(4)
-  int(5)
-}
-bool(true)
-================== A::__call =====================
-vec(5) {
-  int(1)
-  int(2)
-  int(3)
-  int(4)
-  int(5)
-}
-bool(true)
-================== A::__call =====================
-vec(3) {
-  int(3)
-  int(4)
-  int(5)
-}
-bool(true)
-================== A::__callStatic ===============
-vec(3) {
-  int(3)
-  int(4)
-  int(5)
-}
-bool(true)
-================== A::__callStatic ===============
-vec(5) {
-  int(1)
-  int(2)
-  int(3)
-  int(4)
-  int(5)
-}
-bool(true)
-================== A::__callStatic ===============
-vec(3) {
-  int(3)
-  int(4)
-  int(5)
-}
-bool(true)
 ================== variadic ======================
 vec(3) {
   int(2)
@@ -361,52 +153,6 @@ vec(2) {
 bool(true)
 ================== variadic ======================
 vec(2) {
-  int(4)
-  int(5)
-}
-bool(true)
-================== A::__call =====================
-vec(3) {
-  int(3)
-  int(4)
-  int(5)
-}
-bool(true)
-================== A::__call =====================
-vec(5) {
-  int(1)
-  int(2)
-  int(3)
-  int(4)
-  int(5)
-}
-bool(true)
-================== A::__call =====================
-vec(3) {
-  int(3)
-  int(4)
-  int(5)
-}
-bool(true)
-================== A::__callStatic ===============
-vec(3) {
-  int(3)
-  int(4)
-  int(5)
-}
-bool(true)
-================== A::__callStatic ===============
-vec(5) {
-  int(1)
-  int(2)
-  int(3)
-  int(4)
-  int(5)
-}
-bool(true)
-================== A::__callStatic ===============
-vec(3) {
-  int(3)
   int(4)
   int(5)
 }

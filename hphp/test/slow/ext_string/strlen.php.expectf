@@ -1,30 +1,30 @@
-Warning: strlen() expects exactly 1 parameter, 0 given in %s on line %d
-NULL
-int(0)
-int(1)
-int(0)
-int(6)
-int(6)
-int(7)
+Warning: strlen() expects exactly 1 positional parameter, 0 given in %s/strlen.php on line 16
 
-Warning: strlen() expects parameter 1 to be string, array given in %s on line %d
-NULL
+Warning: Argument 1 passed to strlen() must be an instance of string, null given in %s/strlen.php on line 18
 
-Warning: strlen() expects parameter 1 to be string, array given in %s on line %d
-NULL
+Warning: Argument 1 passed to strlen() must be an instance of string, bool given in %s/strlen.php on line 19
 
-Warning: strlen() expects parameter 1 to be string, vec given in %s on line %d
-NULL
+Warning: Argument 1 passed to strlen() must be an instance of string, bool given in %s/strlen.php on line 20
 
-Warning: strlen() expects parameter 1 to be string, dict given in %s on line %d
-NULL
+Warning: Argument 1 passed to strlen() must be an instance of string, int given in %s/strlen.php on line 22
 
-Warning: strlen() expects parameter 1 to be string, keyset given in %s on line %d
-NULL
+Warning: Argument 1 passed to strlen() must be an instance of string, float given in %s/strlen.php on line 23
 
-Warning: strlen() expects parameter 1 to be string, object given in %s on line %d
-NULL
-int(21)
+Warning: Argument 1 passed to strlen() must be an instance of string, float given in %s/strlen.php on line 24
+
+Warning: Argument 1 passed to strlen() must be an instance of string, HH\vec given in %s/strlen.php on line 26
+
+Warning: Argument 1 passed to strlen() must be an instance of string, HH\vec given in %s/strlen.php on line 27
+
+Warning: Argument 1 passed to strlen() must be an instance of string, HH\vec given in %s/strlen.php on line 29
+
+Warning: Argument 1 passed to strlen() must be an instance of string, HH\dict given in %s/strlen.php on line 30
+
+Warning: Argument 1 passed to strlen() must be an instance of string, HH\keyset given in %s/strlen.php on line 31
+
+Warning: Argument 1 passed to strlen() must be an instance of string, stdClass given in %s/strlen.php on line 33
+
+Warning: Argument 1 passed to strlen() must be an instance of string, StrlenTest given in %s/strlen.php on line 34
 int(4)
 int(4)
 int(5)

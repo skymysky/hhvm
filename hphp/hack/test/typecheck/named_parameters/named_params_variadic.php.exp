@@ -1,0 +1,19 @@
+error: Typing[4499] Missing required named argument: label [1]
+-> Definition is here [2]
+
+named_params_variadic.php:16:3
+ 2 | <<file: __EnableUnstableFeatures('named_parameters')>>
+ 3 | 
+ 4 | function take(
+   |          ^^^^ [2]
+ 5 |   int $required,
+ 6 |   named string $label,
+   :
+14 | 
+15 |   // Error: Missing required named parameter
+16 |   take(2, 3, 4);
+   |   ^^^^^^^^^^^^^ [1]
+17 | 
+18 |   // Error: Missing required positional parameter
+
+1 error found

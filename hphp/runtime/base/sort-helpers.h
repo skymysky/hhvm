@@ -14,26 +14,25 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_SORT_HELPERS_H_
-#define incl_HPHP_SORT_HELPERS_H_
+#pragma once
 
 #include "hphp/runtime/base/builtin-functions.h"
 #include "hphp/runtime/base/comparisons.h"
 #include "hphp/runtime/base/execution-context.h"
+#include "hphp/runtime/base/sort-flags.h"
 #include "hphp/runtime/base/type-string.h"
 #include "hphp/runtime/base/type-variant.h"
-#include "hphp/runtime/base/zend-functions.h"
+#include "hphp/runtime/base/vanilla-keyset.h"
+#include "hphp/runtime/base/vanilla-dict.h"
 #include "hphp/runtime/base/zend-string.h"
-#include "hphp/runtime/base/sort-flags.h"
-#include "hphp/runtime/base/mixed-array.h"
-#include "hphp/runtime/base/set-array.h"
 
+#include "hphp/util/conv-10.h"
 #include "hphp/util/safesort.h"
 
 namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
 
-// For sorting PackedArray and Vector
+// For sorting VanillaVec and Vector
 struct TVAccessor {
   typedef const TypedValue& ElmT;
   bool isInt(ElmT elm) const { return elm.m_type == KindOfInt64; }
@@ -60,15 +59,15 @@ struct AssocKeyAccessorImpl {
 template<typename E> struct AssocKeyAccessor;
 
 template<>
-struct AssocKeyAccessor<MixedArray::Elm> :
-  AssocKeyAccessorImpl<AssocKeyAccessor<MixedArray::Elm>, MixedArray::Elm> {
+struct AssocKeyAccessor<VanillaDict::Elm> :
+  AssocKeyAccessorImpl<AssocKeyAccessor<VanillaDict::Elm>, VanillaDict::Elm> {
   static int64_t getInt(ElmT elm) { return elm.ikey; }
   static StringData* getStr(ElmT elm) { return elm.skey; }
 };
 
 template<>
-struct AssocKeyAccessor<SetArray::Elm> :
-  AssocKeyAccessorImpl<AssocKeyAccessor<SetArray::Elm>, SetArray::Elm> {
+struct AssocKeyAccessor<VanillaKeyset::Elm> :
+  AssocKeyAccessorImpl<AssocKeyAccessor<VanillaKeyset::Elm>, VanillaKeyset::Elm> {
   static int64_t getInt(ElmT elm) { return elm.intKey(); }
   static StringData* getStr(ElmT elm) { return elm.strKey(); }
 };
@@ -90,7 +89,7 @@ template<typename E> struct AssocValAccessor {
 
 template <typename AccessorT, int sort_flags, bool ascending>
 struct IntElmCompare {
-  typedef typename AccessorT::ElmT ElmT;
+  using ElmT = typename AccessorT::ElmT;
   AccessorT acc;
   bool operator()(ElmT left, ElmT right) const {
     int64_t iLeft = acc.getInt(left);
@@ -105,7 +104,7 @@ struct IntElmCompare {
     int lenLeft;
     int lenRight;
     // Take advantage of precomputed StringDatas if they are available
-    const StringData* sdLeft = String::GetIntegerStringData(iLeft);
+    const StringData* sdLeft = OptString::GetIntegerStringData(iLeft);
     if (sdLeft) {
       sLeft = sdLeft->data();
       lenLeft = sdLeft->size();
@@ -115,7 +114,7 @@ struct IntElmCompare {
       sLeft = sl.data();
       lenLeft = sl.size();
     }
-    const StringData* sdRight = String::GetIntegerStringData(iRight);
+    const StringData* sdRight = OptString::GetIntegerStringData(iRight);
     if (sdRight) {
       sRight = sdRight->data();
       lenRight = sdRight->size();
@@ -156,7 +155,7 @@ struct IntElmCompare {
 
 template <typename AccessorT, int sort_flags, bool ascending>
 struct StrElmCompare {
-  typedef typename AccessorT::ElmT ElmT;
+  using ElmT = typename AccessorT::ElmT;
   AccessorT acc;
   bool operator()(ElmT left, ElmT right) const {
     StringData* sdLeft = acc.getStr(left);
@@ -205,7 +204,7 @@ struct StrElmCompare {
 
 template <typename AccessorT, int sort_flags, bool ascending>
 struct ElmCompare {
-  typedef typename AccessorT::ElmT ElmT;
+  using ElmT = typename AccessorT::ElmT;
   AccessorT acc;
   bool operator()(ElmT left, ElmT right) const {
     // Fast paths
@@ -282,8 +281,8 @@ struct ElmCompare {
       double dRight = vRight.toDouble();
       return ascending ? dLeft > dRight : dLeft < dRight;
     }
-    String strLeft = vLeft.toString();
-    String strRight = vRight.toString();
+    OptString strLeft = vLeft.toString();
+    OptString strRight = vRight.toString();
     const char* sLeft = strLeft.data();
     int lenLeft = strLeft.size();
     const char* sRight = strRight.data();
@@ -320,21 +319,25 @@ struct ElmCompare {
 
 template <typename AccessorT>
 struct ElmUCompare {
-  typedef typename AccessorT::ElmT ElmT;
+  using ElmT = typename AccessorT::ElmT;
   AccessorT acc;
   const CallCtx* ctx;
 
-  // only warn with HH syntax enabled
-  ElmUCompare() : warned(!RuntimeOption::EnableHipHopSyntax) {}
+  ElmUCompare() : warned(false) {}
 
   bool operator()(ElmT left, ElmT right) const {
     TypedValue args[2] = {
-      *acc.getValue(left).asCell(),
-      *acc.getValue(right).asCell()
+      *acc.getValue(left).asTypedValue(),
+      *acc.getValue(right).asTypedValue()
     };
     auto ret = Variant::attach(
-      g_context->invokeFuncFew(*ctx, 2, args)
+      g_context->invokeFuncFew(*ctx, 2, /* namedArgNames=*/ nullptr,
+                               args, RuntimeCoeffects::fixme())
     );
+    if (ctx->func->takesInOutParams()) {
+      assertx(ret.isArray());
+      ret = ret.asCArrRef()[0];
+    }
     if (LIKELY(ret.isInteger())) {
       return ret.toInt64() > 0;
     }
@@ -371,5 +374,3 @@ private:
 
 ///////////////////////////////////////////////////////////////////////////////
 }
-
-#endif // incl_HPHP_SORT_HELPERS_H_

@@ -13,12 +13,11 @@
    | license@php.net so we can mail you a copy immediately.               |
    +----------------------------------------------------------------------+
 */
-#ifndef incl_HPHP_JIT_IRGEN_INTERPONE_H_
-#define incl_HPHP_JIT_IRGEN_INTERPONE_H_
+#pragma once
 
-#include <folly/Optional.h>
+#include "hphp/util/optional.h"
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 
 struct InterpOneData;
 struct NormalizedInstruction;
@@ -30,15 +29,12 @@ struct IRGS;
 
 //////////////////////////////////////////////////////////////////////
 
-void interpOne(IRGS&, const NormalizedInstruction&);
+void interpOne(IRGS&);
 void interpOne(IRGS&, int popped);
 void interpOne(IRGS&, Type t, int popped);
-void interpOne(IRGS&, folly::Optional<Type>, int popped, int pushed,
+void interpOne(IRGS&, Optional<Type>, int popped, int pushed,
                InterpOneData&);
 
 //////////////////////////////////////////////////////////////////////
 
-}}}
-
-
-#endif
+}}

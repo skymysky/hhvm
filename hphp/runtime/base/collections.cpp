@@ -16,6 +16,7 @@
 #include "hphp/runtime/base/collections.h"
 
 #include "hphp/runtime/base/array-init.h"
+#include "hphp/runtime/base/bespoke-array.h"
 #include "hphp/runtime/base/variable-serializer.h"
 #include "hphp/runtime/base/variable-unserializer.h"
 #include "hphp/runtime/ext/collections/ext_collections-map.h"
@@ -23,7 +24,7 @@
 #include "hphp/runtime/ext/collections/ext_collections-set.h"
 #include "hphp/runtime/ext/collections/ext_collections-vector.h"
 
-namespace HPHP { namespace collections {
+namespace HPHP::collections {
 /////////////////////////////////////////////////////////////////////////////
 
 #define X(type) const StaticString s_##type("HH\\" #type);
@@ -32,10 +33,6 @@ COLLECTIONS_ALL_TYPES(X)
 
 /////////////////////////////////////////////////////////////////////////////
 // Constructor/Initializer
-
-ObjectData* allocPair(TypedValue c1, TypedValue c2) {
-  return req::make<c_Pair>(c1, c2, c_Pair::NoIncRef{}).detach();
-}
 
 #define X(type)                                    \
 ObjectData* allocEmpty##type() {                   \
@@ -47,6 +44,16 @@ ObjectData* allocFromArray##type(ArrayData* arr) { \
 COLLECTIONS_PAIRED_TYPES(X)
 #undef X
 
+newEmptyInstanceFunc allocEmptyFunc(CollectionType ctype) {
+  switch (ctype) {
+#define X(type) case CollectionType::type: return allocEmpty##type;
+COLLECTIONS_PAIRED_TYPES(X)
+#undef X
+    case CollectionType::Pair: not_reached();
+  }
+  not_reached();
+}
+
 newFromArrayFunc allocFromArrayFunc(CollectionType ctype) {
   switch (ctype) {
 #define X(type) case CollectionType::type: return allocFromArray##type;
@@ -57,14 +64,17 @@ COLLECTIONS_PAIRED_TYPES(X)
   not_reached();
 }
 
-newEmptyInstanceFunc allocEmptyFunc(CollectionType ctype) {
-  switch (ctype) {
-#define X(type) case CollectionType::type: return allocEmpty##type;
-COLLECTIONS_PAIRED_TYPES(X)
-#undef X
-    case CollectionType::Pair: not_reached();
+ObjectData* alloc(CollectionType ctype, ArrayData* arr) {
+  if (!arr->isVanilla()) {
+    auto const vanilla = BespokeArray::ToVanilla(arr, "collections::alloc");
+    decRefArr(arr);
+    arr = vanilla;
   }
-  not_reached();
+  return allocFromArrayFunc(ctype)(arr);
+}
+
+ObjectData* allocPair(TypedValue c1, TypedValue c2) {
+  return req::make<c_Pair>(c1, c2, c_Pair::NoIncRef{}).detach();
 }
 
 /////////////////////////////////////////////////////////////////////////////
@@ -82,15 +92,21 @@ COLLECTIONS_ALL_TYPES(X)
 /////////////////////////////////////////////////////////////////////////////
 // Casting and Copying
 
+template <IntishCast IC>
 Array toArray(const ObjectData* obj) {
   assertx(obj->isCollection());
   switch (obj->collectionType()) {
-#define X(type) case CollectionType::type: return c_##type::ToArray(obj);
+#define X(type) case CollectionType::type: return c_##type::ToArray<IC>(obj);
 COLLECTIONS_ALL_TYPES(X)
 #undef X
   }
   not_reached();
 }
+
+template
+Array toArray<IntishCast::None>(const ObjectData*);
+template
+Array toArray<IntishCast::Cast>(const ObjectData*);
 
 bool toBool(const ObjectData* obj) {
   assertx(obj->isCollection());
@@ -129,15 +145,40 @@ ArrayData* asArray(ObjectData* obj) {
   not_reached();
 }
 
+void replaceArray(ObjectData* obj, ArrayData* ad) {
+  assertx(obj->isCollection());
+  switch (obj->collectionType()) {
+  case CollectionType::ImmVector:
+  case CollectionType::Vector: {
+    auto const collection = static_cast<BaseVector*>(obj);
+    decRefArr(collection->arrayData());
+    return collection->setArrayData(ad);
+  }
+  case CollectionType::ImmMap:
+  case CollectionType::Map:
+  case CollectionType::ImmSet:
+  case CollectionType::Set: {
+    auto const collection = static_cast<HashCollection*>(obj);
+    decRefArr(collection->arrayData()->asArrayData());
+    return collection->setArrayData(VanillaDict::as(ad));
+  }
+  case CollectionType::Pair:
+    always_assert(false);
+  }
+  not_reached();
+}
+
 /////////////////////////////////////////////////////////////////////////////
 // Deep Copy
 
-ArrayData* deepCopyArray(ArrayData* arr) {
-  assertx(arr->isPHPArray());
+namespace {
+
+ArrayData* deepCopyArrayLike(ArrayData* arr) {
+  assertx(!arr->isKeysetType());
   Array ar(arr);
   IterateKV(
     arr,
-    [&](Cell k, TypedValue v) {
+    [&](TypedValue k, TypedValue v) {
       if (!isRefcountedType(v.m_type)) return false;
       Variant value{tvAsCVarRef(&v)};
       deepCopy(value.asTypedValue());
@@ -150,92 +191,40 @@ ArrayData* deepCopyArray(ArrayData* arr) {
   return ar.detach();
 }
 
-ArrayData* deepCopyVecArray(ArrayData* arr) {
-  assertx(arr->isVecArray());
-  Array ar(arr);
-  PackedArray::IterateKV(
-    arr,
-    [&](Cell k, TypedValue v) {
-      if (!isRefcountedType(v.m_type)) return false;
-      Variant value{tvAsCVarRef(&v)};
-      deepCopy(value.asTypedValue());
-      if (value.asTypedValue()->m_data.num != v.m_data.num) {
-        assertx(k.m_type == KindOfInt64);
-        ar.set(k.m_data.num, value);
-      }
-      return false;
-    }
-  );
-  return ar.detach();
-}
+}  // namespace
 
-ArrayData* deepCopyDict(ArrayData* arr) {
-  assertx(arr->isDict());
-  Array ar(arr);
-  MixedArray::IterateKV(
-    MixedArray::asMixed(arr),
-    [&](Cell k, TypedValue v) {
-      if (!isRefcountedType(v.m_type)) return false;
-      Variant value{tvAsCVarRef(&v)};
-      deepCopy(value.asTypedValue());
-      if (value.asTypedValue()->m_data.num != v.m_data.num) {
-        ar.set(k, *value.asTypedValue());
-      }
-      return false;
-    }
-  );
-  return ar.detach();
-}
-
-ObjectData* deepCopySet(c_Set* st) {
-  return c_Set::Clone(st);
-}
-
-ObjectData* deepCopyImmSet(c_ImmSet* st) {
-  return c_ImmSet::Clone(st);
-}
-
-void deepCopy(TypedValue* tv) {
-  switch (tv->m_type) {
+void deepCopy(tv_lval lval) {
+  switch (type(lval)) {
     DT_UNCOUNTED_CASE:
     case KindOfString:
     case KindOfResource:
-    case KindOfRef:
     case KindOfKeyset:
+    case KindOfRClsMeth:
+    case KindOfRFunc:
       return;
 
-    case KindOfVec: {
-      auto arr = deepCopyVecArray(tv->m_data.parr);
-      decRefArr(tv->m_data.parr);
-      tv->m_data.parr = arr;
-      return;
-    }
-
+    case KindOfVec:
     case KindOfDict: {
-      auto arr = deepCopyDict(tv->m_data.parr);
-      decRefArr(tv->m_data.parr);
-      tv->m_data.parr = arr;
-      return;
-    }
-
-    case KindOfArray: {
-      auto arr = deepCopyArray(tv->m_data.parr);
-      decRefArr(tv->m_data.parr);
-      tv->m_data.parr = arr;
+      auto& original = val(lval).parr;
+      if (!original->isRefCounted()) return;
+      auto arr = deepCopyArrayLike(original);
+      decRefArr(original);
+      original = arr;
       return;
     }
 
     case KindOfObject: {
-      auto obj = tv->m_data.pobj;
+      auto& original = val(lval).pobj;
+      auto obj = original;
       if (!obj->isCollection()) return;
       const auto copyVector = [](BaseVector* vec) {
-        if (vec->size() > 0 && vec->arrayData()->isRefCounted()) {
+        const auto size = vec->size();
+        if (size > 0 && vec->arrayData()->isRefCounted()) {
           vec->mutate();
-          auto elm = vec->data();
-          auto end = vec->data() + vec->size();
+          int64_t i = 0;
           do {
-            deepCopy(elm);
-          } while (++elm < end);
+            deepCopy(vec->lvalAt(i));
+          } while (++i < size);
         }
         return vec;
       };
@@ -281,9 +270,9 @@ void deepCopy(TypedValue* tv) {
         default:
           assertx(false);
       }
-      assertx(obj != tv->m_data.pobj || tv->m_data.pobj->hasMultipleRefs());
-      decRefObj(tv->m_data.pobj);
-      tv->m_data.pobj = obj;
+      assertx(obj != original || original->hasMultipleRefs());
+      decRefObj(original);
+      original = obj;
       return;
     }
   }
@@ -293,9 +282,16 @@ void deepCopy(TypedValue* tv) {
 /////////////////////////////////////////////////////////////////////////////
 // Read/Write access
 
+namespace {
+
+// Value types (everything except Object and Resource) are handled specially:
+// any value-type members of an immutable collection are also immutable.
+inline bool isValueType(DataType type) {
+  return type != KindOfObject && type != KindOfResource;
+}
+
 template <bool throwOnMiss>
-static inline TypedValue* atImpl(ObjectData* obj, const TypedValue* key) {
-  assertx(!isRefType(key->m_type));
+inline tv_lval atImpl(ObjectData* obj, const TypedValue* key) {
   switch (obj->collectionType()) {
 #define X(type) case CollectionType::type: \
                   return c_##type::OffsetAt<throwOnMiss>(obj, key);
@@ -305,16 +301,17 @@ COLLECTIONS_ALL_TYPES(X)
   return nullptr;
 }
 
-TypedValue* at(ObjectData* obj, const TypedValue* key) {
+}  // namespace
+
+tv_lval at(ObjectData* obj, const TypedValue* key) {
   return atImpl<true>(obj, key);
 }
-TypedValue* get(ObjectData* obj, const TypedValue* key) {
+tv_lval get(ObjectData* obj, const TypedValue* key) {
   return atImpl<false>(obj, key);
 }
 
-TypedValue* atLval(ObjectData* obj, const TypedValue* key) {
-  assertx(!isRefType(key->m_type));
-  TypedValue* ret;
+tv_lval atLval(ObjectData* obj, const TypedValue* key) {
+  tv_lval ret;
   switch (obj->collectionType()) {
     case CollectionType::Pair:
       ret = c_Pair::OffsetAt<true>(obj, key);
@@ -326,9 +323,7 @@ TypedValue* atLval(ObjectData* obj, const TypedValue* key) {
       // if the element is a value-type (anything other than objects and
       // resources) we need to sever any buffer sharing that might be going on
       auto* vec = static_cast<c_Vector*>(obj);
-      if (UNLIKELY(!vec->canMutateBuffer() &&
-                   ret->m_type != KindOfObject &&
-                   ret->m_type != KindOfResource)) {
+      if (UNLIKELY(!vec->canMutateBuffer() && isValueType(type(ret)))) {
         vec->mutate();
         ret = BaseVector::OffsetAt<true>(obj, key);
       }
@@ -344,9 +339,7 @@ TypedValue* atLval(ObjectData* obj, const TypedValue* key) {
       // if the element is a value-type (anything other than objects and
       // resources) we need to sever any buffer sharing that might be going on
       auto* mp = static_cast<c_Map*>(obj);
-      if (UNLIKELY(!mp->canMutateBuffer() &&
-                   ret->m_type != KindOfObject &&
-                   ret->m_type != KindOfResource)) {
+      if (UNLIKELY(!mp->canMutateBuffer() && isValueType(type(ret)))) {
         mp->mutate();
         ret = BaseMap::OffsetAt<true>(obj, key);
       }
@@ -368,14 +361,13 @@ TypedValue* atLval(ObjectData* obj, const TypedValue* key) {
   // promotion, null->stdClass promotion, and mutating strings or arrays
   // in place (see "test/slow/collection_classes/invalid-operations.php"
   // for examples).
-  if (ret->m_type != KindOfObject && ret->m_type != KindOfResource) {
+  if (isValueType(type(ret))) {
     throw_cannot_modify_immutable_object(obj->getClassName().data());
   }
   return ret;
 }
 
-TypedValue* atRw(ObjectData* obj, const TypedValue* key) {
-  assertx(!isRefType(key->m_type));
+tv_lval atRw(ObjectData* obj, const TypedValue* key) {
   switch (obj->collectionType()) {
     case CollectionType::Vector:
       // Since we're exposing an element of a Vector in an read/write context,
@@ -397,7 +389,7 @@ TypedValue* atRw(ObjectData* obj, const TypedValue* key) {
 }
 
 bool contains(ObjectData* obj, const Variant& offset) {
-  auto* key = offset.asCell();
+  auto* key = offset.asTypedValue();
   switch (obj->collectionType()) {
     case CollectionType::Vector:
     case CollectionType::ImmVector:
@@ -415,7 +407,6 @@ bool contains(ObjectData* obj, const Variant& offset) {
 }
 
 bool isset(ObjectData* obj, const TypedValue* key) {
-  assertx(!isRefType(key->m_type));
   switch (obj->collectionType()) {
     case CollectionType::Vector:
     case CollectionType::ImmVector:
@@ -432,26 +423,7 @@ bool isset(ObjectData* obj, const TypedValue* key) {
   not_reached();
 }
 
-bool empty(ObjectData* obj, const TypedValue* key) {
-  assertx(!isRefType(key->m_type));
-  switch (obj->collectionType()) {
-    case CollectionType::Vector:
-    case CollectionType::ImmVector:
-      return BaseVector::OffsetEmpty(obj, key);
-    case CollectionType::Map:
-    case CollectionType::ImmMap:
-      return BaseMap::OffsetEmpty(obj, key);
-    case CollectionType::Set:
-    case CollectionType::ImmSet:
-      return BaseSet::OffsetEmpty(obj, key);
-    case CollectionType::Pair:
-      return c_Pair::OffsetEmpty(obj, key);
-  }
-  not_reached();
-}
-
 void unset(ObjectData* obj, const TypedValue* key) {
-  assertx(!isRefType(key->m_type));
   switch (obj->collectionType()) {
     case CollectionType::Vector:
       c_Vector::OffsetUnset(obj, key);
@@ -471,17 +443,16 @@ void unset(ObjectData* obj, const TypedValue* key) {
 }
 
 void append(ObjectData* obj, TypedValue* val) {
-  assertx(!isRefType(val->m_type));
   assertx(val->m_type != KindOfUninit);
   switch (obj->collectionType()) {
     case CollectionType::Vector:
       static_cast<c_Vector*>(obj)->add(*val);
       break;
     case CollectionType::Map:
-      static_cast<c_Map*>(obj)->add(*val);
+      SystemLib::throwInvalidArgumentExceptionObject("Cannot append to Map");
       break;
     case CollectionType::Set:
-      static_cast<c_Set*>(obj)->add(*val);
+      static_cast<c_Set*>(obj)->add(tvClassToString(*val));
       break;
     case CollectionType::ImmVector:
     case CollectionType::ImmMap:
@@ -492,8 +463,6 @@ void append(ObjectData* obj, TypedValue* val) {
 }
 
 void set(ObjectData* obj, const TypedValue* key, const TypedValue* val) {
-  assertx(!isRefType(key->m_type));
-  assertx(!isRefType(val->m_type));
   assertx(val->m_type != KindOfUninit);
   switch (obj->collectionType()) {
     case CollectionType::Vector:
@@ -566,4 +535,4 @@ Variant shift(ObjectData* obj) {
 }
 
 /////////////////////////////////////////////////////////////////////////////
-}}
+}

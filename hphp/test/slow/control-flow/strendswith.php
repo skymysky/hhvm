@@ -11,6 +11,10 @@ public static function endsWith(string $str, string $test): bool {
 }
 }
 
+
+<<__EntryPoint>>
+function main_strendswith() :mixed{
 for ($i = 0; $i < 12; $i++) {
   var_dump(Str::endsWith(str_repeat('x', $i), "bar"));
+}
 }

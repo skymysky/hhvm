@@ -14,10 +14,13 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_EVAL_CODE_COVERAGE_H_
-#define incl_HPHP_EVAL_CODE_COVERAGE_H_
+#pragma once
 
-#include "hphp/util/hash-map.h"
+#include "hphp/runtime/base/req-hash-map.h"
+#include "hphp/runtime/base/req-bitset.h"
+#include "hphp/runtime/vm/hhbc.h"
+
+#include "hphp/util/optional.h"
 
 #include <string>
 #include <vector>
@@ -28,9 +31,9 @@ namespace HPHP {
 struct Array;
 
 struct CodeCoverage {
-  static constexpr int kLineExecuted = 1;
-
-  void Record(const char* filename, int line0, int line1);
+  void Record(const char* filename, int line);
+  void onSessionInit();
+  void onSessionExit();
 
   /*
    * If report_frequency is passed, returns an array in this format,
@@ -59,12 +62,30 @@ struct CodeCoverage {
    */
   void Reset();
 
+  /*
+   * Causes CodeCoverage to dump any coverage data onSessionExit()
+   */
+  void dumpOnExit() { shouldDump = true; }
+
+  /*
+   * Whether or not this opcode should be covered.
+   * The reason we don't cover all opcodes is because some opcodes are just
+   * internal. We want the opcodes that call a function, jumps, assign to local
+   * and so on to matter. Also by only doing code coverage on some bytecodes
+   * makes running HHVM with codecoverage faster.
+   */
+  static bool isCoverable(Op op);
+
+  /*
+   * Whether or not coverage should use per file coverage
+   */
+  bool m_should_use_per_file_coverage{false};
+
 private:
-  using CodeCoverageMap = hphp_const_char_map<std::vector<int>>;
-  CodeCoverageMap m_hits;
+  using CodeCoverageMap = req::vector_map<const char*, req::dynamic_bitset>;
+  Optional<CodeCoverageMap> m_hits;
+  bool shouldDump{false};
 };
 
 ///////////////////////////////////////////////////////////////////////////////
 }
-
-#endif // incl_HPHP_EVAL_CODE_COVERAGE_H_

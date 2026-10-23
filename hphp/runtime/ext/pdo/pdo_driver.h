@@ -15,8 +15,7 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_PDO_DRIVER_H_
-#define incl_HPHP_PDO_DRIVER_H_
+#pragma once
 
 #include "hphp/runtime/ext/extension.h"
 #include "hphp/runtime/base/req-ptr.h"
@@ -240,9 +239,9 @@ struct PDODriver {
 
   const char *getName() const { return m_name;}
 
-  req::ptr<PDOResource> createResource(const String& datasource,
-                                       const String& username,
-                                       const String& password,
+  req::ptr<PDOResource> createResource(const OptString& datasource,
+                                       const OptString& username,
+                                       const OptString& password,
                                        const Array& options);
   virtual req::ptr<PDOResource>
     createResource(const sp_PDOConnection& conn) = 0;
@@ -299,20 +298,20 @@ struct PDOConnection : std::enable_shared_from_this<PDOConnection> {
   /*
    * Prepare a statement and stash driver specific portion into `stmt'.
    */
-  virtual bool preparer(const String& sql,
+  virtual bool preparer(const OptString& sql,
                         sp_PDOStatement *stmt,
                         const Variant& options);
 
   /*
    * Execute a statement (that does not return a result set).
    */
-  virtual int64_t doer(const String& sql);
+  virtual int64_t doer(const OptString& sql);
 
   /*
    * Quote a string.
    */
-  virtual bool quoter(const String& input,
-                      String &quoted,
+  virtual bool quoter(const OptString& input,
+                      OptString &quoted,
                       PDOParamType paramtype);
 
   /*
@@ -331,7 +330,7 @@ struct PDOConnection : std::enable_shared_from_this<PDOConnection> {
    * Return last insert ID.  Null indicates error condition; otherwise, the
    * return value MUST be an emalloc'd NULL terminated string.
    */
-  virtual String lastId(const char *name);
+  virtual OptString lastId(const char *name);
 
   /*
    * Fetch error information.  If `stmt' is not null, fetch information
@@ -402,7 +401,7 @@ struct PDOConnection : std::enable_shared_from_this<PDOConnection> {
   };
 
   // Data source string used to open this handle.
-  std::string data_source;
+  std::string m_data_source;
 
   // The global error code.
   PDOErrorType error_code{0};
@@ -453,7 +452,7 @@ struct PDOResource : SweepableResourceData {
   DECLARE_RESOURCE_ALLOCATION(PDOResource)
 
   // overriding ResourceData
-  const String& o_getClassNameHook() const override { return classnameof(); }
+  const OptString& o_getClassNameHook() const override { return classnameof(); }
 
   const sp_PDOConnection& conn() const { return m_conn; }
 
@@ -478,17 +477,17 @@ public:
 
 /* describes a column */
 struct PDOColumn : ResourceData {
-  DECLARE_RESOURCE_ALLOCATION_NO_SWEEP(PDOColumn);
+  DECLARE_RESOURCE_ALLOCATION_NO_SWEEP(PDOColumn)
   PDOColumn();
   ~PDOColumn();
 
   CLASSNAME_IS("PDOColumn")
-  const String& o_getClassNameHook() const override {
+  const OptString& o_getClassNameHook() const override {
     return classnameof();
   }
 
 public:
-  String name;
+  OptString name;
   unsigned long maxlen;
   PDOParamType param_type;
   unsigned long precision;
@@ -497,29 +496,24 @@ public:
 ///////////////////////////////////////////////////////////////////////////////
 
 /* describes a bound parameter */
-struct PDOBoundParam : SweepableResourceData {
-  DECLARE_RESOURCE_ALLOCATION(PDOBoundParam);
+struct PDOBoundParam final : SweepableResourceData {
+  DECLARE_RESOURCE_ALLOCATION(PDOBoundParam)
   PDOBoundParam();
   ~PDOBoundParam();
 
   CLASSNAME_IS("PDOBoundParam")
   // overriding ResourceData
-  const String& o_getClassNameHook() const override { return classnameof(); }
+  const OptString& o_getClassNameHook() const override { return classnameof(); }
 
 public:
   int64_t paramno;           /* if -1, then it has a name, and we don't
                               know the index *yet* */
-  String name;
-
-  int64_t max_value_len;     /* as a hint for pre-allocation */
+  OptString name;
 
   Variant parameter;       /* the variable itself */
   PDOParamType param_type; /* desired or suggested type */
 
-  Variant driver_params;   /* optional parameter(s) for the driver */
-
   PDOStatement *stmt;      /* for convenience in dtor */
-  bool is_param;           /* parameter or column ? */
 
   void *driver_ext_data;   /* must not be request-heap ptr */
   TYPE_SCAN_IGNORE_FIELD(driver_ext_data);
@@ -537,7 +531,7 @@ using sp_pdo = req::ptr<c_pdo>;
  */
 struct PDOStatement : SweepableResourceData {
 
-  DECLARE_RESOURCE_ALLOCATION(PDOStatement);
+  DECLARE_RESOURCE_ALLOCATION(PDOStatement)
 
   enum SupportedMethod {
     MethodExecuter,
@@ -558,7 +552,7 @@ public:
 
   CLASSNAME_IS("PDOStatement")
   // overriding ResourceData
-  const String& o_getClassNameHook() const override { return classnameof(); }
+  const OptString& o_getClassNameHook() const override { return classnameof(); }
 
   virtual bool support(SupportedMethod method);
 
@@ -670,10 +664,10 @@ public:
   long row_count;
 
   /* used to hold the statement's current query */
-  String query_string;
+  OptString query_string;
 
   /* copy of the query with expanded binds ONLY for emulated-prepare drivers */
-  String active_query_string;
+  OptString active_query_string;
 
   /* the cursor specific error code. */
   PDOErrorType error_code;
@@ -686,10 +680,10 @@ public:
   PDOFetchType default_fetch_type;
   struct {
     int column;
-    String clsname;
-    String constructor;
+    OptString clsname;
+    OptString constructor;
     Variant ctor_args;
-    String func;
+    OptString func;
     Variant fetch_args;
     Object object;
     Variant values;
@@ -701,15 +695,14 @@ public:
   const char *named_rewrite_template;
 };
 
-int pdo_parse_params(sp_PDOStatement stmt, const String& in, String &out);
+int pdo_parse_params(sp_PDOStatement stmt, const OptString& in, OptString &out);
 void pdo_raise_impl_error(sp_PDOResource rsrc, sp_PDOStatement stmt,
                           const char *sqlstate, const char *supp);
 void pdo_raise_impl_error(sp_PDOResource rsrc, PDOStatement* stmt,
                           const char *sqlstate, const char *supp);
-void throw_pdo_exception(const Variant& code, const Variant& info,
-  ATTRIBUTE_PRINTF_STRING const char *fmt, ...) ATTRIBUTE_PRINTF(3,4);
+void throw_pdo_exception(const Variant& info,
+  ATTRIBUTE_PRINTF_STRING const char *fmt, ...) ATTRIBUTE_PRINTF(2,3);
 
 ///////////////////////////////////////////////////////////////////////////////
 }
 
-#endif // incl_HPHP_PDO_DRIVER_H_

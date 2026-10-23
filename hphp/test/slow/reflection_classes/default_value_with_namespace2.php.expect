@@ -1,26 +1,18 @@
 reflection:
-array(3) {
-  [0]=>
+vec(3) {
   int(1)
-  [1]=>
-  array(1) {
-    [0]=>
+  vec(1) {
     string(2) "42"
   }
-  [2]=>
   string(3) "foo"
 }
-string(65) "array(SORT_NUMERIC, array(\Foo\Derived::NUM), \Foo\Bar\Base::STR)"
+string(62) "vec[\SORT_NUMERIC, vec[\Foo\Derived::NUM], \Foo\Bar\Base::STR]"
 NULL
 call:
-array(3) {
-  [0]=>
+vec(3) {
   int(1)
-  [1]=>
-  array(1) {
-    [0]=>
+  vec(1) {
     string(2) "42"
   }
-  [2]=>
   string(3) "foo"
 }

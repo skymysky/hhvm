@@ -14,13 +14,13 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_TREADMILL_H_
-#define incl_HPHP_TREADMILL_H_
+#pragma once
 
 #include <stdint.h>
+#include <chrono>
 #include <memory>
 
-namespace HPHP { namespace Treadmill {
+namespace HPHP::Treadmill {
 
 //////////////////////////////////////////////////////////////////////
 
@@ -40,20 +40,37 @@ enum class SessionKind {
   RpcRequest,
   TranslateWorker,
   Retranslate,
+  RetranslateAll,
   ProfData,
   UnitTests,
   CompileRepo,
   HHBBC,
   CompilerEmit,
   CompilerAnalysis,
-  CLISession
+  CLISession,
+  UnitReaper
 };
 
 /*
- * Return the current thread's index.
+ * Treadmill uses steady clock to track the oldest running request.
  */
-constexpr int64_t kInvalidThreadIdx = -1;
-int64_t threadIdx();
+using Clock = std::chrono::steady_clock;
+
+/*
+ * A special value of start time indicating either an idle request in request
+ * context, or no request in flight in global context.
+ */
+constexpr Clock::time_point kNoStartTime = Clock::time_point{};
+
+/*
+ * Return the current thread's session kind.
+ */
+SessionKind sessionKind();
+
+/*
+ * Return the current thread's request index.
+ */
+int64_t requestIdx();
 
 /*
  * The Treadmill allows us to defer work until all currently
@@ -64,19 +81,15 @@ void startRequest(SessionKind session_kind);
 void finishRequest();
 
 /*
- * Returns the oldest start time in seconds of all requests in flight.
- * If there are no requests in flight the return value is 0.
- * The value returned should be used as a conservative and true value
- * for the oldest start time of any request in flight. In that sense
- * the value is safe to compare against in a less-than relationship.
+ * Returns the start time of the oldest request in flight, or kNoStartTime
+ * if there is none.
  */
-int64_t getOldestStartTime();
+Clock::time_point getOldestRequestStartTime();
 
 /*
- * Returns for how long (wall time) the oldest request in flight has
- * been running, in seconds.
+ * Returns the start time of this request.
  */
-int64_t getAgeOldestRequest();
+Clock::time_point getRequestStartTime();
 
 /*
  * Ask for memory to be freed (as in free, not delete) by the next
@@ -85,9 +98,23 @@ int64_t getAgeOldestRequest();
 void deferredFree(void*);
 
 /*
- * Used to get debug information about the treadmill.
+ * Check if the treadmill is "stuck" by a request running far longer
+ * than it should. If stuck, the process will send a SIGABRT to itself
+ * to die. This check is normally done by startRequest(), but can be
+ * triggered manually with this.
  */
-std::string dumpTreadmillInfo();
+void checkForStuckTreadmill();
+
+/*
+ * Used to get debug information about the treadmill. If forCrash is true then
+ * an attempt will be made to acquire the treadmill mutex but a result will be
+ * returned regardless of whether the lock was acquired.
+ */
+std::string dumpTreadmillInfo(bool forCrash = false);
+
+/* TODO: Add docs for these requests */
+std::string dumpActiveRequestInfo();
+unsigned long long getNumInflightRequests();
 
 /*
  * Schedule a function to run on the next appropriate treadmill round.
@@ -110,8 +137,6 @@ struct Session final {
 
 //////////////////////////////////////////////////////////////////////
 
-}}
+}
 
 #include "hphp/runtime/vm/treadmill-inl.h"
-
-#endif

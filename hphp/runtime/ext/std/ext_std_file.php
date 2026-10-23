@@ -1,5 +1,10 @@
 <?hh
 
+namespace {
+
+const int FILE_TEXT = 0;
+const int FILE_BINARY = 0;
+
 /**
  * fopen() binds a named resource, specified by filename, to a stream.
  *
@@ -37,7 +42,7 @@ function popen(string $command, string $mode): mixed;
  * @return bool - Returns TRUE on success or FALSE on failure.
  *
  */
-<<__Native, __ParamCoerceModeFalse>>
+<<__Native>>
 function fclose(resource $handle): bool;
 
 /**
@@ -69,7 +74,7 @@ function pclose(mixed $handle): mixed;
  *   seeking past EOF is not considered an error.
  *
  */
-<<__Native, __ParamCoerceModeFalse>>
+<<__Native>>
 function fseek(resource $handle, int $offset, int $whence = SEEK_SET): mixed;
 
 /**
@@ -84,7 +89,7 @@ function fseek(resource $handle, int $offset, int $whence = SEEK_SET): mixed;
  * @return bool - Returns TRUE on success or FALSE on failure.
  *
  */
-<<__Native, __ParamCoerceModeFalse>>
+<<__Native>>
 function rewind(resource $handle): bool;
 
 /**
@@ -99,7 +104,7 @@ function rewind(resource $handle): bool;
  *   occurs, returns FALSE.
  *
  */
-<<__Native, __ParamCoerceModeFalse>>
+<<__Native>>
 function ftell(resource $handle): mixed;
 
 /**
@@ -113,7 +118,7 @@ function ftell(resource $handle): mixed;
  *   occurs (including socket timeout); otherwise returns FALSE.
  *
  */
-<<__Native, __ParamCoerceModeFalse>>
+<<__Native>>
 function feof(resource $handle): bool;
 
 /**
@@ -127,7 +132,7 @@ function feof(resource $handle): bool;
  *   format of the array is described in detail on the stat() manual page.
  *
  */
-<<__Native, __ParamCoerceModeFalse>>
+<<__Native>>
 function fstat(resource $handle): mixed;
 
 /**
@@ -143,7 +148,7 @@ function fstat(resource $handle): mixed;
  * @return mixed - Returns the read string or FALSE on failure.
  *
  */
-<<__Native, __ParamCoerceModeFalse>>
+<<__Native>>
 function fread(resource $handle, int $length): mixed;
 
 /**
@@ -161,7 +166,7 @@ function fread(resource $handle, int $length): mixed;
  *   this function.
  *
  */
-<<__Native, __ParamCoerceModeFalse>>
+<<__Native>>
 function fgetc(resource $handle): mixed;
 
 /**
@@ -183,7 +188,7 @@ function fgetc(resource $handle): mixed;
  *   file pointed to by handle.  If an error occurs, returns FALSE.
  *
  */
-<<__Native, __ParamCoerceModeFalse>>
+<<__Native>>
 function fgets(resource $handle, int $length = 0): mixed;
 
 /**
@@ -202,7 +207,7 @@ function fgets(resource $handle, int $length = 0): mixed;
  *   error occurs, returns FALSE.
  *
  */
-<<__Native, __ParamCoerceModeFalse>>
+<<__Native>>
 function fgetss(resource $handle,
                 int $length = 0,
                 string $allowable_tags = ""): mixed;
@@ -220,14 +225,11 @@ function fgetss(resource $handle,
  * @param string $format - The specified format as described in the sprintf()
  *   documentation.
  *
- * @return mixed - If only two parameters were passed to this function, the
- *   values parsed will be returned as an array. Otherwise, if optional
- *   parameters are passed, the function will return the number of assigned
- *   values. The optional parameters must be passed by reference.
+ * @return mixed - false on EOF, otherwise varray of parsed values
  *
  */
-<<__Native("ActRec", "VariadicByRef")>>
-function fscanf(resource $handle, string $format, ...): mixed;
+<<__Native>>
+function fscanf(resource $handle, string $format): mixed;
 
 /**
  * Reads to EOF on the given file pointer from the current position and writes
@@ -247,7 +249,7 @@ function fscanf(resource $handle, string $format, ...): mixed;
  *   through to the output.
  *
  */
-<<__Native, __ParamCoerceModeFalse>>
+<<__Native>>
 function fpassthru(resource $handle): mixed;
 
 /**
@@ -263,10 +265,10 @@ function fpassthru(resource $handle): mixed;
  *   error.
  *
  */
-<<__Native, __ParamCoerceModeFalse>>
+<<__Native>>
 function fwrite(resource $handle, string $data, int $length = 0): mixed;
 
-<<__Native, __ParamCoerceModeFalse>>
+<<__Native>>
 function fputs(resource $handle, string $data, int $length = 0): mixed;
 
 /**
@@ -280,7 +282,7 @@ function fputs(resource $handle, string $data, int $length = 0): mixed;
  *
  */
 <<__Native>>
-function fprintf(mixed $handle, string $format, ...$argv): mixed;
+function fprintf(mixed $handle, string $format, mixed... $argv): mixed;
 
 /**
  * Write a string produced according to format to the stream resource
@@ -308,7 +310,7 @@ function vfprintf(mixed $handle, mixed $format, mixed $args): mixed;
  * @return bool - Returns TRUE on success or FALSE on failure.
  *
  */
-<<__Native, __ParamCoerceModeFalse>>
+<<__Native>>
 function fflush(resource $handle): bool;
 
 /**
@@ -323,7 +325,7 @@ function fflush(resource $handle): bool;
  * @return bool - Returns TRUE on success or FALSE on failure.
  *
  */
-<<__Native, __ParamCoerceModeFalse>>
+<<__Native>>
 function ftruncate(resource $handle, int $size): bool;
 
 /**
@@ -353,7 +355,8 @@ function ftruncate(resource $handle, int $size): bool;
 <<__Native>>
 function flock(resource $handle,
                int $operation,
-               mixed &$wouldblock = null): bool;
+               <<__OutOnly>>
+               inout bool $wouldblock): bool;
 
 /**
  * fputcsv() formats a line (passed as a fields array) as CSV and write it
@@ -375,7 +378,7 @@ function flock(resource $handle,
  */
 <<__Native>>
 function fputcsv(resource $handle,
-                 array $fields,
+                 varray<string> $fields,
                  string $delimiter = ",",
                  string $enclosure = "\"",
                  string $escape_char = "\\"): mixed;
@@ -813,11 +816,12 @@ function symlink(string $target, string $link): bool;
  *
  */
 <<__Native, __IsFoldable>>
-function basename(string $path, string $suffix = ""): string;
+function basename(string $path, string $suffix = "")[]: ?string;
 
 /**
  * fnmatch() checks if the passed string would match the given shell wildcard
- *   pattern.
+ *   pattern. If you're looking to test a GLOB pattern against a filepath, this
+ *   is what you want.
  *
  * @param string $pattern - The shell wildcard pattern.
  * @param string $filename - The tested string. This function is especially
@@ -1240,7 +1244,7 @@ function readlink(string $path): mixed;
  *
  */
 <<__Native>>
-function realpath(string $path): mixed;
+function realpath(string $path)[read_globals]: mixed;
 
 /**
  * pathinfo() returns an associative array containing information about path.
@@ -1257,7 +1261,7 @@ function realpath(string $path): mixed;
  *   this function will return a string if not all elements are requested.
  *
  */
-<<__ParamCoerceModeNull, __Native>>
+<<__Native>>
 function pathinfo(string $path, int $opt = 15): mixed;
 
 /**
@@ -1345,7 +1349,7 @@ function rmdir(string $dirname, mixed $context = null): bool;
  *
  */
 <<__Native, __IsFoldable>>
-function dirname(string $path): string;
+function dirname(string $path)[]: ?string;
 
 /**
  * Gets the current working directory.
@@ -1368,7 +1372,7 @@ function getcwd(): mixed;
  * @return bool - Returns TRUE on success or FALSE on failure.
  *
  */
-<<__ParamCoerceModeFalse, __Native>>
+<<__Native>>
 function chdir(string $directory): bool;
 
 /**
@@ -1471,3 +1475,72 @@ function scandir(string $directory,
  */
 <<__Native>>
 function closedir(?resource $dir_handle = null): void;
+
+}
+
+namespace HH {
+
+/**
+ * Return a stream resource attached to stdin in script environments,
+ * or null in web requests
+ */
+<<__Native>>
+function try_stdin()[]: ?resource;
+
+/**
+ * Return a stream resource attached to stdout in script environments,
+ * or null in web requests
+ */
+<<__Native>>
+function try_stdout()[]: ?resource;
+
+/**
+ * Return a stream resource attached to stderr in script environments,
+ * or null in web requests
+ */
+<<__Native>>
+function try_stderr()[]: ?resource;
+
+/**
+ * Return a stream resource attached to stdin in script environments,
+ * or throw a RuntimeException in web requests.
+ */
+function stdin()[]: resource {
+  $s = try_stdin();
+  if ($s is null) {
+    throw new \RuntimeException(
+      "Request STDIO file descriptors are only available in CLI mode"
+    );
+  }
+  return $s;
+}
+
+/**
+ * Return a stream resource attached to stdout in script environments,
+ * or throw a RuntimeException in web requests.
+ */
+function stdout()[]: resource {
+  $s = try_stdout();
+  if ($s is null) {
+    throw new \RuntimeException(
+      "Request STDIO file descriptors are only available in CLI mode"
+    );
+  }
+  return $s;
+}
+
+/**
+ * Return a stream resource attached to stderr in script environments,
+ * or throw a RuntimeException in web requests.
+ */
+function stderr()[]: resource {
+  $s = try_stderr();
+  if ($s is null) {
+    throw new \RuntimeException(
+      "Request STDIO file descriptors are only available in CLI mode"
+    );
+  }
+  return $s;
+}
+
+}

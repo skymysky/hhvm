@@ -1,4 +1,4 @@
 <?hh
 
 class Aaaaaaaaaaa_class {}
-function aaaaaaaaaaa_fun () {}
+function aaaaaaaaaaa_fun (): void {}

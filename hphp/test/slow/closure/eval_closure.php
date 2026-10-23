@@ -1,13 +1,17 @@
-<?php
+<?hh
 
-function reproduce( $code ) {
-        $template = eval( $code );
-        return $template( array() );
+function reproduce( $code, $func ) :mixed{
+        eval( $code );
+        return HH\dynamic_fun($func)( vec[] );
 }
 
-echo reproduce('return function () {
+
+<<__EntryPoint>>
+function main_eval_closure() :mixed{
+echo reproduce('<<__DynamicallyCallable>> function foo() {
     return (function() {return "first\n";})();
-};');
-echo reproduce('return function () {
+}', 'foo');
+echo reproduce('<<__DynamicallyCallable>> function bar() {
     return (function() {return "second\n";})();
-};');
+}', 'bar');
+}

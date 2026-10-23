@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 /**
  * Copyright (c) 2014, Facebook, Inc.
  * All rights reserved.
@@ -8,6 +8,14 @@
  *
  *
  */
+
+class Foo implements HH\ClassAttribute { public function __construct(int... $x) {} }
+class Bar implements HH\ClassAttribute {}
+class SingleAttribute implements HH\ClassAttribute {}
+class SingleAttributeWithOneParam implements HH\ClassAttribute { public function __construct(public int $x) {} }
+class SingleAttributeWithTwoParams implements HH\ClassAttribute { public function __construct(public int $x, public int $y) {} }
+class Multiple implements HH\ClassAttribute { public function __construct(public int $x) {} }
+class Attributes implements HH\ClassAttribute { public function __construct(public int $x, public int $y) {} }
 
 <<Foo(1,2,3), Bar>>
 class C1 {

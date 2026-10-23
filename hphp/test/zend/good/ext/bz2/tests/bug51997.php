@@ -1,7 +1,7 @@
-<?php
-
+<?hh
+<<__EntryPoint>> function main(): void {
 error_reporting(E_ALL);
-
+chdir(sys_get_temp_dir());
 $filename = "bug51997.bz2";
 $str = "This is a test string.\n";
 $bz = bzopen($filename, "w");
@@ -14,4 +14,4 @@ print bzread($bz, 10);
 print bzread($bz);
 bzclose($bz);
 unlink($filename);
-
+}

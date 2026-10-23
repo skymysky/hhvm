@@ -1,0 +1,4 @@
+(library
+ (name disk)
+ (wrapped false)
+ (libraries injector_config utils_core unix))

@@ -16,7 +16,7 @@ class C {
 }
 
 function nullthrows<T>(?T $x): T {
-  // UNSAFE
+  return $x as nonnull;
 }
 
 async function f(): Awaitable<int> {

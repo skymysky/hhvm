@@ -1,24 +1,17 @@
-<?php
+<?hh
 
-function g($a) {
- function t(){
-}
-;
- return $a ? array(1,2,3) : 'foo';
+function g($a) :mixed{
+ return $a ? vec[1,2,3] : 'foo';
  }
-function f($a) {
+function f($a) :mixed{
  return g($a);
  }
-function test($a) {
-  return reset((f($a)));
-  }
+function test($a) :mixed{
+  $f = f($a);
+  return $f[0];
+}
+
+<<__EntryPoint>>
+function main_1833() :mixed{
 var_dump(test(1));
-function &h(&$a) {
- return $a['foo'];
- }
-function i($a) {
- $x = &h($a);
- $x = 'hello';
- return $a;
- }
-var_dump(i(false));
+}

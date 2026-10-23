@@ -1,4 +1,4 @@
 <?hh
 
-const X = +1;
-const Y = -1;
+const mixed X = +1;
+const mixed Y = -1;

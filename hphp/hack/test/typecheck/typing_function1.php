@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 /**
  * Copyright (c) 2014, Facebook, Inc.
  * All rights reserved.
@@ -14,5 +14,5 @@ function f(int $x): int {
 }
 
 function test(): void {
-  $y = call_user_func(fun('f'), 32);
+  $y = (f<>)(32);
 }

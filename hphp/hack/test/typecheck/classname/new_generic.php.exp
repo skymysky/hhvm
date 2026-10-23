@@ -1,14 +1,31 @@
 File "new_generic.php", line 13, characters 3-16:
-  <expr#1> as Tobj
+  Tobj as C<Targ>
 File "new_generic.php", line 18, characters 3-32:
-  ^(C<int>)
+  <expr#2> as C<int>
 File "new_generic.php", line 19, characters 3-38:
-  ^(C<int>)
-File "new_generic.php", line 19, characters 11-19:
-Some type constraint(s) here are violated (Typing[4110])
-File "new_generic.php", line 8, characters 26-29:
-'Tobj' is a constrained type parameter
-File "new_generic.php", line 17, characters 35-37:
-This is an int
-File "new_generic.php", line 19, characters 29-36:
-It is incompatible with a string
+  <expr#2> as C<int>
+error: Typing[4030] Was expecting a return type hint [1]
+
+new_generic.php:17:10
+15 | }
+16 | 
+17 | function test_factory(class<C<int>> $klass) {
+   |          ^^^^^^^^^^^^ [1]
+18 |   hh_show(factory_c($klass, 10));
+19 |   hh_show(factory_c($klass, 'string'));
+
+error: Typing[4110] Invalid argument [1]
+-> Expected `int` [2]
+-> But got `string` [1]
+
+new_generic.php:19:29
+15 | }
+16 | 
+17 | function test_factory(class<C<int>> $klass) {
+   |                               ^^^ [2]
+18 |   hh_show(factory_c($klass, 10));
+19 |   hh_show(factory_c($klass, 'string'));
+   |                             ^^^^^^^^ [1]
+20 | }
+
+2 errors found

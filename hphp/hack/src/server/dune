@@ -1,0 +1,339 @@
+(library
+ (name deferral_tracker)
+ (wrapped false)
+ (modules deferral_tracker)
+ (libraries hg_states server_config server_notifier utils_core))
+
+(library
+ (name server_symbol_info_service_utils)
+ (wrapped false)
+ (modules symbol_info_service_utils)
+ (libraries
+  ast_provider
+  naming
+  server_command_types
+  tast_provider
+  server_services
+  utils_core
+  server_rpc_services)
+ (preprocess
+  (pps lwt_ppx ppx_deriving.std)))
+
+(library
+ (name server_env_build)
+ (wrapped false)
+ (modules server_env_build)
+ (libraries server_env server_revision_tracker dfind)
+ (preprocess
+  (pps lwt_ppx ppx_deriving.std)))
+
+(executable
+ (name hh_saved_state_verifier)
+ (modules
+  diff_hot_decls
+  diff_naming_table
+  hh_saved_state_verifier)
+ (libraries
+  default_injector_config
+  file_info
+  naming_table
+  ppxlib.print_diff
+  provider_backend
+  server_services
+  typing_deps
+  utils_core
+  server_rpc_services))
+
+(rule
+ (target server_invalidate_units.fb.ml)
+ (action
+  (copy# facebook/server_invalidate_units.ml server_invalidate_units.fb.ml)))
+
+(library
+ (name server_incremental)
+ (wrapped false)
+ (modules
+  server_incremental)
+ (libraries
+  decl_compare
+  fanout
+  naming_provider
+  provider_context
+  relative_path
+  server_env
+  server_progress))
+
+(library
+ (name server_enforcement_at_pos)
+ (wrapped false)
+ (modules enforcement_at_pos_service server_enforcement_at_pos)
+ (libraries
+  annotated_ast
+  decl_provider
+  decl_provider_internals
+  file_content
+  naming_special_names
+  shallow_decl_defs
+  hh_json
+  pos
+  provider_context
+  tast_env
+  tast_provider
+  typing
+  typing_defs
+  utils_core
+  visitors_runtime)
+ (preprocess
+  (pps lwt_ppx ppx_deriving.std)))
+
+(library
+ (name server)
+ (wrapped false)
+ (modules
+  full_fidelity_parse_service
+  server_check_utils
+  server_idle
+  server_tast_holes_batch
+  server_invalidate_units
+  server_is_subtype
+  server_lint
+  server_log_errors
+  server_method_jumps
+  server_method_jumps_batch
+  server_rage
+  server_status_single
+  server_type_check
+  server_worker
+  symbol_info_service)
+ (libraries
+  base64
+  buffered_line_reader
+  cgroupprofiler
+  decl_redecl_service
+  direct_decl_service
+  dfind
+  edenfs_prefetch
+  fileutils
+  findmytests_stubs
+  format_helpers
+  hg
+  hhi
+  hint_print
+  ide_rpc_api_types
+  remote_old_decls_ffi
+  linting
+  linting_main
+  lints_core
+  lsp
+  procs_entry_point
+  security_stubs
+  old_shallow_classes_provider
+  direct_decl_parser
+  direct_decl_utils
+  server_codemod_type_printer
+  code_actions_services
+  server_docblock_at
+  server_env
+  server_incremental
+  server_find_refs
+  ide_hover
+  server_infer_type
+  server_prechecked_files
+  server_revision_tracker
+  server_services
+  server_symbol_info_service_utils
+  sys_utils
+  tast_provider
+  typing
+  typing_check_job
+  utils_core
+  version
+  watchman_utils
+  (select
+   server_invalidate_units.ml
+   from
+   (facebook signed_source -> server_invalidate_units.fb.ml)
+   (-> server_invalidate_units.stubs.ml))
+  server_infer_type_batch
+  server_rpc_services)
+ (preprocess
+  (pps lwt_ppx ppx_deriving.std ppx_sexp_conv ppx_hash)))
+
+(rule
+ (target server_init_messages.fb.ml)
+ (action
+  (copy# facebook/server_init_messages.ml server_init_messages.fb.ml)))
+
+
+(library
+  (name hh_server_monitor)
+  (wrapped false)
+  (modules
+    client_command_handler
+    server_command
+    server_init
+    server_init_common
+    server_init_messages
+    server_init_types
+    server_lazy_init
+    server_main
+    server_rpc
+    server_isolation
+    server_isolation_decls
+    server_isolation_growth
+    server_isolation_inbound
+    server_isolation_memory
+    server_isolation_outbound
+    server_isolation_validate)
+  (libraries
+    ast
+    ci_util
+    cgroupprofiler
+    custom_error_config
+    decl_fold_options
+    decl_parser_options
+    deferral_tracker
+    direct_decl_service
+    error_codes
+    findmytests_stubs
+    folly_stubs
+    hh_server_provider_backend_stubs
+    ide_highlight_refs
+    lwt
+    memory_stats
+    parent
+    provider_backend
+    security_stubs
+    server
+    server_enforcement_at_pos
+    server_env_build
+    server_incremental
+    server_go_to
+    server_rewrite
+    ide_search
+    startup_initializer_stubs
+    state_loader
+    write_symbol_info
+  (select
+   server_init_messages.ml
+   from
+   (facebook signed_source -> server_init_messages.fb.ml)
+   (-> server_init_messages.stubs.ml))
+  client_provider
+  server_find_refs_batch
+  server_infer_type_batch
+  server_rpc_services)
+ (preprocess
+  (pps
+   lwt_ppx
+   ppx_deriving.std
+   ppx_yojson_conv)))
+
+(library
+ (name server_rpc_services)
+ (wrapped false)
+ (modules
+  cst_search_service
+  save_state_service
+  server_deps_out_batch
+  server_deps_util
+  server_file_dependents
+  server_fun_deps_batch
+  server_global_state
+  server_rx_api_shared
+  symbol_fun_call_service
+  symbol_type_service)
+ (libraries
+  ast
+  cgroupprofiler
+  decl
+  decl_compare
+  decl_export
+  fileutils
+  heap_shared_mem
+  hint_print
+  parser
+  provider_context
+  provider_utils
+  server_command_types
+  server_env
+  server_progress
+  server_symbol_definition
+  sys_utils
+  tast_check
+  tast_provider
+  tast_type_collector
+  typechecker_options
+  typing
+  typing_check
+  typing_deps
+  typing_json
+  utils_core)
+ (preprocess
+  (pps lwt_ppx ppx_deriving.std)))
+
+(library
+ (name server_find_refs_batch)
+ (wrapped false)
+ (modules server_deps_in_batch server_package_lint)
+ (libraries
+  package_info
+  package_provider
+  procs_procs
+  provider_context
+  server_command_types
+  server_env
+  server_find_refs
+  server_rpc_services
+  server_services
+  server_symbol_definition
+  typechecker_options
+  utils_core)
+ (preprocess
+  (pps lwt_ppx ppx_deriving.std)))
+
+(library
+ (name server_infer_type_batch)
+ (wrapped false)
+ (modules
+  server_collect_tast_holes
+  server_infer_dynamic
+  server_infer_type_batch
+  server_infer_type_error)
+ (libraries
+  annotated_ast
+  ast
+  hh_json
+  naming_provider
+  pos
+  provider_context
+  server_command_types
+  server_env
+  server_infer_type
+  tast_env
+  tast_provider
+  typing
+  typing_defs
+  utils_core)
+ (preprocess
+  (pps lwt_ppx ppx_deriving.std)))
+
+(library
+ (name client_provider)
+ (wrapped false)
+ (modules
+  client_provider
+  client_provider_sig
+  server_client_provider
+  server_idle_gc
+  test_client_provider)
+ (libraries
+  libancillary
+  monitor_rpc
+  relative_path
+  server_command_types
+  server_files
+  server_utils
+  utils_core)
+ (preprocess
+  (pps lwt_ppx ppx_deriving.std)))

@@ -1,27 +1,28 @@
-<?php
+<?hh
 
 trait T {
-  public function m() {
- echo "original
-";
- }
+  public static function m() :mixed{
+    echo "original\n";
+  }
 }
+
 class A {
- use T;
- }
+  use T;
+}
+
 class B {
- use T;
- }
-T::m();
-$a1 = new A;
-$a1->m();
-fb_intercept("T::m", function() {
- echo "new
-";
- }
-);
-$a2 = new A;
-$a2->m();
-$b1 = new B;
-$b1->m();
-T::m();
+  use T;
+}
+
+<<__EntryPoint>>
+function main_2079() :mixed{
+  T::m();
+  A::m();
+  fb_intercept2("T::m", function($_1, $_2, inout $_3) {
+    echo "new\n";
+    return shape('value' => null);
+  });
+  A::m();
+  B::m();
+  T::m();
+}

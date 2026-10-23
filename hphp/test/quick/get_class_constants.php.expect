@@ -1,6 +1,4 @@
-array(5) {
-  ["DYNAMIC_VAL"]=>
-  int(2)
+dict(4) {
   ["STRING_VAL"]=>
   string(3) "zzz"
   ["INT_VAL"]=>

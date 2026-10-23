@@ -1,334 +1,338 @@
-<?php
+<?hh
 
+<<__NEVER_INLINE>> function P(bool $v) :mixed{ print $v ? 'Y' : 'N'; }
+
+<<__EntryPoint>>
+function main_1026() :mixed{
 $i = 0;
- print ++$i;
+ ++$i; print $i;
  print "\t";
- print (''<=true) ? 'Y' : 'N';
+ try { P(HH\Lib\Legacy_FIXME\lte('', true)); } catch (Throwable $_) { print 'E'; }
  $a = 1;
  $a = 't';
  $a = '';
- print ($a <=true) ? 'Y' : 'N';
+ try { P(HH\Lib\Legacy_FIXME\lte($a, true)); } catch (Throwable $_) { print 'E'; }
  $b = 1;
  $b = 't';
  $b = true;
- print (''<=$b) ? 'Y' : 'N';
- print ($a <=$b) ? 'Y' : 'N';
+ try { P(HH\Lib\Legacy_FIXME\lte('', $b)); } catch (Throwable $_) { print 'E'; }
+ try { P(HH\Lib\Legacy_FIXME\lte($a, $b)); } catch (Throwable $_) { print 'E'; }
  print "\t";
  print "'' <= true	";
  print "\n";
- print ++$i;
+ ++$i; print $i;
  print "\t";
- print (''<=false) ? 'Y' : 'N';
+ try { P(HH\Lib\Legacy_FIXME\lte('', false)); } catch (Throwable $_) { print 'E'; }
  $a = 1;
  $a = 't';
  $a = '';
- print ($a <=false) ? 'Y' : 'N';
+ try { P(HH\Lib\Legacy_FIXME\lte($a, false)); } catch (Throwable $_) { print 'E'; }
  $b = 1;
  $b = 't';
  $b = false;
- print (''<=$b) ? 'Y' : 'N';
- print ($a <=$b) ? 'Y' : 'N';
+ try { P(HH\Lib\Legacy_FIXME\lte('', $b)); } catch (Throwable $_) { print 'E'; }
+ try { P(HH\Lib\Legacy_FIXME\lte($a, $b)); } catch (Throwable $_) { print 'E'; }
  print "\t";
  print "'' <= false	";
  print "\n";
- print ++$i;
+ ++$i; print $i;
  print "\t";
- print (''<=1) ? 'Y' : 'N';
+ try { P(HH\Lib\Legacy_FIXME\lte('', 1)); } catch (Throwable $_) { print 'E'; }
  $a = 1;
  $a = 't';
  $a = '';
- print ($a <=1) ? 'Y' : 'N';
+ try { P(HH\Lib\Legacy_FIXME\lte($a, 1)); } catch (Throwable $_) { print 'E'; }
  $b = 1;
  $b = 't';
  $b = 1;
- print (''<=$b) ? 'Y' : 'N';
- print ($a <=$b) ? 'Y' : 'N';
+ try { P(HH\Lib\Legacy_FIXME\lte('', $b)); } catch (Throwable $_) { print 'E'; }
+ try { P(HH\Lib\Legacy_FIXME\lte($a, $b)); } catch (Throwable $_) { print 'E'; }
  print "\t";
  print "'' <= 1	";
  print "\n";
- print ++$i;
+ ++$i; print $i;
  print "\t";
- print (''<=0) ? 'Y' : 'N';
+ try { P(HH\Lib\Legacy_FIXME\lte('', 0)); } catch (Throwable $_) { print 'E'; }
  $a = 1;
  $a = 't';
  $a = '';
- print ($a <=0) ? 'Y' : 'N';
+ try { P(HH\Lib\Legacy_FIXME\lte($a, 0)); } catch (Throwable $_) { print 'E'; }
  $b = 1;
  $b = 't';
  $b = 0;
- print (''<=$b) ? 'Y' : 'N';
- print ($a <=$b) ? 'Y' : 'N';
+ try { P(HH\Lib\Legacy_FIXME\lte('', $b)); } catch (Throwable $_) { print 'E'; }
+ try { P(HH\Lib\Legacy_FIXME\lte($a, $b)); } catch (Throwable $_) { print 'E'; }
  print "\t";
  print "'' <= 0	";
  print "\n";
- print ++$i;
+ ++$i; print $i;
  print "\t";
- print (''<=-1) ? 'Y' : 'N';
+ try { P(HH\Lib\Legacy_FIXME\lte('', -1)); } catch (Throwable $_) { print 'E'; }
  $a = 1;
  $a = 't';
  $a = '';
- print ($a <=-1) ? 'Y' : 'N';
+ try { P(HH\Lib\Legacy_FIXME\lte($a, -1)); } catch (Throwable $_) { print 'E'; }
  $b = 1;
  $b = 't';
  $b = -1;
- print (''<=$b) ? 'Y' : 'N';
- print ($a <=$b) ? 'Y' : 'N';
+ try { P(HH\Lib\Legacy_FIXME\lte('', $b)); } catch (Throwable $_) { print 'E'; }
+ try { P(HH\Lib\Legacy_FIXME\lte($a, $b)); } catch (Throwable $_) { print 'E'; }
  print "\t";
  print "'' <= -1	";
  print "\n";
- print ++$i;
+ ++$i; print $i;
  print "\t";
- print (''<='1') ? 'Y' : 'N';
+ try { P(''<='1'); } catch (Throwable $_) { print 'E'; }
  $a = 1;
  $a = 't';
  $a = '';
- print ($a <='1') ? 'Y' : 'N';
+ try { P($a <='1'); } catch (Throwable $_) { print 'E'; }
  $b = 1;
  $b = 't';
  $b = '1';
- print (''<=$b) ? 'Y' : 'N';
- print ($a <=$b) ? 'Y' : 'N';
+ try { P(''<=$b); } catch (Throwable $_) { print 'E'; }
+ try { P($a <=$b); } catch (Throwable $_) { print 'E'; }
  print "\t";
  print "'' <= '1'	";
  print "\n";
- print ++$i;
+ ++$i; print $i;
  print "\t";
- print (''<='0') ? 'Y' : 'N';
+ try { P(''<='0'); } catch (Throwable $_) { print 'E'; }
  $a = 1;
  $a = 't';
  $a = '';
- print ($a <='0') ? 'Y' : 'N';
+ try { P($a <='0'); } catch (Throwable $_) { print 'E'; }
  $b = 1;
  $b = 't';
  $b = '0';
- print (''<=$b) ? 'Y' : 'N';
- print ($a <=$b) ? 'Y' : 'N';
+ try { P(''<=$b); } catch (Throwable $_) { print 'E'; }
+ try { P($a <=$b); } catch (Throwable $_) { print 'E'; }
  print "\t";
  print "'' <= '0'	";
  print "\n";
- print ++$i;
+ ++$i; print $i;
  print "\t";
- print (''<='-1') ? 'Y' : 'N';
+ try { P(''<='-1'); } catch (Throwable $_) { print 'E'; }
  $a = 1;
  $a = 't';
  $a = '';
- print ($a <='-1') ? 'Y' : 'N';
+ try { P($a <='-1'); } catch (Throwable $_) { print 'E'; }
  $b = 1;
  $b = 't';
  $b = '-1';
- print (''<=$b) ? 'Y' : 'N';
- print ($a <=$b) ? 'Y' : 'N';
+ try { P(''<=$b); } catch (Throwable $_) { print 'E'; }
+ try { P($a <=$b); } catch (Throwable $_) { print 'E'; }
  print "\t";
  print "'' <= '-1'	";
  print "\n";
- print ++$i;
+ ++$i; print $i;
  print "\t";
- print (''<=null) ? 'Y' : 'N';
+ try { P(HH\Lib\Legacy_FIXME\lte('', null)); } catch (Throwable $_) { print 'E'; }
  $a = 1;
  $a = 't';
  $a = '';
- print ($a <=null) ? 'Y' : 'N';
+ try { P(HH\Lib\Legacy_FIXME\lte($a, null)); } catch (Throwable $_) { print 'E'; }
  $b = 1;
  $b = 't';
  $b = null;
- print (''<=$b) ? 'Y' : 'N';
- print ($a <=$b) ? 'Y' : 'N';
+ try { P(HH\Lib\Legacy_FIXME\lte('', $b)); } catch (Throwable $_) { print 'E'; }
+ try { P(HH\Lib\Legacy_FIXME\lte($a, $b)); } catch (Throwable $_) { print 'E'; }
  print "\t";
  print "'' <= null	";
  print "\n";
- print ++$i;
+ ++$i; print $i;
  print "\t";
- print (''<=array()) ? 'Y' : 'N';
+ try { P(''<=dict[]); } catch (Throwable $_) { print 'E'; }
  $a = 1;
  $a = 't';
  $a = '';
- print ($a <=array()) ? 'Y' : 'N';
+ try { P($a <=dict[]); } catch (Throwable $_) { print 'E'; }
  $b = 1;
  $b = 't';
- $b = array();
- print (''<=$b) ? 'Y' : 'N';
- print ($a <=$b) ? 'Y' : 'N';
+ $b = dict[];
+ try { P(''<=$b); } catch (Throwable $_) { print 'E'; }
+ try { P($a <=$b); } catch (Throwable $_) { print 'E'; }
  print "\t";
  print "'' <= array()	";
  print "\n";
- print ++$i;
+ ++$i; print $i;
  print "\t";
- print (''<=array(1)) ? 'Y' : 'N';
+ try { P(''<=vec[1]); } catch (Throwable $_) { print 'E'; }
  $a = 1;
  $a = 't';
  $a = '';
- print ($a <=array(1)) ? 'Y' : 'N';
+ try { P($a <=vec[1]); } catch (Throwable $_) { print 'E'; }
  $b = 1;
  $b = 't';
- $b = array(1);
- print (''<=$b) ? 'Y' : 'N';
- print ($a <=$b) ? 'Y' : 'N';
+ $b = vec[1];
+ try { P(''<=$b); } catch (Throwable $_) { print 'E'; }
+ try { P($a <=$b); } catch (Throwable $_) { print 'E'; }
  print "\t";
  print "'' <= array(1)	";
  print "\n";
- print ++$i;
+ ++$i; print $i;
  print "\t";
- print (''<=array(2)) ? 'Y' : 'N';
+ try { P(''<=vec[2]); } catch (Throwable $_) { print 'E'; }
  $a = 1;
  $a = 't';
  $a = '';
- print ($a <=array(2)) ? 'Y' : 'N';
+ try { P($a <=vec[2]); } catch (Throwable $_) { print 'E'; }
  $b = 1;
  $b = 't';
- $b = array(2);
- print (''<=$b) ? 'Y' : 'N';
- print ($a <=$b) ? 'Y' : 'N';
+ $b = vec[2];
+ try { P(''<=$b); } catch (Throwable $_) { print 'E'; }
+ try { P($a <=$b); } catch (Throwable $_) { print 'E'; }
  print "\t";
  print "'' <= array(2)	";
  print "\n";
- print ++$i;
+ ++$i; print $i;
  print "\t";
- print (''<=array('1')) ? 'Y' : 'N';
+ try { P(''<=vec['1']); } catch (Throwable $_) { print 'E'; }
  $a = 1;
  $a = 't';
  $a = '';
- print ($a <=array('1')) ? 'Y' : 'N';
+ try { P($a <=vec['1']); } catch (Throwable $_) { print 'E'; }
  $b = 1;
  $b = 't';
- $b = array('1');
- print (''<=$b) ? 'Y' : 'N';
- print ($a <=$b) ? 'Y' : 'N';
+ $b = vec['1'];
+ try { P(''<=$b); } catch (Throwable $_) { print 'E'; }
+ try { P($a <=$b); } catch (Throwable $_) { print 'E'; }
  print "\t";
  print "'' <= array('1')	";
  print "\n";
- print ++$i;
+ ++$i; print $i;
  print "\t";
- print (''<=array('0' => '1')) ? 'Y' : 'N';
+ try { P(''<=dict['0' => '1']); } catch (Throwable $_) { print 'E'; }
  $a = 1;
  $a = 't';
  $a = '';
- print ($a <=array('0' => '1')) ? 'Y' : 'N';
+ try { P($a <=dict['0' => '1']); } catch (Throwable $_) { print 'E'; }
  $b = 1;
  $b = 't';
- $b = array('0' => '1');
- print (''<=$b) ? 'Y' : 'N';
- print ($a <=$b) ? 'Y' : 'N';
+ $b = dict['0' => '1'];
+ try { P(''<=$b); } catch (Throwable $_) { print 'E'; }
+ try { P($a <=$b); } catch (Throwable $_) { print 'E'; }
  print "\t";
  print "'' <= array('0' => '1')	";
  print "\n";
- print ++$i;
+ ++$i; print $i;
  print "\t";
- print (''<=array('a')) ? 'Y' : 'N';
+ try { P(''<=vec['a']); } catch (Throwable $_) { print 'E'; }
  $a = 1;
  $a = 't';
  $a = '';
- print ($a <=array('a')) ? 'Y' : 'N';
+ try { P($a <=vec['a']); } catch (Throwable $_) { print 'E'; }
  $b = 1;
  $b = 't';
- $b = array('a');
- print (''<=$b) ? 'Y' : 'N';
- print ($a <=$b) ? 'Y' : 'N';
+ $b = vec['a'];
+ try { P(''<=$b); } catch (Throwable $_) { print 'E'; }
+ try { P($a <=$b); } catch (Throwable $_) { print 'E'; }
  print "\t";
  print "'' <= array('a')	";
  print "\n";
- print ++$i;
+ ++$i; print $i;
  print "\t";
- print (''<=array('a' => 1)) ? 'Y' : 'N';
+ try { P(''<=dict['a' => 1]); } catch (Throwable $_) { print 'E'; }
  $a = 1;
  $a = 't';
  $a = '';
- print ($a <=array('a' => 1)) ? 'Y' : 'N';
+ try { P($a <=dict['a' => 1]); } catch (Throwable $_) { print 'E'; }
  $b = 1;
  $b = 't';
- $b = array('a' => 1);
- print (''<=$b) ? 'Y' : 'N';
- print ($a <=$b) ? 'Y' : 'N';
+ $b = dict['a' => 1];
+ try { P(''<=$b); } catch (Throwable $_) { print 'E'; }
+ try { P($a <=$b); } catch (Throwable $_) { print 'E'; }
  print "\t";
  print "'' <= array('a' => 1)	";
  print "\n";
- print ++$i;
+ ++$i; print $i;
  print "\t";
- print (''<=array('b' => 1)) ? 'Y' : 'N';
+ try { P(''<=dict['b' => 1]); } catch (Throwable $_) { print 'E'; }
  $a = 1;
  $a = 't';
  $a = '';
- print ($a <=array('b' => 1)) ? 'Y' : 'N';
+ try { P($a <=dict['b' => 1]); } catch (Throwable $_) { print 'E'; }
  $b = 1;
  $b = 't';
- $b = array('b' => 1);
- print (''<=$b) ? 'Y' : 'N';
- print ($a <=$b) ? 'Y' : 'N';
+ $b = dict['b' => 1];
+ try { P(''<=$b); } catch (Throwable $_) { print 'E'; }
+ try { P($a <=$b); } catch (Throwable $_) { print 'E'; }
  print "\t";
  print "'' <= array('b' => 1)	";
  print "\n";
- print ++$i;
+ ++$i; print $i;
  print "\t";
- print (''<=array('a' => 1, 'b' => 2)) ? 'Y' : 'N';
+ try { P(''<=dict['a' => 1, 'b' => 2]); } catch (Throwable $_) { print 'E'; }
  $a = 1;
  $a = 't';
  $a = '';
- print ($a <=array('a' => 1, 'b' => 2)) ? 'Y' : 'N';
+ try { P($a <=dict['a' => 1, 'b' => 2]); } catch (Throwable $_) { print 'E'; }
  $b = 1;
  $b = 't';
- $b = array('a' => 1, 'b' => 2);
- print (''<=$b) ? 'Y' : 'N';
- print ($a <=$b) ? 'Y' : 'N';
+ $b = dict['a' => 1, 'b' => 2];
+ try { P(''<=$b); } catch (Throwable $_) { print 'E'; }
+ try { P($a <=$b); } catch (Throwable $_) { print 'E'; }
  print "\t";
  print "'' <= array('a' => 1, 'b' => 2)	";
  print "\n";
- print ++$i;
+ ++$i; print $i;
  print "\t";
- print (''<=array(array('a' => 1))) ? 'Y' : 'N';
+ try { P(''<=vec[dict['a' => 1]]); } catch (Throwable $_) { print 'E'; }
  $a = 1;
  $a = 't';
  $a = '';
- print ($a <=array(array('a' => 1))) ? 'Y' : 'N';
+ try { P($a <=vec[dict['a' => 1]]); } catch (Throwable $_) { print 'E'; }
  $b = 1;
  $b = 't';
- $b = array(array('a' => 1));
- print (''<=$b) ? 'Y' : 'N';
- print ($a <=$b) ? 'Y' : 'N';
+ $b = vec[dict['a' => 1]];
+ try { P(''<=$b); } catch (Throwable $_) { print 'E'; }
+ try { P($a <=$b); } catch (Throwable $_) { print 'E'; }
  print "\t";
  print "'' <= array(array('a' => 1))	";
  print "\n";
- print ++$i;
+ ++$i; print $i;
  print "\t";
- print (''<=array(array('b' => 1))) ? 'Y' : 'N';
+ try { P(''<=vec[dict['b' => 1]]); } catch (Throwable $_) { print 'E'; }
  $a = 1;
  $a = 't';
  $a = '';
- print ($a <=array(array('b' => 1))) ? 'Y' : 'N';
+ try { P($a <=vec[dict['b' => 1]]); } catch (Throwable $_) { print 'E'; }
  $b = 1;
  $b = 't';
- $b = array(array('b' => 1));
- print (''<=$b) ? 'Y' : 'N';
- print ($a <=$b) ? 'Y' : 'N';
+ $b = vec[dict['b' => 1]];
+ try { P(''<=$b); } catch (Throwable $_) { print 'E'; }
+ try { P($a <=$b); } catch (Throwable $_) { print 'E'; }
  print "\t";
  print "'' <= array(array('b' => 1))	";
  print "\n";
- print ++$i;
+ ++$i; print $i;
  print "\t";
- print (''<='php') ? 'Y' : 'N';
+ try { P(''<='php'); } catch (Throwable $_) { print 'E'; }
  $a = 1;
  $a = 't';
  $a = '';
- print ($a <='php') ? 'Y' : 'N';
+ try { P($a <='php'); } catch (Throwable $_) { print 'E'; }
  $b = 1;
  $b = 't';
  $b = 'php';
- print (''<=$b) ? 'Y' : 'N';
- print ($a <=$b) ? 'Y' : 'N';
+ try { P(''<=$b); } catch (Throwable $_) { print 'E'; }
+ try { P($a <=$b); } catch (Throwable $_) { print 'E'; }
  print "\t";
  print "'' <= 'php'	";
  print "\n";
- print ++$i;
+ ++$i; print $i;
  print "\t";
- print (''<='') ? 'Y' : 'N';
+ try { P(''<=''); } catch (Throwable $_) { print 'E'; }
  $a = 1;
  $a = 't';
  $a = '';
- print ($a <='') ? 'Y' : 'N';
+ try { P($a <=''); } catch (Throwable $_) { print 'E'; }
  $b = 1;
  $b = 't';
  $b = '';
- print (''<=$b) ? 'Y' : 'N';
- print ($a <=$b) ? 'Y' : 'N';
+ try { P(''<=$b); } catch (Throwable $_) { print 'E'; }
+ try { P($a <=$b); } catch (Throwable $_) { print 'E'; }
  print "\t";
  print "'' <= ''	";
  print "\n";
-
+}

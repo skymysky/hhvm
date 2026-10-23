@@ -3,11 +3,11 @@
 
 /* The XSLTProcessor class.
  */
-<<__NativeData("XSLTProcessorData")>>
+<<__NativeData>>
 class XSLTProcessor {
   /* Creates a new XSLTProcessor object.
    */
-  function __construct() {}
+  public function __construct() {}
 
   /* Gets a parameter if previously set by XSLTProcessor::setParameter().
    * @param string $namespaceURI - The namespace URI of the XSLT parameter.
@@ -16,29 +16,29 @@ class XSLTProcessor {
    * not set.
    */
   <<__Native>>
-  function getParameter(?string $namespaceURI,
+  public function getParameter(?string $namespaceURI,
                         string $localName): mixed;
 
   /* Get security preferences.
    * @return int - Security preferences.
    */
   <<__Native>>
-  function getSecurityPrefs(): int;
+  public function getSecurityPrefs(): int;
 
   /* This method determines if HHVM was built with the EXSLT library.
    * @return bool - Returns TRUE on success or FALSE on failure.
    */
-  function hasExsltSupport(): bool {
+  public function hasExsltSupport(): bool {
     return true;
   }
 
   /* This method imports the stylesheet into the XSLTProcessor for
    * transformations.
-   * @param object $stylesheet - The imported style sheet as a DOMDocument or
-   * SimpleXMLElement object.
+   * @param object $stylesheet - The imported style sheet as a DOMDocument
+   * object.
    */
   <<__Native>>
-  function importStylesheet(object $stylesheet): void;
+  public function importStylesheet(DOMDocument $stylesheet): void;
 
   /* This method enables the ability to use PHP functions as XSLT functions
    * within XSL stylesheets.
@@ -47,7 +47,7 @@ class XSLTProcessor {
    * name) or an array of functions.
    */
   <<__Native>>
-  function registerPHPFunctions(mixed $funcs = null): void;
+  public function registerPHPFunctions(mixed $funcs = null): void;
 
   /* Removes a parameter, if set. This will make the processor use the default
    * value for the parameter as specified in the stylesheet.
@@ -56,7 +56,7 @@ class XSLTProcessor {
    * @return bool - Returns TRUE on success or FALSE on failure.
    */
   <<__Native>>
-  function removeParameter(?string $namespaceURI,
+  public function removeParameter(?string $namespaceURI,
                            string $localName): bool;
 
   /* Sets the value of one or more parameters to be used in subsequent
@@ -69,7 +69,7 @@ class XSLTProcessor {
    * @return bool - Returns TRUE on success or FALSE on failure.
    */
   <<__Native>>
-  function setParameter(?string $namespaceURI,
+  public function setParameter(?string $namespaceURI,
                         mixed $localName,
                         mixed $value = null): bool;
 
@@ -78,14 +78,14 @@ class XSLTProcessor {
    * @return bool - Returns TRUE on success or FALSE on failure.
    */
   <<__Native>>
-  function setProfiling(string $filename): bool;
+  public function setProfiling(string $filename): bool;
 
   /* Set security preferences.
    * @param int $securityPrefs - Security preferences.
    * @return int - Previous security preferences.
    */
   <<__Native>>
-  function setSecurityPrefs(int $securityPrefs): int;
+  public function setSecurityPrefs(int $securityPrefs): int;
 
   /* Transforms the source node to a DOMDocument applying the stylesheet given
    * by the XSLTProcessor::importStylesheet() method.
@@ -93,7 +93,7 @@ class XSLTProcessor {
    * @return mixed - The resulting DOMDocument or FALSE on error.
    */
   <<__Native>>
-  function transformToDoc(object $doc): mixed;
+  public function transformToDoc(DOMNode $doc): mixed;
 
   /* Transforms the source node to an URI applying the stylesheet given by the
    * XSLTProcessor::importStylesheet() method.
@@ -103,8 +103,7 @@ class XSLTProcessor {
    * occurred.
    */
   <<__Native>>
-  function transformToURI(object $doc,
-                          string $uri): mixed;
+  public function transformToURI(DOMDocument $doc, string $uri): mixed;
 
   /* Transforms the source node to a string applying the stylesheet given by the
    * XSLTProcessor::importStylesheet() method.
@@ -113,5 +112,5 @@ class XSLTProcessor {
    * error.
    */
   <<__Native>>
-  function transformToXML(object $doc): mixed;
+  public function transformToXML(DOMDocument $doc): mixed;
 }

@@ -1,0 +1,17 @@
+error: Parsing[1002] A comma `,` is expected here. [1]
+
+incorrect_darray.php:3:28
+1 | <?hh
+2 | 
+3 | function foo(darray<string => int> $x) : void {}
+  |                            ^ [1]
+
+error: Parsing[1002] Encountered unexpected text `=>`, was expecting a type hint. [1]
+
+incorrect_darray.php:3:28
+1 | <?hh
+2 | 
+3 | function foo(darray<string => int> $x) : void {}
+  |                            ^^ [1]
+
+2 errors found

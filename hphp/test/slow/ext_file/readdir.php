@@ -1,26 +1,36 @@
-<?php
+<?hh
 
+
+
+<<__EntryPoint>>
+function main_readdir() :mixed{
 $d = dir(__DIR__);
-while ($ent = readdir($d->handle)) {
+$ent = readdir($d->handle);
+while ($ent) {
   if ($ent == 'test_ext_file.txt') {
     var_dump($ent);
   }
+  $ent = readdir($d->handle);
 }
 closedir($d->handle);
 
 $d = opendir(__DIR__);
-while ($ent = readdir($d)) {
+$ent = readdir($d);
+while ($ent) {
   if ($ent == 'test_ext_file.txt') {
     var_dump($ent);
   }
+  $ent = readdir($d);
 }
 
 rewinddir($d);
 
-while ($ent = readdir($d)) {
+$ent = readdir($d);
+while ($ent) {
   if ($ent == 'test_ext_file.txt') {
     var_dump($ent);
   }
+  $ent = readdir($d);
 }
 
 closedir($d);
@@ -30,4 +40,4 @@ foreach (scandir(__DIR__) as $x) {
     var_dump($x);
   }
 }
-
+}

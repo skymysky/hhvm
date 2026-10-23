@@ -1,0 +1,24 @@
+warning: Lint[5649] This is a classname of an `internal` class. Internal classnames are dangerous because they are effectively raw strings. Please avoid them, or make sure that they are never used outside of the module.
+   --> lint_internal_class.php--use.php
+  7 |   $y = Foo::class;
+    |        ^^^
+
+
+warning: Lint[5649] This is a classname of an `internal` class. Internal classnames are dangerous because they are effectively raw strings. Please avoid them, or make sure that they are never used outside of the module.
+   --> lint_internal_class.php--use.php
+  8 |   $y = static::class;
+    |        ^^^^^^
+
+
+warning: Lint[5649] This is a classname of an `internal` class. Internal classnames are dangerous because they are effectively raw strings. Please avoid them, or make sure that they are never used outside of the module.
+   --> lint_internal_class.php--use.php
+ 14 |     $y = parent::class;
+    |          ^^^^^^
+
+
+warning: Lint[5649] This is a classname of an `internal` class. Internal classnames are dangerous because they are effectively raw strings. Please avoid them, or make sure that they are never used outside of the module.
+   --> lint_internal_class.php--use.php
+ 33 |   $x = InternalForSealed::class;
+    |        ^^^^^^^^^^^^^^^^^
+
+

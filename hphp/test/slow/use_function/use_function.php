@@ -1,45 +1,43 @@
-<?php
+<?hh
 
 namespace foo {
-  function bar() {
+  function bar() :mixed{
     return __FUNCTION__;
   }
 
-  function baz() {
+  function baz() :mixed{
     return __FUNCTION__;
   }
 }
 
 namespace fizz {
-  function baz() {
+  function baz() :mixed{
     return __FUNCTION__;
   }
 }
 
 namespace baz {
-  function bar() {
+  function bar() :mixed{
     return __FUNCTION__;
   }
 
-  function baz() {
+  function baz() :mixed{
     return __FUNCTION__;
   }
-}
-
-namespace test_simple {
-  use function baz\bar;
-  use function fizz\baz;
-
-  var_dump(bar());
-  var_dump(baz());
 }
 
 namespace test_as {
+  use function baz\bar;
+  use function fizz\baz;
   use function foo\bar as foobar;
   use function fizz\baz as fizzbaz;
   use function baz\baz as bazbaz;
 
-  var_dump(foobar());
-  var_dump(fizzbaz());
-  var_dump(bazbaz());
+  <<__EntryPoint>> function main(): void {
+    \var_dump(bar());
+    \var_dump(baz());
+    \var_dump(foobar());
+    \var_dump(fizzbaz());
+    \var_dump(bazbaz());
+  }
 }

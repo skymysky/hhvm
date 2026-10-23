@@ -1,60 +1,114 @@
 module Test = Integration_test_base
 
 let foo_name = "foo.php"
+
 let bar_name = Printf.sprintf "bar%d.php"
 
-let foo_contents = "<?hh //strict
+let foo_contents =
+  "<?hh //strict
+/* HH_FIXME[4336] */
 function foo() : string {
-  // UNSAFE_EXPR
 }
 "
 
-let bar_contents = Printf.sprintf "<?hh //strict
+let bar_contents =
+  Printf.sprintf "<?hh //strict
 
 function bar%d() : int {
   return foo();
 }
 "
 
-let expected_errors = {|
-File "/bar2.php", line 4, characters 10-14:
+let expected_errors =
+  {|
+ERROR: File "/bar2.php", line 4, characters 10-14:
 Invalid return type (Typing[4110])
-File "/bar2.php", line 3, characters 19-21:
-This is an int
-File "/foo.php", line 2, characters 18-23:
-It is incompatible with a string
+  File "/bar2.php", line 3, characters 19-21:
+  Expected `int`
+  File "/foo.php", line 3, characters 18-23:
+  But got `string`
 |}
 
+let root = "/"
 
-let () =
-  let env = Test.setup_server () in
+let hhconfig_filename = Filename.concat root ".hhconfig"
+
+let hhconfig_contents =
+  "
+allowed_fixme_codes_strict = 4336
+allowed_decl_fixme_codes = 4336
+"
+
+let test () =
+  Relative_path.set_path_prefix Relative_path.Root (Path.make root);
+  Test_disk.set hhconfig_filename hhconfig_contents;
+  let (custom_config, _) =
+    Server_config.load ~silent:false ~from:"" ~cli_config_overrides:[]
+  in
+  let env =
+    Test.setup_server
+      ~custom_config
+      ~hhi_files:(Hhi.get_raw_hhi_contents () |> Array.to_list)
+      ()
+  in
   (* There are errors in both bar files *)
-  let env = Test.setup_disk env [
-    foo_name, foo_contents;
-    bar_name 1, bar_contents 1;
-    bar_name 2, bar_contents 2;
-  ] in
-
+  let env =
+    Test.setup_disk
+      env
+      [
+        (foo_name, foo_contents);
+        (bar_name 1, bar_contents 1);
+        (bar_name 2, bar_contents 2);
+      ]
+  in
   (* Prepare rechecking of all files *)
+  let ctx = Provider_utils.ctx_from_server_env env in
   let workers = None in
-  let options = TypecheckerOptions.default in
-  let fast = FileInfo.simplify_fast env.ServerEnv.files_info in
-
+  let defs_per_file =
+    Naming_table.to_defs_per_file env.Server_env.naming_table
+  in
   (* Pretend that this rechecking will be cancelled before we get to bar1 *)
   let bar1_path =
-    Relative_path.(create Root (Test.prepend_root (bar_name 1))) in
-  Typing_check_service.TestMocking.set_is_cancelled (bar1_path);
+    Relative_path.(create Root (Test.prepend_root (bar_name 1)))
+  in
+  Typing_check_service.TestMocking.set_is_cancelled bar1_path;
 
   (* Run the recheck *)
-  let interrupt = MultiThreadedCall.no_interrupt () in
-  let errors, (), cancelled = Typing_check_service.go_with_interrupt
-    workers options Relative_path.Set.empty fast ~interrupt in
-
+  let interrupt = Multi_threaded_call.no_interrupt () in
+  let fnl = Relative_path.Map.keys defs_per_file in
+  let check_info =
+    {
+      Typing_service_types.init_id = "";
+      check_reason = "test_interrupt";
+      log_errors = false;
+      discard_warnings = false;
+      recheck_id = Some "";
+      per_file_profiling = Hack_event_logger.PerFileProfilingConfig.default;
+      memtrace_dir = None;
+      heartbeat_interval = None;
+      prefetch_decls_enabled = false;
+      prefetch_decls_threshold = 0;
+    }
+  in
+  let (((), { Typing_check_service.diagnostics; _ }), cancelled) =
+    Typing_check_service.go_with_interrupt
+      ctx
+      workers
+      (Telemetry.create ())
+      fnl
+      ~root:None
+      ~interrupt
+      ~longlived_workers:false
+      ~hh_distc_config:None
+      ~warnings_saved_state:None
+      ~check_info
+      ~type_check_testing_hooks:None
+  in
   (* Assert that we got the errors in bar2 only... *)
-  Test.assert_errors errors expected_errors;
+  Test.assert_diagnostics diagnostics expected_errors;
+
   (* ...while bar1 is among cancelled jobs*)
-  begin match cancelled with
-    | [(x, _)] when x = bar1_path -> ()
-    | _ -> assert false
-  end;
+  (match cancelled with
+  | Some ([x], _) when x = bar1_path -> ()
+  | _ -> assert false);
   ()

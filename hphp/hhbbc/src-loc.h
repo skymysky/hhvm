@@ -13,13 +13,12 @@
    | license@php.net so we can mail you a copy immediately.               |
    +----------------------------------------------------------------------+
 */
-#ifndef incl_HHBBC_SRC_LOC_H_
-#define incl_HHBBC_SRC_LOC_H_
+#pragma once
 
 #include <cstdint>
 #include <tuple>
 
-namespace HPHP { namespace HHBBC {
+namespace HPHP::HHBBC {
 
 //////////////////////////////////////////////////////////////////////
 
@@ -37,6 +36,10 @@ struct SrcPos {
 
   LineNumber line;
   ColNumber col;
+
+  template <typename SerDe> void serde(SerDe& sd) {
+    sd(line)(col);
+  }
 };
 
 struct SrcLoc {
@@ -60,6 +63,10 @@ struct SrcLoc {
 
   SrcPos start;
   SrcPos past;
+
+  template <typename SerDe> void serde(SerDe& sd) {
+    sd(start)(past);
+  }
 };
 
 std::string show(SrcLoc);
@@ -68,6 +75,4 @@ std::string show(SrcLoc);
 
 //////////////////////////////////////////////////////////////////////
 
-}}
-
-#endif
+}

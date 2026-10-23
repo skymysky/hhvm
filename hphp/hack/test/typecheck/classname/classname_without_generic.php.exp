@@ -1,0 +1,10 @@
+error: Naming[2066] Missing type parameter to `classname`; `classname` is entirely meaningless without one [1]
+
+classname_without_generic.php:4:13
+2 | 
+3 | final class ClassNameTest {
+4 |   const vec<classname> CLASS_VEC = vec[];
+  |             ^^^^^^^^^ [1]
+5 | }
+
+1 error found

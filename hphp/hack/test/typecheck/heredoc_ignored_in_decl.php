@@ -1,4 +1,4 @@
-<?hh // decl
+<?hh
 /**
  * Copyright (c) 2014, Facebook, Inc.
  * All rights reserved.
@@ -10,12 +10,11 @@
  */
 
 class Test {
-  public function f() {
+  public function f(): string {
     return <<<END
       public function testFunctionWithReturnTypeHavingAngleBrackets(): array<int> {
-        return array();
+        return vec[];
       }
 END;
   }
 }
-

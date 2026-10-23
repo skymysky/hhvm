@@ -1,4 +1,16 @@
-File "string_expressions6.php", line 14, characters 19-23:
-You cannot use this object as a string (Typing[4067])
-File "string_expressions6.php", line 13, characters 37-39:
-This object doesn't implement __toString
+error: Typing[4110] Only string and int values can be used in string interpolation [1]
+-> Expected `string` or `int` [1]
+-> But got `Meh` [1]
+->   from this definition [2]
+
+string_expressions6.php:14:19
+11 | 
+12 | class Meh {
+13 |   public static function foo(Vector<Meh> $x): void {
+   |                                     ^^^ [2]
+14 |     print "Hello, $x[1]";
+   |                   ^^^^^ [1]
+15 |   }
+16 | }
+
+1 error found

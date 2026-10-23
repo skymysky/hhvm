@@ -1,7 +1,7 @@
-<?php
+<?hh
 
 class A {
-  function a() {
+  function a() :mixed{
  echo "A
 ";
  }
@@ -10,8 +10,12 @@ class A {
 ";
  }
 }
- function test() {
+ function test() :mixed{
  $obj = new A();
  $obj->a();
  }
- test();
+
+ <<__EntryPoint>>
+function main_1720() :mixed{
+test();
+}

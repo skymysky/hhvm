@@ -1,9 +1,14 @@
-<?php
+<?hh
 
-function foo() {
+function foo() :mixed{
   $x = new stdClass;
-  $x->v = array(1, 2);
+  $x->v = vec[1, 2];
   return $x;
 }
+
+<<__EntryPoint>>
+function main_695() :mixed{
 foo()->v[0] += 5;
-var_dump(shuffle(foo()->v));
+$v = foo()->v;
+var_dump(shuffle(inout $v));
+}

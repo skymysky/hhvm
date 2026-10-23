@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2013 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-present Facebook, Inc. (http://www.facebook.com)  |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -13,6 +13,8 @@
    | license@php.net so we can mail you a copy immediately.               |
    +----------------------------------------------------------------------+
 */
+
+#include <fmt/format.h>
 
 #include "hphp/runtime/vm/jit/vasm-print.h"
 
@@ -32,9 +34,9 @@
 #include "hphp/util/ringbuffer.h"
 #include "hphp/util/stack-trace.h"
 
-TRACE_SET_MOD(vasm);
+TRACE_SET_MOD(vasm)
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -45,10 +47,12 @@ const char* area_names[] = { "main", "cold", "frozen" };
 
 namespace {
 
+#ifdef __aarch64__
 const char* vixl_ccs[] = {
   "eq", "ne", "hs", "lo", "mi", "pl", "vs", "vc",
   "hi", "ls", "ge", "lt", "gt", "le", "al", "nv"
 };
+#endif
 
 // Visitor class to format the operands of a Vinstr.  There are imm()
 // overloaded methods for each type of operand used by any Vinstr.  If you add
@@ -84,9 +88,11 @@ struct FormatVisitor {
     else str << folly::format("0x{:08x}", s.q());
   }
 
-  void imm(FPInvOffset off) { str << sep() << off.offset; }
+  void imm(SBInvOffset off) { str << sep() << off.offset; }
   void imm(ConditionCode cc) { str << sep() << cc_names[cc]; }
+#ifdef __aarch64__
   void imm(vixl::Condition cc) { str << sep() << vixl_ccs[cc]; }
+#endif
   void imm(TCA addr) {
     str << sep() << getNativeFunctionName(addr);
   }
@@ -106,11 +112,11 @@ struct FormatVisitor {
     case CallSpec::Kind::Direct:
     case CallSpec::Kind::Smashable:
       return imm((TCA)call.address());
-    case CallSpec::Kind::ArrayVirt:
-      str << sep() << folly::format("ArrayVirt({})", call.arrayTable());
-      break;
     case CallSpec::Kind::Destructor:
       str << sep() << folly::format("destructor({})", show(call.reg()));
+      break;
+    case CallSpec::Kind::ObjDestructor:
+      str << sep() << folly::format("obj-destructor({})", show(call.reg()));
       break;
     case CallSpec::Kind::Stub:
       return imm(call.stubAddr());
@@ -119,7 +125,7 @@ struct FormatVisitor {
   void imm(RingBufferType t) { str << sep() << ringbufferName(t); }
   void imm(SrcKey k) { str << sep() << showShort(k); }
   void imm(Fixup fix) {
-    str << sep() << "pc:" << fix.pcOffset << " sp:" << fix.spOffset;
+    str << sep() << fix.show();
   }
   void imm(Stats::StatCounter c) { str << sep() << Stats::g_counterNames[c]; }
   void imm(Vlabel b) { str << sep() << "B" << size_t(b); }
@@ -131,9 +137,6 @@ struct FormatVisitor {
     } else {
       str << "nullptr";
     }
-  }
-  void imm(TransFlags f) {
-    if (f.noinlineSingleton) str << sep() << "noinlineSingleton";
   }
   void imm(DestType dt) {
     str << sep() << destTypeName(dt);
@@ -185,19 +188,28 @@ struct FormatVisitor {
     print(unit.tuples[t]);
   }
 
-  void print(const VregList& regs) {
+  void print(const VregList& regs, const VcallArgs::Spills* spills = nullptr) {
     str << sep() << '{';
     comma = false;
-    for (auto r : regs) print(r);
+    for (int i = 0; i < regs.size(); ++i) {
+      print(regs[i]);
+      if (!spills) continue;
+      auto const it = spills->find(i);
+      if (it == spills->end()) continue;
+      str << '+';
+      comma = false;
+      print(it->second);
+    }
     comma = true;
     str << '}';
   }
 
   void print(VcallArgsId id) {
     auto& args = unit.vcallArgs[id];
-    print(args.args);
+    print(args.args, &args.argSpills);
     print(args.simdArgs);
-    print(args.stkArgs);
+    print(args.stkArgs, &args.stkSpills);
+    print(args.indRetArgs);
   }
 
   void print(RegSet regs) {
@@ -233,22 +245,43 @@ std::string show(Vreg r) {
   return str.str();
 }
 
+std::string show(const VregSet& s) {
+  std::ostringstream str;
+  auto comma = false;
+  str << '{';
+  for (auto const r : s) {
+    if (comma) str << ", ";
+    comma = true;
+    str << show(r);
+  }
+  str << '}';
+  return str.str();
+}
+
+std::string show(const VregList& l) {
+  using namespace folly::gen;
+  return fmt::format(
+    "[{}]",
+    from(l)
+    | map([] (Vreg r) { return show(r); })
+    | unsplit<std::string>(", ")
+  );
+}
+
 std::string show(Vptr p) {
   std::string str;
-  switch(arch()) {
-    case Arch::X64:
-    case Arch::ARM: {
-      // [%fs + %base + disp + %index * scale]
-      str = "[";
-      auto prefix = false;
-      if (p.seg == Vptr::FS) {
-        str += "%fs";
-        prefix = true;
-      }
-      if (p.seg == Vptr::GS) {
-        str += "%gs";
-        prefix = true;
-      }
+  {
+    // [%fs + %base + disp + %index * scale]
+    str = "[";
+    auto prefix = false;
+    if (p.seg == Segment::FS) {
+      str += "%fs";
+      prefix = true;
+    }
+    if (p.seg == Segment::GS) {
+      str += "%gs";
+      prefix = true;
+    }
       if (p.base.isValid()) {
         folly::toAppend(prefix ? " + " : "", show(p.base), &str);
         prefix = true;
@@ -263,36 +296,13 @@ std::string show(Vptr p) {
         folly::toAppend(prefix ? " + " : "", show(p.index), &str);
         if (p.scale != 1) folly::toAppend(" * ", p.scale, &str);
       }
-      str += ']';
-      return str;
-    }
-    case Arch::PPC64: {
-      auto prefix = false;
-      if (p.disp) {
-        folly::format(&str, "{}{:#x}",
-                      p.disp < 0 ? "-" : "+",
-                      std::abs(p.disp));
-        prefix = true;
-      }
-
-      if (p.base.isValid()) {
-        folly::toAppend(prefix ? "(" : "", show(p.base), &str);
-        if (prefix == true) {
-          folly::toAppend(")", &str);
-        }
-        prefix = true;
-      }
-      if (p.index.isValid()) {
-        folly::toAppend(prefix ? "," : "", show(p.index), &str);
-      }
-      return str;
-    }
+    str += ']';
+    return str;
   }
-  not_reached();
 }
 
 std::string show(Vconst c) {
-  auto str = folly::to<std::string>(c.val);
+  auto str = c.isUndef ? "undef:" : folly::to<std::string>(c.val);
   switch (c.kind) {
     case Vconst::Quad:
       str += 'q';
@@ -334,8 +344,9 @@ void printBlock(std::ostream& out, const Vunit& unit,
                 const IRInstruction*& origin) {
   auto& block = unit.blocks[b];
   out << '\n' << color(ANSI_COLOR_MAGENTA);
-  out << folly::format(" B{: <6} {}", size_t(b),
-           area_names[int(block.area_idx)]);
+  out << folly::format(" B{: <6} {} ({})", size_t(b),
+                       area_names[int(block.area_idx)],
+                       block.weight);
   for (auto p : preds[b]) out << ", B" << size_t(p);
   out << color(ANSI_COLOR_END) << '\n';
 
@@ -432,4 +443,4 @@ void printUnit(int level, const std::string& caption, const Vunit& unit) {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-}}
+}

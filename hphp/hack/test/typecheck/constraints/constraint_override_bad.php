@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 // Copyright 2004-present Facebook. All Rights Reserved.
 
 class B {
@@ -23,5 +23,7 @@ function TestIt(): void {
   $c = new C();
   CallOnB($c);
 }
-/* HH_FIXME[1002] */
-TestIt();
+
+function main(): void {
+  TestIt();
+}

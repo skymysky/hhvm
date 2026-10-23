@@ -1,6 +1,21 @@
-File "class_meth8.php", line 19, characters 8-28:
-Could not find static method f1 in type A (Typing[4090])
-File "class_meth8.php", line 13, characters 19-20:
-The closest thing is f1 but it's not a static method
-File "class_meth8.php", line 12, characters 7-7:
-Declaration of A is here
+error: Typing[4407] Function pointer syntax requires a static method. Use `meth_caller(A::class, 'f1')` to create a function pointer to the instance method [1]
+
+class_meth8.php:19:11
+17 | 
+18 | function foo(): int {
+19 |   $p = A::f1<>;
+   |           ^^ [1]
+20 |   return $p('moo');
+21 | }
+
+error: Typing[4407] Function pointer syntax requires a static method. Use `meth_caller(A::class, 'f1')` to create a function pointer to the instance method [1]
+
+class_meth8.php:24:11
+22 | 
+23 | function bar(): int {
+24 |   $p = A::f1<>;
+   |           ^^ [1]
+25 |   return $p('moo');
+26 | }
+
+2 errors found

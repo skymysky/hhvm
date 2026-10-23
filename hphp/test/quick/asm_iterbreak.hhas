@@ -1,15 +1,7 @@
-
-.main {
-  FPushFuncD 0 "main"
-  FCall 0
-  PopR
-  Int 1
-  RetC
-}
-
-.function main() {
+.function ["__EntryPoint"("""y:0:{}""")] N main() {
   .numiters 2;
-  NewArray 3
+  .declvars $0 $1 $2 $3 $4;
+  NewDictArray 3
 
   String "hello"
   String "world"
@@ -26,44 +18,61 @@
   SetL $0
   PopC
 
-  CGetL $0
-  IterInitK 0 endOuter $1 $2
-startOuter:
+  IterInit <WithKeys> 0 $0 endOuter
+  .try {
+  startOuter:
+    IterGetValue <WithKeys> 0 $0
+    PopL $1
+    IterGetKey <WithKeys> 0 $0
+    PopL $2
+    String "\n"
+    CGetL2 $1
+    Concat
+    Print
+    PopC
 
-  String "\n"
-  CGetL2 $1
-  Concat
-  Print
-  PopC
+    String "\n"
+    CGetL2 $2
+    Concat
+    Print
+    PopC
 
-  String "\n"
-  CGetL2 $2
-  Concat
-  Print
-  PopC
+    IterInit <WithKeys> 1 $0 endInner
+    .try {
+    startInner:
+      IterGetValue <WithKeys> 1 $0
+      PopL $3
+      IterGetKey <WithKeys> 1 $0
+      PopL $4
+      String "\n"
+      CGetL2 $3
+      Concat
+      Print
+      PopC
 
-  CGetL $0
-  Box
-  MIterInitK 1 endInner $3 $4
-startInner:
-  String "\n"
-  CGetL2 $3
-  Concat
-  Print
-  PopC
+      String "\n"
+      CGetL2 $4
+      Concat
+      Print
+      PopC
 
-  String "\n"
-  CGetL2 $4
-  Concat
-  Print
-  PopC
-
-  IterBreak endOuter <(MIter) 1, (Iter) 0>
-  MIterNextK 1 startInner $3 $4
-endInner:
-  IterNextK 0 startOuter $1 $2
+      IterFree 1
+      IterFree 0
+      Jmp endOuter
+      IterNext <WithKeys> 1 $0 startInner
+      Jmp endInner
+    } .catch {
+      IterFree 1
+      Throw
+    }
+  endInner:
+    IterNext <WithKeys> 0 $0 startOuter
+    Jmp endOuter
+  } .catch {
+    IterFree 0
+    Throw
+  }
 endOuter:
-
   Int 1
-  RetC
+  RetC None
 }

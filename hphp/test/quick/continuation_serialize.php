@@ -1,15 +1,15 @@
 <?hh
 
 
-async function static_result_create($result) {
+async function static_result_create<T>(T $result): Awaitable<T> {
   return $result;
 }
 
-async function static_exception_create($exception) {
+async function static_exception_create(Throwable $exception) :Awaitable<mixed>{
   throw $exception;
 }
 
-function main() {
+<<__EntryPoint>> function main(): void {
   // Make new wait handles with valid values.
   $srwh = static_result_create(42);
   $r = HH\Asio\join($srwh);
@@ -44,5 +44,3 @@ function main() {
   $c1 = unserialize("O:9:\"Generator\":0:{}");
   var_dump($c1);
 }
-
-main();

@@ -25,64 +25,21 @@ struct StringData;
 struct ArrayData;
 
 ///////////////////////////////////////////////////////////////////////////////
-// Static constructors.
-
-inline TypeAliasReq TypeAliasReq::Invalid(Unit* unit) {
-  assertx(unit);
-  TypeAliasReq req;
-  req.unit = unit;
-  req.invalid = true;
-  return req;
-}
-
-inline TypeAliasReq TypeAliasReq::From(Unit* unit, const TypeAlias& alias) {
-  assertx(alias.type != AnnotType::Object);
-  assertx(unit);
-
-  TypeAliasReq req;
-  req.unit = unit;
-  req.name = alias.name;
-  req.type = alias.type;
-  req.nullable = alias.nullable;
-  req.typeStructure = alias.typeStructure;
-  req.userAttrs = alias.userAttrs;
-  assertx(req.typeStructure.isDictOrDArray());
-  return req;
-}
-
-inline TypeAliasReq TypeAliasReq::From(Unit* unit, TypeAliasReq req,
-                                       const TypeAlias& alias) {
-  assertx(alias.type == AnnotType::Object);
-  assertx(unit);
-
-  req.unit = unit;
-  if (req.invalid) {
-    return req; // Do nothing.
-  }
-  req.name = alias.name;
-  req.nullable |= alias.nullable;
-  req.typeStructure = alias.typeStructure;
-  req.userAttrs = alias.userAttrs;
-  assertx(req.typeStructure.isDictOrDArray());
-  return req;
-}
-
-///////////////////////////////////////////////////////////////////////////////
 // Comparison.
 
-inline bool TypeAliasReq::same(const TypeAliasReq& req) const {
-  return (invalid && req.invalid) ||
-         (type == AnnotType::Mixed && req.type == AnnotType::Mixed) ||
-         (type == req.type && nullable == req.nullable && klass == req.klass);
+inline bool TypeAlias::same(const TypeAlias& req) const {
+  if (invalid != req.invalid) return false;
+  if (invalid) return true;
+  return value == req.value;
 }
 
-inline bool operator==(const TypeAliasReq& l,
-                       const TypeAliasReq& r) {
+inline bool operator==(const TypeAlias& l,
+                       const TypeAlias& r) {
   return l.same(r);
 }
 
-inline bool operator!=(const TypeAliasReq& l,
-                       const TypeAliasReq& r) {
+inline bool operator!=(const TypeAlias& l,
+                       const TypeAlias& r) {
   return !l.same(r);
 }
 

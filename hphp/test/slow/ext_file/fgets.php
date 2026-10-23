@@ -1,6 +1,9 @@
-<?php
+<?hh
 
-$tempfile = tempnam('/tmp', 'vmextfiletest');
+
+<<__EntryPoint>>
+function main_fgets() :mixed{
+$tempfile = tempnam(sys_get_temp_dir(), 'vmextfiletest');
 
 $f = fopen($tempfile, 'w');
 fputs($f, "testing\nfgets\n\n");
@@ -12,3 +15,4 @@ var_dump(fgets($f));
 var_dump(fgets($f));
 
 unlink($tempfile);
+}

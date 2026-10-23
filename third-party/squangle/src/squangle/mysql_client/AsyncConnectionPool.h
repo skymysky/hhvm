@@ -1,0 +1,216 @@
+/*
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ * All rights reserved.
+ *
+ * This source code is licensed under the BSD-style license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+//
+// Asynchronous Connection Pool based on our async MySQL client.
+//
+// This pool offers na async way to acquire a connection by creating new ones
+// or recycling an existing one. Also provides a way to limit the number of
+// open connections per database/user and for the client.
+//
+// AsyncConnectionPool - This pool holds multiple MySQL connections and
+//   manages them to make sure only healthy connections are given back.
+//   The interface to request a connection works just like the
+//   AsyncMysqlClient, an ConnectPoolOperation is started by `beginConnection`.
+//
+// ConnectPoolOperation - An abstraction of ConnectOperation that instead of
+//   opening a new connection, requests a connection to the pool it was created
+//   by. The usage and error treat are the same.
+
+#pragma once
+
+#include <folly/String.h>
+#include <folly/container/F14Map.h>
+#include <folly/futures/Future.h>
+#include <folly/synchronization/Baton.h>
+#include <memory>
+
+#include "squangle/mysql_client/AsyncMysqlClient.h"
+#include "squangle/mysql_client/ConnectPoolOperation.h"
+#include "squangle/mysql_client/ConnectionPool.h"
+#include "squangle/mysql_client/Operation.h"
+#include "squangle/mysql_client/mysql_protocol/MysqlConnectPoolOperationImpl.h"
+
+namespace facebook::common::mysql_client {
+
+template <typename Client>
+class ConnectPoolOperation;
+class AsyncConnectionPool;
+class PoolKey;
+
+using AsyncConnectPoolOperation = ConnectPoolOperation<AsyncMysqlClient>;
+using AsyncConnectPoolOperationImpl =
+    mysql_protocol::MysqlConnectPoolOperationImpl<AsyncMysqlClient>;
+
+class AsyncConnectionPool : public ConnectionPool<AsyncMysqlClient> {
+ public:
+  // Don't use std::chrono::duration::MAX to avoid overflows
+  static std::shared_ptr<AsyncConnectionPool> makePool(
+      std::shared_ptr<AsyncMysqlClient> mysql_client,
+      PoolOptions pool_options = PoolOptions());
+
+  // The destructor will start the shutdown phase
+  ~AsyncConnectionPool() override;
+
+  // Don't allow copy or move
+  AsyncConnectionPool(const AsyncConnectionPool&) = delete;
+  AsyncConnectionPool& operator=(const AsyncConnectionPool&) = delete;
+
+  AsyncConnectionPool(AsyncConnectionPool&&) = delete;
+  AsyncConnectionPool& operator=(AsyncConnectionPool&&) = delete;
+
+  [[nodiscard]] folly::SemiFuture<ConnectResult> connectSemiFuture(
+      const std::string& host,
+      int port,
+      const std::string& database_name,
+      const std::string& user,
+      const std::string& password,
+      const ConnectionOptions& conn_opts = ConnectionOptions());
+
+  [[nodiscard]] folly::SemiFuture<ConnectResult> connectSemiFuture(
+      const std::string& host,
+      int port,
+      const std::string& database_name,
+      const std::string& user,
+      const std::string& password,
+      const std::string& special_tag,
+      const ConnectionOptions& conn_opts = ConnectionOptions());
+
+  std::unique_ptr<Connection> connect(
+      const std::string& host,
+      int port,
+      const std::string& database_name,
+      const std::string& user,
+      const std::string& password,
+      const ConnectionOptions& conn_opts = ConnectionOptions());
+
+  // Don't use the constructor directly, only public to use make_shared
+  AsyncConnectionPool(
+      std::shared_ptr<AsyncMysqlClient> mysql_client,
+      PoolOptions pool_options);
+
+  // It will clean the pool and block any new connections or operations
+  // Shutting down phase:
+  // The remaining connections or operations that are linked to this pool
+  // will know (using their weak_pointer to this pool) that the pool is dead
+  // and proceed without the pool.
+  void shutdown() override;
+
+  // for debugging, return number of pool keys in the pool
+  [[nodiscard]] size_t getNumKey() const noexcept {
+    // conn_storage_ is unsynchronized for this pool, which relies on every
+    // access happening on the mysql thread. Hop onto it so callers elsewhere
+    // don't race the pool mutating itself; runs inline if already there.
+    size_t numKey = 0;
+    mysql_client_->getEventBase()->runImmediatelyOrRunInEventBaseThreadAndWait(
+        [&] { numKey = conn_storage_.getNumKey(); });
+    return numKey;
+  }
+
+ private:
+  template <typename Client>
+  friend class ConnectPoolOperation;
+
+  class CleanUpTimer : public folly::AsyncTimeout {
+   public:
+    explicit CleanUpTimer(
+        folly::EventBase* base,
+        PoolStorage<AsyncMysqlClient>& pool)
+        : folly::AsyncTimeout(base), pool_(pool) {}
+
+    void timeoutExpired() noexcept override {
+      // timeoutExpired is `noexcept` so we can't throw from it.  The two
+      // sweeps are guarded separately so that neither is skipped because the
+      // other failed.
+      //
+      // Rate limited because this timer fires every kCleanUpTimeout (300ms)
+      // and keeps rescheduling, so a persistently throwing sweep would
+      // otherwise log a few lines a second for the life of the process, in a
+      // library with a very large number of dependents.
+      // SQUANGLE_LOG_EVERY_N_ATOMIC rather than LOG_EVERY_N: the latter is not
+      // thread safe, which is why ConnectionPool.h defines the former.
+      // `guarded` is a generic lambda, so each step instantiates it separately
+      // and carries its own counters -- the throttle is per step, and per catch
+      // arm within a step, rather than one budget shared across all of them.
+      auto guarded = [](const char* step, auto&& fn) noexcept {
+        try {
+          fn();
+        } catch (const std::exception& ex) {
+          SQUANGLE_LOG_EVERY_N_ATOMIC(ERROR, 1024)
+              << "Exception in pool cleanup " << step << ": " << ex.what();
+        } catch (...) {
+          SQUANGLE_LOG_EVERY_N_ATOMIC(ERROR, 1024)
+              << "Unknown exception in pool cleanup " << step;
+        }
+      };
+
+      // Not guarded: scheduleTimeout reports failure by returning false, not by
+      // throwing.  Ignoring it is the reachable fault -- folly leaves the
+      // timeout unscheduled after an error even when it was only rescheduling,
+      // so cleanup would stop for the life of the pool with nothing in
+      // squangle saying so.
+      //
+      // Not throttled either, unlike the sweeps above: after this failure the
+      // timer is never armed again, so there is at most one such line per pool
+      // and no volume to suppress.
+      //
+      // DFATAL rather than ERROR, matching the initial arming in the
+      // constructor.  It is fatal in dev and CI, where a broken event base
+      // should stop a test rather than scroll past, and an error in release,
+      // where squangle has a very large number of dependents.
+      if (!scheduleTimeout(PoolOptions::kCleanUpTimeout)) {
+        LOG(DFATAL) << "Failed to reschedule pool cleanup; idle and aged-out "
+                       "connections will no longer be retired and the wait "
+                       "list will no longer be swept";
+      }
+
+      guarded("cleanupOperations", [&] { pool_.cleanupOperations(); });
+      guarded("cleanupConnections", [&] { pool_.cleanupConnections(); });
+    }
+
+   private:
+    PoolStorage<AsyncMysqlClient>& pool_;
+  } cleanup_timer_;
+
+  // The AsyncConnectionPool needs to make sure certain things run in the mysql
+  // thread.
+  void validateCorrectThread() const override {
+    DCHECK_EQ(std::this_thread::get_id(), mysql_client_->threadId());
+  }
+
+  bool runInCorrectThread(std::function<void()>&& func, bool /*wait*/)
+      override {
+    return mysql_client_->runInThread([func = std::move(func)]() { func(); });
+  }
+
+  std::unique_ptr<Connection> makeNewConnection(
+      std::shared_ptr<const ConnectionKey> conn_key,
+      std::unique_ptr<MysqlPooledHolder<AsyncMysqlClient>> mysqlConn) override {
+    return std::make_unique<AsyncConnection>(
+        *mysql_client_, std::move(conn_key), std::move(mysqlConn));
+  }
+
+  struct ShutdownData {
+    bool shutting_down = false;
+    bool finished_shutdown = false;
+  };
+
+  folly::Synchronized<ShutdownData> shutdown_data_;
+
+  bool isShuttingDown() const override {
+    return shutdown_data_.rlock()->shutting_down;
+  }
+
+  // Nothing needed here - the async connection pool should not wait.
+  void openNewConnectionPrep(AsyncConnectPoolOperation& /*pool_op*/) override {}
+  void openNewConnectionFinish(
+      AsyncConnectPoolOperation& /*pool_op*/,
+      const PoolKey& /*pool_key*/) override {}
+};
+
+} // namespace facebook::common::mysql_client

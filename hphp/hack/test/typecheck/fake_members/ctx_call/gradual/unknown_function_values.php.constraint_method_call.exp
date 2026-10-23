@@ -1,0 +1,17 @@
+error: Typing[4403] Function  `call_dependent` is not dynamically callable. [1]
+-> Typing error [1]
+-> Expected a function that requires the capability $runner::CRun [2]
+-> But got a function that requires the capability set {AccessGlobals, IO, ImplicitPolicyLocal, RxLocal, SystemLocal, WriteProperty} [3]
+
+unknown_function_values.php:36:3
+33 | }
+34 | 
+35 | function call_dependent(Runner $runner)[$runner::CRun]: void {
+   |                                ^^^^^^^ [3]
+   |                                         ^^^^^^^^^^^^^ [2]
+36 |   $runner->run();
+   |   ^^^^^^^^^^^^^^ [1]
+37 | }
+38 | 
+
+1 error found

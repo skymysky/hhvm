@@ -9,5 +9,7 @@
  *
  */
 
+function main(): void {
 $x = <<<END
     Here is some heredoc content.
+}

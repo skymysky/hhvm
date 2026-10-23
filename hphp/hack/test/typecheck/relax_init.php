@@ -17,7 +17,7 @@ class Foo {
     $this->duck = 'hello';
   }
 
-  private function setBar(int $bar) {
+  private function setBar(int $bar): int {
     $this->bar = $bar;
     return 123; // This works without this line
   }

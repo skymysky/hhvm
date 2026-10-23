@@ -1,0 +1,106 @@
+error: Typing[4110] Invalid return type [1]
+-> Expected `CT<int>` [2]
+-> But got `float` [3]
+
+simple_subtyping.php:20:10
+17 | }
+18 | 
+19 | function sub_fails_super(float $x): CT<int> {
+   |                          ^^^^^ [3]
+   |                                     ^^^^^^^ [2]
+20 |   return $x;
+   |          ^^ [1]
+21 | }
+22 | 
+
+error: Typing[4110] Invalid return type [1]
+-> Expected `CT<null>` [2]
+-> But got `float` [3]
+
+simple_subtyping.php:24:10
+21 | }
+22 | 
+23 | function other_fails_super(float $x): CT<null> {
+   |                            ^^^^^ [3]
+   |                                       ^^^^^^^^ [2]
+24 |   return $x;
+   |          ^^ [1]
+25 | }
+26 | 
+
+error: Typing[4110] Invalid return type [1]
+-> Expected `CT<?bool>` [2]
+-> But got `bool` [3]
+
+simple_subtyping.php:34:10
+31 | }
+32 | 
+33 | function super_fails_eq(bool $x): CT<?bool> {
+   |                         ^^^^ [3]
+   |                                   ^^^^^^^^^ [2]
+34 |   return $x;
+   |          ^^ [1]
+35 | }
+36 | 
+
+error: Typing[4110] Invalid return type [1]
+-> Expected `CT<nothing>` [2]
+-> But got `bool` [3]
+
+simple_subtyping.php:38:10
+35 | }
+36 | 
+37 | function sub_fails_eq(bool $x): CT<nothing> {
+   |                       ^^^^ [3]
+   |                                 ^^^^^^^^^^^ [2]
+38 |   return $x;
+   |          ^^ [1]
+39 | }
+40 | 
+
+error: Typing[4110] Invalid return type [1]
+-> Expected `CT<null>` [2]
+-> But got `bool` [3]
+
+simple_subtyping.php:42:10
+39 | }
+40 | 
+41 | function other_fails_eq(bool $x): CT<null> {
+   |                         ^^^^ [3]
+   |                                   ^^^^^^^^ [2]
+42 |   return $x;
+   |          ^^ [1]
+43 | }
+44 | 
+
+error: Typing[4110] Invalid return type [1]
+-> Expected `CT<?num>` [2]
+-> But got `string` [3]
+
+simple_subtyping.php:52:10
+49 | }
+50 | 
+51 | function super_fails_as(string $x): CT<?num> {
+   |                         ^^^^^^ [3]
+   |                                     ^^^^^^^^ [2]
+52 |   return $x;
+   |          ^^ [1]
+53 | }
+54 | 
+
+error: Typing[4110] Invalid return type [1]
+-> Expected `CT<null>` [2]
+-> But got `string` [3]
+
+simple_subtyping.php:60:10
+57 | }
+58 | 
+59 | function other_fails_as(string $x): CT<null> {
+   |                         ^^^^^^ [3]
+   |                                     ^^^^^^^^ [2]
+60 |   return $x;
+   |          ^^ [1]
+61 | }
+62 | 
+
+7 errors found

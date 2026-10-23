@@ -14,13 +14,12 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_VM_CFG_H_
-#define incl_HPHP_VM_CFG_H_
+#pragma once
 
 #include "hphp/runtime/vm/jit/containers.h"
 #include "hphp/runtime/vm/jit/state-vector.h"
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 
 struct IRUnit;
 struct Block;
@@ -101,6 +100,18 @@ bool cfgHasLoop(const IRUnit&);
  */
 EdgeSet findRetreatingEdges(const IRUnit&);
 
+struct LoopInfo {
+  jit::hash_set<RegionDesc::BlockId> blocks;
+  jit::hash_map<RegionDesc::BlockId, BlockList> loopPreheaders;
+};
+
+/*
+ * Return loop information containing the set of blocks in a loop and the
+ * set of loop preheaders for each loop
+ */
+LoopInfo findBlocksInLoops(const IRUnit&, const EdgeSet&);
+
+
 /*
  * Visit the instructions in this blocklist, in block order.
  */
@@ -109,8 +120,6 @@ void forEachInst(const BlockList& blocks, Body body);
 
 //////////////////////////////////////////////////////////////////////
 
-}}
+}
 
 #include "hphp/runtime/vm/jit/cfg-inl.h"
-
-#endif

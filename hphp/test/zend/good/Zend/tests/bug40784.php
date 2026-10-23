@@ -1,17 +1,18 @@
-<?php
+<?hh
 
 class A {
-	  function A () { echo "I'm A\n"; }
+  function __construct () { echo "I'm A\n"; }
 }
 
 class B extends A {
   function __construct() {
     parent::__construct();
-    parent::__constrUct();
+    parent::__construct();
   }
 }
 
-$b = new B;
-
-echo "Done\n";
-?>
+<<__EntryPoint>>
+function main() :mixed{
+  $b = new B;
+  echo "Done\n";
+}

@@ -1,0 +1,2 @@
+--no-builtins
+--error-format plain_highlighted

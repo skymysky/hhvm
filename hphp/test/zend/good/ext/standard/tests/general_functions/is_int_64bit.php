@@ -1,16 +1,16 @@
-<?php
+<?hh
 /* Prototype: bool is_int ( mixed $var );
- * Description: Finds whether the given variable is an integer  
+ * Description: Finds whether the given variable is an integer
  */
-
+<<__EntryPoint>> function main(): void {
 echo "*** Testing is_int(), is_integer() & is_long()  with valid integer values ***\n";
-// different valid  integer vlaues 
-$valid_ints = array(
+// different valid  integer vlaues
+$valid_ints = vec[
   0,
   1,
   -1,
   -2147483648, // max negative integer value
-  -2147483647, 
+  -2147483647,
   2147483647,  // max positive integer value
   2147483640,
   0x123B,      // integer as hexadecimal
@@ -21,15 +21,15 @@ $valid_ints = array(
   0x7fffffff,  // max postive integer as hexadecimal
   0x7FFFFFFF,  // max postive integer as hexadecimal
   0123,        // integer as octal
-  01912,       // should be quivalent to octal 1
+  01,       // should be quivalent to octal 1
   -020000000000, // max negative integer as octal
   017777777777,  // max positive integer as octal
-);
-/* loop to check that is_int() recognizes different 
+];
+/* loop to check that is_int() recognizes different
    integer values, expected output: bool(true) */
 $loop_counter = 1;
 foreach ($valid_ints as $int_val ) {
-   echo "--Iteration $loop_counter--\n"; $loop_counter++;   
+   echo "--Iteration $loop_counter--\n"; $loop_counter++;
    var_dump( is_int($int_val) );
    var_dump( is_integer($int_val) );
    var_dump( is_long($int_val) );
@@ -40,21 +40,18 @@ echo "\n*** Testing is_int(), is_integer() & is_long() with  non integer values 
 // resource type variable
 $fp = fopen (__FILE__, "r");
 $dfp = opendir ( dirname(__FILE__) );
-// unset variable
 
-$unset_var = 10;
-unset ($unset_var);
 
-// other types in a array 
-$not_int_types = array (
+// other types in a array
+$not_int_types = vec[
   /* float values */
   -2147483649, // float value
   2147483648,  // float value
   -0x80000001, // float value, beyond max negative int
   0x800000001, // float value, beyond max positive int
-  020000000001, // float value, beyond max positive int 
-  -020000000001, // float value, beyond max negative int 
-  0.0,  
+  020000000001, // float value, beyond max positive int
+  -020000000001, // float value, beyond max negative int
+  0.0,
   -0.1,
   1.0,
   1e5,
@@ -63,28 +60,28 @@ $not_int_types = array (
   -1E9,
   10.0000000000000000005,
   10.5e+5,
- 
+
   /* objects */
-  new stdclass,
+  new stdClass,
 
   /* resources */
   $fp,
   $dfp,
-  
+
   /* arrays */
-  array(),
-  array(0),
-  array(1),
-  array(NULL),
-  array(null),
-  array("string"),
-  array(true),
-  array(TRUE),
-  array(false),
-  array(FALSE),
-  array(1,2,3,4),
-  array(1 => "One", "two" => 2),
-  
+  vec[],
+  vec[0],
+  vec[1],
+  vec[NULL],
+  vec[null],
+  vec["string"],
+  vec[true],
+  vec[TRUE],
+  vec[false],
+  vec[FALSE],
+  vec[1,2,3,4],
+  dict[1 => "One", "two" => 2],
+
   /* strings */
   "",
   '',
@@ -111,15 +108,12 @@ $not_int_types = array (
   TRUE,
   FALSE,
 
-  /* undefined and unset vars */
-  @$unset_var, 
-  @$undefined_var
-);
-/* loop through the $not_int_types to see working of 
+];
+/* loop through the $not_int_types to see working of
    is_int() on non integer types, expected output: bool(false) */
 $loop_counter = 1;
 foreach ($not_int_types as $type ) {
-   echo "--Iteration $loop_counter--\n"; $loop_counter++;   
+   echo "--Iteration $loop_counter--\n"; $loop_counter++;
    var_dump( is_int($type) );
    var_dump( is_integer($type) );
    var_dump( is_long($type) );
@@ -127,14 +121,14 @@ foreach ($not_int_types as $type ) {
 
 echo "\n*** Testing error conditions ***\n";
 //Zero argument
-var_dump( is_int() );
-var_dump( is_integer() );
-var_dump( is_long() );
+try { var_dump( is_int() ); } catch (Exception $e) { echo "\n".'Warning: '.$e->getMessage().' in '.__FILE__.' on line '.__LINE__."\n"; }
+try { var_dump( is_integer() ); } catch (Exception $e) { echo "\n".'Warning: '.$e->getMessage().' in '.__FILE__.' on line '.__LINE__."\n"; }
+try { var_dump( is_long() ); } catch (Exception $e) { echo "\n".'Warning: '.$e->getMessage().' in '.__FILE__.' on line '.__LINE__."\n"; }
 
-//arguments more than expected 
-var_dump( is_int(TRUE, FALSE) );
-var_dump( is_integer(TRUE, FALSE) );
-var_dump( is_long(TRUE, FALSE) );
- 
+//arguments more than expected
+try { var_dump( is_int(TRUE, FALSE) ); } catch (Exception $e) { echo "\n".'Warning: '.$e->getMessage().' in '.__FILE__.' on line '.__LINE__."\n"; }
+try { var_dump( is_integer(TRUE, FALSE) ); } catch (Exception $e) { echo "\n".'Warning: '.$e->getMessage().' in '.__FILE__.' on line '.__LINE__."\n"; }
+try { var_dump( is_long(TRUE, FALSE) ); } catch (Exception $e) { echo "\n".'Warning: '.$e->getMessage().' in '.__FILE__.' on line '.__LINE__."\n"; }
+
 echo "Done\n";
-?>
+}

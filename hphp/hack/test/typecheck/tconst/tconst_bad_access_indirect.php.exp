@@ -1,0 +1,18 @@
+error: Typing[4090] Invalid type hint [1]
+-> No type constant `T3` in `E` [2]
+-> Declaration of `E` is here [3]
+
+tconst_bad_access_indirect.php:7:18
+2 | // Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved.
+3 | 
+4 | class E { }
+  |       ^ [3]
+5 | 
+6 | class D {
+7 |   const type T = E::T3;
+  |                  ^^^^^ [1]
+  |                     ^^ [2]
+8 | }
+9 | class C {
+
+1 error found

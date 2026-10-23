@@ -1,8 +1,3 @@
-object(Closure%s)#%d (1) {
-  ["static"]=>
-  array(1) {
-    ["x"]=>
-    *RECURSION*
-  }
+object(Closure%s) (0) {
 }
 int(1)

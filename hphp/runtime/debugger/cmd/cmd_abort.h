@@ -14,12 +14,11 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_EVAL_DEBUGGER_CMD_ABORT_H_
-#define incl_HPHP_EVAL_DEBUGGER_CMD_ABORT_H_
+#pragma once
 
 #include "hphp/runtime/debugger/debugger_command.h"
 
-namespace HPHP { namespace Eval {
+namespace HPHP::Eval {
 ///////////////////////////////////////////////////////////////////////////////
 
 struct CmdAbort : DebuggerCommand {
@@ -27,9 +26,10 @@ struct CmdAbort : DebuggerCommand {
 
   void help(DebuggerClient&) override;
   void onClient(DebuggerClient&) override;
+
+  std::string name() const override { return "abort"; }
 };
 
 ///////////////////////////////////////////////////////////////////////////////
-}}
+}
 
-#endif // incl_HPHP_EVAL_DEBUGGER_CMD_ABORT_H_

@@ -1,5 +1,4 @@
-#ifndef incl_HPHP_EXT_ICU_BREAK_ITERATOR_H
-#define incl_HPHP_EXT_ICU_BREAK_ITERATOR_H
+#pragma once
 
 #include "hphp/runtime/ext/icu/icu.h"
 #include "hphp/runtime/ext/icu/CodePointBreakIterator.h"
@@ -8,11 +7,11 @@
 #include <unicode/rbbi.h>
 #include <unicode/utext.h>
 
-namespace HPHP { namespace Intl {
+namespace HPHP::Intl {
 /////////////////////////////////////////////////////////////////////////////
-extern const StaticString s_IntlBreakIterator, s_IntlCodePointBreakIterator;
 
-struct IntlBreakIterator : IntlError {
+struct IntlBreakIterator : IntlError,
+                           SystemLib::ClassLoader<"IntlBreakIterator"> {
   IntlBreakIterator() {}
   IntlBreakIterator(const IntlBreakIterator&) = delete;
   IntlBreakIterator& operator=(const IntlBreakIterator& src) {
@@ -20,6 +19,11 @@ struct IntlBreakIterator : IntlError {
     return *this;
   }
   ~IntlBreakIterator() { setBreakIterator(nullptr); }
+
+  void sweep() {
+    setBreakIterator(nullptr);
+    std::destroy_at(&m_text);
+  }
 
   void setBreakIterator(icu::BreakIterator *bi) {
     if (m_breakIterator) {
@@ -33,28 +37,11 @@ struct IntlBreakIterator : IntlError {
   }
 
   static IntlBreakIterator* Get(ObjectData* obj) {
-    return GetData<IntlBreakIterator>(obj, s_IntlBreakIterator);
+    return GetData<IntlBreakIterator>(obj, className());
   }
 
   static Object newInstance(icu::BreakIterator* bi = nullptr) {
-    if (!c_IntlBreakIterator) {
-      c_IntlBreakIterator = Unit::lookupClass(s_IntlBreakIterator.get());
-      assertx(c_IntlBreakIterator);
-    }
-    Object obj{c_IntlBreakIterator};
-    if (bi) {
-      Native::data<IntlBreakIterator>(obj)->setBreakIterator(bi);
-    }
-    return obj;
-  }
-
-  static Object newCodePointInstance(CodePointBreakIterator* bi = nullptr) {
-    if (!c_IntlCodePointBreakIterator) {
-      c_IntlCodePointBreakIterator =
-        Unit::lookupClass(s_IntlCodePointBreakIterator.get());
-      assertx(c_IntlCodePointBreakIterator);
-    }
-    Object obj{c_IntlCodePointBreakIterator};
+    Object obj{ classof() };
     if (bi) {
       Native::data<IntlBreakIterator>(obj)->setBreakIterator(bi);
     }
@@ -76,7 +63,7 @@ struct IntlBreakIterator : IntlError {
     return dynamic_cast<CodePointBreakIterator*>(m_breakIterator);
   }
 
-  bool setText(const String& str) {
+  bool setText(const OptString& str) {
     assertx(isValid());
     m_text = str.toCppString();
     UErrorCode error = U_ZERO_ERROR;
@@ -99,17 +86,20 @@ struct IntlBreakIterator : IntlError {
   // BreakIterator doesn't keep track of this for us, so we have to
   // A value of -1 means unknown and unknowable
   int32_t m_key{0};
+  OptString m_compiledRules;
  private:
   icu::BreakIterator *m_breakIterator{nullptr};
   std::string m_text;
   UText *m_uText{nullptr};
   bool m_started{false};
+};
 
-  static Class* c_IntlBreakIterator;
-  static Class* c_IntlCodePointBreakIterator;
+struct IntlCodePointBreakIterator :
+  SystemLib::ClassLoader<"IntlCodePointBreakIterator"> {
+
+  static Object newInstance(CodePointBreakIterator* bi = nullptr);
 };
 
 
 /////////////////////////////////////////////////////////////////////////////
-}} // namespace HPHP::Intl
-#endif // icl_HPHP_EXT_ICU_BREAK_ITERATOR_H
+} // namespace HPHP::Intl

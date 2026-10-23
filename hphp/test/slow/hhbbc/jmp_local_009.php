@@ -1,15 +1,22 @@
-<?php
+<?hh
 
 class A {}
 
-function foo($x) {
-  if ($x instanceof A) {
-    $y = "asd";
-  } else {
-    $y = "asd2";
+function foo() :mixed{
+  try {
+    if ($x is A) {
+      $y = "asd";
+    } else {
+      $y = "asd2";
+    }
+    var_dump($y);
+  } catch (UndefinedVariableException $e) {
+    var_dump($e->getMessage());
   }
-
-  var_dump($y);
 }
 
-foo();
+
+<<__EntryPoint>>
+function main_jmp_local_009() :mixed{
+  foo();
+}

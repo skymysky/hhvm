@@ -1,0 +1,23 @@
+error: Parsing[1002] Direct references to coeffects namespaces are not allowed [1]
+
+capability_as_context.php:4:3
+2 | 
+3 | function banned_externally_but_not_in_tests()[
+4 |   \HH\Capabilities\WriteProperty
+  |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ [1]
+5 | ]: void {}
+
+error: NastCheck[3090] Illegal context: `\HH\Capabilities\WriteProperty`
+Cannot use a context defined outside namespace \HH\Contexts [1]
+
+capability_as_context.php:3:46
+1 | <?hh
+2 | 
+3 | function banned_externally_but_not_in_tests()[
+  |                                              ^ [1]
+4 |   \HH\Capabilities\WriteProperty
+  |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ [1]
+5 | ]: void {}
+  | ^ [1]
+
+2 errors found

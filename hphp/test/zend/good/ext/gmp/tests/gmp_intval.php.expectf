@@ -1,6 +1,5 @@
 
-Warning: %s
-NULL
+Warning: gmp_intval() expects exactly 1 positional parameter, 2 given in %s/gmp_intval.php on line 3
 int(0)
 int(1)
 int(1)
@@ -8,9 +7,6 @@ int(-1)
 int(-1)
 int(-2349828)
 int(2342344)
-
-Notice: %s
-int(1)
 int(0)
 int(%d)
 int(12345678)

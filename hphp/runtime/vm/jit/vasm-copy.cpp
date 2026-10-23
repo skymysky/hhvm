@@ -29,11 +29,9 @@
 #include "hphp/runtime/vm/jit/vasm-visit.h"
 
 #include "hphp/util/dataflow-worklist.h"
-#include "hphp/util/either.h"
 #include "hphp/util/trace.h"
 
-#include <boost/dynamic_bitset.hpp>
-
+#include <fmt/format.h>
 #include <folly/Format.h>
 
 #include <algorithm>
@@ -41,11 +39,11 @@
 #include <string>
 #include <type_traits>
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 
 namespace {
 
-TRACE_SET_MOD(vasm_copy);
+TRACE_SET_MOD(vasm_copy)
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -83,12 +81,15 @@ struct PhysExpr {
  */
 struct DefInfo {
   bool operator==(const DefInfo& o) const {
-    return base == o.base && disp == o.disp && expr == o.expr;
+    return base == o.base && disp == o.disp && expr == o.expr && copy == o.copy;
   }
   bool operator!=(const DefInfo& o) const { return !(*this == o); }
 
   Vreg base;
   int32_t disp;
+  Vreg copy; // This Vreg is identical to "copy" (which might be
+             // different from "base" if the displacement is
+             // non-zero).
   PhysExpr expr;
 };
 
@@ -168,11 +169,17 @@ struct Env {
 ///////////////////////////////////////////////////////////////////////////////
 
 DEBUG_ONLY std::string show(PhysExpr x) {
-  return folly::sformat("{} + {}", show(x.base), x.disp);
+  return fmt::format("{} + {}", show(x.base), x.disp);
 }
 
-DEBUG_ONLY std::string show(DefInfo x) {
-  return folly::sformat("{} + {}", show(x.base), x.disp);
+DEBUG_ONLY std::string show(const DefInfo& x) {
+  return fmt::format(
+    "{} + {}{}{}{}",
+    show(x.base), x.disp,
+    x.copy.isValid() ? " [" : "",
+    x.copy.isValid() ? show(x.copy) : "",
+    x.copy.isValid() ? "]" : ""
+  );
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -203,7 +210,6 @@ void initialize_reg_states(Env& env) {
   auto& state = env.block_states[env.unit.entry];
 
   for (auto const r : state.phys) {
-    if (!env.abi.reserved().contains(r)) continue;
     state.phys[r] = PhysExpr { r, 0 };
   }
   state.virt_seen = boost::dynamic_bitset<>(env.unit.next_vr);
@@ -277,13 +283,6 @@ DEBUG_ONLY std::string show_fixed_point(Env& env) {
 ///////////////////////////////////////////////////////////////////////////////
 
 /*
- * Whether `r' is a reserved physical register.
- */
-bool is_phys_tracked(const Env& env, Vreg r) {
-  return r.isPhys() && env.abi.reserved().contains(r);
-}
-
-/*
  * "Chase" the def metadata for `r' through its sources until we arrive at a
  * physical source, then compute a PhysExpr.
  *
@@ -317,7 +316,7 @@ PhysExpr chase_thru(const Env& env, Vreg r) {
  * Get or compute a PhysExpr for `s', else return an invalid PhysExpr.
  */
 PhysExpr expr_for(const Env& env, RegState& state, Vreg s) {
-  return is_phys_tracked(env, s)
+  return s.isPhys()
     ? state.phys[s]
     : chase_thru(env, s);
 }
@@ -325,47 +324,12 @@ PhysExpr expr_for(const Env& env, RegState& state, Vreg s) {
 ///////////////////////////////////////////////////////////////////////////////
 
 /*
- * Analyze instructions that are part of a callphp{} sequence.
- *
- * Returns true if no further analysis is needed for the def to `d'.
- */
-bool analyze_phys_callseq(const Env& /*env*/, Vreg d, const Vinstr& inst,
-                          const Vinstr* next) {
-  if (d != rvmfp()) return false;
-
-  /*
-   * A common pattern for us is to load an address into the frame pointer
-   * right before a PHP call.  In this case, if the frame pointer was not
-   * altered before this redefinition, it will effectively still be
-   * not-altered after the call, because callphp{} restores it to the
-   * previous value.
-   *
-   * We don't need to worry about not setting the redefined flag in between
-   * this instruction and the callphp{}, because callphp{}'s uses are only of
-   * a RegSet---we cannot mis-optimize any of its args based on the state
-   * we're tracking for the frame pointer.
-   *
-   * We also skip over callphp{}'s definition of rvmfp() for this reason.
-   * Really callphp{} only preserves rvmfp() if we properly set up the
-   * rvmfp() arg to it, but the program is ill-formed if it's not doing
-   * that so it's ok to just ignore that definition here.
-   */
-  if (next && next->op == Vinstr::callphp) {
-    FTRACE(3, "      post-dominated by callphp---preserving frame ptr\n");
-    return true;
-  }
-  if (inst.op == Vinstr::callphp) return true;
-
-  return false;
-}
-
-/*
  * Analyze a copy from `s' to `d'.
  *
  * Returns true if no further analysis is needed for the def to `d'.
  */
 bool analyze_phys_copy(const Env& env, RegState& state, Vreg d, Vreg s) {
-  if (!is_phys_tracked(env, d)) return true;
+  if (!d.isPhys()) return true;
 
   auto const expr = expr_for(env, state, s);
   if (expr == PhysExpr{}) return false;
@@ -382,7 +346,7 @@ bool analyze_phys_copy(const Env& env, RegState& state, Vreg d, Vreg s) {
  */
 bool analyze_phys_disp(const Env& env, RegState& state,
                        Vreg d, Vreg s, int32_t disp) {
-  if (!is_phys_tracked(env, d)) return true;
+  if (!d.isPhys()) return true;
 
   auto const expr = expr_for(env, state, s);
   if (expr == PhysExpr{}) return false;
@@ -399,7 +363,7 @@ bool analyze_phys_disp(const Env& env, RegState& state,
  * Always returns true, for easy chaining of analysis routines.
  */
 bool analyze_phys_def(const Env& env, RegState& state, Vreg d) {
-  if (!is_phys_tracked(env, d)) return true;
+  if (!d.isPhys()) return true;
 
   FTRACE(3, "      kill {}\n", show(d));
   state.phys[d] = PhysExpr{};
@@ -447,7 +411,7 @@ void merge_def_info(Env& env, RegState& state, Vreg d, const DefInfo& src) {
  */
 void analyze_virt_copy(Env& env, RegState& state, Vreg d, Vreg s) {
   if (!d.isVirt()) return;
-  merge_def_info(env, state, d, DefInfo { s, 0 });
+  merge_def_info(env, state, d, DefInfo { s, 0, s.isVirt() ? s : Vreg{} });
 }
 void analyze_virt_disp(Env& env, RegState& state,
                        Vreg d, Vreg s, int32_t disp) {
@@ -470,10 +434,20 @@ void analyze_inst_virtual(Env& env, RegState& state, const Vinstr& inst) {
     case Vinstr::copy:
       return analyze_virt_copy(env, state, inst.copy_.d, inst.copy_.s);
 
+    case Vinstr::copyargs: {
+      auto const& s = env.unit.tuples[inst.copyargs_.s];
+      auto const& d = env.unit.tuples[inst.copyargs_.d];
+      assertx(s.size() == d.size());
+      for (size_t i = 0; i < s.size(); ++i) {
+        analyze_virt_copy(env, state, d[i], s[i]);
+      }
+      return;
+    }
+
     case Vinstr::lea:
     {
       auto const& i = inst.lea_;
-      if (i.s.seg == Vptr::DS && i.s.index == InvalidReg) {
+      if (i.s.seg == Segment::DS && i.s.index == InvalidReg) {
         analyze_virt_disp(env, state, i.d, i.s.base, i.s.disp);
       }
       return;
@@ -501,20 +475,7 @@ void analyze_inst_virtual(Env& env, RegState& state, const Vinstr& inst) {
  */
 void analyze_inst_physical(Env& env, RegState& state,
                            const Vinstr& inst, const Vinstr* next) {
-  auto const is_call_seq = [&] {
-    auto result = false;
-    for_all_defs(env, inst, [&] (Vreg d) {
-      result |= analyze_phys_callseq(env, d, inst, next);
-    });
-    return result;
-  }();
-
   auto const done = [&] {
-    // If this instruction is part of a callphp{} sequence (i.e., fill rvmfp(),
-    // then callphp{}), we don't want to do instruction-specific analysis---but
-    // we stillneed to analyze any non-rvmfp() physical defs.
-    if (is_call_seq) return false;
-
     switch (inst.op) {
       case Vinstr::copy:
         return analyze_phys_copy(env, state, inst.copy_.d, inst.copy_.s);
@@ -522,7 +483,7 @@ void analyze_inst_physical(Env& env, RegState& state,
       case Vinstr::lea:
       {
         auto const& i = inst.lea_;
-        return i.s.seg == Vptr::DS &&
+        return i.s.seg == Segment::DS &&
                i.s.index == InvalidReg &&
                analyze_phys_disp(env, state, i.d, i.s.base, i.s.disp);
       }
@@ -547,8 +508,7 @@ void analyze_inst_physical(Env& env, RegState& state,
   if (done) return;
 
   for_all_defs(env, inst, [&] (Vreg d) {
-    return analyze_phys_callseq(env, d, inst, next) ||
-           analyze_phys_def(env, state, d);
+    return analyze_phys_def(env, state, d);
   });
 }
 
@@ -605,6 +565,15 @@ void flatten_impl(Env& env, DefInfo& def) {
   auto& src = env.defs[s];
   flatten_impl(env, src);
 
+  if (def.copy.isValid()) {
+    assertx(def.copy.isVirt());
+    while (true) {
+      auto const& other = env.defs[def.copy];
+      if (!other.copy.isValid() || other.copy.isPhys()) break;
+      def.copy = other.copy;
+    }
+  }
+
   if (!src.base.isVirt()) return;
   def.base = src.base;
   def.disp += src.disp;
@@ -636,7 +605,7 @@ void if_rewritable(const Env& env, const RegState& state, Vreg r, F f) {
 
   auto const try_phys_rewrite = [&] (DefInfo def) {
     // We can't fold defs relative to unreserved physical registers.
-    if (!is_phys_tracked(env, def.base)) return false;
+    if (!def.base.isPhys()) return false;
 
     // If we don't know anything about the physical register's value, we can't
     // do any rewriting.
@@ -733,9 +702,9 @@ struct OptVisit {
   void use(Vptr& ptr) {
     // Rewrite memory operands that are based on registers we've copied or
     // lea'd off of other registers.
-    if (ptr.seg != Vptr::DS) return;
+    if (ptr.seg != Segment::DS) return;
     if_rewritable(env, state, ptr.base, [&] (const DefInfo& def) {
-      if (arch() == Arch::ARM) {
+      if (arch::any<arch::ARM>()) {
         // After lowering, only [base, index lsl #scale] and [base, #imm]
         // are allowed where the range of #imm is [-256 .. 255]
         assertx(ptr.base.isValid());
@@ -750,6 +719,15 @@ struct OptVisit {
       ptr.base = def.base;
       ptr.disp += def.disp;
     });
+    if_rewritable(env, state, ptr.index, [&] (const DefInfo& def) {
+      if (arch::any<arch::ARM>()) return;
+      auto const newDisp =
+        static_cast<int64_t>(ptr.disp) + ptr.scale * def.disp;
+      if (!deltaFits(newDisp, sz::dword)) return;
+      FTRACE(2, "      rewrite: {} => {}\n", show(ptr.index), show(def));
+      ptr.index = def.base;
+      ptr.disp = newDisp;
+    });
   }
 
   template<class T>
@@ -763,9 +741,13 @@ struct OptVisit {
   >::type use(T& reg) {
     // Rewrite to another register if it's just a copy.
     if_rewritable(env, state, reg, [&] (const DefInfo& def) {
-      if (def.disp != 0) return;
-      FTRACE(2, "      rewrite: {} => {}\n", show(reg), show(def.base));
-      reg = def.base;
+      // If the displacement is zero, just use the base
+      // register. Otherwise, we might a copy (which isn't necessarily
+      // as good as base). Use that instead.
+      auto const d = (def.disp != 0) ? def.copy : def.base;
+      if (!d.isValid()) return;
+      FTRACE(2, "      rewrite: {} => {}\n", show(reg), show(d));
+      reg = d;
     });
   }
 };
@@ -789,6 +771,11 @@ void optimize_copy(const Env& env, const RegState& state, Vinstr& inst) {
  * Rewrite the srcs of `inst' as the expressions used to def them.
  */
 void optimize_inst(const Env& env, const RegState& state, Vinstr& inst) {
+  // For specialized iterators, we'd like to use a physical single register for
+  // the position. On exit traces, we intentionally recompute the old position
+  // in order to avoid extending Vreg lifetimes. Don't overoptimize this case.
+  if (inst.origin != nullptr && inst.origin->is(StIterPos)) return;
+
   auto visit = OptVisit { env, state };
   visitOperands(inst, visit);
 
@@ -839,11 +826,11 @@ void optimize(Env& env) {
  * when a register holds a value that is the same as another register plus some
  * offset.  It then folds offsets in memory operands to try to require fewer
  * registers.  The main motivation for this is to generally eliminate the need
- * for a separate stack pointer (the result of HHIR's DefSP instruction, which
- * will just be an lea off of the rvmfp() physical register).
+ * for a separate stack pointer (the result of HHIR's DefFrameRelSP instruction,
+ * which will just be an lea off of the rvmfp() physical register).
  */
 void optimizeCopies(Vunit& unit, const Abi& abi) {
-  Timer timer(Timer::vasm_copy);
+  Timer timer(Timer::vasm_copy, unit.log_entry);
   VpassTracer tracer{&unit, Trace::vasm_copy, "vasm-copy"};
   Env env { unit, abi };
   analyze_defs(env);
@@ -853,4 +840,4 @@ void optimizeCopies(Vunit& unit, const Abi& abi) {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-}}
+}

@@ -17,11 +17,13 @@
 #include "hphp/runtime/base/ini-setting.h"
 
 #include "hphp/runtime/base/array-init.h"
+#include "hphp/runtime/base/array-iterator.h"
 #include "hphp/runtime/base/builtin-functions.h"
 #include "hphp/runtime/base/execution-context.h"
+#include "hphp/runtime/base/init-fini-node.h"
 #include "hphp/runtime/base/req-optional.h"
-#include "hphp/runtime/base/runtime-option.h"
-#include "hphp/runtime/base/zend-strtod.h"
+#include "hphp/runtime/base/stat-cache.h"
+#include "hphp/runtime/base/string-functors.h"
 
 #include "hphp/runtime/base/ini-parser/zend-ini.h"
 
@@ -30,13 +32,16 @@
 #include "hphp/runtime/ext/extension-registry.h"
 #include "hphp/runtime/ext/json/ext_json.h"
 
+#include "hphp/util/build-info.h"
+#include "hphp/util/configs/eval.h"
+#include "hphp/util/configs/server.h"
 #include "hphp/util/lock.h"
 #include "hphp/util/portability.h"
 #include "hphp/util/logger.h"
 
-#ifndef _MSC_VER
+#include "hphp/zend/zend-strtod.h"
+
 #include <glob.h>
-#endif
 
 #define __STDC_LIMIT_MACROS
 #include <cstdint>
@@ -44,6 +49,11 @@
 #include <boost/algorithm/string/split.hpp>
 #include <boost/algorithm/string.hpp>
 #include <map>
+
+#include <folly/container/F14Map.h>
+#include <folly/Hash.h>
+#include <folly/FileUtil.h>
+#include <folly/Overload.h>
 
 namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
@@ -100,6 +110,51 @@ std::string convert_long_to_bytes(int64_t value) {
   }
 }
 
+namespace {
+
+template<typename T>
+void set(DictInit& arr, const std::string& key, const T& value) {
+  auto keyStr = OptString(key);
+  int64_t n;
+  if (keyStr.get()->isStrictlyInteger(n)) {
+    arr.set(n, value);
+    return;
+  }
+  arr.set(keyStr.get(), value);
+}
+
+template<typename T>
+Variant ini_get_vec(std::vector<T>& p) {
+  VecInit ret(p.size());
+  for (auto& s : p) {
+    ret.append(s);
+  }
+  return ret.toArray();
+}
+
+template<class T> struct PreserveOrder { static constexpr bool val = false; };
+
+template<class... Args>
+struct PreserveOrder<std::set<Args...>> { static constexpr bool val = true; };
+
+template<class... Args>
+struct PreserveOrder<std::map<Args...>> { static constexpr bool val = true; };
+
+template<class... Args>
+struct PreserveOrder<boost::container::flat_set<Args...>> {
+  static constexpr bool val = true;
+};
+
+template<class T>
+size_t hash_collection(const T& c) {
+  if constexpr (PreserveOrder<T>::val) {
+    return folly::hash::hash_range(c.begin(), c.end());
+  }
+  return folly::hash::commutative_hash_combine_range(c.begin(), c.end());
+}
+
+}
+
 #define INI_ASSERT_STR(v) \
   if (!v.isScalar()) { \
     return false; \
@@ -111,6 +166,123 @@ std::string convert_long_to_bytes(int64_t value) {
     return false; \
   }
 
+#define INI_ASSERT_ARR_INNER(v, t) \
+  if (!value.isArray() && !value.isObject()) { \
+    return false; \
+  } \
+  for (ArrayIter iter(value.toArray()); iter; ++iter) { \
+    if (!iter.second().is##t()) return false; \
+  }
+
+#define N(Ty) \
+  Variant ini_get(Ty& p) { return p; }                                    \
+  bool ini_on_update(const Variant& value, Ty& p) {                       \
+    INI_ASSERT_STR(value);                                                \
+    auto n = convert_bytes_to_long(str);                                  \
+    using L = std::numeric_limits<Ty>;                                    \
+    if (n > L::max() || n < L::min()) return false;                       \
+    p = n;                                                                \
+    return true;                                                          \
+  }                                                                       \
+  static void ini_log(Ty& t, const char* name, StructuredLogEntry& ent) { \
+    ent.setInt(name, t);                                                  \
+  }                                                                       \
+  static size_t ini_hash(Ty& t) { return std::hash<Ty>{}(t); }            \
+  static folly::dynamic ini_dyn(Ty& t) { return t; }                      \
+/**/
+
+#define U(Ty) \
+  Variant ini_get(Ty& p) { return p; }                                    \
+  bool ini_on_update(const Variant& value, Ty& p) {                       \
+    INI_ASSERT_STR(value);                                                \
+    auto n = convert_bytes_to_long(str);                                  \
+    auto mask = ~size_t((Ty)(-1));                                        \
+    if (size_t(n) & mask) return false;                                   \
+    p = n;                                                                \
+    return true;                                                          \
+  }                                                                       \
+  static void ini_log(Ty& t, const char* name, StructuredLogEntry& ent) { \
+    ent.setInt(name, t);                                                  \
+  }                                                                       \
+  static size_t ini_hash(Ty& t) { return std::hash<Ty>{}(t); }            \
+  static folly::dynamic ini_dyn(Ty& t) { return t; }                      \
+/**/
+
+#define M(Ty)                                                             \
+  Variant ini_get(Ty& p) {                                                \
+    DictInit ret(p.size());                                               \
+    for (auto& [f, s] : p) {                                              \
+      set(ret, f, s);                                                     \
+    }                                                                     \
+    return ret.toArray();                                                 \
+  }                                                                       \
+  bool ini_on_update(const Variant& value, Ty& p) {                       \
+    INI_ASSERT_ARR_INNER(value, String);                                  \
+    for (ArrayIter iter(value.toArray()); iter; ++iter) {                 \
+      p[iter.first().toString().toCppString()] =                          \
+        iter.second().toString().toCppString();                           \
+    }                                                                     \
+    return true;                                                          \
+  }                                                                       \
+  static void ini_log(Ty& t, const char* name, StructuredLogEntry& ent) { \
+    std::vector<std::string> strs;                                        \
+    std::set<folly::StringPiece> tags;                                    \
+    for (auto& [k, v] : t) {                                              \
+      strs.emplace_back(folly::to<std::string>(k, ": ", v));              \
+      tags.emplace(strs.back());                                          \
+    }                                                                     \
+    ent.setSet(name, tags);                                               \
+  }                                                                       \
+  static size_t ini_hash(Ty& t) {                                         \
+    return hash_collection(t);                                            \
+  }                                                                       \
+  static folly::dynamic ini_dyn(Ty& t) {                                  \
+    folly::dynamic obj = folly::dynamic::object;                          \
+    for (auto& [k, v] : t) {                                              \
+      obj[k] = v;                                                         \
+    }                                                                     \
+    return obj;                                                           \
+  }                                                                       \
+  /**/
+
+#define S(Ty)                                                             \
+  Variant ini_get(Ty& p) {                                                \
+    VecInit ret(p.size());                                                \
+    for (auto& s : p) {                                                   \
+      ret.append(s);                                                      \
+    }                                                                     \
+    return ret.toArray();                                                 \
+  }                                                                       \
+  bool ini_on_update(const Variant& value, Ty& p) {                       \
+    INI_ASSERT_ARR_INNER(value, String);                                  \
+    for (ArrayIter iter(value.toArray()); iter; ++iter) {                 \
+      p.insert(iter.second().toString().toCppString());                   \
+    }                                                                     \
+    return true;                                                          \
+  }                                                                       \
+  static void ini_log(Ty& t, const char* name, StructuredLogEntry& ent) { \
+    std::set<folly::StringPiece> tags;                                    \
+    for (auto& v : t) tags.emplace(v);                                    \
+    ent.setSet(name, tags);                                               \
+  }                                                                       \
+  static size_t ini_hash(Ty& t) {                                         \
+    return hash_collection(t);                                            \
+  }                                                                       \
+  static folly::dynamic ini_dyn(Ty& t) {                                  \
+    auto arr = folly::dynamic::array();                                   \
+    for (auto& v : t) arr.push_back(v);                                   \
+    return arr;                                                           \
+  }                                                                       \
+  /**/
+
+INI_TYPES4(N, U, M, S)
+
+#undef S
+#undef M
+#undef U
+#undef N
+
+Variant ini_get(bool& p) { return p ? "1" : ""; }
 bool ini_on_update(const Variant& value, bool& p) {
   INI_ASSERT_STR(value);
   if ((str.size() == 0) ||
@@ -124,328 +296,136 @@ bool ini_on_update(const Variant& value, bool& p) {
   }
   return true;
 }
+static void ini_log(bool& t, const char* name, StructuredLogEntry& ent) {
+  ent.setInt(name, t ? 1 : 0);
+}
+static folly::dynamic ini_dyn(bool& t) { return t; }
+static size_t ini_hash(bool& t) { return std::hash<bool>{}(t); }
 
+Variant ini_get(double& p) { return p; }
 bool ini_on_update(const Variant& value, double& p) {
   INI_ASSERT_STR(value);
   p = zend_strtod(str.data(), nullptr);
   return true;
 }
-
-bool ini_on_update(const Variant& value, char& p) {
-  INI_ASSERT_STR(value);
-  auto n = convert_bytes_to_long(str);
-  auto maxValue = 0x7FL;
-  if (n > maxValue || n < (- maxValue - 1)) {
-    return false;
-  }
-  p = n;
-  return true;
+static void ini_log(double& t, const char* name, StructuredLogEntry& ent) {
+  ent.setStr(name, folly::to<std::string>(t));
 }
+static folly::dynamic ini_dyn(double& t) { return t; }
+static size_t ini_hash(double& t) { return std::hash<double>{}(t); }
 
-bool ini_on_update(const Variant& value, int16_t& p) {
-  INI_ASSERT_STR(value);
-  auto n = convert_bytes_to_long(str);
-  auto maxValue = 0x7FFFL;
-  if (n > maxValue || n < (- maxValue - 1)) {
-    return false;
-  }
-  p = n;
-  return true;
-}
-
-bool ini_on_update(const Variant& value, int32_t& p) {
-  INI_ASSERT_STR(value);
-  auto n = convert_bytes_to_long(str);
-  auto maxValue = 0x7FFFFFFFL;
-  if (n > maxValue || n < (- maxValue - 1)) {
-    return false;
-  }
-  p = n;
-  return true;
-}
-
-bool ini_on_update(const Variant& value, int64_t& p) {
-  INI_ASSERT_STR(value);
-  p = convert_bytes_to_long(str);
-  return true;
-}
-
-bool ini_on_update(const Variant& value, unsigned char& p) {
-  INI_ASSERT_STR(value);
-  auto n = convert_bytes_to_long(str);
-  auto mask = ~0xFFUL;
-  if (((uint64_t)n & mask)) {
-    return false;
-  }
-  p = n;
-  return true;
-}
-
-bool ini_on_update(const Variant& value, uint16_t& p) {
-  INI_ASSERT_STR(value);
-  auto n = convert_bytes_to_long(str);
-  auto mask = ~0xFFFFUL;
-  if (((uint64_t)n & mask)) {
-    return false;
-  }
-  p = n;
-  return true;
-}
-
-bool ini_on_update(const Variant& value, uint32_t& p) {
-  INI_ASSERT_STR(value);
-  auto n = convert_bytes_to_long(str);
-  auto mask = ~0x7FFFFFFFUL;
-  if (((uint64_t)n & mask)) {
-    return false;
-  }
-  p = n;
-  return true;
-}
-
-bool ini_on_update(const Variant& value, uint64_t& p) {
-  INI_ASSERT_STR(value);
-  p = convert_bytes_to_long(str);
-  return true;
-}
-
+Variant ini_get(std::string& p) { return p.data(); }
 bool ini_on_update(const Variant& value, std::string& p) {
   INI_ASSERT_STR(value);
   p = str;
   return true;
 }
-
-bool ini_on_update(const Variant& value, String& p) {
-  INI_ASSERT_STR(value);
-  p = str.data();
-  return true;
+static void ini_log(std::string& t, const char* name, StructuredLogEntry& ent) {
+  ent.setStr(name, t);
 }
+static folly::dynamic ini_dyn(std::string& t) { return t; }
+static size_t ini_hash(std::string& t) { return std::hash<std::string>{}(t); }
 
-bool ini_on_update(const Variant& value, Array& p) {
-  INI_ASSERT_ARR(value);
-  p = value.toArray();
-  return true;
-}
-
-bool ini_on_update(const Variant& value, std::set<std::string>& p) {
-  INI_ASSERT_ARR(value);
-  for (ArrayIter iter(value.toArray()); iter; ++iter) {
-    p.insert(iter.second().toString().toCppString());
+Variant ini_get(std::unordered_map<std::string, int>& p) {
+  DictInit ret(p.size());
+  for (auto& pair : p) {
+    set(ret, pair.first, pair.second);
   }
-  return true;
+  return ret.toArray();
 }
-
-bool ini_on_update(const Variant& value,
-                   std::set<std::string, stdltistr>& p) {
-  INI_ASSERT_ARR(value);
-  for (ArrayIter iter(value.toArray()); iter; ++iter) {
-    p.insert(iter.second().toString().toCppString());
-  }
-  return true;
-}
-
-bool ini_on_update(const Variant& value,
-                   boost::container::flat_set<std::string>& p) {
-  INI_ASSERT_ARR(value);
-  for (ArrayIter iter(value.toArray()); iter; ++iter) {
-    p.insert(iter.second().toString().toCppString());
-  }
-  return true;
-}
-
-bool ini_on_update(const Variant& value, std::vector<uint32_t>& p) {
-  INI_ASSERT_ARR(value);
-  for (ArrayIter iter(value.toArray()); iter; ++iter) {
-    p.push_back(iter.second().toInt64());
-  }
-  return true;
-}
-
-bool ini_on_update(const Variant& value, std::vector<std::string>& p) {
-  INI_ASSERT_ARR(value);
-  for (ArrayIter iter(value.toArray()); iter; ++iter) {
-    p.push_back(iter.second().toString().toCppString());
-  }
-  return true;
-}
-
 bool ini_on_update(const Variant& value,
                    std::unordered_map<std::string, int>& p) {
-  INI_ASSERT_ARR(value);
+  INI_ASSERT_ARR_INNER(value, Integer);
   for (ArrayIter iter(value.toArray()); iter; ++iter) {
     p[iter.first().toString().toCppString()] = iter.second().toInt64();
   }
   return true;
 }
+static void ini_log(std::unordered_map<std::string, int>& t,
+                    const char* name, StructuredLogEntry& ent) {
+  std::vector<std::string> strs;
+  std::set<folly::StringPiece> tags;
+  for (auto& [k, v] : t) {
+    strs.emplace_back(folly::to<std::string>(k, ": ", v));
+    tags.emplace(strs.back());
+  }
+  ent.setSet(name, tags);
+}
+static folly::dynamic ini_dyn(std::unordered_map<std::string, int>& t) {
+  folly::dynamic obj = folly::dynamic::object;
+  for (auto& [k, v] : t) obj[k] = v;
+  return obj;
+}
+static size_t ini_hash(std::unordered_map<std::string, int>& t) {
+  return hash_collection(t);
+}
 
-bool ini_on_update(const Variant& value,
-                   std::map<std::string, std::string>& p) {
+Variant ini_get(Array& p) { return p; }
+bool ini_on_update(const Variant& value, Array& p) {
   INI_ASSERT_ARR(value);
+  p = value.toArray();
+  return true;
+}
+static void ini_log(Array& t, const char* name, StructuredLogEntry& ent) {
+  // Do nothing
+}
+static size_t ini_hash(Array&) {
+  return 0; // don't bother hashing arrays as they aren't included in logging
+}
+static folly::dynamic ini_dyn(Array& t) {
+  // Ignore
+  return folly::dynamic::array();
+}
+
+Variant ini_get(std::vector<int32_t>& p) { return ini_get_vec(p); }
+bool ini_on_update(const Variant& value, std::vector<int32_t>& p) {
+  INI_ASSERT_ARR_INNER(value, Integer);
   for (ArrayIter iter(value.toArray()); iter; ++iter) {
-    p[iter.first().toString().toCppString()] =
-      iter.second().toString().toCppString();
+    p.push_back(iter.second().toInt64());
   }
   return true;
 }
+static void ini_log(std::vector<int32_t>& t, const char* name,
+                    StructuredLogEntry& ent) {
+  std::vector<std::string> strs;
+  std::vector<folly::StringPiece> v;
+  for (auto i : t) {
+    strs.emplace_back(folly::to<std::string>(i));
+    v.emplace_back(strs.back());
+  }
+  ent.setVec(name, v);
+}
+static folly::dynamic ini_dyn(std::vector<int32_t>& t) {
+  auto arr = folly::dynamic::array();
+  for (auto i : t) arr.push_back(i);
+  return arr;
+}
+static size_t ini_hash(std::vector<int32_t>& t) {
+  return folly::hash::hash_range(t.begin(), t.end());
+}
 
-bool ini_on_update(const Variant& value,
-                   std::map<std::string, std::string, stdltistr>& p) {
-  INI_ASSERT_ARR(value);
+Variant ini_get(std::vector<std::string>& p) { return ini_get_vec(p); }
+bool ini_on_update(const Variant& value, std::vector<std::string>& p) {
+  INI_ASSERT_ARR_INNER(value, String);
   for (ArrayIter iter(value.toArray()); iter; ++iter) {
-    p[iter.first().toString().toCppString()] =
-      iter.second().toString().toCppString();
+    p.push_back(iter.second().toString().toCppString());
   }
   return true;
 }
-
-bool ini_on_update(const Variant& value,
-                   hphp_string_imap<std::string>& p) {
-  INI_ASSERT_ARR(value);
-  for (ArrayIter iter(value.toArray()); iter; ++iter) {
-    p[iter.first().toString().toCppString()] =
-      iter.second().toString().toCppString();
-  }
-  return true;
+static void ini_log(std::vector<std::string>& t, const char* name,
+                    StructuredLogEntry& ent) {
+  std::vector<folly::StringPiece> v;
+  for (auto& s : t) v.emplace_back(s);
+  ent.setVec(name, v);
 }
-
-Variant ini_get(bool& p) {
-  return p ? "1" : "";
+static folly::dynamic ini_dyn(std::vector<std::string>& t) {
+  auto arr = folly::dynamic::array();
+  for (auto& s : t) arr.push_back(s);
+  return arr;
 }
-
-Variant ini_get(double& p) {
-  return p;
+static size_t ini_hash(std::vector<std::string>& t) {
+  return folly::hash::hash_range(t.begin(), t.end());
 }
-
-Variant ini_get(char& p) {
-  return p;
-}
-
-Variant ini_get(int16_t& p) {
-  return p;
-}
-
-Variant ini_get(int32_t& p) {
-  return p;
-}
-
-Variant ini_get(int64_t& p) {
-  return p;
-}
-
-Variant ini_get(unsigned char& p) {
-  return p;
-}
-
-Variant ini_get(uint16_t& p) {
-  return p;
-}
-
-Variant ini_get(uint32_t& p) {
-  return (uint64_t) p;
-}
-
-Variant ini_get(uint64_t& p) {
-  return p;
-}
-
-Variant ini_get(std::string& p) {
-  return p.data();
-}
-
-Variant ini_get(String& p) {
-  return p.data();
-}
-
-namespace {
-
-template<typename T>
-void add(ArrayInit& arr, const std::string& key, const T& value) {
-  auto keyStr = String(key);
-  int64_t n;
-  if (keyStr.get()->isStrictlyInteger(n)) {
-    arr.add(n, value);
-    return;
-  }
-  arr.add(keyStr.get(), value);
-}
-
-}
-
-Variant ini_get(std::unordered_map<std::string, int>& p) {
-  ArrayInit ret(p.size(), ArrayInit::Map{});
-  for (auto& pair : p) {
-    add(ret, pair.first, pair.second);
-  }
-  return ret.toArray();
-}
-
-Variant ini_get(std::map<std::string, std::string>& p) {
-  ArrayInit ret(p.size(), ArrayInit::Map{});
-  for (auto& pair : p) {
-    add(ret, pair.first, pair.second);
-  }
-  return ret.toArray();
-}
-
-Variant ini_get(std::map<std::string, std::string, stdltistr>& p) {
-  ArrayInit ret(p.size(), ArrayInit::Map{});
-  for (auto& pair : p) {
-    add(ret, pair.first, pair.second);
-  }
-  return ret.toArray();
-}
-
-Variant ini_get(hphp_string_imap<std::string>& p) {
-  ArrayInit ret(p.size(), ArrayInit::Map{});
-  for (auto& pair : p) {
-    add(ret, pair.first, pair.second);
-  }
-  return ret.toArray();
-}
-
-Variant ini_get(Array& p) {
-  return p;
-}
-
-Variant ini_get(std::set<std::string>& p) {
-  ArrayInit ret(p.size(), ArrayInit::Map{});
-  auto idx = 0;
-  for (auto& s : p) {
-    ret.add(idx++, s);
-  }
-  return ret.toArray();
-}
-
-Variant ini_get(std::set<std::string, stdltistr>& p) {
-  ArrayInit ret(p.size(), ArrayInit::Map{});
-  auto idx = 0;
-  for (auto& s : p) {
-    ret.add(idx++, s);
-  }
-  return ret.toArray();
-}
-
-Variant ini_get(boost::container::flat_set<std::string>& p) {
-  ArrayInit ret(p.size(), ArrayInit::Map{});
-  auto idx = 0;
-  for (auto& s : p) {
-    ret.add(idx++, s);
-  }
-  return ret.toArray();
-}
-
-template<typename T>
-Variant ini_get(std::vector<T>& p) {
-  ArrayInit ret(p.size(), ArrayInit::Map{});
-  auto idx = 0;
-  for (auto& s : p) {
-    ret.add(idx++, s);
-  }
-  return ret.toArray();
-}
-
-template Variant ini_get<uint32_t>(std::vector<uint32_t>&);
-template Variant ini_get<std::string>(std::vector<std::string>&);
 
 const IniSettingMap ini_iterate(const IniSettingMap &ini,
                                 const std::string &name) {
@@ -507,7 +487,7 @@ const IniSettingMap ini_iterate(const IniSettingMap &ini,
 // IniSettingMap
 
 IniSettingMap::IniSettingMap() {
-  m_map = Variant(Array::Create());
+  m_map = Variant(Array::CreateDict());
 }
 
 IniSettingMap::IniSettingMap(Type /*t*/) : IniSettingMap() {}
@@ -524,9 +504,13 @@ IniSettingMap::IniSettingMap(IniSettingMap&& i) noexcept {
   m_map = v;
 }
 
-const IniSettingMap IniSettingMap::operator[](const String& key) const {
+const IniSettingMap IniSettingMap::operator[](const OptString& key) const {
   assertx(this->isArray());
-  return IniSettingMap(m_map.toCArrRef()[key]);
+  int64_t intish;
+  if (key.get()->isStrictlyInteger(intish)) {
+    return IniSettingMap(m_map.asCArrRef()[intish]);
+  }
+  return IniSettingMap(m_map.asCArrRef()[key]);
 }
 
 IniSettingMap& IniSettingMap::operator=(const IniSettingMap& i) {
@@ -536,28 +520,60 @@ IniSettingMap& IniSettingMap::operator=(const IniSettingMap& i) {
 
 namespace {
 void mergeSettings(tv_lval curval, TypedValue v) {
-  auto const cur_inner = curval.unboxed();
-  auto const cell = tvToCell(v);
-
-  if (isArrayLikeType(cell.m_type) &&
-      isArrayLikeType(cur_inner.type())) {
-    for (auto i = ArrayIter(cell.m_data.parr); !i.end(); i.next()) {
-      mergeSettings(asArrRef(cur_inner).lvalAt(i.first()), i.secondVal());
+  if (isArrayLikeType(v.m_type) &&
+      isArrayLikeType(curval.type())) {
+    for (auto i = ArrayIter(v.m_data.parr); !i.end(); i.next()) {
+      auto& cur_inner_ref = asArrRef(curval);
+      if (!cur_inner_ref.exists(i.first())) {
+        cur_inner_ref.set(i.first(), Array::CreateDict());
+      }
+      mergeSettings(cur_inner_ref.lval(i.first()), i.secondVal());
     }
   } else {
-    tvSet(tvToInitCell(v), curval);
+    tvSet(tvToInit(v), curval);
   }
 }
 }
 
-void IniSettingMap::set(const String& key, const Variant& v) {
+void IniSettingMap::set(const OptString& key, const Variant& v) {
   assertx(this->isArray());
-  auto const curval = m_map.toArrRef().lvalAt(key);
+  auto& mapref = m_map.asArrRef();
+  if (!mapref.exists(key)) {
+    mapref.set(key, Array::CreateDict());
+  }
+  auto const curval = mapref.lval(key);
   mergeSettings(curval, *v.asTypedValue());
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 // callbacks for creating arrays out of ini
+
+Array IniSetting::ParserCallback::emptyArrayForMode() const {
+  switch (mode_) {
+    case ParserCallbackMode::DARRAY:
+    case ParserCallbackMode::DICT:
+      return Array::CreateDict();
+  }
+  not_reached();
+}
+
+Array& IniSetting::ParserCallback::forceToArrayForMode(Variant& var) const {
+  switch (mode_) {
+    case ParserCallbackMode::DARRAY:
+    case ParserCallbackMode::DICT:
+      return forceToDict(var);
+  }
+  not_reached();
+}
+
+Array& IniSetting::ParserCallback::forceToArrayForMode(tv_lval var) const {
+  switch (mode_) {
+    case ParserCallbackMode::DARRAY:
+    case ParserCallbackMode::DICT:
+      return forceToDict(var);
+  }
+  not_reached();
+}
 
 void IniSetting::ParserCallback::onSection(const std::string& /*name*/,
                                            void* /*arg*/) {
@@ -572,9 +588,9 @@ void IniSetting::ParserCallback::onLabel(const std::string& /*name*/,
 void IniSetting::ParserCallback::onEntry(
     const std::string &key, const std::string &value, void *arg) {
   auto arr = static_cast<Variant*>(arg);
-  String skey(key);
+  OptString skey(key);
   Variant sval(value);
-  forceToArray(*arr).set(skey, sval);
+  forceToArrayForMode(*arr).set(skey, sval);
 }
 
 void IniSetting::ParserCallback::onPopEntry(
@@ -583,25 +599,18 @@ void IniSetting::ParserCallback::onPopEntry(
     const std::string &offset,
     void *arg) {
   auto arr = static_cast<Variant*>(arg);
-  forceToArray(*arr);
 
-  bool oEmpty = offset.empty();
-  // Substitution copy or symlink
-  // Offset come in like: hhvm.a.b\0c\0@
-  // Check for `\0` because it is possible, although unlikely, to have
-  // something like hhvm.a.b[c@]. Thus we wouldn't want to make a substitution.
-  if (!oEmpty && (offset.size() == 1 || offset[offset.size() - 2] == '\0') &&
-      (offset.back() == '@' || offset.back() == ':')) {
-    makeSettingSub(key, offset, value, *arr);
-  } else {                                 // Normal array value
-    String skey(key);
-    auto const hash = arr->toArrRef().lvalAt(skey);
-    forceToArray(hash);
-    if (!oEmpty) {                         // a[b]
-      makeArray(hash, offset, value);
-    } else {                               // a[]
-      asArrRef(hash).append(value);
-    }
+  OptString skey(key);
+  auto& arr_ref = forceToArrayForMode(*arr);
+  if (!arr_ref.exists(skey)) {
+    arr_ref.set(skey, emptyArrayForMode());
+  }
+  auto const hash = arr_ref.lval(skey);
+  forceToArrayForMode(hash);
+  if (!offset.empty()) {                 // a[b]
+    makeArray(hash, offset, value);
+  } else {                               // a[]
+    asArrRef(hash).append(value);
   }
 }
 
@@ -613,94 +622,37 @@ void IniSetting::ParserCallback::makeArray(tv_lval val,
   auto start = offset.c_str();
   auto p = start;
   bool last = false;
-  do {
-    String index(p);
+  for (;;) {
+    OptString index(p);
     last = p + index.size() >= start + offset.size();
     // This is mandatory in case we have a nested array like:
     //   hhvm.a[b][c][d]
     // b will be hash and an array already, but c and d might
     // not exist and will need to be made an array
-    val = forceToArray(val).lvalAt(index);
+    auto& arr = forceToArrayForMode(val);
+    Variant key = index;
+    int64_t intish;
+    if (index.get()->isStrictlyInteger(intish)) {
+      key = intish;
+    }
     if (last) {
-      tvMove(make_tv<KindOfString>(StringData::Make(value)), val);
-    } else {
-      p += index.size() + 1;
+      arr.set(key, value);
+      break;
     }
-  } while (!last);
-}
-
-void IniSetting::ParserCallback::makeSettingSub(const String& key,
-                                                const std::string& offset,
-                                                const std::string& value,
-                                                Variant& cur_settings) {
-  assertx(offset.size() == 1 ||
-         (offset.size() >=2 && offset[offset.size()-2] == 0));
-  auto type = offset.substr(offset.size() - 1);
-  assertx(type == ":" || type == "@");
-  std::vector<std::string> copy_name_parts = split_brackets(value);
-  assertx(!copy_name_parts.empty());
-  auto base = tv_lval{cur_settings.asTypedValue()};
-  bool skip = false;
-  for (auto& part : copy_name_parts) {
-    auto lval = forceToArray(base).lvalAt(String(part));
-    if (isNullType(lval.unboxed().type())) {
-      skip = true;
-    } else {
-      base = lval;
+    // Similar to the above, in the case of a nested array we need to ensure
+    // that we create empty arrays on the way down if they don't already exist.
+    if (!arr.exists(key)) {
+      arr.set(key, emptyArrayForMode());
     }
-  }
-  // if skip is true we have something like:
-  //   hhvm.env_variables["MYINT"][:] = 3
-  //   hhvm.stats.slot_duration[:] = "hhvm.stats.slot_duration"
-  if (skip) {
-    Logger::Warning("A false recursive setting at key %s with offset %s and "
-                    "value %s. Value is literal or pointing to setting that "
-                    "does not exist. Skipping!", key.toCppString().c_str(),
-                    offset.c_str(), value.c_str());
-  } else if (offset == ":") {
-   cur_settings.toArrRef().setRef(key, base);
-  } else if (offset == "@") {
-    cur_settings.toArrRef().set(key, *base);
-  } else {
-    traverseToSet(key, offset, base, cur_settings, type);
-  }
-}
-
-void IniSetting::ParserCallback::traverseToSet(const String &key,
-                                               const std::string& offset,
-                                               tv_lval value,
-                                               Variant& cur_settings,
-                                               const std::string& stopChar) {
-  assertx(stopChar == "@" || stopChar == ":");
-  assertx(offset != stopChar);
-  assertx(cur_settings.isArray());
-  auto isSymlink = stopChar == ":";
-  auto start = offset.c_str();
-  auto p = start;
-  tv_lval first = cur_settings.toArrRef().lvalAt(key);
-  forceToArray(first);
-  String index;
-  bool done = false;
-  while (!done) {
-    index = String(p);
+    val = arr.lval(key);
     p += index.size() + 1;
-    if (strcmp(p, stopChar.c_str()) != 0) {
-      first = forceToArray(first).lvalAt(index);
-    } else {
-      done = true;
-    }
-  }
-  if (isSymlink) {
-    toArrRef(first).setRef(index, value);
-  } else {
-    toArrRef(first).set(index, *value);
   }
 }
 
 void IniSetting::ParserCallback::onConstant(std::string &result,
                                             const std::string &name) {
-  if (f_defined(name)) {
-    result = f_constant(name).toString().toCppString();
+  if (HHVM_FN(defined)(name)) {
+    result = HHVM_FN(constant)(name).toString().toCppString();
   } else {
     result = name;
   }
@@ -708,17 +660,19 @@ void IniSetting::ParserCallback::onConstant(std::string &result,
 
 void IniSetting::ParserCallback::onVar(std::string &result,
                                        const std::string& name) {
-  std::string curval;
-  if (IniSetting::Get(name, curval)) {
-    result = curval;
-    return;
-  }
-  String value = g_context->getenv(name);
-  if (!value.isNull()) {
-    result = value.toCppString();
-    return;
-  }
   result.clear();
+  if (IniSetting::Get(name, result)) return;
+
+  if (g_context) {
+    auto const value = g_context->getenv(name);
+    if (value) result = value.toCppString();
+    return;
+  }
+
+  // We read -c ini files before ExecutionContext is initialized, so we can't
+  // use the m_env cache or CLI-server-specific env variables in that case.
+  auto const value = ::getenv(name.data());
+  if (value) result = value;
 }
 
 void IniSetting::ParserCallback::onOp(
@@ -740,9 +694,12 @@ void IniSetting::ParserCallback::onOp(
 void IniSetting::SectionParserCallback::onSection(
     const std::string &name, void *arg) {
   auto const data = (CallbackData*)arg;
-  data->active_section.unset(); // break ref() from previous section
-  data->active_section = Array::Create();
-  data->arr.toArrRef().setRef(String(name), data->active_section);
+  if (!data->active_name.isNull()) {
+    data->arr.asArrRef().set(data->active_name, data->active_section);
+    data->active_section.unset();
+  }
+  data->active_section = emptyArrayForMode();
+  data->active_name = OptString(name);
 }
 
 Variant* IniSetting::SectionParserCallback::activeArray(CallbackData* data) {
@@ -799,8 +756,8 @@ void IniSetting::SystemParserCallback::onPopEntry(const std::string& key,
 void IniSetting::SystemParserCallback::onConstant(std::string &result,
                                                   const std::string &name) {
   IniSetting::s_config_is_a_constant = true;
-  if (f_defined(name, false)) {
-    result = f_constant(name).toString().toCppString();
+  if (HHVM_FN(defined)(name, false)) {
+    result = HHVM_FN(constant)(name).toString().toCppString();
   } else {
     result = name;
   }
@@ -809,7 +766,7 @@ void IniSetting::SystemParserCallback::onConstant(std::string &result,
 ///////////////////////////////////////////////////////////////////////////////
 
 static Mutex s_mutex;
-Variant IniSetting::FromString(const String& ini, const String& filename,
+Variant IniSetting::FromString(const OptString& ini, const OptString& filename,
                                bool process_sections /* = false */,
                                int scanner_mode /* = NormalScanner */) {
   Lock lock(s_mutex); // ini parser is not thread-safe
@@ -820,14 +777,17 @@ Variant IniSetting::FromString(const String& ini, const String& filename,
   Variant ret = false;
   if (process_sections) {
     CallbackData data;
-    SectionParserCallback cb;
-    data.arr = Array::Create();
+    SectionParserCallback cb(ParserCallbackMode::DARRAY);
+    data.arr = Array::CreateDict();
     if (zend_parse_ini_string(ini_cpp, filename_cpp, scanner_mode, cb, &data)) {
+      if (!data.active_name.isNull()) {
+        data.arr.asArrRef().set(data.active_name, data.active_section);
+      }
       ret = data.arr;
     }
   } else {
-    ParserCallback cb;
-    Variant arr = Array::Create();
+    ParserCallback cb(ParserCallbackMode::DARRAY);
+    Variant arr = Array::CreateDict();
     if (zend_parse_ini_string(ini_cpp, filename_cpp, scanner_mode, cb, &arr)) {
       ret = arr;
     }
@@ -840,82 +800,166 @@ IniSettingMap IniSetting::FromStringAsMap(const std::string& ini,
   Lock lock(s_mutex); // ini parser is not thread-safe
   // We are parsing something new, so reset this flag
   s_config_is_a_constant = false;
-  SystemParserCallback cb;
+  SystemParserCallback cb(ParserCallbackMode::DICT);
   Variant parsed;
   zend_parse_ini_string(ini, filename, NormalScanner, cb, &parsed);
   if (parsed.isNull()) {
     return uninit_null();
   }
-  // We have the final values for our ini settings.
-  // Unbox everything so that we have no more references in the map since we do
-  // things that might require us not to have references
-  // (e.g. calling Variant::SetEvalScalar(), which will assert if an
-  // arraydata's elements are KindOfRef)
-  std::set<ArrayData*> seen;
-  bool use_defaults = false;
-  Variant ret = Unbox(parsed, seen, use_defaults, empty_string());
-  if (use_defaults) {
-    return uninit_null();
-  }
-  return ret;
+  return parsed;
 }
 
-Variant IniSetting::Unbox(const_variant_ref boxed, std::set<ArrayData*>& seen,
-                          bool& use_defaults, const String& array_key) {
-  assertx(boxed.isArray());
-  Variant unboxed(Array::Create());
-  auto ad = boxed.getArrayData();
-  if (seen.insert(ad).second) {
-    for (auto it = boxed.toArray().begin(); it; it.next()) {
-      auto key = it.first();
-      // asserting here to ensure that key is  a scalar type that can be
-      // converted to a string.
-      assertx(key.isScalar());
-      auto elem = it.secondRef();
-      unboxed.asArrRef().set(
-        key,
-        elem.isArray()
-          ? *Unbox(elem, seen, use_defaults, key.toString()).asTypedValue()
-          : *elem.rval()
-      );
-    }
-    seen.erase(ad);
-  } else {
-    // The insert into seen wasn't successful. We have recursion.  break the
-    // recursive cycle, so the elements can be freed by the MM. The
-    // as_variant_ref() is ok because we fully own the array, with no sharing.
+namespace {
 
-    // Use the current array key to give a little help in the log message
-    boxed.as_variant_ref().unset();
-    use_defaults = true;
-    Logger::Warning("INI Recursion Detected at offset named %s. "
-                    "Using default runtime settings.",
-                    array_key.toCppString().c_str());
+Variant doGet(IniSetting::OptionData& data) {
+#define F(Ty) \
+  [] (IniSetting::SetAndGetImpl<Ty>& data) -> Variant { \
+    Ty v;                                               \
+    if (data.getter) v = data.getter();                 \
+    else if (data.val) v = *data.val;                   \
+    return ini_get(v);                                  \
+  },
+  return folly::variant_match<Variant>(
+    data,
+    INI_TYPES(F)
+    [] (std::nullptr_t) { always_assert(false); return Variant(); }
+  );
+#undef F
+}
+
+bool doSet(IniSetting::OptionData& data, const Variant& value) {
+#define F(Ty) \
+  [&] (IniSetting::SetAndGetImpl<Ty>& data) -> bool { \
+    Ty v;                                             \
+    if (!ini_on_update(value, v)) return false;       \
+    if (data.setter && !data.setter(v)) return false; \
+    if (data.val) *data.val = v;                      \
+    return true;                                      \
+  },
+  return folly::variant_match<bool>(
+    data,
+    INI_TYPES(F)
+    [] (std::nullptr_t) { always_assert(false); return false; }
+  );
+#undef F
+}
+
+void doLog(IniSetting::OptionData& data, const char* name,
+           StructuredLogEntry& ent) {
+#define F(Ty) \
+  [&] (IniSetting::SetAndGetImpl<Ty>& data) { \
+    Ty v;                                     \
+    if (data.getter) v = data.getter();       \
+    else if (data.val) v = *data.val;         \
+    ini_log(v, name, ent);                    \
+  },
+  folly::variant_match<void>(
+    data,
+    INI_TYPES(F)
+    [] (std::nullptr_t) {}
+  );
+#undef F
+}
+
+folly::dynamic doDyn(IniSetting::OptionData& data) {
+#define F(Ty) \
+  [] (IniSetting::SetAndGetImpl<Ty>& data) { \
+    Ty v;                                    \
+    if (data.getter) v = data.getter();      \
+    else if (data.val) v = *data.val;        \
+    return ini_dyn(v);                       \
+  },
+  return folly::variant_match<folly::dynamic>(
+    data,
+    INI_TYPES(F)
+    [] (std::nullptr_t) { always_assert(false); return folly::dynamic(); }
+  );
+#undef F
+}
+
+size_t doHash(IniSetting::OptionData& data) {
+#define F(Ty) \
+  [] (IniSetting::SetAndGetImpl<Ty>& data) { \
+    Ty v;                                    \
+    if (data.getter) v = data.getter();      \
+    else if (data.val) v = *data.val;        \
+    return ini_hash(v);                      \
+  },
+  return folly::variant_match<size_t>(
+    data,
+    INI_TYPES(F)
+    [] (std::nullptr_t) { always_assert(false); return 0; }
+  );
+#undef F
+}
+
+void logSettings() {
+  if (Cfg::Repo::Authoritative) return;
+  if (!StructuredLog::coinflip(Cfg::Eval::StartOptionLogRate)) return;
+
+  auto const hash = IniSetting::HashAll(Cfg::Eval::StartOptionLogOptions,
+                                        Cfg::Eval::StartOptionLogExcludeOptions);
+  if (!Cfg::Eval::StartOptionLogCache.empty()) {
+    auto name = Cfg::Eval::StartOptionLogCache;
+    replacePlaceholders(name, {{"%{hash}", folly::to<std::string>(hash)}});
+    struct stat s;
+    if (statSyscall(name.data(), &s) != 0) {
+      if (time(nullptr) - s.st_mtim.tv_sec < Cfg::Eval::StartOptionLogWindow) {
+        return;
+      }
+    }
+    auto f = open(name.data(), O_CREAT|O_TRUNC|O_WRONLY, S_IRUSR | S_IWUSR);
+    if (f >= 0) {
+      SCOPE_EXIT { close(f); };
+      auto id = compilerId();
+      folly::writeFull(f, id.data(), id.size());
+    }
   }
-  return unboxed;
+
+  StructuredLogEntry ent;
+  ent.force_init = true;
+  ent.setStr("cmd_line", Process::GetAppName());
+  ent.setInt("server_mode", Cfg::Server::Mode ? 1 : 0);
+  ent.setInt("sample_rate", Cfg::Eval::StartOptionLogRate);
+  ent.setInt("hash", hash);
+  ent.setProcessUuid("hhvm_uuid");
+  IniSetting::Log(ent,
+                  Cfg::Eval::StartOptionLogOptions,
+                  Cfg::Eval::StartOptionLogExcludeOptions);
+  StructuredLog::log("hhvm_runtime_options", ent);
+}
+
+InitFiniNode s_logSettings(logSettings, InitFiniNode::When::ServerInit);
+
 }
 
 struct IniCallbackData {
-  IniCallbackData() {
-    extension = nullptr;
-    mode = IniSetting::PHP_INI_NONE;
-    iniData = nullptr;
-    updateCallback = nullptr;
-    getCallback = nullptr;
-  }
-  virtual ~IniCallbackData() {
-    delete iniData;
-    iniData = nullptr;
-  }
-public:
-  const Extension* extension;
-  IniSetting::Mode mode;
-  UserIniData *iniData;
-  std::function<bool(const Variant& value)> updateCallback;
-  std::function<Variant()> getCallback;
+  const Extension* extension{nullptr};
+  IniSetting::Mode mode{IniSetting::Mode::Request};
+  IniSetting::OptionData callbacks{nullptr};
 };
 
-typedef std::map<std::string, IniCallbackData> CallbackMap;
+using CallbackMap = folly::F14FastMap<
+  OptString, IniCallbackData, hphp_string_hash, hphp_string_same>;
+
+struct SystemSettings {
+  std::unordered_map<std::string,Variant> settings;
+  TYPE_SCAN_IGNORE_ALL; // the variants are always static
+};
+
+struct LocalSettings {
+  // Using hash_map for reference stability
+  using Map = req::hash_map<std::string,Variant>;
+  req::Optional<Map> settings;
+  Map& init() {
+    if (!settings) settings.emplace();
+    return settings.value();
+  }
+  void clear() { settings.reset(); }
+  bool empty() { return !settings.has_value() || settings.value().empty(); }
+};
+
+namespace {
 
 //
 // These are for settings/callbacks only settable at startup.
@@ -924,7 +968,7 @@ typedef std::map<std::string, IniCallbackData> CallbackMap;
 //   * server mode: the contents of system map are     destructed on SIGTERM
 //   * CLI    mode: the contents of system map are NOT destructed on SIGTERM
 //
-static CallbackMap s_system_ini_callbacks;
+CallbackMap s_system_ini_callbacks;
 
 //
 // These are for settings/callbacks that the script
@@ -934,94 +978,49 @@ static CallbackMap s_system_ini_callbacks;
 //   * server mode: the contents of user map are     destructed N-1 times
 //   * CLI    mode: the contents of user map are NOT destructed on SIGTERM
 //
-static THREAD_LOCAL(CallbackMap, s_user_callbacks);
-
-struct SystemSettings {
-  std::unordered_map<std::string,Variant> settings;
-  TYPE_SCAN_IGNORE_ALL; // the variants are always static
-};
-
-struct LocalSettings {
-  using Map = req::hash_map<std::string,Variant>;
-  req::Optional<Map> settings;
-  Map& init() {
-    if (!settings) settings.emplace();
-    return settings.value();
-  }
-  void clear() { settings.clear(); }
-  bool empty() { return !settings.hasValue() || settings.value().empty(); }
-};
+RDS_LOCAL(CallbackMap, s_user_callbacks);
 
 // Set by a .ini file at the start
-static SystemSettings s_system_settings;
+SystemSettings s_system_settings;
 
 // Changed during the course of the request
-static THREAD_LOCAL(LocalSettings, s_saved_defaults);
+RDS_LOCAL(LocalSettings, s_saved_defaults);
 
 struct IniSettingExtension final : Extension {
-  IniSettingExtension() : Extension("hhvm.ini", NO_EXTENSION_VERSION_YET) {}
+  IniSettingExtension() : Extension("hhvm_ini", NO_EXTENSION_VERSION_YET, "hphp_hphpi") {}
 
   // s_saved_defaults should be clear at the beginning of any request
   void requestInit() override {
-    assertx(!s_saved_defaults->settings.hasValue());
+    assertx(!s_saved_defaults->settings.has_value());
+  }
+  std::vector<std::string> hackFiles() const override {
+    return {};
   }
 } s_ini_extension;
+
+}
 
 void IniSetting::Bind(
   const Extension* extension,
   const Mode mode,
   const std::string& name,
-  std::function<bool(const Variant&)> updateCallback,
-  std::function<Variant()> getCallback,
-  std::function<struct UserIniData *(void)> userDataCallback
+  OptionData callbacks,
+  const char* defaultValue
 ) {
   assertx(!name.empty());
 
-  /*
-   * WATCH OUT: unlike php5, a Mode is not necessarily a bit mask.
-   * PHP_INI_ALL is NOT encoded as the union:
-   *   PHP_INI_USER|PHP_INI_PERDIR|PHP_INI_SYSTEM
-   *
-   * Note that Mode value PHP_INI_SET_USER and PHP_INI_SET_EVERY are bit
-   * sets; "SET" in this use means "bitset", and not "assignment".
-   */
-  bool is_thread_local;
-  if (RuntimeOption::EnableZendIniCompat) {
-    is_thread_local = (
-    (mode == PHP_INI_USER) ||
-    (mode == PHP_INI_PERDIR) ||
-    (mode == PHP_INI_ALL) ||  /* See note above */
-    (mode &  PHP_INI_USER) ||
-    (mode &  PHP_INI_PERDIR) ||
-    (mode &  PHP_INI_ALL)
-    );
-  } else {
-    is_thread_local = (mode == PHP_INI_USER || mode == PHP_INI_ALL);
-    assertx(is_thread_local || !ExtensionRegistry::modulesInitialised() ||
-           !s_system_settings_are_set);
-  }
-  //
+  bool is_thread_local = canSet(mode, Mode::Request);
+  assertx(is_thread_local || !ExtensionRegistry::modulesInitialised() ||
+         !s_system_settings_are_set);
+
   // When the debugger is loading its configuration, there will be some
   // cases where Extension::ModulesInitialised(), but the name appears
   // in neither s_user_callbacks nor s_system_ini_callbacks. The bottom
   // line is that we can't really use ModulesInitialised() to help steer
   // the choices here.
-  //
+  auto const staticName = OptString::attach(makeStaticString(name));
+  assertx(IMPLIES(!is_thread_local, !s_user_callbacks->count(staticName)));
 
-  bool use_user = is_thread_local;
-  if (RuntimeOption::EnableZendIniCompat && !use_user) {
-    //
-    // If it is already in the user callbacks, continue to use it from
-    // there. We don't expect it to be already there, but it has been
-    // observed during development.
-    //
-    bool in_user_callbacks =
-      (s_user_callbacks->find(name) != s_user_callbacks->end());
-    assert (!in_user_callbacks);  // See note above
-    use_user = in_user_callbacks;
-  }
-
-  //
   // For now, we require the extensions to use their own thread local
   // memory for user-changeable settings. This means you need to use
   // the default field to Bind and can't statically initialize them.
@@ -1036,17 +1035,16 @@ void IniSetting::Bind(
   // We could conceivably let you use static memory and have our own
   // thread local here that users can change and then reset it back to
   // the default, but we haven't built that yet.
-  //
-
-  IniCallbackData &data =
-    use_user ? (*s_user_callbacks)[name] : s_system_ini_callbacks[name];
+  IniCallbackData &data = is_thread_local ? (*s_user_callbacks)[staticName]
+                                          : s_system_ini_callbacks[staticName];
 
   data.extension = extension;
   data.mode = mode;
-  data.updateCallback = updateCallback;
-  data.getCallback = getCallback;
-  if (data.iniData == nullptr && userDataCallback != nullptr) {
-    data.iniData = userDataCallback();
+  data.callbacks = callbacks;
+
+  auto hasSystemDefault = ResetSystemDefault(name);
+  if (!hasSystemDefault && defaultValue) {
+    doSet(callbacks, defaultValue);
   }
 }
 
@@ -1055,8 +1053,8 @@ void IniSetting::Unbind(const std::string& name) {
   s_user_callbacks->erase(name);
 }
 
-static IniCallbackData* get_callback(const std::string& name) {
-  CallbackMap::iterator iter = s_system_ini_callbacks.find(name);
+static IniCallbackData* get_callback(const OptString& name) {
+  auto iter = s_system_ini_callbacks.find(name);
   if (iter == s_system_ini_callbacks.end()) {
     iter = s_user_callbacks->find(name);
     if (iter == s_user_callbacks->end()) {
@@ -1073,32 +1071,38 @@ bool IniSetting::Get(const std::string& name, std::string &value) {
   return ret && !value.empty();
 }
 
-bool IniSetting::Get(const String& name, String& value) {
+bool IniSetting::Get(const OptString& name, std::string &value) {
+  Variant b;
+  auto ret = Get(name, b);
+  value = b.toString().toCppString();
+  return ret && !value.empty();
+}
+
+bool IniSetting::Get(const OptString& name, OptString& value) {
   Variant b;
   auto ret = Get(name, b);
   value = b.toString();
   return ret;
 }
 
-static bool shouldHideSetting(const std::string& name) {
-  for (auto& sub : RuntimeOption::EvalIniGetHide) {
-    if (name.find(sub) != std::string::npos) {
+static bool shouldHideSetting(const OptString& name) {
+  for (auto& sub : Cfg::Eval::IniGetHide) {
+    if (name.find(sub) != -1) {
       return true;
     }
   }
   return false;
 }
 
-bool IniSetting::Get(const String& name, Variant& value) {
-  auto nameStr = name.toCppString();
-  if (shouldHideSetting(nameStr)) {
+bool IniSetting::Get(const OptString& name, Variant& value) {
+  if (shouldHideSetting(name)) {
     return false;
   }
-  auto cb = get_callback(nameStr);
+  auto cb = get_callback(name);
   if (!cb) {
     return false;
   }
-  value = cb->getCallback();
+  value = doGet(cb->callbacks);
   return true;
 }
 
@@ -1108,13 +1112,19 @@ std::string IniSetting::Get(const std::string& name) {
   return ret;
 }
 
-static bool ini_set(const std::string& name, const Variant& value,
+std::string IniSetting::Get(const OptString& name) {
+  std::string ret;
+  Get(name, ret);
+  return ret;
+}
+
+static bool ini_set(const OptString& name, const Variant& value,
                     IniSetting::Mode mode) {
   auto cb = get_callback(name);
-  if (!cb || !(cb->mode & mode)) {
+  if (!cb || !IniSetting::canSet(cb->mode, mode)) {
     return false;
   }
-  return cb->updateCallback(value);
+  return doSet(cb->callbacks, value);
 }
 
 bool IniSetting::FillInConstant(const std::string& name,
@@ -1132,7 +1142,7 @@ bool IniSetting::FillInConstant(const std::string& name,
   return ret;
 }
 
-bool IniSetting::SetSystem(const String& name, const Variant& value) {
+bool IniSetting::SetSystem(const OptString& name, const Variant& value) {
   // Shouldn't be calling this function after the runtime options are loaded.
   assertx(!s_system_settings_are_set);
   // Since we're going to keep these settings for the lifetime of the program,
@@ -1140,10 +1150,10 @@ bool IniSetting::SetSystem(const String& name, const Variant& value) {
   Variant eval_scalar_variant = value;
   eval_scalar_variant.setEvalScalar();
   s_system_settings.settings[name.toCppString()] = eval_scalar_variant;
-  return ini_set(name.toCppString(), value, PHP_INI_SET_EVERY);
+  return ini_set(name, value, Mode::Config);
 }
 
-bool IniSetting::GetSystem(const String& name, Variant& value) {
+bool IniSetting::GetSystem(const OptString& name, Variant& value) {
   auto it = s_system_settings.settings.find(name.toCppString());
   if (it == s_system_settings.settings.end()) {
     return false;
@@ -1152,59 +1162,104 @@ bool IniSetting::GetSystem(const String& name, Variant& value) {
   return true;
 }
 
-bool IniSetting::SetUser(const String& name, const Variant& value) {
+bool IniSetting::SetUser(const OptString& name, const Variant& value) {
   auto& defaults = s_saved_defaults->init();
-  auto it = defaults.find(name.toCppString());
-  if (it == defaults.end()) {
+  if (!defaults.contains(name.toCppString())) {
     Variant def;
     auto success = Get(name, def); // def gets populated here
     if (success) {
       defaults[name.toCppString()] = def;
     }
   }
-  return ini_set(name.toCppString(), value, PHP_INI_SET_USER);
+  return ini_set(name, value, Mode::Request);
 }
 
-void IniSetting::RestoreUser(const String& name) {
+void IniSetting::RestoreUser(const OptString& name) {
   if (!s_saved_defaults->empty()) {
     auto& defaults = s_saved_defaults->settings.value();
     auto it = defaults.find(name.toCppString());
     if (it != defaults.end() &&
-        ini_set(name.toCppString(), it->second, PHP_INI_SET_USER)) {
+        ini_set(name, it->second, Mode::Request)) {
       defaults.erase(it);
     }
   }
-};
+}
 
 bool IniSetting::ResetSystemDefault(const std::string& name) {
   auto it = s_system_settings.settings.find(name);
   if (it == s_system_settings.settings.end()) {
     return false;
   }
-  return ini_set(name, it->second, PHP_INI_SET_EVERY);
+  return ini_set(name, it->second, Mode::Config);
 }
 
 void IniSetting::ResetSavedDefaults() {
   if (!s_saved_defaults->empty()) {
     for (auto& item : s_saved_defaults->settings.value()) {
-      ini_set(item.first, item.second, PHP_INI_SET_USER);
+      ini_set(item.first, item.second, Mode::Request);
     }
   }
   // destroy the local settings hashtable even if it's empty
   s_saved_defaults->clear();
 }
 
-bool IniSetting::GetMode(const std::string& name, Mode& mode) {
-  auto cb = get_callback(name);
-  if (!cb) {
-    return false;
-  }
-  mode = cb->mode;
-  return true;
+bool IniSetting::canSet(Mode settingMode, Mode checkMode) {
+  assertx(checkMode != Mode::Constant);
+  if (settingMode == Mode::Constant) return false;
+  return settingMode <= checkMode;
 }
 
-Array IniSetting::GetAll(const String& ext_name, bool details) {
-  Array r = Array::Create();
+Optional<IniSetting::Mode> IniSetting::GetMode(const OptString& name) {
+  auto cb = get_callback(name);
+  if (!cb) {
+    return {};
+  }
+  return {cb->mode};
+}
+
+void IniSetting::Log(StructuredLogEntry& ent,
+                     const hphp_fast_string_set& toLog,
+                     const hphp_fast_string_set& toExclude) {
+  for (auto& iter: boost::join(s_system_ini_callbacks, *s_user_callbacks)) {
+    if (shouldHideSetting(iter.first)) continue;
+    if (!toLog.empty() && !toLog.count(iter.first.toCppString())) continue;
+    if (toExclude.contains(iter.first.toCppString())) continue;
+
+    doLog(iter.second.callbacks, iter.first.data(), ent);
+  }
+}
+
+folly::dynamic IniSetting::GetAllAsDynamic() {
+  folly::dynamic obj = folly::dynamic::object;
+  for (auto& iter: boost::join(s_system_ini_callbacks, *s_user_callbacks)) {
+    if (shouldHideSetting(iter.first)) continue;
+
+    obj[iter.first.toCppString()] = doDyn(iter.second.callbacks);
+  }
+  return obj;
+}
+
+size_t IniSetting::HashAll(const hphp_fast_string_set& toLog,
+                           const hphp_fast_string_set& toExclude) {
+  size_t hash = 0;
+  for (auto& iter: boost::join(s_system_ini_callbacks, *s_user_callbacks)) {
+    if (!toLog.empty() && !toLog.count(iter.first.toCppString())) continue;
+    if (toExclude.contains(iter.first.toCppString())) continue;
+    if (shouldHideSetting(iter.first)) continue;
+
+    hash = folly::hash::commutative_hash_combine_value_generic(
+      hash,
+      std::hash<size_t>{},
+      folly::hash::hash_combine(
+        iter.first.toCppString(), doHash(iter.second.callbacks)
+      )
+    );
+  }
+  return hash;
+}
+
+Array IniSetting::GetAll(const OptString& ext_name, bool details) {
+  Array r = Array::CreateDict();
 
   const Extension* ext = nullptr;
   if (!ext_name.empty()) {
@@ -1228,36 +1283,28 @@ Array IniSetting::GetAll(const String& ext_name, bool details) {
       continue;
     }
 
-    auto value = iter.second.getCallback();
+    auto value = doGet(iter.second.callbacks);
     // Cast all non-arrays to strings since that is what everything used to be
     if (!value.isArray()) {
       value = value.toString();
     }
     if (details) {
-      Array item = Array::Create();
-      item.add(s_global_value, value);
-      item.add(s_local_value, value);
-      if (iter.second.mode == PHP_INI_ALL) {
-        item.add(
-          s_access,
-          Variant(PHP_INI_USER | PHP_INI_SYSTEM | PHP_INI_PERDIR)
-        );
-      } else if (iter.second.mode == PHP_INI_ONLY) {
-        item.add(s_access, Variant(PHP_INI_SYSTEM));
-      } else {
-        item.add(s_access, Variant(iter.second.mode));
-      }
-      r.add(String(iter.first), item);
+      Array item = Array::CreateDict();
+      item.set(s_global_value, value);
+      item.set(s_local_value, value);
+      item.set(s_access, Variant(int64_t(iter.second.mode)));
+      r.set(OptString(iter.first), item);
     } else {
-      r.add(String(iter.first), value);
+      r.set(OptString(iter.first), value);
     }
   }
   return r;
 }
 
 std::string IniSetting::GetAllAsJSON() {
-  Array settings = GetAll(empty_string(), true);
-  String out = Variant::attach(HHVM_FN(json_encode)(settings)).toString();
+  Array settings = GetAll(String::Empty(), true);
+  auto const opts = k_JSON_FB_FORCE_HACK_ARRAYS;
+  OptString out = Variant::attach(HHVM_FN(json_encode)(settings, opts)).toString();
   return std::string(out.c_str());
 }
 

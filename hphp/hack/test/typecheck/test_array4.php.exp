@@ -1,6 +1,38 @@
-File "test_array4.php", line 13, characters 10-17:
-Invalid return type (Typing[4110])
-File "test_array4.php", line 12, characters 37-40:
-This is a bool
-File "test_array4.php", line 12, characters 27-29:
-It is incompatible with an int
+error: Typing[4323] Some type arguments violate their constraints [1]
+-> `Tk` is a constrained type parameter [2]
+-> This type constraint is violated [3]
+-> Expected `arraykey` [3]
+-> But got `bool` [4]
+
+test_array4.php:12:15
+10 |  */
+11 | 
+12 | function test(darray<bool, int> $x): bool {
+   |               ^^^^^^^^^^^^^^^^^ [1]
+   |                      ^^^^ [4]
+13 |   return $x[true];
+14 | }
+
+hackarray.hhi:33:24
+31 |   <<__SupportDynamicType>>
+32 |   abstract final class dict<
+33 |     <<__NoAutoBound>> +Tk as arraykey,
+   |                        ^^ [2]
+   |                              ^^^^^^^^ [3]
+34 |     <<__NoAutoBound>> +Tv,
+35 |   > extends AnyArray<Tk, Tv> {}
+
+error: Typing[4110] Typing error [1]
+-> Expected `arraykey` because only array keys can be used to index into a `Map`, `dict`, `darray`, `Set`, or `keyset` [2]
+-> But got `bool` [3]
+
+test_array4.php:13:10
+11 | 
+12 | function test(darray<bool, int> $x): bool {
+13 |   return $x[true];
+   |          ^^^^^^^^ [1]
+   |          ^^ [2]
+   |             ^^^^ [3]
+14 | }
+
+2 errors found

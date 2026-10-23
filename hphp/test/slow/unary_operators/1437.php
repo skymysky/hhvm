@@ -1,57 +1,58 @@
-<?php
+<?hh
 
-// disable array -> "Array" conversion notice
-error_reporting(error_reporting() & ~E_NOTICE);
 
-var_dump(array("\0" => 1));
-var_dump(array("\0" => "\0"));
-var_dump(array("\0" => "\\"));
-var_dump(array("\0" => "\'"));
-var_dump(array("\\" => 1));
-var_dump(array("\\" => "\0"));
-var_dump(array("\\" => "\\"));
-var_dump(array("\\" => "\'"));
-var_dump(array("\'" => 1));
-var_dump(array("\'" => "\0"));
-var_dump(array("\'" => "\\"));
-var_dump(array("\'" => "\'"));
-var_dump(array("\a" => "\a"));
-var_dump(!array("\0" => "\0"));
-var_dump((array("\0" => "\0")));
-var_dump((int)array("\0" => "\0"));
-var_dump((integer)array("\0" => "\0"));
-var_dump((bool)array("\0" => "\0"));
-var_dump((boolean)array("\0" => "\0"));
-var_dump((float)array("\0" => "\0"));
-var_dump((double)array("\0" => "\0"));
-var_dump((real)array("\0" => "\0"));
-var_dump((string)array("\0" => "\0"));
+<<__EntryPoint>>
+function main_1437() :mixed{
+
+var_dump(dict["\0" => 1]);
+var_dump(dict["\0" => "\0"]);
+var_dump(dict["\0" => "\\"]);
+var_dump(dict["\0" => "\'"]);
+var_dump(dict["\\" => 1]);
+var_dump(dict["\\" => "\0"]);
+var_dump(dict["\\" => "\\"]);
+var_dump(dict["\\" => "\'"]);
+var_dump(dict["\'" => 1]);
+var_dump(dict["\'" => "\0"]);
+var_dump(dict["\'" => "\\"]);
+var_dump(dict["\'" => "\'"]);
+var_dump(dict["\a" => "\a"]);
+var_dump(!dict["\0" => "\0"]);
+var_dump((dict["\0" => "\0"]));
+var_dump((int)dict["\0" => "\0"]);
+var_dump((int)dict["\0" => "\0"]);
+var_dump((bool)dict["\0" => "\0"]);
+var_dump((bool)dict["\0" => "\0"]);
+var_dump((float)dict["\0" => "\0"]);
+var_dump((float)dict["\0" => "\0"]);
+var_dump((float)dict["\0" => "\0"]);
 $a = "0x10";
 var_dump($a);
 var_dump("\0");
-$a = array("\0" => 1);
+$a = dict["\0" => 1];
 var_dump($a);
-$a = array("\0" => "\0");
+$a = dict["\0" => "\0"];
 var_dump($a);
-$a = array("\0" => "\\");
+$a = dict["\0" => "\\"];
 var_dump($a);
-$a = array("\0" => "\'");
+$a = dict["\0" => "\'"];
 var_dump($a);
-$a = array("\\" => 1);
+$a = dict["\\" => 1];
 var_dump($a);
-$a = array("\\" => "\0");
+$a = dict["\\" => "\0"];
 var_dump($a);
-$a = array("\\" => "\\");
+$a = dict["\\" => "\\"];
 var_dump($a);
-$a = array("\\" => "\'");
+$a = dict["\\" => "\'"];
 var_dump($a);
-$a = array("\'" => 1);
+$a = dict["\'" => 1];
 var_dump($a);
-$a = array("\'" => "\0");
+$a = dict["\'" => "\0"];
 var_dump($a);
-$a = array("\'" => "\\");
+$a = dict["\'" => "\\"];
 var_dump($a);
-$a = array("\'" => "\'");
+$a = dict["\'" => "\'"];
 var_dump($a);
-$a = array("\a" => "\a");
+$a = dict["\a" => "\a"];
 var_dump($a);
+}

@@ -1,13 +1,20 @@
-<?php
-function f(&$a) {
-  ++$a;
-  yield $a;
-  ++$a;
-  yield $a;
+<?hh
+
+class Ref {
+  function __construct(public $value)[] {}
 }
-$a = 3;
+function f($a) :AsyncGenerator<mixed,mixed,void>{
+  ++$a->value;
+  yield $a->value;
+  ++$a->value;
+  yield $a->value;
+}
+
+<<__EntryPoint>>
+function main_g11() :mixed{
+$a = new Ref(3);
 $x = f($a);
-unset($a);
+$a = null;
 $y1 = clone $x;
 $y2 = clone $x;
 foreach ($y1 as $v) {
@@ -20,4 +27,5 @@ foreach ($y2 as $v) {
 echo "========\n";
 foreach ($x as $v) {
   echo $v . "\n";
+}
 }

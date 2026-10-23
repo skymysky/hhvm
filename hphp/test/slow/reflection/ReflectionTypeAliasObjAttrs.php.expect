@@ -1,33 +1,32 @@
-array(0) {
+dict(0) {
 }
-array(1) {
+dict(1) {
   ["Attr1"]=>
-  array(1) {
-    [0]=>
+  vec(1) {
     int(1337)
   }
 }
-array(2) {
+dict(2) {
   ["Attr2"]=>
-  array(0) {
+  vec(0) {
   }
   ["Attr3"]=>
-  array(0) {
+  vec(0) {
   }
 }
-array(2) {
+dict(2) {
   ["Attr2"]=>
-  array(0) {
+  vec(0) {
   }
   ["Attr3"]=>
-  array(0) {
+  vec(0) {
   }
 }
-array(2) {
+dict(2) {
   ["Attr2"]=>
-  array(0) {
+  vec(0) {
   }
   ["Attr3"]=>
-  array(0) {
+  vec(0) {
   }
 }

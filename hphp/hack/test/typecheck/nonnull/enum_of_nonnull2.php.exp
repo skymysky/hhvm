@@ -1,4 +1,11 @@
-File "enum_of_nonnull2.php", line 8, characters 9-11:
-Enum constants must be an int or string (Typing[4018])
-File "enum_of_nonnull2.php", line 8, characters 15-18:
-Not a bool
+error: Typing[4024] Enums must be `int` or `string` or `arraykey`, not `nonnull` [1]
+
+enum_of_nonnull2.php:7:7
+5 | }
+6 | 
+7 | class E extends Enum {
+  |       ^ [1]
+8 |   const type TInner = nonnull;
+9 |   const FOO = 'foo';
+
+1 error found

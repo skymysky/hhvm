@@ -9,7 +9,7 @@
  *
  */
 
-function f() {
+function f(): string {
   $x = 'error';
   return "I am ${error{}";
 }

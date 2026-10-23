@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 /**
  * Copyright (c) 2014, Facebook, Inc.
  * All rights reserved.
@@ -11,5 +11,6 @@
 
 function f(): void {
   $x = async $v ==> $v;
-  if ($x(true)) {}
+  /* HH_IGNORE_ERROR[4273] */
+  $x(true);
 }

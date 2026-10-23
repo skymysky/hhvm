@@ -1,15 +1,15 @@
-<?php
+<?hh
 
-function VS($x, $y) {
+function VS($x, $y) :mixed{
   var_dump($x === $y);
   if ($x !== $y) { echo "Failed: $y\n"; echo "Got: $x\n";
                    var_dump(debug_backtrace()); }
 }
-function VERIFY($x) { VS($x, true); }
+function VERIFY($x) :mixed{ VS($x, true); }
 
 //////////////////////////////////////////////////////////////////////
 
-function test_icu_match() {
+function test_icu_match() :mixed{
   // Test subject strings.
   $subject = "\xd7\x96\xf0\x90\xa4\x85". " PHP is a scripting language. " .
              "\xef\xba\xb0\xef\xbb\xb3";
@@ -37,42 +37,57 @@ function test_icu_match() {
 
   // Test basic regex parsing functionality.
   VERIFY(icu_match("scripting", $subject) != false);
-  VERIFY(icu_match("php", $subject) == false);
+  VERIFY(HH\Lib\Legacy_FIXME\eq(icu_match("php", $subject), false));
   VERIFY(icu_match("(\\bPHP\\b)", $subject) != false);
   VERIFY(icu_match("(\\bPHP\\b))", $subject) == false);
 
+  $matches = null;
   // Test returning matches functionality.
-  VERIFY(icu_match("(PHP) is", $subject, $matches) != false);
+  VERIFY(icu_match_with_matches("(PHP) is", $subject, inout $matches) != false);
   VS(print_r($matches, true),
-    "Array\n".
+    "Vec\n".
     "(\n".
     "    [0] => PHP is\n".
     "    [1] => PHP\n".
     ")\n");
-  VERIFY(icu_match("is (a)", $subject, $matches,
-                     UREGEX_OFFSET_CAPTURE) != false);
+  VERIFY(
+    icu_match_with_matches(
+      "is (a)",
+      $subject,
+      inout $matches,
+      UREGEX_OFFSET_CAPTURE,
+    ) !=
+      false,
+  );
   VS(print_r($matches, true),
-     "Array\n".
+     "Vec\n".
      "(\n".
-     "    [0] => Array\n".
+     "    [0] => Vec\n".
      "        (\n".
      "            [0] => is a\n".
      "            [1] => 7\n".
      "        )\n".
      "\n".
-     "    [1] => Array\n".
+     "    [1] => Vec\n".
      "        (\n".
      "            [0] => a\n".
      "            [1] => 10\n".
      "        )\n".
      "\n".
      ")\n");
-  VERIFY(icu_match("\\. \xef\xba\xb0", $subject, $matches,
-                     UREGEX_OFFSET_CAPTURE) != false);
+  VERIFY(
+    icu_match_with_matches(
+      "\\. \xef\xba\xb0",
+      $subject,
+      inout $matches,
+      UREGEX_OFFSET_CAPTURE,
+    ) !=
+      false,
+  );
   VS(print_r($matches, true),
-    "Array\n".
+    "Vec\n".
     "(\n".
-    "    [0] => Array\n".
+    "    [0] => Vec\n".
     "        (\n".
     "            [0] => . \xef\xba\xb0\n".
     "            [1] => 30\n".
@@ -81,18 +96,25 @@ function test_icu_match() {
     ")\n");
   $junk1="\xef\xbb\xa9\xef\xbb\xad";
   $junk2="\xef\xba\x8e\xef\xbb\xa0\xef\xbb\xa8\xef\xba\xbb";
-  VERIFY(icu_match("$junk1 ($junk2)",
-                     $subject_ar, $matches, UREGEX_OFFSET_CAPTURE) != false);
+  VERIFY(
+    icu_match_with_matches(
+      "$junk1 ($junk2)",
+      $subject_ar,
+      inout $matches,
+      UREGEX_OFFSET_CAPTURE,
+    ) !=
+      false,
+  );
   VS(print_r($matches, true),
-    "Array\n".
+    "Vec\n".
     "(\n".
-    "    [0] => Array\n".
+    "    [0] => Vec\n".
     "        (\n".
     "            [0] => $junk1 $junk2\n".
     "            [1] => 4\n".
     "        )\n".
     "\n".
-    "    [1] => Array\n".
+    "    [1] => Vec\n".
     "        (\n".
     "            [0] => $junk2\n".
     "            [1] => 7\n".
@@ -101,18 +123,25 @@ function test_icu_match() {
     ")\n");
 
   // Test match for 32-bit code points.
-  VERIFY(icu_match(".*", $subject_32, $matches) != false);
+  VERIFY(icu_match_with_matches(".*", $subject_32, inout $matches) != false);
   $expected="\xf0\x90\xa4\x85\xf0\x90\xa4\x85\xf0\x90\xa4".
     "\x85\xf0\x90\xa4\x85\xf0\x90\xa4\x85\xf0\x90\xa4\x85";
   VS(print_r($matches, true),
-    "Array\n".
+    "Vec\n".
     "(\n".
     "    [0] => $expected\n".
     ")\n");
 
   // Test regex caching functionality.
-  VERIFY(icu_match("(php)", $subject, $ignore, UREGEX_CASE_INSENSITIVE) != false);
-  VERIFY(icu_match("(php)", $subject) == false);
+  VERIFY(
+    icu_match(
+      "(php)",
+      $subject,
+      UREGEX_CASE_INSENSITIVE,
+    ) !=
+      false,
+  );
+  VERIFY(HH\Lib\Legacy_FIXME\eq(icu_match("(php)", $subject), false));
 
   // Test ICU specific (ie bidi) functionality.
   $pattern_ltr = "\\p{Bidi_Class=Left_To_Right}";
@@ -120,14 +149,14 @@ function test_icu_match() {
   $pattern_arl = "\\p{Bidi_Class=Arabic_Letter}";
 
   VERIFY(icu_match($pattern_ltr, $subject_en) != false);
-  VERIFY(icu_match($pattern_rtl, $subject_en) == false);
+  VERIFY(HH\Lib\Legacy_FIXME\eq(icu_match($pattern_rtl, $subject_en), false));
 
-  VERIFY(icu_match($pattern_ltr, $subject_he) == false);
+  VERIFY(HH\Lib\Legacy_FIXME\eq(icu_match($pattern_ltr, $subject_he), false));
   VERIFY(icu_match($pattern_rtl, $subject_he) != false);
-  VERIFY(icu_match($pattern_arl, $subject_he) == false);
+  VERIFY(HH\Lib\Legacy_FIXME\eq(icu_match($pattern_arl, $subject_he), false));
 
-  VERIFY(icu_match($pattern_ltr, $subject_ar) == false);
-  VERIFY(icu_match($pattern_rtl, $subject_ar) == false);
+  VERIFY(HH\Lib\Legacy_FIXME\eq(icu_match($pattern_ltr, $subject_ar), false));
+  VERIFY(HH\Lib\Legacy_FIXME\eq(icu_match($pattern_rtl, $subject_ar), false));
   VERIFY(icu_match($pattern_arl, $subject_ar) != false);
 
   VERIFY(icu_match($pattern_ltr, $subject_mixed) != false);
@@ -135,7 +164,7 @@ function test_icu_match() {
 }
 
 // Test string lifted from tests/intl/utf8.h
-function test_icu_transliterate() {
+function test_icu_transliterate() :mixed{
   $input_ru = "\xd1\x84\xd0\xb5\xd0\xb9\xd1".
            "\x81\xd0\xb1\xd1\x83\xc5\x93\xd0\xba";
   $output_ru = icu_transliterate($input_ru, false);
@@ -162,12 +191,12 @@ function test_icu_transliterate() {
 }
 
 
-function test_icu_tokenize() {
+function test_icu_tokenize() :mixed{
   $input_eng = "Hello World";
   $output_eng = icu_tokenize($input_eng);
 
   VS(print_r($output_eng, true),
-     "Array\n".
+     "Vec\n".
      "(\n".
      "    [0] => _B_\n".
      "    [1] => hello\n".
@@ -183,7 +212,7 @@ function test_icu_tokenize() {
   $output_long = icu_tokenize($input_long);
 
   VS(print_r($output_long, true),
-     "Array\n".
+     "Vec\n".
      "(\n".
      "    [0] => _B_\n".
      "    [1] => hello\n".
@@ -215,7 +244,7 @@ function test_icu_tokenize() {
   $output_de = icu_tokenize($input_de);
 
   VS(print_r($output_de, true),
-     "Array\n".
+     "Vec\n".
      "(\n".
      "    [0] => _B_\n".
      "    [1] => ich\n".
@@ -236,7 +265,7 @@ function test_icu_tokenize() {
   $input_hebrew = "היום יום רביעי, וזה ממש טוב.";
   $output_hebrew = icu_tokenize($input_hebrew);
   VS(print_r($output_hebrew, true),
-     "Array\n".
+     "Vec\n".
      "(\n".
      "    [0] => _B_\n".
      "    [1] => היום\n".
@@ -251,6 +280,10 @@ function test_icu_tokenize() {
      ")\n");
 }
 
+
+<<__EntryPoint>>
+function main_ext_icu() :mixed{
 test_icu_match();
 test_icu_transliterate();
 test_icu_tokenize();
+}

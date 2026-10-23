@@ -1,13 +1,8 @@
-%unicode|string%(3) "foo"
 
-Warning: %s
+Warning: Invalid argument: function: class not found in %s/call_user_func_002.php on line 4
 
-Warning: %s
+Warning: Invalid argument: function: class not found in %s/call_user_func_002.php on line 5
 
-Notice: %s
-
-Warning: %s
-
-Notice: %s
-
-Warning: %s
+Fatal error: Uncaught exception 'UndefinedVariableException' with message 'Undefined variable: foo' in %s/call_user_func_002.php:6
+Stack trace:
+%A

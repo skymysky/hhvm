@@ -1,17 +1,20 @@
-<?php
+<?hh
 
 class A {
  private $a;
  protected $b;
  public $c;
- static $d;
+ public static $d;
  }
-function f($a) {
- asort($a);
+function f($a) :mixed{
+ asort(inout $a);
  foreach ($a as $v) {
  var_dump($v->getName());
  }
  }
+
+<<__EntryPoint>>
+function main_1362() :mixed{
 $r = new ReflectionClass('A');
 $a = $r->getProperties();
  f($a);
@@ -23,3 +26,4 @@ $a = $r->getProperties(ReflectionProperty::IS_PROTECTED);
  f($a);
 $a = $r->getProperties(ReflectionProperty::IS_STATIC);
  f($a);
+}

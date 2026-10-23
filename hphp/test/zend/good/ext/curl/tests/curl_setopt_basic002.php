@@ -1,8 +1,8 @@
-<?php
+<?hh
 
-include 'server.inc';
+<<__EntryPoint>> function main(): void {
+require_once 'server.inc';
 $host = curl_cli_server_start();
-
 // start testing
 echo "*** Testing curl_setopt with CURLOPT_STDERR\n";
 
@@ -18,9 +18,9 @@ curl_setopt($ch, CURLOPT_STDERR, $handle);
 $curl_content = curl_exec($ch);
 
 fclose($handle);
-unset($handle);
+$handle = null;
 var_dump(preg_replace('/[\r\n]/', ' ', file_get_contents($temp_file)));
-@unlink($temp_file);
+unlink($temp_file);
 
 ob_start(); // start output buffering
 $handle = fopen($temp_file, 'w');
@@ -30,10 +30,9 @@ $data = curl_exec($ch);
 ob_end_clean();
 
 fclose($handle);
-unset($handle);
+$handle = null;
 var_dump(preg_replace('/[\r\n]/', ' ', file_get_contents($temp_file)));
-@unlink($temp_file);
+unlink($temp_file);
 
 curl_close($ch);
-
-?>
+}

@@ -15,8 +15,7 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_EXT_XMLREADER_H_
-#define incl_HPHP_EXT_XMLREADER_H_
+#pragma once
 
 #include "hphp/runtime/ext/extension.h"
 #include "hphp/runtime/base/file.h"
@@ -25,10 +24,11 @@
 #include <libxml/xmlreader.h>
 #include <libxml/uri.h>
 
-typedef int (*xmlreader_read_int_t)(xmlTextReaderPtr reader);
-typedef unsigned char *(*xmlreader_read_char_t)(xmlTextReaderPtr reader);
-typedef const unsigned char *(*xmlreader_read_const_char_t)(xmlTextReaderPtr reader);
-typedef unsigned char *(*xmlreader_read_one_char_t)(xmlTextReaderPtr reader, const unsigned char *);
+using xmlreader_read_int_t = int (*)(xmlTextReaderPtr reader);
+using xmlreader_read_char_t = unsigned char *(*)(xmlTextReaderPtr reader);
+using xmlreader_read_const_char_t = const unsigned char *(*)(xmlTextReaderPtr reader);
+using xmlreader_read_one_char_t = unsigned char *(*)(xmlTextReaderPtr reader, const unsigned char *);
+
 namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
 // class XMLReader
@@ -38,11 +38,11 @@ struct XMLReader {
   ~XMLReader();
   void sweep();
   void close();
-  String read_string_func(xmlreader_read_char_t internal_function);
+  OptString read_string_func(xmlreader_read_char_t internal_function);
   bool bool_func_no_arg(xmlreader_read_int_t internal_function);
-  Variant string_func_string_arg(String value,
+  Variant string_func_string_arg(OptString value,
                                  xmlreader_read_one_char_t internal_function);
-  bool set_relaxng_schema(String source, int type);
+  bool set_relaxng_schema(OptString source, int type);
 
   req::ptr<File> m_stream; // input stream
   xmlTextReaderPtr m_ptr;
@@ -53,5 +53,3 @@ struct XMLReader {
 
 ///////////////////////////////////////////////////////////////////////////////
 }
-
-#endif // incl_HPHP_EXT_XMLREADER_H_

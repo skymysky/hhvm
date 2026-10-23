@@ -36,7 +36,8 @@ namespace HPHP {
 void ThreadLocalManager::OnThreadExit(void* p) {
   auto list = getList(p);
   p = list->head;
-  delete list;
+  list->~ThreadLocalList();
+  local_free(list);
   while (p != nullptr) {
     auto* pNode = static_cast<ThreadLocalNode<void>*>(p);
     if (pNode->m_on_thread_exit_fn) {
@@ -62,7 +63,8 @@ void ThreadLocalManager::PushTop(void* nodePtr, uint32_t nodeSize,
   auto key = GetManager().m_key;
   auto list = getList(pthread_getspecific(key));
   if (UNLIKELY(!list)) {
-    ThreadLocalSetValue(key, list = new ThreadLocalList);
+    list = new (local_malloc(sizeof(ThreadLocalList))) ThreadLocalList;
+    ThreadLocalSetValue(key, list);
   }
   node.m_next = list->head;
   node.m_size = nodeSize;
@@ -74,16 +76,6 @@ ThreadLocalManager& ThreadLocalManager::GetManager() {
   static ThreadLocalManager m;
   return m;
 }
-
-#ifdef __APPLE__
-ThreadLocalManager::ThreadLocalList::ThreadLocalList() {
-  pthread_t self = pthread_self();
-  handler.__routine = ThreadLocalManager::OnThreadExit;
-  handler.__arg = this;
-  handler.__next = self->__cleanup_stack;
-  self->__cleanup_stack = &handler;
-}
-#endif
 
 #endif
 
@@ -104,12 +96,7 @@ static int visit_phdr(dl_phdr_info* info, size_t, void*) {
 
 std::pair<void*,size_t> getCppTdata() {
   uintptr_t addr;
-#if defined(__x86_64__)
   if (!arch_prctl(ARCH_GET_FS, &addr)) {
-#elif defined(__powerpc64__)
-  __asm__ ("\tmr %0, 13" : "=r" (addr));
-  if (addr) {
-#endif
     // fs points to the end of the threadlocal area.
     size_t size = dl_iterate_phdr(&visit_phdr, nullptr);
     return {(void*)(addr - size), size};

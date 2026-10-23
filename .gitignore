@@ -1,10 +1,14 @@
 *.[oad]
 *.hhbc
+*.rej
+*.orig
+.merlin
 .mkdir
 .DS_Store
 hphp.log
-/build
 /_build
+hphp/hack/_build/
+hphp/hack/cargo_home/
 /deps
 
 /hphp/test/test
@@ -65,6 +69,9 @@ TAGS
 .syntastic_cpp_config
 *~
 
+# vscode
+.vscode
+
 # CMake
 CMakeCache.txt
 CMakeFiles
@@ -74,7 +81,10 @@ install_manifest.txt
 
 # CMake-generated files that need to stay in the source tree because
 # of ocamlbuild
-hphp/hack/src/options/buildOptions.ml
+/hphp/hack/src/options/buildOptions.ml
+/hphp/hack/opam.stamp
+/hphp/hack/test/.mypy_cache
+/hphp/util/generated-hhjs-babel-transform.txt
 
 # CPack
 CPackConfig.cmake
@@ -90,3 +100,6 @@ CPackSourceConfig.cmake
 
 # python scripts
 *.pyc
+
+# clangd JSON Compilation Database
+compile_commands.json

@@ -1,8 +1,8 @@
 <?hh
 
-function g(int $x) {}
+function g(int $x): void {}
 
-function f(mixed $x) {
-  $x ?as int;
-  g($x);
+function f(mixed $x): void {
+  $y = $x ?as int;
+  g($y);
 }

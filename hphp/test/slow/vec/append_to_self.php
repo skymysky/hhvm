@@ -8,7 +8,7 @@ function append_to_self(): vec {
   return $v;
 }
 
-function main() {
+function main() :mixed{
   echo "---- profiling ----\n";
   var_dump(append_to_self());
   append_to_self();
@@ -16,4 +16,8 @@ function main() {
   var_dump(append_to_self());
 }
 
+
+<<__EntryPoint>>
+function main_append_to_self() :mixed{
 main();
+}

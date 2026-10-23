@@ -1,0 +1,2 @@
+
+Fatal error: A parameter cannot be both `inout` and `readonly`. in %s on line 4

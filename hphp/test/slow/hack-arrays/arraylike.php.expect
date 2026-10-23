@@ -1,12 +1,11 @@
-array(1) {
+dict(1) {
   [42]=>
   string(3) "lol"
 }
-array(1) {
-  [0]=>
+vec(1) {
   string(3) "lol"
 }
-array(1) {
+dict(1) {
   [42]=>
   string(3) "lol"
 }
@@ -20,15 +19,14 @@ dict(1) {
 keyset(1) {
   string(3) "lol"
 }
-array(1) {
+dict(1) {
   [42]=>
   string(3) "lol"
 }
-array(1) {
-  [0]=>
+vec(1) {
   string(3) "lol"
 }
-array(1) {
+dict(1) {
   [42]=>
   string(3) "lol"
 }
@@ -42,3 +40,7 @@ dict(1) {
 keyset(1) {
   string(3) "lol"
 }
+Exception: Argument 1 passed to __hhvm_intrinsics\dummy_arraylike_builtin() must be an instance of HH\AnyArray, null given
+Exception: Argument 1 passed to __hhvm_intrinsics\dummy_arraylike_builtin() must be an instance of HH\AnyArray, int given
+Exception: Argument 1 passed to __hhvm_intrinsics\dummy_arraylike_builtin() must be an instance of HH\AnyArray, null given
+Exception: Argument 1 passed to __hhvm_intrinsics\dummy_arraylike_builtin() must be an instance of HH\AnyArray, int given

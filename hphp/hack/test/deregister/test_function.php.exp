@@ -1,2 +1,19 @@
-File "test_function.php", line 9, characters 3-9:
-Unbound name: ignored (a global function) (Naming[2049])
+error: Naming[2049] Unbound name: `trim` (a global function) [1]
+
+test_function.php:4:3
+2 | 
+3 | function test () : void {
+4 |   trim();
+  |   ^^^^ [1]
+5 | }
+
+error: Typing[4107] Unbound name (typing): `trim` [1]
+
+test_function.php:4:3
+2 | 
+3 | function test () : void {
+4 |   trim();
+  |   ^^^^ [1]
+5 | }
+
+2 errors found

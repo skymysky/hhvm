@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 /**
  * Copyright (c) 2014, Facebook, Inc.
  * All rights reserved.
@@ -9,14 +9,14 @@
  *
  */
 
-function get_arr(): array<string, bool> {
-  return array(
+function get_arr(): darray<string, bool> {
+  return dict[
     'foo' => true,
     'bar' => false,
-  );
+  ];
 }
 
-function use_arr(array<mixed, mixed> $arr): void {
+function use_arr(darray<mixed, mixed> $arr): void {
 }
 
 function test(): void {

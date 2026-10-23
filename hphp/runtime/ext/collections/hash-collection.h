@@ -1,42 +1,43 @@
-#ifndef incl_HPHP_COLLECTIONS_HASHCOLLECTION_H
-#define incl_HPHP_COLLECTIONS_HASHCOLLECTION_H
+#pragma once
 
-#include "hphp/runtime/ext/extension.h"
-#include "hphp/runtime/ext/collections/ext_collections.h"
-#include "hphp/runtime/base/mixed-array.h"
-#include "hphp/runtime/base/mixed-array-defs.h"
 #include "hphp/runtime/base/tv-refcount.h"
+#include "hphp/runtime/base/vanilla-dict-defs.h"
+#include "hphp/runtime/base/vanilla-dict.h"
+#include "hphp/runtime/ext/collections/ext_collections.h"
+#include "hphp/runtime/ext/extension.h"
 
 namespace HPHP {
 /////////////////////////////////////////////////////////////////////////////
 
-ALWAYS_INLINE MixedArray* staticEmptyDictArrayAsMixed() {
-  return static_cast<MixedArray*>(staticEmptyDictArray());
+ALWAYS_INLINE VanillaDict* CreateDictAsMixed() {
+  return VanillaDict::as(staticEmptyDictArray());
 }
 
 // Common base class for BaseMap/BaseSet collections
-struct HashCollection : ObjectData {
+struct HashCollection : c_Collection {
   explicit HashCollection(Class* cls, HeaderKind kind)
-    : ObjectData(cls, NoInit{}, collections::objectFlags, kind)
+    : c_Collection(cls, kind)
     , m_unusedAndSize(0)
-    , m_arr(staticEmptyDictArrayAsMixed())
-  {}
+  {
+    setArrayData(CreateDictAsMixed());
+  }
   explicit HashCollection(Class* cls, HeaderKind kind, ArrayData* arr)
-    : ObjectData(cls, NoInit{}, collections::objectFlags, kind)
+    : c_Collection(cls, kind)
     , m_unusedAndSize(arr->m_size)
-    , m_arr(MixedArray::asMixed(arr))
-  {}
+  {
+    setArrayData(VanillaDict::as(arr));
+  }
   explicit HashCollection(Class* cls, HeaderKind kind, uint32_t cap);
 
-  using Elm = MixedArray::Elm;
-  using hash_t = MixedArray::hash_t;
+  using Elm = VanillaDict::Elm;
+  using hash_t = VanillaDict::hash_t;
 
-  static const int32_t Empty           = MixedArray::Empty;
-  static const int32_t Tombstone       = MixedArray::Tombstone;
-  static const uint32_t LoadScale      = MixedArray::LoadScale;
-  static const uint32_t SmallScale     = MixedArray::SmallScale;
-  static const uint32_t SmallSize      = MixedArray::SmallSize;
-  static const uint32_t MaxSize        = MixedArray::MaxSize;
+  static const int32_t Empty           = VanillaDict::Empty;
+  static const int32_t Tombstone       = VanillaDict::Tombstone;
+  static const uint32_t LoadScale      = VanillaDict::LoadScale;
+  static const uint32_t SmallScale     = VanillaDict::SmallScale;
+  static const uint32_t SmallSize      = VanillaDict::SmallSize;
+  static const uint32_t MaxSize        = VanillaDict::MaxSize;
   // HashCollections can only guarantee that it won't throw "cannot add
   // element" exceptions if m_size <= MaxSize / 2. Therefore, we only allow
   // reserve() to make room for up to MaxSize / 2 elements.
@@ -46,9 +47,26 @@ struct HashCollection : ObjectData {
     return m_size;
   }
 
-  Array toArray();
-  Array toVArray();
-  Array toDArray();
+  Array toArray() = delete;
+
+  template <IntishCast intishCast = IntishCast::None>
+  Array toPHPArrayImpl() {
+    if (!m_size) {
+      return empty_dict_array();
+    }
+
+    ArrayData* ad;
+    if (intishCast == IntishCast::None) {
+      ad = arrayData()->toDict(true);
+    } else if (intishCast == IntishCast::Cast) {
+      ad = arrayData()->toDictIntishCast(true);
+    } else {
+      always_assert(false);
+    }
+
+    assertx(m_size);
+    return ad != arrayData() ? Array::attach(ad) : Array{ad};
+  }
 
   Array toKeysArray();
   Array toValuesArray();
@@ -62,23 +80,19 @@ struct HashCollection : ObjectData {
 
   void remove(int64_t key);
   void remove(StringData* key);
-  void eraseNoCompact(ssize_t pos);
-  void erase(ssize_t pos) {
+  void eraseNoCompact(VanillaDict::RemovePos pos);
+  void erase(VanillaDict::RemovePos pos) {
     eraseNoCompact(pos);
     compactOrShrinkIfDensityTooLow();
   }
-
-  void asort(int sort_flags, bool ascending);
-  void ksort(int sort_flags, bool ascending);
-  bool uasort(const Variant& cmp_function);
-  bool uksort(const Variant& cmp_function);
 
   bool isFull() { return posLimit() == cap(); }
   bool isDensityTooLow() const {
     bool b = (m_size < posLimit() / 2);
     assertx(IMPLIES(
-      arrayData() == staticEmptyDictArrayAsMixed(),
-      !b));
+      arrayData()->isStatic() && arrayData()->empty(),
+      !b
+    ));
     assertx(IMPLIES(cap() == 0, !b));
     return b;
   }
@@ -89,8 +103,9 @@ struct HashCollection : ObjectData {
     bool b = ((uint64_t(cap()) >= uint64_t(m_size) * 8) &&
               (cap() >= HashCollection::SmallSize * 8));
     assertx(IMPLIES(
-      arrayData() == staticEmptyDictArrayAsMixed(),
-      !b));
+      arrayData()->isStatic() && arrayData()->empty(),
+      !b
+    ));
     assertx(IMPLIES(cap() == 0, !b));
     return b;
   }
@@ -140,9 +155,9 @@ struct HashCollection : ObjectData {
     }
   }
 
-  HashCollection::Elm& allocElm(MixedArray::Inserter ei) {
+  HashCollection::Elm& allocElm(VanillaDict::Inserter ei) {
     assertx(canMutateBuffer());
-    assertx(MixedArray::isValidIns(ei) && !MixedArray::isValidPos(*ei)
+    assertx(VanillaDict::isValidIns(ei) && !VanillaDict::isValidPos(*ei)
            && m_size <= posLimit() && posLimit() < cap());
     size_t i = posLimit();
     *ei = i;
@@ -151,7 +166,7 @@ struct HashCollection : ObjectData {
     return data()[i];
   }
 
-  HashCollection::Elm& allocElmFront(MixedArray::Inserter ei);
+  HashCollection::Elm& allocElmFront(VanillaDict::Inserter ei);
 
   // This method will grow or compact as needed in preparation for
   // repeatedly adding new elements until m_size >= sz.
@@ -166,9 +181,8 @@ struct HashCollection : ObjectData {
     return pos < (ssize_t)posLimit();
   }
 
-  bool iter_valid(ssize_t pos, ssize_t limit) const {
-    assertx(limit == (ssize_t)posLimit());
-    return pos < limit;
+  bool iter_valid_and_not_tombstone(ssize_t pos) const {
+    return iter_valid(pos) && !isTombstone(iter_elm(pos));
   }
 
   const Elm* iter_elm(ssize_t pos) const {
@@ -225,25 +239,38 @@ struct HashCollection : ObjectData {
       return n;
     }
     // Slow path: AssoCollection has at least one tombstone,
-    // so we need to count forward
-    // TODO Task# 4281431: If n > m_size/2 we could get better
-    // performance by starting at the end of the buffer and
-    // walking backward.
+    // so we need to linear scan.
     if (n >= m_size) {
       return posLimit();
     }
-    uint32_t pos = 0;
-    for (;;) {
-      while (isTombstone(pos)) {
+
+    if (n > m_size/2) {
+      uint32_t pos = posLimit() - 1;
+      for (;;) {
+        while (isTombstone(pos)) {
+          assertx(pos > 0);
+          --pos;
+        }
+        if (n == m_size - 1) break;
+        n++;
+        assertx(pos > 0);
+        --pos;
+      }
+      return pos;
+    } else {
+      uint32_t pos = 0;
+      for (;;) {
+        while (isTombstone(pos)) {
+          assertx(pos + 1 < posLimit());
+          ++pos;
+        }
+        if (n == 0) break;
+        --n;
         assertx(pos + 1 < posLimit());
         ++pos;
       }
-      if (n <= 0) break;
-      --n;
-      assertx(pos + 1 < posLimit());
-      ++pos;
+      return pos;
     }
-    return pos;
   }
 
   /**
@@ -256,7 +283,7 @@ struct HashCollection : ObjectData {
   void mutate() {
     assertx(IMPLIES(!m_immCopy.isNull(), arrayData()->hasMultipleRefs()));
     if (arrayData()->cowCheck()) {
-      // mutateImpl() does two things for us. First it drops the the
+      // mutateImpl() does two things for us. First it drops the
       // immutable collection held by m_immCopy (if m_immCopy is not
       // null). Second, it takes care of copying the buffer if needed.
       mutateImpl();
@@ -275,9 +302,10 @@ struct HashCollection : ObjectData {
   TypedValue* findForUnserialize(int64_t k) {
     auto h = hash_int64(k);
     auto p = findForInsert(k, h);
-    if (UNLIKELY(MixedArray::isValidPos(*p))) return nullptr;
+    if (UNLIKELY(VanillaDict::isValidPos(*p))) return nullptr;
     auto e = &allocElm(p);
     e->setIntKey(k, h);
+    arrayData()->mutableKeyTypes()->recordInt();
     updateNextKI(k);
     return &e->data;
   }
@@ -285,9 +313,10 @@ struct HashCollection : ObjectData {
   TypedValue* findForUnserialize(StringData* key) {
     auto h = key->hash();
     auto p = findForInsert(key, h);
-    if (UNLIKELY(MixedArray::isValidPos(*p))) return nullptr;
+    if (UNLIKELY(VanillaDict::isValidPos(*p))) return nullptr;
     auto e = &allocElm(p);
     e->setStrKey(key, h);
+    arrayData()->mutableKeyTypes()->recordStr(key);
     return &e->data;
   }
 
@@ -307,8 +336,9 @@ struct HashCollection : ObjectData {
     auto h = key->hash();
     // Not hashing yet, so position is unused for now.
     int32_t unusedPos = -1;
-    auto e = &allocElm(MixedArray::Inserter(&unusedPos));
+    auto e = &allocElm(VanillaDict::Inserter(&unusedPos));
     e->setStrKey(key, h);
+    arrayData()->mutableKeyTypes()->recordStr(key);
     return &e->data;
   }
   /*
@@ -323,7 +353,7 @@ struct HashCollection : ObjectData {
       auto p = e.hasStrKey() ?
         findForInsert(e.skey, h) :
         findForInsert(e.ikey, h);
-      if (UNLIKELY(MixedArray::isValidPos(*p))) {
+      if (UNLIKELY(VanillaDict::isValidPos(*p))) {
         batchInsertAbort(begin);
         return false;
       }
@@ -394,36 +424,32 @@ struct HashCollection : ObjectData {
   }
 
   ssize_t find(int64_t ki, inthash_t h) const {
-    return m_arr->find(ki, h);
+    return arrayData()->find(ki, h);
   }
 
   ssize_t find(const StringData* s, strhash_t h) const {
-    return m_arr->find(s, h);
+    return arrayData()->find(s, h);
   }
 
-  ssize_t findForRemove(int64_t k, inthash_t h) {
-    assertx(canMutateBuffer());
-    return m_arr->findForRemove(k, h, false);
+  auto findForRemove(int64_t k, inthash_t h) const {
+    return arrayData()->findForRemove(k, h);
   }
 
-  ssize_t findForRemove(const StringData* s, strhash_t h) {
-    assertx(canMutateBuffer());
-    return m_arr->findForRemove(s, h);
+  auto findForRemove(const StringData* s, strhash_t h) const {
+    return arrayData()->findForRemove(s, h);
   }
 
-  MixedArray::Inserter findForInsert(int64_t ki,
-                                                 inthash_t h) const {
-    return m_arr->findForInsertUpdate(ki, h);
+  VanillaDict::Inserter findForInsert(int64_t ki, inthash_t h) const {
+    return arrayData()->findForInsertUpdate(ki, h);
   }
 
-  MixedArray::Inserter findForInsert(const StringData* s,
-                                                 strhash_t h) const {
-    return m_arr->findForInsertUpdate(s, h);
+  VanillaDict::Inserter findForInsert(const StringData* s, strhash_t h) const {
+    return arrayData()->findForInsertUpdate(s, h);
   }
 
-  MixedArray::Inserter findForNewInsert(int32_t* table, size_t mask,
-                                                    hash_t h0) const {
-    return m_arr->findForNewInsert(table, mask, h0);
+  VanillaDict::Inserter findForNewInsert(int32_t* table, size_t mask,
+                                        hash_t h0) const {
+    return arrayData()->findForNewInsert(table, mask, h0);
   }
 
   static void copyElm(const Elm& frE, Elm& toE) {
@@ -437,27 +463,33 @@ struct HashCollection : ObjectData {
     tvIncRefGen(toE.data);
   }
 
-  MixedArray* arrayData() { return m_arr; }
-  const MixedArray* arrayData() const { return m_arr; }
+  VanillaDict* arrayData() { return m_arr; }
+  const VanillaDict* arrayData() const { return m_arr; }
+  void setArrayData(VanillaDict* arr) {
+    assertx(arr->isVanillaDict());
+    assertx(!arr->isLegacyArray());
+    m_arr = arr;
+  }
 
   /**
    * Copy the buffer and reset the immutable copy.
    */
   void mutateImpl();
 
-  Elm* data() { return m_arr->data(); }
-  const Elm* data() const { return m_arr->data(); }
-  int32_t* hashTab() const { return m_arr->hashTab(); }
+  Elm* data() { return arrayData()->data(); }
+  const Elm* data() const { return arrayData()->data(); }
+  int32_t* hashTab() const { return arrayData()->hashTab(); }
 
   void setSize(uint32_t sz) {
     assertx(sz <= cap());
-    if (m_arr == staticEmptyDictArrayAsMixed()) {
+    auto const arr = arrayData();
+    if (arr->isStatic() && arr->empty()) {
       assertx(sz == 0);
       return;
     }
-    assertx(!arrayData()->hasMultipleRefs());
+    assertx(!arr->hasMultipleRefs());
     m_size = sz;
-    arrayData()->m_size = sz;
+    arr->m_size = sz;
   }
   void incSize() {
     assertx(m_size + 1 <= cap());
@@ -490,7 +522,7 @@ struct HashCollection : ObjectData {
   }
   void setPosLimit(uint32_t limit) {
     auto* a = arrayData();
-    if (a == staticEmptyDictArrayAsMixed()) {
+    if (a->isStatic() && a->empty()) {
       assertx(limit == 0);
       return;
     }
@@ -587,25 +619,40 @@ struct HashCollection : ObjectData {
   [[noreturn]] void throwReserveTooLarge();
   int32_t* warnUnbalanced(size_t n, int32_t* ei) const;
 
-  /**
-   * Raises a warning if the set contains an int and a string with the same
-   * numeric value: e.g. Set {'123', 123}. It's a no-op otherwise.
-   */
-  void warnOnStrIntDup() const;
-
   void scan(type_scan::Scanner& scanner) const {
     scanner.scan(m_arr);
     scanner.scan(m_immCopy);
   }
 
+  struct SortTmp {
+    SortTmp(HashCollection* h, SortFunction sf) : m_h(h) {
+      if (hasUserDefinedCmp(sf)) {
+        m_ad = VanillaDict::Copy(m_h->arrayData());
+      } else {
+        m_h->mutate();
+        m_ad = m_h->arrayData();
+      }
+    }
+    ~SortTmp() {
+      if (m_h->arrayData() != m_ad) {
+        Array tmp = Array::attach(m_h->arrayData());
+        assertx(m_ad->isVanillaDict());
+        m_h->setArrayData(static_cast<VanillaDict*>(m_ad));
+      }
+    }
+    ArrayData* operator->() { return m_ad; }
+   private:
+    HashCollection* m_h;
+    ArrayData* m_ad;
+  };
+
  protected:
 
-  // Replace the m_arr field with a new MixedArray. The array must be known to
-  // *not* contain any references.
+  // Replace the backing array with a new VanillaDict.
   void replaceArray(ArrayData* adata) {
-    auto* oldAd = m_arr;
+    auto* oldAd = arrayData();
     dropImmCopy();
-    m_arr = MixedArray::asMixed(adata);
+    setArrayData(VanillaDict::as(adata));
     adata->incRefCount();
     m_size = adata->size();
     decRefArr(oldAd);
@@ -619,20 +666,14 @@ struct HashCollection : ObjectData {
     int64_t m_unusedAndSize;
   };
 
-  MixedArray* m_arr;      // Elm store.
+  // The dict backing this collection. See setArrayData() for a list of the
+  // invariants that this dict must satisfy.
+  VanillaDict* m_arr;
 
   // A pointer to an immutable collection that shares its buffer with
   // this collection.
   Object m_immCopy;
-
- private:
-  template <typename AccessorT>
-  SortFlavor preSort(const AccessorT& acc, bool checkTypes);
-  void postSort();
-
-
 };
 
 /////////////////////////////////////////////////////////////////////////////
 }
-#endif

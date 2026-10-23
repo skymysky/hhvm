@@ -1,26 +1,27 @@
 <?hh
 
 namespace keyset {
-const STUFF = 12;
-function keyset() { return 0; }
-function foo() { return 1; }
+const int STUFF = 12;
+function keyset() :mixed{ return 0; }
+function foo() :mixed{ return 1; }
 }
 
 namespace alpha {
-const STUFF = 12;
-function keyset() { return 0; }
-function foo() { return 1; }
+const int STUFF = 12;
+function keyset() :mixed{ return 0; }
+function foo() :mixed{ return 1; }
 }
 
 namespace beta\keyset {
-const STUFF = 12;
-function keyset() { return 0; }
-function foo() { return 1; }
+const int STUFF = 12;
+function keyset() :mixed{ return 0; }
+function foo() :mixed{ return 1; }
 }
 
 namespace {
 
-function main() {
+<<__EntryPoint>>
+function main() :void{
   var_dump(\keyset\keyset());
   var_dump(\keyset\foo());
   var_dump(\keyset\STUFF);
@@ -39,5 +40,5 @@ function main() {
   var_dump(beta\keyset\foo());
   var_dump(beta\keyset\STUFF);
 }
-main();
+
 }

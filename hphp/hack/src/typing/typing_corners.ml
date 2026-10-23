@@ -1,0 +1,2548 @@
+(*
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the "hack" directory of this source tree.
+ *
+ *)
+
+(* == Shape-splat corner checking ========================================== *
+ *
+ * A ground check here means that the normalized rows contain no inference
+ * variables. Type parameters and opaque newtypes may remain in spread
+ * position, so their fields are known only through bounds.
+ *
+ * At one label, each such spread element has an interval of possible fields.
+ * A field is the product of a presence and a value type, so the interval has
+ * at most four endpoint combinations, called corners. An [Assignment.t]
+ * chooses one corner field for each relevant element at this label; it is not
+ * a substitution for the element's whole type.
+ *
+ * The logical execution order is:
+ *
+ * 1. Project normalized rows and find the spread elements live at one label.
+ * 2. Structurally summarize dependencies and labels in their bounds.
+ * 3. Analyze that finite graph, classify cycles, and order its components.
+ * 4. Compile the result into an executable [Plan.t].
+ * 5. Evaluate exact field bounds after prerequisite groups are assigned.
+ * 6. Enumerate the retained corners and project both rows under each complete
+ *    assignment.
+ *
+ * The separation between steps 2 and 5 is a performance invariant. Shape
+ * normalization can invoke subtyping, which can re-enter this procedure.
+ * Dependency discovery must therefore remain a structural traversal: it must
+ * not normalize bounds, project rows, perform subtyping, or enumerate corners.
+ * This lets graph traversal visit each reachable node and edge once rather
+ * than recurse once for every dependency path.
+ *
+ * The remaining Cartesian search can still be exponential when assignments
+ * are observably different. Search removes choices only where structural
+ * equality, row position, or dependency information proves them redundant.
+ * Missing assignments and unsupported cycles leave this module as structured
+ * data; callers decide how and when to render an error.
+ * ========================================================================== *)
+
+open Hh_prelude
+open Typing_defs
+open Typing_env_types
+
+(* The key identifying a spread element. Two occurrences of the same
+   parameter are the same key, so it is compared by type rather than by name:
+   [NT<int>] and [NT<string>] are different elements. *)
+module Splat_elem : sig
+  type t = locl_ty
+
+  val compare : t -> t -> int
+
+  module Map : Stdlib.Map.S with type key := t
+
+  module Set : Stdlib.Set.S with type elt := t
+end = struct
+  module Minimal = struct
+    type t = locl_ty
+
+    let compare ty1 ty2 =
+      let same_opacity =
+        match (get_node ty1, get_node ty2) with
+        | (Tnewtype _, Tnewtype _) ->
+          Bool.equal
+            (Typing_reason.Predicates.is_opaque_type_from_module
+               (get_reason ty1))
+            (Typing_reason.Predicates.is_opaque_type_from_module
+               (get_reason ty2))
+        | _ -> true
+      in
+      if phys_equal (get_node ty1) (get_node ty2) && same_opacity then
+        0
+      else
+        Typing_shape_splat_key.compare
+          (Typing_shape_splat_key.of_ty ty1)
+          (Typing_shape_splat_key.of_ty ty2)
+  end
+
+  include Minimal
+  module Map = Stdlib.Map.Make (Minimal)
+  module Set = Stdlib.Set.Make (Minimal)
+end
+
+(* One per-label choice of a corner field for each relevant spread element.
+   This is not a substitution for the element's complete type. *)
+module Assignment : sig
+  type t = locl_phase shape_field_type Splat_elem.Map.t
+end = struct
+  (* A per-label assignment of each live spread element to a corner field. *)
+  type t = locl_phase shape_field_type Splat_elem.Map.t
+end
+
+module Missing_assignment : sig
+  type t = {
+    element: locl_ty;
+    position: Pos_or_decl.t;
+  }
+
+  val make : locl_ty -> t
+
+  val element : t -> locl_ty
+
+  val position : t -> Pos_or_decl.t
+end = struct
+  type t = {
+    element: Splat_elem.t;
+    position: Pos_or_decl.t;
+  }
+
+  let make element = { element; position = get_pos element }
+
+  let element missing = missing.element
+
+  let position missing = missing.position
+end
+
+module Env_memo : sig
+  (** A cached value tied to the exact environment in which it was computed. *)
+  type 'a entry
+
+  (** Memoize an environment-threading computation only when it returns the
+      physically identical environment. Reusing a value that changed the
+      environment could couple otherwise independent branches. *)
+  val memoize :
+    'a entry Splat_elem.Map.t ref ->
+    env ->
+    Splat_elem.t ->
+    (unit -> env * 'a) ->
+    env * 'a
+
+  (** Memoize an environment-indexed value that does not thread environment
+      changes. *)
+  val memoize_value :
+    'a entry Splat_elem.Map.t ref -> env -> Splat_elem.t -> (unit -> 'a) -> 'a
+end = struct
+  type 'a entry = {
+    input_env: env;
+    value: 'a;
+  }
+
+  let memoize cache env key f =
+    match Splat_elem.Map.find_opt key !cache with
+    | Some { input_env; value } when phys_equal input_env env -> (env, value)
+    | _ ->
+      let (output_env, value) = f () in
+      (* Reusing generative localization output could couple otherwise separate
+         branches, so raw resolutions are cached only when they do not modify
+         the env. *)
+      if phys_equal output_env env then
+        cache := Splat_elem.Map.add key { input_env = env; value } !cache;
+      (output_env, value)
+
+  let memoize_value cache env key f =
+    match Splat_elem.Map.find_opt key !cache with
+    | Some { input_env; value } when phys_equal input_env env -> value
+    | _ ->
+      let value = f () in
+      cache := Splat_elem.Map.add key { input_env = env; value } !cache;
+      value
+end
+
+(* Fields use the product order
+
+     (p1, t1) <=field (p2, t2)
+
+   exactly when [p1] is at least as present as [p2] and [t1 <: t2]. Required is
+   below optional in the presence order. Consequently field meet and join act
+   component-wise: upper constraints meet, while lower possibilities join. *)
+module Field : sig
+  (** A required or optional localized shape field. *)
+  type t = locl_phase shape_field_type
+
+  (** Whether the field must be present. *)
+  val is_required : t -> bool
+
+  (** Whether the field may be absent. *)
+  val is_optional : t -> bool
+
+  (** Whether the field is optional with type [nothing], hence always absent. *)
+  val is_absent : t -> env -> bool
+
+  (** [sub] is at least as required as [super]. *)
+  val requiredness_lte : sub:t -> super:t -> bool
+
+  (** Rightmost-wins merge of two fields. *)
+  val merge : left:t -> right:t -> env -> env * t
+
+  (** Greatest lower bound of two fields. *)
+  val meet : left:t -> right:t -> env -> env * t
+
+  (** Least upper bound of two fields. *)
+  val join : left:t -> right:t -> env -> env * t
+
+  (** Extremal field values induced by lower and upper bounds. *)
+  module Corners : sig
+    (** The field descriptor enumerated at each corner. *)
+    type field = t
+
+    (** The reachable corner fields, or an uninhabited inverted interval. *)
+    type t =
+      | Values of field list
+      | Inverted
+
+    (** Enumerate the distinct corners between [lower] and [upper]. *)
+    val of_bounds : lower:field -> upper:field -> t
+  end
+end = struct
+  type t = locl_phase shape_field_type
+
+  let is_required field = not field.sft_optional
+
+  let is_optional field = field.sft_optional
+
+  (* An optional field of [nothing] must be absent. *)
+  let is_absent field env =
+    field.sft_optional && Typing_utils.is_nothing env field.sft_ty
+
+  (* A subtype field must be at least as required as the supertype field. *)
+  let requiredness_lte ~sub ~super =
+    (not sub.sft_optional) || super.sft_optional
+
+  (* Rightmost-wins field merge. *)
+  let merge ~(left : t) ~(right : t) env =
+    Typing_shape_normalize.merge_field_descs ~fd_left:left ~fd_right:right env
+
+  let meet ~(left : t) ~(right : t) env =
+    let (env, sft_ty) =
+      Typing_intersection.intersect
+        env
+        ~r:(get_reason left.sft_ty)
+        left.sft_ty
+        right.sft_ty
+    in
+    (env, { sft_optional = left.sft_optional && right.sft_optional; sft_ty })
+
+  let join ~(left : t) ~(right : t) env =
+    let (env, sft_ty) = Typing_union.union env left.sft_ty right.sft_ty in
+    (env, { sft_optional = left.sft_optional || right.sft_optional; sft_ty })
+
+  module Corners = struct
+    type field = t
+
+    type nonrec t =
+      | Values of field list
+      | Inverted
+
+    (* The generated fields can only be duplicates when the lower and upper
+       types are equal. Compare them at most once: [equal_locl_ty] may traverse
+       large types, and this function runs at internal nodes of the
+       corner traversal. Structural equality is nevertheless intentional;
+       retaining separately allocated but equal bounds would multiply the
+       number of branches explored afterwards.
+
+       An inverted bound pair is uninhabited and contributes no obligations. *)
+    let of_bounds ~(lower : field) ~(upper : field) =
+      match (lower.sft_optional, upper.sft_optional) with
+      | (false, true) ->
+        if Typing_defs.equal_locl_ty lower.sft_ty upper.sft_ty then
+          Values [lower; upper]
+        else
+          Values
+            [
+              lower;
+              upper;
+              { lower with sft_optional = true };
+              { upper with sft_optional = false };
+            ]
+      | (false, false)
+      | (true, true) ->
+        if Typing_defs.equal_locl_ty lower.sft_ty upper.sft_ty then
+          Values [lower]
+        else
+          Values [lower; upper]
+      | (true, false) -> Inverted
+  end
+end
+
+(* -- Projection ------------------------------------------------------------ *)
+
+module Row : sig
+  val element_tys : Typing_shape_normalize.Row.Element.t list -> locl_ty list
+
+  (** Project a normalized splat row at a label under an [Assignment.t] of
+      all spread elements contributing to that label. [None] denotes the
+      unknown tail: every label not named explicitly. *)
+  val proj :
+    env ->
+    Typing_shape_normalize.Row.t ->
+    TShapeField.t option ->
+    Assignment.t ->
+    env * (locl_phase shape_field_type, Missing_assignment.t) result
+
+  (** Spread elements whose assigned field can change the projection at
+      [label]. A concrete required field masks every element to its left. *)
+  val live_spreads :
+    Typing_shape_normalize.Row.t -> TShapeField.t option -> locl_ty list
+
+  (** Set of all known field labels in a normalized row  *)
+  val label_set : Typing_shape_normalize.Row.t -> TShapeSet.t
+
+  (** Type parameters and newtypes in spread position in the normalized row. *)
+  val spread_elements : Typing_shape_normalize.Row.t -> locl_ty list
+end = struct
+  let element_tys elements =
+    List.map elements ~f:Typing_shape_normalize.Row.Element.ty
+
+  let proj_simple
+      ~(s_fields : locl_phase shape_field_type TShapeMap.t)
+      ~(s_unknown_value : locl_ty)
+      (label : TShapeField.t option) : locl_phase shape_field_type =
+    match Option.bind label ~f:(fun l -> TShapeMap.find_opt l s_fields) with
+    | Some fd -> fd
+    | None -> { sft_optional = true; sft_ty = s_unknown_value }
+
+  let proj_element
+      env
+      (ty : locl_ty)
+      (label : TShapeField.t option)
+      (assignment : Assignment.t) :
+      env * (locl_phase shape_field_type, Missing_assignment.t) result =
+    let r = get_reason ty in
+    match get_node ty with
+    | Tgeneric _
+    | Tnewtype _ ->
+      (match Splat_elem.Map.find_opt ty assignment with
+      | Some fd -> (env, Ok fd)
+      | None -> (env, Error (Missing_assignment.make ty)))
+    | Tshape (Shape_simple { s_fields; s_unknown_value; _ }) ->
+      (env, Ok (proj_simple ~s_fields ~s_unknown_value label))
+    | _ when Typing_defs.is_nothing ty ->
+      (env, Ok { sft_optional = false; sft_ty = Typing_make_type.nothing r })
+    | _ -> (env, Ok { sft_optional = true; sft_ty = Typing_make_type.nothing r })
+
+  (* Right-to-left rightmost-wins fold over splat elements, short-circuiting
+     once the accumulated field is required. *)
+  let rec proj_splat_help
+      env rev_left label assignment (fd_right : locl_phase shape_field_type) =
+    if not fd_right.sft_optional then
+      (env, Ok fd_right)
+    else
+      match rev_left with
+      | [] -> (env, Ok fd_right)
+      | elem :: rest ->
+        let (env, result) = proj_element env elem label assignment in
+        (match result with
+        | Error missing -> (env, Error missing)
+        | Ok fd_left ->
+          let (env, fd) = Field.merge env ~left:fd_left ~right:fd_right in
+          proj_splat_help env rest label assignment fd)
+
+  let proj_splat env (ss_elems : locl_ty list) label assignment =
+    match List.rev ss_elems with
+    | [] ->
+      (* An empty splat is the identity, i.e. the empty closed shape. Every
+         label projects to absent (Opt nothing). *)
+      ( env,
+        Ok
+          {
+            sft_optional = true;
+            sft_ty = Typing_make_type.nothing Typing_reason.none;
+          } )
+    | rightmost :: rev_left ->
+      let (env, result) = proj_element env rightmost label assignment in
+      (match result with
+      | Error missing -> (env, Error missing)
+      | Ok fd -> proj_splat_help env rev_left label assignment fd)
+
+  let proj env (row : Typing_shape_normalize.Row.t) label assignment =
+    Typing_shape_normalize.Row.fold
+      row
+      ~bottom:(fun () ->
+        ( env,
+          Ok
+            {
+              sft_optional = false;
+              sft_ty = Typing_make_type.nothing Typing_reason.none;
+            } ))
+      ~simple:(fun { s_fields; s_unknown_value; _ } ->
+        (env, Ok (proj_simple ~s_fields ~s_unknown_value label)))
+      ~elements:(fun elements ->
+        proj_splat env (element_tys elements) label assignment)
+
+  (* -- Live parameters ----------------------------------------------------- *)
+
+  (* Type parameters to the right of any [Req] field at [label]: only these can
+     contribute to the merged field. *)
+  let live_spreads_at (ss_elems : locl_ty list) (label : TShapeField.t option) :
+      locl_ty list =
+    let rec aux rev_elems acc =
+      match rev_elems with
+      | [] -> acc
+      | ty :: left ->
+        (match get_node ty with
+        | Tgeneric _
+        | Tnewtype _ ->
+          aux left (ty :: acc)
+        | _ when Typing_defs.is_nothing ty ->
+          (* A bottom row forces [Req bottom], masking everything to its
+             left. *)
+          acc
+        | Tshape (Shape_simple { s_fields; s_unknown_value; _ }) ->
+          let fd = proj_simple ~s_fields ~s_unknown_value label in
+          if fd.sft_optional then
+            aux left acc
+          else
+            acc
+        | _ -> aux left acc)
+    in
+    aux (List.rev ss_elems) []
+
+  let live_spreads (row : Typing_shape_normalize.Row.t) label =
+    Typing_shape_normalize.Row.fold
+      row
+      ~bottom:(fun () -> [])
+      ~simple:(fun _ -> [])
+      ~elements:(fun elements -> live_spreads_at (element_tys elements) label)
+
+  (* -- Labels -------------------------------------------------------------- *)
+
+  (* Inline labels a row contributes, looking through inline shape spreads.
+     Opaque splat elements contribute none. *)
+  let rec label_set_shape (row : locl_phase shape_type) : TShapeSet.t =
+    match row with
+    | Shape_simple { s_fields; _ } ->
+      TShapeMap.fold
+        (fun k _ acc -> TShapeSet.add k acc)
+        s_fields
+        TShapeSet.empty
+    | Shape_splat { ss_elems } ->
+      List.fold_left ss_elems ~init:TShapeSet.empty ~f:(fun acc ty ->
+          TShapeSet.union acc (element_label_set ty))
+
+  and element_label_set (ty : locl_ty) : TShapeSet.t =
+    match get_node ty with
+    | Tshape shape_ty -> label_set_shape shape_ty
+    | _ -> TShapeSet.empty
+
+  let label_set (row : Typing_shape_normalize.Row.t) : TShapeSet.t =
+    Typing_shape_normalize.Row.fold
+      row
+      ~bottom:(fun () -> TShapeSet.empty)
+      ~simple:(fun shape -> label_set_shape (Shape_simple shape))
+      ~elements:(fun elements ->
+        List.fold_left
+          (element_tys elements)
+          ~init:TShapeSet.empty
+          ~f:(fun labels ty -> TShapeSet.union labels (element_label_set ty)))
+
+  let spread_elements (row : Typing_shape_normalize.Row.t) : locl_ty list =
+    Typing_shape_normalize.Row.fold
+      row
+      ~bottom:(fun () -> [])
+      ~simple:(fun _ -> [])
+      ~elements:(fun elements ->
+        List.filter (element_tys elements) ~f:(fun ty ->
+            match get_node ty with
+            | Tgeneric _
+            | Tnewtype _ ->
+              true
+            | _ -> false))
+end
+
+(* -- Bound lookup ----------------------------------------------------------
+   Determine the bounds of an opaque shape splat element under the typing
+   environment.
+   -------------------------------------------------------------------------- *)
+module Bound_lookup : sig
+  module Cache : sig
+    type t
+
+    val create : unit -> t
+  end
+
+  val upper_bounds :
+    Cache.t -> env -> Splat_elem.t -> Typing_reason.t -> env * locl_ty list
+
+  val lower_bounds :
+    Cache.t -> env -> Splat_elem.t -> Typing_reason.t -> env * locl_ty list
+
+  val combined_upper_bound :
+    Cache.t -> env -> Splat_elem.t -> Typing_reason.t -> env * locl_ty
+
+  val combined_lower_bound :
+    Cache.t -> env -> Splat_elem.t -> Typing_reason.t -> env * locl_ty
+
+  val concrete_supertypes : Cache.t -> env -> locl_ty -> env * locl_ty list
+
+  val concrete_subtypes : Cache.t -> env -> locl_ty -> env * locl_ty list
+
+  val strip_supportdyn : env -> locl_ty -> env * locl_ty
+end = struct
+  module Cache = struct
+    type t = {
+      upper_bounds: locl_ty Env_memo.entry Splat_elem.Map.t ref;
+      lower_bounds: locl_ty Env_memo.entry Splat_elem.Map.t ref;
+      concrete_supers: locl_ty list Env_memo.entry Splat_elem.Map.t ref;
+      concrete_subs: locl_ty list Env_memo.entry Splat_elem.Map.t ref;
+    }
+
+    let create () =
+      {
+        upper_bounds = ref Splat_elem.Map.empty;
+        lower_bounds = ref Splat_elem.Map.empty;
+        concrete_supers = ref Splat_elem.Map.empty;
+        concrete_subs = ref Splat_elem.Map.empty;
+      }
+  end
+
+  let combined_upper_bound cache env key r =
+    Env_memo.memoize cache.Cache.upper_bounds env key (fun () ->
+        match get_node key with
+        | Tnewtype (name, targs, _) ->
+          Typing_utils.get_newtype_super env (get_reason key) name targs
+        | Tgeneric name ->
+          let bounds = Typing_env.get_upper_bounds env name in
+          if Typing_set.is_empty bounds then
+            (env, Typing_make_type.mixed r)
+          else
+            Typing_intersection.intersect_list
+              env
+              r
+              (Typing_set.elements bounds)
+        | _ -> (env, Typing_make_type.mixed r))
+
+  let combined_lower_bound cache env key r =
+    Env_memo.memoize cache.Cache.lower_bounds env key (fun () ->
+        match get_node key with
+        | Tnewtype (name, targs, _) ->
+          let (env, lower) = Typing_utils.get_newtype_sub_opt env name targs in
+          (env, Option.value lower ~default:(Typing_make_type.nothing r))
+        | Tgeneric name ->
+          let bounds = Typing_env.get_lower_bounds env name in
+          if Typing_set.is_empty bounds then
+            (env, Typing_make_type.nothing r)
+          else
+            Typing_union.union_list env r (Typing_set.elements bounds)
+        | _ -> (env, Typing_make_type.nothing r))
+
+  let upper_bounds cache env key r =
+    match get_node key with
+    | Tgeneric name ->
+      (env, Typing_set.elements (Typing_env.get_upper_bounds env name))
+    | Tnewtype _ ->
+      let (env, bound) = combined_upper_bound cache env key r in
+      (env, [bound])
+    | _ -> (env, [])
+
+  let lower_bounds cache env key r =
+    match get_node key with
+    | Tgeneric name ->
+      (env, Typing_set.elements (Typing_env.get_lower_bounds env name))
+    | Tnewtype _ ->
+      let (env, bound) = combined_lower_bound cache env key r in
+      (env, [bound])
+    | _ -> (env, [])
+
+  let concrete_supertypes cache env ty =
+    Env_memo.memoize cache.Cache.concrete_supers env ty (fun () ->
+        Typing_utils.get_concrete_supertypes ~abstract_enum:false env ty)
+
+  let concrete_subtypes cache env ty =
+    Env_memo.memoize cache.Cache.concrete_subs env ty (fun () ->
+        Typing_utils.get_concrete_subtypes env ty)
+
+  let strip_supportdyn env ty =
+    let (_supportdyn, env, ty) = Typing_utils.strip_supportdyn env ty in
+    (env, ty)
+end
+
+(* -- Exact field-bound evaluation ---------------------------------------- *
+ *
+ * This is the first stage allowed to normalize bounds. By the time it runs,
+ * dependency analysis has produced an order in which every parameter needed
+ * by a projected bound already has a field in [Assignment.t]. A missing
+ * assignment therefore exposes a broken planning invariant.
+ *
+ * If declarations establish [L <: T <: U], T's field lies between the
+ * projected fields of L and U. Multiple lower possibilities are joined,
+ * because T must admit each of them. Multiple upper constraints are met,
+ * because T must satisfy all of them. For example:
+ *
+ *   required int join required string = required (int | string)
+ *   required mixed meet optional mixed = required mixed
+ *
+ * The view constructors distinguish facts that project to similar fields:
+ * [Lower.Bottom] means that no shape lower bound supplied positive
+ * information; [Upper.Bottom] means the parameter is uninhabited; and
+ * [Upper.Unconstrained] means no upper bound restricted shape fields.
+ * ------------------------------------------------------------------------- *)
+module Field_bounds : sig
+  module Upper : sig
+    type t =
+      | Shapes of Typing_shape_normalize.Row.t list
+          (** All the rows the bound resolves to. The element is below every
+              one of them, so its field is below each of their fields: combine
+              by meet. A bound can resolve to several, an intersection being
+              the obvious case, and keeping only one silently drops what the
+              others say. *)
+      | Bottom
+          (** The bottom row: every field present, at the uninhabited type. *)
+      | Unconstrained  (** Not a shape, so it rules nothing out. *)
+  end
+
+  val bound_shape_upper :
+    Bound_lookup.Cache.t ->
+    env ->
+    Splat_elem.t ->
+    Assignment.t ->
+    Typing_reason.t ->
+    env * Upper.t
+
+  module Lower : sig
+    type t =
+      | Shapes of Typing_shape_normalize.Row.t list
+          (** Likewise, but the element is above every one of them, so combine
+              by join. *)
+      | Bottom
+          (** No usable shape lower bound supplied positive information. *)
+  end
+
+  val bound_shape_lower :
+    Bound_lookup.Cache.t ->
+    env ->
+    Splat_elem.t ->
+    Assignment.t ->
+    Typing_reason.t ->
+    env * Lower.t
+
+  val field_bounds :
+    Bound_lookup.Cache.t ->
+    env ->
+    Splat_elem.t ->
+    TShapeField.t option ->
+    Assignment.t ->
+    Typing_reason.t ->
+    env
+    * ( locl_phase shape_field_type * locl_phase shape_field_type,
+        Missing_assignment.t )
+      result
+
+  val upper_field_bound :
+    Bound_lookup.Cache.t ->
+    env ->
+    Splat_elem.t ->
+    TShapeField.t option ->
+    Assignment.t ->
+    Typing_reason.t ->
+    env * (locl_phase shape_field_type, Missing_assignment.t) result
+
+  val field_bounds_for_equality :
+    Bound_lookup.Cache.t ->
+    env ->
+    preferred_members:Splat_elem.Set.t ->
+    Splat_elem.Set.t ->
+    TShapeField.t option ->
+    Assignment.t ->
+    Typing_reason.t ->
+    env
+    * ( locl_phase shape_field_type * locl_phase shape_field_type,
+        Missing_assignment.t )
+      result
+
+  val upper_field_bound_for_equality :
+    Bound_lookup.Cache.t ->
+    env ->
+    preferred_members:Splat_elem.Set.t ->
+    Splat_elem.Set.t ->
+    TShapeField.t option ->
+    Assignment.t ->
+    Typing_reason.t ->
+    env * (locl_phase shape_field_type, Missing_assignment.t) result
+end = struct
+  (* -- Bound views and normalization ------------------------------------- *)
+
+  let shape_types env tys =
+    let (env, shapes) =
+      List.fold_map tys ~init:env ~f:(fun env ty ->
+          let (env, ty) = Bound_lookup.strip_supportdyn env ty in
+          match get_node ty with
+          | Tshape shape_ty -> (env, Some shape_ty)
+          | _ -> (env, None))
+    in
+    (env, List.filter_opt shapes)
+
+  module Upper = struct
+    type t =
+      | Shapes of Typing_shape_normalize.Row.t list
+          (** All the rows the bound resolves to. The element is below every
+              one of them, so its field is below each of their fields: combine
+              by meet. A bound can resolve to several, an intersection being
+              the obvious case, and keeping only one silently drops what the
+              others say. *)
+      | Bottom
+          (** The bottom row: every field present, at the uninhabited type. *)
+      | Unconstrained  (** Not a shape, so it rules nothing out. *)
+  end
+
+  module Lower = struct
+    type t =
+      | Shapes of Typing_shape_normalize.Row.t list
+          (** Likewise, but the element is above every one of them, so combine
+              by join. *)
+      | Bottom
+          (** No usable shape lower bound supplied positive information. *)
+  end
+
+  let intersect_upper_views views =
+    if
+      List.exists views ~f:(function
+          | Upper.Bottom -> true
+          | Upper.Shapes _
+          | Upper.Unconstrained ->
+            false)
+    then
+      Upper.Bottom
+    else
+      match
+        List.concat_map views ~f:(function
+            | Upper.Shapes rows -> rows
+            | Upper.Bottom
+            | Upper.Unconstrained ->
+              [])
+      with
+      | [] -> Upper.Unconstrained
+      | rows -> Upper.Shapes rows
+
+  let union_lower_views views =
+    match
+      List.concat_map views ~f:(function
+          | Lower.Shapes rows -> rows
+          | Lower.Bottom -> [])
+    with
+    | [] -> Lower.Bottom
+    | rows -> Lower.Shapes rows
+
+  (* Read a normalized shape in each direction's own answer type. *)
+  let rec normalized_upper env r shape_ty =
+    let (env, _err, normalized) =
+      Typing_shape_normalize.Row.normalize r shape_ty env ~on_error:None
+    in
+    Typing_shape_normalize.Row.fold_normalized
+      normalized
+      ~row:(fun row ->
+        if Typing_shape_normalize.Row.is_bottom row then
+          (env, Upper.Bottom)
+        else
+          (env, Upper.Shapes [row]))
+      ~union:(fun _ -> (env, Upper.Unconstrained))
+      ~intersection:(fun tys ->
+        let (env, views) =
+          List.fold_map tys ~init:env ~f:(fun env ty ->
+              normalized_upper
+                env
+                (get_reason ty)
+                (Shape_splat { ss_elems = [ty] }))
+        in
+        (env, intersect_upper_views views))
+
+  let rec normalized_lower env r shape_ty =
+    let (env, _err, normalized) =
+      Typing_shape_normalize.Row.normalize r shape_ty env ~on_error:None
+    in
+    Typing_shape_normalize.Row.fold_normalized
+      normalized
+      ~row:(fun row ->
+        if Typing_shape_normalize.Row.is_bottom row then
+          (env, Lower.Bottom)
+        else
+          (env, Lower.Shapes [row]))
+      ~union:(fun tys ->
+        let (env, views) =
+          List.fold_map tys ~init:env ~f:(fun env ty ->
+              normalized_lower
+                env
+                (get_reason ty)
+                (Shape_splat { ss_elems = [ty] }))
+        in
+        (env, union_lower_views views))
+      ~intersection:(fun _ -> (env, Lower.Bottom))
+
+  (* Spreading [dynamic] is an open row whose unknown fields are [dynamic]
+     ([shape(_ => dynamic)]), matching [Typing_shape_normalize]. *)
+  let dynamic_row r =
+    Typing_shape_normalize.Row.of_simple
+      {
+        s_origin = Missing_origin;
+        s_unknown_value = Typing_make_type.dynamic r;
+        s_fields = TShapeMap.empty;
+      }
+
+  let bound_shape_upper_of_ty cache env bound_ty assignment r =
+    let (env, bound_ty) = Typing_env.expand_type env bound_ty in
+    let (env, bound_ty) = Bound_lookup.strip_supportdyn env bound_ty in
+    let is_assigned_param () =
+      Splat_elem.Map.mem bound_ty assignment
+      &&
+      match get_node bound_ty with
+      | Tnewtype (n, _, _) ->
+        not (String.equal n Naming_special_names.Classes.cSupportDyn)
+      | _ -> true
+    in
+    match get_node bound_ty with
+    | Tshape shape_ty -> normalized_upper env r shape_ty
+    | Tdynamic _ -> (env, Upper.Shapes [dynamic_row r])
+    | _ when Typing_defs.is_nothing bound_ty -> (env, Upper.Bottom)
+    | Tgeneric _
+    | Tnewtype _
+      when is_assigned_param () ->
+      normalized_upper env r (Shape_splat { ss_elems = [bound_ty] })
+    | _ ->
+      let (env, supers) = Bound_lookup.concrete_supertypes cache env bound_ty in
+      let (env, shapes) = shape_types env supers in
+      (match shapes with
+      | [] -> (env, Upper.Unconstrained)
+      | _ ->
+        let (env, row_groups) =
+          List.fold_map shapes ~init:env ~f:(fun env shape_ty ->
+              match normalized_upper env r shape_ty with
+              | (env, Upper.Shapes rows) -> (env, Some rows)
+              | (env, _) -> (env, None))
+        in
+        (match List.concat (List.filter_opt row_groups) with
+        | [] -> (env, Upper.Bottom)
+        | shapes -> (env, Upper.Shapes shapes)))
+
+  let bound_shape_upper cache env name assignment r =
+    let (env, bound_ty) = Bound_lookup.combined_upper_bound cache env name r in
+    bound_shape_upper_of_ty cache env bound_ty assignment r
+
+  let bound_shape_lower_of_ty cache env bound_ty assignment r =
+    let (env, bound_ty) = Typing_env.expand_type env bound_ty in
+    let (env, bound_ty) = Bound_lookup.strip_supportdyn env bound_ty in
+    match get_node bound_ty with
+    | Tshape shape_ty -> normalized_lower env r shape_ty
+    | Tdynamic _ -> (env, Lower.Shapes [dynamic_row r])
+    | _ when Typing_defs.is_nothing bound_ty -> (env, Lower.Bottom)
+    (* A lower bound that is a parameter, where that parameter ALREADY has a
+       value. Then it is not an approximation at all: this element is at least
+       whatever that one turned out to be, so use it.
+
+       Unlike the upper case this creates no ordering requirement, and
+       [type_params_in_lower_bound] deliberately reports no dependency for it.
+       An edge here would make the relation symmetric and turn a single
+       constraint into a cycle. Taking the value only when it happens to be
+       there keeps the coupling without the edge, which is what
+       [where T1 = T2] needs: the two parameters constrain each other in both
+       directions, and with only the upper half enforced one could be given a
+       value below the other. *)
+    | Tgeneric _
+    | Tnewtype _
+      when Splat_elem.Map.mem bound_ty assignment
+           &&
+           match get_node bound_ty with
+           | Tnewtype (n, _, _) ->
+             not (String.equal n Naming_special_names.Classes.cSupportDyn)
+           | _ -> true ->
+      normalized_lower env r (Shape_splat { ss_elems = [bound_ty] })
+    | _ ->
+      let (env, subs) = Bound_lookup.concrete_subtypes cache env bound_ty in
+      let (env, shapes) = shape_types env subs in
+      (match shapes with
+      | [] -> (env, Lower.Bottom)
+      | _ ->
+        let (env, row_groups) =
+          List.fold_map shapes ~init:env ~f:(fun env shape_ty ->
+              match normalized_lower env r shape_ty with
+              | (env, Lower.Shapes rows) -> (env, Some rows)
+              | (env, _) -> (env, None))
+        in
+        (match List.concat (List.filter_opt row_groups) with
+        | [] -> (env, Lower.Bottom)
+        | shapes -> (env, Lower.Shapes shapes)))
+
+  let bound_shape_lower cache env name assignment r =
+    let (env, bound_ty) = Bound_lookup.combined_lower_bound cache env name r in
+    bound_shape_lower_of_ty cache env bound_ty assignment r
+
+  (* -- Projecting one field interval ------------------------------------- *)
+
+  let project_shapes env shapes label assignment ~empty ~combine =
+    let rec project_rest env acc = function
+      | [] -> (env, Ok acc)
+      | shape :: rest ->
+        let (env, result) = Row.proj env shape label assignment in
+        (match result with
+        | Error missing -> (env, Error missing)
+        | Ok field ->
+          let (env, acc) = combine ~left:acc ~right:field env in
+          project_rest env acc rest)
+    in
+    match shapes with
+    | [] -> (env, Ok empty)
+    | first :: rest ->
+      let (env, result) = Row.proj env first label assignment in
+      (match result with
+      | Error missing -> (env, Error missing)
+      | Ok field -> project_rest env field rest)
+
+  let proj_upper_view env view label assignment r =
+    match view with
+    | Upper.Shapes shapes ->
+      project_shapes
+        env
+        shapes
+        label
+        assignment
+        ~empty:{ sft_optional = true; sft_ty = Typing_make_type.mixed r }
+        ~combine:Field.meet
+    | Upper.Bottom ->
+      (env, Ok { sft_optional = false; sft_ty = Typing_make_type.nothing r })
+    (* A non-shape upper bound constrains nothing: the label may be absent and
+       its type may be anything. *)
+    | Upper.Unconstrained ->
+      (env, Ok { sft_optional = true; sft_ty = Typing_make_type.mixed r })
+
+  let proj_lower_view env view label assignment r =
+    match view with
+    | Lower.Shapes shapes ->
+      project_shapes
+        env
+        shapes
+        label
+        assignment
+        ~empty:{ sft_optional = false; sft_ty = Typing_make_type.nothing r }
+        ~combine:Field.join
+    | Lower.Bottom ->
+      (env, Ok { sft_optional = false; sft_ty = Typing_make_type.nothing r })
+
+  let proj_upper_bound cache env name label assignment r =
+    let (env, view) = bound_shape_upper cache env name assignment r in
+    proj_upper_view env view label assignment r
+
+  let upper_field_bound = proj_upper_bound
+
+  let proj_lower_bound cache env name label assignment r =
+    let (env, view) = bound_shape_lower cache env name assignment r in
+    proj_lower_view env view label assignment r
+
+  let field_bounds cache env name label assignment r =
+    let (env, lower) = proj_lower_bound cache env name label assignment r in
+    match lower with
+    | Error missing -> (env, Error missing)
+    | Ok lower ->
+      let (env, upper) = proj_upper_bound cache env name label assignment r in
+      (match upper with
+      | Error missing -> (env, Error missing)
+      | Ok upper -> (env, Ok (lower, upper)))
+
+  (* -- Bounds for a proven-equal component ------------------------------- *)
+
+  let fold_equality_bounds
+      cache
+      env
+      ~preferred_members
+      members
+      label
+      assignment
+      r
+      ~get_bounds
+      ~project
+      ~combine
+      ~(init : Field.t) =
+    let is_direct_member env bound =
+      let (env, bound) = Typing_env.expand_type env bound in
+      let is_member =
+        match get_node bound with
+        | Tgeneric _ -> Splat_elem.Set.mem bound members
+        | _ -> false
+      in
+      (env, bound, is_member)
+    in
+    let rec fold_one_member env acc = function
+      | [] -> (env, Ok acc)
+      | member :: rest ->
+        let (env, bounds) = get_bounds cache env member r in
+        let rec fold_one_bound env acc = function
+          | [] -> fold_one_member env acc rest
+          | bound :: bounds ->
+            let (env, bound, is_member) = is_direct_member env bound in
+            if is_member then
+              fold_one_bound env acc bounds
+            else
+              let (env, result) = project env bound label assignment r in
+              (match result with
+              | Error missing -> (env, Error missing)
+              | Ok field ->
+                let (env, acc) = combine ~left:acc ~right:field env in
+                fold_one_bound env acc bounds)
+        in
+        fold_one_bound env acc bounds
+    in
+    let preferred = Splat_elem.Set.inter members preferred_members in
+    let remaining = Splat_elem.Set.diff members preferred in
+    fold_one_member
+      env
+      init
+      (Splat_elem.Set.elements preferred @ Splat_elem.Set.elements remaining)
+
+  let lower_field_bound_for_equality
+      cache env ~preferred_members members label assignment r =
+    let project env bound label assignment r =
+      let (env, view) = bound_shape_lower_of_ty cache env bound assignment r in
+      proj_lower_view env view label assignment r
+    in
+    fold_equality_bounds
+      cache
+      env
+      ~preferred_members
+      members
+      label
+      assignment
+      r
+      ~get_bounds:Bound_lookup.lower_bounds
+      ~project
+      ~combine:Field.join
+      ~init:{ sft_optional = false; sft_ty = Typing_make_type.nothing r }
+
+  let upper_field_bound_for_equality
+      cache env ~preferred_members members label assignment r =
+    let project env bound label assignment r =
+      let (env, view) = bound_shape_upper_of_ty cache env bound assignment r in
+      proj_upper_view env view label assignment r
+    in
+    fold_equality_bounds
+      cache
+      env
+      ~preferred_members
+      members
+      label
+      assignment
+      r
+      ~get_bounds:Bound_lookup.upper_bounds
+      ~project
+      ~combine:Field.meet
+      ~init:{ sft_optional = true; sft_ty = Typing_make_type.mixed r }
+
+  let field_bounds_for_equality
+      cache env ~preferred_members members label assignment r =
+    let (env, lower) =
+      lower_field_bound_for_equality
+        cache
+        env
+        ~preferred_members
+        members
+        label
+        assignment
+        r
+    in
+    match lower with
+    | Error missing -> (env, Error missing)
+    | Ok lower ->
+      let (env, upper) =
+        upper_field_bound_for_equality
+          cache
+          env
+          ~preferred_members
+          members
+          label
+          assignment
+          r
+      in
+      (match upper with
+      | Error missing -> (env, Error missing)
+      | Ok upper -> (env, Ok (lower, upper)))
+end
+
+(* -- Structural dependency analysis ------------------------------------- *
+ *
+ * An edge [source -> target] means that calculating source's field bounds can
+ * require target's chosen field, so target must be assigned first. Analysis
+ * reads only cached structural summaries, then traverses each reachable node
+ * and edge once. Dependency kinds retain enough evidence to distinguish a
+ * direct mutual-subtyping cycle from a recursive field computation.
+ * ------------------------------------------------------------------------- *)
+module Analysis : sig
+  module Dependency : sig
+    (** Why source's field-bound evaluation can require target. *)
+    type kind =
+      | Direct_upper
+          (** A whole upper constraint [source <: target]. Cycles containing only
+          these edges between type parameters prove mutual subtyping. *)
+      | Indirect_upper
+          (** Target was found through a compound upper bound. This proves
+          dependency, but not whole-type equality. *)
+      | Nested_upper  (** A shape in source's upper bounds spreads target. *)
+      | Nested_lower  (** A shape in source's lower bounds spreads target. *)
+
+    type t
+
+    val source : t -> Splat_elem.t
+
+    val target : t -> Splat_elem.t
+
+    val kind : t -> kind
+
+    val position : t -> Pos_or_decl.t
+  end
+
+  module Cycle_info : sig
+    type t
+
+    val members : t -> Splat_elem.Set.t
+
+    val dependencies : t -> Dependency.t list
+
+    val dependency_cycle : t -> Dependency.t list
+  end
+
+  module Component : sig
+    (** One strongly connected component. Only direct reciprocal
+        type-parameter constraints prove equality; every other cyclic
+        component is unsupported. *)
+    type t =
+      | Acyclic of Splat_elem.t
+      | Proven_equal of Cycle_info.t
+      | Unsupported_cycle of Cycle_info.t
+
+    val members : t -> Splat_elem.Set.t
+  end
+
+  module Cache : sig
+    type t
+
+    val create : unit -> t
+  end
+
+  module Labels : sig
+    val subrow_label_set :
+      Bound_lookup.Cache.t ->
+      Cache.t ->
+      env ->
+      sub:Typing_shape_normalize.Row.t ->
+      super:Typing_shape_normalize.Row.t ->
+      Reason.t ->
+      TShapeSet.t
+
+    val subrow_labels :
+      Bound_lookup.Cache.t ->
+      Cache.t ->
+      env ->
+      sub:Typing_shape_normalize.Row.t ->
+      super:Typing_shape_normalize.Row.t ->
+      Reason.t ->
+      tshape_field_name option list
+  end
+
+  type t = {
+    components: Component.t list;
+    dependencies: Dependency.t list;
+    node_visits: int;
+    edge_visits: int;
+  }
+
+  val type_params_in_bounds :
+    Bound_lookup.Cache.t ->
+    Cache.t ->
+    env ->
+    locl_ty ->
+    Reason.t ->
+    locl_ty list
+
+  val type_params_in_upper_bound :
+    Bound_lookup.Cache.t ->
+    Cache.t ->
+    env ->
+    locl_ty ->
+    Reason.t ->
+    locl_ty list
+
+  val type_params_in_lower_bound :
+    Bound_lookup.Cache.t ->
+    Cache.t ->
+    env ->
+    locl_ty ->
+    Reason.t ->
+    locl_ty list
+
+  val components : t -> Component.t list
+
+  val dependencies : t -> Dependency.t list
+
+  val closure :
+    Bound_lookup.Cache.t ->
+    Cache.t ->
+    env ->
+    Splat_elem.Set.t ->
+    Reason.t ->
+    Splat_elem.Set.t
+
+  val analyze :
+    Bound_lookup.Cache.t -> Cache.t -> env -> Splat_elem.Set.t -> Reason.t -> t
+
+  (* -- For test only -- *)
+  val node_visits : t -> int
+
+  val edge_visits : t -> int
+end = struct
+  module Dependency = struct
+    type kind =
+      | Direct_upper
+      | Indirect_upper
+      | Nested_upper
+      | Nested_lower
+
+    type t = {
+      source: Splat_elem.t;
+      target: Splat_elem.t;
+      kind: kind;
+      position: Pos_or_decl.t;
+    }
+
+    let make ~source ~target ~kind =
+      { source; target; kind; position = get_pos target }
+
+    let source dependency = dependency.source
+
+    let target dependency = dependency.target
+
+    let kind dependency = dependency.kind
+
+    let position dependency = dependency.position
+  end
+
+  module Cycle_info = struct
+    type t = {
+      members: Splat_elem.Set.t;
+      dependencies: Dependency.t list;
+    }
+
+    let make ~members ~dependencies = { members; dependencies }
+
+    let members info = info.members
+
+    let dependencies info = info.dependencies
+
+    (* Return one concrete cycle for diagnostics. Every dependency stored in a
+       cyclic component is internal to that component, so a depth-first search
+       from an edge's target can recover a path back to its source. *)
+    let dependency_cycle info =
+      let same left right = Int.equal (Splat_elem.compare left right) 0 in
+      let outgoing source =
+        List.filter info.dependencies ~f:(fun dependency ->
+            same source (Dependency.source dependency))
+      in
+      let rec path_to source target seen =
+        if same source target then
+          Some []
+        else
+          List.find_map (outgoing source) ~f:(fun dependency ->
+              let next = Dependency.target dependency in
+              if Splat_elem.Set.mem next seen then
+                None
+              else
+                Option.map
+                  (path_to next target (Splat_elem.Set.add next seen))
+                  ~f:(fun path -> dependency :: path))
+      in
+      List.find_map info.dependencies ~f:(fun dependency ->
+          let source = Dependency.source dependency in
+          let target = Dependency.target dependency in
+          Option.map
+            (path_to target source (Splat_elem.Set.singleton target))
+            ~f:(fun path -> dependency :: path))
+      |> Option.value ~default:[]
+  end
+
+  module Component = struct
+    type t =
+      | Acyclic of Splat_elem.t
+      | Proven_equal of Cycle_info.t
+      | Unsupported_cycle of Cycle_info.t
+
+    let members = function
+      | Acyclic member -> Splat_elem.Set.singleton member
+      | Proven_equal info
+      | Unsupported_cycle info ->
+        Cycle_info.members info
+  end
+
+  module Bound_summary = struct
+    (* Assignment-independent facts about one element's bounds. Constructing a
+       summary may expand types and inspect constructors, but must never
+       normalize a shape, project a row, perform subtyping, evaluate exact
+       field bounds, or enumerate corners. *)
+    type t = {
+      dependencies: Dependency.t list;
+      labels: TShapeSet.t;
+    }
+  end
+
+  module Cache = struct
+    type t = {
+      bound_summaries: Bound_summary.t Env_memo.entry Splat_elem.Map.t ref;
+    }
+
+    let create () = { bound_summaries = ref Splat_elem.Map.empty }
+  end
+
+  type t = {
+    components: Component.t list;
+    dependencies: Dependency.t list;
+    node_visits: int;
+    edge_visits: int;
+  }
+
+  let components analysis = analysis.components
+
+  let dependencies analysis = analysis.dependencies
+
+  let node_visits analysis = analysis.node_visits
+
+  let edge_visits analysis = analysis.edge_visits
+
+  (* -- Structural bound summaries --------------------------------------- *)
+
+  (* Shape normalization may ask whether an opaque operand is [nothing]. That
+     invokes subtyping and can re-enter corner checking once for every
+     dependency path. Collect only dependencies and explicit labels directly
+     from localized type syntax. *)
+  type scan = {
+    rev_dependencies: Dependency.t list;
+    labels: TShapeSet.t;
+  }
+
+  let empty_scan = { rev_dependencies = []; labels = TShapeSet.empty }
+
+  let add_dependency ~source ~target ~kind scan =
+    {
+      scan with
+      rev_dependencies =
+        Dependency.make ~source ~target ~kind :: scan.rev_dependencies;
+    }
+
+  let add_labels fields scan =
+    {
+      scan with
+      labels =
+        TShapeMap.fold
+          (fun label _ labels -> TShapeSet.add label labels)
+          fields
+          scan.labels;
+    }
+
+  let rec scan_shape ~source ~kind env scan = function
+    | Shape_simple { s_fields; _ } -> (env, add_labels s_fields scan)
+    | Shape_splat { ss_elems } ->
+      scan_nested_tys ~source ~kind env scan ss_elems
+
+  and scan_nested_ty ~source ~kind env scan ty =
+    let (env, ty) = Typing_env.expand_type env ty in
+    let (env, ty) = Bound_lookup.strip_supportdyn env ty in
+    match get_node ty with
+    | Tgeneric _
+    | Tnewtype _ ->
+      (env, add_dependency ~source ~target:ty ~kind scan)
+    | Tshape shape_ty -> scan_shape ~source ~kind env scan shape_ty
+    | Tunion tys
+    | Tintersection tys ->
+      scan_nested_tys ~source ~kind env scan tys
+    | _ -> (env, scan)
+
+  and scan_nested_tys ~source ~kind env scan tys =
+    List.fold_left tys ~init:(env, scan) ~f:(fun (env, scan) ty ->
+        scan_nested_ty ~source ~kind env scan ty)
+
+  let rec scan_indirect_upper_ty ~source env scan ty =
+    let (env, ty) = Typing_env.expand_type env ty in
+    let (env, ty) = Bound_lookup.strip_supportdyn env ty in
+    match get_node ty with
+    | Tgeneric _
+    | Tnewtype _ ->
+      ( env,
+        add_dependency ~source ~target:ty ~kind:Dependency.Indirect_upper scan
+      )
+    | Tshape shape_ty ->
+      scan_shape ~source ~kind:Dependency.Nested_upper env scan shape_ty
+    | Tunion tys
+    | Tintersection tys ->
+      List.fold_left tys ~init:(env, scan) ~f:(fun (env, scan) ty ->
+          scan_indirect_upper_ty ~source env scan ty)
+    | _ -> (env, scan)
+
+  let scan_upper_bound bounds_cache env source scan bound =
+    let (env, bound) = Typing_env.expand_type env bound in
+    match get_node bound with
+    | Tgeneric _ ->
+      ( env,
+        add_dependency ~source ~target:bound ~kind:Dependency.Direct_upper scan
+      )
+    | Tnewtype (name, _, _)
+      when not (String.equal name Naming_special_names.Classes.cSupportDyn) ->
+      ( env,
+        add_dependency ~source ~target:bound ~kind:Dependency.Direct_upper scan
+      )
+    | _ ->
+      let (env, bound) = Bound_lookup.strip_supportdyn env bound in
+      let (env, supers) =
+        Bound_lookup.concrete_supertypes bounds_cache env bound
+      in
+      List.fold_left supers ~init:(env, scan) ~f:(fun (env, scan) super ->
+          scan_indirect_upper_ty ~source env scan super)
+
+  let scan_lower_bound bounds_cache env source scan bound =
+    let (env, bound) = Typing_env.expand_type env bound in
+    let (env, bound) = Bound_lookup.strip_supportdyn env bound in
+    let (env, subs) = Bound_lookup.concrete_subtypes bounds_cache env bound in
+    List.fold_left subs ~init:(env, scan) ~f:(fun (env, scan) sub ->
+        let (env, sub) = Bound_lookup.strip_supportdyn env sub in
+        match get_node sub with
+        | Tshape shape_ty ->
+          scan_shape ~source ~kind:Dependency.Nested_lower env scan shape_ty
+        | _ -> (env, scan))
+
+  let summary_from bounds_cache cache env source r =
+    Env_memo.memoize_value cache.Cache.bound_summaries env source (fun () ->
+        let (env, upper_bounds) =
+          Bound_lookup.upper_bounds bounds_cache env source r
+        in
+        let (env, scan) =
+          List.fold_left
+            upper_bounds
+            ~init:(env, empty_scan)
+            ~f:(fun (env, scan) bound ->
+              scan_upper_bound bounds_cache env source scan bound)
+        in
+        let (env, lower_bounds) =
+          Bound_lookup.lower_bounds bounds_cache env source r
+        in
+        let (_env, scan) =
+          List.fold_left
+            lower_bounds
+            ~init:(env, scan)
+            ~f:(fun (env, scan) bound ->
+              scan_lower_bound bounds_cache env source scan bound)
+        in
+        Bound_summary.
+          {
+            dependencies = List.rev scan.rev_dependencies;
+            labels = scan.labels;
+          })
+
+  (* The cached structural summary is the sole dependency representation.
+     Graph discovery therefore cannot recursively invoke corner checking. *)
+  let dependencies_from bounds_cache cache env source r =
+    (summary_from bounds_cache cache env source r).Bound_summary.dependencies
+
+  let labels_from bounds_cache cache env source r =
+    (summary_from bounds_cache cache env source r).Bound_summary.labels
+
+  let targets dependencies ~f =
+    List.fold_left dependencies ~init:Splat_elem.Set.empty ~f:(fun acc edge ->
+        if f (Dependency.kind edge) then
+          Splat_elem.Set.add (Dependency.target edge) acc
+        else
+          acc)
+    |> Splat_elem.Set.elements
+
+  let type_params_in_upper_bound bounds_cache cache env source r =
+    targets (dependencies_from bounds_cache cache env source r) ~f:(function
+        | Dependency.Direct_upper
+        | Dependency.Indirect_upper
+        | Dependency.Nested_upper ->
+          true
+        | Dependency.Nested_lower -> false)
+
+  let type_params_in_lower_bound bounds_cache cache env source r =
+    targets (dependencies_from bounds_cache cache env source r) ~f:(function
+        | Dependency.Nested_lower -> true
+        | Dependency.Direct_upper
+        | Dependency.Indirect_upper
+        | Dependency.Nested_upper ->
+          false)
+
+  let type_params_in_bounds bounds_cache cache env source r =
+    targets (dependencies_from bounds_cache cache env source r) ~f:(fun _ ->
+        true)
+
+  (* -- Reachability and SCC classification ------------------------------- *)
+
+  (* [roots] are caller-supplied starting elements, normally the elements live
+     in either surface row at one label. They are not graph nodes with no
+     incoming edge. *)
+  let closure bounds_cache cache env names r =
+    let rec aux worklist acc =
+      match worklist with
+      | [] -> acc
+      | next :: rest when Splat_elem.Set.mem next acc -> aux rest acc
+      | next :: rest ->
+        let delta = type_params_in_bounds bounds_cache cache env next r in
+        aux (delta @ rest) (Splat_elem.Set.add next acc)
+    in
+    aux (Splat_elem.Set.elements names) Splat_elem.Set.empty
+
+  (* Tarjan's traversal returns dependency-first strongly connected
+     components. Since summaries cannot invoke corner checking, its work is
+     linear in the reachable nodes and dependency edges. *)
+  let analyze bounds_cache analysis_cache env roots r =
+    let next_index = ref 0 in
+    let indices = ref Splat_elem.Map.empty in
+    let lowlinks = ref Splat_elem.Map.empty in
+    let stack = ref [] in
+    let on_stack = ref Splat_elem.Set.empty in
+    let components = ref [] in
+    let dependencies = ref [] in
+    let node_visits = ref 0 in
+    let edge_visits = ref 0 in
+    let find map key = Option.value_exn (Splat_elem.Map.find_opt key !map) in
+    let rec visit source =
+      let index = !next_index in
+      Int.incr next_index;
+      Int.incr node_visits;
+      indices := Splat_elem.Map.add source index !indices;
+      lowlinks := Splat_elem.Map.add source index !lowlinks;
+      stack := source :: !stack;
+      on_stack := Splat_elem.Set.add source !on_stack;
+      let outgoing =
+        dependencies_from bounds_cache analysis_cache env source r
+      in
+      dependencies := List.rev_append outgoing !dependencies;
+      List.iter outgoing ~f:(fun dependency ->
+          Int.incr edge_visits;
+          let target = Dependency.target dependency in
+          if not (Splat_elem.Map.mem target !indices) then begin
+            visit target;
+            lowlinks :=
+              Splat_elem.Map.add
+                source
+                (Int.min (find lowlinks source) (find lowlinks target))
+                !lowlinks
+          end else if Splat_elem.Set.mem target !on_stack then
+            lowlinks :=
+              Splat_elem.Map.add
+                source
+                (Int.min (find lowlinks source) (find indices target))
+                !lowlinks);
+      if Int.equal (find lowlinks source) (find indices source) then begin
+        let rec pop members =
+          match !stack with
+          | [] -> failwith "empty stack while completing an SCC"
+          | member :: rest ->
+            stack := rest;
+            on_stack := Splat_elem.Set.remove member !on_stack;
+            let members = Splat_elem.Set.add member members in
+            if Int.equal (Splat_elem.compare member source) 0 then
+              members
+            else
+              pop members
+        in
+        components := pop Splat_elem.Set.empty :: !components
+      end
+    in
+    Splat_elem.Set.iter
+      (fun root -> if not (Splat_elem.Map.mem root !indices) then visit root)
+      roots;
+    (* Tarjan pops dependencies before their dependents; the accumulator
+       reverses that order. *)
+    let components = List.rev !components in
+    let dependencies = List.rev !dependencies in
+    let component_by_member =
+      List.foldi
+        components
+        ~init:Splat_elem.Map.empty
+        ~f:(fun index acc members ->
+          Splat_elem.Set.fold
+            (fun member acc -> Splat_elem.Map.add member index acc)
+            members
+            acc)
+    in
+    let internal_dependencies = Stdlib.Array.make (List.length components) [] in
+    List.iter dependencies ~f:(fun dependency ->
+        let source_component =
+          Splat_elem.Map.find (Dependency.source dependency) component_by_member
+        in
+        let target_component =
+          Splat_elem.Map.find (Dependency.target dependency) component_by_member
+        in
+        if Int.equal source_component target_component then
+          internal_dependencies.(source_component) <-
+            dependency :: internal_dependencies.(source_component));
+    let components =
+      List.mapi components ~f:(fun index members ->
+          let dependencies = List.rev internal_dependencies.(index) in
+          let is_self_dependency dependency =
+            Int.equal
+              (Splat_elem.compare
+                 (Dependency.source dependency)
+                 (Dependency.target dependency))
+              0
+          in
+          if
+            Int.equal (Splat_elem.Set.cardinal members) 1
+            && not (List.exists dependencies ~f:is_self_dependency)
+          then
+            Component.Acyclic (Splat_elem.Set.choose members)
+          else
+            let info = Cycle_info.make ~members ~dependencies in
+            let is_ty_param ty =
+              match get_node ty with
+              | Tgeneric _ -> true
+              | _ -> false
+            in
+            (* Strong connectivity through direct upper constraints proves
+               mutual subtyping. Other paths merely prove dependency. *)
+            if
+              Splat_elem.Set.for_all is_ty_param members
+              && List.for_all dependencies ~f:(fun dependency ->
+                     match Dependency.kind dependency with
+                     | Dependency.Direct_upper -> true
+                     | Dependency.Indirect_upper
+                     | Dependency.Nested_upper
+                     | Dependency.Nested_lower ->
+                       false)
+            then
+              Component.Proven_equal info
+            else
+              Component.Unsupported_cycle info)
+    in
+    {
+      components;
+      dependencies;
+      node_visits = !node_visits;
+      edge_visits = !edge_visits;
+    }
+
+  (* -- Label discovery ---------------------------------------------------- *)
+
+  (* Label discovery cannot begin with per-label liveness: the labels must be
+     known before liveness can be calculated. Start from every spread element
+     written in either surface row, follow its dependency closure, and collect
+     labels from all reachable summaries. Search later computes a smaller live
+     root set separately for each discovered label. *)
+  module Labels = struct
+    let bound_label_set bounds_cache analysis_cache env names r =
+      let all =
+        closure bounds_cache analysis_cache env (Splat_elem.Set.of_list names) r
+      in
+      Splat_elem.Set.fold
+        (fun name acc ->
+          TShapeSet.union
+            acc
+            (labels_from bounds_cache analysis_cache env name r))
+        all
+        TShapeSet.empty
+
+    let subrow_label_set
+        bounds_cache
+        analysis_cache
+        env
+        ~(sub : Typing_shape_normalize.Row.t)
+        ~(super : Typing_shape_normalize.Row.t)
+        r =
+      let params = Row.spread_elements sub @ Row.spread_elements super in
+      TShapeSet.union
+        (TShapeSet.union (Row.label_set sub) (Row.label_set super))
+        (bound_label_set bounds_cache analysis_cache env params r)
+
+    let subrow_labels bounds_cache analysis_cache env ~sub ~super r :
+        TShapeField.t option list =
+      None
+      :: List.map
+           (TShapeSet.elements
+              (subrow_label_set bounds_cache analysis_cache env ~sub ~super r))
+           ~f:Option.some
+  end
+end
+
+(* Public compatibility aliases. The representations themselves are owned by
+   dependency analysis. *)
+module Dependency = Analysis.Dependency
+module Cycle_info = Analysis.Cycle_info
+module Component = Analysis.Component
+
+(** The outcome of traversing a corner plan. [Empty] means that every branch
+    encountered an uninhabited field interval, so there is no checking
+    obligation. [Unsupported_cycle] preserves facts for the caller's error
+    construction rather than rendering a message here. *)
+type 'a computation =
+  | Computed of 'a
+  | Empty
+  | Unsupported_cycle of Cycle_info.t
+
+module Cache : sig
+  type t = {
+    bounds: Bound_lookup.Cache.t;
+    analysis: Analysis.Cache.t;
+  }
+
+  val create : unit -> t
+end = struct
+  type t = {
+    bounds: Bound_lookup.Cache.t;
+    analysis: Analysis.Cache.t;
+  }
+
+  let create () =
+    {
+      bounds = Bound_lookup.Cache.create ();
+      analysis = Analysis.Cache.create ();
+    }
+end
+
+(* -- Compiling an executable plan ---------------------------------------- *
+ *
+ * Analysis describes every reachable component, including unsupported
+ * cycles. A plan either rejects such a cycle or turns the analysis into
+ * dependency-ordered singleton and proven-equality groups. Every dependency
+ * between distinct groups points to an earlier group, and each element occurs
+ * in exactly one group.
+ * ------------------------------------------------------------------------- *)
+module Plan : sig
+  type group =
+    | One of locl_ty
+    | Equal of Cycle_info.t
+
+  type t
+
+  val groups : t -> group list
+
+  (** Parameters whose assigned field can affect another group's bounds. *)
+  val depended_on : t -> Splat_elem.Set.t
+
+  val order : Cache.t -> env -> Splat_elem.Set.t -> Reason.t -> locl_ty list
+
+  val of_analysis : Analysis.t -> (t, Cycle_info.t) result
+end = struct
+  type group =
+    | One of Splat_elem.t
+    | Equal of Analysis.Cycle_info.t
+
+  type t = {
+    groups: group list;
+    (* Search cannot prune these parameters' corners using only their visible
+       positions in the surface rows: another group's bounds depend on them. *)
+    depended_on: Splat_elem.Set.t;
+  }
+
+  let groups plan = plan.groups
+
+  let depended_on plan = plan.depended_on
+
+  (* Compatibility view for tests and callers which still request a flat
+     topological order. Search consumes the component plan below. *)
+  let order cache env roots r =
+    Analysis.analyze cache.Cache.bounds cache.Cache.analysis env roots r
+    |> Analysis.components
+    |> List.concat_map ~f:(fun component ->
+           Analysis.Component.members component |> Splat_elem.Set.elements)
+
+  (* Compile dependency analysis into the only representation consumed by
+     search: dependency-ordered singleton or proven-equality groups. *)
+  let of_analysis analysis =
+    let depended_on =
+      List.fold_left
+        (Analysis.dependencies analysis)
+        ~init:Splat_elem.Set.empty
+        ~f:(fun acc dependency ->
+          Splat_elem.Set.add (Analysis.Dependency.target dependency) acc)
+    in
+    List.fold_result
+      (Analysis.components analysis)
+      ~init:[]
+      ~f:(fun groups component ->
+        match component with
+        | Analysis.Component.Acyclic element -> Ok (One element :: groups)
+        | Analysis.Component.Proven_equal info -> Ok (Equal info :: groups)
+        | Analysis.Component.Unsupported_cycle info -> Error info)
+    |> Result.map ~f:(fun groups -> { groups = List.rev groups; depended_on })
+end
+
+(* -- Corner search ------------------------------------------------------- *
+ *
+ * Search evaluates groups in plan order. Bounds for the current group may
+ * read fields assigned to earlier groups, so its available corners are
+ * calculated separately inside each partial-assignment branch.
+ *
+ * This Cartesian product is intentionally exponential when its leaves are
+ * observably different. It is distinct from the accidental exponential
+ * dependency discovery prevented by structural summaries. The pruning below
+ * selects one extremum only when row position and dependency information make
+ * it dominate every omitted corner.
+ * ------------------------------------------------------------------------- *)
+module Search : sig
+  val corners_for :
+    Cache.t ->
+    env ->
+    depended_on:Splat_elem.Set.t ->
+    live_sub:Splat_elem.Set.t ->
+    live_super:Splat_elem.Set.t ->
+    sub:Typing_shape_normalize.Row.t ->
+    super:Typing_shape_normalize.Row.t ->
+    tshape_field_name option ->
+    locl_ty ->
+    Assignment.t ->
+    Reason.t ->
+    env * (Field.Corners.t, Missing_assignment.t) result
+
+  val check_subrow_corners :
+    Cache.t ->
+    env ->
+    sub:Typing_shape_normalize.Row.t ->
+    super:Typing_shape_normalize.Row.t ->
+    tshape_field_name option ->
+    Reason.t ->
+    init:(env -> env * 'a) ->
+    conj:(env * 'a -> ('b -> env * 'a) -> env * 'a) ->
+    f:
+      (env ->
+      sub:locl_phase shape_field_type ->
+      super:locl_phase shape_field_type ->
+      env * 'a) ->
+    env * ('a computation, Missing_assignment.t) result
+
+  val assignments :
+    Cache.t ->
+    env ->
+    Splat_elem.Set.t ->
+    tshape_field_name option ->
+    Reason.t ->
+    env * (Assignment.t list computation, Missing_assignment.t) result
+
+  (* -- For test only -- *)
+
+  (** Whether rightward spreads prevent an element from affecting a label. *)
+  module Masking : sig
+    (** Definitely overwritten, still potentially relevant, or
+        bounds-dependent. *)
+    type t =
+      | Masked
+      | Unmasked
+      | Unknown
+
+    (** Determine how [key] is masked in a row under the current assignment. *)
+    val of_row :
+      Cache.t ->
+      env ->
+      Typing_shape_normalize.Row.t ->
+      TShapeField.t option ->
+      locl_ty ->
+      Assignment.t ->
+      Typing_reason.t ->
+      (t, Missing_assignment.t) result
+  end
+end = struct
+  (* -- Dynamic masking and corner pruning -------------------------------- *)
+
+  module Masking = struct
+    (* Whether rightward spread elements definitely overwrite [key], leave it
+       potentially relevant at every allowed corner, or vary across their own
+       corners. [Unmasked] does not mean visible in every value; it means that
+       [key] cannot be discarded. *)
+    type t =
+      | Masked
+      | Unmasked
+      | Unknown
+
+    (* In [shape(...key, ...other)], [other] definitely masks [key] at [label]
+       when its upper field is required. If both field bounds are optional,
+       [key] remains potentially relevant. Required lower and optional upper
+       bounds make the answer [Unknown]. *)
+    let of_splat cache env ss_elems label key assignment r =
+      let rec aux rev_elems acc =
+        match rev_elems with
+        | [] -> Ok Unknown
+        | ty :: rest ->
+          (match get_node ty with
+          | Tgeneric _
+          | Tnewtype _
+            when Int.equal (Splat_elem.compare ty key) 0 ->
+            Ok acc
+          | Tgeneric _
+          | Tnewtype _ ->
+            let (_env, bounds) =
+              Field_bounds.field_bounds
+                cache.Cache.bounds
+                env
+                ty
+                label
+                assignment
+                r
+            in
+            (match bounds with
+            | Error missing -> Error missing
+            | Ok (lower, upper) ->
+              if Field.is_required upper then
+                Ok Masked
+              else if Field.is_required lower then
+                aux rest Unknown
+              else
+                aux rest acc)
+          | _ -> aux rest acc)
+      in
+      aux (List.rev ss_elems) Unmasked
+
+    let of_row
+        cache env (row : Typing_shape_normalize.Row.t) label key assignment r =
+      Typing_shape_normalize.Row.fold
+        row
+        ~bottom:(fun () -> Ok Unknown)
+        ~simple:(fun _ -> Ok Unknown)
+        ~elements:(fun elements ->
+          of_splat cache env (Row.element_tys elements) label key assignment r)
+
+    (* let of_row env row label key assignment r =
+       of_row_cached (Cache.create ()) env row label key assignment r *)
+  end
+
+  (* Enumerate corner assignments in dependency order. Bound resolution is
+     cached within one shape-splat operation, but every retained assignment
+     path is traversed. *)
+  let corners_for
+      cache
+      env
+      ~depended_on
+      ~live_sub
+      ~live_super
+      ~(sub : Typing_shape_normalize.Row.t)
+      ~(super : Typing_shape_normalize.Row.t)
+      label
+      key
+      assignment
+      r : env * (Field.Corners.t, Missing_assignment.t) result =
+    let (env, bounds) =
+      Field_bounds.field_bounds cache.Cache.bounds env key label assignment r
+    in
+    match bounds with
+    | Error missing -> (env, Error missing)
+    | Ok (lower, upper) ->
+      (* A free parameter affects no other parameter's bounds, so its visible
+         row position alone can determine the extremal corner to check. *)
+      let is_free = not (Splat_elem.Set.mem key depended_on)
+      and in_sub = Splat_elem.Set.mem key live_sub
+      and in_super = Splat_elem.Set.mem key live_super in
+      if is_free && in_sub && not in_super then
+        (env, Ok (Field.Corners.Values [upper]))
+      else if is_free && (not in_sub) && in_super then
+        (env, Ok (Field.Corners.Values [lower]))
+      else if is_free && in_sub && in_super then
+        let m_sub = Masking.of_row cache env sub label key assignment r
+        and m_super = Masking.of_row cache env super label key assignment r in
+        match (m_sub, m_super) with
+        | (Error missing, _)
+        | (_, Error missing) ->
+          (env, Error missing)
+        | (Ok Masking.Masked, _) -> (env, Ok (Field.Corners.Values [lower]))
+        | (_, Ok Masking.Masked) -> (env, Ok (Field.Corners.Values [upper]))
+        (* Both occurrences use the same assignment. If the supertype
+           occurrence remains relevant and the lower field is optional, that
+           lower choice exposes every unshared subtype contribution. Raising
+           the field adds the same shared contribution to both projections, so
+           it cannot create a harder case. *)
+        | (_, Ok Masking.Unmasked) when Field.is_optional lower ->
+          (env, Ok (Field.Corners.Values [lower]))
+        | (Ok _, Ok _) -> (env, Ok (Field.Corners.of_bounds ~lower ~upper))
+      else
+        (env, Ok (Field.Corners.of_bounds ~lower ~upper))
+
+  let bounds_for_group cache env ~preferred_members label assignment r =
+    function
+    | Plan.One key ->
+      Field_bounds.field_bounds cache.Cache.bounds env key label assignment r
+    | Plan.Equal info ->
+      Field_bounds.field_bounds_for_equality
+        cache.Cache.bounds
+        env
+        ~preferred_members
+        (Cycle_info.members info)
+        label
+        assignment
+        r
+
+  let corners_for_group
+      cache
+      env
+      ~depended_on
+      ~live_sub
+      ~live_super
+      ~sub
+      ~super
+      ~preferred_members
+      label
+      group
+      assignment
+      r =
+    match group with
+    | Plan.One key ->
+      corners_for
+        cache
+        env
+        ~depended_on
+        ~live_sub
+        ~live_super
+        ~sub
+        ~super
+        label
+        key
+        assignment
+        r
+    | Plan.Equal _ as group ->
+      let (env, bounds) =
+        bounds_for_group cache env ~preferred_members label assignment r group
+      in
+      (match bounds with
+      | Error missing -> (env, Error missing)
+      | Ok (lower, upper) -> (env, Ok (Field.Corners.of_bounds ~lower ~upper)))
+
+  let assign_group group field assignment =
+    match group with
+    | Plan.One member -> Splat_elem.Map.add member field assignment
+    | Plan.Equal info ->
+      Splat_elem.Set.fold
+        (fun member assignment -> Splat_elem.Map.add member field assignment)
+        (Cycle_info.members info)
+        assignment
+
+  (* -- Traversing the Cartesian product ---------------------------------- *)
+
+  (* Traverse one dependency-ordered plan. [corners] chooses the candidates for
+     a group; [leaf], [empty], and [combine] interpret the same traversal for
+     ground checking or for collecting inference assignments. *)
+  let rec fold_plan groups assignment env ~corners ~leaf ~empty ~combine =
+    match groups with
+    | [] -> leaf assignment env
+    | group :: rest ->
+      let (env, result) = corners env group assignment in
+      (match result with
+      | Error missing -> (env, Error missing)
+      | Ok Field.Corners.Inverted -> empty env
+      | Ok (Field.Corners.Values []) ->
+        failwith "Field.Corners.Values must be nonempty"
+      | Ok (Field.Corners.Values (first :: fields)) ->
+        let branch field env =
+          fold_plan
+            rest
+            (assign_group group field assignment)
+            env
+            ~corners
+            ~leaf
+            ~empty
+            ~combine
+        in
+        List.fold_left fields ~init:(branch first env) ~f:(fun acc field ->
+            combine acc (branch field)))
+
+  let check_subrow_corners
+      cache
+      env
+      ~(sub : Typing_shape_normalize.Row.t)
+      ~(super : Typing_shape_normalize.Row.t)
+      label
+      r
+      ~init
+      ~conj
+      ~f =
+    let live_sub = Splat_elem.Set.of_list (Row.live_spreads sub label)
+    and live_super = Splat_elem.Set.of_list (Row.live_spreads super label) in
+    let all_live = Splat_elem.Set.union live_sub live_super in
+    let analysis =
+      Analysis.analyze cache.Cache.bounds cache.Cache.analysis env all_live r
+    in
+    match Plan.of_analysis analysis with
+    | Error info -> (env, Ok (Unsupported_cycle info))
+    | Ok plan ->
+      let preferred_members = Splat_elem.Set.union live_sub live_super in
+      let empty env =
+        let (env, value) = init env in
+        (env, Ok (value, false))
+      in
+      let combine (env, result) next =
+        match result with
+        | Error missing -> (env, Error missing)
+        | Ok (left, left_completed) ->
+          let env_before = env in
+          let (env_after, right) = next env_before in
+          (match right with
+          | Error missing -> (env_after, Error missing)
+          | Ok (right, right_completed) ->
+            let (env, value) =
+              conj (env_before, left) (fun _ -> (env_after, right))
+            in
+            (env, Ok (value, left_completed || right_completed)))
+      in
+      let finish assignment env =
+        let (env, sub_result) = Row.proj env sub label assignment in
+        match sub_result with
+        | Error missing -> (env, Error missing)
+        | Ok sub ->
+          let (env, super_result) = Row.proj env super label assignment in
+          (match super_result with
+          | Error missing -> (env, Error missing)
+          | Ok super ->
+            let (env, value) = f env ~sub ~super in
+            (env, Ok (value, true)))
+      in
+      let corners env group assignment =
+        corners_for_group
+          cache
+          env
+          ~depended_on:(Plan.depended_on plan)
+          ~live_sub
+          ~live_super
+          ~sub
+          ~super
+          ~preferred_members
+          label
+          group
+          assignment
+          r
+      in
+      let (env, result) =
+        fold_plan
+          (Plan.groups plan)
+          Splat_elem.Map.empty
+          env
+          ~corners
+          ~leaf:finish
+          ~empty
+          ~combine
+      in
+      (match result with
+      | Error missing -> (env, Error missing)
+      | Ok (value, true) -> (env, Ok (Computed value))
+      | Ok (_value, false) -> (env, Ok Empty))
+
+  (* -- Materializing assignments for inference and tests ---------------- *)
+
+  let assignments cache env roots (label : TShapeField.t option) r =
+    let analysis =
+      Analysis.analyze cache.Cache.bounds cache.Cache.analysis env roots r
+    in
+    match Plan.of_analysis analysis with
+    | Error info -> (env, Ok (Unsupported_cycle info))
+    | Ok plan ->
+      let corners env group assignment =
+        let (env, bounds) =
+          bounds_for_group
+            cache
+            env
+            ~preferred_members:roots
+            label
+            assignment
+            r
+            group
+        in
+        match bounds with
+        | Error missing -> (env, Error missing)
+        | Ok (lower, upper) -> (env, Ok (Field.Corners.of_bounds ~lower ~upper))
+      in
+      (* Difference lists make collection linear in the number of generated
+         assignments; only the Cartesian corner search remains exponential. *)
+      let empty env = (env, Ok Fn.id) in
+      let combine (env, result) next =
+        match result with
+        | Error missing -> (env, Error missing)
+        | Ok left ->
+          let (env, result) = next env in
+          (match result with
+          | Error missing -> (env, Error missing)
+          | Ok right -> (env, Ok (fun tail -> left (right tail))))
+      in
+      let leaf assignment env = (env, Ok (fun tail -> assignment :: tail)) in
+      let (env, result) =
+        fold_plan
+          (Plan.groups plan)
+          Splat_elem.Map.empty
+          env
+          ~corners
+          ~leaf
+          ~empty
+          ~combine
+      in
+      (match result with
+      | Error missing -> (env, Error missing)
+      | Ok build_assignments ->
+        (match build_assignments [] with
+        | [] -> (env, Ok Empty)
+        | assignments -> (env, Ok (Computed assignments))))
+end
+
+(* -- Inference helpers ----------------------------------------------------- *)
+module Inference : sig
+  val spread_tyvar_ids : Typing_shape_normalize.Row.t -> Tvid.t list
+
+  val partition_at_tyvar :
+    Typing_shape_normalize.Row.t ->
+    Tvid.t ->
+    (locl_ty list * locl_ty list) option
+
+  val solve_spread_vars :
+    env ->
+    Reason.t ->
+    Typing_shape_normalize.Row.t ->
+    env * Typing_shape_normalize.Row.normalized
+end = struct
+  (* Spread type-variable ids at spread position, in source order *)
+  let spread_tyvar_ids (row : Typing_shape_normalize.Row.t) : Tvid.t list =
+    Typing_shape_normalize.Row.fold
+      row
+      ~bottom:(fun () -> [])
+      ~simple:(fun _ -> [])
+      ~elements:(fun elements ->
+        List.filter_map (Row.element_tys elements) ~f:(fun ty ->
+            match get_node ty with
+            | Tvar v -> Some v
+            | _ -> None))
+
+  (* Split a splat's elements around the first occurrence of spread var [v]
+     returning the elements before and after. *)
+  let partition_at_tyvar (row : Typing_shape_normalize.Row.t) (v : Tvid.t) :
+      (locl_ty list * locl_ty list) option =
+    Typing_shape_normalize.Row.fold
+      row
+      ~bottom:(fun () -> None)
+      ~simple:(fun _ -> None)
+      ~elements:(fun elements ->
+        let ss_elems = Row.element_tys elements in
+        let rec loop elems left =
+          match elems with
+          | [] -> None
+          | ty :: rest ->
+            (match get_node ty with
+            | Tvar v' when Tvid.equal v v' -> Some (List.rev left, rest)
+            | _ -> loop rest (ty :: left))
+        in
+        loop ss_elems [])
+
+  (* Resolve a row's spread type variables to their current solutions, for the
+     decoupled both-sides fallback: expand each spread var; keep it if it
+     resolved to a non-var, drop it (the empty-row contribution) if still
+     unsolved. Sound (the dropped var contributes nothing).
+
+     Substituting breaks normal form three ways: dropping a var can leave a
+     lone element, a solution can itself be a splat, and a solution can land
+     next to another simple shape, so the rewritten row is re-normalized
+     before it goes back to the corner. *)
+  let solve_spread_vars env r (row : Typing_shape_normalize.Row.t) :
+      env * Typing_shape_normalize.Row.normalized =
+    let normalize env ss_elems =
+      let (env, _err, normalized) =
+        Typing_shape_normalize.Row.normalize
+          ~on_error:None
+          r
+          (Shape_splat { ss_elems })
+          env
+      in
+      (env, normalized)
+    in
+    Typing_shape_normalize.Row.fold
+      row
+      ~bottom:(fun () ->
+        normalize env [Typing_shape_normalize.Row.to_ty ~reason:r row])
+      ~simple:(fun _ ->
+        normalize env [Typing_shape_normalize.Row.to_ty ~reason:r row])
+      ~elements:(fun elements ->
+        let ss_elems = Row.element_tys elements in
+        let (env, rev) =
+          List.fold_left ss_elems ~init:(env, []) ~f:(fun (env, acc) ty ->
+              match get_node ty with
+              | Tvar _ ->
+                let (env, ty') = Typing_env.expand_type env ty in
+                (match get_node ty' with
+                | Tvar _ -> (env, acc)
+                | _ -> (env, ty' :: acc))
+              | _ -> (env, ty :: acc))
+        in
+        normalize env (List.rev rev))
+end
+
+(* -- Resolve a splat to a simple shape for reads ---------------------------
+   Unsupported cyclic components are assigned [Opt mixed]; projecting the
+   original row afterward preserves precision from concrete fields that mask
+   them on the right.
+   -------------------------------------------------------------------------- *)
+module Read_resolution : sig
+  val resolve :
+    env ->
+    Reason.t ->
+    locl_phase ty list ->
+    env * (locl_phase ty, Missing_assignment.t) result
+end = struct
+  let resolve env r elems =
+    let cache = Cache.create () in
+    let assign_field assignment members field =
+      Splat_elem.Set.fold
+        (fun member assignment -> Splat_elem.Map.add member field assignment)
+        members
+        assignment
+    in
+    let upper_for_component env ~preferred_members assignment label = function
+      | Component.Acyclic key ->
+        let (env, upper) =
+          Field_bounds.upper_field_bound
+            cache.Cache.bounds
+            env
+            key
+            label
+            assignment
+            r
+        in
+        (match upper with
+        | Error missing -> (env, Error missing)
+        | Ok upper -> (env, Ok (Splat_elem.Map.add key upper assignment)))
+      | Component.Proven_equal info ->
+        let members = Cycle_info.members info in
+        let (env, upper) =
+          Field_bounds.upper_field_bound_for_equality
+            cache.Cache.bounds
+            env
+            ~preferred_members
+            members
+            label
+            assignment
+            r
+        in
+        (match upper with
+        | Error missing -> (env, Error missing)
+        | Ok upper -> (env, Ok (assign_field assignment members upper)))
+      | Component.Unsupported_cycle _ -> (env, Ok assignment)
+    in
+    let assignment_for_read env row label =
+      let live = Splat_elem.Set.of_list (Row.live_spreads row label) in
+      let analysis =
+        Analysis.analyze cache.Cache.bounds cache.Cache.analysis env live r
+      in
+      let top = { sft_optional = true; sft_ty = Typing_make_type.mixed r } in
+      let rec assign env assignment = function
+        | [] -> (env, Ok assignment)
+        | Component.Unsupported_cycle info :: rest ->
+          let assignment =
+            assign_field assignment (Cycle_info.members info) top
+          in
+          assign env assignment rest
+        | ((Component.Acyclic _ | Component.Proven_equal _) as component)
+          :: rest ->
+          let (env, result) =
+            upper_for_component
+              env
+              ~preferred_members:live
+              assignment
+              label
+              component
+          in
+          (match result with
+          | Error missing -> (env, Error missing)
+          | Ok assignment -> assign env assignment rest)
+      in
+      assign env Splat_elem.Map.empty (Analysis.components analysis)
+    in
+    (* Project one row to a resolved simple shape, replacing generics with
+       their upper bounds. *)
+    let project env row =
+      let labels =
+        None
+        :: List.map
+             (TShapeSet.elements
+                (Analysis.Labels.subrow_label_set
+                   cache.Cache.bounds
+                   cache.Cache.analysis
+                   env
+                   ~sub:row
+                   ~super:row
+                   r))
+             ~f:Option.some
+      in
+      let rec project_labels env known unknown = function
+        | [] ->
+          ( env,
+            Ok
+              (mk
+                 ( r,
+                   Tshape
+                     (Shape_simple
+                        {
+                          s_origin = Missing_origin;
+                          s_unknown_value = unknown;
+                          s_fields = known;
+                        }) )) )
+        | label :: rest ->
+          let (env, assignment) = assignment_for_read env row label in
+          (match assignment with
+          | Error missing -> (env, Error missing)
+          | Ok assignment ->
+            let (env, field) = Row.proj env row label assignment in
+            (match field with
+            | Error missing -> (env, Error missing)
+            | Ok field ->
+              (match label with
+              | Some name ->
+                project_labels env (TShapeMap.add name field known) unknown rest
+              | None -> project_labels env known field.sft_ty rest)))
+      in
+      project_labels env TShapeMap.empty (Typing_make_type.nothing r) labels
+    in
+    let (env, _err, normalized) =
+      let shape_ty = Shape_splat { ss_elems = elems } and on_error = None in
+      Typing_shape_normalize.Row.normalize ~on_error r shape_ty env
+    in
+    Typing_shape_normalize.Row.fold_normalized
+      normalized
+      ~row:(fun row ->
+        if Typing_shape_normalize.Row.is_bottom row then
+          (env, Ok (Typing_shape_normalize.Row.to_ty ~reason:r row))
+        else
+          project env row)
+      ~union:(fun _ ->
+        let (env, ty) =
+          Typing_shape_normalize.Row.normalized_to_ty env ~reason:r normalized
+        in
+        (env, Ok ty))
+      ~intersection:(fun _ ->
+        let (env, ty) =
+          Typing_shape_normalize.Row.normalized_to_ty env ~reason:r normalized
+        in
+        (env, Ok ty))
+end
+
+(* -- API ------------------------------------------------------------------- *)
+
+let proj = Row.proj
+
+let row_live_spread_at = Row.live_spreads
+
+let resolve_for_read = Read_resolution.resolve
+
+let subrow_label_set cache env ~sub ~super r =
+  Analysis.Labels.subrow_label_set
+    cache.Cache.bounds
+    cache.Cache.analysis
+    env
+    ~sub
+    ~super
+    r
+
+let subrow_labels cache env ~sub ~super r =
+  Analysis.Labels.subrow_labels
+    cache.Cache.bounds
+    cache.Cache.analysis
+    env
+    ~sub
+    ~super
+    r
+
+let topo = Plan.order
+
+let check_subrow_corners = Search.check_subrow_corners
+
+let corner_assignments = Search.assignments
+
+let spread_tyvar_ids = Inference.spread_tyvar_ids
+
+let partition_at_tyvar = Inference.partition_at_tyvar
+
+let solve_spread_vars = Inference.solve_spread_vars
+
+module For_test = struct
+  type upper_bound_view =
+    | Upper_shapes of Typing_shape_normalize.Row.t list
+    | Upper_bottom
+    | Upper_unconstrained
+
+  type lower_bound_view =
+    | Lower_shapes of Typing_shape_normalize.Row.t list
+    | Lower_bottom
+
+  module Masking = Search.Masking
+  module Dependency = Analysis.Dependency
+  module Cycle_info = Analysis.Cycle_info
+  module Component = Analysis.Component
+  module Analysis = Analysis
+
+  let analyze_dependencies env roots r =
+    let cache = Cache.create () in
+    Analysis.analyze cache.Cache.bounds cache.Cache.analysis env roots r
+
+  let closure env names r =
+    let cache = Cache.create () in
+    Analysis.closure cache.Cache.bounds cache.Cache.analysis env names r
+
+  let bound_shape_upper env ty assignment r =
+    let cache = Cache.create () in
+    let (env, view) =
+      Field_bounds.bound_shape_upper cache.Cache.bounds env ty assignment r
+    in
+    match view with
+    | Field_bounds.Upper.Shapes rows -> (env, Upper_shapes rows)
+    | Field_bounds.Upper.Bottom -> (env, Upper_bottom)
+    | Field_bounds.Upper.Unconstrained -> (env, Upper_unconstrained)
+
+  let bound_shape_lower env ty assignment r =
+    let cache = Cache.create () in
+    let (env, view) =
+      Field_bounds.bound_shape_lower cache.Cache.bounds env ty assignment r
+    in
+    match view with
+    | Field_bounds.Lower.Shapes rows -> (env, Lower_shapes rows)
+    | Field_bounds.Lower.Bottom -> (env, Lower_bottom)
+
+  let field_bounds env name label assignment r =
+    let cache = Cache.create () in
+    Field_bounds.field_bounds cache.Cache.bounds env name label assignment r
+
+  let type_params_in_upper_bound env splat_elem r =
+    let cache = Cache.create () in
+    Analysis.type_params_in_upper_bound
+      cache.Cache.bounds
+      cache.Cache.analysis
+      env
+      splat_elem
+      r
+
+  let type_params_in_lower_bound env splat_elem r =
+    let cache = Cache.create () in
+    Analysis.type_params_in_lower_bound
+      cache.Cache.bounds
+      cache.Cache.analysis
+      env
+      splat_elem
+      r
+
+  let type_params_in_bounds env splat_elem r =
+    let cache = Cache.create () in
+    Analysis.type_params_in_bounds
+      cache.Cache.bounds
+      cache.Cache.analysis
+      env
+      splat_elem
+      r
+
+  let corners_for
+      env ~depended_on ~live_sub ~live_super ~sub ~super label key assignment r
+      =
+    let cache = Cache.create () in
+    Search.corners_for
+      cache
+      env
+      ~depended_on
+      ~live_sub
+      ~live_super
+      ~sub
+      ~super
+      label
+      key
+      assignment
+      r
+end

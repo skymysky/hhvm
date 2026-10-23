@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 
 // Abstract class for expression abstract syntax tree
 abstract class Exp<+T> {
@@ -42,18 +42,17 @@ enum BinOp: int {
   Add = 0;
   Sub = 1;
   Mul = 2;
-  Div = 3;
 }
 
 // Binary numeric operator expressions
-class BinOpExp extends Exp<num> {
+class BinOpExp extends Exp<int> {
   public function __construct(
     public BinOp $op,
-    public Exp<num> $exp1,
-    public Exp<num> $exp2,
+    public Exp<int> $exp1,
+    public Exp<int> $exp2,
   ) {}
 
-  public function evaluate(): num {
+  public function evaluate(): int {
     $val1 = $this->exp1->evaluate();
     $val2 = $this->exp2->evaluate();
     switch ($this->op) {
@@ -63,8 +62,6 @@ class BinOpExp extends Exp<num> {
         return $val1 - $val2;
       case BinOp::Mul:
         return $val1 * $val2;
-      case BinOp::Div:
-        return $val1 / $val2;
     }
     return 0;
   }
@@ -102,7 +99,7 @@ class SndExp<Tu, Tv> extends Exp<Tv> {
 }
 
 // Example: the expression fst(true ? (42,false) : (30,true)) * 3
-function ExampleExp(): Exp<num> {
+function ExampleExp(): Exp<int> {
   return new BinOpExp(
     BinOp::Mul,
     new FstExp(
@@ -132,17 +129,17 @@ function TestInstanceof(): void {
 
 // Now let's use new instanceof operator to implement eval
 function IEval<T>(Exp<T> $e): T {
-  if ($e instanceof IntConst) {
+  if ($e is IntConst) {
     return $e->val;
-  } else if ($e instanceof BoolConst) {
+  } else if ($e is BoolConst) {
     return $e->val;
-  } else if ($e instanceof CondExp) {
+  } else if ($e is CondExp<_>) {
     if (IEval($e->cond)) {
       return IEval($e->then);
     } else {
       return IEval($e->else);
     }
-  } else if ($e instanceof BinOpExp) {
+  } else if ($e is BinOpExp) {
     $val1 = IEval($e->exp1);
     $val2 = IEval($e->exp2);
     switch ($e->op) {
@@ -152,16 +149,14 @@ function IEval<T>(Exp<T> $e): T {
         return $val1 - $val2;
       case BinOp::Mul:
         return $val1 * $val2;
-      case BinOp::Div:
-        return $val1 / $val2;
     }
-  } else if ($e instanceof FstExp) {
+  } else if ($e is FstExp<_, _>) {
     list($val1, $val2) = IEval($e->exp);
     return $val1;
-  } else if ($e instanceof SndExp) {
+  } else if ($e is SndExp<_, _>) {
     list($val1, $val2) = IEval($e->exp);
     return $val2;
-  } else if ($e instanceof PairExp) {
+  } else if ($e is PairExp<_, _>) {
     $val1 = IEval($e->exp1);
     $val2 = IEval($e->exp2);
     return tuple($val1, $val2);
@@ -170,7 +165,7 @@ function IEval<T>(Exp<T> $e): T {
   throw new Exception('Unknown expression');
 }
 
-/* HH_FIXME[1002] */
-TestOOP();
-/* HH_FIXME[1002] */
-TestInstanceof();
+function main(): void {
+  TestOOP();
+  TestInstanceof();
+}

@@ -1,16 +1,34 @@
-<?php
+<?hh
 
-// HNI ParamCoerceModeNull
-var_dump(bcscale([]));
-$x = 'bcscale';
-var_dump($x([]));
+<<__EntryPoint>>
+function main(): void {
+  set_error_handler(($errno, $errstr, ...$_rest)==> {
+    throw new Exception($errstr);
+  });
 
-// IDL ParamCoerceModeNull
-var_dump(sqrt([]));
-$x = 'sqrt';
-var_dump($x([]));
+  // HNI ParamCoerceModeNull
+  try {
+    var_dump(bcscale(vec[]));
+  } catch (Exception $e) {
+    echo "\n".'Warning: '.$e->getMessage().' in '.__FILE__.' on line '.__LINE__."\n";
+  }
+  $x = bcscale<>;
+  try {
+    var_dump($x(vec[]));
+  } catch (Exception $e) {
+    echo "\n".'Warning: '.$e->getMessage().' in '.__FILE__.' on line '.__LINE__."\n";
+  }
 
-// HNI ParamCoerceModeFalse
-var_dump(grapheme_extract([], 1));
-$x = 'grapheme_extract';
-var_dump($x([], 1));
+  // IDL ParamCoerceModeNull
+  try {
+    var_dump(sqrt(vec[]));
+  } catch (Exception $e) {
+    echo "\n".'Warning: '.$e->getMessage().' in '.__FILE__.' on line '.__LINE__."\n";
+  }
+  $x = sqrt<>;
+  try {
+    var_dump($x(vec[]));
+  } catch (Exception $e) {
+    echo "\n".'Warning: '.$e->getMessage().' in '.__FILE__.' on line '.__LINE__."\n";
+  }
+}

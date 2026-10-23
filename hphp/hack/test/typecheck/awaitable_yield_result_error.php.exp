@@ -1,6 +1,11 @@
-File "awaitable_yield_result_error.php", line 13, characters 10-13:
-Invalid return type (Typing[4110])
-File "awaitable_yield_result_error.php", line 12, characters 24-26:
-This is an int
-File "awaitable_yield_result_error.php", line 13, characters 3-14:
-It is incompatible with an object of type Awaitable
+error: Parsing[1002] `async` functions must have an `Awaitable` return type. [1]
+
+awaitable_yield_result_error.php:16:29
+14 | }
+15 | 
+16 | async function foo_error(): ?int {
+   |                             ^^^^ [1]
+17 |   return null;
+18 | }
+
+1 error found

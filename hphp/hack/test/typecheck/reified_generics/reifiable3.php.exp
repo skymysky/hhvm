@@ -1,0 +1,18 @@
+error: Typing[4322] Invalid type [1]
+-> This type constant has the `__Reifiable` attribute [2]
+-> It cannot contain an abstract type constant without the __Reifiable attribute [3]
+
+reifiable3.php:17:14
+12 |   const type Tc = this::Ta;
+13 | 
+14 |   abstract const type Td;
+   |                       ^^ [3]
+15 | 
+16 |   <<__Reifiable>>
+   |     ^^^^^^^^^^^ [2]
+17 |   const type Te = this::Td;
+   |              ^^ [1]
+18 | }
+19 | 
+
+1 error found

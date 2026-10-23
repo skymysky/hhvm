@@ -14,12 +14,11 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_COLLECTIONS_H_
-#define incl_HPHP_COLLECTIONS_H_
+#pragma once
 
-#include <folly/Optional.h>
-
+#include "hphp/runtime/base/array-data.h"
 #include "hphp/runtime/base/header-kind.h"
+#include "hphp/runtime/base/tv-val.h"
 #include "hphp/runtime/base/type-string.h"
 
 namespace HPHP {
@@ -34,7 +33,7 @@ struct c_Set;
 struct c_ImmSet;
 }
 
-namespace HPHP { namespace collections {
+namespace HPHP::collections {
 /////////////////////////////////////////////////////////////////////////////
 
 #define COLLECTIONS_PAIRED_TYPES(MACRO) \
@@ -56,8 +55,11 @@ COLLECTIONS_ALL_TYPES(X)
 using newEmptyInstanceFunc = ObjectData* (*)();
 using newFromArrayFunc = ObjectData* (*)(ArrayData* arr);
 
-/* Get a function capable of creating a collection class.
+/*
+ * Get a constructor for the collections class.
+ *
  * This is primarily used by the JIT to burn the initializer into the TC.
+ * The newFromArrayFunc result requires that its input is a vanilla array-like.
  */
 newEmptyInstanceFunc allocEmptyFunc(CollectionType ctype);
 newFromArrayFunc allocFromArrayFunc(CollectionType ctype);
@@ -73,11 +75,9 @@ inline ObjectData* alloc(CollectionType ctype) {
  * Create a collection from an array, with refcount set to 1.
  *
  * Pre: The array must have a kind that's compatible with the collection type
- * we're creating.
+ * we're creating. However it MAY have a "bespoke" layout.
  */
-inline ObjectData* alloc(CollectionType ctype, ArrayData* arr) {
-  return allocFromArrayFunc(ctype)(arr);
-}
+ObjectData* alloc(CollectionType ctype, ArrayData* arr);
 
 /*
  * Creates a Pair. Takes ownership of the TypedValues passed in.
@@ -85,7 +85,7 @@ inline ObjectData* alloc(CollectionType ctype, ArrayData* arr) {
 ObjectData* allocPair(TypedValue c1, TypedValue c2);
 
 /////////////////////////////////////////////////////////////////////////////
-// Casting and Cloing
+// Casting and Cloning
 
 bool isType(const Class* cls, CollectionType type);
 template<typename ...Args>
@@ -93,11 +93,13 @@ bool isType(const Class* cls, CollectionType type, Args... args) {
   return isType(cls, type) || isType(cls, args...);
 }
 
+template <IntishCast IC = IntishCast::None>
 Array toArray(const ObjectData* obj);
+
 bool toBool(const ObjectData* obj);
 ObjectData* clone(ObjectData* obj);
 
-void deepCopy(TypedValue* tv);
+void deepCopy(tv_lval tv);
 
 /*
  * Return the inner-array for array-backed collections, and nullptr if it's a
@@ -108,6 +110,12 @@ inline const ArrayData* asArray(const ObjectData* obj) {
   return asArray(const_cast<ObjectData*>(obj));
 }
 
+/*
+ * Replace the inner-array for array-backed collections. May not be called on
+ * non-array-backed collections. This method is dangerous - take care!
+ */
+void replaceArray(ObjectData* obj, ArrayData* ad);
+
 /////////////////////////////////////////////////////////////////////////////
 // Read/Write
 
@@ -115,30 +123,28 @@ inline const ArrayData* asArray(const ObjectData* obj) {
  * If the key does not exist in the collection, at() will throw an exception
  * while get() will return nullptr
  */
-TypedValue* at(ObjectData* obj, const TypedValue* key);
-TypedValue* get(ObjectData* obj, const TypedValue* key);
+tv_lval at(ObjectData* obj, const TypedValue* key);
+tv_lval get(ObjectData* obj, const TypedValue* key);
 
 /* atLval() is used to get the address of an element when the
  * caller is NOT going to do direct write per se, but it intends to use
  * the element as the base of a member operation in an "lvalue" context
  * (which could mutate the element in various ways).
  */
-TypedValue* atLval(ObjectData* obj, const TypedValue* key);
+tv_lval atLval(ObjectData* obj, const TypedValue* key);
 
 /* atRw() is used to get the address of an element for reading
  * and writing. It is typically used for read-modify-write operations (the
  * SetOp* and IncDec* instructions).
  */
-TypedValue* atRw(ObjectData* obj, const TypedValue* key);
+tv_lval atRw(ObjectData* obj, const TypedValue* key);
 
 /* Check for {key} within {obj} Collection
  * `contains` merely need to exist
  * `isset` needs to exist and not be null
- * `empty` needs to exist and not be falsy
  */
 bool contains(ObjectData* obj, const Variant& offset);
 bool (isset)(ObjectData* obj, const TypedValue* key);
-bool empty(ObjectData* obj, const TypedValue* key);
 
 /* Remove element {key} from Collection {obj} */
 void unset(ObjectData* obj, const TypedValue* key);
@@ -173,26 +179,25 @@ COLLECTIONS_ALL_TYPES(X)
 }
 
 /*
- * Returns a CollectionType given a name, folly::none if name is not a
+ * Returns a CollectionType given a name, std::nullopt if name is not a
  * collection type.
  */
-inline folly::Optional<CollectionType> stringToType(const StringData* name) {
-#define X(type) if (name->isame(s_##type.get())) return CollectionType::type;
+inline Optional<CollectionType> stringToType(const StringData* name) {
+#define X(type) if (name->tsame(s_##type.get())) return CollectionType::type;
 COLLECTIONS_ALL_TYPES(X)
 #undef X
-  return folly::none;
+  return std::nullopt;
 }
 
-inline folly::Optional<CollectionType> stringToType(const std::string& s) {
+inline Optional<CollectionType> stringToType(const std::string& s) {
   return stringToType(
     req::ptr<StringData>::attach(StringData::Make(s)).get()
   );
 }
 
 inline bool isTypeName(const StringData* str) {
-  return stringToType(str).hasValue();
+  return stringToType(str).has_value();
 }
 
 /////////////////////////////////////////////////////////////////////////////
-}}
-#endif
+}

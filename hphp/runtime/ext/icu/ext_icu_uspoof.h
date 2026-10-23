@@ -1,5 +1,4 @@
-#ifndef incl_HPHP_ICU_USPOOF_H
-#define incl_HPHP_ICU_USPOOF_H
+#pragma once
 
 #include "hphp/runtime/ext/extension.h"
 #include "hphp/runtime/ext/icu/icu.h"
@@ -7,7 +6,7 @@
 #include <unicode/uspoof.h>
 #include <unicode/utypes.h>
 
-namespace HPHP { namespace Intl {
+namespace HPHP::Intl {
 /////////////////////////////////////////////////////////////////////////////
 extern const StaticString s_SpoofChecker;
 
@@ -58,6 +57,5 @@ struct SpoofChecker : IntlError {
 };
 
 /////////////////////////////////////////////////////////////////////////////
-}} // namespace HPHP::Intl
+} // namespace HPHP::Intl
 
-#endif // incl_HPHP_ICU_USPOOF_H

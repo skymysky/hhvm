@@ -1,2 +1,2 @@
-Fatal error: %s in %s on line 4
 
+Fatal error: Expected constant expression for initializer in %s/variable_in_enum.php on line 2

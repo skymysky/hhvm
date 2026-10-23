@@ -14,12 +14,7 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_LIGHT_PROCESS_H_
-#define incl_HPHP_LIGHT_PROCESS_H_
-
-#ifdef _MSC_VER
-# error LightProcess is not supported under MSVC!
-#endif
+#pragma once
 
 #include <string>
 #include <vector>
@@ -58,8 +53,23 @@ struct LightProcess {
                      const char *cwd = nullptr);
   static int pclose(FILE *f);
 
+  /** Opens a process with the given arguments, environment, working directory,
+   * and file descriptors.
+   *
+   * See Process::ForkAndExecve for details.
+   */
+  static pid_t ForkAndExecve(
+    const std::string& path,
+    const std::vector<std::string>& argv,
+    const std::vector<std::string>& envp,
+    const std::string& cwd,
+    const std::map<int, int>& fds,
+    int flags = Process::FORK_AND_EXECVE_FLAG_NONE,
+    pid_t pgid = 0
+  );
+
   /**
-   * Opens a process with given cwd and environment variables.
+   * Opens a process with given cwd and environment variables, using the shell.
    *
    * The parameters "created" and "desired" describe the pipes that need to
    * be setup for the child process: "created" contains created fd for child,
@@ -79,13 +89,13 @@ struct LightProcess {
    */
   static pid_t waitpid(pid_t pid, int *stat_loc, int options, int timeout = 0);
 
-  static pid_t pcntl_waitpid(pid_t pid, int *stat_loc, int options);
-
   /**
    * When running a CLI server, the requests executed on behalf of local
    * processes will delegate to a light process pool run by the client.
    */
   static int createDelegate();
+  static int cloneDelegate();
+  static void shutdownDelegate();
 
   static std::unique_ptr<LightProcess> setThreadLocalAfdtOverride(int fd);
   static std::unique_ptr<LightProcess> setThreadLocalAfdtOverride(
@@ -119,5 +129,3 @@ private:
 
 ///////////////////////////////////////////////////////////////////////////////
 }
-
-#endif // incl_HPHP_LIGHT_PROCESS_H_

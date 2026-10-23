@@ -59,7 +59,7 @@ struct c_ExternalThreadEventWaitHandle;
  *       markAsFinished();
  *     }
  *   protected:
- *     void unserialize(Cell& result) const {
+ *     void unserialize(TypedValue& result) const {
  *       if (UNLIKELY(m_failed)) {
  *         SystemLib::throwInvalidOperationExceptionObject(
  *           "An error has occurred while scheduling the operation"
@@ -72,7 +72,7 @@ struct c_ExternalThreadEventWaitHandle;
  *         );
  *       }
  *
- *       cellDup(make_tv<KindOfInt64>(m_value), result);
+ *       tvDup(make_tv<KindOfInt64>(m_value), result);
  *     }
  *   private:
  *     int m_value, m_maxValue;
@@ -84,7 +84,7 @@ struct c_ExternalThreadEventWaitHandle;
  *
  * Example:
  *
- * Object f_gen_foo(int max_value) {
+ * Object HHVM_FUNCTION(gen_foo, int max_value) {
  *   // validate user input early
  *   if (max_value < 0) {
  *     SystemLib::throwInvalidArgumentExceptionObject(
@@ -192,13 +192,13 @@ struct AsioExternalThreadEvent {
      * If a result was already initialized, it must be uninitialized (decref
      * if needed) prior to throwing an exception.
      */
-    virtual void unserialize(Cell& result) = 0;
+    virtual void unserialize(TypedValue& result) = 0;
 
     /**
      * Get the time markAsFinished was called to retroactively reference
      * when the underlying IO operation was over
      */
-    AsioSession::TimePoint getFinishTime() const { return m_finishTime; };
+    AsioSession::TimePoint getFinishTime() const { return m_finishTime; }
 
   protected:
     /**
@@ -224,7 +224,7 @@ struct AsioExternalThreadEvent {
         m_state.load() == Canceled ||
         m_state.load() == Abandoned
       );
-    };
+    }
 
     /**
      * Mark the event as finished.

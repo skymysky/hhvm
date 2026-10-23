@@ -14,19 +14,17 @@
    | license@php.net so we can mail you a copy immediately.               |
    +----------------------------------------------------------------------+
 */
-#ifndef incl_HPHP_ICU_ITERATOR_H
-#define incl_HPHP_ICU_ITERATOR_H
+#pragma once
 
 #include "hphp/runtime/ext/extension.h"
 #include "hphp/runtime/ext/icu/icu.h"
 
 #include <unicode/strenum.h>
 
-namespace HPHP { namespace Intl {
+namespace HPHP::Intl {
 /////////////////////////////////////////////////////////////////////////////
-extern const StaticString s_IntlIterator;
 
-struct IntlIterator : IntlError {
+struct IntlIterator : IntlError, SystemLib::ClassLoader<"IntlIterator"> {
   IntlIterator() {}
   IntlIterator(const IntlIterator&) = delete;
   IntlIterator& operator=(const IntlIterator& src) {
@@ -49,11 +47,7 @@ struct IntlIterator : IntlError {
   }
 
   static Object newInstance(icu::StringEnumeration *se = nullptr) {
-    if (!c_IntlIterator) {
-      c_IntlIterator = Unit::lookupClass(s_IntlIterator.get());
-      assertx(c_IntlIterator);
-    }
-    Object obj{c_IntlIterator};
+    Object obj{ classof() };
     if (se) {
       Native::data<IntlIterator>(obj)->setEnumeration(se);
     }
@@ -61,7 +55,7 @@ struct IntlIterator : IntlError {
   }
 
   static IntlIterator* Get(ObjectData* obj) {
-    return GetData<IntlIterator>(obj, s_IntlIterator);
+    return GetData<IntlIterator>(obj, className());
   }
 
   int64_t key() const { return m_key; }
@@ -76,7 +70,7 @@ struct IntlIterator : IntlError {
       s_intl_error->setError(error, "Error fetching next iteration element");
       m_current = uninit_null();
     } else {
-      m_current = String(e, len, CopyString);
+      m_current = OptString(e, len, CopyString);
     }
     m_key++;
     return m_current;
@@ -101,8 +95,6 @@ private:
   icu::StringEnumeration *m_enum = nullptr;
   int64_t m_key = -1;
   Variant m_current{Variant::NullInit()};
-
-  static Class* c_IntlIterator;
 };
 
 #if U_ICU_VERSION_MAJOR_NUM * 10 + U_ICU_VERSION_MINOR_NUM >= 42
@@ -115,7 +107,7 @@ struct BugStringCharEnumeration : icu::StringEnumeration {
     return uenum_count(uenum, &status);
   }
 
-  const UnicodeString* snext(UErrorCode& status) override {
+  const icu::UnicodeString* snext(UErrorCode& status) override {
     int32_t length;
     const UChar* str = uenum_unext(uenum, &length, &status);
     if (str == 0 || U_FAILURE(status)) {
@@ -152,6 +144,5 @@ struct BugStringCharEnumeration : icu::StringEnumeration {
 #endif // icu >= 4.2
 
 /////////////////////////////////////////////////////////////////////////////
-}} // namespace HPHP::Intl
+} // namespace HPHP::Intl
 
-#endif // incl_HPHP_ICU_ITERATOR_H

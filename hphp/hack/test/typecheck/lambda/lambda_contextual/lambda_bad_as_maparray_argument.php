@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 // Copyright 2004-present Facebook. All Rights Reserved.
 
 class MyClass {
@@ -19,21 +19,21 @@ class MyClassClosureRunner {
 }
 
 function expectsMyClosureRunnerMyClass(
-  array<string, MyClosureRunner<MyClass>> $p,
+  darray<string, MyClosureRunner<MyClass>> $p,
 ): MyClosureRunner<MyClass> {
   $r = $p['a'];
   return $r;
 }
 function getThing1(): MyClosureRunner<MyClass> {
   $var = expectsMyClosureRunnerMyClass(
-    array(
+    dict[
       'a' => new MyClosureRunner(
         function($arg) {
           $arg->missing_method();
           return "ok";
         },
       ),
-    ),
+    ],
   );
   return $var;
 }
@@ -44,5 +44,6 @@ function breakIt(): void {
   $c($x);
 }
 
-/* HH_FIXME[1002] */
-breakIt();
+function main(): void {
+  breakIt();
+}

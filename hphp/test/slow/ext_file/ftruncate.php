@@ -1,6 +1,9 @@
-<?php
+<?hh
 
-$tempfile = tempnam('/tmp', 'vmextfiletest');
+
+<<__EntryPoint>>
+function main_ftruncate() :mixed{
+$tempfile = tempnam(sys_get_temp_dir(), 'vmextfiletest');
 
 $f = fopen($tempfile, 'w');
 fputs($f, "testing ftruncate");
@@ -14,3 +17,4 @@ $f = fopen($tempfile, "r");
 var_dump(fread($f, 20));
 
 unlink($tempfile);
+}

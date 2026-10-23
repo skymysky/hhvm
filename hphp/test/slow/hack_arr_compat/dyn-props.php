@@ -1,31 +1,21 @@
-<?php
+<?hh
 
 class C {}
 
-class D {
-  private $array;
-
-  function __construct() {
-    $this->array = array();
-  }
-
-  function __get($key) {
-    $this->array[$key] = $this->array[$key] ?? null;
-    return $this->array[$key];
+function error_boundary(inout $x, $fn) :mixed{
+  try {
+    $fn(inout $x);
+  } catch (Exception $e) {
+    print("Error: ".$e->getMessage()."\n");
   }
 }
 
-function main() {
+<<__EntryPoint>>
+function main() :mixed{
   $c = new C();
-  $c->foo[] = 42;
+  $c->foo = darray(vec[42]);
+  $c->bar ??= 0;
   $c->bar += 42;
-  $c->baz++;
+  error_boundary(inout $c, (inout $o) ==> { $o->baz++; });
   var_dump($c);
-
-  $d = new D();
-  $d->bar += 42;
-  $d->baz++;
-  var_dump($d);
 }
-
-main();

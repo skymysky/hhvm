@@ -19,11 +19,11 @@
 #include "hphp/runtime/vm/jit/abi.h"
 #include "hphp/runtime/vm/jit/code-gen-helpers.h"
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-TRACE_SET_MOD(hhir);
+TRACE_SET_MOD(hhir)
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -32,7 +32,6 @@ const char* destTypeName(DestType dt) {
     case DestType::None:     return "None";
     case DestType::Indirect: return "Indirect";
     case DestType::SSA:      return "SSA";
-    case DestType::SSAPair:  return "SSAPair";
     case DestType::Byte:     return "Byte";
     case DestType::TV:       return "TV";
     case DestType::Dbl:      return "Dbl";
@@ -41,16 +40,35 @@ const char* destTypeName(DestType dt) {
   not_reached();
 }
 
-ArgDesc::ArgDesc(SSATmp* tmp, Vloc loc, bool val) {
+ArgDesc::ArgDesc(SSATmp* tmp,
+                 Vloc loc,
+                 bool val,
+                 Optional<AuxUnion> aux) {
+  assertx(IMPLIES(aux, !val));
+
+  auto const setTypeImm = [&] {
+    static_assert(offsetof(TypedValue, m_type) % 8 == 0, "");
+
+    if (aux) {
+      auto const dt = static_cast<std::make_unsigned<data_type_t>::type>(
+        tmp->type().toDataType()
+      );
+      static_assert(std::numeric_limits<decltype(dt)>::digits <= 32, "");
+      m_imm64 = dt | auxToMask(*aux);
+      m_kind = Kind::Imm;
+    } else {
+      m_typeImm = tmp->type().toDataType();
+      m_kind = Kind::TypeImm;
+    }
+  };
+
   if (tmp->hasConstVal()) {
     // tmp is a constant
     if (val) {
       m_imm64 = tmp->rawVal();
       m_kind = Kind::Imm;
     } else {
-      static_assert(offsetof(TypedValue, m_type) % 8 == 0, "");
-      m_typeImm = tmp->type().toDataType();
-      m_kind = Kind::TypeImm;
+      setTypeImm();
     }
     return;
   }
@@ -70,28 +88,59 @@ ArgDesc::ArgDesc(SSATmp* tmp, Vloc loc, bool val) {
     // val is false so we're passing tmp's type.
     m_srcReg = loc.reg(1);
     m_kind = Kind::Reg;
+    m_aux = aux;
     return;
   }
 
-  // arg is the (constant) type of a known-typed value.
-  static_assert(offsetof(TypedValue, m_type) % 8 == 0, "");
-  m_typeImm = tmp->type().toDataType();
-  m_kind = Kind::TypeImm;
+  setTypeImm();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 
-ArgGroup& ArgGroup::typedValue(int i) {
-  // If there's exactly one register argument slot left, the whole TypedValue
-  // goes on the stack instead of being split between a register and the
-  // stack.
-  if (m_gpArgs.size() == num_arg_regs() - 1) {
-    m_override = &m_stkArgs;
+ArgGroup& ArgGroup::ssa(int i, bool allowFP) {
+  auto const s = m_inst->src(i);
+  auto const loc = m_locs[s];
+
+  if (s->isA(TDbl) && allowFP) {
+    push_SIMDarg(ArgDesc{s, loc}, s->type());
+  } else {
+    if (s->isA(TLval) && !s->isA(TBottom)) {
+      // If there's exactly one register argument slot left, the whole tv_lval
+      // goes on the stack instead of being split between a register and the
+      // stack.
+      if (m_gpArgs.size() == num_arg_regs() - 1) m_override = &m_stkArgs;
+      SCOPE_EXIT { m_override = nullptr; };
+
+      push_arg(ArgDesc{ArgDesc::Kind::Reg, loc.reg(0), -1}, s->type());
+      push_arg(ArgDesc{ArgDesc::Kind::Reg, loc.reg(1), -1});
+    } else {
+      push_arg(ArgDesc{s, loc}, s->type());
+    }
   }
+  return *this;
+}
+
+ArgGroup& ArgGroup::fp(int i) {
+  auto const s = m_inst->src(i);
+  auto const loc = m_locs[s];
+  push_SIMDarg(ArgDesc{s, loc}, s->type());
+  return *this;
+}
+
+ArgGroup& ArgGroup::typedValue(int i, Optional<AuxUnion> aux) {
+  // If there's exactly one register argument slot left, the whole TypedValue
+  // goes on the stack instead of being split between a register and the stack.
+  if (m_gpArgs.size() == num_arg_regs() - 1) m_override = &m_stkArgs;
+
+  // On x86, if we have one free GP register left, we'll use it for the next
+  // int argument, but on ARM, we'll just spill all later int arguments.
+  #ifndef __aarch64__
+    SCOPE_EXIT { m_override = nullptr; };
+  #endif
+
   static_assert(offsetof(TypedValue, m_data) == 0, "");
   static_assert(offsetof(TypedValue, m_type) == 8, "");
-  ssa(i, false).type(i);
-  m_override = nullptr;
+  ssa(i, false).type(i, aux);
   return *this;
 }
 
@@ -123,4 +172,4 @@ void ArgGroup::push_SIMDarg(const ArgDesc& arg, Type t) {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-}}
+}

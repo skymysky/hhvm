@@ -1,9 +1,12 @@
-<?php
+<?hh
 
-function err($x, $y) { echo $y; echo "\n"; }
-set_error_handler('err');
-abstract class Asd {
-  private function __construct() {}
+function err($x, $y) :mixed{ echo $y; echo "\n"; }
+class Asd {
+  private function __construct()[] {}
 }
 
-function x() { new Asd(); } x();
+function x() :mixed{ new Asd(); } <<__EntryPoint>>
+function entrypoint_ctor_fail(): void {
+  set_error_handler(err<>);
+  x();
+}

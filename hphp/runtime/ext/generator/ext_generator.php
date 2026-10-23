@@ -1,41 +1,38 @@
 <?hh
 
-<<__NativeData("Generator")>>
+<<__NativeData>>
 final class Generator implements HH\KeyedIterator {
 
   private function __construct(): void {}
 
   <<__Native("OpCodeImpl")>>
-  function current(): mixed;
+  public function current()[]: mixed;
 
   <<__Native("OpCodeImpl")>>
-  function key(): mixed;
+  public function key()[]: mixed;
+
+  <<__Native("OpCodeImpl"), __NEVER_INLINE>>
+  public function next()[/* gen $this */]: mixed;
+
+  <<__Native("OpCodeImpl"), __NEVER_INLINE>>
+  private function throw(Throwable $ex)[/* gen $this */]: mixed;
+
+  <<__Native("OpCodeImpl"), __NEVER_INLINE>>
+  public function rewind()[/* gen $this */]: mixed;
 
   <<__Native("OpCodeImpl")>>
-  function next(): mixed;
+  public function valid()[]: bool;
 
-  <<__Native("OpCodeImpl")>>
-  private function throw(object $ex): mixed;
+  <<__Native("OpCodeImpl"), __NEVER_INLINE>>
+  public function send(mixed $v)[/* gen $this */]: mixed;
 
-  <<__Native("OpCodeImpl")>>
-  function rewind(): mixed;
-
-  <<__Native("OpCodeImpl")>>
-  function valid(): bool;
-
-  <<__Native("OpCodeImpl")>>
-  function send(mixed $v): mixed;
-
-  <<__Native("OpCodeImpl")>>
-  function raise(mixed $v): mixed;
-
-  <<__Native("OpCodeImpl")>>
-  function getReturn(): mixed;
+  <<__Native("OpCodeImpl"), __NEVER_INLINE>>
+  public function raise(mixed $v)[/* gen $this */]: mixed;
 
   <<__Native>>
-  function getOrigFuncName(): string;
+  public function getOrigFuncName()[]: ?string;
 
   <<__Native>>
-  function getCalledClass(): string;
+  public function getCalledClass()[]: ?string;
 
 }

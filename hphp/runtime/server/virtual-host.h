@@ -14,8 +14,7 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_VIRTUAL_HOST_H_
-#define incl_HPHP_VIRTUAL_HOST_H_
+#pragma once
 
 #include "hphp/util/hdf.h"
 #include "hphp/runtime/server/ip-block-map.h"
@@ -58,7 +57,7 @@ public:
   std::string serverName(const std::string &host) const;
 
   bool valid() const { return !(m_prefix.empty() && !m_pattern); }
-  bool match(const String &host) const;
+  bool match(const OptString &host) const;
   bool disabled() const { return m_disabled; }
 
   // whether to check (and serve) files that exist before applying rewrite rules
@@ -67,10 +66,10 @@ public:
   }
   // should we always decode the post data as if it were
   // application/x-www-form-urlencoded
-  bool alwaysDecodePostData(const String& url) const;
+  bool alwaysDecodePostData(const OptString& url) const;
 
   // url rewrite rules
-  bool rewriteURL(const String& host, String &url,
+  bool rewriteURL(const OptString& host, OptString &url,
                   bool &qsa, int &redirect) const;
 
   // ip blocking rules
@@ -139,4 +138,3 @@ private:
 ///////////////////////////////////////////////////////////////////////////////
 }
 
-#endif // incl_HPHP_VIRTUAL_HOST_H_

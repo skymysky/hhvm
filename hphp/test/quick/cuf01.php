@@ -1,24 +1,24 @@
 <?hh
+
 class C {
-  public function foo($x, $y) {
+  <<__DynamicallyCallable>>
+  public function foo($x, $y) :mixed{
     var_dump(isset($this));
     return $x + $y;
   }
-  public static function bar($x, $y) {
+  <<__DynamicallyCallable>>
+  public static function bar($x, $y) :mixed{
     return $x + $y;
   }
 }
 
-function main() {
+<<__EntryPoint>>
+function main(): void {
   $obj = new C;
-  var_dump(call_user_func(array($obj, 'foo'), 123, 456));
-  var_dump(call_user_func(array($obj, 'bar'), 123, 456));
-  var_dump(call_user_func_array(array($obj, 'foo'), array(123, 456)));
-  var_dump(call_user_func_array(array($obj, 'bar'), array(123, 456)));
-  var_dump(call_user_func(array('C', 'foo'), 123, 456));
-  var_dump(call_user_func(array('C', 'bar'), 123, 456));
-  var_dump(call_user_func_array(array('C', 'foo'), array(123, 456)));
-  var_dump(call_user_func_array(array('C', 'bar'), array(123, 456)));
+  var_dump(call_user_func(vec[$obj, 'foo'], 123, 456));
+  var_dump(call_user_func(vec[$obj, 'bar'], 123, 456));
+  var_dump(call_user_func_array(vec[$obj, 'foo'], vec[123, 456]));
+  var_dump(call_user_func_array(vec[$obj, 'bar'], vec[123, 456]));
+  var_dump(call_user_func(vec['C', 'bar'], 123, 456));
+  var_dump(call_user_func_array(vec['C', 'bar'], vec[123, 456]));
 }
-main();
-

@@ -1,12 +1,15 @@
 <?hh
-set_error_handler('handler');
-function handler() { throw new Exception; }
-function foo(&$r) {}
-function test() {
+function handler() :mixed{ throw new Exception; }
+function foo(inout $r) :mixed{}
+function test() :mixed{
   try {
     foo();
   } catch (Exception $e) {
   }
   var_dump('ok');
 }
-test();
+<<__EntryPoint>>
+function main_entry(): void {
+  set_error_handler(handler<>);
+  test();
+}

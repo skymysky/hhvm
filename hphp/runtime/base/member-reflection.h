@@ -14,10 +14,9 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_MEMBER_REFLECTION_H_
-#define incl_HPHP_MEMBER_REFLECTION_H_
+#pragma once
 
-#include "hphp/runtime/base/mixed-array.h"
+#include "hphp/runtime/base/vanilla-dict.h"
 
 namespace HPHP {
 
@@ -30,15 +29,11 @@ namespace HPHP {
   X(Class)\
   /* arrays */\
   X(ArrayData)\
-  X(MixedArray)\
-  X(EmptyArray)\
-  X(APCLocalArray)\
-  X(GlobalsArray)\
+  X(VanillaDict)\
   /* other php types */\
   X(StringData)\
   X(ObjectData)\
   X(ResourceData)\
-  X(RefData)\
   /* collections */\
   X(c_Pair)\
   X(BaseVector)\
@@ -47,7 +42,7 @@ namespace HPHP {
 
 #define HPHP_REFLECTABLES \
   HPHP_REFLECTABLES_UNQ\
-  X(MixedArray::Elm)\
+  X(VanillaDict::Elm)\
   /* */
 
 #define X(name) struct name;
@@ -78,9 +73,9 @@ bool init_member_reflection(const std::string& extractPath,
   HPHP_REFLECTABLES
 #undef X
 
-  template <typename T>
-  const char* nameof_member(const T* /*base*/, const void* /*internal*/) {
-    return nullptr;
+template <typename T>
+const char* nameof_member(const T* /*base*/, const void* /*internal*/) {
+  return nullptr;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -96,4 +91,3 @@ constexpr const char* const kMemberReflectionTableName =
 
 }
 
-#endif

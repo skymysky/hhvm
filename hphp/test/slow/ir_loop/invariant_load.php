@@ -1,29 +1,39 @@
-<?php
+<?hh
 
-function alternator() {
-  static $i = 0;
-  mt_rand();
-  mt_rand();
-  mt_rand();
-  return ($i++ % 2) == 0;
+abstract final class AlternatorStatics {
+  public static $i = 0;
 }
-function foo($x, $k) {
+
+function alternator() :mixed{
+  mt_rand();
+  mt_rand();
+  mt_rand();
+  $__lval_tmp_0 = AlternatorStatics::$i;
+  AlternatorStatics::$i++;
+  return ($__lval_tmp_0% 2) == 0;
+}
+function foo($x, $k) :mixed{
   foreach ($x as $j) {
-  loop:
-    echo "$j: ";
-    echo $k;
-    echo "\n";
-    if (alternator()) { goto loop; }
+    while(true) {
+      echo "$j: ";
+      echo $k;
+      echo "\n";
+      if (!alternator()) { break; }
+    }
     echo "ok\n";
   }
 
   echo "done\n";
 }
 
-foo(array(1,2,3), 123);
-foo(array(1,2,3), 123);
-foo(array(1,2,3), 123);
-foo(array(1,2,3), 123);
-foo(array(1,2,3), 123);
-foo(array(1,2,3), 123);
-foo(array(1,2,3), 'asd');
+
+<<__EntryPoint>>
+function main_invariant_load() :mixed{
+foo(vec[1,2,3], 123);
+foo(vec[1,2,3], 123);
+foo(vec[1,2,3], 123);
+foo(vec[1,2,3], 123);
+foo(vec[1,2,3], 123);
+foo(vec[1,2,3], 123);
+foo(vec[1,2,3], 'asd');
+}

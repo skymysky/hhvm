@@ -18,27 +18,12 @@
 #error "func-emitter-inl.h should only be included by func-emitter.h"
 #endif
 
+#include "hphp/util/assertions.h"
+
+#include <folly/Likely.h>
+
 namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
-
-template<class SerDe>
-void EHEntEmitter::serde(SerDe& sd) {
-  sd(m_type)
-    (m_base)
-    (m_past)
-    (m_iterId)
-    (m_handler)
-    (m_end)
-    (m_itRef)
-    (m_parentIndex)
-    ;
-}
-
-///////////////////////////////////////////////////////////////////////////////
-
-inline UnitEmitter& FuncEmitter::ue() const {
-  return m_ue;
-}
 
 inline PreClassEmitter* FuncEmitter::pce() const {
   return m_pce;
@@ -53,9 +38,83 @@ inline Id FuncEmitter::id() const {
   return m_id;
 }
 
-inline void FuncEmitter::setIds(int sn, Id id) {
-  m_sn = sn;
-  m_id = id;
+///////////////////////////////////////////////////////////////////////////////
+// Bytecode
+
+inline const unsigned char* FuncEmitter::bc() const {
+  return m_bc.ptr();
+}
+
+inline Offset FuncEmitter::bcPos() const {
+  return m_bclen;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// Bytecode emit.
+
+inline void FuncEmitter::emitOp(Op op) {
+  encode_op(op, [&](uint8_t byte) { emitByte(byte); });
+}
+
+inline void FuncEmitter::emitByte(unsigned char n, int64_t pos) {
+  emitImpl(n, pos);
+}
+
+inline void FuncEmitter::emitInt16(uint16_t n, int64_t pos) {
+  emitImpl(n, pos);
+}
+
+inline void FuncEmitter::emitInt32(int n, int64_t pos) {
+  emitImpl(n, pos);
+}
+
+inline void FuncEmitter::emitInt64(int64_t n, int64_t pos) {
+  emitImpl(n, pos);
+}
+
+inline void FuncEmitter::emitDouble(double n, int64_t pos) {
+  emitImpl(n, pos);
+}
+
+template<typename T>
+void FuncEmitter::emitIVA(T n) {
+  if (LIKELY((n & 0x7f) == n)) {
+    emitByte((unsigned char)n);
+  } else {
+    assertx((n & 0x7fffffff) == n);
+    emitInt32((n & 0x7fffff80) << 1 | 0x80 | (n & 0x7f));
+  }
+}
+
+inline void FuncEmitter::emitNamedLocal(NamedLocal loc) {
+  emitIVA(loc.name + 1);
+  emitIVA(loc.id);
+}
+
+template<class T>
+void FuncEmitter::emitImpl(T n, int64_t pos) {
+  assertx(m_bc.isPtr());
+  auto c = (unsigned char*)&n;
+  if (pos == -1) {
+    // Make sure m_bc is large enough.
+    auto p = m_bc.ptr();
+    while (m_bclen + sizeof(T) > m_bcmax) {
+      // If m_bcmax is 0 we haven't allocated a buffer yet so start with a size
+      // of BCMaxInit
+      m_bcmax = m_bcmax == 0 ? BCMaxInit : m_bcmax << 1;
+      p = (unsigned char*)realloc(p, m_bcmax);
+    }
+    memcpy(&p[m_bclen], c, sizeof(T));
+    m_bc = Func::BCPtr::FromPtr(p);
+    m_bclen += sizeof(T);
+  } else {
+    assertx(pos + sizeof(T) <= m_bclen);
+    auto p = m_bc.ptr();
+    for (uint32_t i = 0; i < sizeof(T); ++i) {
+      p[pos + i] = c[i];
+    }
+    m_bc = Func::BCPtr::FromPtr(p);
+  }
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -66,15 +125,12 @@ inline Id FuncEmitter::numLocals() const {
 }
 
 inline Id FuncEmitter::numNamedLocals() const {
-  return m_numLocals - m_numUnnamedLocals;
+  // Don't use m_numUnnamedLocals here, it isn't serialized to the repo
+  return m_localNames.size();
 }
 
 inline Id FuncEmitter::numIterators() const {
   return m_numIterators;
-}
-
-inline Id FuncEmitter::numClsRefSlots() const {
-  return m_numClsRefSlots;
 }
 
 inline Id FuncEmitter::numLiveIterators() const {
@@ -90,25 +146,14 @@ inline void FuncEmitter::setNumLiveIterators(Id id) {
   m_nextFreeIterator = id;
 }
 
-inline void FuncEmitter::setNumClsRefSlots(Id num) {
-  assertx(m_numClsRefSlots == 0);
-  m_numClsRefSlots = num;
+inline bool FuncEmitter::hasVar(const StringData* name_2) const {
+  assertx(name_2 != nullptr);
+  return m_localNames.contains(name_2);
 }
 
-inline bool FuncEmitter::hasVar(const StringData* name) const {
-  assertx(name != nullptr);
-  return m_localNames.find(name) != m_localNames.end();
-}
-
-inline Id FuncEmitter::lookupVarId(const StringData* name) const {
-  assertx(hasVar(name));
-  return m_localNames.find(name)->second;
-}
-
-inline void FuncEmitter::freeUnnamedLocal(Id id) {
-  assertx(m_activeUnnamedLocals > 0);
-  assertx(id == numNamedLocals() - 1 + m_activeUnnamedLocals);
-  --m_activeUnnamedLocals;
+inline Id FuncEmitter::lookupVarId(const StringData* name_2) const {
+  assertx(hasVar(name_2));
+  return m_localNames.find(name_2)->second;
 }
 
 inline void FuncEmitter::freeIterator(Id id) {
@@ -116,9 +161,9 @@ inline void FuncEmitter::freeIterator(Id id) {
   assertx(id == m_nextFreeIterator);
 }
 
-inline void FuncEmitter::appendParam(const StringData* name,
-                                     const ParamInfo& info) {
-  allocVarId(name);
+inline void FuncEmitter::appendParam(
+  const StringData* name_2, const Func::ParamInfo& info) {
+  allocVarId(name_2);
   params.push_back(info);
 }
 
@@ -129,20 +174,8 @@ inline const Func::NamedLocalsMap::Builder& FuncEmitter::localNameMap() const {
 ///////////////////////////////////////////////////////////////////////////////
 // Helper accessors.
 
-inline bool FuncEmitter::isPseudoMain() const {
-  return name->empty();
-}
-
 inline bool FuncEmitter::isMethod() const {
-  return !isPseudoMain() && pce();
-}
-
-inline bool FuncEmitter::isVariadic() const {
-  return params.size() && params[(params.size() - 1)].isVariadic();
-}
-
-inline bool FuncEmitter::isVariadicByRef() const {
-  return isVariadic() && params[(params.size() -1)].byRef;
+  return pce();
 }
 
 inline std::pair<int,int> FuncEmitter::getLocation() const {
@@ -158,47 +191,26 @@ inline void FuncEmitter::setLocation(int l1, int l2) {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// Serialization/Deserialization
+// Source locations.
 
-template<class SerDe>
-void FuncEmitter::serdeMetaData(SerDe& sd) {
-  // NOTE: name, top, and a few other fields currently handled outside of this.
-  Offset past_delta;
-  if (!SerDe::deserializing) {
-    past_delta = past - base;
+inline bool FuncEmitter::hasSourceLocInfo() const {
+  return !m_sourceLocTab.empty();
+}
+
+inline const LineTable& FuncEmitter::lineTable() const {
+  auto const p = m_lineTable.ptr();
+  if (!p) {
+    static LineTable empty;
+    return empty;
   }
+  return *p;
+}
 
-  sd(line1)
-    (line2)
-    (base)
-    (past_delta)
-    (attrs)
-    (hniReturnType)
-    (repoReturnType)
-    (repoAwaitedReturnType)
-    (docComment)
-    (m_numLocals)
-    (m_numIterators)
-    (m_numClsRefSlots)
-    (maxStackCells)
-    (m_repoBoolBitset)
+///////////////////////////////////////////////////////////////////////////////
+// Bytecode.
 
-    (params)
-    (m_localNames)
-    (staticVars)
-    (ehtab)
-    (fpitab)
-    (userAttributes)
-    (retTypeConstraint)
-    (retUserType)
-    (originalFilename)
-    ;
-
-  if (SerDe::deserializing) {
-    repoReturnType.resolveArray(ue());
-    repoAwaitedReturnType.resolveArray(ue());
-    past = base + past_delta;
-  }
+inline Offset FuncEmitter::offsetOf(const unsigned char* pc) const {
+  return pc - bc();
 }
 
 ///////////////////////////////////////////////////////////////////////////////

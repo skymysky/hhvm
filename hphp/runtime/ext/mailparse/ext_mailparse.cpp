@@ -24,7 +24,7 @@ namespace HPHP {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-static req::ptr<File> get_valid_file_resource(const Resource& fp) {
+static req::ptr<File> get_valid_file_resource(const OptResource& fp) {
   auto f = dyn_cast_or_null<File>(fp);
   if (f == nullptr || f->isClosed()) {
     raise_warning("Not a valid stream resource");
@@ -35,21 +35,21 @@ static req::ptr<File> get_valid_file_resource(const Resource& fp) {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-Resource HHVM_FUNCTION(mailparse_msg_create) {
-  return Resource(req::make<MimePart>());
+OptResource HHVM_FUNCTION(mailparse_msg_create) {
+  return OptResource(req::make<MimePart>());
 }
 
-bool HHVM_FUNCTION(mailparse_msg_free, const Resource& /*mimemail*/) {
+bool HHVM_FUNCTION(mailparse_msg_free, const OptResource& /*mimemail*/) {
   return true;
 }
 
-Variant HHVM_FUNCTION(mailparse_msg_parse_file, const String& filename) {
+Variant HHVM_FUNCTION(mailparse_msg_parse_file, const OptString& filename) {
   auto f = File::Open(filename, "rb");
   if (!f) return false;
 
   auto p = req::make<MimePart>();
   while (!f->eof()) {
-    String line = f->readLine();
+    OptString line = f->readLine();
     if (!line.isNull()) {
       if (!MimePart::ProcessLine(p, line)) {
         return false;
@@ -60,13 +60,13 @@ Variant HHVM_FUNCTION(mailparse_msg_parse_file, const String& filename) {
 }
 
 bool HHVM_FUNCTION(mailparse_msg_parse,
-                   const Resource& mimemail,
-                   const String& data) {
+                   const OptResource& mimemail,
+                   const OptString& data) {
   return cast<MimePart>(mimemail)->parse(data.data(), data.size());
 }
 
 Variant HHVM_FUNCTION(mailparse_msg_extract_part_file,
-                      const Resource& mimemail,
+                      const OptResource& mimemail,
                       const Variant& filename,
                       const Variant& callbackfunc /* = "" */) {
   return cast<MimePart>(mimemail)->
@@ -75,7 +75,7 @@ Variant HHVM_FUNCTION(mailparse_msg_extract_part_file,
 }
 
 Variant HHVM_FUNCTION(mailparse_msg_extract_whole_part_file,
-                      const Resource& mimemail,
+                      const OptResource& mimemail,
                       const Variant& filename,
                       const Variant& callbackfunc /* = "" */) {
   return cast<MimePart>(mimemail)->
@@ -83,7 +83,7 @@ Variant HHVM_FUNCTION(mailparse_msg_extract_whole_part_file,
 }
 
 Variant HHVM_FUNCTION(mailparse_msg_extract_part,
-                      const Resource& mimemail,
+                      const OptResource& mimemail,
                       const Variant& msgbody,
                       const Variant& callbackfunc /* = "" */) {
   return cast<MimePart>(mimemail)->
@@ -91,14 +91,14 @@ Variant HHVM_FUNCTION(mailparse_msg_extract_part,
             MimePart::Decode8Bit | MimePart::DecodeNoHeaders, false);
 }
 
-Array HHVM_FUNCTION(mailparse_msg_get_part_data, const Resource& mimemail) {
-  return cast<MimePart>(mimemail)->getPartData().toArray();
+Array HHVM_FUNCTION(mailparse_msg_get_part_data, const OptResource& mimemail) {
+  return cast<MimePart>(mimemail)->getPartData();
 }
 
 Variant HHVM_FUNCTION(mailparse_msg_get_part,
-                      const Resource& mimemail,
-                      const String& mimesection) {
-  Resource part =
+                      const OptResource& mimemail,
+                      const OptString& mimesection) {
+  OptResource part =
     cast<MimePart>(mimemail)->findByName(mimesection.c_str());
   if (part.isNull()) {
     raise_warning("cannot find section %s in message", mimesection.data());
@@ -107,7 +107,7 @@ Variant HHVM_FUNCTION(mailparse_msg_get_part,
   return part;
 }
 
-Array HHVM_FUNCTION(mailparse_msg_get_structure, const Resource& mimemail) {
+Array HHVM_FUNCTION(mailparse_msg_get_structure, const OptResource& mimemail) {
   return cast<MimePart>(mimemail)->getStructure();
 }
 
@@ -117,19 +117,19 @@ const StaticString
   s_is_group("is_group");
 
 Array HHVM_FUNCTION(mailparse_rfc822_parse_addresses,
-                    const String& addresses) {
+                    const OptString& addresses) {
   php_rfc822_tokenized_t *toks =
     php_mailparse_rfc822_tokenize(addresses.data(), 1);
   php_rfc822_addresses_t *addrs = php_rfc822_parse_address_tokens(toks);
 
-  Array ret = Array::Create();
+  Array ret = Array::CreateVec();
   for (int i = 0; i < addrs->naddrs; i++) {
-    Array item = Array::Create();
+    Array item = Array::CreateDict();
     if (addrs->addrs[i].name) {
-      item.set(s_display, String(addrs->addrs[i].name, CopyString));
+      item.set(s_display, OptString(addrs->addrs[i].name, CopyString));
     }
     if (addrs->addrs[i].address) {
-      item.set(s_address, String(addrs->addrs[i].address, CopyString));
+      item.set(s_address, OptString(addrs->addrs[i].address, CopyString));
     }
     item.set(s_is_group, (bool)addrs->addrs[i].is_group);
     ret.append(item);
@@ -151,9 +151,9 @@ static int mailparse_stream_flush(void *stream) {
 }
 
 bool HHVM_FUNCTION(mailparse_stream_encode,
-                   const Resource& sourcefp,
-                   const Resource& destfp,
-                   const String& encoding) {
+                   const OptResource& sourcefp,
+                   const OptResource& destfp,
+                   const OptString& encoding) {
   auto srcstream = get_valid_file_resource(sourcefp);
   if (!srcstream) {
     return false;
@@ -180,7 +180,7 @@ bool HHVM_FUNCTION(mailparse_stream_encode,
      * have the letter F encoded, so that MTAs do not stick a > character
      * in front of it and invalidate the content/signature */
     while (!srcstream->eof())  {
-      String line = srcstream->readLine();
+      OptString line = srcstream->readLine();
       if (!line.isNull()) {
         int i;
         if (strncmp(line.data(), "From ", 5) == 0) {
@@ -199,7 +199,7 @@ bool HHVM_FUNCTION(mailparse_stream_encode,
 
   } else {
     while (!srcstream->eof())  {
-      String data = srcstream->read();
+      OptString data = srcstream->read();
       if (!data.empty()) {
         const char *p = data.data();
         for (int i = 0; i < data.size(); i++) {
@@ -226,7 +226,7 @@ static size_t mailparse_do_uudecode(const req::ptr<File>& instream,
   if (outstream) {
     /* write to outstream */
     while (!instream->eof())  {
-      String line = instream->readLine(128);
+      OptString line = instream->readLine(128);
       if (line.isNull()) break;
 
       int x = 0;
@@ -252,7 +252,7 @@ static size_t mailparse_do_uudecode(const req::ptr<File>& instream,
      * This is separated from the version above to speed it up by a few cycles
      */
     while (!instream->eof())  {
-      String line = instream->readLine(128);
+      OptString line = instream->readLine(128);
       if (line.isNull()) break;
 
       int x = 0;
@@ -272,7 +272,7 @@ const StaticString
   s_filename("filename"),
   s_origfilename("origfilename");
 
-Variant HHVM_FUNCTION(mailparse_uudecode_all, const Resource& fp) {
+Variant HHVM_FUNCTION(mailparse_uudecode_all, const OptResource& fp) {
   auto instream = get_valid_file_resource(fp);
   if (!instream) {
     return false;
@@ -284,7 +284,7 @@ Variant HHVM_FUNCTION(mailparse_uudecode_all, const Resource& fp) {
   Array return_value;
   int nparts = 0;
   while (!instream->eof()) {
-    String line = instream->readLine();
+    OptString line = instream->readLine();
     if (line.isNull()) break;
 
     /* Look for the "begin " sequence that identifies a uuencoded file */
@@ -306,23 +306,23 @@ Variant HHVM_FUNCTION(mailparse_uudecode_all, const Resource& fp) {
 
       /* make the return an array */
       if (nparts == 0) {
-        return_value = Array::Create();
+        return_value = Array::CreateVec();
         /* create an initial item representing the file with all uuencoded
            parts removed */
-        Array item = Array::Create();
-        item.set(s_filename, String(outstream->getName()));
+        Array item = Array::CreateDict();
+        item.set(s_filename, OptString(outstream->getName()));
         return_value.append(item);
       }
 
       /* add an item */
-      Array item = Array::Create();
-      item.set(s_origfilename, String(origfilename, namelen, CopyString));
+      Array item = Array::CreateDict();
+      item.set(s_origfilename, OptString(origfilename, namelen, CopyString));
 
       /* create a temp file for the data */
       auto partstream = req::make<TempFile>(false);
       if (partstream)  {
         nparts++;
-        item.set(s_filename, String(partstream->getName()));
+        item.set(s_filename, OptString(partstream->getName()));
         return_value.append(item);
 
         /* decode it */
@@ -342,7 +342,7 @@ Variant HHVM_FUNCTION(mailparse_uudecode_all, const Resource& fp) {
 }
 
 Variant HHVM_FUNCTION(mailparse_determine_best_xfer_encoding,
-                      const Resource& fp) {
+                      const OptResource& fp) {
   auto stream = get_valid_file_resource(fp);
   if (!stream) {
     return false;
@@ -372,7 +372,7 @@ Variant HHVM_FUNCTION(mailparse_determine_best_xfer_encoding,
 
   char * name = (char *)mbfl_no2preferred_mime_name(bestenc);
   if (name) {
-    return String(name, CopyString);
+    return OptString(name, CopyString);
   }
   return false;
 }
@@ -380,8 +380,8 @@ Variant HHVM_FUNCTION(mailparse_determine_best_xfer_encoding,
 ///////////////////////////////////////////////////////////////////////////////
 
 struct MailparseExtension final : Extension {
-  MailparseExtension() : Extension("mailparse") { }
-  void moduleInit() override {
+  MailparseExtension() : Extension("mailparse", NO_EXTENSION_VERSION_YET, "hphp_hphpi") { }
+  void moduleRegisterNative() override {
     HHVM_FE(mailparse_msg_create);
     HHVM_FE(mailparse_msg_free);
     HHVM_FE(mailparse_msg_parse_file);
@@ -396,7 +396,6 @@ struct MailparseExtension final : Extension {
     HHVM_FE(mailparse_stream_encode);
     HHVM_FE(mailparse_uudecode_all);
     HHVM_FE(mailparse_determine_best_xfer_encoding);
-    loadSystemlib();
   }
 } s_mailparse_extension;
 

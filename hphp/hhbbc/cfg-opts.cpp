@@ -22,47 +22,91 @@
 #include "hphp/hhbbc/bc.h"
 #include "hphp/hhbbc/cfg.h"
 #include "hphp/hhbbc/dce.h"
-#include "hphp/hhbbc/unit-util.h"
+#include "hphp/hhbbc/func-util.h"
+#include "hphp/hhbbc/wide-func.h"
 
-namespace HPHP { namespace HHBBC {
+namespace HPHP::HHBBC {
 
-TRACE_SET_MOD(hhbbc_cfg);
+TRACE_SET_MOD(hhbbc_cfg)
 
 //////////////////////////////////////////////////////////////////////
 
-void remove_unreachable_blocks(const FuncAnalysis& ainfo) {
+static bool is_dead(const php::Block* blk) {
+  return blk->dead;
+}
+
+namespace {
+
+/*
+ * Remove exception handlers that has no effect, either because they just
+ * immediately rethrow the received exception, or they only unset locals
+ * before rethrowing at the top level, which is redundant with the unwinder.
+ */
+void remove_unnecessary_exception_handlers(const FuncAnalysis& ainfo,
+                                           php::WideFunc& func) {
+  auto& blocks = func.blocks();
+  auto remap = std::vector<Optional<std::tuple<BlockId, ExnNodeId>>>(
+    blocks.size(), std::nullopt);
+
+  // Visit exception handlers before the blocks using them.
+  for (auto it = ainfo.rpoBlocks.rbegin(); it != ainfo.rpoBlocks.rend(); ++it) {
+    auto& blk = blocks[*it];
+
+    // Apply the remap if this block handles exceptions with a remapped
+    // exception handler.
+    if (blk->throwExit != NoBlockId) {
+      if (auto const r = remap[blk->throwExit]) {
+        auto const mblk = blk.mutate();
+        std::tie(mblk->throwExit, mblk->exnNodeId) = *r;
+      }
+    }
+
+    // If this block looks like an exception handler that can be optimized away,
+    // add it to the remap.
+    if (is_single_throw(*blk) ||
+        (blk->throwExit == NoBlockId && is_unsetl_throw(*blk))) {
+      remap[*it] = std::make_tuple(blk->throwExit, blk->exnNodeId);
+    }
+  }
+}
+
+}
+
+void remove_unreachable_blocks(const FuncAnalysis& ainfo, php::WideFunc& func) {
   auto done_header = false;
   auto header = [&] {
     if (done_header) return;
     done_header = true;
-    FTRACE(2, "Remove unreachable blocks: {}\n", ainfo.ctx.func->name);
+    FTRACE(2, "Remove unreachable blocks: {}\n", func->name);
   };
 
-  auto make_unreachable = [&](borrowed_ptr<php::Block> blk) {
-    if (blk->id == NoBlockId) return false;
-    auto const& state = ainfo.bdata[blk->id].stateIn;
+  auto& blocks = func.blocks();
+
+  auto make_unreachable = [&](BlockId bid) {
+    auto const blk = blocks[bid].get();
+    if (is_dead(blk)) return false;
+    auto const& state = ainfo.bdata[bid].stateIn;
     if (!state.initialized) return true;
     if (!state.unreachable) return false;
-    return blk->hhbcs.size() != 2 ||
-           blk->hhbcs.back().op != Op::Fatal;
+    return !is_fatal_block(*blk);
   };
 
-  for (auto const& blk : ainfo.ctx.func->blocks) {
-    if (!make_unreachable(borrow(blk))) continue;
+  for (auto bid : func.blockRange()) {
+    if (!make_unreachable(bid)) continue;
     header();
-    FTRACE(2, "Marking {} unreachable\n", blk->id);
+    FTRACE(2, "Marking {} unreachable\n", bid);
+    auto const blk = func.blocks()[bid].mutate();
     auto const srcLoc = blk->hhbcs.front().srcLoc;
     blk->hhbcs = {
-      bc_with_loc(srcLoc, bc::String { s_unreachable.get() }),
-      bc_with_loc(srcLoc, bc::Fatal { FatalOp::Runtime })
+      bc_with_loc(srcLoc, bc::StaticAnalysisError {})
     };
     blk->fallthrough = NoBlockId;
-    blk->throwExits = {};
-    blk->unwindExits = {};
-    blk->exnNode = nullptr;
+    blk->throwExit = NoBlockId;
+    blk->exnNodeId = NoExnNodeId;
+    assertx(is_fatal_block(*blk));
   }
 
-  if (!options.RemoveDeadBlocks) return;
+  remove_unnecessary_exception_handlers(ainfo, func);
 
   auto reachable = [&](BlockId id) {
     if (id == NoBlockId) return false;
@@ -70,35 +114,49 @@ void remove_unreachable_blocks(const FuncAnalysis& ainfo) {
     return state.initialized && !state.unreachable;
   };
 
-  for (auto const& blk : ainfo.rpoBlocks) {
-    if (!reachable(blk->id)) continue;
+  for (auto const bid : ainfo.rpoBlocks) {
+    if (!reachable(bid)) continue;
     auto reachableTarget = NoBlockId;
     auto hasUnreachableTargets = false;
-    forEachNormalSuccessor(*blk, [&] (BlockId id) {
+    forEachNormalSuccessor(
+      *blocks[bid],
+      [&] (BlockId id) {
         if (reachable(id)) {
           reachableTarget = id;
         } else {
           hasUnreachableTargets = true;
         }
-      });
+      }
+    );
+
     if (!hasUnreachableTargets || reachableTarget == NoBlockId) continue;
     header();
-    switch (blk->hhbcs.back().op) {
+    switch (blocks[bid]->hhbcs.back().op) {
       case Op::JmpNZ:
-      case Op::JmpZ:
-        FTRACE(2, "blk: {} - jcc -> jmp {}\n", blk->id, reachableTarget);
+      case Op::JmpZ: {
+        FTRACE(2, "blk: {} - jcc -> jmp {}\n", bid, reachableTarget);
+        auto const blk = func.blocks()[bid].mutate();
         blk->hhbcs.back() = bc_with_loc(blk->hhbcs.back().srcLoc, bc::PopC {});
         blk->fallthrough = reachableTarget;
         break;
-      default:
-        FTRACE(2, "blk: {} -", blk->id, reachableTarget);
-        forEachNormalSuccessor(*blk, [&] (const BlockId& id) {
+      }
+      case Op::Switch:
+      case Op::SSwitch: {
+        FTRACE(2, "blk: {} -", bid);
+        auto const blk = func.blocks()[bid].mutate();
+        forEachNormalSuccessor(
+          *blk,
+          [&] (BlockId& id) {
             if (!reachable(id)) {
               FTRACE(2, " {}->{}", id, reachableTarget);
-              const_cast<BlockId&>(id) = reachableTarget;
+              id = reachableTarget;
             }
-          });
+          }
+        );
         FTRACE(2, "\n");
+        break;
+      }
+      default:
         break;
     }
   }
@@ -113,6 +171,8 @@ struct MergeBlockInfo {
   uint8_t multiplePreds    : 1;
   // Block has more than one successor
   uint8_t multipleSuccs    : 1;
+  // Block has simple Nop successor.
+  uint8_t followSucc       : 1;
 
   // Block contains a sequence that could be part of a switch
   uint8_t couldBeSwitch    : 1;
@@ -120,21 +180,25 @@ struct MergeBlockInfo {
   uint8_t onlySwitch       : 1;
   // Block follows the "default" of a prior switch sequence
   uint8_t followsSwitch    : 1;
+
+  // Block will not throw
+  uint8_t noThrow          : 1;
 };
 
 struct SwitchInfo {
   union Case { SString s; int64_t i; };
   std::vector<std::pair<Case,BlockId>> cases;
   BlockId defaultBlock = NoBlockId;
-  LocalId switchLoc    = NoLocalId;
+  NamedLocal switchLoc{};
   DataType kind;
 };
 
-bool analyzeSwitch(const php::Block& blk,
+bool analyzeSwitch(const php::WideFunc& func, BlockId bid,
                    std::vector<MergeBlockInfo>& blkInfos,
                    SwitchInfo* switchInfo) {
+  auto const& blk = *func.blocks()[bid];
   auto const jmp = &blk.hhbcs.back();
-  auto& blkInfo = blkInfos[blk.id];
+  auto& blkInfo = blkInfos[bid];
 
   switch (jmp->op) {
     case Op::JmpZ:
@@ -143,11 +207,13 @@ bool analyzeSwitch(const php::Block& blk,
       auto const& cmp = jmp[-1];
       if (cmp.op != Op::Eq && cmp.op != Op::Neq) return false;
       auto check = [&] (const Bytecode& arg1, const Bytecode& arg2) -> bool {
-        LocalId loc;
+        NamedLocal loc;
         if (arg2.op == Op::CGetL) {
-          loc = arg2.CGetL.loc1;
+          loc = arg2.CGetL.nloc1;
+        } else if (arg2.op == Op::CGetQuietL) {
+          loc = NamedLocal{kInvalidLocalName, arg2.CGetQuietL.loc1};
         } else if (arg2.op == Op::CGetL2 && &arg2 == &arg1 + 1) {
-          loc = arg2.CGetL2.loc1;
+          loc = arg2.CGetL2.nloc1;
         } else {
           return false;
         }
@@ -170,7 +236,7 @@ bool analyzeSwitch(const php::Block& blk,
           }
         }
         auto const jmpTarget = jmp->op == Op::JmpNZ ?
-          jmp->JmpNZ.target : jmp->JmpZ.target;
+          jmp->JmpNZ.target1 : jmp->JmpZ.target1;
         BlockId caseTarget, defaultBlock;
         if ((jmp->op == Op::JmpNZ) == (cmp.op == Op::Eq)) {
           defaultBlock = blk.fallthrough;
@@ -194,14 +260,17 @@ bool analyzeSwitch(const php::Block& blk,
     case Op::SSwitch: {
       if (blk.hhbcs.size() < 2) return false;
       auto const& cgetl = jmp[-1];
-      if (cgetl.op != Op::CGetL) return false;
+      if (cgetl.op != Op::CGetL && cgetl.op != Op::CGetQuietL) return false;
+      auto const loc = cgetl.op == Op::CGetQuietL
+                       ? NamedLocal{kInvalidLocalName, cgetl.CGetQuietL.loc1}
+                       : cgetl.CGetL.nloc1;
       auto const dt = jmp->op == Op::Switch ? KindOfInt64 : KindOfString;
       if (switchInfo) {
         if (switchInfo->cases.size()) {
-          if (cgetl.CGetL.loc1 != switchInfo->switchLoc) return false;
+          if (loc != switchInfo->switchLoc) return false;
           if (dt != switchInfo->kind) return false;
         } else {
-          switchInfo->switchLoc = cgetl.CGetL.loc1;
+          switchInfo->switchLoc = loc;
           switchInfo->kind = dt;
         }
       }
@@ -275,19 +344,18 @@ Bytecode buildStringSwitch(SwitchInfo& switchInfo) {
   return { bc::SSwitch { std::move(sswitchTab) } };
 }
 
-bool buildSwitches(php::Func& func,
-                   borrowed_ptr<php::Block> blk,
+bool buildSwitches(php::WideFunc& func, BlockId bid,
                    std::vector<MergeBlockInfo>& blkInfos) {
   SwitchInfo switchInfo;
   std::vector<BlockId> blocks;
-  if (!analyzeSwitch(*blk, blkInfos, &switchInfo)) return false;
-  blkInfos[blk->id].couldBeSwitch = false;
-  blkInfos[blk->id].onlySwitch = false;
+  if (!analyzeSwitch(func, bid, blkInfos, &switchInfo)) return false;
+  blkInfos[bid].couldBeSwitch = false;
+  blkInfos[bid].onlySwitch = false;
   while (true) {
     auto const& bInfo = blkInfos[switchInfo.defaultBlock];
-    auto const nxt = borrow(func.blocks[switchInfo.defaultBlock]);
+    auto const nxtId = switchInfo.defaultBlock;
     if (bInfo.onlySwitch && !bInfo.multiplePreds &&
-        analyzeSwitch(*nxt, blkInfos, &switchInfo)) {
+        analyzeSwitch(func, nxtId, blkInfos, &switchInfo)) {
       blocks.push_back(switchInfo.defaultBlock);
       continue;
     }
@@ -298,6 +366,7 @@ bool buildSwitches(php::Func& func,
       auto bc = switchInfo.kind == KindOfInt64 ?
         buildIntSwitch(switchInfo) : buildStringSwitch(switchInfo);
       if (bc.op != Op::Nop) {
+        auto const blk = func.blocks()[bid].mutate();
         auto it = blk->hhbcs.end();
         // blk->fallthrough implies it was a JmpZ JmpNZ block,
         // which means we have exactly 4 instructions making up
@@ -317,115 +386,53 @@ bool buildSwitches(php::Func& func,
         blk->fallthrough = NoBlockId;
         for (auto id : blocks) {
           if (blkInfos[id].multiplePreds) continue;
-          auto const removed = borrow(func.blocks[id]);
-          removed->id = NoBlockId;
+          auto const removed = func.blocks()[id].mutate();
+          removed->dead = true;
           removed->hhbcs = { bc::Nop {} };
           removed->fallthrough = NoBlockId;
-          removed->throwExits = {};
-          removed->unwindExits = {};
-          removed->exnNode = nullptr;
+          removed->throwExit = NoBlockId;
+          removed->exnNodeId = NoExnNodeId;
         }
         ret = true;
       }
     }
-    return (bInfo.couldBeSwitch && buildSwitches(func, nxt, blkInfos)) || ret;
-  }
-}
-
-bool strip_exn_tree(const php::Func& func,
-                    CompactVector<std::unique_ptr<php::ExnNode>>& nodes,
-                    const hphp_fast_set<borrowed_ptr<php::ExnNode>>& seenNodes,
-                    uint32_t& nextId) {
-  auto it = std::remove_if(nodes.begin(), nodes.end(),
-                           [&] (const std::unique_ptr<php::ExnNode>& node) {
-                             if (seenNodes.count(borrow(node))) return false;
-                             FTRACE(2, "Stripping ExnNode {}\n", node->id);
-                             return true;
-                           });
-  auto ret = false;
-  if (it != nodes.end()) {
-    nodes.erase(it, nodes.end());
-    ret = true;
-  }
-  for (auto& n : nodes) {
-    n->id = nextId++;
-    if (strip_exn_tree(func, n->children, seenNodes, nextId)) {
+    if (bInfo.couldBeSwitch && buildSwitches(func, nxtId, blkInfos)) {
       ret = true;
     }
+    return ret;
   }
-
-  return ret;
 }
 
 }
 
-bool rebuild_exn_tree(const FuncAnalysis& ainfo) {
-  auto& func = *ainfo.ctx.func;
-  Trace::Bump bumper{
-    Trace::hhbbc_cfg, kSystemLibBump, is_systemlib_part(*func.unit)
-  };
-  FTRACE(4, "Rebuild exn tree: {}\n", func.name);
+bool control_flow_opts(const FuncAnalysis& ainfo, php::WideFunc& func) {
+  FTRACE(2, "control_flow_opts: {}\n", func->name);
 
-  auto reachable = [&](BlockId id) {
-    if (id == NoBlockId) return false;
-    auto const& state = ainfo.bdata[id].stateIn;
-    return state.initialized && !state.unreachable;
-  };
-  hphp_fast_set<borrowed_ptr<php::ExnNode>> seenNodes;
-
-  for (auto const& blk : ainfo.rpoBlocks) {
-    if (!reachable(blk->id)) {
-      FTRACE(4, "Unreachable: {}\n", blk->id);
-      continue;
-    }
-    if (auto node = blk->exnNode) {
-      do {
-        if (!seenNodes.insert(node).second) break;
-      } while ((node = node->parent) != nullptr);
-    }
-  }
-
-  uint32_t nextId = 0;
-  if (!strip_exn_tree(func, func.exnNodes, seenNodes, nextId)) {
-    return false;
-  }
-
-  for (auto const& blk : func.blocks) {
-    if (!reachable(blk->id)) {
-      blk->exnNode = nullptr;
-      blk->throwExits = {};
-      blk->unwindExits = {};
-      continue;
-    }
-  }
-
-  return true;
-}
-
-bool control_flow_opts(const FuncAnalysis& ainfo) {
-  auto& func = *ainfo.ctx.func;
-  FTRACE(2, "control_flow_opts: {}\n", func.name);
-
-  std::vector<MergeBlockInfo> blockInfo(func.blocks.size(), MergeBlockInfo {});
+  std::vector<MergeBlockInfo> blockInfo(
+      func.blocks().size(), MergeBlockInfo {});
 
   bool anyChanges = false;
 
   auto reachable = [&](BlockId id) {
+    if (is_dead(func.blocks()[id].get())) return false;
     auto const& state = ainfo.bdata[id].stateIn;
     return state.initialized && !state.unreachable;
   };
+
   // find all the blocks with multiple preds; they can't be merged
   // into their predecessors
-  for (auto const& blk : func.blocks) {
-    if (blk->id == NoBlockId) continue;
-    auto& bbi = blockInfo[blk->id];
+  for (auto bid : func.blockRange()) {
+    auto& cblk = func.blocks()[bid];
+    if (is_dead(cblk.get())) continue;
+    auto& bbi = blockInfo[bid];
+    bbi.noThrow = ainfo.bdata[bid].noThrow;
     int numSucc = 0;
-    if (!reachable(blk->id)) {
+    if (!reachable(bid)) {
       bbi.multiplePreds = true;
       bbi.multipleSuccs = true;
       continue;
     } else {
-      analyzeSwitch(*blk, blockInfo, nullptr);
+      analyzeSwitch(func, bid, blockInfo, nullptr);
     }
     auto handleSucc = [&] (BlockId succId) {
       auto& bsi = blockInfo[succId];
@@ -435,72 +442,247 @@ bool control_flow_opts(const FuncAnalysis& ainfo) {
         bsi.hasPred = true;
       }
     };
-    forEachNormalSuccessor(*blk, [&](const BlockId& succId) {
-        auto skip = next_real_block(func, succId);
-        if (skip != succId) {
-          const_cast<BlockId&>(succId) = skip;
-          anyChanges = true;
+    forEachNormalSuccessor(
+      *cblk,
+      [&] (BlockId succId) {
+        if (cblk->hhbcs.back().op == Op::Enter) {
+          // Enter must always point to the main func entry.
+          handleSucc(succId);
+        } else {
+          auto const realSucc = next_real_block(func, succId);
+          if (succId != realSucc) bbi.followSucc = true;
+          handleSucc(realSucc);
         }
-        handleSucc(succId);
         numSucc++;
-      });
-    for (auto& ex : blk->throwExits)  handleSucc(ex);
-    for (auto& ex : blk->unwindExits) handleSucc(ex);
+      }
+    );
+    // Attempt to jump thread the catch blocks again, in the hope of
+    // having two adjacent blocks end up with the same catch block.
+    auto const nextCatch =
+      next_catch_block(func, cblk->throwExit, cblk->exnNodeId);
+    if (nextCatch.first != cblk->throwExit ||
+        nextCatch.second != cblk->exnNodeId) {
+      anyChanges = true;
+      auto const blk = cblk.mutate();
+      blk->throwExit = nextCatch.first;
+      blk->exnNodeId = nextCatch.second;
+    }
+    if (cblk->throwExit != NoBlockId) handleSucc(cblk->throwExit);
     if (numSucc > 1) bbi.multipleSuccs = true;
   }
-  blockInfo[func.mainEntry].multiplePreds = true;
-  for (auto const blkId: func.dvEntries) {
+  blockInfo[func->mainEntry].multiplePreds = true;
+  for (auto const blkId: func->dvEntries) {
     if (blkId != NoBlockId) {
       blockInfo[blkId].multiplePreds = true;
     }
   }
+  for (auto bid : func.blockRange()) {
+    if (blockInfo[bid].followSucc) {
+      auto const blk = func.blocks()[bid].mutate();
+      assertx(blk->hhbcs.back().op != Op::Enter);
+      forEachNormalSuccessor(
+        *blk,
+        [&] (BlockId& succId) {
+          auto skip = next_real_block(func, succId);
+          auto const criticalEdge = blockInfo[bid].multipleSuccs
+                                    && blockInfo[skip].multiplePreds;
+          if (skip != succId) {
+            if (!criticalEdge) anyChanges = true;
+            succId = skip;
+          }
+        }
+      );
+    }
+  }
 
-  for (auto& blk : func.blocks) {
-    if (blk->id == NoBlockId) continue;
-    while (blk->fallthrough != NoBlockId) {
-      auto nxt = borrow(func.blocks[blk->fallthrough]);
-      if (blockInfo[blk->id].multipleSuccs ||
-          blockInfo[nxt->id].multiplePreds ||
-          blk->exnNode != nxt->exnNode ||
-          blk->section != nxt->section ||
-          blk->throwExits != nxt->throwExits) {
-        break;
+  for (auto bid : func.blockRange()) {
+    auto& cblk = func.blocks()[bid];
+    if (is_dead(cblk.get())) continue;
+
+    while (cblk->fallthrough != NoBlockId) {
+      auto const nid = cblk->fallthrough;
+      auto& cnxt = func.blocks()[nid];
+      if (blockInfo[bid].multipleSuccs || blockInfo[nid].multiplePreds) break;
+
+      // If the two blocks have different catch blocks, we might still
+      // be able to combine them. If one (or both) of the blocks are
+      // no throw, it doesn't matter what the catch block is, because
+      // its unreachable.
+      auto useNextCatch = false;
+      if (cblk->exnNodeId != cnxt->exnNodeId ||
+          cblk->throwExit != cnxt->throwExit) {
+        auto const noThrow = blockInfo[bid].noThrow;
+        auto const nextNoThrow = blockInfo[cblk->fallthrough].noThrow;
+        if (!nextNoThrow && !noThrow) break;
+
+        // Don't merge blocks containing these instructions because it
+        // can produce bytecode which will fail the verifier.
+        auto const unsafe = [] (const Bytecode& bc) {
+          switch (bc.op) {
+            case Op::IterFree:
+              return true;
+            default:
+              return false;
+          }
+        };
+        if (std::any_of(begin(cblk->hhbcs), end(cblk->hhbcs), unsafe)) break;
+        if (std::any_of(begin(cnxt->hhbcs), end(cnxt->hhbcs), unsafe)) break;
+
+        useNextCatch = noThrow;
       }
 
-      FTRACE(2, "   merging: {} into {}\n", nxt->id, blk->id);
-      auto& bInfo = blockInfo[blk->id];
-      auto const& nInfo = blockInfo[nxt->id];
+      FTRACE(2, "   merging: {} into {}\n", nid, bid);
+      auto& bInfo = blockInfo[bid];
+      auto const& nInfo = blockInfo[nid];
       bInfo.multipleSuccs = nInfo.multipleSuccs;
       bInfo.couldBeSwitch = nInfo.couldBeSwitch;
       bInfo.onlySwitch = false;
+      bInfo.noThrow &= nInfo.noThrow;
 
-      blk->fallthrough = nxt->fallthrough;
-      blk->fallthroughNS = nxt->fallthroughNS;
-      // The predecessor should not have any unwind exits (because that
-      // would make the block terminal), while the successor might.
-      assert(blk->unwindExits.empty());
-      blk->unwindExits = nxt->unwindExits;
-      std::copy(nxt->hhbcs.begin(), nxt->hhbcs.end(),
+      auto const blk = func.blocks()[bid].mutate();
+      blk->fallthrough = cnxt->fallthrough;
+      if (useNextCatch) {
+        blk->throwExit = cnxt->throwExit;
+        blk->exnNodeId = cnxt->exnNodeId;
+      }
+      std::copy(cnxt->hhbcs.begin(), cnxt->hhbcs.end(),
                 std::back_inserter(blk->hhbcs));
+      auto const nxt = func.blocks()[nid].mutate();
       nxt->fallthrough = NoBlockId;
-      nxt->id = NoBlockId;
+      nxt->throwExit = NoBlockId;
+      nxt->exnNodeId = NoExnNodeId;
+      nxt->dead = true;
       nxt->hhbcs = { bc::Nop {} };
       anyChanges = true;
     }
-    auto const& bInfo = blockInfo[blk->id];
+
+    auto& bInfo = blockInfo[bid];
+
     if (bInfo.couldBeSwitch &&
         (bInfo.multiplePreds || !bInfo.onlySwitch || !bInfo.followsSwitch)) {
       // This block looks like it could be part of a switch, and it's
       // not in the middle of a sequence of such blocks.
-      if (buildSwitches(func, borrow(blk), blockInfo)) {
+      if (buildSwitches(func, bid, blockInfo)) {
         anyChanges = true;
       }
+    }
+
+    // Turn a conditional jump to the same block into an unconditional
+    // jump. This can make the source of the conditional jump dead.
+    auto const jmpTarget = [&] () -> Optional<BlockId> {
+      auto const& lastOp = cblk->hhbcs.back();
+      if (lastOp.op == Op::JmpZ)  return lastOp.JmpZ.target1;
+      if (lastOp.op == Op::JmpNZ) return lastOp.JmpNZ.target1;
+      return std::nullopt;
+    }();
+
+    if (jmpTarget && cblk->fallthrough == *jmpTarget) {
+      FTRACE(2, "   removing redundant conditional jmp in {}\n", bid);
+      auto const blk = func.blocks()[bid].mutate();
+      blk->hhbcs.back() = bc_with_loc(blk->hhbcs.back().srcLoc, bc::PopC {});
+      bInfo.multipleSuccs = false;
+      anyChanges = true;
     }
   }
 
   return anyChanges;
 }
 
+void split_critical_edges(const IIndex& index, FuncAnalysis& ainfo,
+                          php::WideFunc& func) {
+  // Changed tracks if we need to recompute RPO.
+  auto changed = false;
+  assertx(func.blocks().size() == ainfo.bdata.size());
+
+  // Makes an empty block and inserts it between src and dst.  Since we can't
+  // have empty blocks it actually stores a Nop in it to keep everyone happy.
+  // The block will have the same exception node id, and throw exit block as
+  // the src block.
+  //
+  // ainfo is not updated with the correct rpo info by this helper, but is
+  // updated with the correct state info.
+  auto const split_edge = [&](BlockId srcBid, php::Block* srcBlk,
+                              BlockId dstBid) {
+    assertx(srcBlk->hhbcs.back().op != Op::Enter);
+    auto const srcLoc = srcBlk->hhbcs.back().srcLoc;
+    auto const newBid = make_block(func, srcBlk);
+    auto const newBlk = func.blocks()[newBid].mutate();
+    newBlk->hhbcs = { bc_with_loc(srcLoc, bc::Nop{}) };
+    newBlk->fallthrough = dstBid;
+
+    UNUSED bool replacedDstTarget = false;
+    forEachNormalSuccessor(*srcBlk, [&] (BlockId& bid) {
+      if (bid == dstBid) {
+        bid = newBid;
+        replacedDstTarget = true;
+      }
+    });
+    assertx(replacedDstTarget);
+
+    auto collect = CollectedInfo {
+      index, ainfo.ctx, nullptr,
+      CollectionOpts{}, nullptr, &ainfo
+    };
+    auto const ctx = AnalysisContext { ainfo.ctx.unit, func, ainfo.ctx.cls };
+    ainfo.bdata.push_back({
+      0, // We renumber the blocks at the end of the function.
+      locally_propagated_bid_state(index, ctx, collect, srcBid,
+                                   ainfo.bdata[srcBid].stateIn,
+                                   newBid)
+    });
+    assertx(func.blocks().size() == ainfo.bdata.size());
+
+    changed = true;
+  };
+
+  boost::dynamic_bitset<> haveSeenPred(func.blocks().size());
+  boost::dynamic_bitset<> hasMultiplePreds(func.blocks().size());
+  boost::dynamic_bitset<> hasMultipleSuccs(func.blocks().size());
+  // Switches can have the same successor for multiple cases, and we only want
+  // to split the edge once.
+  boost::dynamic_bitset<> seenSuccs(func.blocks().size());
+  for (auto bid : func.blockRange()) {
+    auto& blk = func.blocks()[bid];
+
+    int succCount = 0;
+    seenSuccs.reset();
+    forEachNormalSuccessor(*blk, [&] (BlockId succBid) {
+      if (seenSuccs[succBid]) return;
+      seenSuccs[succBid] = true;
+      if (haveSeenPred[succBid]) {
+        hasMultiplePreds[succBid] = true;
+      } else {
+        haveSeenPred[succBid] = true;
+      }
+      succCount++;
+    });
+
+    hasMultipleSuccs[bid] = succCount > 1;
+  }
+
+  for (auto bid : func.blockRange()) {
+    if (!hasMultipleSuccs[bid]) continue;
+    auto blk = func.blocks()[bid];
+    seenSuccs.reset();
+    forEachNormalSuccessor(*blk, [&] (BlockId succBid) {
+      if (hasMultiplePreds[succBid] && !seenSuccs[succBid]) {
+        seenSuccs[succBid] = true;
+        split_edge(bid, func.blocks()[bid].mutate(), succBid);
+      }
+    });
+  }
+
+  if (changed) {
+    // Recompute the rpo ids.
+    assertx(func.blocks().size() == ainfo.bdata.size());
+    ainfo.rpoBlocks = rpoSortAddDVs(func);
+    assertx(ainfo.rpoBlocks.size() <= ainfo.bdata.size());
+    for (size_t rpoId = 0; rpoId < ainfo.rpoBlocks.size(); ++rpoId) {
+      ainfo.bdata[ainfo.rpoBlocks[rpoId]].rpoId = rpoId;
+    }
+  }
+}
+
 //////////////////////////////////////////////////////////////////////
 
-}}
+}

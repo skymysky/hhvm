@@ -1,0 +1,136 @@
+// Copyright (c) Facebook, Inc. and its affiliates.
+//
+// This source code is licensed under the MIT license found in the
+// LICENSE file in the "hack" directory of this source tree.
+
+use core_utils_rust as utils;
+use emit_type_hint::Kind;
+use env::Env;
+use env::emitter::Emitter;
+use error::Result;
+use ffi::Maybe;
+use hhbc::Coeffects;
+use hhbc::Constant;
+use hhbc::Function;
+use hhbc::FunctionFlags;
+use hhbc::Span;
+use hhbc::TypedValue;
+use hhbc::VerifyRetKind;
+use hhbc_string_utils::strip_global_ns;
+use hhvm_types_ffi::ffi::Attr;
+use instruction_sequence::InstrSeq;
+use instruction_sequence::instr;
+use oxidized::ast;
+
+use crate::emit_body;
+use crate::emit_expression;
+
+fn emit_constant_cinit<'a>(
+    e: &mut Emitter,
+    env: &mut Env<'a>,
+    constant: &'a ast::Gconst,
+    init: Option<InstrSeq>,
+) -> Result<Option<Function>> {
+    let const_name = hhbc::ConstName::from_ast_name(&constant.name.1);
+    let (ns, name) = utils::split_ns_from_name(const_name.as_str());
+    let name = String::new() + strip_global_ns(ns) + "86cinit_" + name;
+    let original_name = hhbc::FunctionName::intern(&name);
+    let ret = constant.type_.as_ref();
+    let return_type = ret
+        .map(|h| {
+            emit_type_hint::hint_to_type_info(
+                &Kind::Return,
+                false, /* skipawaitable */
+                false, /* nullable */
+                &[],   /* tparams */
+                h,
+            )
+        })
+        .transpose()?;
+    init.map(|instrs| {
+        let verify_kind = match return_type {
+            None => VerifyRetKind::None,
+            Some(_) => VerifyRetKind::All,
+        };
+        let instrs = InstrSeq::gather(vec![instrs, instr::ret_c(verify_kind)]);
+        let mut attrs = Attr::AttrNoInjection;
+        attrs.set(Attr::AttrPersistent, e.systemlib());
+        attrs.set(Attr::AttrBuiltin, e.systemlib());
+        let body = emit_body::make_body(
+            e,
+            instrs,
+            vec![],
+            false,  /* is_memoize_wrapper */
+            false,  /* is_memoize_wrapper_lsb */
+            vec![], /* upper_bounds */
+            vec![], /* tparam_info */
+            vec![], /* attributes */
+            attrs,
+            Coeffects::default(),
+            vec![], /* params */
+            return_type,
+            None, /* doc_comment */
+            Some(env),
+            Span::from_pos(&constant.span),
+        )?;
+
+        Ok(Function {
+            name: original_name,
+            body,
+            flags: FunctionFlags::empty(),
+        })
+    })
+    .transpose()
+}
+
+fn emit_constant<'a>(
+    e: &mut Emitter,
+    env: &mut Env<'a>,
+    constant: &'a ast::Gconst,
+) -> Result<(Constant, Option<Function>)> {
+    let (c, init) = from_ast(e, env, &constant.name, false, Some(&constant.value))?;
+    let f = emit_constant_cinit(e, env, constant, init)?;
+    Ok((c, f))
+}
+
+pub fn emit_constants_from_program<'a>(
+    e: &mut Emitter,
+    env: &mut Env<'a>,
+    defs: &'a [ast::Def],
+) -> Result<(Vec<Constant>, Vec<Function>)> {
+    let const_tuples = defs
+        .iter()
+        .filter_map(|d| d.as_constant().map(|c| emit_constant(e, env, c)))
+        .collect::<Result<Vec<_>>>()?;
+    let (contants, inits): (Vec<_>, Vec<_>) = const_tuples.into_iter().unzip();
+    Ok((contants, inits.into_iter().flatten().collect()))
+}
+
+pub fn from_ast<'a>(
+    emitter: &mut Emitter,
+    env: &Env<'a>,
+    id: &'a ast::Id,
+    is_abstract: bool,
+    expr: Option<&ast::Expr>,
+) -> Result<(Constant, Option<InstrSeq>)> {
+    let (value, initializer_instrs) = match expr {
+        None => (None, None),
+        Some(init) => match constant_folder::expr_to_typed_value(emitter, &env.scope, init) {
+            Ok(v) => (Some(v), None),
+            Err(_) => (
+                Some(TypedValue::Uninit),
+                Some(emit_expression::emit_expr(emitter, env, init)?),
+            ),
+        },
+    };
+    let mut attrs = Attr::AttrNone;
+    attrs.set(Attr::AttrPersistent, emitter.systemlib());
+    attrs.set(Attr::AttrAbstract, is_abstract);
+
+    let constant = Constant {
+        name: hhbc::ConstName::from_ast_name(id.name()),
+        value: Maybe::from(value),
+        attrs,
+    };
+    Ok((constant, initializer_instrs))
+}

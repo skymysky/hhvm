@@ -1,6 +1,6 @@
-<?php
+<?hh
 
-function main() {
+function main() :mixed{
   $ch = curl_init();
   var_dump(is_resource($ch));
   curl_close($ch);
@@ -12,4 +12,8 @@ function main() {
   var_dump(is_resource($ch));
 }
 
+
+<<__EntryPoint>>
+function main_handle_not_resource_after_close() :mixed{
 main();
+}

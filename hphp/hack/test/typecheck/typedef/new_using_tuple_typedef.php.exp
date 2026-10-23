@@ -1,0 +1,15 @@
+error: Naming[2052] Expected a `class` but got a type alias. [1]
+-> Alias definition is here. [2]
+
+new_using_tuple_typedef.php:6:12
+1 | <?hh
+2 | 
+3 | newtype T = (int, float);
+  |         ^ [2]
+4 | 
+5 | function f(): void {
+6 |   $f = new T(42);
+  |            ^ [1]
+7 | }
+
+1 error found

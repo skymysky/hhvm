@@ -12,21 +12,22 @@ namespace Test {
     }
   }
 
-  function foo() {
+  function foo() :mixed{
     $custom_set = new ImmSet();
-    var_dump($custom_set instanceof \HH\ImmSet); // False
+    \var_dump($custom_set is \HH\ImmSet); // False
   }
 
 }
 
 namespace {
 
-  function bar() {
+  function bar() :mixed{
     $builtin_set = new ImmSet();
-    var_dump($builtin_set instanceof HH\ImmSet); // True
+    \var_dump($builtin_set is HH\ImmSet); // True
   }
 
+  <<__EntryPoint>> function main(): void {
   Test\foo();
   bar();
+  }
 }
-

@@ -1,0 +1,15 @@
+error: Naming[2050] Variable `$undefined` is undefined, or not always defined. [1]
+-> Did you mean `$this` instead? [2]
+
+T219758824.php:7:14
+5 |   public function main(): void {
+6 |     $kls = $this->kls;
+7 |     new $kls($undefined); // no type error
+  |              ^^^^^^^^^^ [1]
+8 |   }
+9 | }
+
+:0:0
+0 | No source found
+
+1 error found

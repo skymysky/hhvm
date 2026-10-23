@@ -1,0 +1,31 @@
+error: Parsing[1002] Declarations are not supported outside global scope [1]
+
+inline_function.php:4:5
+2 | function foo() : void {
+3 |   if(true) {
+4 |     function bar() {}
+  |     ^^^^^^^^^^^^^^ [1]
+5 |   }
+6 | }
+
+error: Parsing[1002] Encountered unexpected text `function bar() {}`, was expecting a statement. [1]
+
+inline_function.php:4:5
+2 | function foo() : void {
+3 |   if(true) {
+4 |     function bar() {}
+  |     ^^^^^^^^^^^^^^^^^ [1]
+5 |   }
+6 | }
+
+error: Parsing[1002] Inline function definitions are not supported in Hack [1]
+
+inline_function.php:4:22
+2 | function foo() : void {
+3 |   if(true) {
+4 |     function bar() {}
+  |                      ^ [1]
+5 |   }
+6 | }
+
+3 errors found

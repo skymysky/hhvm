@@ -14,32 +14,35 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_VARIABLE_UNSERIALIZER_H_
-#define incl_HPHP_VARIABLE_UNSERIALIZER_H_
+#pragma once
 
+#include "hphp/runtime/base/contiguous-source.h"
 #include "hphp/runtime/base/type-variant.h"
 #include "hphp/runtime/base/variable-serializer.h"
 #include "hphp/util/compact-tagged-ptrs.h"
 
 namespace HPHP {
 struct StringBuffer;
+struct ZStdDecompressSource;
 
 ///////////////////////////////////////////////////////////////////////////////
 
 enum class UnserializeMode {
   Value = 0,
   Key = 1,
-  ColValue = 2,
-  ColKey = 3,
-  VecValue = 4,
-  DictValue = 5,
+  ColKey = 2,
 };
 
 struct InvalidAllowedClassesException : Exception {
 };
 
-struct VariableUnserializer {
-
+/*
+ * Source-independent state and types shared by every VariableUnserializerImpl
+ * instantiation. Keeping Type here (rather than in the template) makes it a
+ * single enum type across all byte sources, so e.g. VariableUnserializer::Type
+ * and ZStdVariableUnserializer::Type are the same type and interchangeable.
+ */
+struct VariableUnserializerBase {
   /*
    * Supported unserialization formats.
    */
@@ -47,8 +50,20 @@ struct VariableUnserializer {
     Serialize,
     Internal,
     APCSerialize,
-    DebuggerSerialize
+    DebuggerSerialize,
+    Last
   };
+};
+
+/*
+ * Unserializes a serialized string into a Variant. Templated on the byte Source
+ * so the common in-memory path (ContiguousSource) is a fully monomorphic
+ * instantiation with zero per-byte dispatch overhead, while the streaming
+ * zstd-decompression path (ZStdDecompressSource) is a separate instantiation
+ * selected at the call site. Neither instantiation pays for the other.
+ */
+template <class Source>
+struct VariableUnserializerImpl : VariableUnserializerBase {
 
   /*
    * Construct an unserializer, with an optional whitelist of classes to
@@ -56,7 +71,7 @@ struct VariableUnserializer {
    * null_array means allow any classes.  We default to null_array since
    * serialization is not limited inside the VM.
    */
-  VariableUnserializer(
+  VariableUnserializerImpl(
     const char* str,
     size_t len,
     Type type,
@@ -73,20 +88,22 @@ struct VariableUnserializer {
    */
   Variant unserialize();
 
-  void reserialize(StringBuffer& buf);
-
-  const char* head() const;
-
-  /*
-   * Set the beginning and end of internal buffer.
-   */
-  void set(const char* buf, const char* end);
-
-  void setDVOverrides(VariableSerializer::DVOverrides* overrides) {
-    m_dvOverrides = overrides;
+  void setUnitFilename(const StringData* name) {
+    assertx(name->isStatic());
+    assertx(m_type == Type::Internal);
+    m_unitFilename = name;
   }
 
+  // Should we be calling the pure callbacks
+  void setPure() { m_pure = true; }
+
  private:
+  /*
+   * Used to object property values that are overwritten by later entries.
+   * For array element values, later values for the key override earlier ones.
+   */
+  Array m_overwrittenList = Array::CreateVec();
+
   bool readOnly() const { return m_readOnly; }
 
   /*
@@ -96,7 +113,7 @@ struct VariableUnserializer {
   double readDouble();
   char readChar();
 
-  // Return a StringPiece of up to n characters pointing into m_buf
+  // Return a StringPiece of up to n characters pointing into the source window
   folly::StringPiece readStr(unsigned n);
 
   /*
@@ -107,6 +124,7 @@ struct VariableUnserializer {
   /*
    * Attempt to consume a serialized string with content matching str.
    * Return false and rewind stream on non-standard format or content mismatch.
+   * Only available for a contiguous source; a no-op returning false otherwise.
    */
   bool matchString(folly::StringPiece str);
 
@@ -115,16 +133,14 @@ struct VariableUnserializer {
    */
   Type type() const;
   bool allowUnknownSerializableClass() const;
-  const char* begin() const;
-  const char* end() const;
-  char peek() const;
-  char peekBack() const;
-  bool endOfBuffer() const;
+  char peek();
+  char peekBack();
+  bool endOfBuffer();
 
   /*
    * True if clsName is allowed to be unserialized.
    */
-  bool whitelistCheck(const String& clsName) const;
+  bool whitelistCheck(const OptString& clsName) const;
 
   /*
    * Push v onto the vector of refs for future reference.
@@ -138,20 +154,9 @@ struct VariableUnserializer {
   void reserveForAdd(size_t count);
 
   /*
-   * Used by the 'r' encoding to get a reference.
+   * Used by the 'r' encoding to re-use previously deserialized values.
    */
-  tv_lval getByVal(int id);
-
-  /*
-   * Used by the 'R' encoding to get a reference.
-   */
-  tv_lval getByRef(int id);
-
-  /*
-   * Store properties/array elements that get overwritten incase they are
-   * referenced later during unserialization
-   */
-  void putInOverwrittenList(tv_rval v);
+  TypedValue getByVal(int id);
 
   /*
    * Register an object that needs its __wakeup() method called after
@@ -160,61 +165,38 @@ struct VariableUnserializer {
   void addSleepingObject(const Object&);
 
 private:
-  /*
-   * Hold references to previously-unserialized data, along with bits telling
-   * whether it is legal to reference them later.
-   */
-  struct RefInfo {
-    explicit RefInfo(tv_lval v);
-    static RefInfo makeColValue(tv_lval v);
-    static RefInfo makeVecValue(tv_lval v);
-    static RefInfo makeDictValue(tv_lval v);
-
-    tv_lval var() const;
-
-    bool canBeReferenced() const;
-    bool isColValue() const;
-    bool isVecValue() const;
-    bool isDictValue() const;
-  private:
-    enum class Type : int16_t {
-      Value,
-      ColValue,
-      VecValue,
-      DictValue
-    };
-    RefInfo(tv_lval, Type);
-    // tv_lval with a Type tag.
-    tv_val<false, Type> m_data;
-  };
-
-  Array m_overwrittenList;
-
-  void check() const;
+  void checkElemTermination();
 
   Type m_type;
   bool m_readOnly;
-  const char* m_buf;
-  const char* m_end;
-  req::vector<RefInfo> m_refs;
+  // Owns the byte cursor. ContiguousSource is a zero-overhead view over an
+  // in-memory buffer; ZStdDecompressSource streams from a compressed frame.
+  Source m_source;
+  req::vector<tv_rval> m_refs;
   bool m_unknownSerializable;
   const Array& m_options; // e.g. classes allowed to be unserialized
   req::vector<Object> m_sleepingObjects;
-  const char* const m_begin;
   bool m_forceDArrays;
-  VariableSerializer::DVOverrides* m_dvOverrides = nullptr;
+  bool m_markLegacyArrays;
+  bool m_pure{false};            // should we call the pure callbacks?
+  /* unitFilename should be set when we are deserializing
+   * an adata from the repo--it is needed to *re*construct the
+   * correct provenance tag */
+  const StringData* m_unitFilename{nullptr};
 
   void unserializeVariant(tv_lval self,
                           UnserializeMode mode = UnserializeMode::Value);
   Array unserializeArray();
+  void unserializeProvenanceTag();
   Array unserializeDict();
   Array unserializeVec();
   Array unserializeKeyset();
   Array unserializeVArray();
   Array unserializeDArray();
+  Array unserializeBespokeTypeStructure();
   folly::StringPiece unserializeStringPiece(char delimiter0 = '"',
                                             char delimiter1 = '"');
-  String unserializeString(char delimiter0 = '"', char delimiter1 = '"');
+  OptString unserializeString(char delimiter0 = '"', char delimiter1 = '"');
   void unserializeCollection(ObjectData* obj, int64_t sz, char type);
   void unserializeVector(ObjectData*, int64_t sz,
                          char type);
@@ -223,13 +205,17 @@ private:
   void unserializePair(ObjectData*, int64_t sz, char type);
   void unserializePropertyValue(tv_lval v, int remainingProps);
   bool tryUnserializeStrIntMap(struct BaseMap* map, int64_t sz);
-  void unserializeProp(ObjectData* obj, const String& key, Class* ctx,
-                       const String& realKey, int nProp);
+  void unserializeProp(ObjectData* obj, const OptString& key, Class* ctx,
+                       const OptString& realKey, int nProp);
   void unserializeRemainingProps(Object& obj, int remainingProps,
                                  Variant& serializedNativeData,
                                  bool& hasSerializedNativeData);
 };
 
-}
+// Default path: a contiguous in-memory buffer, no decompression overhead.
+using VariableUnserializer = VariableUnserializerImpl<ContiguousSource>;
+// Streaming-zstd variant, selected by unserialize()'s zstd option.
+using ZStdVariableUnserializer = VariableUnserializerImpl<ZStdDecompressSource>;
 
-#endif // incl_HPHP_VARIABLE_UNSERIALIZER_H_
+///////////////////////////////////////////////////////////////////////////////
+}

@@ -1,0 +1,40 @@
+error: Typing[4110] Typing error [1]
+-> Expected `int` [2]
+-> But got `bool` [3]
+
+apply_toplevel_poly_uninstantiable_where.php:9:8
+ 3 | function never<T1 as int, T2 as string>(T1 $_, T2 $_): void
+ 4 | where
+ 5 |   bool as int,
+   |   ^^^^ [3]
+   |           ^^^ [2]
+ 6 |   T2 super T1 {}
+ 7 | 
+ 8 | function call_generic_bad(): void {
+ 9 |   $f = never<>;
+   |        ^^^^^ [1]
+10 |   $f(3, '3');
+11 | }
+
+error: Typing[4323] Invalid argument [1]
+-> `T2` is a constrained type parameter [2]
+-> This type constraint is violated [3]
+-> Expected `string` [3]
+-> But got `int` [1]
+
+apply_toplevel_poly_uninstantiable_where.php:10:6
+ 1 | <?hh
+ 2 | 
+ 3 | function never<T1 as int, T2 as string>(T1 $_, T2 $_): void
+   |                           ^^ [2]
+   |                                 ^^^^^^ [3]
+ 4 | where
+ 5 |   bool as int,
+   :
+ 8 | function call_generic_bad(): void {
+ 9 |   $f = never<>;
+10 |   $f(3, '3');
+   |      ^ [1]
+11 | }
+
+2 errors found

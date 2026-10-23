@@ -1,0 +1,34 @@
+Code actions available:
+------------------------------------------
+Add doc comment (CodeActionKind: "refactor") SELECTED
+
+JSON for selected code action:
+------------------------------------------
+{
+  "title": "Add doc comment",
+  "kind": "refactor",
+  "diagnostics": [],
+  "edit": {
+    "changes": {
+      "FILE.php": [
+        {
+          "range": {
+            "start": { "line": 2, "character": 0 },
+            "end": { "line": 2, "character": 0 }
+          },
+          "newText": "/**\n * ${0:}\n */\n"
+        }
+      ]
+    }
+  }
+}
+
+Applied edit for code action:
+------------------------------------------
+<?hh
+
+/**
+ * ${0:}
+ */
+newtype A/*range-start*//*range-end*/ = 3;
+

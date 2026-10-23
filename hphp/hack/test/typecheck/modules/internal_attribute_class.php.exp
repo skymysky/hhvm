@@ -1,0 +1,17 @@
+error: Typing[4444] Cannot access an internal element from module `foo` in the default module [1]
+-> This is from module `foo` [2]
+
+internal_attribute_class.php--test2.php:2:3
+1 | <?hh
+2 | <<Sealed>>
+  |   ^^^^^^ [1]
+3 | trait TBar {}
+
+internal_attribute_class.php--test.php:3:16
+1 | <?hh
+2 | module foo;
+3 | internal class Sealed implements HH\ClassAttribute {}
+  |                ^^^^^^ [2]
+4 | 
+
+1 error found

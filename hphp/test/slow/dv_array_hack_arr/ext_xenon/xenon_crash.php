@@ -2,40 +2,29 @@
 
 // Testing that we don't crash due to xenon
 
-async function genList(...$args) {
-  await AwaitAllWaitHandle::fromVArray($args);
+async function genList(...$args) :Awaitable<mixed>{
+  await AwaitAllWaitHandle::fromVec($args);
   return array_map($wh ==> \HH\Asio\result($wh), $args);
 }
 
-class X {
-  function __destruct() {
-    var_dump(__METHOD__);
-  }
-}
-
 class A {
-  function __destruct() {
-    var_dump(__METHOD__);
-  }
-
-  async function gen1($a) {
+  async function gen1($a) :Awaitable<mixed>{
     await RescheduleWaitHandle::create(0, 0); // simulate blocking I/O
     return $a + 1;
   }
 
-  async function gen2($a) {
+  async function gen2($a) :Awaitable<mixed>{
     await RescheduleWaitHandle::create(0, $a); // simulate blocking I/O
     $x = HH\Asio\join($this->gen1($a));
     return $x;
   }
 
-  async function genBar($a) {
-    $x = new X;
+  async function genBar($a) :Awaitable<mixed>{
     await RescheduleWaitHandle::create(0, $a); // simulate blocking I/O
     return $a + 2;
   }
 
-  static async function genFoo($a) {
+  static async function genFoo($a) :Awaitable<mixed>{
     $a++;
     list($x, $y) = await genList(
       (new A)->genBar($a),
@@ -46,8 +35,12 @@ class A {
   }
 }
 
-function main($a) {
+function main($a) :mixed{
   return HH\Asio\join(A::genFoo($a));
 }
 
+
+<<__EntryPoint>>
+function main_xenon_crash() :mixed{
 var_dump(main(42));
+}

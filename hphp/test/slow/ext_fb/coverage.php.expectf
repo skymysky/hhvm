@@ -1,26 +1,22 @@
-array(2) {
-  ["%s"]=>
-  array(1) {
-    [%s]=>
+dict(2) {
+  ["/:ext_fb.php"]=>
+  dict(1) {
+    [%d]=>
     int(1)
   }
-  ["%s"]=>
-  array(4) {
-    [3]=>
-    int(1)
+  ["%s/test/slow/ext_fb/coverage.php"]=>
+  dict(2) {
     [13]=>
-    int(1)
-    [14]=>
     int(1)
     [16]=>
     int(1)
   }
 }
-array(3) {
-  ["%s"]=>
+dict(3) {
+  ["/:ext_std_variable.php"]=>
   int(1)
-  ["%s"]=>
-  int(1)
-  ["%s"]=>
-  int(5)
+  ["/:ext_fb.php"]=>
+  int(2)
+  ["%s/test/slow/ext_fb/coverage.php"]=>
+  int(3)
 }

@@ -1,6 +1,6 @@
 <?hh
 
-function get($d, $k) {
+function get($d, $k) :mixed{
   try {
     var_dump($d[$k]);
   } catch (OutOfBoundsException $ex) {
@@ -9,7 +9,7 @@ function get($d, $k) {
   return $d;
 }
 
-function manipulate($arr) {
+function manipulate($arr) :mixed{
   $arr['foo'][] = 12;
   var_dump($arr['foo'][1]);
   try {
@@ -20,12 +20,11 @@ function manipulate($arr) {
   var_dump($arr);
 }
 
-function main() {
-  function init($b) {
-    if ($b) { return 'a'; }
-    return 'b';
-  }
-  $foo = keyset[init(true), init(false)];
+<<__EntryPoint>> function main(): void {
+  $foo = keyset[
+    __hhvm_intrinsics\launder_value('a'),
+    __hhvm_intrinsics\launder_value('b'),
+  ];
   $foo[] = 1;
   $foo[] = '2';
   $foo[] = 3;
@@ -46,8 +45,6 @@ function main() {
     |> get($$, 'foobar')
     |> var_dump($$);
 
-  $arr = array('foo' => keyset[$foo[1], '2', 3]);
+  $arr = dict['foo' => keyset[$foo[1], '2', 3]];
   manipulate($arr);
 }
-
-main();

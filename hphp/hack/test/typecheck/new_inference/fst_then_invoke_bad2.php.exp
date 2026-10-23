@@ -1,0 +1,17 @@
+error: Typing[4110] Invalid argument [1]
+-> Expected `D` [2]
+-> But got `C` [3]
+
+fst_then_invoke_bad2.php:24:16
+20 | }
+21 | 
+22 | function bar(C $c, Contra<D> $d): Inv<B> {
+   |              ^ [3]
+   |                           ^ [2]
+23 |   // Here, let $x:v and C<:v and Contra<D><:Contra<v> so v <: D
+24 |   $x = fst($c, $d);
+   |                ^^ [1]
+25 |   // Here, we find v:=C but we must also check C<:D and fail!
+26 |   $x->foo();
+
+1 error found

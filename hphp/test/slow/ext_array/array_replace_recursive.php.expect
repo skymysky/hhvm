@@ -1,17 +1,15 @@
-array(2) {
+dict(2) {
   ["color"]=>
-  array(1) {
+  dict(1) {
     ["favoritte"]=>
     string(3) "red"
   }
   [0]=>
-  array(2) {
-    [0]=>
+  vec(2) {
     int(10)
-    [1]=>
-    array(1) {
+    dict(1) {
       ["color"]=>
-      array(2) {
+      dict(2) {
         ["favorite"]=>
         string(5) "green"
         [0]=>

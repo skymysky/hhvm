@@ -1,0 +1,41 @@
+File "tconst_bug.php", line 9, characters 5-30:
+  HH\FunctionRef<(readonly function(vec<StringType with { type TThis = StringType }> $boxes): vec<string>)>
+File "tconst_bug.php", line 10, characters 5-30:
+  HH\FunctionRef<(readonly function(vec<StringType with { type TExposeAs = string }> $boxes): vec<string>)>
+File "tconst_bug.php", line 11, characters 5-52:
+  (function(vec<StringType> $boxes): vec<string>)
+File "tconst_bug.php", line 12, characters 5-47:
+  (function(vec<<expr#4> as StringType> $boxes): vec<string>)
+File "tconst_bug.php", line 13, characters 5-52:
+  (function(vec<StringType> $boxes): vec<string>)
+File "tconst_bug.php", line 14, characters 5-47:
+  (function(vec<<expr#4> as StringType> $boxes): vec<string>)
+error: Typing[4110] Invalid argument [1]
+-> Expected exactly the type `StringType` [2]
+->   where the class `StringType` was referenced here [3]
+-> But got the nonexact type `StringType` [4]
+
+tconst_bug.php:16:37
+ 5 | }
+ 6 | class W {
+ 7 |   public function testit(vec<StringType> $x, StringType $st): void {
+   |                              ^^^^^^^^^^ [4]
+ 8 |     $exactst = new StringType();
+ 9 |     hh_show(StringType::foo<>);
+   :
+14 |     hh_show(($boxes) ==> $st->inst_bar($boxes));
+15 |     expectVecString(StringType::foo($x));
+16 |     expectVecString(StringType::bar($x));
+   |                     ^^^^^^^^^^ [3]
+   |                                     ^^ [1]
+17 |   }
+18 | }
+   :
+35 |   // This fails, but why?
+36 |   public static final function bar(
+37 |     vec<this> $boxes,
+   |         ^^^^ [2]
+38 |   ): vec<this::TExposeAs> {
+39 |     return vec[];
+
+1 error found

@@ -1,0 +1,26 @@
+error: Typing[4053] Invalid assignment [1]
+-> No property `x` in `A` [2]
+-> This is why I think it is an object of type A [3]
+-> Declaration of `A` is here [4]
+
+prop_access2.php:13:7
+ 2 | // Copyright 2004-present Facebook. All Rights Reserved.
+ 3 | 
+ 4 | class A {}
+   |       ^ [4]
+ 5 | 
+ 6 | function test(A $a): void {
+   |               ^ [3]
+ 7 |   $x = Vector {};
+ 8 |   while (true) {
+ 9 |     if (!$x->isEmpty()) {
+10 |       $x[0]->x;
+   |              ^ [2]
+11 |       break;
+12 |     } else {
+13 |       $x[] = $a;
+   |       ^^^^^^^^^ [1]
+14 |     }
+15 |   }
+
+1 error found

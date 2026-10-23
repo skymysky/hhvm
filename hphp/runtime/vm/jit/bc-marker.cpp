@@ -16,44 +16,75 @@
 
 #include "hphp/runtime/vm/jit/bc-marker.h"
 
+#include <fmt/format.h>
 #include <folly/Format.h>
 #include <folly/Conv.h>
 
-#include "hphp/runtime/base/runtime-option.h"
-#include "hphp/runtime/vm/resumable.h"
+#include "hphp/runtime/vm/jit/extra-data.h"
+#include "hphp/runtime/vm/jit/ir-instruction.h"
 #include "hphp/runtime/vm/jit/ssa-tmp.h"
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 
 //////////////////////////////////////////////////////////////////////
 
 std::string BCMarker::show() const {
-  assertx(valid());
+  if (!valid()) return "invalid BCMarker";
+
   return folly::format(
-    "--- bc {}{}{}{}, fp {}, spOff {} ({}){}",
-    m_sk.offset(),
-    resumeModeShortName(m_sk.resumeMode()),
-    m_sk.hasThis()  ? "t" : "",
-    m_sk.prologue() ? "p" : "",
+    "--- bc {}, fp {}, fixupFP {}, spOff {}, {}",
+    showShort(m_sk),
     m_fp ? folly::to<std::string>(m_fp->id()) : "_",
-    m_spOff.offset,
-    m_sk.func()->fullName(),
-    m_profTransID != kInvalidTransID
-      ? folly::format(" [profTrans={}]", m_profTransID).str()
-      : std::string{}
+    m_fixupFP ? folly::to<std::string>(m_fixupFP->id()) : "_",
+    m_bcSPOff.offset,
+    m_profTransIDs.empty()
+      ? ""
+      : fmt::format(" [profTrans={}]", folly::join(',', m_profTransIDs))
   ).str();
 }
 
 bool BCMarker::valid() const {
-  if (isDummy()) return true;
   // Note, we can't check stack bounds here because of inlining, and
   // instructions like idx, which can create php-level calls.
-  return
-    m_sk.valid() &&
-    m_sk.offset() >= m_sk.func()->base() &&
-    m_sk.offset() < m_sk.func()->past();
+  assertx(m_profTransIDs.find(kInvalidTransID) == m_profTransIDs.end());
+  return m_sk.valid();
+}
+
+SBInvOffset BCMarker::fixupSBOff() const {
+  assertx(valid());
+  if (fp() == fixupFP()) return SBInvOffset{0};
+  auto const begin_inlining = fp()->inst();
+  assertx(begin_inlining->is(DefCalleeFP));
+  auto const fpSBOffset = begin_inlining->extra<DefCalleeFP>()->sbOffset;
+
+  auto const fixupFPStackBaseOffset = [&] {
+    if (fixupFP()->inst()->is(DefCalleeFP)) {
+      return fixupFP()->inst()->extra<DefCalleeFP>()->sbOffset;
+    }
+    assertx(fixupFP()->inst()->is(DefFP, EnterFrame));
+    auto const defSP = fp()->inst()->src(0)->inst();
+    auto const irSPOff = defSP->extra<DefStackData>()->irSPOff;
+    return SBInvOffset{0}.to<IRSPRelOffset>(irSPOff);
+  }();
+  return SBInvOffset{fixupFPStackBaseOffset - fpSBOffset};
+}
+
+SrcKey BCMarker::fixupSk() const {
+  assertx(valid());
+  if (fp() == fixupFP()) return sk();
+
+  auto curFP = fp();
+  do {
+    assertx(curFP->inst()->is(DefCalleeFP));
+    // Walking the FP chain created from the marker is suspect, but we aren't
+    // using it to materialize the fp SSATmp, or offsets based on the begin
+    // inlinings.  We are only materializing srckey info.
+    auto const nextFP = curFP->inst()->marker().fp();
+    if (nextFP == fixupFP()) return curFP->inst()->marker().sk();
+    curFP = nextFP;
+  } while (true);
 }
 
 //////////////////////////////////////////////////////////////////////
 
-}}
+}

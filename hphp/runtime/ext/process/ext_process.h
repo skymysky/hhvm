@@ -15,8 +15,7 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_EXT_PROCESS_H_
-#define incl_HPHP_EXT_PROCESS_H_
+#pragma once
 
 #include "hphp/runtime/ext/extension.h"
 #include <sys/wait.h>
@@ -24,59 +23,10 @@
 namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
 
-int64_t HHVM_FUNCTION(pcntl_alarm,
-                      int seconds);
-void HHVM_FUNCTION(pcntl_exec,
-                   const String& path,
-                   const Array& args = null_array,
-                   const Array& envs = null_array);
-
-int64_t HHVM_FUNCTION(pcntl_fork);
-Variant HHVM_FUNCTION(pcntl_getpriority,
-                      int pid = 0,
-                      int process_identifier = 0);
-bool HHVM_FUNCTION(pcntl_setpriority,
-                   int priority,
-                   int pid = 0,
-                   int process_identifier = 0);
-
-bool HHVM_FUNCTION(pcntl_signal,
-                   int signo,
-                   const Variant& handler,
-                   bool restart_syscalls = true);
-bool HHVM_FUNCTION(pcntl_sigprocmask,
-                   int how,
-                   const Array& set,
-                   VRefParam oldset = uninit_null());
-int64_t HHVM_FUNCTION(pcntl_wait,
-                      VRefParam status,
-                      int options = 0);
-int64_t HHVM_FUNCTION(pcntl_waitpid,
-                      int pid,
-                      VRefParam status,
-                      int options = 0);
-
-int64_t HHVM_FUNCTION(pcntl_wexitstatus,
-                      int status);
-
 /**
  * Process pending signals flagged earlier.
  */
 bool HHVM_FUNCTION(pcntl_signal_dispatch);
 
-// status querying
-bool HHVM_FUNCTION(pcntl_wifexited,
-                   int status);
-bool HHVM_FUNCTION(pcntl_wifsignaled,
-                   int status);
-bool HHVM_FUNCTION(pcntl_wifstopped,
-                   int status);
-int64_t HHVM_FUNCTION(pcntl_wstopsig,
-                      int status);
-int64_t HHVM_FUNCTION(pcntl_wtermsig,
-                      int status);
-
 ///////////////////////////////////////////////////////////////////////////////
 }
-
-#endif // incl_HPHP_EXT_PROCESS_H_

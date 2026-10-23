@@ -14,8 +14,7 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_DIRECTORY_H_
-#define incl_HPHP_DIRECTORY_H_
+#pragma once
 
 #include "hphp/runtime/base/array-iterator.h"
 #include "hphp/runtime/base/resource-data.h"
@@ -43,17 +42,17 @@ struct Directory : SweepableResourceData {
 
   CLASSNAME_IS("Directory")
   // overriding ResourceData
-  const String& o_getClassNameHook() const override { return classnameof(); }
+  const OptString& o_getClassNameHook() const override { return classnameof(); }
 
-  String getLastError() {
-    return String(folly::errnoStr(errno).toStdString());
+  OptString getLastError() {
+    return OptString(folly::errnoStr(errno));
   }
 };
 
 struct PlainDirectory : Directory {
-  DECLARE_RESOURCE_ALLOCATION(PlainDirectory);
+  DECLARE_RESOURCE_ALLOCATION(PlainDirectory)
 
-  explicit PlainDirectory(const String& path);
+  explicit PlainDirectory(const OptString& path);
   explicit PlainDirectory(int fd);
   ~PlainDirectory() override;
 
@@ -67,7 +66,7 @@ private:
 };
 
 struct ArrayDirectory : Directory {
-  DECLARE_RESOURCE_ALLOCATION_NO_SWEEP(ArrayDirectory);
+  DECLARE_RESOURCE_ALLOCATION_NO_SWEEP(ArrayDirectory)
 
   explicit ArrayDirectory(const Array& a) : m_it(a) {}
 
@@ -82,21 +81,21 @@ struct ArrayDirectory : Directory {
   }
 
   size_t size() const { return m_it.getArrayData()->size(); }
-  String path();
+  OptString path();
 
 private:
   ArrayIter m_it;
 };
 
 struct CachedDirectory : Directory {
-  DECLARE_RESOURCE_ALLOCATION_NO_SWEEP(CachedDirectory);
+  DECLARE_RESOURCE_ALLOCATION_NO_SWEEP(CachedDirectory)
 
-  explicit CachedDirectory(const String& path);
+  explicit CachedDirectory(const OptString& path);
 
   void close() override {}
   Variant read() override {
     if (m_pos >= m_files.size()) return false;
-    return String(m_files[m_pos++]);
+    return OptString(m_files[m_pos++]);
   }
   void rewind() override { m_pos = 0; }
   bool isEof() const override { return m_pos >= m_files.size(); }
@@ -108,5 +107,3 @@ private:
 
 ///////////////////////////////////////////////////////////////////////////////
 }
-
-#endif // incl_HPHP_DIRECTORY_H_

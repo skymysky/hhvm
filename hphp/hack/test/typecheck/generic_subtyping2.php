@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 /**
  * Copyright (c) 2014, Facebook, Inc.
  * All rights reserved.
@@ -16,8 +16,8 @@ class UnrelatedClass {}
 
 function foo<T as I>(T $x): void {}
 
-function test(): void {
-  if (true) {
+function test(bool $b): void {
+  if ($b) {
     $y = new B();
   } else {
     $y = new UnrelatedClass();

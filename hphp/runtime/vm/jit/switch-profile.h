@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2013 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-present Facebook, Inc. (http://www.facebook.com)  |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -14,23 +14,32 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_JIT_SWITCH_PROFILE_H_
-#define incl_HPHP_JIT_SWITCH_PROFILE_H_
+#pragma once
 
 #include "hphp/runtime/vm/jit/target-profile.h"
 
 #include <sstream>
 #include <string>
 
+#include <folly/json/dynamic.h>
 #include <folly/Format.h>
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 
 ///////////////////////////////////////////////////////////////////////////////
 
 struct SwitchProfile {
+  SwitchProfile() = default;
   SwitchProfile(const SwitchProfile&) = delete;
   SwitchProfile& operator=(const SwitchProfile&) = delete;
+
+  std::string toString() const {
+    return "";
+  }
+
+  folly::dynamic toDynamic() const {
+    return folly::dynamic::object();
+  }
 
   std::string toString(uint32_t size) const {
     auto const nCases = size / sizeof(uint32_t);
@@ -38,6 +47,8 @@ struct SwitchProfile {
     for (int i = 0; i < nCases; ++i) folly::format(&out, "{},", cases()[i]);
     return out;
   }
+
+  folly::dynamic toDynamic(uint32_t size) const;
 
   static void reduce(SwitchProfile& a, const SwitchProfile& b, uint32_t size) {
     auto const nCases = size / sizeof(uint32_t);
@@ -60,7 +71,7 @@ struct SwitchProfile {
     return const_cast<SwitchProfile*>(this)->cases();
   }
 
-  uint32_t first_case;
+  uint32_t first_case = 0;
 
   // In RDS but can't contain pointers to request-allocated data
   TYPE_SCAN_IGNORE_ALL;
@@ -84,6 +95,5 @@ std::vector<SwitchCaseCount> sortedSwitchProfile(
 
 ///////////////////////////////////////////////////////////////////////////////
 
-}}
+}
 
-#endif

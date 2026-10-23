@@ -1,6 +1,6 @@
 <?hh
 
-function f(int $x, ...): void {}
+function f(int $x, mixed ...$_): void {}
 
 function test(): void {
   $v = 123;

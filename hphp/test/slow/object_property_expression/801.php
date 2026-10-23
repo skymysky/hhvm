@@ -1,22 +1,30 @@
-<?php
+<?hh
 
 class X {
-  function ref(&$ref) {
- $ref = 1;
- }
-  function bar() {
-    $this->ref($this->priv);
+  function notref($_) :mixed{
+
+  }
+  function bar() :mixed{
+    try {
+      $this->notref($this->priv);
+    } catch (UndefinedPropertyException $e) {
+      var_dump($e->getMessage());
+    }
   }
 }
-;
 class Y extends X {
- private $priv;
- }
+  private $priv;
+}
 class Z extends Y {
 }
-$z = new Z;
-$z->bar();
-var_dump($z);
-$y = new Y;
-$y->bar();
-var_dump($y);
+
+<<__EntryPoint>>
+function main_801() :mixed{
+  ;
+  $z = new Z;
+  $z->bar();
+  var_dump($z);
+  $y = new Y;
+  $y->bar();
+  var_dump($y);
+}

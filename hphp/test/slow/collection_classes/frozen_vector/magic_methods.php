@@ -4,7 +4,7 @@
 
 // Call $f(); if it throws, return the exception's error message.
 // Otherwise, return $f's return value.
-function callFailsafe((function (ImmVector): string) $f) {
+function callFailsafe((function (ImmVector): string) $f) :mixed{
   $fv = ImmVector {1, 2, 3};
 
   try {
@@ -16,13 +16,9 @@ function callFailsafe((function (ImmVector): string) $f) {
   return $r;
 }
 
-function main() {
+function main() :mixed{
 
   $functions = ImmVector {
-    function ($fv) {
-      // __toString()
-      return (string)$fv;
-    },
     function ($fv) {
       // __get()
       $p = $fv->nonExistentProperty; // should throw
@@ -35,12 +31,7 @@ function main() {
     },
     function ($fv) {
       // __isset()
-      return isset($v->nonExistentProperty) ? "true" : "false";
-    },
-    function ($fv) {
-      // __unset()
-      unset($fv->nonExistentProperty); // should throw
-      return "SomethingWentWrong";
+      return isset($fv->nonExistentProperty) ? "true" : "false";
     }
   };
 
@@ -49,4 +40,8 @@ function main() {
   }
 }
 
+
+<<__EntryPoint>>
+function main_magic_methods() :mixed{
 main();
+}

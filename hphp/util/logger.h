@@ -14,18 +14,22 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_LOGGER_H_
-#define incl_HPHP_LOGGER_H_
+#pragma once
 
 #include <atomic>
 #include <chrono>
 #include <cstdarg>
+#include <filesystem>
 #include <string>
+
+#include <fmt/core.h>
 
 #include "hphp/util/cronolog.h"
 #include "hphp/util/log-file-flusher.h"
 #include "hphp/util/service-data.h"
 #include "hphp/util/thread-local.h"
+
+#define PATH_CONCAT(base, file) (std::filesystem::path(base) / file).string()
 
 namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
@@ -35,6 +39,8 @@ struct Exception;
 
 struct ErrorLogFileData {
   ErrorLogFileData() {}
+  ErrorLogFileData(const std::string& baseDir, const std::string& file, const std::string& symlink, int mpl)
+    : ErrorLogFileData(PATH_CONCAT(baseDir, file), PATH_CONCAT(baseDir, symlink), mpl) {}
   ErrorLogFileData(const std::string& file, const std::string& symlink, int mpl)
     : logFile(file)
     , symLink(symlink)
@@ -51,6 +57,17 @@ struct LoggerHook {
   virtual ~LoggerHook() {}
   virtual void operator()(const char* header, const char* msg,
                           const char* ending) = 0;
+};
+
+struct LogGrowth {
+  LogGrowth(uint64_t lines, uint64_t serialized_bytes, uint64_t compressed_bytes)
+    : lines(lines)
+    , serializedBytes(serialized_bytes)
+    , compressedBytes(compressed_bytes)
+  {}
+  uint64_t lines;
+  uint64_t serializedBytes;
+  uint64_t compressedBytes;
 };
 
 struct Logger {
@@ -94,15 +111,14 @@ struct Logger {
   static void Verbose(ATTRIBUTE_PRINTF_STRING const char *fmt, ...)
     ATTRIBUTE_PRINTF(1,2);
 
-  template<typename... Args> static void FError(Args&&... args);
-  template<typename... Args> static void FWarning(Args&&... args);
-  template<typename... Args> static void FInfo(Args&&... args);
-  template<typename... Args> static void FVerbose(Args&&... args);
+  template<typename... Args> static void FError(fmt::format_string<Args...> fmt_str, Args&&... args);
+  template<typename... Args> static void FWarning(fmt::format_string<Args...> fmt_str, Args&&... args);
+  template<typename... Args> static void FInfo(fmt::format_string<Args...> fmt_str, Args&&... args);
+  template<typename... Args> static void FVerbose(fmt::format_string<Args...> fmt_str, Args&&... args);
 
   static void Log(LogLevelType level, const char* type, const Exception& e,
                   const char* file = nullptr, int line = 0);
-  static void OnNewRequest();
-  static void ResetRequestCount();
+  static void OnNewRequest(int64_t requestId);
 
   static bool SetThreadLog(const char *file, bool threadOnly);
   static void ClearThreadLog();
@@ -111,7 +127,7 @@ struct Logger {
   static void SetThreadHook(LoggerHook*);
 
   static constexpr const char *DEFAULT = "Default";
-  static void SetTheLogger(const std::string &name, Logger* newLogger);
+  static void SetTheLogger(const std::string &name, std::unique_ptr<Logger> newLogger);
   static bool IsDefaultLogger(const std::string& name);
 
   static char *EscapeString(const std::string &msg);
@@ -130,9 +146,17 @@ struct Logger {
 
   virtual FILE* fileForStackTrace() { return output(); }
 
+  struct GlobalLoggers {
+    std::unordered_map<std::string, std::unique_ptr<Logger>> m_loggers;
+    GlobalLoggers();
+    auto begin() { return m_loggers.begin(); }
+    auto end() { return m_loggers.end(); }
+    std::optional<Logger*> get(const std::string& name);
+  };
+
 protected:
   struct ThreadData {
-    int request{0};
+    int64_t requestId{0};
     int message{0};
     LogFileFlusher flusher;
     FILE *log{nullptr};
@@ -154,13 +178,15 @@ protected:
   friend struct ExtendedLogger;
 
   // For subclasses to override, e.g., to support injected stack trace.
-  // Returns (lines, bytes) it's going to output. Used for monitoring growth.
-  virtual std::pair<int, int> log(LogLevelType level, const std::string& msg,
+  // Returns LogGrowth it's going to output. Used for monitoring growth.
+  virtual LogGrowth log(LogLevelType level, const std::string& msg,
                                   const StackTrace* stackTrace,
                                   bool escape = false, bool escapeMore = false);
   // Intended for subclass of loggers that batch.
   // Returns (lines, bytes) it's going to output. Used for monitoring growth.
-  virtual std::pair<int, int> flush() { return std::make_pair(0, 0); }
+  virtual LogGrowth flush() {
+    return LogGrowth(0, 0, 0);
+  }
 
   virtual void setBatchSize(size_t /*bsize*/) {}
 
@@ -178,21 +204,41 @@ protected:
    */
   static std::string GetHeader();
   static pid_t s_pid;
+
 protected:
   bool m_isPipeOutput;
   FILE *m_output;
   FILE* m_standardOut;
   Cronolog m_cronOutput;
   LogFileFlusher m_flusher;
-  static std::map<std::string, Logger*> s_loggers;
-  // bytes and lines the DEFAULT logger has written
+
+  static std::shared_ptr<GlobalLoggers> getLoggers();
+  template<typename F>
+  static void withLoggers(F f) {
+    auto loggers = getLoggers();
+    if (loggers) {
+      f(*loggers);
+    }
+  }
+  template<typename F>
+  static void forEachLogger(F f) {
+    withLoggers([&](auto& loggers) {
+      for (auto& it : loggers) {
+        if (it.second) {
+          f(*it.second);
+        }
+      }
+    });
+  }
+  static Logger* getLogger(const std::string& name);
+
+  // serialized/compressed bytes and lines the DEFAULT logger has written
   static ServiceData::ExportedCounter* s_errorLines;
-  static ServiceData::ExportedCounter* s_errorBytes;
+  static ServiceData::ExportedCounter* s_errorSerializedBytes;
+  static ServiceData::ExportedCounter* s_errorCompressedBytes;
 };
 
 ///////////////////////////////////////////////////////////////////////////////
 }
 
 #include "hphp/util/logger-inl.h"
-
-#endif // incl_HPHP_LOGGER_H_

@@ -1,5 +1,9 @@
 <?hh
-function t(X $a) {
+function t(X $a) :mixed{
  echo 1;
  }
- t(42);
+
+ <<__EntryPoint>>
+function main_2205() :mixed{
+t(42);
+}

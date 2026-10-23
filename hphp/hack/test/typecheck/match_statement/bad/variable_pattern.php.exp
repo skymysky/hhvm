@@ -1,0 +1,25 @@
+error: Parsing[1002] Binding a variable in a pattern is not yet supported. [1]
+
+variable_pattern.php:7:5
+5 | function f(int $v): void {
+6 |   match ($v) {
+7 |     $i => echo "int $i\n";
+  |     ^^ [1]
+8 |   }
+9 | }
+
+error: Naming[2050] Variable `$i` is undefined, or not always defined. [1]
+-> Did you mean `$v` instead? [2]
+
+variable_pattern.php:7:21
+3 | <<file:__EnableUnstableFeatures('match_statements')>>
+4 | 
+5 | function f(int $v): void {
+  |                ^^ [2]
+6 |   match ($v) {
+7 |     $i => echo "int $i\n";
+  |                     ^^ [1]
+8 |   }
+9 | }
+
+2 errors found

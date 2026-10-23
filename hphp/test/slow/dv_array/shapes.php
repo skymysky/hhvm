@@ -1,7 +1,7 @@
 <?hh
 // Copyright 2004-present Facebook. All Rights Reserved.
 
-function test() {
+function test() :mixed{
   echo "=========================\n";
   $x = tuple();
   var_dump(is_array($x));
@@ -35,4 +35,8 @@ function test() {
   var_dump(is_darray($x));
 }
 
+
+<<__EntryPoint>>
+function main_shapes() :mixed{
 test();
+}

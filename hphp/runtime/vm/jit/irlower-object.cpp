@@ -18,6 +18,7 @@
 
 #include "hphp/runtime/base/memory-manager.h"
 #include "hphp/runtime/base/object-data.h"
+#include "hphp/runtime/base/tv-layout.h"
 #include "hphp/runtime/vm/class.h"
 
 #include "hphp/runtime/vm/jit/types.h"
@@ -34,13 +35,14 @@
 #include "hphp/runtime/vm/jit/vasm-gen.h"
 #include "hphp/runtime/vm/jit/vasm-instr.h"
 #include "hphp/runtime/vm/jit/vasm-reg.h"
-#include "hphp/runtime/ext/std/ext_std_closure.h"
+#include "hphp/runtime/ext/core/ext_core_closure.h"
 
+#include "hphp/util/arch.h"
 #include "hphp/util/trace.h"
 
-namespace HPHP { namespace jit { namespace irlower {
+namespace HPHP::jit::irlower {
 
-TRACE_SET_MOD(irlower);
+TRACE_SET_MOD(irlower)
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -53,6 +55,7 @@ void cgLdObjClass(IRLS& env, const IRInstruction* inst) {
 IMPL_OPCODE_CALL(AllocObj)
 
 void cgNewInstanceRaw(IRLS& env, const IRInstruction* inst) {
+  auto& v = vmain(env);
   auto const dst = dstLoc(env, inst, 0).reg();
   auto const cls = inst->extra<NewInstanceRaw>()->cls;
 
@@ -64,21 +67,7 @@ void cgNewInstanceRaw(IRLS& env, const IRInstruction* inst) {
   auto const index = MemoryManager::size2Index(size);
   auto const size_class = MemoryManager::sizeIndex2Size(index);
 
-  auto const attrs = cls->getODAttrs();
-
   auto const target = [&]{
-    if (attrs != ObjectData::DefaultAttrs) {
-      if (memoSize > 0) {
-        return size <= kMaxSmallSize
-          ? CallSpec::direct(&ObjectData::newInstanceRawMemoAttrsSmall)
-          : CallSpec::direct(&ObjectData::newInstanceRawMemoAttrsBig);
-      } else {
-        return size <= kMaxSmallSize
-          ? CallSpec::direct(&ObjectData::newInstanceRawAttrsSmall)
-          : CallSpec::direct(&ObjectData::newInstanceRawAttrsBig);
-      }
-    }
-
     if (memoSize > 0) {
       return size <= kMaxSmallSize
         ? CallSpec::direct(&ObjectData::newInstanceRawMemoSmall)
@@ -95,14 +84,13 @@ void cgNewInstanceRaw(IRLS& env, const IRInstruction* inst) {
     ? args.imm(size_class).imm(index)
     : args.imm(size);
   if (memoSize > 0) args.imm(memoSize);
-  if (attrs != ObjectData::DefaultAttrs) args.imm(attrs);
 
   cgCallHelper(
-    vmain(env),
+    v,
     env,
     target,
     callDest(dst),
-    SyncOptions::Sync,
+    SyncOptions::None,
     args
   );
 }
@@ -112,39 +100,73 @@ void cgConstructInstance(IRLS& env, const IRInstruction* inst) {
   auto const cls = inst->extra<ConstructInstance>()->cls;
 
   auto const args = argGroup(env, inst).immPtr(cls);
-  cgCallHelper(vmain(env), env, CallSpec::direct(cls->instanceCtor().get()),
+  cgCallHelper(vmain(env), env,
+               CallSpec::direct(cls->instanceCtor<true>().get()),
                callDest(dst), SyncOptions::Sync, args);
 }
 
+void cgConstructClosure(IRLS& env, const IRInstruction* inst) {
+  auto const dst = dstLoc(env, inst, 0).reg();
+  auto const cls = inst->extra<ConstructClosure>()->cls;
+  assertx(cls);
+  auto& v = vmain(env);
+
+  // c_Closure is not allowed to use the fast path, as the constructor will
+  // throw immediately.  No other closure's constructor is able to throw, so we
+  // are able to make some optimizations that would be unsafe if unwinding.
+  if (!Cfg::Repo::Authoritative || cls == c_Closure::classof()) {
+    auto const args = argGroup(env, inst).immPtr(cls);
+    cgCallHelper(vmain(env), env, CallSpec::direct(createClosure),
+                 callDest(dst), SyncOptions::None, args);
+  } else {
+    auto const size = c_Closure::size(cls);
+
+    auto const index = MemoryManager::size2Index(size);
+    auto const size_class = MemoryManager::sizeIndex2Size(index);
+
+    // We don't specialize the large allocation case since it is unlikely.
+    auto const target = index < kNumSmallSizes
+                        ? CallSpec::direct(&createClosureRepoAuthRawSmall)
+                        : CallSpec::direct(&createClosureRepoAuth);
+
+    auto args = argGroup(env, inst).immPtr(cls);
+    if (index < kNumSmallSizes) {
+      args.imm(size_class).imm(index);
+    }
+
+    cgCallHelper(vmain(env), env, target,
+                 callDest(dst), SyncOptions::None, args);
+  }
+
+  if (inst->src(0)->isA(TNullptr)) {
+    v << storeqi{0, dst[c_Closure::ctxOffset()]};
+  } else {
+    auto const ctx = srcLoc(env, inst, 0).reg();
+    v << store{ctx, dst[c_Closure::ctxOffset()]};
+  }
+}
+
 IMPL_OPCODE_CALL(Clone)
-IMPL_OPCODE_CALL(RegisterLiveObj)
+
+IMPL_OPCODE_CALL(FuncCred)
 
 ///////////////////////////////////////////////////////////////////////////////
 
 namespace {
 
+static void initObjMemoSlots(MemoSlot* slots, size_t n) {
+  for (auto i = 0; i < n; i++) {
+    slots[i].init();
+  }
+}
+
 void implInitObjPropsFast(Vout& v, IRLS& env, const IRInstruction* inst,
                           Vreg dst, const Class* cls, size_t nprops) {
-  // If the object has a small number of properties, just emit stores inline.
-  if (nprops < 8) {
-    for (int i = 0; i < nprops; ++i) {
-      auto const propOffset = sizeof(ObjectData) + sizeof(TypedValue) * i;
-      auto const& initTV = cls->declPropInit()[i];
-
-      if (!isNullType(initTV.m_type)) {
-        emitImmStoreq(v, initTV.m_data.num, dst[propOffset + TVOFF(m_data)]);
-      }
-      v << storebi{static_cast<data_type_t>(initTV.m_type),
-                   dst[propOffset + TVOFF(m_type)]};
-    }
-    return;
-  }
-
-  // Use memcpy for large numbers of properties.
+  // memcpy the values from the class property init vec.
   auto args = argGroup(env, inst)
     .addr(dst, safe_cast<int32_t>(sizeof(ObjectData)))
-    .imm(reinterpret_cast<uintptr_t>(&cls->declPropInit()[0]))
-    .imm(cellsToBytes(nprops));
+    .imm(reinterpret_cast<uintptr_t>(cls->declPropInit().data()))
+    .imm(ObjectProps::sizeFor(nprops));
 
   cgCallHelper(v, env, CallSpec::direct(memcpy),
                kVoidDest, SyncOptions::None, args);
@@ -157,23 +179,48 @@ void implInitObjMemoSlots(Vout& v, IRLS& env, const IRInstruction* inst,
 
   auto const nslots = cls->numMemoSlots();
   if (nslots < 8) {
-    for (Slot i = 0; i < nslots; ++i) {
-      static_assert(sizeof(MemoSlot) == 16, "");
-      auto const offset = -(sizeof(MemoSlot) * (nslots - i));
-      emitImmStoreq(v, 0, obj[offset]);
-      emitImmStoreq(v, 0, obj[offset+8]);
+    static_assert(sizeof(MemoSlot) == 16, "");
+    auto const dt = static_cast<data_type_t>(KindOfUninit);
+    if (arch::any<arch::ARM>()) {
+      // Store each slot as data+type with a single stp. The type constant is
+      // still materialized as a register, since stp has no immediate form.
+      auto const zeroReg = v.cns(0);
+      auto const dtReg = v.cns(dt);
+      for (Slot i = 0; i < nslots; ++i) {
+        auto const offset = -(sizeof(MemoSlot) * (nslots - i));
+        v << storepair{
+          zeroReg,
+          dtReg,
+          obj[offset + TVOFF(m_data)]
+        };
+      }
+    } else {
+      for (Slot i = 0; i < nslots; ++i) {
+        auto const offset = -(sizeof(MemoSlot) * (nslots - i));
+        emitImmStoreq(v, 0, obj[offset + TVOFF(m_data)]);
+        // On x64, storebi encodes shorter than materializing a register and
+        // using a full-width store.
+        v << storebi{dt, obj[offset + TVOFF(m_type)]};
+      }
     }
     return;
   }
 
   auto const args = argGroup(env, inst)
     .addr(obj, -safe_cast<int32_t>(sizeof(MemoSlot) * nslots))
-    .imm(0)
-    .imm(sizeof(MemoSlot) * nslots);
-  cgCallHelper(v, env, CallSpec::direct(memset),
+    .imm(nslots);
+  cgCallHelper(v, env, CallSpec::direct(initObjMemoSlots),
                kVoidDest, SyncOptions::None, args);
 }
 
+}
+
+void cgInitObjMemoSlots(IRLS& env, const IRInstruction* inst) {
+  auto const cls = inst->extra<InitObjMemoSlots>()->cls;
+  auto const obj = srcLoc(env, inst, 0).reg();
+  auto& v = vmain(env);
+
+  implInitObjMemoSlots(v, env, inst, cls, obj);
 }
 
 void cgInitObjProps(IRLS& env, const IRInstruction* inst) {
@@ -196,26 +243,67 @@ void cgInitObjProps(IRLS& env, const IRInstruction* inst) {
       auto const propHandle = cls->propHandle();
       assertx(rds::isNormalHandle(propHandle));
 
+      markRDSAccess(v, propHandle);
+
       auto const propInitVec = v.makeReg();
       auto const propData = v.makeReg();
       v << load{Vreg(rvmtl())[propHandle], propInitVec};
-      v << load{propInitVec[Class::PropInitVec::dataOff()], propData};
 
       auto args = argGroup(env, inst)
-        .addr(obj, safe_cast<int32_t>(sizeof(ObjectData)))
-        .reg(propData);
+        .addr(obj, safe_cast<int32_t>(sizeof(ObjectData)));
 
       if (!cls->hasDeepInitProps()) {
+        v << load{propInitVec[Class::PropInitVec::dataOff()], propData};
         cgCallHelper(v, env, CallSpec::direct(memcpy), kVoidDest,
-                     SyncOptions::None, args.imm(cellsToBytes(nprops)));
+                     SyncOptions::None,
+                     args
+                     .reg(propData)
+                     .imm(ObjectProps::sizeFor(nprops)));
       } else {
         cgCallHelper(v, env, CallSpec::direct(deepInitHelper),
-                     kVoidDest, SyncOptions::None, args.imm(nprops));
+                     kVoidDest, SyncOptions::None,
+                     args.reg(propInitVec).imm(nprops));
       }
     }
   }
 }
 
+void cgLockObj(IRLS& env, const IRInstruction* inst) {
+  auto const obj = srcLoc(env, inst, 0).reg();
+  auto& v = vmain(env);
+  auto const mask = ~static_cast<int8_t>(ObjectData::IsBeingConstructed);
+  v << andbim{mask, obj[HeaderAuxOffset], v.makeReg()};
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 
-}}}
+void cgClassHasReifiedGenerics(IRLS& env, const IRInstruction* inst) {
+  auto const dst = dstLoc(env, inst, 0).reg();
+  auto const cls = srcLoc(env, inst, 0).reg();
+
+  auto& v = vmain(env);
+  auto const sf = v.makeReg();
+
+  v << testbim{(int32_t)Class::reifiedGenericsMask(), cls[Class::allFlagsOff()], sf};
+  v << setcc{CC_NZ, sf, dst};
+}
+
+void cgHasReifiedParent(IRLS& env, const IRInstruction* inst) {
+  auto const dst = dstLoc(env, inst, 0).reg();
+  auto const cls = srcLoc(env, inst, 0).reg();
+
+  auto& v = vmain(env);
+  auto const sf = v.makeReg();
+
+  v << testbim{(int32_t)Class::reifiedParentMask(), cls[Class::allFlagsOff()], sf};
+  v << setcc{CC_NZ, sf, dst};
+}
+
+
+IMPL_OPCODE_CALL(ReifiedInit)
+
+IMPL_OPCODE_CALL(GetClsRGProp)
+
+///////////////////////////////////////////////////////////////////////////////
+
+}

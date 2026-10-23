@@ -3,5 +3,5 @@
 abstract final class Foo {}
 
 function f(): classname<Foo> {
-  // UNSAFE
+  return nameof Foo;
 }

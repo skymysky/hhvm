@@ -1,0 +1,11 @@
+error: Parsing[1002] Attributes on enum class enumerators are not allowed [1]
+
+enum_class_enumerator_attr.php:15:35
+13 |   <<__Enforceable>> // allowed
+14 |     const type T = int;
+15 |   <<__Enforceable>> // not allowed
+   |                                   ^ [1]
+16 |     int A = 42;
+17 | }
+
+1 error found

@@ -16,24 +16,20 @@
 
 #include "hphp/runtime/vm/jit/irlower-internal.h"
 
-#include "hphp/runtime/base/rds.h"
-#include "hphp/runtime/base/runtime-option.h"
+#include "hphp/runtime/base/exceptions.h"
 #include "hphp/runtime/vm/bytecode.h"
 #include "hphp/runtime/vm/func.h"
 #include "hphp/runtime/vm/resumable.h"
 
-#include "hphp/runtime/vm/jit/types.h"
 #include "hphp/runtime/vm/jit/abi.h"
 #include "hphp/runtime/vm/jit/arg-group.h"
 #include "hphp/runtime/vm/jit/bc-marker.h"
 #include "hphp/runtime/vm/jit/call-spec.h"
 #include "hphp/runtime/vm/jit/code-gen-cf.h"
 #include "hphp/runtime/vm/jit/extra-data.h"
-#include "hphp/runtime/vm/jit/fixup.h"
 #include "hphp/runtime/vm/jit/ir-instruction.h"
 #include "hphp/runtime/vm/jit/ir-opcode.h"
 #include "hphp/runtime/vm/jit/ssa-tmp.h"
-#include "hphp/runtime/vm/jit/stack-overflow.h"
 #include "hphp/runtime/vm/jit/tc.h"
 #include "hphp/runtime/vm/jit/translator-inline.h"
 #include "hphp/runtime/vm/jit/type.h"
@@ -42,36 +38,24 @@
 #include "hphp/runtime/vm/jit/vasm-instr.h"
 #include "hphp/runtime/vm/jit/vasm-reg.h"
 
+#include "hphp/util/configs/eval.h"
 #include "hphp/util/trace.h"
 
-#include <folly/Optional.h>
+namespace HPHP::jit::irlower {
 
-namespace HPHP { namespace jit { namespace irlower {
-
-TRACE_SET_MOD(irlower);
+TRACE_SET_MOD(irlower)
 
 ///////////////////////////////////////////////////////////////////////////////
 
 void emitCheckSurpriseFlags(Vout& v, Vreg fp, Vlabel handleSurprise) {
+  auto constexpr surpriseFlagsOff =
+    rds::Header::stackLimitAndSurpriseOffset() +
+    StackLimitAndSurpriseFlags::valueOffset();
   auto const done = v.makeBlock();
   auto const sf = v.makeReg();
-  v << cmpqm{fp, rvmtl()[rds::kSurpriseFlagsOff], sf};
+  v << cmpqm{fp, rvmtl()[surpriseFlagsOff], sf};
   v << jcc{CC_NBE, sf, {done, handleSurprise}};
   v = done;
-}
-
-void emitCheckSurpriseFlagsEnter(Vout& v, Vout& vcold, Vreg fp,
-                                 Fixup fixup, Vlabel catchBlock) {
-  auto const handleSurprise = vcold.makeBlock();
-  auto const done = v.makeBlock();
-  emitCheckSurpriseFlags(v, fp, handleSurprise);;
-  v << jmp{done};
-  v = done;
-
-  vcold = handleSurprise;
-  auto const call = CallSpec::stub(tc::ustubs().functionEnterHelper);
-  auto const args = v.makeVcallArgs({});
-  vcold << vinvoke{call, args, v.makeTuple({}), {done, catchBlock}, fixup};
 }
 
 void cgCheckSurpriseFlags(IRLS& env, const IRInstruction* inst) {
@@ -88,61 +72,103 @@ void cgCheckSurpriseFlags(IRLS& env, const IRInstruction* inst) {
   emitCheckSurpriseFlags(v, fp_or_sp, label(env, inst->taken()));
 }
 
+static void handleSurpriseCheck() {
+  size_t flags = handle_request_surprise();
+  // Memory Threhsold callback should also be fired here
+  if (flags & MemThresholdFlag) {
+    EventHook::DoMemoryThresholdCallback();
+  }
+  if (flags & TimedOutFlag) {
+    RID().invokeUserTimeoutCallback();
+  }
+  if (flags & DebuggerSignalFlag) {
+    VMRegAnchor _;
+    markFunctionWithDebuggerIntr(vmfp()->func());
+  }
+}
+
+void cgHandleRequestSurprise(IRLS& env, const IRInstruction* inst) {
+  auto& v = vmain(env);
+  cgCallHelper(v, env, CallSpec::direct(handleSurpriseCheck), kVoidDest,
+    SyncOptions::Sync, argGroup(env, inst));
+}
+
 void cgCheckStackOverflow(IRLS& env, const IRInstruction* inst) {
-  auto const fp = srcLoc(env, inst, 0).reg();
-  auto const func = inst->marker().func();
+  auto const calleeFP = srcLoc(env, inst, 0).reg();
+  auto const callee = inst->marker().func();
   auto& v = vmain(env);
 
   auto const stackMask = int32_t{
-    cellsToBytes(RuntimeOption::EvalVMStackElms) - 1
+    cellsToBytes(Cfg::Eval::VMStackElms) - 1
   };
-  auto const depth = cellsToBytes(func->maxStackCells()) +
-                     cellsToBytes(kStackCheckPadding) +
+  auto const depth = cellsToBytes(callee->maxStackCells()) +
+                     cellsToBytes(stackCheckPadding()) +
                      Stack::sSurprisePageSize;
 
   auto const r = v.makeReg();
   auto const sf = v.makeReg();
-  v << andqi{stackMask, fp, r, v.makeReg()};
+  v << andqi{stackMask, calleeFP, r, v.makeReg()};
   v << subqi{safe_cast<int32_t>(depth), r, v.makeReg(), sf};
 
   unlikelyIfThen(v, vcold(env), CC_L, sf, [&] (Vout& v) {
-    cgCallHelper(v, env, CallSpec::direct(handleStackOverflow), kVoidDest,
-                 SyncOptions::Sync, argGroup(env, inst).reg(fp));
+    cgCallHelper(v, env, CallSpec::direct(throw_stack_overflow), kVoidDest,
+                 SyncOptions::Sync, argGroup(env, inst));
   });
 }
 
 void cgCheckSurpriseFlagsEnter(IRLS& env, const IRInstruction* inst) {
   auto const fp = srcLoc(env, inst, 0).reg();
-  auto const extra = inst->extra<CheckSurpriseFlagsEnter>();
-  auto const func = extra->func;
-
-  auto const off = func->getEntryForNumArgs(extra->argc) - func->base();
-  auto const fixup = Fixup(off, func->numSlotsInFrame());
-
-  auto const catchBlock = label(env, inst->taken());
-  emitCheckSurpriseFlagsEnter(vmain(env), vcold(env), fp, fixup, catchBlock);
-}
-
-void cgCheckSurpriseAndStack(IRLS& env, const IRInstruction* inst) {
-  auto const fp = srcLoc(env, inst, 0).reg();
-  auto const extra = inst->extra<CheckSurpriseAndStack>();
-  auto const func = extra->func;
-
-  auto const off = func->getEntryForNumArgs(extra->argc) - func->base();
-  auto const fixup = Fixup(off, func->numSlotsInFrame());
+  auto const& extra = inst->extra<CheckSurpriseFlagsEnter>();
   auto& v = vmain(env);
 
+  // Check for surprise. Check also for stack overflow if requested.
   auto const sf = v.makeReg();
-  auto const needed_top = v.makeReg();
-  v << lea{fp[-cellsToBytes(func->maxStackCells())], needed_top};
-  v << cmpqm{needed_top, rvmtl()[rds::kSurpriseFlagsOff], sf};
+  auto const neededTop = extra->checkStackOverflow ? v.makeReg() : fp;
+  if (extra->checkStackOverflow) {
+    v << lea{fp[-cellsToBytes(extra->func->maxStackCells())], neededTop};
+  }
+  auto constexpr surpriseFlagsOff =
+    rds::Header::stackLimitAndSurpriseOffset() +
+    StackLimitAndSurpriseFlags::valueOffset();
+  v << cmpqm{neededTop, rvmtl()[surpriseFlagsOff], sf};
 
-  unlikelyIfThen(v, vcold(env), CC_AE, sf, [&] (Vout& v) {
-    auto const stub = tc::ustubs().functionSurprisedOrStackOverflow;
-    auto const done = v.makeBlock();
-    v << vinvoke{CallSpec::stub(stub), v.makeVcallArgs({}), v.makeTuple({}),
-                 {done, label(env, inst->taken())}, fixup };
-    v = done;
+  auto const done = v.makeBlock();
+  auto const handleSurprise = label(env, inst->taken());
+  if (Cfg::Eval::FastMethodIntercept && extra->func->isInterceptable()) {
+    v << interceptjcc{CC_AE, sf, {done, handleSurprise}};
+  } else {
+    v << jcc{CC_AE, sf, {done, handleSurprise}};
+  }
+  v = done;
+}
+
+void cgHandleSurpriseEnter(IRLS& env, const IRInstruction* inst) {
+  auto const& extra = inst->extra<HandleSurpriseEnter>();
+  auto& v = vmain(env);
+
+  // Call the surprise / stack overflow handler.
+  auto const stub = extra->checkStackOverflow
+    ? tc::ustubs().functionSurprisedOrStackOverflow
+    : tc::ustubs().functionSurprised;
+  auto const done = v.makeBlock();
+  auto const catchBlock = label(env, inst->taken());
+  auto const fixup = makeFixup(inst->marker(), SyncOptions::Sync);
+  v << vinvoke{CallSpec::stub(stub), v.makeVcallArgs({}), v.makeTuple({}),
+               {done, catchBlock}, fixup};
+  v = done;
+
+  // If the function is not interceptable, the handler returned nullptr.
+  if (!extra->func->isInterceptable()) return;
+
+  auto const sf = v.makeReg();
+  auto const rIntercept = rarg(3); // NB: must match emitFunctionSurprised
+  assertx(!php_return_regs().contains(rIntercept));
+
+  v << testq{rIntercept, rIntercept, sf};
+  ifThen(v, CC_NZ, sf, [&] (Vout& v) {
+    // We are intercepting. Return to the caller.
+    v << unrecordbasenativesp{};
+    v << jmpr{rIntercept, php_return_regs()};
   });
 }
 
@@ -155,4 +181,4 @@ IMPL_OPCODE_CALL(ReturnHook)
 
 ///////////////////////////////////////////////////////////////////////////////
 
-}}}
+}

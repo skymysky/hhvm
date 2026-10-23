@@ -1,8 +1,12 @@
-<?php
+<?hh
 
-$a = array(1);
-$b = array(2);
-$arr = array($b, $a);
+
+<<__EntryPoint>>
+function main_175() :mixed{
+$a = vec[1];
+$b = vec[2];
+$arr = vec[$b, $a];
 print $arr[0][0];
-asort($arr, SORT_REGULAR);
+asort(inout $arr, SORT_REGULAR);
  print $arr[0][0];
+}

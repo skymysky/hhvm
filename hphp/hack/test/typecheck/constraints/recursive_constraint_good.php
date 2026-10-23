@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 // Copyright 2004-present Facebook. All Rights Reserved.
 
 interface GIComparable<T> {
@@ -37,9 +37,6 @@ class MyInt implements GIComparable<MyInt> {
   public function Compare(MyInt $mi): int {
     return $this->item - $mi->item;
   }
-  public function __toString(): string {
-    return (string)$this->item;
-  }
 }
 
 // Lexicographic ordering
@@ -51,9 +48,6 @@ class MyPair<Tx as GIComparable<Tx>, Ty as GIComparable<Ty>>
     if ($c !== 0)
       return $c;
     return $this->snd->Compare($that->snd);
-  }
-  public function __toString(): string {
-    return (string)$this->fst.",".(string)$this->snd;
   }
 }
 
@@ -74,8 +68,8 @@ function Test(): void {
   $mm = new MinMax($twotwo);
   $mm->Add($twothree);
   $mm->Add($fourtwo);
-  echo 'min is ', $mm->GetMin();
-  echo ' and max is ', $mm->GetMax(), "\n";
+  echo 'min is (', $mm->GetMin()->fst->item, ',', $mm->GetMin()->snd->item, ')';
+  echo ' and max is (', $mm->GetMax()->fst->item, ',', $mm->GetMax()->snd->item, ")\n";
 }
 
 // Test();

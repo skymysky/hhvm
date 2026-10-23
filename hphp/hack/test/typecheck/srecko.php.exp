@@ -1,1 +1,11 @@
-No errors
+warning: Warn[12009] This `is` check is always `true`. The expression on the left has type `Foo` which is a subtype of `SomeInterface`. [1]
+
+srecko.php:16:7
+14 | 
+15 | function f(Foo $bar): Foo {
+16 |   if ($bar is SomeInterface) {
+   |       ^^^^^^^^^^^^^^^^^^^^^ [1]
+17 |     // At this point, $bar is of SomeInterface type.
+18 |     // All typing from Foo is lost.
+
+1 error found

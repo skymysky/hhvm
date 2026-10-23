@@ -16,55 +16,22 @@
 */
 #include "hphp/runtime/ext/server/ext_server.h"
 
-#include <folly/Conv.h>
-
 #include "hphp/runtime/base/builtin-functions.h"
-#include "hphp/runtime/base/runtime-option.h"
-#include "hphp/runtime/base/string-buffer.h"
-#include "hphp/runtime/base/thread-info.h"
+#include "hphp/runtime/base/request-info.h"
 #include "hphp/runtime/server/http-protocol.h"
 #include "hphp/runtime/server/http-server.h"
 #include "hphp/runtime/server/pagelet-server.h"
-#include "hphp/runtime/server/rpc-request-handler.h"
-#include "hphp/runtime/server/satellite-server.h"
+#include "hphp/runtime/server/xbox-request-handler.h"
 #include "hphp/runtime/server/xbox-server.h"
+#include "hphp/runtime/server/thread-hint.h"
 #include "hphp/util/boot-stats.h"
+#include "hphp/util/configs/server.h"
 
 namespace HPHP {
 
 static struct ServerExtension final : Extension {
-  ServerExtension() : Extension("server", NO_EXTENSION_VERSION_YET) {}
-  void moduleInit() override {
-    HHVM_RC_INT_SAME(PAGELET_NOT_READY);
-    HHVM_RC_INT_SAME(PAGELET_READY);
-    HHVM_RC_INT_SAME(PAGELET_DONE);
-
-    HHVM_FE(hphp_thread_type);
-    HHVM_FE(pagelet_server_is_enabled);
-    HHVM_FE(pagelet_server_task_start);
-    HHVM_FE(pagelet_server_task_status);
-    HHVM_FE(pagelet_server_task_result);
-    HHVM_FE(pagelet_server_tasks_started);
-    HHVM_FE(pagelet_server_flush);
-    HHVM_FE(pagelet_server_is_done);
-    HHVM_FE(xbox_send_message);
-    HHVM_FE(xbox_post_message);
-    HHVM_FE(xbox_task_start);
-    HHVM_FE(xbox_task_status);
-    HHVM_FE(xbox_task_result);
-    HHVM_FE(xbox_process_call_message);
-    HHVM_FE(xbox_get_thread_timeout);
-    HHVM_FE(xbox_set_thread_timeout);
-    HHVM_FE(xbox_schedule_thread_reset);
-    HHVM_FE(xbox_get_thread_time);
-    HHVM_FALIAS(HH\\server_is_stopping, server_is_stopping);
-    HHVM_FALIAS(HH\\server_is_prepared_to_stop, server_is_prepared_to_stop);
-    HHVM_FALIAS(HH\\server_health_level, server_health_level);
-    HHVM_FALIAS(HH\\server_uptime, server_uptime);
-    HHVM_FALIAS(HH\\server_process_start_time, server_process_start_time);
-
-    loadSystemlib();
-  }
+  ServerExtension() : Extension("server", NO_EXTENSION_VERSION_YET, "hphp_hphpi") {}
+  void moduleRegisterNative() override;
 } s_server_extension;
 
 int64_t HHVM_FUNCTION(hphp_thread_type) {
@@ -81,25 +48,25 @@ bool HHVM_FUNCTION(pagelet_server_is_enabled) {
 
 const StaticString s_Host("Host");
 
-Resource HHVM_FUNCTION(pagelet_server_task_start,
-                       const String& url,
+OptResource HHVM_FUNCTION(pagelet_server_task_start,
+                       const OptString& url,
                        const Array& headers /* = null_array */,
-                       const String& post_data /* = null_string */,
+                       const OptString& post_data /* = null_string */,
                        const Array& files /* = null_array */,
                        int64_t desired_timeout /* = 0 */) {
-  String remote_host;
+  OptString remote_host;
   Transport *transport = g_context->getTransport();
   // If a non-zero timeout is requested, use it and cap it at the remaining
   // request time.
   int remaining_time =
-    ThreadInfo::s_threadInfo->m_reqInjectionData.getRemainingTime();
+    RequestInfo::s_requestInfo->m_reqInjectionData.getRemainingTime();
   int timeout = desired_timeout > 0 && desired_timeout <= remaining_time
     ? desired_timeout
     : remaining_time;
 
   if (transport) {
     remote_host = transport->getRemoteHost();
-    if (!headers.exists(s_Host) && RuntimeOption::SandboxMode) {
+    if (!headers.exists(s_Host) && Cfg::Sandbox::Mode) {
       Array tmp = headers;
       tmp.set(s_Host, transport->getHeader("Host"));
       return PageletServer::TaskStart(url, tmp, remote_host,
@@ -111,21 +78,19 @@ Resource HHVM_FUNCTION(pagelet_server_task_start,
 }
 
 int64_t HHVM_FUNCTION(pagelet_server_task_status,
-                      const Resource& task) {
+                      const OptResource& task) {
   return PageletServer::TaskStatus(task);
 }
 
-String HHVM_FUNCTION(pagelet_server_task_result,
-                     const Resource& task,
-                     VRefParam headers,
-                     VRefParam code,
-                     int64_t timeout_ms /* = 0 */) {
-  Array rheaders;
+OptString HHVM_FUNCTION(pagelet_server_task_result,
+                        const OptResource& task,
+                        Array& headers,
+                        int64_t& code,
+                        int64_t timeout_ms /* = 0 */) {
   int rcode;
-  String response = PageletServer::TaskResult(task, rheaders, rcode,
-                                              timeout_ms);
-  headers.assignIfRef(rheaders);
-  code.assignIfRef(rcode);
+  OptString response = PageletServer::TaskResult(task, headers, rcode,
+                                                 timeout_ms);
+  code = rcode;
   return response;
 }
 
@@ -140,7 +105,7 @@ void HHVM_FUNCTION(pagelet_server_flush) {
       transport->getThreadType() == Transport::ThreadType::PageletThread) {
     // this method is only meaningful in a pagelet thread
     context->obFlushAll();
-    String content = context->obDetachContents();
+    OptString content = context->obDetachContents();
     std::string s(content.data(), content.size());
     if (!s.empty()) {
       PageletServer::AddToPipeline(s);
@@ -161,42 +126,26 @@ bool HHVM_FUNCTION(pagelet_server_is_done) {
 ///////////////////////////////////////////////////////////////////////////////
 // xbox
 
-bool HHVM_FUNCTION(xbox_send_message,
-                   const String& msg,
-                   VRefParam retRef,
-                   int64_t timeout_ms,
-                   const String& host /* = "localhost" */) {
-  Array ret;
-  auto b = XboxServer::SendMessage(msg, ret, timeout_ms, host);
-  retRef.assignIfRef(ret);
-  return b;
-}
-
-bool HHVM_FUNCTION(xbox_post_message,
-                   const String& msg,
-                   const String& host /* = "localhost" */) {
-  return XboxServer::PostMessage(msg, host);
-}
-
-Resource HHVM_FUNCTION(xbox_task_start,
-                       const String& message) {
+OptResource HHVM_FUNCTION(xbox_task_start,
+                       const OptString& message) {
   return XboxServer::TaskStart(message);
 }
 
 bool HHVM_FUNCTION(xbox_task_status,
-                   const Resource& task) {
+                   const OptResource& task) {
   return XboxServer::TaskStatus(task);
 }
 
 int64_t HHVM_FUNCTION(xbox_task_result,
-                      const Resource& task,
+                      const OptResource& task,
                       int64_t timeout_ms,
-                      VRefParam ret) {
-  return XboxServer::TaskResult(task, timeout_ms, ret.getVariantOrNull());
+                      Variant& ret) {
+  auto result = XboxServer::TaskResult(task, timeout_ms, &ret);
+  return result;
 }
 
 Variant HHVM_FUNCTION(xbox_process_call_message,
-                      const String& msg) {
+                      const OptString& msg) {
   Variant v =
     unserialize_from_string(msg, VariableUnserializer::Type::Internal);
   if (!v.isArray()) {
@@ -219,46 +168,12 @@ Variant HHVM_FUNCTION(xbox_process_call_message,
   if (!args.isArray()) {
     raise_error("Error decoding xbox call message");
   }
-  return vm_call_user_func(fn, args.toArray());
+  return vm_call_user_func(fn, args.toArray(), RuntimeCoeffects::fixme(),
+                           false, true);
 }
 
-int64_t HHVM_FUNCTION(xbox_get_thread_timeout) {
-  auto server_info = XboxServer::GetServerInfo();
-  if (server_info) {
-    return server_info->getMaxDuration();
-  }
-  throw Exception("Not an xbox worker!");
-}
-
-void HHVM_FUNCTION(xbox_set_thread_timeout,
-                   int timeout) {
-  if (timeout < 0) {
-    raise_warning("Cannot set timeout/duration to a negative number.");
-    return;
-  }
-  auto server_info = XboxServer::GetServerInfo();
-  if (server_info) {
-    server_info->setMaxDuration(timeout);
-  } else {
-    throw Exception("Not an xbox worker!");
-  }
-}
-
-void HHVM_FUNCTION(xbox_schedule_thread_reset) {
-  RPCRequestHandler *handler = XboxServer::GetRequestHandler();
-  if (handler) {
-    handler->setReset();
-  } else {
-    throw Exception("Not an xbox worker!");
-  }
-}
-
-int64_t HHVM_FUNCTION(xbox_get_thread_time) {
-  RPCRequestHandler *handler = XboxServer::GetRequestHandler();
-  if (handler) {
-    return time(nullptr) - handler->getLastResetTime();
-  }
-  throw Exception("Not an xbox worker!");
+int64_t HHVM_FUNCTION(xbox_tasks_started) {
+  return g_context->getXboxTasksStarted();
 }
 
 bool HHVM_FUNCTION(server_is_stopping) {
@@ -272,21 +187,22 @@ bool HHVM_FUNCTION(server_is_stopping) {
 }
 
 bool HHVM_FUNCTION(server_is_prepared_to_stop) {
+  if (isJitSerializing()) return true;
   auto const now = time(nullptr);
   auto const lastPrepareTime = HttpServer::GetPrepareToStopTime();
   if (lastPrepareTime == 0) return false;
-  return (lastPrepareTime + RuntimeOption::ServerPrepareToStopTimeout) >= now;
+  return (lastPrepareTime + Cfg::Server::PrepareToStopTimeout) >= now;
 }
 
 int64_t HHVM_FUNCTION(server_health_level) {
   if (HttpServer::Server) {
     if (auto const server = HttpServer::Server->getPageServer()) {
-      return healthLeveltToInt(server->getHealthLevel());
+      return healthLevelToInt(server->getHealthLevel());
     }
   }
   // If server is not yet started, e.g., when not running in server
   // mode, or before server starts, we assume everything is OK.
-  return healthLeveltToInt(HealthLevel::Bold);
+  return healthLevelToInt(HealthLevel::Bold);
 }
 
 int64_t HHVM_FUNCTION(server_uptime) {
@@ -301,6 +217,45 @@ int64_t HHVM_FUNCTION(server_uptime) {
 int64_t HHVM_FUNCTION(server_process_start_time) {
   // Returns 0 when not running in server mode.
   return BootStats::startTimestamp();
+}
+
+void HHVM_FUNCTION(enable_thread_hint, int64_t hint) {
+  if (!Cfg::Server::ScxThreadHintFirstFlushOverride) return;
+  ThreadHint::getInstance().updateThreadHint(
+    ThreadHint::Priority::FirstFlush);
+}
+
+void HHVM_FUNCTION(disable_thread_hint, int64_t hint) {
+  if (!Cfg::Server::ScxThreadHintFirstFlushOverride) return;
+  ThreadHint::getInstance().updateThreadHint(
+    ThreadHint::Priority::Processing);
+}
+
+void ServerExtension::moduleRegisterNative() {
+  HHVM_RC_INT_SAME(PAGELET_NOT_READY);
+  HHVM_RC_INT_SAME(PAGELET_READY);
+  HHVM_RC_INT_SAME(PAGELET_DONE);
+
+  HHVM_FE(hphp_thread_type);
+  HHVM_FE(pagelet_server_is_enabled);
+  HHVM_FE(pagelet_server_task_start);
+  HHVM_FE(pagelet_server_task_status);
+  HHVM_FE(pagelet_server_task_result);
+  HHVM_FE(pagelet_server_tasks_started);
+  HHVM_FE(pagelet_server_flush);
+  HHVM_FE(pagelet_server_is_done);
+  HHVM_FE(xbox_task_start);
+  HHVM_FE(xbox_task_status);
+  HHVM_FE(xbox_task_result);
+  HHVM_FE(xbox_process_call_message);
+  HHVM_FE(xbox_tasks_started);
+  HHVM_FALIAS(HH\\server_is_stopping, server_is_stopping);
+  HHVM_FALIAS(HH\\server_is_prepared_to_stop, server_is_prepared_to_stop);
+  HHVM_FALIAS(HH\\server_health_level, server_health_level);
+  HHVM_FALIAS(HH\\server_uptime, server_uptime);
+  HHVM_FALIAS(HH\\server_process_start_time, server_process_start_time);
+  HHVM_FALIAS(HH\\Experimental\\enable_thread_hint, enable_thread_hint);
+  HHVM_FALIAS(HH\\Experimental\\disable_thread_hint, disable_thread_hint);
 }
 
 ///////////////////////////////////////////////////////////////////////////////

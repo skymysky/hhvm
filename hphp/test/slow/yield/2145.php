@@ -1,10 +1,14 @@
-<?php
+<?hh
 
-function fruit() {
+function fruit(): Iterator<string> {
  echo "sadpanda, no fruit";
  yield break;
  }
- foreach (fruit() as $fruit) {
+
+
+ <<__EntryPoint>>
+function main_2145() :mixed{
+foreach (fruit() as $fruit) {
  var_dump($fruit);
 }
-
+}

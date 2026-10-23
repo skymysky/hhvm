@@ -1,33 +1,26 @@
 string(5) "hello"
-array(3) {
-  [0]=>
-  array(3) {
+vec(3) {
+  dict(3) {
     ["file"]=>
     string(%d) "%s/test/slow/debug_backtrace/compact_crash.php"
     ["line"]=>
-    int(13)
+    int(14)
     ["function"]=>
     string(7) "profile"
   }
-  [1]=>
-  array(5) {
+  dict(5) {
     ["file"]=>
     string(%d) "%s/test/slow/debug_backtrace/compact_crash.php"
     ["line"]=>
-    int(18)
+    int(19)
     ["function"]=>
     string(3) "foo"
     ["class"]=>
     string(1) "X"
     ["type"]=>
-    string(2) "::"
+    string(2) "->"
   }
-  [2]=>
-  array(3) {
-    ["file"]=>
-    string(%d) "%s/test/slow/debug_backtrace/compact_crash.php"
-    ["line"]=>
-    int(21)
+  dict(1) {
     ["function"]=>
     string(4) "main"
   }

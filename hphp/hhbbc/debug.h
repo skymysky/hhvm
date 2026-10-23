@@ -13,16 +13,21 @@
    | license@php.net so we can mail you a copy immediately.               |
    +----------------------------------------------------------------------+
 */
-#ifndef incl_HHBBC_DEBUG_H_
-#define incl_HHBBC_DEBUG_H_
+#pragma once
 
 #include "hphp/util/trace.h"
 
 #include "hphp/hhbbc/misc.h"
 #include "hphp/hhbbc/representation.h"
+#include "hphp/hhbbc/type-structure.h"
 #include "hphp/hhbbc/unit-util.h"
 
-namespace HPHP { namespace HHBBC {
+namespace HPHP::HHBBC {
+
+//////////////////////////////////////////////////////////////////////
+
+struct IIndex;
+struct ParsedUnit;
 
 //////////////////////////////////////////////////////////////////////
 
@@ -30,30 +35,26 @@ namespace HPHP { namespace HHBBC {
  * If the hhbbc_dump trace module is on, dump the entire program to a
  * temporary directory as readable text.
  */
-void debug_dump_program(const Index&, const php::Program&);
+std::string debug_dump_to();
+
+std::string dump_representation(const IIndex&, const php::Unit&);
+std::string dump_index(const IIndex&, const php::Unit&);
+
+void write_representation_dump(const std::string& dir,
+                               const std::string& unitPath,
+                               const std::string& dump);
+void write_index_dump(const std::string& dir,
+                      const std::string& unitPath,
+                      const std::string& dump);
 
 /*
  * Utilities for printing the state of the program after various
  * transformations.
  */
 
-inline void banner(const char* what) {
-  TRACE_SET_MOD(hhbbc);
-  FTRACE(2, "{:-^70}\n", what);
-}
-
-inline void state_after(const char* when, const php::Program& program) {
-  TRACE_SET_MOD(hhbbc);
-  banner(when);
-  for (auto& u : program.units) {
-    Trace::Bump bumper{Trace::hhbbc, kSystemLibBump, is_systemlib_part(*u)};
-    FTRACE(4, "{}", show(*u));
-  }
-  banner("");
-}
+void state_after(const char* when, const php::Unit&, const IIndex&);
+void state_after(const char* when, const ParsedUnit&);
 
 //////////////////////////////////////////////////////////////////////
 
-}}
-
-#endif
+}

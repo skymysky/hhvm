@@ -1,0 +1,78 @@
+warning: Lint[5638] This call to 'contains' will always return the same value, because type Map<string, mixed> is disjoint from type int.
+   --> invalid_disjoint_check_static_methods.php
+ 16 |     return !self::contains($table_data, (int)$assoc['id1']);
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+
+warning: Lint[5638] This call to 'contains' will always return the same value, because type Foo is disjoint from type int.
+   --> invalid_disjoint_check_static_methods.php
+ 26 |   return C::contains($x, $i);
+    |          ^^^^^^^^^^^^^^^^^^^
+
+
+warning: Lint[5638] This call to 'contains' will always return the same value, because type Foo is disjoint from type int.
+   --> invalid_disjoint_check_static_methods.php
+ 30 |   return C::contains($x, $i);
+    |          ^^^^^^^^^^^^^^^^^^^
+
+
+warning: Lint[5638] This call to 'contains' will always return the same value, because type Foo is disjoint from type int.
+   --> invalid_disjoint_check_static_methods.php
+ 33 |   return C::contains($x, $i);
+    |          ^^^^^^^^^^^^^^^^^^^
+
+
+warning: Lint[5638] This call to 'contains' will always return the same value, because type Foo is disjoint from type int.
+   --> invalid_disjoint_check_static_methods.php
+ 36 |   return C::contains($x, $i);
+    |          ^^^^^^^^^^^^^^^^^^^
+
+
+warning: Lint[5638] This call to 'contains' will always return the same value, because type Foo is disjoint from type int.
+   --> invalid_disjoint_check_static_methods.php
+ 39 |   return C::contains($x, $i);
+    |          ^^^^^^^^^^^^^^^^^^^
+
+
+warning: Lint[5638] This call to 'contains' will always return the same value, because type Foo is disjoint from type int.
+   --> invalid_disjoint_check_static_methods.php
+ 42 |   return C::contains($x, $i);
+    |          ^^^^^^^^^^^^^^^^^^^
+
+
+warning: Lint[5638] This call to 'contains' will always return the same value, because type Foo is disjoint from type int.
+   --> invalid_disjoint_check_static_methods.php
+ 45 |   return C::contains($x, $i);
+    |          ^^^^^^^^^^^^^^^^^^^
+
+
+warning: Lint[5638] This call to 'contains' will always return the same value, because type Foo is disjoint from type int.
+   --> invalid_disjoint_check_static_methods.php
+ 48 |   return C::contains($x, $i);
+    |          ^^^^^^^^^^^^^^^^^^^
+
+
+warning: Lint[5638] This call to 'contains' will always return the same value, because type Foo is disjoint from type Baz.
+   --> invalid_disjoint_check_static_methods.php
+ 51 |   return C::contains($x, $i);
+    |          ^^^^^^^^^^^^^^^^^^^
+
+
+warning: Lint[5638] This call to 'contains' will always return the same value, because type Foo is disjoint from type <expr#3> as Bar.
+   --> invalid_disjoint_check_static_methods.php
+ 54 |   return C::contains($x, $i);
+    |          ^^^^^^^^^^^^^^^^^^^
+
+
+warning: Lint[5638] This call to 'contains' will always return the same value, because type Bar is disjoint from type Foo.
+   --> invalid_disjoint_check_static_methods.php
+ 57 |   return C::contains($x, $i);
+    |          ^^^^^^^^^^^^^^^^^^^
+
+
+warning: Lint[5638] This call to 'contains' will always return the same value, because type string is disjoint from type EnumInt.
+   --> invalid_disjoint_check_static_methods.php
+105 |   return C::contains($x, $y);
+    |          ^^^^^^^^^^^^^^^^^^^
+
+

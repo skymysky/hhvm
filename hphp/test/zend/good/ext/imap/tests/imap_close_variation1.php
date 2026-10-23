@@ -1,6 +1,6 @@
-<?php
+<?hh
 /* Prototype  : bool imap_close(resource $stream_id [, int $options])
- * Description: Close an IMAP stream 
+ * Description: Close an IMAP stream
  * Source code: ext/imap/php_imap.c
  */
 
@@ -8,19 +8,16 @@
  * Pass different data types as $stream_id argument to test behaviour of imap_close()
  */
 
-echo "*** Testing imap_close() : usage variations ***\n";
-
-//get an unset variable
-$unset_var = 10;
-unset ($unset_var);
-
 // get a class
 class classA
 {
-  public function __toString() {
+  public function __toString() :mixed{
     return "Class A object";
   }
 }
+<<__EntryPoint>> function main(): void {
+echo "*** Testing imap_close() : usage variations ***\n";
+
 
 // heredoc string
 $heredoc = <<<EOT
@@ -28,7 +25,7 @@ hello world
 EOT;
 
 // unexpected values to be passed to $stream_id argument
-$inputs = array(
+$inputs = vec[
 
        // int data
 /*1*/  0,
@@ -52,33 +49,29 @@ $inputs = array(
        false,
        TRUE,
        FALSE,
-       
+
        // empty data
 /*16*/ "",
        '',
-       array(),
+       vec[],
 
        // string data
 /*19*/ "string",
        'string',
        $heredoc,
-       
+
        // object data
 /*22*/ new classA(),
 
-       // undefined data
-/*23*/ @$undefined_var,
 
-       // unset data
-/*24*/ @$unset_var,
-);
+];
 
 // loop through each element of $inputs to check the behavior of imap_close()
 $iterator = 1;
 foreach($inputs as $input) {
   echo "\n-- Iteration $iterator --\n";
-  var_dump( imap_close($input) );
+  try { var_dump( imap_close($input) ); } catch (Exception $e) { echo "\n".'Warning: '.$e->getMessage().' in '.__FILE__.' on line '.__LINE__."\n"; }
   $iterator++;
 };
-?>
-===DONE===
+echo "===DONE===\n";
+}

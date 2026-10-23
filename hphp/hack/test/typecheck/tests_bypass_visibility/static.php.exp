@@ -1,0 +1,37 @@
+error: Typing[4112] You cannot access this member [1]
+-> This member is private [2]
+
+static.php:22:16
+ 5 | class StaticFoo {
+ 6 |   <<__TestsBypassVisibility>>
+ 7 |   private static function spriv(): void {}
+   |                           ^^^^^ [2]
+ 8 | 
+ 9 |   <<__TestsBypassVisibility>>
+   :
+20 | class StaticNonTest {
+21 |   public function test(): void {
+22 |     StaticFoo::spriv(); // error
+   |                ^^^^^ [1]
+23 |     StaticFoo::sprot(); // error
+24 |   }
+
+error: Typing[4112] Cannot access this protected member, you don't extend StaticFoo [1]
+-> This member is protected [2]
+
+static.php:23:16
+ 8 | 
+ 9 |   <<__TestsBypassVisibility>>
+10 |   protected static function sprot(): void {}
+   |                             ^^^^^ [2]
+11 | }
+12 | 
+   :
+21 |   public function test(): void {
+22 |     StaticFoo::spriv(); // error
+23 |     StaticFoo::sprot(); // error
+   |                ^^^^^ [1]
+24 |   }
+25 | }
+
+2 errors found

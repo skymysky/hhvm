@@ -14,8 +14,7 @@
    | license@php.net so we can mail you a copy immediately.               |
    +----------------------------------------------------------------------+
 */
-#ifndef incl_HPHP_ICU_LIFE_EVENT_TOKENIZER_H_
-#define incl_HPHP_ICU_LIFE_EVENT_TOKENIZER_H_
+#pragma once
 
 #include <atomic>
 #include <string>
@@ -31,7 +30,7 @@
 
 namespace HPHP {
 
-typedef icu::RuleBasedBreakIterator BreakIterator;
+using BreakIterator = icu::RuleBasedBreakIterator;
 
 // Master copy of the ICU object we use for tokenization. Creation is expensive,
 // but cloning is fast and thread-safe, so we clone a copy (in tokenizeString)
@@ -65,5 +64,3 @@ void tokenizeString(
   const icu::UnicodeString& ustr);
 
 }
-
-#endif // incl_HPHP_ICU_LIFE_EVENT_TOKENIZER_H_

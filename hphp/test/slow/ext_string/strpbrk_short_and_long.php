@@ -1,6 +1,6 @@
-<?php
+<?hh
 
-function both_short() {
+function both_short() :mixed{
   print __FUNCTION__."\n";
   $haystack = 'foo:bar';
   $needle1 = '12345:';
@@ -9,7 +9,7 @@ function both_short() {
   var_dump(strpbrk($haystack, $needle2));
 }
 
-function short_needle() {
+function short_needle() :mixed{
   print __FUNCTION__."\n";
   $haystack = '12345678901234567890:1337';
   $needle1 = 'abcdef:';
@@ -18,7 +18,7 @@ function short_needle() {
   var_dump(strpbrk($haystack, $needle2));
 }
 
-function short_haystack() {
+function short_haystack() :mixed{
   print __FUNCTION__."\n";
   $haystack = '12345';
   $needle1 = 'abcdefghijklmnopqrstuvwxyz3';
@@ -27,7 +27,7 @@ function short_haystack() {
   var_dump(strpbrk($haystack, $needle2));
 }
 
-function both_long() {
+function both_long() :mixed{
   print __FUNCTION__."\n";
   $haystack = '12345678901234567890';
   $needle1 = 'abcdefghijklmnopqrstuvwxyz9';
@@ -36,33 +36,33 @@ function both_long() {
   var_dump(strpbrk($haystack, $needle2));
 }
 
-function empties() {
+function empties() :mixed{
   print __FUNCTION__."\n";
   var_dump(strpbrk('', '12345'));
   var_dump(strpbrk('', '12345678901234567890'));
 }
 
-function multiple_matches() {
+function multiple_matches() :mixed{
   var_dump(strpbrk('foo:bar', ':b'));
   var_dump(strpbrk('foo:bar', 'b:'));
 }
 
-function restarting_things() {
+function restarting_things() :mixed{
   var_dump(
     strtr(
       strpbrk("foo\x00bar\x00waaaaa", 'w'),
-      array("\x00" => '<0>')));
+      dict["\x00" => '<0>']));
   var_dump(
     strtr(
       strpbrk("foo\x00bar\x00waaaaa", 'r'),
-      array("\x00" => '<0>')));
+      dict["\x00" => '<0>']));
   var_dump(
     strtr(
       strpbrk("foo\x00bar\x00waaaaaz", 'z'),
-      array("\x00" => '<0>')));
+      dict["\x00" => '<0>']));
 }
 
-function main() {
+function main() :mixed{
   both_short();
   short_needle();
   short_haystack();
@@ -72,4 +72,8 @@ function main() {
   restarting_things();
 }
 
+
+<<__EntryPoint>>
+function main_strpbrk_short_and_long() :mixed{
 main();
+}

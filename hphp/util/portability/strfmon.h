@@ -21,12 +21,12 @@
  * TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
  * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
-#ifndef incl_HPHP_UTIL_PORTABILITY_STRFMON_H_
-#define incl_HPHP_UTIL_PORTABILITY_STRFMON_H_
+#pragma once
 
-#include "hphp/util/locale-portability.h"
 #include <folly/Portability.h>
 
+#include <locale.h>
+#include <langinfo.h>
 #include <stdint.h>
 
 extern "C" ssize_t strfmon_l(char* __restrict s,
@@ -38,5 +38,3 @@ extern "C" ssize_t strfmon(char* __restrict s,
                            size_t n,
                            const char* __restrict fmt,
                            ...);
-
-#endif

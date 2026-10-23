@@ -1,0 +1,127 @@
+%A
+ Method static public (no-override) (persistent) (can_async_eager_ret) (eager-only) (leaf) Closure$eager_closure::__invoke
+%A
+ Method static public (no-override) (persistent) (can_async_eager_ret) Closure$suspending_closure::__invoke
+%A
+ Method static public (no-override) (persistent) (can_async_eager_ret) (eager-only) (leaf) Closure$eager_conditional_closure::__invoke
+%A
+ Method static public (no-override) (persistent) (can_async_eager_ret) (eager-only) (leaf) Closure$eager_map::__invoke
+%A
+ Method static public (no-override) (persistent) (can_async_eager_ret) Closure$suspending_map::__invoke
+%A
+ Method static public (no-override) (persistent) (can_async_eager_ret) (eager-only) (leaf) Closure$eager_dict_map::__invoke
+%A
+Function (persistent) (can_async_eager_ret) (eager-only) (leaf) eager_leaf
+%A
+Function (persistent) (can_async_eager_ret) (eager-only) eager_chain
+%A
+%w%d: WHResult
+%A
+Function (persistent) (can_async_eager_ret) (eager-only) eager_stored
+%A
+%w%d: WHResult
+%A
+Function (persistent) (can_async_eager_ret) suspending_leaf
+%A
+Function (persistent) (can_async_eager_ret) suspending_chain
+%A
+Function (persistent) (can_async_eager_ret) apply_async
+%A
+Function (persistent) (can_async_eager_ret) conditional_apply_async
+%A
+Function (persistent) (can_async_eager_ret) (eager-only) eager_closure
+%A
+Function (persistent) (can_async_eager_ret) suspending_closure
+%A
+Function (persistent) (can_async_eager_ret) (eager-only) eager_conditional_closure
+%A
+Function (persistent) (can_async_eager_ret) (eager-only) eager_all
+%A
+Function (persistent) (can_async_eager_ret) suspending_all
+%A
+Function (persistent) (can_async_eager_ret) (eager-only) eager_concurrent
+%A
+%w%d: PopL L:%d
+%w// line %d
+%w%d: AssertRATL L:%d Obj<=HH\Awaitable
+%w%d: PushL L:%d
+%w%d: WHResult
+%A
+%w%d: WHResult
+%A
+Function (persistent) (can_async_eager_ret) mixed_concurrent
+%A
+%w%d: AwaitAll L:%d+2
+%A
+Function (persistent) (can_async_eager_ret) edge_eager_concurrent
+%A
+%w%d: AwaitAll L:%d+1
+%A
+Function (persistent) (can_async_eager_ret) (eager-only) caught_eager_failure
+%A
+%w%d: WHResult
+%A
+Function (persistent) (can_async_eager_ret) (eager-only) catch_direct_eager_failure
+%A
+%w%d: WHResult
+%A
+Function (persistent) (can_async_eager_ret) mixed_concurrent_failure
+%A
+%w%d: AwaitAll L:%d+2
+%A
+Function (persistent) (can_async_eager_ret) (eager-only) eager_map
+%A
+Function (persistent) (can_async_eager_ret) suspending_map
+%A
+Function (persistent) (can_async_eager_ret) (eager-only) eager_dict_map
+%A
+Function (persistent) (can_async_eager_ret) (eager-only) eager_memo_throws$memoize_impl
+%A
+Function (persistent) (can_async_eager_ret) (memoize_wrapper) eager_memo_throws
+%A
+Function (persistent) (can_async_eager_ret) catch_eager_memo_throw
+%A
+int(2)
+int(3)
+int(71)
+int(10)
+int(11)
+int(12)
+eager all done
+suspending all done
+vec(2) {
+  int(21)
+  int(31)
+}
+vec(3) {
+  int(41)
+  int(51)
+  int(61)
+}
+vec(3) {
+  int(81)
+  int(91)
+  int(101)
+}
+string(13) "eager failure"
+string(20) "direct eager failure"
+vec(2) {
+  bool(true)
+  bool(true)
+}
+vec(2) {
+  int(2)
+  int(3)
+}
+vec(2) {
+  int(2)
+  int(3)
+}
+dict(2) {
+  [3]=>
+  int(7)
+  [2]=>
+  int(7)
+}
+string(4) "memo"
+int(13)

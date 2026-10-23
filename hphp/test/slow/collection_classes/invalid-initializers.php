@@ -1,7 +1,7 @@
 <?hh
 // Copyright 2004-present Facebook. All Rights Reserved.
 
-function test() {
+function test() :mixed{
   try {
     echo "Creating Set with booleans...\n";
     $foo = Set { true, false };
@@ -35,4 +35,8 @@ function test() {
   }
 }
 
+
+<<__EntryPoint>>
+function main_invalid_initializers() :mixed{
 test();
+}

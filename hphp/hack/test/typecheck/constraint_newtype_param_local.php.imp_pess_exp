@@ -1,0 +1,41 @@
+error: Typing[4323] Some type arguments violate their constraints [1]
+-> `T` is a constrained type parameter [2]
+-> This type constraint is violated [3]
+-> Expected `arraykey` [3]
+-> But got `T` [4]
+
+constraint_newtype_param_local.php--a.php:5:25
+1 | <?hh
+2 | 
+3 | newtype X<T as arraykey> = T;
+  |           ^ [2]
+  |                ^^^^^^^^ [3]
+4 | 
+5 | function make<T>(T $x): X<T> {
+  |                         ^^^^ [1]
+  |                           ^ [4]
+6 |   return $x;
+7 | }
+
+error: Typing[4323] Some type arguments violate their constraints [1]
+-> `T` is a constrained type parameter [2]
+-> This type constraint is violated [3]
+-> Expected `arraykey` [3]
+-> But got `mixed` [4]
+->   by the definition of `T` [5]
+
+constraint_newtype_param_local.php--a.php:5:25
+1 | <?hh
+2 | 
+3 | newtype X<T as arraykey> = T;
+  |           ^ [2]
+  |                ^^^^^^^^ [3]
+4 | 
+5 | function make<T>(T $x): X<T> {
+  |               ^ [5]
+  |                         ^^^^ [1]
+  |                           ^ [4]
+6 |   return $x;
+7 | }
+
+2 errors found

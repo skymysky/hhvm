@@ -1,14 +1,18 @@
-<?php
+<?hh
 
-class C { function heh() { echo "heh\n"; } }
-function foo() { return array(); }
-function bar() {
+class C { function heh() :mixed{ echo "heh\n"; } }
+function foo() :mixed{ return vec[]; }
+function bar() :mixed{
   $x = foo();
-  $x[0] = new C;
+  $x[] = new C;
   return $x;
 }
-function main() {
+function main() :mixed{
   $y = bar()[0];
   $y->heh();
 }
+
+<<__EntryPoint>>
+function main_array_040() :mixed{
 main();
+}

@@ -14,8 +14,7 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_FAKE_TRANSPORT_H_
-#define incl_HPHP_FAKE_TRANSPORT_H_
+#pragma once
 
 #include "hphp/runtime/server/transport.h"
 
@@ -70,8 +69,8 @@ struct FakeTransport final : Transport {
   /**
    * Get request header(s).
    */
-  std::string getHeader(const char* /*name*/) override { return ""; };
-  void getHeaders(HeaderMap& /*headers*/) override {
+  std::string getHeader(const char* /*name*/) override { return ""; }
+  const HeaderMap& getHeaders() override {
     LOG(FATAL) << "FakeTransport::getHeaders";
   }
   /**
@@ -79,14 +78,14 @@ struct FakeTransport final : Transport {
    */
   void addHeaderImpl(const char* /*name*/, const char* /*value*/) override {
     LOG(FATAL) << "FakeTransport::addHeaderImpl";
-  };
+  }
   void removeHeaderImpl(const char* /*name*/) override {
     LOG(FATAL) << "FakeTransport::removeHeaderImpl";
   }
   /**
    * Get a description of the type of transport.
    */
-  String describe() const override {
+  OptString describe() const override {
     return s_fake;
   }
 
@@ -98,9 +97,8 @@ struct FakeTransport final : Transport {
   void sendImpl(const void* /*data*/, int /*size*/, int /*code*/,
                 bool /*chunked*/, bool /*eom*/) override {
     LOG(FATAL) << "FakeTransport::sendImpl";
-  };
+  }
 
 };
 
 }
-#endif

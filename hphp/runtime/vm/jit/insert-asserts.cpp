@@ -22,7 +22,7 @@
 #include "hphp/runtime/vm/jit/ir-unit.h"
 #include "hphp/runtime/vm/jit/cfg.h"
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 
 namespace {
 
@@ -57,7 +57,7 @@ void insertAfter(IRInstruction* definer, IRInstruction* inst) {
 void insertRefCountAsserts(IRUnit& unit, IRInstruction& inst) {
   for (auto dst : inst.dsts()) {
     auto const t = dst->type();
-    if (t <= TGen && t.maybe(TCounted)) {
+    if (t <= TCell && t.maybe(TCounted)) {
       insertAfter(&inst,
         unit.gen(DbgAssertRefCount, inst.bcctx(), ASSERT_REASON, dst)
       );
@@ -85,4 +85,4 @@ void insertAsserts(IRUnit& unit) {
 
 //////////////////////////////////////////////////////////////////////
 
-}}
+}

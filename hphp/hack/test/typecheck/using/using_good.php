@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 // Copyright 2004-present Facebook. All Rights Reserved.
 
 class Handle implements IDisposable {
@@ -23,7 +23,6 @@ class Another implements IDisposable {
       // fake member
       expect_string($this->str);
     }
-    echo($x);
   }
   public function __dispose(): void { }
 }
@@ -45,7 +44,8 @@ async function testit():Awaitable<void> {
     // Nested
     using ($z = new Handle()) {
       // This is legal because var_dump is marked as <<__AcceptDisposable>>
-      var_dump($x, $z);
+      var_dump($x);
+      var_dump($z);
       $z->foo();
     }
     $z = 'a';

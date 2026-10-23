@@ -1,0 +1,10 @@
+error: Parsing[1002] Cannot use unstable feature: `expression_tree_subscript` [1]
+
+subscript_feature.php:6:58
+4 | 
+5 | function test(): void {
+6 |   ExampleDsl`(vec<ExampleInt> $arr, ExampleInt $idx) ==> $arr[$idx]`;
+  |                                                          ^^^^^^^^^^ [1]
+7 | }
+
+1 error found

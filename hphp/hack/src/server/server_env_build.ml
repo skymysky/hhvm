@@ -1,0 +1,83 @@
+(*
+ * Copyright (c) 2015, Facebook, Inc.
+ * All rights reserved.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the "hack" directory of this source tree.
+ *
+ *)
+
+(*****************************************************************************)
+(* Building the environment *)
+(*****************************************************************************)
+open Hh_prelude
+open Server_env
+
+let make_genv options config local_config workers =
+  Typing_deps.trace := not (Server_args.check_mode options);
+  let (notifier, indexer) =
+    Server_notifier.init options local_config ~num_workers:(List.length workers)
+  in
+  {
+    options;
+    config;
+    local_config;
+    workers = Some workers;
+    notifier;
+    indexer;
+    debug_channels = None;
+  }
+
+(* useful in testing code *)
+let default_genv =
+  {
+    options = Server_args.default_options ~root:"";
+    config = Server_config.default_config;
+    local_config = Server_local_config_load.default;
+    workers = None;
+    notifier = Server_notifier.init_null ();
+    indexer = (fun _ () -> []);
+    debug_channels = None;
+  }
+
+let make_env ~init_id ~deps_mode ?diagnostics config : Server_env.env =
+  {
+    tcopt = Server_config.typechecker_options config;
+    popt = Server_config.parser_options config;
+    gleanopt = Server_config.glean_options config;
+    swriteopt = Server_config.symbol_write_options config;
+    naming_table = Naming_table.empty;
+    deps_mode;
+    diagnostics = Option.value diagnostics ~default:Diagnostics.empty;
+    failed_naming = Relative_path.Set.empty;
+    last_command_time = 0.0;
+    last_notifier_check_time = 0.0;
+    last_idle_job_time = 0.0;
+    disk_needs_parsing = Relative_path.Set.empty;
+    clock = None;
+    needs_phase2_redecl = Relative_path.Set.empty;
+    needs_recheck = Relative_path.Set.empty;
+    full_check_status = Full_check_done;
+    changed_files = Relative_path.Set.empty;
+    prechecked_files = Prechecked_files_disabled;
+    interrupt_handlers = (fun _ _ -> []);
+    type_check_testing_hooks = None;
+    nonpersistent_client_pending_command_needs_full_check = None;
+    why_needs_server_type_check = ("init", "");
+    init_env =
+      {
+        approach_name = "";
+        ci_info = None;
+        init_error = None;
+        init_id;
+        init_start_t = Unix.gettimeofday ();
+        init_type = "";
+        mergebase_warning_hashes = None;
+        why_needed_full_check = None;
+        recheck_id = None;
+        saved_state_revs_info = None;
+        naming_table_manifold_path = None;
+      };
+    last_recheck_loop_stats = RecheckLoopStats.empty ~recheck_id:"<none>";
+    last_recheck_loop_stats_for_actual_work = None;
+  }

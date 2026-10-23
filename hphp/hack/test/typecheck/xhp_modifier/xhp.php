@@ -1,0 +1,3 @@
+<?hh
+
+xhp class foo {}

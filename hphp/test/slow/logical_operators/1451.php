@@ -1,14 +1,21 @@
-<?php
-
-function foo() {
- echo "foo";
- }
+<?hh
+function foo() :mixed{
+  echo "foo";
+}
+<<__EntryPoint>> function main(): void {
 $a = (false && foo());
 $b = (true  || foo());
-$c = (false and foo());
-$d = (true  or  foo());
-$e = ($e || true);
-$f = ($f or true);
-$g = ($g && false);
-$h = ($h and false);
-var_dump($a, $b, $c, $d, $e, $f, $g, $h);
+var_dump($a, $b);
+try {
+  $c = ($c || true);
+  var_dump($c);
+} catch (UndefinedVariableException $e) {
+  var_dump($e->getMessage());
+}
+try {
+  $d = ($d && false);
+  var_dump($d);
+} catch (UndefinedVariableException $e) {
+  var_dump($e->getMessage());
+}
+}

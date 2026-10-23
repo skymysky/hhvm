@@ -1,0 +1,14 @@
+error: Typing[4110] Invalid argument [1]
+-> Expected `arraykey` [2]
+-> But got `null` [1]
+
+set_keybound.php:6:11
+3 | <<__EntryPoint>>
+4 | function f() : void {
+5 |   $s = Set {};
+  |        ^^^^^^ [2]
+6 |   $s->add(null);
+  |           ^^^^ [1]
+7 | }
+
+1 error found

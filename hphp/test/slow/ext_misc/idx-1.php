@@ -1,38 +1,20 @@
 <?hh
 
-// Test classes
-class MyArray implements ArrayAccess {
-  private $arr = array('a' => 'apple', 'b' => null);
-  public function offsetExists($index) {
-    return array_key_exists($index, $this->arr);
-  }
-  public function offsetGet($index) {
-    return $this->arr[$index];
-  }
-  public function offsetSet($index, $newvalue) {
-    $this->arr[$index] = $newvalue;
-  }
-  public function offsetUnset($index) {
-    unset($this->arr[$index]);
-  }
-}
-
-function main() {
+function main() :mixed{
   $o = new stdClass();
-  $a = new MyArray();
   $v = Vector { 'a' , 'b' };
   $m = Map { 'a' => 2, 'b' => 'c' };
   $s = 'hello';
 
   // Arrays
-  var_dump(idx(array(2 => 'h', 3 => 'i', 4 => 'j'), 4, null));
-  var_dump(idx(array('hello' => 42), 'hello', 31337));
-  var_dump(idx(array(2 => false), 2, true));
-  var_dump(idx(array('world' => 1), 'hello', $o));
-  var_dump(idx(array(2 => null), 2, 'not_reached'));
-  var_dump(idx(array(), 2, 'not_reached'));
-  var_dump(idx(array(), 'absent'));
-  var_dump(idx(array(), null, 5));
+  var_dump(idx(dict[2 => 'h', 3 => 'i', 4 => 'j'], 4, null));
+  var_dump(idx(dict['hello' => 42], 'hello', 31337));
+  var_dump(idx(dict[2 => false], 2, true));
+  var_dump(idx(dict['world' => 1], 'hello', $o));
+  var_dump(idx(dict[2 => null], 2, 'not_reached'));
+  var_dump(idx(vec[], 2, 'not_reached'));
+  var_dump(idx(vec[], 'absent'));
+  var_dump(idx(vec[], null, 5));
   echo "\n";
 
   // Collections
@@ -60,22 +42,22 @@ function main() {
   var_dump(idx($s, null, 'abc'));
   echo "\n";
 
-  // ArrayAccess
-  var_dump(idx($a, 'a', null));
-  var_dump(idx($a, 'b', 'orange'));
-  var_dump(idx($a, 'c', 'orange'));
-  var_dump(idx($a, 'absent'));
-  var_dump(idx($a, null, 'orange'));
-  echo "\n";
-
   // null (because PHP)
   var_dump(idx(null, 'absent'));
   var_dump(idx(null, 'not_reached', 'wtf'));
   echo "\n";
 
+  // invalid array key
+  try { var_dump(idx(dict[2 => $o], $o)); } catch (Exception $e) { var_dump($e->getMessage()); }
+  try { var_dump(idx(vec[$o], $o)); } catch (Exception $e) { var_dump($e->getMessage()); }
+
   // too few arguments
-  var_dump(idx($a));
-  var_dump(idx());
+  try { var_dump(idx($s)); } catch (Exception $e) { var_dump($e->getMessage()); }
+  try { var_dump(idx()); } catch (Exception $e) { var_dump($e->getMessage()); }
 }
 
+
+<<__EntryPoint>>
+function main_idx_1() :mixed{
 main();
+}

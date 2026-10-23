@@ -1,10 +1,8 @@
-<?php
-
-echo "Test\n";
+<?hh
 
 class A
 {
-    public $a = array();
+    public $a = vec[];
 
     public function __construct()
     {
@@ -23,12 +21,12 @@ class B implements Serializable
     }
 
     public function serialize()
-    {
+:mixed    {
         return serialize(clone $this->b);
     }
 
     public function unserialize($data)
-    {
+:mixed    {
         $this->b = unserialize($data);
     }
 }
@@ -42,11 +40,12 @@ class C
         $this->c = $c;
     }
 }
+<<__EntryPoint>> function main(): void {
+echo "Test\n";
 
 $a = unserialize(serialize(new A()));
 
 print $a->a[0]->b->c . "\n";
 print $a->a[1]->b->c . "\n";
-
-?>
-Done
+echo "Done";
+}

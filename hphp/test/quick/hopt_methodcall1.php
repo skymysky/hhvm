@@ -2,18 +2,17 @@
 // Copyright 2004-2015 Facebook. All Rights Reserved.
 
 
-echo "Starting\n";
-
-// tests FPushFuncD
-function hello() {
+// tests FCallFuncD
+<<__DynamicallyCallable>>
+function hello() :mixed{
   echo "hello";
   return 1;
 }
 
-// tests FPushFunc
-function doCall($f) {
+// tests FCallFunc
+function doCall($f) :mixed{
   echo "doCall(";
-  if ($f()) {
+  if (HH\dynamic_fun($f)()) {
     echo ") -- doCall got true\n";
   } else {
     echo ") -- doCall got false\n";
@@ -21,7 +20,7 @@ function doCall($f) {
 }
 
 class C {
-  public function method1() {
+  public function method1() :mixed{
     $x = 1;
     echo "method1\n";
     if ($x) {
@@ -30,7 +29,7 @@ class C {
     }
     return 0;
   }
-  public function doPr($x) {
+  public function doPr($x) :mixed{
     echo $x;
     echo "\n";
     if ($x) {
@@ -38,7 +37,7 @@ class C {
     }
     return 2;
   }
-  public function foo() {
+  public function foo() :mixed{
     echo "foo\n";
     if ($this->method1()) {
       if ($this->doPr(true)) {
@@ -51,9 +50,11 @@ class C {
     return 2;
   }
 }
-
+<<__EntryPoint>> function main(): void {
+echo "Starting\n";
 $c = new C;
 $val = $c->foo();
 echo $val;
 echo "\n";
 echo "Done\n";
+}

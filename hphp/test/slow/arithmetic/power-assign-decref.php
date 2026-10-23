@@ -1,39 +1,64 @@
-<?php
-
-error_reporting(E_NOTICE);
+<?hh
 
 class D {
-  public $id;
-
-  public function __construct($id) {
-    $this->id = $id;
-  }
-
-  public function __destruct() {
-    echo "Instance $this->id destroyed!\n";
-  }
 }
 
-function main() {
-  $i1 = new D('+=');
-  $i2 = new D('-=');
-  $i3 = new D('*=');
-  $i4 = new D('/=');
-  $i5 = new D('%=');
-  $i6 = new D('**=');
-  $i7 = new D('&=');
-  $i8 = new D('|=');
-  $i9 = new D('^=');
+function main() :mixed{
+  $i1 = new D;
+  $i2 = new D;
+  $i3 = new D;
+  $i4 = new D;
+  $i5 = new D;
+  $i6 = new D;
+  $i7 = new D;
+  $i8 = new D;
+  $i9 = new D;
 
-  $i1 += 1;
-  $i2 -= 1;
-  $i3 *= 1;
-  $i4 /= 1;
-  $i5 %= 1;
-  $i6 **= 1;
-  $i7 &= 1;
-  $i8 |= 1;
-  $i9 ^= 1;
+  try {
+    $i1 += 1;
+  } catch (Exception $e) {
+    var_dump($e->getMessage());
+  }
+  try {
+    $i2 -= 1;
+  } catch (Exception $e) {
+    var_dump($e->getMessage());
+  }
+  try {
+    $i3 *= 1;
+  } catch (Exception $e) {
+    var_dump($e->getMessage());
+  }
+  try {
+    $i4 /= 1;
+  } catch (Exception $e) {
+    var_dump($e->getMessage());
+  }
+  try {
+    $i5 %= 1;
+  } catch (Exception $e) {
+    var_dump($e->getMessage());
+  }
+  try {
+    $i6 **= 1;
+  } catch (Exception $e) {
+    var_dump($e->getMessage());
+  }
+  try {
+    $i7 &= 1;
+  } catch (Exception $e) {
+    var_dump($e->getMessage());
+  }
+  try {
+    $i8 |= 1;
+  } catch (Exception $e) {
+    var_dump($e->getMessage());
+  }
+  try {
+    $i9 ^= 1;
+  } catch (Exception $e) {
+    var_dump($e->getMessage());
+  }
 
   var_dump($i1);
   var_dump($i2);
@@ -46,4 +71,10 @@ function main() {
   var_dump($i9);
 }
 
+
+<<__EntryPoint>>
+function main_power_assign_decref() :mixed{
+error_reporting(E_NOTICE);
+
 main();
+}

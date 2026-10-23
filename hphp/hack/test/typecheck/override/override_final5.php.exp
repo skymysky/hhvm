@@ -1,0 +1,24 @@
+error: Typing[4186] Traits with final methods cannot be reused, and `T` is already used by `ParentClass`. [1]
+-> `ParentClass` is defined here [2]
+-> `ParentClass` uses `T` [3]
+-> `T` has a final method `f` [4]
+
+override_final5.php:21:7
+11 | 
+12 | trait T {
+13 |   final public static function f(): void {}
+   |                                ^ [4]
+14 | }
+15 | 
+16 | class ParentClass {
+   |       ^^^^^^^^^^^ [2]
+17 |   use T;
+   |       ^ [3]
+18 | }
+19 | 
+20 | class ChildClass extends ParentClass {
+21 |   use T;
+   |       ^ [1]
+22 | }
+
+1 error found

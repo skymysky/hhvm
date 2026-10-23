@@ -1,7 +1,9 @@
-<?php
-parse_str("email=foo&password=bar&submit=Log+on", $_POST);
-$_REQUEST = array_merge($_REQUEST, $_POST);
-_filter_snapshot_globals();
+<?hh
+<<__EntryPoint>>
+function main() :mixed{
+$post = \HH\global_get('_POST');
+parse_str("email=foo&password=bar&submit=Log+on", inout $post);
+\HH\global_set('_POST', $post);
 
-var_dump($_POST);
-?>
+var_dump(\HH\global_get('_POST'));
+}

@@ -1,4 +1,22 @@
-File "assignment1.php", line 14, characters 14-22:
-You are trying to access the member getLength but this is not an object, it is an array (used like a hashtable) (Typing[4062])
-File "assignment1.php", line 14, characters 3-29:
-Check this out
+error: Typing[4053] No instance method `getLength` in `dict` [1]
+-> This is why I think it is an object of type HH\dict [2]
+-> Declaration of `dict` is here [3]
+
+assignment1.php:14:14
+11 | 
+12 | function main(): void {
+13 |   $arr = dict[];
+   |          ^^^^^^ [2]
+14 |   $arr[$arr->getLength()] = 1;
+   |              ^^^^^^^^^ [1]
+15 | }
+
+hackarray.hhi:32:24
+30 |    */
+31 |   <<__SupportDynamicType>>
+32 |   abstract final class dict<
+   |                        ^^^^ [3]
+33 |     <<__NoAutoBound>> +Tk as arraykey,
+34 |     <<__NoAutoBound>> +Tv,
+
+1 error found

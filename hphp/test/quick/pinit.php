@@ -6,14 +6,15 @@
 class Fub {
   const FLUB = 'flub';
   // This depends on a class constant, which means it will need a 86pinit().
-  public $dub = array(
-    self::FLUB => array(123)
-  );
+  public $dub = dict[
+    self::FLUB => vec[123]
+  ];
 }
+<<__EntryPoint>> function main(): void {
+$f = new Fub;
+var_dump($f->dub);
+$f = null;
 
 $f = new Fub;
 var_dump($f->dub);
-unset($f);
-
-$f = new Fub;
-var_dump($f->dub);
+}

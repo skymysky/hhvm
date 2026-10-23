@@ -1,6 +1,6 @@
-<?hh // strict
+<?hh
 
 // No using HH\BuiltinEnum
 function foo(mixed $foo): bool {
-  return $foo instanceof HH\BuiltinEnum;
+  return $foo is HH\BuiltinEnum;
 }

@@ -1,0 +1,13 @@
+error: Typing[4110] Wrong type hint [1]
+-> Expected `string` [1]
+-> But got `int` [2]
+
+explicit_type_collection_mismatch2.php:4:13
+2 | 
+3 | function f(): void {
+4 |   $b = dict<string, int>[6 => 6, "1" => 11, "2" => 12];
+  |             ^^^^^^ [1]
+  |                          ^ [2]
+5 | }
+
+1 error found

@@ -14,33 +14,35 @@
    +----------------------------------------------------------------------+
 */
 
-#if defined(__linux__) || defined(__FreeBSD__)
+#if defined(__linux__) 
 
+#include <fmt/format.h>
 #include <folly/Demangle.h>
 #include <folly/Format.h>
 #include <folly/Memory.h>
 #include <folly/ScopeGuard.h>
-#include <folly/String.h>
 #include <folly/container/F14Map.h>
 #include <folly/container/F14Set.h>
 #include <folly/portability/Unistd.h>
 
-#include <errno.h>
-#include <fcntl.h>
-#include <sys/stat.h>
-#include <sys/types.h>
-
-#include <dwarf.h>
-#include <libdwarf.h>
+#include "llvm/DebugInfo/DWARF/DWARFContext.h"
+#if LLVM_VERSION_MAJOR > 20
+#include "llvm/DebugInfo/DWARF/LowLevel/DWARFExpression.h"
+#else
+#include "llvm/DebugInfo/DWARF/DWARFExpression.h"
+#endif
+#include "llvm/DebugInfo/DWARF/DWARFFormValue.h"
 
 #include "hphp/util/assertions.h"
 #include "hphp/util/job-queue.h"
+#include "hphp/util/trace.h"
 
+#include "hphp/tools/debug-parser/dwarf-context-manager.h"
+#include "hphp/tools/debug-parser/dwarf-global-offset.h"
 #include "hphp/tools/debug-parser/debug-parser.h"
-#include "hphp/tools/debug-parser/dwarfstate.h"
 
 /*
- * Debug parser for DWARF (using libdwarf)
+ * Debug parser for DWARF
  *
  * DWARF is structured as a forest of DIEs (Debug Information Entry). Each DIE
  * has a tag, which describes what kind of DIE it is, and a list of
@@ -57,7 +59,13 @@
 
 namespace debug_parser { namespace {
 
+TRACE_SET_MOD(trans)
+
 ////////////////////////////////////////////////////////////////////////////////
+
+// Allow foreach on a range (as returned by equal_range)
+template<typename It> It begin(std::pair<It,It> p) { return p.first; }
+template<typename It> It end(std::pair<It,It> p) { return p.second; }
 
 /*
  * Fully qualified names aren't represented explicitly in DWARF. Instead the
@@ -66,7 +74,7 @@ namespace debug_parser { namespace {
  * infer the fully qualified name for any given class, the current scope is
  * tracked as the DIEs are walked.
  *
- * Likewise, DWARF as no concept of linkage, but the linkage is needed to know
+ * Likewise, DWARF has no concept of linkage, but the linkage is needed to know
  * which types are actually equivalent. Luckily, a type's linkage is closely
  * related to its scope (except for templates, see below), so it can be inferred
  * the same way.
@@ -76,8 +84,8 @@ namespace debug_parser { namespace {
  */
 
 struct Scope {
-  explicit Scope(Dwarf_Off cu_offset)
-    : m_cu_offset{cu_offset}
+  explicit Scope(GlobalOff cu_offset)
+      : m_cu_offset{cu_offset}
   {
     m_scope.emplace_back(
       ObjectTypeName{std::string{}, ObjectTypeName::Linkage::external},
@@ -85,9 +93,13 @@ struct Scope {
     );
   }
 
-  Dwarf_Off cuOffset() const { return m_cu_offset; }
+  GlobalOff cuOffset() const { return m_cu_offset; }
 
   ObjectTypeName name() const;
+
+  // Fix the name of a type to match where it is in the namespace/type
+  // hierarchy.
+  void fixName(ObjectTypeName newName);
 
   ObjectTypeName::Linkage linkage() const {
     return m_scope.back().name.linkage;
@@ -103,11 +115,11 @@ struct Scope {
 
   void incUnnamedTypeCount() { ++m_scope.back().unnamed_count; }
 
-  folly::Optional<Dwarf_Off> typeOffset() const {
+  HPHP::Optional<GlobalOff> typeOffset() const {
     return m_scope.back().offset;
   }
 
-  void pushType(std::string name, Dwarf_Off offset) {
+  void pushType(std::string name, GlobalOff offset) {
     m_scope.emplace_back(
       ObjectTypeName{std::move(name), linkage()},
       false
@@ -115,7 +127,7 @@ struct Scope {
     m_scope.back().offset = offset;
   }
 
-  void pushUnnamedType(std::string name, Dwarf_Off offset) {
+  void pushUnnamedType(std::string name, GlobalOff offset) {
     m_scope.emplace_back(
       ObjectTypeName{
         std::move(name),
@@ -145,7 +157,7 @@ struct Scope {
 
   void pop() { m_scope.pop_back(); }
 
- private:
+private:
   struct Context {
     Context(ObjectTypeName name, bool in_namespace_scope)
         : name(std::move(name))
@@ -153,12 +165,12 @@ struct Scope {
     ObjectTypeName name;
     bool in_namespace_scope;
     std::size_t unnamed_count = 0;
-    folly::Optional<Dwarf_Off> offset;
+    HPHP::Optional<GlobalOff> offset;
   };
   std::vector<Context> m_scope;
-  Dwarf_Off m_cu_offset;
+  GlobalOff m_cu_offset;
 
- public:
+public:
   static const std::string s_pseudo_type_name;
 };
 
@@ -167,65 +179,84 @@ struct Scope {
  */
 
 struct TypeParserImpl : TypeParser {
-  explicit TypeParserImpl(const std::string& filename);
+  explicit TypeParserImpl(const std::string& filename, int num_threads);
 
   Object getObject(ObjectTypeKey key) override;
 
   size_t getObjectBlockCount() const override;
 
- protected:
+protected:
   const std::vector<ObjectType>& getObjectBlock(size_t index) const override;
 
- private:
+private:
   struct StateBlock;
+
+  struct LinkageDependents {
+    folly::F14FastSet<GlobalOff> template_uses;
+    folly::F14FastSet<GlobalOff> children;
+  };
+
+  struct StaticSpec {
+    static auto constexpr kNoAddress = std::numeric_limits<uint64_t>::max();
+    std::string linkage_name;
+    uint64_t address{kNoAddress};
+    bool is_member{false};
+  };
+
+  struct Env {
+    const DWARFContextManager* dwarfContext;
+    std::unique_ptr<StateBlock> state;
+    folly::F14FastMap<GlobalOff, GlobalOff> local_mappings;
+    folly::F14FastMap<GlobalOff, LinkageDependents> linkage_dependents;
+    std::vector<std::pair<GlobalOff, StaticSpec>> raw_static_definitions;
+  };
 
   // Functions used while concurrently building state. Since these functions are
   // invoked from multiple threads, they are static and take all their state
   // explicitly as parameters.
-  static void genNames(StateBlock& state,
-                       DwarfState& dwarf,
-                       Dwarf_Die die,
+  static void genNames(Env& env,
+                       const DieContext& dieContext,
                        Scope& scope,
-                       std::vector<Dwarf_Off>* template_params = nullptr);
-  static folly::Optional<Dwarf_Off> findSpecification(DwarfState& dwarf,
-                                                      Dwarf_Die die,
-                                                      bool first);
-  static void fixTemplateLinkage(StateBlock& state);
+                       std::vector<GlobalOff>* template_params = nullptr);
+
+  static HPHP::Optional<uintptr_t> interpretLocAddress(const DWARFContextManager& dwarfContext,
+                                                       const DieContext& dieContext,
+                                                       llvm::DWARFAttribute attr);
+  static HPHP::Optional<GlobalOff> parseSpecification(const DWARFContextManager& dwarfContext,
+                                                      const DieContext& dieContext,
+                                                      bool first,
+                                                      StaticSpec& spec);
+  void fixTemplateLinkage();
 
   // Functions used after state is built. These are not thread-safe.
-  Object genObject(Dwarf_Die die,
+  Object genObject(const DieContext& dieContext,
                    ObjectTypeName name,
                    ObjectTypeKey key);
-  Type genType(Dwarf_Die die);
-  Object::Member genMember(Dwarf_Die die,
+  Type genType(const DieContext& dieContext);
+  Object::Member genMember(const DieContext& dieContext,
                            const ObjectTypeName& parent_name);
-  Object::Function genFunction(Dwarf_Die die);
-  Object::Base genBase(Dwarf_Die die, const ObjectTypeName& parent_name);
-  Object::TemplateParam genTemplateParam(Dwarf_Die die);
-  folly::Optional<size_t> determineArrayBound(Dwarf_Die die);
+  Object::Function genFunction(const DieContext& dieContext);
+  Object::Base genBase(const DieContext& dieContext, const ObjectTypeName& parent_name);
+  Object::TemplateParam genTemplateParam(const DieContext& dieContext);
+  HPHP::Optional<size_t> determineArrayBound(const llvm::DWARFDie& die);
 
-  void fillFuncArgs(Dwarf_Die die, FuncType& func);
+  void fillFuncArgs(const DieContext& dieContext, FuncType& func);
 
   // Map a given offset to the state block which contains state for that offset
   // (see below).
-  const StateBlock& stateForOffset(Dwarf_Off offset) const {
+  const StateBlock& stateForOffset(GlobalOff offset) const {
     assertx(!m_state_map.empty());
     auto it = std::upper_bound(
       m_state_map.begin(),
       m_state_map.end(),
       offset,
-      [](Dwarf_Off offset, const std::pair<Dwarf_Off, StateBlock*>& p) {
+      [](GlobalOff offset, const std::pair<GlobalOff, StateBlock*>& p) {
         return offset < p.first;
       }
     );
     if (it != m_state_map.begin()) --it;
     return *it->second;
   }
-
-  struct LinkageDependents {
-    folly::F14FastSet<Dwarf_Off> template_uses;
-    folly::F14FastSet<Dwarf_Off> children;
-  };
 
   // All of the parser's persistent state is stored in some number of
   // blocks. All of the blocks are computed concurrently, one block per
@@ -241,14 +272,16 @@ struct TypeParserImpl : TypeParser {
   // always be true.
   struct StateBlock {
     std::vector<ObjectType> all_objs;
-    folly::F14FastMap<Dwarf_Off, size_t> obj_offsets;
-    folly::F14FastMap<Dwarf_Off, LinkageDependents> linkage_dependents;
-    std::unordered_multimap<Dwarf_Off, Dwarf_Off> static_definitions;
+    folly::F14FastMap<GlobalOff, size_t> obj_offsets;
+    std::multimap<GlobalOff, StaticSpec> static_definitions;
   };
   std::vector<std::unique_ptr<StateBlock>> m_states;
-  std::vector<std::pair<Dwarf_Off, StateBlock*>> m_state_map;
+  std::vector<std::pair<GlobalOff, StateBlock*>> m_state_map;
+  tbb::concurrent_hash_map<GlobalOff,
+                           LinkageDependents,
+                           GlobalOff::Hash> m_linkage_dependents;
 
-  DwarfState m_dwarf;
+  DWARFContextManager m_dwarfContext;
 };
 
 // Purposefully fake name to avoid confusion with an actual type.
@@ -260,43 +293,58 @@ ObjectTypeName Scope::name() const {
   ++iter;
   for (; iter != m_scope.end(); ++iter) {
     if (str.empty()) str = iter->name.name;
-    else str = folly::sformat("{}::{}", str, iter->name.name);
+    else str = fmt::format("{}::{}", str, iter->name.name);
   }
   return ObjectTypeName{std::move(str), linkage()};
 }
 
-// Number of threads to use for building up state. More isn't necessarily
-// better.
-constexpr size_t kNumThreads = 24;
+void Scope::fixName(ObjectTypeName newName) {
+  if (m_scope.size() == 1) {
+    m_scope.back().name = std::move(newName);
+    return;
+  }
 
-TypeParserImpl::TypeParserImpl(const std::string& filename)
-  : m_dwarf{filename}
+  auto context = std::move(m_scope.back());
+  m_scope.pop_back();
+  auto outerName = name();
+  assertx(newName.name.size() > outerName.name.size());
+  if (outerName.name.size()) {
+    assertx(!outerName.name.compare(0, outerName.name.size(), newName.name));
+    newName.name = newName.name.substr(outerName.name.size() + 2);
+  }
+  context.name = std::move(newName);
+  m_scope.push_back(std::move(context));
+}
+
+TypeParserImpl::TypeParserImpl(const std::string& filename, int num_threads)
+    : m_dwarfContext{filename}
 {
-  // Processing each compiliation unit is very expensive, as it involves walking
-  // a large part of the debug information. To speed things up (a lot), we buid
-  // up the state concurrently. Create a job corresponding to each compiliation
+  // Processing each compilation unit is very expensive, as it involves walking
+  // a large part of the debug information. To speed things up (a lot), we build
+  // up the state concurrently. Create a job corresponding to each compilation
   // unit in the file and enqueue the jobs with a thread pool. We'll find the
-  // offsets of the compiliation unit in the main thread, enqueuing them as we
+  // offsets of the compilation unit in the main thread, enqueuing them as we
   // find them. This lets us not only exploit concurrency between processing
-  // compiliation units, but between finding them and processing them.
+  // compilation units, but between finding them and processing them.
   //
   // Each worker maintains its own private state which it populates for all the
-  // compiliation units its assigned (each worker can process multiple
-  // compiliation units). Once done, all the different states are kept separate
+  // compilation units its assigned (each worker can process multiple
+  // compilation units). Once done, all the different states are kept separate
   // (merging them would be too expensive), but a mapping is constructed to map
   // offsets to the appropriate state block.
   //
   // This whole scheme is only viable because (right now), debug information in
-  // a given compiliation unit doesn't reference anything outside of that unit,
-  // so the state for any given compiliation unit can be processed
+  // a given compilation unit doesn't reference anything outside of that unit,
+  // so the state for any given compilation unit can be processed
   // independently.
 
   // The context serves as the link between a worker and the TypeParserImpl
   // state (this is forced by the JobQueueWorker interface).
   struct Context {
-    const std::string& filename;
+    const decltype(m_dwarfContext)& dwarfContext;
     decltype(m_states)& states;
     decltype(m_state_map)& state_map;
+    decltype(m_linkage_dependents)& linkage_dependents;
     // The lock protects states, state_map, and the exception field (but only
     // when the workers are running).
     std::mutex lock;
@@ -305,33 +353,75 @@ TypeParserImpl::TypeParserImpl(const std::string& filename)
   };
 
   // Thread worker. We'll end up with a state block for each one of these.
-  struct Worker : HPHP::JobQueueWorker<Dwarf_Off, Context*> {
-    // Constructing a DwarfState is expensive. So, defer its construction until
-    // we know we actually need it and we're running in a separate thread.
-    folly::Optional<DwarfState> dwarf;
-    std::unique_ptr<StateBlock> state;
+  struct Worker : HPHP::JobQueueWorker<GlobalOff, Context*> {
+    Env env;
+
     // Remember each offset we processed so we can record it the global state
     // map when we finish.
-    std::vector<Dwarf_Off> offsets;
+    std::vector<GlobalOff> offsets;
 
-    void doJob(Dwarf_Off offset) override {
-      // Process a compiliation unit at the given offset.
+    void doJob(GlobalOff globalOff) override {
+      // Process a compilation unit at the given offset.
       try {
-        // We're going to use it so let's construct the DwarfState if we haven't
-        // yet.
-        if (!dwarf) {
-          dwarf.emplace(m_context->filename);
-          state = std::make_unique<StateBlock>();
+        // We're going to use it so let's mark this worker active.
+        if (!env.dwarfContext) {
+          env.dwarfContext = &m_context->dwarfContext;
+          env.state = std::make_unique<StateBlock>();
         }
 
-        offsets.emplace_back(offset);
+        auto dwarfUnit = env.dwarfContext->findUnitForGlobalOffset(globalOff);
+        // Force load the unit which will be further processed in this worker
+        auto unitDie = dwarfUnit->getUnitDIE(/*ExtractUnitDIEOnly=*/false);
+        offsets.emplace_back(globalOff);
 
         // Do the actual processing, adding to the state block:
-        Scope scope{offset};
-        dwarf->onDIEAtOffset(
-          offset,
-          [&](Dwarf_Die cu) { genNames(*state, *dwarf, cu, scope); }
-        );
+        Scope scope{globalOff};
+        genNames(env, {unitDie, globalOff.isInfo()}, scope);
+
+        auto const remap = [&] (GlobalOff o) {
+          auto const it = env.local_mappings.find(o);
+          if (it != env.local_mappings.end()) {
+            return it->second;
+          }
+          return o;
+        };
+
+        // Generate static_definitions by updating their keys collected during
+        // genNames. Some keys refer back to a DW_AT_member that belongs to a
+        // struct whose definition was in another type-unit. We want to add an
+        // entry for the member in the definition.
+        std::transform(
+            env.raw_static_definitions.begin(),
+            env.raw_static_definitions.end(),
+            std::inserter(
+                env.state->static_definitions,
+                env.state->static_definitions.end()),
+            [&](const auto& elem) {
+              return std::make_pair(remap(elem.first), std::move(elem.second));
+            });
+        env.raw_static_definitions.clear();
+
+        for (auto& linkage : env.linkage_dependents) {
+          if (!linkage.second.template_uses.size()) continue;
+
+          std::decay_t<decltype(m_context->linkage_dependents)>::accessor acc;
+
+          auto const inserted =
+            m_context->linkage_dependents.insert(acc, remap(linkage.first));
+          if (inserted && !env.local_mappings.size()) {
+            acc->second = std::move(linkage.second);
+          } else {
+            auto const process = [&] (auto const& from, auto& to) {
+              for (auto& elm : from) {
+                to.insert(remap(elm));
+              }
+            };
+            process(linkage.second.template_uses, acc->second.template_uses);
+            process(linkage.second.children, acc->second.children);
+          }
+        }
+        env.linkage_dependents.clear();
+        env.local_mappings.clear();
       } catch (...) {
         // Store any exception thrown so it can be rethrown in the main
         // thread. We only bother to store the first one.
@@ -347,30 +437,25 @@ TypeParserImpl::TypeParserImpl(const std::string& filename)
       // The worker is done (we've been told to stop). Now that we know we won't
       // be processing anymore offsets, do the needed post-processing on the
       // rest of the state.
+      if (!env.dwarfContext) return;
       try {
         // Compute a mapping of an object type's offset to its location in the
         // all_objs vector.
-        state->obj_offsets.reserve(state->all_objs.size());
-        for (auto i = size_t{0}; i < state->all_objs.size(); ++i) {
-          state->obj_offsets.emplace(state->all_objs[i].key.object_id, i);
+        env.state->obj_offsets.reserve(env.state->all_objs.size());
+        for (auto i = size_t{0}; i < env.state->all_objs.size(); ++i) {
+          env.state->obj_offsets.emplace(
+            GlobalOff::fromRaw(env.state->all_objs[i].key.object_id), i
+          );
         }
-
-        // The linkage of template instantiations need to be fixed up depending
-        // on the linkage of its template parameters. Now that we have all the
-        // types, do so here.
-        fixTemplateLinkage(*state);
-        state->linkage_dependents.clear();
 
         // Record all the offsets this worker processed (along with the state
         // block) in the global state map. This is done using a lock because its
         // quick and only done when the thread is finishing.
         std::lock_guard<std::mutex> guard{m_context->lock};
-        m_context->states.emplace_back(std::move(state));
+        auto const state = env.state.get();
+        m_context->states.emplace_back(std::move(env.state));
         for (auto offset : offsets) {
-          m_context->state_map.emplace_back(
-            offset,
-            m_context->states.back().get()
-          );
+          m_context->state_map.emplace_back(offset, state);
         }
       } catch (...) {
         // Store any exception thrown so it can be rethrown in the main
@@ -384,21 +469,32 @@ TypeParserImpl::TypeParserImpl(const std::string& filename)
     }
   };
 
-  // Fire up the thread pool
-  Context context{filename, m_states, m_state_map};
+  // Create the thread pool
+  Context context{m_dwarfContext, m_states, m_state_map, m_linkage_dependents};
   HPHP::JobQueueDispatcher<Worker> dispatcher{
-    kNumThreads, kNumThreads, 0, false, &context
+    num_threads, num_threads, 0, false, &context
   };
+
+  size_t infoUnits = 0;
+  size_t typeUnits = 0;
+  FTRACE(1, "Adding units to dispatcher...\n");
+
+  m_dwarfContext.forEachUnit([&](const std::unique_ptr<llvm::DWARFUnit>& unit, bool isInfo){
+    // getNonSkeletonUnitDIE in general is not thread safe, so call it here and
+    // then parse the unit in the worker thread.
+    auto unitDie = unit->getNonSkeletonUnitDIE(/*ExtractUnitDIEOnly=*/true);
+    dispatcher.enqueue(m_dwarfContext.getGlobalOffset(unitDie.getOffset(), isInfo));
+    isInfo ? ++infoUnits : ++typeUnits;
+    return true;
+  });
+
+  FTRACE(1, "... {} info units added.\n", infoUnits);
+  FTRACE(1, "... {} type units added.\n", typeUnits);
   dispatcher.start();
-
-  // Iterate over every compilation-unit, enqueuing jobs which will
-  // concurrently scan that unit.
-  m_dwarf.forEachCompilationUnit(
-    [&](Dwarf_Die cu) { dispatcher.enqueue(m_dwarf.getDIEOffset(cu)); }
-  );
-
-  // Wait for all the workers to finish.
+  FTRACE(1, "Waiting for dispatcher...\n");
   dispatcher.stop();
+
+  FTRACE(1, "Finished with genNames\n");
 
   // If any of the workers caught an exception, rethrow here in the main
   // thread. We don't need to bother taking the lock because all the workers are
@@ -409,11 +505,39 @@ TypeParserImpl::TypeParserImpl(const std::string& filename)
   // order, we need to sort it by offset so we can do efficient lookups later.
   std::sort(
     m_state_map.begin(), m_state_map.end(),
-    [&](const std::pair<Dwarf_Off, StateBlock*>& p1,
-        const std::pair<Dwarf_Off, StateBlock*>& p2) {
+    [&](const std::pair<GlobalOff, StateBlock*>& p1,
+        const std::pair<GlobalOff, StateBlock*>& p2) {
       return p1.first < p2.first;
     }
   );
+
+  // Some of the static_definitions entries need to be moved to the
+  // correct block; eg they were seen when processing the cu
+  // containing the definition of the static member, but need to be
+  // moved to the state for the tu which contains the definition of
+  // the struct (which may or may not be the same state block).
+  folly::F14FastSet<void*> seen;
+  for (auto const& p : m_state_map) {
+    if (!seen.insert(p.second).second) continue;
+    auto curOff = p.first;
+    auto curState = p.second;
+    for (auto it = p.second->static_definitions.begin();
+         it != p.second->static_definitions.end(); ) {
+      if (it->first != curOff) {
+        curOff = it->first;
+        curState = const_cast<decltype(p.second)>(&stateForOffset(curOff));
+      }
+      if (curState == p.second) {
+        ++it;
+        continue;
+      }
+      curState->static_definitions.insert(*it);
+      it = p.second->static_definitions.erase(it);
+    }
+  }
+
+  fixTemplateLinkage();
+  m_linkage_dependents.clear();
 }
 
 size_t TypeParserImpl::getObjectBlockCount() const {
@@ -443,11 +567,11 @@ TypeParserImpl::getObjectBlock(size_t index) const {
  * relationship between templates, their parameters, and nested classes is
  * recorded in linkage_dependents, which is used here.
  */
-void TypeParserImpl::fixTemplateLinkage(StateBlock& state) {
-  using ChangedSet = folly::F14FastSet<Dwarf_Off>;
+void TypeParserImpl::fixTemplateLinkage() {
+  using ChangedSet = folly::F14FastSet<GlobalOff>;
   ChangedSet changed;
 
-  for (const auto& pair : state.linkage_dependents) {
+  for (const auto& pair : m_linkage_dependents) {
     if (pair.second.template_uses.empty()) continue;
     changed.emplace(pair.first);
   }
@@ -460,73 +584,50 @@ void TypeParserImpl::fixTemplateLinkage(StateBlock& state) {
     // (templates where the type is used as a parameter, or nested classes) with
     // the new linkage, and mark as being changed as well.
     for (auto changed_offset : old_changed) {
-      const auto iter = state.linkage_dependents.find(changed_offset);
-      if (iter == state.linkage_dependents.end()) continue;
+      decltype(m_linkage_dependents)::const_accessor acc;
+      if (!m_linkage_dependents.find(acc, changed_offset)) continue;
 
-      const auto& children = iter->second.children;
-      const auto& template_uses = iter->second.template_uses;
+      auto const& children = acc->second.children;
+      auto const& template_uses = acc->second.template_uses;
 
-      const auto& changed_obj =
-        state.all_objs[state.obj_offsets[changed_offset]];
+      auto const& changed_state = stateForOffset(changed_offset);
+
+      auto const it = changed_state.obj_offsets.find(changed_offset);
+      if (it == changed_state.obj_offsets.end()) {
+        // This isn't right - if (eg) its a pointer to an object type
+        // with internal linkage, we need to mark the dependents
+        // internal; but we don't track pointer types at all - so just
+        // assume this type doesn't matter. The same goes for other
+        // things like const struct types etc.
+        continue;
+      }
+
+      auto const& changed_obj = changed_state.all_objs[it->second];
 
       // Only update and mark if we actually make the linkage more restrictive.
-      switch (changed_obj.name.linkage) {
-        case ObjectTypeName::Linkage::external:
-          break;
-        case ObjectTypeName::Linkage::internal: {
-          const auto process = [&](Dwarf_Off dependent_offset) {
-            auto& dependent_obj =
-              state.all_objs[state.obj_offsets[dependent_offset]];
-            switch (dependent_obj.name.linkage) {
-              case ObjectTypeName::Linkage::external:
-                dependent_obj.name.linkage = changed_obj.name.linkage;
-                changed.emplace(dependent_offset);
-                break;
-              case ObjectTypeName::Linkage::internal:
-              case ObjectTypeName::Linkage::none:
-              case ObjectTypeName::Linkage::pseudo:
-                break;
-            }
-          };
-          for (auto template_offset : template_uses) process(template_offset);
-          for (auto child_offset : children) process(child_offset);
-        }
-        case ObjectTypeName::Linkage::none: {
-          const auto process = [&](Dwarf_Off dependent_offset) {
-            auto& dependent_obj =
-              state.all_objs[state.obj_offsets[dependent_offset]];
-            switch (dependent_obj.name.linkage) {
-              case ObjectTypeName::Linkage::external:
-              case ObjectTypeName::Linkage::internal:
-                dependent_obj.name.linkage = changed_obj.name.linkage;
-                changed.emplace(dependent_offset);
-                break;
-              case ObjectTypeName::Linkage::none:
-              case ObjectTypeName::Linkage::pseudo:
-                break;
-            }
-          };
-          for (auto template_offset : template_uses) process(template_offset);
-          for (auto child_offset : children) process(child_offset);
-        }
-        case ObjectTypeName::Linkage::pseudo: {
-          const auto process = [&](Dwarf_Off dependent_offset) {
-            auto& dependent_obj =
-              state.all_objs[state.obj_offsets[dependent_offset]];
-            switch (dependent_obj.name.linkage) {
-              case ObjectTypeName::Linkage::external:
-              case ObjectTypeName::Linkage::internal:
-              case ObjectTypeName::Linkage::none:
-                dependent_obj.name.linkage = changed_obj.name.linkage;
-                changed.emplace(dependent_offset);
-                break;
-              case ObjectTypeName::Linkage::pseudo:
-                break;
-            }
-          };
-          for (auto template_offset : template_uses) process(template_offset);
-          for (auto child_offset : children) process(child_offset);
-        }
+      if (changed_obj.name.linkage != ObjectTypeName::Linkage::external) {
+        const auto process = [&](GlobalOff dependent_offset) {
+          auto& dep_state = const_cast<StateBlock&>(
+            stateForOffset(dependent_offset)
+          );
+          auto const it = dep_state.obj_offsets.find(dependent_offset);
+          if (it == dep_state.obj_offsets.end()) return;
+          auto& dependent_obj = dep_state.all_objs[it->second];
+          if (dependent_obj.name.linkage < changed_obj.name.linkage) {
+            FTRACE(4,
+                   "Reducing linkage for {}({}) from {} to {} due to {}({})\n",
+                   dependent_obj.name.name,
+                   GlobalOff::fromRaw(dependent_obj.key.object_id),
+                   show(dependent_obj.name.linkage),
+                   show(changed_obj.name.linkage),
+                   changed_obj.name.name,
+                   GlobalOff::fromRaw(changed_obj.key.object_id));
+            dependent_obj.name.linkage = changed_obj.name.linkage;
+            changed.emplace(dependent_offset);
+          }
+        };
+        for (auto template_offset : template_uses) process(template_offset);
+        for (auto child_offset : children) process(child_offset);
       }
     }
 
@@ -535,8 +636,9 @@ void TypeParserImpl::fixTemplateLinkage(StateBlock& state) {
 }
 
 Object TypeParserImpl::getObject(ObjectTypeKey key) {
-  auto const& state = stateForOffset(key.object_id);
-  auto iter = state.obj_offsets.find(key.object_id);
+  auto const& state = stateForOffset(GlobalOff::fromRaw(key.object_id));
+  auto iter = state.obj_offsets.find(GlobalOff::fromRaw(key.object_id));
+
   // If we don't know of an object type at the given location, assume its
   // referring to something we never parsed in the first place, so return the
   // pseudo-type.
@@ -550,57 +652,129 @@ Object TypeParserImpl::getObject(ObjectTypeKey key) {
       key,
       Object::Kind::k_other,
       true
-     };
+    };
   }
 
-  return m_dwarf.onDIEAtOffset(
-    key.object_id,
-    [&](Dwarf_Die die) {
-      return genObject(
-        die,
-        state.all_objs[iter->second].name,
-        key
-      );
-    }
-  );
+  auto const offset = GlobalOff::fromRaw(key.object_id);
+  auto dieContext = m_dwarfContext.getDieContextAtGlobalOffset(offset);
+  return genObject(dieContext, state.all_objs[iter->second].name, key);
 }
 
-/*
- * Static definitions have a "specification" which basically links the
- * definition to the declaration. A specification can refer to another
- * specification, so they form a chain. Given a DIE, walk the specification
- * chain and return the offset of the actual type declaration.
- */
-folly::Optional<Dwarf_Off> TypeParserImpl::findSpecification(DwarfState& dwarf,
-                                                             Dwarf_Die die,
-                                                             bool first) {
-  folly::Optional<Dwarf_Off> offset;
-  bool is_inline = false;
-  dwarf.forEachAttribute(
-    die,
-    [&](Dwarf_Attribute attr) {
-      switch (dwarf.getAttributeType(attr)) {
-        case DW_AT_abstract_origin:
-          offset = dwarf.onDIEAtOffset(
-            dwarf.getAttributeValueRef(attr),
-            [&](Dwarf_Die die2) {
-              return findSpecification(dwarf, die2, false);
-            }
-          );
-          break;
-        case DW_AT_specification:
-          offset = dwarf.getAttributeValueRef(attr);
-          break;
-        case DW_AT_inline:
-          is_inline = true;
-          break;
-        default:
-          break;
-      }
-      return true;
-    }
+// For static members, determine how that member's address can be
+// determined. In theory, this can be any arbitrary expression, but we only
+// support constant addresses right now.
+HPHP::Optional<uintptr_t>
+TypeParserImpl::interpretLocAddress(const DWARFContextManager& dwarfContext,
+                                    const DieContext& dieContext,
+                                    llvm::DWARFAttribute attr) {
+  const auto form = attr.Value.getForm();
+  if (form != llvm::dwarf::DW_FORM_exprloc) return std::nullopt;
+
+  llvm::DataExtractor extractor(
+    *attr.Value.getAsBlock(),
+    dwarfContext.getDWARFContext()->isLittleEndian()
+#if LLVM_VERSION_MAJOR < 23
+    ,
+    dieContext.die.getDwarfUnit()->getAddressByteSize()
+#endif
   );
-  if (first && is_inline) return folly::none;
+
+  if (extractor.size() != 1) return std::nullopt;
+
+  llvm::DWARFExpression expression(
+    extractor,
+    dieContext.die.getDwarfUnit()->getAddressByteSize()
+  );
+
+  const auto& ex = *expression.begin();
+  if (ex.getCode() != llvm::dwarf::DW_OP_addr) return std::nullopt;
+  return HPHP::Optional<uintptr_t>{ex.getRawOperand(0)};
+}
+
+uint64_t getRefOffset(const DieContext &dieContext,
+                      const llvm::DWARFAttribute &attr) {
+#if LLVM_VERSION_MAJOR >= 19
+  if (auto ref = attr.Value.getAsRelativeReference()) {
+    return dieContext.die.getDwarfUnit()->getOffset() + *ref;
+  } else if (auto ref = attr.Value.getAsDebugInfoReference()) {
+    return *ref;
+  } else if (auto ref = attr.Value.getAsSignatureReference()) {
+    return *ref;
+  } else {
+    // Unsupported reference type
+    always_assert(0);
+  }
+#else
+  return *attr.Value.getAsReference();
+#endif
+}
+
+HPHP::Optional<GlobalOff>
+TypeParserImpl::parseSpecification(const DWARFContextManager& dwarfContext,
+                                   const DieContext& dieContext,
+                                   bool first,
+                                   StaticSpec &spec) {
+  HPHP::Optional<GlobalOff> offset;
+  bool is_inline = false;
+  for (const auto& attr : dieContext.die.attributes()) {
+    switch (attr.Attr) {
+      case llvm::dwarf::DW_AT_abstract_origin: {
+        const auto attrOffset = getRefOffset(dieContext, attr);
+        const auto globalOff = dwarfContext.getGlobalOffset(attrOffset, dieContext.isInfo);
+        const auto die2Context = dwarfContext.getDieContextAtGlobalOffset(globalOff);
+        offset = parseSpecification(dwarfContext, die2Context, false, spec);
+        break;
+      }
+      case llvm::dwarf::DW_AT_specification: {
+        const auto attrOffset = getRefOffset(dieContext, attr);
+        offset = dwarfContext.getGlobalOffset(attrOffset, dieContext.isInfo);
+        break;
+      }
+      case llvm::dwarf::DW_AT_linkage_name: {
+        if (spec.linkage_name.empty()) {
+          if (auto val = llvm::dwarf::toString(attr.Value)) {
+            spec.linkage_name = *val;
+          }
+        }
+        break;
+      }
+      case llvm::dwarf::DW_AT_location: {
+        if (spec.address == StaticSpec::kNoAddress) {
+          if (auto const address = interpretLocAddress(dwarfContext, dieContext, attr)) {
+            spec.address = *address;
+          }
+        }
+        break;
+      }
+      case llvm::dwarf::DW_AT_low_pc: {
+        if (spec.address == StaticSpec::kNoAddress) {
+          // TODO: check the func here
+          spec.address = *attr.Value.getAsCStringOffset();
+          // Sometimes GCC and Clang will emit invalid function
+          // addresses. Usually zero, but sometimes a very low
+          // number. These numbers have the appearance of being
+          // un-relocated addresses, but its in the final executable. As
+          // a safety net, if an address is provided, but its abnormally
+          // low, ignore it.
+          if (spec.address < 4096) spec.address = StaticSpec::kNoAddress;
+        }
+        break;
+      }
+      case llvm::dwarf::DW_AT_object_pointer:
+        // Just in case we actually have a definition, use it to infer
+        // member-ness.
+        spec.is_member = true;
+        break;
+      default:
+        break;
+    }
+  }
+  if (first && (is_inline ||
+                (spec.linkage_name.empty() &&
+                 spec.address == StaticSpec::kNoAddress &&
+                 !spec.is_member))) {
+    return std::nullopt;
+  }
   return offset;
 }
 
@@ -610,57 +784,94 @@ folly::Optional<Dwarf_Off> TypeParserImpl::findSpecification(DwarfState& dwarf,
  * provided, the parent DIE is an object type, so template_params should be
  * filled with any template parameters in the child DIE.
  */
-void TypeParserImpl::genNames(StateBlock& state,
-                              DwarfState& dwarf,
-                              Dwarf_Die die,
+void TypeParserImpl::genNames(Env& env,
+                              const DieContext& dieContext,
                               Scope& scope,
-                              std::vector<Dwarf_Off>* template_params) {
-  const auto recurse = [&](std::vector<Dwarf_Off>* params = nullptr){
-    dwarf.forEachChild(
-      die,
-      [&](Dwarf_Die child) {
-        genNames(state, dwarf, child, scope, params);
-        return true;
-      }
-    );
+                              std::vector<GlobalOff>* template_params) {
+  auto& dwarfContext = *env.dwarfContext;
+  auto& state = *env.state;
+
+  const auto recurse = [&](std::vector<GlobalOff>* params = nullptr){
+    for (const auto& child : dieContext.die.children()) {
+      genNames(env, {child, dieContext.isInfo}, scope, params);
+    }
   };
 
-  auto tag = dwarf.getTag(die);
+  auto tag = dieContext.die.getTag();
   switch (tag) {
-    case DW_TAG_base_type:
-    case DW_TAG_union_type:
-    case DW_TAG_enumeration_type:
-    case DW_TAG_structure_type:
-    case DW_TAG_class_type:
-    case DW_TAG_unspecified_type: {
+    case llvm::dwarf::DW_TAG_base_type:
+    case llvm::dwarf::DW_TAG_union_type:
+    case llvm::dwarf::DW_TAG_enumeration_type:
+    case llvm::dwarf::DW_TAG_structure_type:
+    case llvm::dwarf::DW_TAG_class_type:
+    case llvm::dwarf::DW_TAG_unspecified_type: {
       // Object-types. These have names and linkages, so we must record them.
+
+      // If this is a type-unit definition with a separate declaration
+      // in the same tu, declarationOffset will point to the
+      // declaration.
+      HPHP::Optional<GlobalOff> declarationOffset;
+
+      // If this is a declaration in a cu, referring back to a
+      // tu-definition, definitionOffset will point to that
+      // definition. Such declarations are emitted for the
+      // *definitions* of static members (which always happen in cus,
+      // not tus)
+      HPHP::Optional<GlobalOff> definitionOffset;
 
       // Determine the base name, whether this type was unnamed, and whether
       // this is an incomplete type or not from the DIE's attributes.
-      const auto info = [&]() -> std::tuple<std::string, bool, bool> {
+      auto get_info = [&](DieContext curContext,
+                          bool updateOffsets) ->
+        std::tuple<std::string, bool, bool> {
         std::string name;
         std::string linkage_name;
-        bool incomplete = false;
+        auto incomplete = false;
 
-        dwarf.forEachAttribute(
-          die,
-          [&](Dwarf_Attribute attr) {
-            switch (dwarf.getAttributeType(attr)) {
-              case DW_AT_name:
-                name = dwarf.getAttributeValueString(attr);
-                break;
-              case DW_AT_linkage_name:
-                linkage_name = dwarf.getAttributeValueString(attr);
-                break;
-              case DW_AT_declaration:
-                incomplete = dwarf.getAttributeValueFlag(attr);
-                break;
-              default:
-                break;
+      for (const auto& attr : curContext.die.attributes()) {
+        switch(attr.Attr) {
+          case llvm::dwarf::DW_AT_name:
+            if (auto val = llvm::dwarf::toString(attr.Value)) {
+              name = *val;
             }
-            return true;
+            break;
+          case llvm::dwarf::DW_AT_linkage_name:
+            if (auto val = llvm::dwarf::toString(attr.Value)) {
+              linkage_name = *val;
+            }
+            break;
+          case llvm::dwarf::DW_AT_declaration:
+            incomplete = *attr.Value.getAsUnsignedConstant() != 0;
+            break;
+          case llvm::dwarf::DW_AT_specification:
+            // The compiler can spit out a declaration for a
+            // struct, followed later by the full definition. The
+            // full definition has a DW_AT_specification pointing
+            // back to the declaration - but note that the full
+            // definition may not be defined in the correct
+            // namespace - so we're going to keep the declaration,
+            // and update it based on the definition ignoring the
+            // definition's name (this feels a little backwards,
+            // but its how dwarf works).
+            if (updateOffsets) {
+              declarationOffset = dwarfContext.getGlobalOffset(
+                  getRefOffset(dieContext, attr), curContext.isInfo);
+            }
+            break;
+          case llvm::dwarf::DW_AT_signature: {
+            if (updateOffsets && attr.Value.getForm() == llvm::dwarf::DW_FORM_ref_sig8) {
+              const auto sig8 = getRefOffset(dieContext, attr);
+              // The actual definition is in another type-unit, we
+              // can ignore this declaration.
+              definitionOffset = dwarfContext.getTypeUnitOffset(sig8);
+              break;
+            }
+            break;
           }
-        );
+          default:
+            break;
+        }
+      }
 
         // If there's an explicit name, just use that.
         if (!name.empty()) return std::make_tuple(name, false, incomplete);
@@ -680,20 +891,20 @@ void TypeParserImpl::genNames(StateBlock& state,
         // infer one ourself (making it a synthetic name).
 
         // Try the first named member
-        auto const first_member = [&](const char* type,
-                                      Dwarf_Half member_type) {
+        auto const first_member = [&](const char* type) {
           std::string first_member;
-          dwarf.forEachChild(
-            die,
-            [&](Dwarf_Die child) {
-              if (dwarf.getTag(child) == member_type) {
-                first_member = dwarf.getDIEName(child);
-              }
-              return first_member.empty();
+          for (const auto& child : curContext.die.children()) {
+            if ((tag == llvm::dwarf::DW_TAG_enumeration_type &&
+                 child.getTag() == llvm::dwarf::DW_TAG_enumerator) ||
+                (tag != llvm::dwarf::DW_TAG_enumeration_type &&
+                 (child.getTag() == llvm::dwarf::DW_TAG_member ||
+                  child.getTag() == llvm::dwarf::DW_TAG_variable))) {
+              first_member = dwarfContext.getDIEName(dieContext.die);
             }
-          );
+            if (!first_member.empty()) break;
+          }
           if (!first_member.empty()) {
-            return folly::sformat(
+            return fmt::format(
               "(unnamed {} containing '{}')", type, first_member
             );
           }
@@ -701,19 +912,14 @@ void TypeParserImpl::genNames(StateBlock& state,
         };
 
         auto const type_name = [&]{
-          if (tag == DW_TAG_enumeration_type) return "enumeration";
-          if (tag == DW_TAG_union_type) return "union";
-          if (tag == DW_TAG_structure_type) return "struct";
-          if (tag == DW_TAG_class_type) return "class";
+          if (tag == llvm::dwarf::DW_TAG_enumeration_type) return "enumeration";
+          if (tag == llvm::dwarf::DW_TAG_union_type) return "union";
+          if (tag == llvm::dwarf::DW_TAG_structure_type) return "struct";
+          if (tag == llvm::dwarf::DW_TAG_class_type) return "class";
           return "type";
         };
 
-        auto const member_type = [&]() {
-          if (tag == DW_TAG_enumeration_type) return DW_TAG_enumerator;
-          return DW_TAG_member;
-        };
-
-        auto first_member_name = first_member(type_name(), member_type());
+        auto first_member_name = first_member(type_name());
         if (!first_member_name.empty()) {
           return std::make_tuple(
             std::move(first_member_name), true, incomplete
@@ -729,7 +935,7 @@ void TypeParserImpl::genNames(StateBlock& state,
         if (!scope.isInNamespaceScope()) {
           scope.incUnnamedTypeCount();
           return std::make_tuple(
-            folly::sformat(
+            fmt::format(
               "(unnamed {} #{})",
               type_name(),
               scope.unnamedTypeCount()
@@ -740,51 +946,147 @@ void TypeParserImpl::genNames(StateBlock& state,
         }
 
         return std::make_tuple(
-          folly::sformat("(unnamed {})", type_name()),
+          fmt::format("(unnamed {})", type_name()),
           true,
           incomplete
         );
-      }();
+      };
 
-      auto offset = dwarf.getDIEOffset(die);
+      const auto info = get_info(dieContext, /*updateOffsets=*/true);
+
+      auto offset = dwarfContext.getGlobalOffset(dieContext.die.getOffset(), dieContext.isInfo);
+      if (definitionOffset) {
+        // This is a declaration which refers to the definition via
+        // DW_AT_signature. We'll see one of these for a class in the
+        // cu where its static members are defined.  Later
+        // DW_TAG_variable nodes will refer back to the ones here,
+        // rather than the ones in the definition, so we need to
+        // record a map from any members defined here back to the
+        // original definition. We could also see them for parent
+        // classes, or for template param (a template param can refer
+        // to an out-of-unit type either by using a ref_sig8 directly,
+        // in which case we will have resolved the offset correctly,
+        // or it could have an offset to a type with a
+        // DW_AT_signature, in which case we'll need to fix it up
+        // later). In any case, add an entry to map our offset to the
+        // true definition, and entries to map any members to their
+        // true definitions.
+        env.local_mappings.emplace(offset, *definitionOffset);
+
+        folly::F14FastMap<std::string, GlobalOff> map;
+        for (const auto& child : dieContext.die.children()) {
+          if (child.getTag() == llvm::dwarf::DW_TAG_member ||
+              child.getTag() == llvm::dwarf::DW_TAG_variable) {
+            auto name = dwarfContext.getDIEName(child);
+            map.emplace(
+              std::move(name),
+              dwarfContext.getGlobalOffset(child.getOffset(), dieContext.isInfo)
+            );
+          }
+        }
+        if (!map.empty()) {
+          const auto orig = dwarfContext.getDieContextAtGlobalOffset(*definitionOffset);
+          for (const auto& child : orig.die.children()) {
+            auto const name = dwarfContext.getDIEName(child);
+            auto it = map.find(name);
+            if (it != map.end()) {
+              env.local_mappings.emplace(
+                it->second,
+                dwarfContext.getGlobalOffset(child.getOffset(), definitionOffset->isInfo())
+              );
+            }
+          }
+        }
+      }
+
       auto parent_offset = scope.typeOffset();
 
       // If we inferred a base name, use that to form the fully qualified name,
       // otherwise treat it as an unnamed type.
-      std::get<1>(info) ?
-        scope.pushUnnamedType(std::get<0>(info), offset) :
-        scope.pushType(std::get<0>(info), offset);
+      if (!definitionOffset) {
+        std::get<1>(info) ?
+          scope.pushUnnamedType(std::get<0>(info), offset) :
+          scope.pushType(std::get<0>(info), offset);
+      } else {
+        // Push the name of the definition, not of the declaration
+        const auto defContext = dwarfContext.getDieContextAtGlobalOffset(*definitionOffset);
+        const auto info_def = get_info(defContext, /*updateOffsets=*/false);
+        std::get<1>(info_def) ?
+          scope.pushUnnamedType(std::get<0>(info_def), offset) :
+          scope.pushType(std::get<0>(info_def), offset);
+      }
       SCOPE_EXIT { scope.pop(); };
 
-      // Record this object type, with fully qualified name, key, and linkage.
-      state.all_objs.emplace_back(
-        ObjectType{
-          scope.name(),
-          ObjectTypeKey{offset, scope.cuOffset()},
-          std::get<2>(info)
+      if (declarationOffset) {
+        // This completes a previous declaration. search backwards for
+        // it, which should be fine because its normally right after
+        // the declaration (and its always in the same cu/tu).
+        auto i = state.all_objs.size();
+        while (true) {
+          assert(i);
+          auto& obj = state.all_objs[--i];
+          if (obj.key.object_id == declarationOffset->raw()) {
+            assert(obj.incomplete);
+            FTRACE(5,
+                   "Completing previous definition of {}.\n"
+                   "  Was {}, Now {}, Linkage: {}\n",
+                   obj.name.name,
+                   GlobalOff::fromRaw(obj.key.object_id), offset,
+                   show(obj.name.linkage)
+                  );
+            obj.incomplete = false;
+            obj.key.object_id = offset.raw();
+            // map declarationOffset to offset, because any ref_sig8s
+            // will point to the definition, not the declaration.
+            env.local_mappings.emplace(*declarationOffset, offset);
+
+            // Fixup the name in the scope stack
+            scope.fixName(obj.name);
+            assertx(scope.name().name == obj.name.name);
+            break;
+          }
         }
-      );
+      } else {
+        // Record this object type, with fully qualified name, key, and linkage.
+        auto obj = ObjectType{
+          scope.name(),
+          ObjectTypeKey{offset.raw(), scope.cuOffset().raw()},
+          std::get<2>(info)
+        };
+        FTRACE(5,
+               "{} {} at {} Linkage: {}\n",
+               obj.incomplete ? "Declaring" : "Defining",
+               obj.name.name,
+               offset,
+               show(obj.name.linkage)
+              );
+        state.all_objs.emplace_back(std::move(obj));
+      }
 
       // This object type is done, so recurse into any nested classes. Provide a
       // list of template parameters to be filled in case this is a template. If
       // it is, we'll record the linkage dependence for the later template
       // linkage fix-up.
-      std::vector<Dwarf_Off> recurse_template_params;
+      std::vector<GlobalOff> recurse_template_params;
       recurse(&recurse_template_params);
 
       for (auto param_offset : recurse_template_params) {
-        state.linkage_dependents[param_offset].template_uses.emplace(offset);
+        FTRACE(9, "linkage: {} depends on template param {}\n",
+               offset, param_offset);
+        env.linkage_dependents[param_offset].template_uses.emplace(offset);
       }
       if (parent_offset) {
-        state.linkage_dependents[*parent_offset].children.emplace(offset);
+        FTRACE(9, "linkage: {} depends on child {}\n",
+               *parent_offset, offset);
+        env.linkage_dependents[*parent_offset].children.emplace(offset);
       }
       break;
     }
-    case DW_TAG_namespace: {
+    case llvm::dwarf::DW_TAG_namespace: {
       // Record the namespace in the scope and recurse. If this is an unnamed
       // namespace, that means any type found in child DIEs will have internal
       // linkage.
-      auto name = dwarf.getDIEName(die);
+      auto const name = dieContext.die.getShortName() ? std::string(dieContext.die.getShortName()) : "";
       name.empty() ?
         scope.pushUnnamedNamespace() :
         scope.pushNamespace(std::move(name));
@@ -792,7 +1094,7 @@ void TypeParserImpl::genNames(StateBlock& state,
       recurse();
       break;
     }
-    case DW_TAG_variable: {
+    case llvm::dwarf::DW_TAG_variable: {
       // Normally we don't care about variables since we're only looking for
       // types. However, certain aspects of object types can't be completely
       // inferred at the declaration site (mainly static variable linkage
@@ -802,44 +1104,31 @@ void TypeParserImpl::genNames(StateBlock& state,
 
       // Neither GCC nor Clang record a name for a variable which is a static
       // definition, so ignore any that do have a name. This speeds things up.
-      if (!dwarf.getDIEName(die).empty()) break;
+      const auto name = dwarfContext.getDIEName(dieContext.die);
+      if (!name.empty()) break;
 
-      dwarf.forEachAttribute(
-        die,
-        [&](Dwarf_Attribute attr) {
-          switch (dwarf.getAttributeType(attr)) {
-            case DW_AT_specification:
-              state.static_definitions.emplace(
-                dwarf.getAttributeValueRef(attr),
-                dwarf.getDIEOffset(die)
-              );
-              return false;
-            default:
-              return true;
-          }
-        }
-      );
-
+      StaticSpec spec;
+      if (auto off = parseSpecification(dwarfContext, dieContext, true, spec)) {
+        env.raw_static_definitions.emplace_back(*off, spec);
+      }
       // Note that we don't recurse into any child DIEs here. There shouldn't be
       // anything interesting in them.
       break;
     }
-    case DW_TAG_subprogram: {
-      // For the same reason we care about DW_TAG_variables, we examine
-      // DW_TAG_subprogram as well. Certain interesting aspects of a static
+    case llvm::dwarf::DW_TAG_subprogram: {
+      // For the same reason we care about llvm::dwarf::DW_TAG_variables, we examine
+      // llvm::dwarf::DW_TAG_subprogram as well. Certain interesting aspects of a static
       // function are only present in its definition.
+      auto const name = dwarfContext.getDIEName(dieContext.die);
+      if (!name.empty()) break;
 
-      if (!dwarf.getDIEName(die).empty()) break;
-
-      if (auto spec = findSpecification(dwarf, die, true)) {
-        state.static_definitions.emplace(
-          *spec,
-          dwarf.getDIEOffset(die)
-        );
+      StaticSpec spec;
+      if (auto off = parseSpecification(dwarfContext, dieContext, true, spec)) {
+        env.raw_static_definitions.emplace_back(*off, spec);
       }
 
       // Don't recurse. There might be valid types within a subprogram
-      // definition, but we deliberate ignore those. A large portion of the
+      // definition, but we deliberately ignore those. A large portion of the
       // debug information lies within subprogram definitions, and scanning all
       // of that consumes a large amount of time. Moreover, these types usually
       // aren't very interesting, so we deliberately ignore them for
@@ -847,26 +1136,31 @@ void TypeParserImpl::genNames(StateBlock& state,
       // be reported as the pseudo-type.
       break;
     }
-    case DW_TAG_template_type_param: {
+    case llvm::dwarf::DW_TAG_template_type_parameter: {
       // Template type parameters are represented using child DIEs, not
       // attributes. If the parent DIE was an object type, fill the supplied
       // vector with the template parameters. Don't recurse because there
       // shouldn't be anything interesting in the children.
       if (template_params) {
-        dwarf.forEachAttribute(
-          die,
-          [&](Dwarf_Attribute attr) {
-            switch (dwarf.getAttributeType(attr)) {
-              case DW_AT_type:
-                template_params->emplace_back(
-                  dwarf.getAttributeValueRef(attr)
-                );
-                return false;
-              default:
-                return true;
+        for (const auto& attr : dieContext.die.attributes()) {
+          if (attr.Attr == llvm::dwarf::DW_AT_type) {
+            auto offset = dwarfContext.getGlobalOffset(
+                getRefOffset(dieContext, attr), dieContext.isInfo);
+            // Check this type to see if it is a declaration and use the
+            // real type instead
+            const auto typeDieContext = dwarfContext.getDieContextAtGlobalOffset(offset);
+            for (const auto& typeAttr : typeDieContext.die.attributes()) {
+              if (typeAttr.Attr == llvm::dwarf::DW_AT_signature &&
+                  typeAttr.Value.getForm() == llvm::dwarf::DW_FORM_ref_sig8) {
+                const auto sig8 = getRefOffset(dieContext, typeAttr);
+                offset = dwarfContext.getTypeUnitOffset(sig8);
+                break;
+              }
             }
+            template_params->emplace_back(offset);
+            break;
           }
-        );
+        }
       }
       break;
     }
@@ -880,43 +1174,53 @@ void TypeParserImpl::genNames(StateBlock& state,
  * Given the DIE representing an object type, its name, and its key, return the
  * detailed specification of the object.
  */
-Object TypeParserImpl::genObject(Dwarf_Die die,
+Object TypeParserImpl::genObject(const DieContext& dieContext,
                                  ObjectTypeName name,
                                  ObjectTypeKey key) {
+  const auto& die = dieContext.die;
+  const auto& isInfo = dieContext.isInfo;
+
   const auto kind = [&]{
-    switch (m_dwarf.getTag(die)) {
-      case DW_TAG_structure_type: return Object::Kind::k_class;
-      case DW_TAG_class_type: return Object::Kind::k_class;
-      case DW_TAG_union_type: return Object::Kind::k_union;
-      case DW_TAG_base_type: return Object::Kind::k_primitive;
-      case DW_TAG_enumeration_type: return Object::Kind::k_enum;
+    switch (die.getTag()) {
+      case llvm::dwarf::DW_TAG_structure_type: return Object::Kind::k_class;
+      case llvm::dwarf::DW_TAG_class_type: return Object::Kind::k_class;
+      case llvm::dwarf::DW_TAG_union_type: return Object::Kind::k_union;
+      case llvm::dwarf::DW_TAG_base_type: return Object::Kind::k_primitive;
+      case llvm::dwarf::DW_TAG_enumeration_type: return Object::Kind::k_enum;
       // Strange things like "decltype(nullptr_t)"
-      case DW_TAG_unspecified_type: return Object::Kind::k_other;
+      case llvm::dwarf::DW_TAG_unspecified_type: return Object::Kind::k_other;
       // Shouldn't happen because we only call genObject() on offsets already
       // visited and verified to be an object type.
       default: always_assert(0);
     }
   }();
 
-  folly::Optional<std::size_t> size;
+  HPHP::Optional<std::size_t> size;
   bool incomplete = false;
+  HPHP::Optional<GlobalOff> definition_offset;
 
-  m_dwarf.forEachAttribute(
-    die,
-    [&](Dwarf_Attribute attr) {
-      switch (m_dwarf.getAttributeType(attr)) {
-        case DW_AT_byte_size:
-          size = m_dwarf.getAttributeValueUData(attr);
-          break;
-        case DW_AT_declaration:
-          incomplete = m_dwarf.getAttributeValueFlag(attr);
-          break;
-        default:
-          break;
+  for (const auto& attr : die.attributes()) {
+    switch (attr.Attr) {
+      case llvm::dwarf::DW_AT_byte_size:
+        size = attr.Value.getAsUnsignedConstant().value();
+        break;
+      case llvm::dwarf::DW_AT_declaration:
+        incomplete = *attr.Value.getAsUnsignedConstant() != 0;
+        break;
+      case llvm::dwarf::DW_AT_signature: {
+        const auto sig8 = getRefOffset(dieContext, attr);
+        definition_offset = m_dwarfContext.getTypeUnitOffset(sig8);
+        break;
       }
-      return true;
+      default:
+        break;
     }
-  );
+  }
+
+  if (definition_offset) {
+    const auto die2Context = m_dwarfContext.getDieContextAtGlobalOffset(*definition_offset);
+    return genObject(die2Context, name, key);
+  }
 
   // No size was provided. This is expected for incomplete types or the strange
   // "other" types sometimes seen, but an error otherwise.
@@ -925,7 +1229,7 @@ Object TypeParserImpl::genObject(Dwarf_Die die,
       size = 0;
     } else {
       throw Exception{
-        folly::sformat(
+        fmt::format(
           "Object type '{}' at offset {} is a complete definition, "
           "but has no size!",
           name.name,
@@ -937,56 +1241,49 @@ Object TypeParserImpl::genObject(Dwarf_Die die,
 
   Object obj{std::move(name), *size, key, kind, incomplete};
 
-  m_dwarf.forEachChild(
-    die,
-    [&](Dwarf_Die child) {
-      switch (m_dwarf.getTag(child)) {
-        case DW_TAG_inheritance:
-          obj.bases.emplace_back(genBase(child, obj.name));
-          break;
-        case DW_TAG_member:
-          obj.members.emplace_back(genMember(child, obj.name));
-          if (obj.name.linkage != ObjectTypeName::Linkage::external) {
-            // Clang gives linkage names to things that don't actually have
-            // linkage. Don't let any members have linkage names if the object
-            // type doesn't have external linkage.
-            obj.members.back().linkage_name.clear();
+  for (const auto& child : die.children()) {
+    switch (child.getTag()) {
+      case llvm::dwarf::DW_TAG_inheritance:
+        obj.bases.emplace_back(genBase({child, isInfo}, obj.name));
+        break;
+      case llvm::dwarf::DW_TAG_member:
+      case llvm::dwarf::DW_TAG_variable:
+        obj.members.emplace_back(genMember({child, isInfo}, obj.name));
+        if (obj.name.linkage != ObjectTypeName::Linkage::external) {
+          // Clang gives linkage names to things that don't actually have
+          // linkage. Don't let any members have linkage names if the object
+          // type doesn't have external linkage.
+          obj.members.back().linkage_name.clear();
+        }
+        break;
+      case llvm::dwarf::DW_TAG_template_type_parameter:
+        obj.template_params.emplace_back(genTemplateParam({child, isInfo}));
+        break;
+      case llvm::dwarf::DW_TAG_GNU_template_parameter_pack:
+        // Flatten parameter packs as if they were just a normally provided
+        // parameter list. This is enough for our purposes.
+        for (const auto& template_die : child.children()) {
+          if (template_die.getTag() ==
+              llvm::dwarf::DW_TAG_template_type_parameter) {
+            obj.template_params.emplace_back(
+              genTemplateParam({template_die, isInfo})
+            );
           }
-          break;
-        case DW_TAG_template_type_parameter:
-          obj.template_params.emplace_back(genTemplateParam(child));
-          break;
-        case DW_TAG_GNU_template_parameter_pack:
-          // Flatten parameter packs as if they were just a normally provided
-          // parameter list. This is enough for our purposes.
-          m_dwarf.forEachChild(
-            child,
-            [&](Dwarf_Die template_die) {
-              if (m_dwarf.getTag(template_die) ==
-                  DW_TAG_template_type_parameter) {
-                obj.template_params.emplace_back(
-                  genTemplateParam(template_die)
-                );
-              }
-              return true;
-            }
-          );
-          break;
-        case DW_TAG_subprogram:
-          obj.functions.emplace_back(genFunction(child));
-          if (obj.name.linkage != ObjectTypeName::Linkage::external) {
-            // Clang gives linkage names to things that don't actually have
-            // linkage. Don't let any functions have linkage names if the object
-            // type doesn't have external linkage.
-            obj.functions.back().linkage_name.clear();
-          }
-          break;
-        default:
-          break;
-      }
-      return true;
+        }
+        break;
+      case llvm::dwarf::DW_TAG_subprogram:
+        obj.functions.emplace_back(genFunction({child, isInfo}));
+        if (obj.name.linkage != ObjectTypeName::Linkage::external) {
+          // Clang gives linkage names to things that don't actually have
+          // linkage. Don't let any functions have linkage names if the object
+          // type doesn't have external linkage.
+          obj.functions.back().linkage_name.clear();
+        }
+        break;
+      default:
+        break;
     }
-  );
+  }
 
   // The base classes and members aren't always reported in DWARF in offset
   // order, but make the output deterministic here to simplify consumers of the
@@ -1016,49 +1313,58 @@ Object TypeParserImpl::genObject(Dwarf_Die die,
  * Given a DIE representing an arbitrary type, return its equivalent Type. This
  * can involve chasing a chain of such type DIEs.
  */
-Type TypeParserImpl::genType(Dwarf_Die die) {
+Type TypeParserImpl::genType(const DieContext& dieContext) {
   // Offset of a different type this type refers to. If not present, that type
   // is implicitly "void".
-  folly::Optional<Dwarf_Off> type_offset;
+  HPHP::Optional<GlobalOff> type_offset;
   // For pointers to members, the type referring to the object the member
   // belongs to.
-  folly::Optional<Dwarf_Off> containing_type_offset;
+  HPHP::Optional<GlobalOff> containing_type_offset;
 
-  m_dwarf.forEachAttribute(
-    die,
-    [&](Dwarf_Attribute attr) {
-      switch (m_dwarf.getAttributeType(attr)) {
-        case DW_AT_type:
-          type_offset = m_dwarf.getAttributeValueRef(attr);
-          break;
-        case DW_AT_containing_type:
-          containing_type_offset = m_dwarf.getAttributeValueRef(attr);
-          break;
-        default:
-          break;
+  // A struct can have a declaration which refers to the definition
+  // via a DW_AT_signature.
+  HPHP::Optional<GlobalOff> definition_offset;
+
+  const auto& die = dieContext.die;
+  const auto isInfo = dieContext.isInfo;
+
+  for (const auto& attr : dieContext.die.attributes()) {
+    switch (attr.Attr) {
+      case llvm::dwarf::DW_AT_type:
+        type_offset = m_dwarfContext.getGlobalOffset(
+            getRefOffset(dieContext, attr), isInfo);
+        break;
+      case llvm::dwarf::DW_AT_containing_type:
+        containing_type_offset = m_dwarfContext.getGlobalOffset(
+            getRefOffset(dieContext, attr), isInfo);
+        break;
+      case llvm::dwarf::DW_AT_signature: {
+        const auto sig8 = getRefOffset(dieContext, attr);
+        definition_offset = m_dwarfContext.getTypeUnitOffset(sig8);
+        break;
       }
-      return true;
+      default:
+        break;
     }
-  );
+  }
 
-  const auto recurse = [&](Dwarf_Off offset) {
-    return m_dwarf.onDIEAtOffset(
-      offset,
-      [&](Dwarf_Die die2) { return genType(die2); }
-    );
+  const auto recurse = [&](GlobalOff offset) {
+    const auto die2Context = m_dwarfContext.getDieContextAtGlobalOffset(offset);
+    return genType(die2Context);
   };
 
   // Pointers to member functions aren't represented in DWARF. Instead the
   // compiler creates a struct internally which stores all the information.
 
-  switch (m_dwarf.getTag(die)) {
-    case DW_TAG_base_type:
-    case DW_TAG_structure_type:
-    case DW_TAG_class_type:
-    case DW_TAG_union_type:
-    case DW_TAG_enumeration_type:
-    case DW_TAG_unspecified_type: {
-      auto offset = m_dwarf.getDIEOffset(die);
+  switch (die.getTag()) {
+    case llvm::dwarf::DW_TAG_base_type:
+    case llvm::dwarf::DW_TAG_structure_type:
+    case llvm::dwarf::DW_TAG_class_type:
+    case llvm::dwarf::DW_TAG_union_type:
+    case llvm::dwarf::DW_TAG_enumeration_type:
+    case llvm::dwarf::DW_TAG_unspecified_type: {
+      if (definition_offset) return recurse(*definition_offset);
+      auto offset = m_dwarfContext.getGlobalOffset(die.getOffset(), isInfo);
       auto const& state = stateForOffset(offset);
       auto iter = state.obj_offsets.find(offset);
       if (iter == state.obj_offsets.end()) {
@@ -1068,68 +1374,68 @@ Type TypeParserImpl::genType(Dwarf_Die die) {
             Scope::s_pseudo_type_name,
             ObjectTypeName::Linkage::pseudo
           },
-          ObjectTypeKey{offset, 0},
+          ObjectTypeKey{offset.raw(), 0},
           true
         };
       } else {
         return state.all_objs[iter->second];
       }
     }
-    case DW_TAG_pointer_type:
+    case llvm::dwarf::DW_TAG_pointer_type:
       return PtrType{type_offset ? recurse(*type_offset) : VoidType{}};
-    case DW_TAG_reference_type: {
+    case llvm::dwarf::DW_TAG_reference_type: {
       if (!type_offset) {
         throw Exception{
-          folly::sformat(
+          fmt::format(
             "Encountered reference to void at offset {}",
-            m_dwarf.getDIEOffset(die)
+            die.getOffset()
           )
         };
       }
       return RefType{recurse(*type_offset)};
     }
-    case DW_TAG_rvalue_reference_type: {
+    case llvm::dwarf::DW_TAG_rvalue_reference_type: {
       if (!type_offset) {
         throw Exception{
-          folly::sformat(
+          fmt::format(
             "Encountered rvalue reference to void at offset {}",
-            m_dwarf.getDIEOffset(die)
+            die.getOffset()
           )
         };
       }
       return RValueRefType{recurse(*type_offset)};
     }
-    case DW_TAG_array_type: {
+    case llvm::dwarf::DW_TAG_array_type: {
       if (!type_offset) {
         throw Exception{
-          folly::sformat(
+          fmt::format(
             "Encountered array of voids at offset {}",
-            m_dwarf.getDIEOffset(die)
+            die.getOffset()
           )
         };
       }
       return ArrType{recurse(*type_offset), determineArrayBound(die)};
     }
-    case DW_TAG_const_type:
+    case llvm::dwarf::DW_TAG_const_type:
       return ConstType{type_offset ? recurse(*type_offset) : VoidType{}};
-    case DW_TAG_volatile_type:
+    case llvm::dwarf::DW_TAG_volatile_type:
       return VolatileType{type_offset ? recurse(*type_offset) : VoidType{}};
-    case DW_TAG_restrict_type:
+    case llvm::dwarf::DW_TAG_restrict_type:
       return RestrictType{type_offset ? recurse(*type_offset) : VoidType{}};
-    case DW_TAG_typedef:
+    case llvm::dwarf::DW_TAG_typedef:
       return type_offset ? recurse(*type_offset) : VoidType{};
-    case DW_TAG_subroutine_type: {
+    case llvm::dwarf::DW_TAG_subroutine_type: {
       FuncType func{type_offset ? recurse(*type_offset) : VoidType{}};
-      fillFuncArgs(die, func);
+      fillFuncArgs({die, isInfo}, func);
       return std::move(func);
     }
-    case DW_TAG_ptr_to_member_type: {
+    case llvm::dwarf::DW_TAG_ptr_to_member_type: {
       if (!containing_type_offset) {
         throw Exception{
-          folly::sformat(
+          fmt::format(
             "Encountered ptr-to-member at offset {} without a "
             "containing object",
-            m_dwarf.getDIEOffset(die)
+            die.getOffset()
           )
         };
       }
@@ -1141,10 +1447,10 @@ Type TypeParserImpl::genType(Dwarf_Die die) {
         };
       } else {
         throw Exception{
-          folly::sformat(
+          fmt::format(
             "Encountered ptr-to-member at offset {} with a "
             "containing object of type '{}'",
-            m_dwarf.getDIEOffset(die),
+            die.getOffset(),
             containing.toString()
           )
         };
@@ -1152,76 +1458,64 @@ Type TypeParserImpl::genType(Dwarf_Die die) {
     }
     default:
       throw Exception{
-        folly::sformat(
+        fmt::format(
           "Encountered non-type tag '{}' at offset {} while "
           "traversing type description",
-          m_dwarf.tagToString(m_dwarf.getTag(die)),
-          m_dwarf.getDIEOffset(die)
+          die.getTag(),
+          die.getOffset()
         )
       };
   }
 }
 
-Object::Member TypeParserImpl::genMember(Dwarf_Die die,
+Object::Member TypeParserImpl::genMember(const DieContext& dieContext,
                                          const ObjectTypeName& parent_name) {
   std::string name;
   std::string linkage_name;
   std::size_t offset = 0;
-  folly::Optional<Dwarf_Off> die_offset;
-  folly::Optional<uintptr_t> address;
+  HPHP::Optional<GlobalOff> die_offset;
+  HPHP::Optional<uintptr_t> address;
   bool is_static = false;
 
-  // For static members, determine how that member's address can be
-  // determined. In theory, this can be any arbitrary expression, but we only
-  // support constant addresses right now.
-  const auto interpret_loc_address = [&](Dwarf_Attribute attr)
-    -> folly::Optional<uintptr_t> {
-    auto form = m_dwarf.getAttributeForm(attr);
-    if (form != DW_FORM_exprloc) return folly::none;
-    auto exprs = m_dwarf.getAttributeValueExprLoc(attr);
-    if (exprs.size() != 1) return folly::none;
-    if (exprs[0].lr_atom != DW_OP_addr) return folly::none;
-    return folly::Optional<uintptr_t>{exprs[0].lr_number};
-  };
-
-  m_dwarf.forEachAttribute(
-    die,
-    [&](Dwarf_Attribute attr) {
-      switch (m_dwarf.getAttributeType(attr)) {
-        case DW_AT_name:
-          name = m_dwarf.getAttributeValueString(attr);
-          break;
-        case DW_AT_linkage_name:
-          linkage_name = m_dwarf.getAttributeValueString(attr);
-          break;
-        case DW_AT_location:
-          address = interpret_loc_address(attr);
-          break;
-        case DW_AT_data_member_location:
-          offset = m_dwarf.getAttributeValueUData(attr);
-          break;
-        case DW_AT_type:
-          die_offset = m_dwarf.getAttributeValueRef(attr);
-          break;
-        case DW_AT_declaration:
-          is_static = m_dwarf.getAttributeValueFlag(attr);
-          break;
-        default:
-          break;
-      }
-      return true;
+  for (const auto& attr : dieContext.die.attributes()) {
+    switch (attr.Attr) {
+      case llvm::dwarf::DW_AT_name:
+        if (auto val = llvm::dwarf::toString(attr.Value)) {
+          name = *val;
+        }
+        break;
+      case llvm::dwarf::DW_AT_linkage_name:
+        if (auto val = llvm::dwarf::toString(attr.Value)) {
+          linkage_name = *val;
+        }
+        break;
+      case llvm::dwarf::DW_AT_location:
+        address = interpretLocAddress(m_dwarfContext, dieContext, attr);
+        break;
+      case llvm::dwarf::DW_AT_data_member_location:
+        offset = *attr.Value.getAsUnsignedConstant();
+        break;
+      case llvm::dwarf::DW_AT_type:
+        die_offset = m_dwarfContext.getGlobalOffset(
+            getRefOffset(dieContext, attr), dieContext.isInfo);
+        break;
+      case llvm::dwarf::DW_AT_declaration:
+        is_static = *attr.Value.getAsUnsignedConstant() != 0;
+        break;
+      default:
+        break;
     }
-  );
+  }
 
   if (!die_offset) {
     // No DW_AT_type means "void", but you can't have void members!
     throw Exception{
-      folly::sformat(
+      fmt::format(
         "Encountered member (name: '{}') of type void "
         "in object type '{}' at offset {}",
         name,
         parent_name.name,
-        m_dwarf.getDIEOffset(die)
+        dieContext.die.getOffset()
       )
     };
   }
@@ -1229,109 +1523,75 @@ Object::Member TypeParserImpl::genMember(Dwarf_Die die,
   if (is_static) {
     // If this is a static member, look up any definitions which refer to this
     // member, and pull any additional information out of it.
-    auto const static_offset = m_dwarf.getDIEOffset(die);
+    // auto const static_offset = m_dwarf.getDIEOffset(die);
+    auto const static_offset = m_dwarfContext.getGlobalOffset(dieContext.die.getOffset(), dieContext.isInfo);
     auto const& state = stateForOffset(static_offset);
     auto const range = state.static_definitions.equal_range(static_offset);
-    auto const count = std::distance(range.first, range.second);
 
-    if (count > 1) {
-      // Multiple definitions? Technically okay if their information isn't
-      // contradictory, but doesn't seem to happen.
-      throw Exception{
-        folly::sformat(
-          "Encountered static member (name: '{}') with "
-          "multiple definitions in object type '{}' at offset{}",
-          name,
-          parent_name.name,
-          m_dwarf.getDIEOffset(die)
-        )
-      };
-    }
-
-    // Only extract linkage information from the definition.
-    if (count > 0) {
-      m_dwarf.onDIEAtOffset(
-        range.first->second,
-        [&](Dwarf_Die die2) {
-          m_dwarf.forEachAttribute(
-            die2,
-            [&](Dwarf_Attribute attr) {
-              switch (m_dwarf.getAttributeType(attr)) {
-                case DW_AT_linkage_name:
-                  if (linkage_name.empty()) {
-                    linkage_name = m_dwarf.getAttributeValueString(attr);
-                  }
-                  break;
-                case DW_AT_location:
-                  if (!address) address = interpret_loc_address(attr);
-                  break;
-                default:
-                  break;
-              }
-              return true;
-            }
-          );
-        }
-      );
+    for (auto const& elm : range) {
+      if (linkage_name.empty() && !elm.second.linkage_name.empty()) {
+        linkage_name = elm.second.linkage_name;
+      }
+      if (!address && elm.second.address != StaticSpec::kNoAddress) {
+        address = elm.second.address;
+      }
     }
   }
 
-  auto type = m_dwarf.onDIEAtOffset(
-    *die_offset,
-    [&](Dwarf_Die die2){ return genType(die2); }
-  );
+  const auto die2Context = m_dwarfContext.getDieContextAtGlobalOffset(*die_offset);
+  auto type = genType(die2Context);
 
   if (name.empty()) {
     name = is_static
-      ? folly::sformat("(unnamed static member of type '{}')", type.toString())
-      : folly::sformat("(unnamed member of type '{}')", type.toString());
+      ? fmt::format("(unnamed static member of type '{}')", type.toString())
+      : fmt::format("(unnamed member of type '{}')", type.toString());
   }
 
   return Object::Member{
     name,
-    is_static ? folly::none : folly::Optional<std::size_t>{offset},
+    is_static ? std::nullopt : HPHP::Optional<std::size_t>{offset},
     linkage_name,
     address,
     std::move(type)
   };
 }
 
-Object::Function TypeParserImpl::genFunction(Dwarf_Die die) {
+Object::Function TypeParserImpl::genFunction(const DieContext& dieContext) {
   std::string name;
   Type ret_type{VoidType{}};
   std::string linkage_name;
   bool is_virtual = false;
   bool is_member = false;
 
-  m_dwarf.forEachAttribute(
-    die,
-    [&](Dwarf_Attribute attr) {
-      switch (m_dwarf.getAttributeType(attr)) {
-        case DW_AT_name:
-          name = m_dwarf.getAttributeValueString(attr);
-          break;
-        case DW_AT_type:
-          ret_type = m_dwarf.onDIEAtOffset(
-            m_dwarf.getAttributeValueRef(attr),
-            [&](Dwarf_Die ty_die) { return genType(ty_die); }
-          );
-          break;
-        case DW_AT_linkage_name:
-          linkage_name = m_dwarf.getAttributeValueString(attr);
-          break;
-        case DW_AT_virtuality:
-          is_virtual =
-            (m_dwarf.getAttributeValueUData(attr) != DW_VIRTUALITY_none);
-          break;
-        case DW_AT_object_pointer:
-          is_member = true;
-          break;
-        default:
-          break;
+  for (const auto& attr : dieContext.die.attributes()) {
+    switch (attr.Attr) {
+      case llvm::dwarf::DW_AT_name:
+        if (auto val = llvm::dwarf::toString(attr.Value)) {
+          name = *val;
+        }
+        break;
+      case llvm::dwarf::DW_AT_type: {
+        const auto globalOff = m_dwarfContext.getGlobalOffset(
+            getRefOffset(dieContext, attr), dieContext.isInfo);
+        const auto tyDieContext = m_dwarfContext.getDieContextAtGlobalOffset(globalOff);
+        ret_type = genType(tyDieContext);
+        break;
       }
-      return true;
+      case llvm::dwarf::DW_AT_linkage_name:
+        if (auto val = llvm::dwarf::toString(attr.Value)) {
+          linkage_name = *val;
+        }
+        break;
+      case llvm::dwarf::DW_AT_virtuality:
+        is_virtual = *attr.Value.getAsUnsignedConstant() != llvm::dwarf::DW_VIRTUALITY_none;
+        break;
+      case llvm::dwarf::DW_AT_object_pointer:
+        is_member = true;
+        break;
+      default:
+        break;
     }
-  );
+  }
 
   /*
    * We need to determine if this function is a static function or a member
@@ -1342,7 +1602,7 @@ Object::Function TypeParserImpl::genFunction(Dwarf_Die die) {
    * On Clang, the DW_AT_object_pointer is only present in a function's
    * definition, not its declaration. Moreover, it doesn't reliably emit
    * function declarations if it thinks the function isn't used. As a result, we
-   * can't reliably distinguish member functions for static functions on clang.
+   * can't reliably distinguish member functions from static functions on clang.
    *
    * As an alternative, if the first formal parameter of a function is marked as
    * being "artificial" (which means its not present in the actual source),
@@ -1350,96 +1610,54 @@ Object::Function TypeParserImpl::genFunction(Dwarf_Die die) {
    * function.
    */
   std::vector<Type> arg_types;
-  m_dwarf.forEachChild(
-    die,
-    [&](Dwarf_Die child) {
-      if (m_dwarf.getTag(child) != DW_TAG_formal_parameter) {
-        return true;
-      }
-
-      bool is_artificial = false;
-      Type arg_type{VoidType()};
-
-      m_dwarf.forEachAttribute(
-        child,
-        [&](Dwarf_Attribute attr) {
-          switch (m_dwarf.getAttributeType(attr)) {
-            case DW_AT_type:
-              arg_type = m_dwarf.onDIEAtOffset(
-                  m_dwarf.getAttributeValueRef(attr),
-                  [&](Dwarf_Die ty_die) { return genType(ty_die); }
-              );
-              break;
-            case DW_AT_artificial:
-              is_artificial = m_dwarf.getAttributeValueFlag(attr);
-              break;
-            default:
-              break;
-          }
-          return true;
-        }
-      );
-
-      // Only consider this a member function if this arg if the first and its
-      // artificial.
-      if (is_artificial && arg_types.empty()) {
-        is_member = true;
-      }
-      arg_types.emplace_back(std::move(arg_type));
-
-      return true;
+  for (const auto& child : dieContext.die.children()) {
+    if (child.getTag() != llvm::dwarf::DW_TAG_formal_parameter) {
+      continue;
     }
-  );
 
-  folly::Optional<std::uintptr_t> address;
+    bool is_artificial = false;
+    Type arg_type{VoidType()};
+
+    for (const auto& attr : child.attributes()) {
+      switch (attr.Attr) {
+        case llvm::dwarf::DW_AT_type: {
+          const auto globalOff = m_dwarfContext.getGlobalOffset(
+              getRefOffset(dieContext, attr), dieContext.isInfo);
+          const auto ty_die = m_dwarfContext.getDieContextAtGlobalOffset(globalOff);
+          arg_type = genType(ty_die);
+          break;
+        }
+        case llvm::dwarf::DW_AT_artificial:
+          is_artificial = *attr.Value.getAsUnsignedConstant() != 0;
+          break;
+        default:
+          break;
+      }
+    }
+
+    // Only consider this a member function if this arg if the first and its
+    // artificial.
+    if (is_artificial && arg_types.empty()) {
+      is_member = true;
+    }
+    arg_types.emplace_back(std::move(arg_type));
+  }
+
+  HPHP::Optional<std::uintptr_t> address;
 
   // Similar to static variables, find any definitions which refer to this
-  // function in order to extract linkage information. Unlike static variables,
-  // there can be multiple definitions, but we'll only take the first
-  // information we see.
-  auto const offset = m_dwarf.getDIEOffset(die);
+  // function in order to extract linkage information.
+  auto const offset = m_dwarfContext.getGlobalOffset(dieContext.die.getOffset(), dieContext.isInfo);
   auto const& state = stateForOffset(offset);
   auto range = state.static_definitions.equal_range(offset);
-  while (range.first != range.second) {
-    m_dwarf.onDIEAtOffset(
-      range.first->second,
-      [&](Dwarf_Die die2) {
-        m_dwarf.forEachAttribute(
-          die2,
-          [&](Dwarf_Attribute attr) {
-            switch (m_dwarf.getAttributeType(attr)) {
-              case DW_AT_linkage_name:
-                if (linkage_name.empty()) {
-                  linkage_name = m_dwarf.getAttributeValueString(attr);
-                }
-                break;
-              case DW_AT_low_pc:
-                if (!address) {
-                  address = m_dwarf.getAttributeValueAddr(attr);
-                  // Sometimes GCC and Clang will emit invalid function
-                  // addresses. Usually zero, but sometimes a very low
-                  // number. These numbers have the appearance of being
-                  // un-relocated addresses, but its in the final executable. As
-                  // a safety net, if an address is provided, but its abnormally
-                  // low, ignore it.
-                  if (*address < 4096) address.clear();
-                }
-                break;
-              case DW_AT_object_pointer:
-                // Just in case we actually have a definition, use it to infer
-                // member-ness.
-                is_member = true;
-                break;
-              default:
-                break;
-            }
-            return true;
-          }
-        );
-      }
-    );
-
-    ++range.first;
+  for (auto const& elm : range) {
+    if (linkage_name.empty() && !elm.second.linkage_name.empty()) {
+      linkage_name = elm.second.linkage_name;
+    }
+    if (!address && elm.second.address != StaticSpec::kNoAddress) {
+      address = elm.second.address;
+    }
+    if (elm.second.is_member) is_member = true;
   }
 
   return Object::Function{
@@ -1455,408 +1673,233 @@ Object::Function TypeParserImpl::genFunction(Dwarf_Die die) {
   };
 }
 
-Object::Base TypeParserImpl::genBase(Dwarf_Die die,
+Object::Base TypeParserImpl::genBase(const DieContext& dieContext,
                                      const ObjectTypeName& parent_name) {
   std::string name;
-  folly::Optional<std::size_t> offset;
-  folly::Optional<Dwarf_Off> die_offset;
+  HPHP::Optional<std::size_t> offset;
+  HPHP::Optional<GlobalOff> die_offset;
   bool is_virtual = false;
 
-  m_dwarf.forEachAttribute(
-    die,
-    [&](Dwarf_Attribute attr) {
-      switch (m_dwarf.getAttributeType(attr)) {
-        case DW_AT_name:
-          name = m_dwarf.getAttributeValueString(attr);
-          break;
-        case DW_AT_type:
-          die_offset = m_dwarf.getAttributeValueRef(attr);
-          break;
-        case DW_AT_virtuality:
-          is_virtual =
-            (m_dwarf.getAttributeValueUData(attr) != DW_VIRTUALITY_none);
-          break;
-        default:
-          break;
-      }
-      return true;
+  for (const auto& attr : dieContext.die.attributes()) {
+    switch (attr.Attr) {
+      case llvm::dwarf::DW_AT_name:
+        if (auto val = llvm::dwarf::toString(attr.Value)) {
+          name = *val;
+        }
+        break;
+      case llvm::dwarf::DW_AT_type:
+        die_offset = m_dwarfContext.getGlobalOffset(
+            getRefOffset(dieContext, attr), dieContext.isInfo);
+        break;
+      case llvm::dwarf::DW_AT_virtuality:
+        is_virtual = *attr.Value.getAsUnsignedConstant() != llvm::dwarf::DW_VIRTUALITY_none;
+        break;
+      default:
+        break;
     }
-  );
+  }
 
   if (!is_virtual) {
     offset = 0;
 
-    m_dwarf.forEachAttribute(
-      die,
-      [&](Dwarf_Attribute attr) {
-        switch (m_dwarf.getAttributeType(attr)) {
-          case DW_AT_data_member_location:
-            offset = m_dwarf.getAttributeValueUData(attr);
-            break;
-          default:
-            break;
-        }
-        return true;
+    for (const auto& attr : dieContext.die.attributes()) {
+      switch (attr.Attr) {
+        case llvm::dwarf::DW_AT_data_member_location:
+          offset = *attr.Value.getAsUnsignedConstant();
+          break;
+        default:
+          break;
       }
-    );
+    }
   }
 
   if (!die_offset) {
     throw Exception{
-      folly::sformat(
+      fmt::format(
         "Encountered base '{}' of object type '{}' without "
         "type information at offset {}",
         name,
         parent_name.name,
-        m_dwarf.getDIEOffset(die)
+        dieContext.die.getOffset()
       )
     };
   }
 
-  auto type =
-    m_dwarf.onDIEAtOffset(
-      *die_offset,
-      [&](Dwarf_Die die2) { return genType(die2); }
-    );
+  const auto die2Context = m_dwarfContext.getDieContextAtGlobalOffset(*die_offset);
+  auto type = genType(die2Context);
 
   if (auto obj = type.asObject()) {
     // Base class better be an actual class!
     return Object::Base{*obj, offset};
   } else {
     throw Exception{
-      folly::sformat(
+      fmt::format(
         "Encountered base '{}' of object type '{}' of "
         "non-object type '{}' at offset {}",
         name,
         parent_name.name,
         type.toString(),
-        m_dwarf.getDIEOffset(die)
+        dieContext.die.getOffset()
       )
     };
   }
 }
 
-Object::TemplateParam TypeParserImpl::genTemplateParam(Dwarf_Die die) {
-  folly::Optional<Dwarf_Off> die_offset;
+Object::TemplateParam TypeParserImpl::genTemplateParam(const DieContext& dieContext) {
+  HPHP::Optional<GlobalOff> die_offset;
 
-  m_dwarf.forEachAttribute(
-    die,
-    [&](Dwarf_Attribute attr) {
-      switch (m_dwarf.getAttributeType(attr)) {
-        case DW_AT_type:
-          die_offset = m_dwarf.getAttributeValueRef(attr);
-          break;
-        default:
-          break;
+  for (const auto& attr : dieContext.die.attributes()) {
+    switch (attr.Attr) {
+      case llvm::dwarf::DW_AT_type: {
+        die_offset = m_dwarfContext.getGlobalOffset(
+            getRefOffset(dieContext, attr), dieContext.isInfo);
+        break;
       }
-      return true;
+      default:
+        break;
     }
-  );
+  }
 
   return Object::TemplateParam{
     die_offset ?
-      m_dwarf.onDIEAtOffset(
-        *die_offset,
-        [&](Dwarf_Die die2){ return genType(die2); }
-      ) :
+      genType(m_dwarfContext.getDieContextAtGlobalOffset(*die_offset)) :
       VoidType{}
   };
 }
 
-folly::Optional<std::size_t>
-TypeParserImpl::determineArrayBound(Dwarf_Die die) {
-  folly::Optional<std::size_t> bound;
+HPHP::Optional<std::size_t>
+TypeParserImpl::determineArrayBound(const llvm::DWARFDie& die) {
+  HPHP::Optional<std::size_t> bound;
 
-  m_dwarf.forEachChild(
-    die,
-    [&](Dwarf_Die child) {
-      switch (m_dwarf.getTag(child)) {
-        case DW_TAG_subrange_type:
-          m_dwarf.forEachAttribute(
-            child,
-            [&](Dwarf_Attribute attr) {
-              switch (m_dwarf.getAttributeType(attr)) {
-                case DW_AT_count:
-                  bound = m_dwarf.getAttributeValueUData(attr);
+  for (const auto& child : die.children()) {
+    switch (child.getTag()) {
+      case llvm::dwarf::DW_TAG_subrange_type: {
+        for (const auto& attr : child.attributes()) {
+              switch (attr.Attr) {
+                case llvm::dwarf::DW_AT_count:
+                  bound = attr.Value.getRawUValue();
                   break;
-                case DW_AT_upper_bound:
-                  bound = m_dwarf.getAttributeValueUData(attr)+1;
+                case llvm::dwarf::DW_AT_upper_bound:
+                  bound = attr.Value.getRawUValue() + 1;
                   break;
                 default:
                   break;
               }
-              return true;
-            }
-          );
-          break;
-        default:
-          break;
+        }
+        break;
       }
-      return true;
+      default:
+        break;
     }
-  );
+  }
 
-  if (bound && !*bound) bound.clear();
+  if (bound && !*bound) bound.reset();
   return bound;
 }
 
-void TypeParserImpl::fillFuncArgs(Dwarf_Die die, FuncType& func) {
-  m_dwarf.forEachChild(
-    die,
-    [&](Dwarf_Die child) {
-      switch (m_dwarf.getTag(child)) {
-        case DW_TAG_formal_parameter: {
-          folly::Optional<Dwarf_Off> type_offset;
+void TypeParserImpl::fillFuncArgs(const DieContext& dieContext, FuncType& func) {
+  for (const auto& child : dieContext.die.children()) {
+    switch (child.getTag()) {
+      case llvm::dwarf::DW_TAG_formal_parameter: {
+        HPHP::Optional<GlobalOff> type_offset;
 
-          m_dwarf.forEachAttribute(
-            child,
-            [&](Dwarf_Attribute attr) {
-              switch (m_dwarf.getAttributeType(attr)) {
-                case DW_AT_type:
-                  type_offset = m_dwarf.getAttributeValueRef(attr);
-                  break;
-                default:
-                  break;
-              }
-              return true;
-            }
-          );
-
-          if (!type_offset) {
-            throw Exception{
-              folly::sformat(
-                "Encountered function at offset {} taking a void parameter",
-                m_dwarf.getDIEOffset(die)
-              )
-            };
+        for (const auto& attr : child.attributes()) {
+          switch (attr.Attr) {
+            case llvm::dwarf::DW_AT_type:
+              type_offset = m_dwarfContext.getGlobalOffset(
+                  getRefOffset(dieContext, attr), dieContext.isInfo);
+              break;
+            default:
+              break;
           }
+        }
 
-          func.args.push_back(
-            m_dwarf.onDIEAtOffset(
-              *type_offset,
-              [&](Dwarf_Die die) { return genType(die); }
+        if (!type_offset) {
+          throw Exception{
+            fmt::format(
+              "Encountered function at offset {} taking a void parameter",
+              dieContext.die.getOffset()
             )
-          );
-          break;
+          };
         }
-        default:
-          break;
+
+        const auto typeDieContext = m_dwarfContext.getDieContextAtGlobalOffset(*type_offset);
+        func.args.push_back(genType(typeDieContext));
+        break;
       }
-      return true;
+      default:
+        break;
     }
-  );
-}
-
-/*
- * Print out the given DIE (including children) in textual format to the given
- * ostream. Only actually print out DIEs which begin in the range between the
- * begin and end parameters.
- */
-
-void printDIE(std::ostream& os,
-              DwarfState& dwarf,
-              Dwarf_Die die,
-              std::size_t begin,
-              std::size_t end,
-              int indent = 0) {
-  auto tag = dwarf.getTag(die);
-  auto tag_name = dwarf.tagToString(tag);
-  auto name = dwarf.getDIEName(die);
-  auto offset = dwarf.getDIEOffset(die);
-
-  const auto recurse = [&]{
-    // Find the last child DIE which does not start with the begin/end
-    // range. This DIE is the first one which contains some data within the
-    // begin/end range, so that must be the first one to begin recursion at.
-    folly::Optional<Dwarf_Off> first;
-    if (begin > 0) {
-      dwarf.forEachChild(
-        die,
-        [&](Dwarf_Die child) {
-          const auto offset = dwarf.getDIEOffset(child);
-          if (offset <= begin) {
-            first = offset;
-            return true;
-          } else {
-            return false;
-          }
-        }
-      );
-    }
-
-    // Only actually recurse if this child DIE is the above computed first DIE,
-    // or one following it, and begins before the end parameter.
-    dwarf.forEachChild(
-      die,
-      [&](Dwarf_Die child) {
-        const auto offset = dwarf.getDIEOffset(child);
-        if ((!first || offset >= *first) && offset < end) {
-          printDIE(os, dwarf, child, begin, end, indent+1);
-        }
-        return offset < end;
-      }
-    );
-  };
-
-  if (offset < begin) {
-    recurse();
-    return;
-  } else if (offset >= end) {
-    return;
   }
-
-  for (int i = 0; i < indent; ++i) {
-    os << "  ";
-  }
-  os << "#" << offset << ": " << tag_name << " (" << tag << ") \""
-     << name << "\"\n";
-
-  dwarf.forEachAttribute(
-    die,
-    [&](Dwarf_Attribute attr) {
-      auto type = dwarf.getAttributeType(attr);
-      auto attr_name = dwarf.attributeTypeToString(type);
-
-      auto attr_value = [&]() -> std::string {
-        switch (dwarf.getAttributeForm(attr)) {
-          case DW_FORM_data1:
-          case DW_FORM_data2:
-          case DW_FORM_data4:
-          case DW_FORM_data8:
-          case DW_FORM_udata:
-            return folly::sformat("{}", dwarf.getAttributeValueUData(attr));
-
-          case DW_FORM_sdata:
-            return folly::sformat("{}", dwarf.getAttributeValueSData(attr));
-
-          case DW_FORM_string:
-          case DW_FORM_strp:
-            return folly::sformat(
-              "\"{}\"",
-              dwarf.getAttributeValueString(attr)
-            );
-
-          case DW_FORM_flag:
-          case DW_FORM_flag_present:
-            return dwarf.getAttributeValueFlag(attr) ? "true" : "false";
-
-          case DW_FORM_addr:
-            return folly::sformat(
-              "{:#010x}",
-              dwarf.getAttributeValueAddr(attr)
-            );
-
-          case DW_FORM_ref1:
-          case DW_FORM_ref2:
-          case DW_FORM_ref4:
-          case DW_FORM_ref8:
-          case DW_FORM_ref_udata:
-          case DW_FORM_ref_addr:
-            return folly::sformat("#{}", dwarf.getAttributeValueRef(attr));
-          case DW_FORM_ref_sig8: {
-            auto sig = dwarf.getAttributeValueSig8(attr);
-            return folly::sformat(
-              "{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
-              static_cast<uint8_t>(sig.signature[0]),
-              static_cast<uint8_t>(sig.signature[1]),
-              static_cast<uint8_t>(sig.signature[2]),
-              static_cast<uint8_t>(sig.signature[3]),
-              static_cast<uint8_t>(sig.signature[4]),
-              static_cast<uint8_t>(sig.signature[5]),
-              static_cast<uint8_t>(sig.signature[6]),
-              static_cast<uint8_t>(sig.signature[7])
-            );
-          }
-
-          case DW_FORM_exprloc: {
-            std::string output;
-            for (const auto& expr : dwarf.getAttributeValueExprLoc(attr)) {
-              if (expr.lr_atom == DW_OP_addr) {
-                output += folly::sformat(
-                  "<OP_addr: {:#x}>,",
-                  expr.lr_number
-                );
-              } else {
-                output += folly::sformat(
-                  "<{:#02x}:{}:{}:{}>,",
-                  expr.lr_atom,
-                  expr.lr_number,
-                  expr.lr_number2,
-                  expr.lr_offset
-                );
-              }
-            }
-            return folly::sformat("Location: [{}]", output);
-          }
-
-          case DW_FORM_block1:
-          case DW_FORM_block2:
-          case DW_FORM_block4:
-          case DW_FORM_block: return "{BLOCK}";
-
-          case DW_FORM_indirect: return "{INDIRECT}";
-          case DW_FORM_sec_offset: return "{SECTION OFFSET}";
-          default: return "{UNKNOWN}";
-        }
-      }();
-
-      for (int i = 0; i < indent; ++i) {
-        os << "  ";
-      }
-      os << "   **** " << attr_name << " (" << type << ") ==> "
-         << attr_value << '\n';
-      return true;
-    }
-  );
-
-  recurse();
 }
 
 struct PrinterImpl : Printer {
-  explicit PrinterImpl(const std::string& filename): m_filename{filename} {}
-  void operator()(std::ostream& os,
-                  std::size_t begin,
-                  std::size_t end) const override {
-    DwarfState dwarf{m_filename};
+  explicit PrinterImpl(const std::string &filename)
+      : m_filename{filename}, m_dwarfContext{filename} {}
 
-    // If a non-default begin parameter was specified, first iterate over all
-    // the compilation units. Find the first compilation unit which at least
-    // partially lies within the range given by the begin parameter. This is the
-    // first compilation unit to begin printing from.
-    folly::Optional<Dwarf_Off> last;
-    if (begin > 0) {
-      dwarf.forEachCompilationUnit(
-        [&](Dwarf_Die cu) {
-          const auto offset = dwarf.getDIEOffset(cu);
-          if (offset <= begin) last = offset;
+  void operator()(std::ostream &os, std::size_t begin = 0,
+                  std::size_t end = std::numeric_limits<std::size_t>::max(),
+                  bool dwp = false) const override {
+
+    auto printUnits = [&](auto &&unitFunction) {
+      // If a non-default begin parameter was specified, first iterate over all
+      // the compilation units. Find the first compilation unit which at least
+      // partially lies within the range given by the begin parameter. This is
+      // the first compilation unit to begin printing from.
+      HPHP::Optional<uint64_t> last;
+      unitFunction([&](const std::unique_ptr<llvm::DWARFUnit> &unit) {
+        const auto offset = unit->getOffset();
+        if (offset > end)
+          return false;
+        if (offset <= begin)
+          last = offset;
+        return true;
+      });
+
+      // Now iterate over all the compilation units again. Only actually print
+      // out dies that lie within the last/end parameter range.
+      unitFunction([&](const std::unique_ptr<llvm::DWARFUnit> &unit) {
+        const auto offset = unit->getOffset();
+        if (offset > end)
+          return false;
+        if (!last || offset >= *last) {
+          unit->dump(llvm::outs(), llvm::DIDumpOptions{});
+          llvm::DWARFDie unitDie =
+              unit->getUnitDIE(/*ExtractUnitDIEOnly=*/false);
+          for (auto const &die : unitDie.children()) {
+            printDie(os, die, last ? *last : begin, end, 1);
+          }
         }
-      );
+        return true;
+      });
+    };
+
+    if (!dwp) {
+      printUnits([&](auto &&func) { m_dwarfContext.forEachNormalUnit(func); });
+    } else {
+      printUnits([&](auto &&func) { m_dwarfContext.forEachDwoUnit(func); });
+    }
+  }
+
+private:
+  /*
+   * Print out the given DIE (including children) in textual format to the given
+   * ostream. Only actually print out DIEs which begin in the range between the
+   * begin and end parameters.
+   */
+  void printDie(std::ostream &os, const llvm::DWARFDie &dwarfDie, size_t begin,
+                size_t end, unsigned level = 0) const {
+    if (dwarfDie.getOffset() >= begin && dwarfDie.getOffset() <= end) {
+      dwarfDie.dump(llvm::outs(), level);
     }
 
-    // Now iterate over all the compilation units again. Only actually print out
-    // compilation units if they lie within the begin/end parameter range.
-    dwarf.forEachCompilationUnit(
-      [&](Dwarf_Die cu) {
-        const auto offset = dwarf.getDIEOffset(cu);
-        if ((!last || offset >= *last) && offset < end) {
-          printDIE(
-            os,
-            dwarf,
-            cu,
-            // If this compilation unit entirely lies within the begin/end
-            // range, specify a begin parameter of "0", which will stop
-            // printDIE() from doing range checks (which is more efficient).
-            (!last || (offset > *last)) ? 0 : begin,
-            end
-          );
-        }
-      }
-    );
-
-    os << std::flush;
+    for (auto const &child : dwarfDie.children()) {
+      printDie(os, child, begin, end, level + 1);
+    }
   }
-private:
+
   std::string m_filename;
+  DWARFContextManager m_dwarfContext;
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1864,8 +1907,14 @@ private:
 }
 
 std::unique_ptr<TypeParser>
-make_dwarf_type_parser(const std::string& filename) {
-  return std::make_unique<TypeParserImpl>(filename);
+make_dwarf_type_parser(const std::string& filename, int num_threads) {
+  // Support calling with main binary or dwp, but process main binary since
+  // TypeParser handles dwp automatically
+  auto main_binary = filename;
+  if (main_binary.substr(main_binary.size() - 4) == ".dwp") {
+    main_binary = main_binary.substr(0, main_binary.size() - 4);
+  }
+  return std::make_unique<TypeParserImpl>(main_binary, num_threads);
 }
 
 std::unique_ptr<Printer> make_dwarf_printer(const std::string& filename) {
@@ -1877,3 +1926,18 @@ std::unique_ptr<Printer> make_dwarf_printer(const std::string& filename) {
 }
 
 #endif
+
+namespace folly {
+template<> class FormatValue<llvm::dwarf::Tag> {
+ public:
+  explicit FormatValue(llvm::dwarf::Tag tag) : m_tag(tag) {}
+
+  template<typename Callback>
+  void format(FormatArg& arg, Callback& cb) const {
+    format_value::formatString(fmt::format("{}", m_tag), arg, cb);
+  }
+
+ private:
+  llvm::dwarf::Tag m_tag;
+};
+}

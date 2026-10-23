@@ -1,18 +1,18 @@
 <?hh
-error_reporting(0);
 
-$a = array(0, "b", "c");
+<<__EntryPoint>>
+function main(): void {
+  error_reporting(0);
 
-print $a[0];
-$a[0] = 1;
-print $a[0];
-print $a[0]++;
-print $a[0];
-print "\n";
+  $a = vec[0, "b", "c"];
 
-$a[3]++;
-print_r($a);
+  print $a[0];
+  $a[0] = 1;
+  print $a[0];
+  print $a[0];
+  $a[0]++;
+  print $a[0];
+  print "\n";
 
-$b = null;
-print $b[0]++;
-print "\n";
+  $a[3]++;
+}

@@ -1,0 +1,11 @@
+error: Typing[4115] Classes can only extend other classes. [1]
+-> This is an enum class. [2]
+
+typing.extends3.bad.php:22:7
+20 | 
+21 | // normal classes can't extend enum classes
+22 | class C extends E {}
+   |       ^ [1]
+   |                 ^ [2]
+
+1 error found

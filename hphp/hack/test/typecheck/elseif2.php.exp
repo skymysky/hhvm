@@ -1,1 +1,51 @@
-No errors
+error: Parsing[1002] A semicolon `;` is expected here. [1]
+
+elseif2.php:14:20
+12 | function test(): void {
+13 |   if (true) {
+14 |   } elseif (false) {
+   |                    ^ [1]
+15 |   } else {
+16 |   }
+
+error: Naming[2049] Unbound name: `elseif` (a global function) [1]
+
+elseif2.php:14:5
+12 | function test(): void {
+13 |   if (true) {
+14 |   } elseif (false) {
+   |     ^^^^^^ [1]
+15 |   } else {
+16 |   }
+
+error: Naming[2049] Unbound name: `else` (a global constant) [1]
+
+elseif2.php:15:5
+13 |   if (true) {
+14 |   } elseif (false) {
+15 |   } else {
+   |     ^^^^ [1]
+16 |   }
+17 | }
+
+error: Typing[4107] Unbound name (typing): `elseif` [1]
+
+elseif2.php:14:5
+12 | function test(): void {
+13 |   if (true) {
+14 |   } elseif (false) {
+   |     ^^^^^^ [1]
+15 |   } else {
+16 |   }
+
+error: Typing[4106] Unbound global constant (Typing) [1]
+
+elseif2.php:15:5
+13 |   if (true) {
+14 |   } elseif (false) {
+15 |   } else {
+   |     ^^^^ [1]
+16 |   }
+17 | }
+
+5 errors found

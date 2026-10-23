@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 
 // This file test the expression dependent type associated with local variables
 
@@ -22,14 +22,14 @@ abstract class C {
 
     $c->set($c->get());
 
-    // Assigning $c to another local variable transfers the expression id
+    // Assigning $c to another local variable doesn't transfer the expression id
     $c_alias = $c;
     $c->set($c_alias->get());
     $c_alias->set($c->get());
     hh_show($c_alias->get());
 
-    // instanceof does not change the expression id, though the type changes
-    invariant($c_alias instanceof I, '');
+    // type test do not change the expression id, though the type changes
+    invariant($c_alias is I, '');
     hh_show($c_alias);
     hh_show($c_alias->get());
 

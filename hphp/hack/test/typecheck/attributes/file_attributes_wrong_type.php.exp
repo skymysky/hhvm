@@ -1,0 +1,15 @@
+error: Typing[4110] Invalid argument [1]
+-> Expected `string` [2]
+-> But got `int` [1]
+
+file_attributes_wrong_type.php:3:11
+1 | <?hh
+2 | 
+3 | <<file: X(3)>>
+  |           ^ [1]
+4 | class X implements \HH\FileAttribute {
+5 |   public function __construct(public string $x) {}
+  |                                      ^^^^^^ [2]
+6 | }
+
+1 error found

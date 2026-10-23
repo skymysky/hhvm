@@ -34,7 +34,6 @@ class :foo {
   attribute enum { 'bar', 'baz' } clone;
   attribute enum { 'bar', 'baz' } if;
   attribute enum { 'bar', 'baz' } else;
-  attribute enum { 'bar', 'baz' } elseif;
   attribute enum { 'bar', 'baz' } endif;
   attribute enum { 'bar', 'baz' } for;
   attribute enum { 'bar', 'baz' } endfor;
@@ -84,4 +83,8 @@ class :foo {
   attribute enum { 'bar', 'baz' } newtype;
   attribute enum { 'bar', 'baz' } shape;
 }
+
+<<__EntryPoint>>
+function main_xhp_keyword_hh() :mixed{
 echo "Done\n";
+}

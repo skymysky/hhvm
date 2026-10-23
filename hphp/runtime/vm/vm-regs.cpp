@@ -22,30 +22,11 @@ namespace HPHP {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-// Register dirtiness: thread-private.
-__thread VMRegState tl_regState = VMRegState::CLEAN;
-
-VMRegAnchor::VMRegAnchor()
-  : m_old(tl_regState)
+VMRegAnchor::VMRegAnchor(Mode mode)
+  : m_old(regState())
 {
   assert_native_stack_aligned();
-  jit::syncVMRegs();
-}
-
-VMRegAnchor::VMRegAnchor(ActRec* ar)
-  : m_old(tl_regState)
-{
-  assertx(tl_regState == VMRegState::DIRTY);
-  tl_regState = VMRegState::CLEAN;
-
-  auto prevAr = g_context->getOuterVMFrame(ar);
-  const Func* prevF = prevAr->m_func;
-  assertx(!ar->resumed());
-  auto& regs = vmRegs();
-  regs.stack.top() = (TypedValue*)ar - ar->numArgs();
-  assertx(vmStack().isValidAddress((uintptr_t)vmsp()));
-  regs.pc = prevF->unit()->at(prevF->base() + ar->m_soff);
-  regs.fp = prevAr;
+  jit::syncVMRegs(mode == Soft);
 }
 
 ///////////////////////////////////////////////////////////////////////////////

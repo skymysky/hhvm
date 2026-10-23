@@ -1,16 +1,16 @@
-array(2) {
+dict(2) {
   ["kind"]=>
   int(1)
   ["alias"]=>
   string(6) "MyType"
 }
-array(2) {
+dict(2) {
   ["kind"]=>
   int(1)
   ["alias"]=>
   string(6) "MyType"
 }
-array(3) {
+dict(3) {
   ["kind"]=>
   int(1)
   ["alias"]=>
@@ -18,13 +18,13 @@ array(3) {
   ["nullable"]=>
   bool(true)
 }
-array(2) {
+dict(2) {
   ["kind"]=>
   int(1)
   ["alias"]=>
   string(6) "MyType"
 }
-array(3) {
+dict(3) {
   ["kind"]=>
   int(15)
   ["classname"]=>

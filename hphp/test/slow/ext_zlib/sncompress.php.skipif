@@ -1,5 +1,0 @@
-<?php
-
-if (!function_exists('snappy_compress', false)) {
-	echo 'skip';
-}

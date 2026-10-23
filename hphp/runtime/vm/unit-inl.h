@@ -14,115 +14,16 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_VM_UNIT_INL_H_
-#error "unit-inl.h should only be included by unit.h"
-#endif
+#pragma once
 
-#include "hphp/runtime/base/runtime-option.h"
 #include "hphp/runtime/base/type-string.h"
-#include "hphp/runtime/base/repo-auth-type-array.h"
+#include "hphp/runtime/base/repo-auth-type.h"
 #include "hphp/runtime/vm/hhbc-codec.h"
-#include "hphp/runtime/vm/litstr-table.h"
+#include "hphp/runtime/vm/unit-util.h"
+
+#include "hphp/util/configs/eval.h"
 
 namespace HPHP {
-///////////////////////////////////////////////////////////////////////////////
-// SourceLoc.
-
-inline SourceLoc::SourceLoc(const Location::Range& r) {
-  setLoc(&r);
-}
-
-inline void SourceLoc::reset() {
-  line0 = char0 = line1 = char1 = 1;
-}
-
-inline bool SourceLoc::valid() const {
-  return line0 != 1 || char0 != 1 || line1 != 1 || char1 != 1;
-}
-
-inline void SourceLoc::setLoc(const Location::Range* l) {
-  line0 = l->line0;
-  char0 = l->char0;
-  line1 = l->line1;
-  char1 = l->char1;
-}
-
-inline bool SourceLoc::same(const SourceLoc* l) const {
-  return (this == l) ||
-         (line0 == l->line0 && char0 == l->char0 &&
-          line1 == l->line1 && char1 == l->char1);
-}
-
-inline bool SourceLoc::operator==(const SourceLoc& l) const {
-  return same(&l);
-}
-
-///////////////////////////////////////////////////////////////////////////////
-// Location tables.
-
-template<typename T>
-Offset TableEntry<T>::pastOffset() const {
-  return m_pastOffset;
-}
-
-template<typename T>
-T TableEntry<T>::val() const {
-  return m_val;
-}
-
-template<typename T>
-bool TableEntry<T>::operator<(const TableEntry& other) const {
-  return m_pastOffset < other.m_pastOffset;
-}
-
-template<typename T>
-template<class SerDe>
-void TableEntry<T>::serde(SerDe& sd) {
-  sd(m_pastOffset)(m_val);
-}
-
-///////////////////////////////////////////////////////////////////////////////
-// Unit::MergeInfo.
-
-inline Func** Unit::MergeInfo::funcBegin() const {
-  return (Func**)m_mergeables;
-}
-
-inline Func** Unit::MergeInfo::funcEnd() const {
-  return funcBegin() + m_firstHoistablePreClass;
-}
-
-inline Func** Unit::MergeInfo::funcHoistableBegin() const {
-  return funcBegin() + m_firstHoistableFunc;
-}
-
-inline
-Unit::MergeInfo::FuncRange Unit::MergeInfo::funcs() const {
-  return { funcBegin(), funcEnd() };
-}
-
-inline
-Unit::MergeInfo::MutableFuncRange Unit::MergeInfo::mutableFuncs() const {
-  return { funcBegin(), funcEnd() };
-}
-
-inline
-Unit::MergeInfo::MutableFuncRange Unit::MergeInfo::nonMainFuncs() const {
-  return { funcBegin() + 1, funcEnd() };
-}
-
-inline
-Unit::MergeInfo::MutableFuncRange Unit::MergeInfo::hoistableFuncs() const {
-  return { funcHoistableBegin(), funcEnd() };
-}
-
-inline void*& Unit::MergeInfo::mergeableObj(int idx) {
-  return m_mergeables[idx];
-}
-
-inline void** Unit::MergeInfo::mergeableData(int idx) {
-  return m_mergeables + idx;
-}
 
 ///////////////////////////////////////////////////////////////////////////////
 // Basic accessors.
@@ -132,101 +33,203 @@ inline UnitExtended* Unit::getExtended() {
   return static_cast<UnitExtended*>(this);
 }
 
+inline SymbolRefs* Unit::claimSymbolRefsForPrefetch() {
+  if (!m_extended) return nullptr; // No symbol refs
+  auto extended = getExtended();
+  // Atomically mark them as taken and check if they were already
+  // taken
+  if (extended->m_symbolRefsPrefetched.test_and_set()) return nullptr;
+  return &extended->m_symbolRefsForPrefetch;
+}
+
 inline const UnitExtended* Unit::getExtended() const {
   assertx(m_extended);
   return static_cast<const UnitExtended*>(this);
 }
 
-inline int Unit::repoID() const {
-  return m_repoId;
+inline const FatalInfo* Unit::getFatalInfo() const {
+  return m_fatalInfo.get();
 }
 
 inline int64_t Unit::sn() const {
   return m_sn;
 }
 
-inline MD5 Unit::md5() const {
-  return m_md5;
+inline SHA1 Unit::sha1() const {
+  return m_sha1;
 }
 
-inline const StringData* Unit::filepath() const {
-  assertx(m_filepath);
-  return m_filepath;
-}
-
-inline const StringData* Unit::dirpath() const {
-  assertx(m_dirpath);
-  return m_dirpath;
+inline SHA1 Unit::bcSha1() const {
+  return m_bcSha1;
 }
 
 inline bool Unit::isICE() const {
   return m_ICE;
 }
 
-///////////////////////////////////////////////////////////////////////////////
-// Bytecode.
-
-inline PC Unit::entry() const {
-  return m_bc;
+inline bool Unit::isSoftDeployedRepoOnly() const {
+  assertx(Cfg::Repo::Authoritative);
+  return m_softDeployedRepoOnly;
 }
 
-inline Offset Unit::bclen() const {
-  return m_bclen;
-}
-
-inline PC Unit::at(Offset off) const {
-  assertx(off >= 0 && off <= Offset(m_bclen));
-  return m_bc + off;
-}
-
-inline Offset Unit::offsetOf(PC pc) const {
-  assertx(contains(pc));
-  return pc - m_bc;
-}
-
-inline bool Unit::contains(PC pc) const {
-  return pc >= m_bc && pc <= m_bc + m_bclen;
-}
-
-inline Op Unit::getOp(Offset instrOffset) const {
-  assertx(instrOffset < m_bclen);
-  return peek_op(m_bc + instrOffset);
+inline bool Unit::shouldRaiseStrictPackageDynamicClassLoadError() const {
+  return m_raiseStrictPackageDynamicClassLoadError;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// Litstrs and NamedEntitys.
+// File paths.
+
+inline const StringData* Unit::origFilepath() const {
+  assertx(m_origFilepath);
+  return m_origFilepath;
+}
+
+inline const StringData* Unit::perRequestFilepath() const {
+  if (!m_extended) return nullptr;
+  auto const u = getExtended();
+  if (!u->m_perRequestFilepath.bound()) return nullptr;
+  assertx(!Cfg::Repo::Authoritative);
+  assertx(Cfg::Eval::ReuseUnitsByHash);
+  if (!u->m_perRequestFilepath.isInit()) return nullptr;
+  return *u->m_perRequestFilepath;
+}
+
+inline const StringData* Unit::filepath() const {
+  if (auto const p = perRequestFilepath()) return p;
+  return origFilepath();
+}
+
+inline rds::Handle Unit::perRequestFilepathHandle() const {
+  if (!m_extended) return rds::kUninitHandle;
+  return getExtended()->m_perRequestFilepath.maybeHandle();
+}
+
+inline bool Unit::hasPerRequestFilepath() const {
+  return perRequestFilepathHandle() != rds::kUninitHandle;
+}
+
+inline void Unit::bindPerRequestFilepath(const StringData* p) {
+  assertx(p);
+  assertx(p->isStatic());
+  assertx(!Cfg::Repo::Authoritative);
+  assertx(Cfg::Eval::ReuseUnitsByHash);
+  assertx(m_extended);
+  auto u = getExtended();
+  assertx(u->m_perRequestFilepath.bound());
+  assertx(!u->m_perRequestFilepath.isInit());
+  u->m_perRequestFilepath.initWith(p);
+}
+
+inline void Unit::makeFilepathPerRequest() {
+  assertx(!Cfg::Repo::Authoritative);
+  assertx(Cfg::Eval::ReuseUnitsByHash);
+  assertx(m_extended);
+  auto u = getExtended();
+  assertx(!u->m_perRequestFilepath.bound());
+  u->m_perRequestFilepath = rds::alloc<PackedStringPtr>();
+}
+
+/////////////////////////////////////////////////////////////////////////////
+// Unit cache ref-counting
+
+inline void Unit::acquireCacheRefCount() {
+  assertx(!Cfg::Repo::Authoritative);
+  assertx(m_extended);
+  ++getExtended()->m_cacheRefCount;
+}
+
+inline bool Unit::releaseCacheRefCount() {
+  assertx(!Cfg::Repo::Authoritative);
+  assertx(m_extended);
+  assertx(getExtended()->m_cacheRefCount > 0);
+  return !(--getExtended()->m_cacheRefCount);
+}
+
+inline bool Unit::hasCacheRef() const {
+  assertx(!Cfg::Repo::Authoritative);
+  assertx(m_extended);
+  return getExtended()->m_cacheRefCount > 0;
+}
+
+inline Unit* Unit::nextCachedByHash() const {
+  assertx(!Cfg::Repo::Authoritative);
+  assertx(m_extended);
+  return getExtended()->m_nextCachedByHash.load(std::memory_order_acquire);
+}
+
+inline void Unit::setNextCachedByHash(Unit* u) {
+  assertx(!Cfg::Repo::Authoritative);
+  assertx(m_extended);
+  assertx(!u || u->sha1() == sha1());
+  return getExtended()->m_nextCachedByHash.store(u, std::memory_order_release);
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// Idle unit reaping
+
+inline void
+Unit::setLastTouchRequest(Treadmill::Clock::time_point requestStartTime) {
+  assertx(!Cfg::Repo::Authoritative);
+  assertx(Cfg::Eval::IdleUnitTimeoutSecs > 0);
+  assertx(requestStartTime != Treadmill::kNoStartTime);
+  assertx(m_extended);
+  auto u = getExtended();
+  auto old = u->m_lastTouchRequestStartTime.load();
+  while (old < requestStartTime) {
+    if (u->m_lastTouchRequestStartTime
+      .compare_exchange_weak(old, requestStartTime)
+    ) {
+      return;
+    }
+  }
+}
+
+inline void Unit::setLastTouchTime(TouchClock::time_point now) {
+  assertx(!Cfg::Repo::Authoritative);
+  assertx(Cfg::Eval::IdleUnitTimeoutSecs > 0);
+  assertx(m_extended);
+  auto u = getExtended();
+  auto old = u->m_lastTouchTime.load();
+  while (old < now) {
+    if (u->m_lastTouchTime.compare_exchange_weak(old, now)) return;
+  }
+}
+
+inline std::pair<Treadmill::Clock::time_point, Unit::TouchClock::time_point>
+Unit::getLastTouch() const {
+  assertx(!Cfg::Repo::Authoritative);
+  assertx(Cfg::Eval::IdleUnitTimeoutSecs > 0);
+  assertx(m_extended);
+  auto const u = getExtended();
+  return std::make_pair(
+    u->m_lastTouchRequestStartTime.load(),
+    u->m_lastTouchTime.load()
+  );
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// Litstrs, NamedTypes, and NamedFuncs.
 
 inline size_t Unit::numLitstrs() const {
-  if (!m_extended) return 0;
-  return getExtended()->m_namedInfo.size();
+  return m_litstrs.size();
 }
 
-inline bool Unit::isLitstrId(Id id) const {
-  if (isGlobalLitstrId(id)) {
-    auto globalID = decodeGlobalLitstrId(id);
-    return LitstrTable::get().contains(globalID);
-  }
-  return m_extended && getExtended()->m_namedInfo.contains(id);
+inline const NamedType* Unit::lookupNamedTypeId(Id id) const {
+  return lookupNamedTypePairId(id).second;
 }
 
-inline StringData* Unit::lookupLitstrId(Id id) const {
-  if (isGlobalLitstrId(id)) {
-    auto globalID = decodeGlobalLitstrId(id);
-    return LitstrTable::get().lookupLitstrId(globalID);
-  }
-  return getExtended()->m_namedInfo.lookupLitstr(id);
+inline NamedTypePair Unit::lookupNamedTypePairId(Id id) const {
+  auto const name = lookupLitstrId(id);
+  assertx(name);
+  assertx(name->data()[0] != '\\');
+  return { name, NamedType::getOrCreate(name) };
 }
 
-inline const NamedEntity* Unit::lookupNamedEntityId(Id id) const {
-  return lookupNamedEntityPairId(id).second;
-}
-
-inline NamedEntityPair Unit::lookupNamedEntityPairId(Id id) const {
-  if (isGlobalLitstrId(id)) {
-    auto globalID = decodeGlobalLitstrId(id);
-    return LitstrTable::get().lookupNamedEntityPairId(globalID);
-  }
-  return getExtended()->m_namedInfo.lookupNamedEntityPair(id);
+inline NamedFuncPair Unit::lookupNamedFuncPairId(Id id) const {
+  auto const name = lookupLitstrId(id);
+  assertx(name);
+  assertx(name->data()[0] != '\\');
+  return { name, NamedFunc::getOrCreate(name) };
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -236,32 +239,12 @@ inline size_t Unit::numArrays() const {
   return m_arrays.size();
 }
 
-inline const ArrayData* Unit::lookupArrayId(Id id) const {
-  assertx(id < m_arrays.size());
-  return m_arrays[id];
-}
-
-inline const RepoAuthType::Array* Unit::lookupArrayTypeId(Id id) const {
-  return RuntimeOption::RepoAuthoritative ?
-    globalArrayTypeTable().lookup(id) :
-    getExtended()->m_arrayTypeTable.lookup(id);
-}
-
 ///////////////////////////////////////////////////////////////////////////////
-// Funcs and PreClasses.
+// PreClasses
 
-inline Func* Unit::lookupFuncId(Id id) const {
-  assertx(id < Id(mergeInfo()->m_firstHoistablePreClass));
-  return mergeInfo()->funcBegin()[id];
-}
-
-inline PreClass* Unit::lookupPreClassId(Id id) const {
-  assertx(id < Id(m_preClasses.size()));
-  return m_preClasses[id].get();
-}
-
-inline Unit::FuncRange Unit::funcs() const {
-  return mergeInfo()->funcs();
+inline PreClass* Unit::lookupPreClass(const StringData* name) const {
+  auto const it = m_nameToPreClass.find(name);
+  return it == m_nameToPreClass.end() ? nullptr : it->second.get();
 }
 
 inline folly::Range<PreClassPtr*> Unit::preclasses() {
@@ -272,18 +255,51 @@ inline folly::Range<const PreClassPtr*> Unit::preclasses() const {
   return { m_preClasses.data(), m_preClasses.size() };
 }
 
-inline Func* Unit::firstHoistable() const {
-  return *mergeInfo()->funcHoistableBegin();
+///////////////////////////////////////////////////////////////////////////////
+// Metadata
+
+inline const Constant* Unit::lookupConstantId(Id id) const {
+  assertx(id < Id(m_constants.size()));
+  return &m_constants[id];
+}
+
+inline const Module* Unit::lookupModuleId(Id id) const {
+  assertx(id < Id(m_modules.size()));
+  return &m_modules[id];
+}
+
+inline const PreTypeAlias* Unit::lookupTypeAliasId(Id id) const {
+  assertx(id < Id(m_typeAliases.size()));
+  return &m_typeAliases[id];
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// Funcs
+
+inline Func* Unit::lookupFuncId(Id id) const {
+  assertx(id < Id(m_funcs.size()));
+  return m_funcs[id];
+}
+
+inline folly::Range<Func**> Unit::funcs() {
+  return { m_funcs.begin(), m_funcs.end() };
+}
+
+inline folly::Range<Func* const*> Unit::funcs() const {
+  return { m_funcs.begin(), m_funcs.end() };
 }
 
 template<class Fn> void Unit::forEachFunc(Fn fn) const {
   for (auto& func : funcs()) {
-    fn(func);
+    if (fn(func)) {
+      return;
+    }
   }
   for (auto& c : preclasses()) {
-    auto methods = FuncRange{c->methods(), c->methods() + c->numMethods()};
-    for (auto& method : methods) {
-      fn(method);
+    for (auto& method : c->allMethods()) {
+      if (fn(method)) {
+        return;
+      }
     }
   }
 }
@@ -291,71 +307,55 @@ template<class Fn> void Unit::forEachFunc(Fn fn) const {
 ///////////////////////////////////////////////////////////////////////////////
 // Type aliases
 
-inline folly::Range<TypeAlias*> Unit::typeAliases() {
+inline folly::Range<PreTypeAlias*> Unit::typeAliases() {
   return { m_typeAliases.begin(), m_typeAliases.end() };
 }
 
-inline folly::Range<const TypeAlias*> Unit::typeAliases() const {
+inline folly::Range<const PreTypeAlias*> Unit::typeAliases() const {
   return { m_typeAliases.begin(), m_typeAliases.end() };
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// Class lookup.
+// Constants
 
-inline Class* Unit::lookupClass(const NamedEntity* ne) {
-  return ne->getCachedClass();
+inline folly::Range<Constant*> Unit::constants() {
+  return { m_constants.begin(), m_constants.end() };
 }
 
-inline Class* Unit::lookupClass(const StringData* name) {
-  return lookupClass(NamedEntity::get(name));
+inline folly::Range<const Constant*> Unit::constants() const {
+  return { m_constants.begin(), m_constants.end() };
 }
 
-inline const Class* Unit::lookupUniqueClassInContext(const NamedEntity* ne,
-                                                     const Class* ctx) {
-  Class* cls = ne->clsList();
-  if (UNLIKELY(cls == nullptr)) return nullptr;
-  if (cls->attrs() & AttrUnique) return cls;
-  if (!ctx) return nullptr;
-  return ctx->getClassDependency(cls->name());
+///////////////////////////////////////////////////////////////////////////////
+// Modules
+
+inline folly::Range<Module*> Unit::modules() {
+  return { m_modules.begin(), m_modules.end() };
 }
 
-inline const Class* Unit::lookupUniqueClassInContext(const StringData* name,
-                                                     const Class* ctx) {
-  return lookupUniqueClassInContext(NamedEntity::get(name), ctx);
+inline folly::Range<const Module*> Unit::modules() const {
+  return { m_modules.begin(), m_modules.end() };
 }
 
-inline Class* Unit::loadClass(const StringData* name) {
-  String normStr;
-  auto ne = NamedEntity::get(name, true, &normStr);
-  if (normStr) {
-    name = normStr.get();
-  }
-  return loadClass(ne, name);
+///////////////////////////////////////////////////////////////////////////////
+// File attributes
+
+inline const UserAttributeMap& Unit::fileAttributes() const {
+  return m_fileAttributes;
 }
 
-inline Class* Unit::getClass(const StringData* name, bool tryAutoload) {
-  String normStr;
-  auto ne = NamedEntity::get(name, true, &normStr);
-  if (normStr) {
-    name = normStr.get();
-  }
-  return getClass(ne, name, tryAutoload);
+///////////////////////////////////////////////////////////////////////////////
+// Modules
+
+inline const StringData* Unit::moduleName() const {
+  return m_moduleName;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 // Merge.
 
-inline bool Unit::isMergeOnly() const {
-  return m_mergeOnly;
-}
-
 inline bool Unit::isEmpty() const {
-  return m_mergeState.load(std::memory_order_relaxed) & MergeState::Empty;
-}
-
-inline const TypedValue* Unit::getMainReturn() const {
-  assertx(isMergeOnly());
-  return &m_mainReturn;
+  return m_mergeState.load(std::memory_order_acquire) == MergeState::Merged;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -367,18 +367,6 @@ inline bool Unit::isInterpretOnly() const {
 
 inline void Unit::setInterpretOnly() {
   m_interpretOnly = true;
-}
-
-inline bool Unit::isHHFile() const {
-  return m_isHHFile;
-}
-
-inline bool Unit::useStrictTypes() const {
-  return m_useStrictTypes;
-}
-
-inline bool Unit::useStrictTypesForBuiltins() const {
-  return m_useStrictTypesForBuiltins;
 }
 
 inline UserAttributeMap Unit::metaData() const {

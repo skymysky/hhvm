@@ -1,6 +1,27 @@
-File "xor_bad3.php", line 13, characters 3-9:
-Typing error (Typing[4110])
-File "xor_bad3.php", line 13, characters 3-4:
-This is an int because this is used in an arithmetic operation
-File "xor_bad3.php", line 12, characters 14-19:
-It is incompatible with a string
+error: Typing[4110] Invalid argument [1]
+-> Expected `int` because this is used in a bitwise operation [1]
+-> But got `string` [2]
+
+xor_bad3.php:13:3
+10 |  */
+11 | 
+12 | function foo(string $a, string $b): void {
+   |              ^^^^^^ [2]
+13 |   $a ^ $b;
+   |   ^^ [1]
+14 | }
+
+error: Typing[4110] Invalid argument [1]
+-> Expected `int` because this is used in a bitwise operation [1]
+-> But got `string` [2]
+
+xor_bad3.php:13:8
+10 |  */
+11 | 
+12 | function foo(string $a, string $b): void {
+   |                         ^^^^^^ [2]
+13 |   $a ^ $b;
+   |        ^^ [1]
+14 | }
+
+2 errors found

@@ -1,3 +1,5 @@
 <?hh
 
-const X = new A();
+class A {}
+
+const A X = new A();

@@ -1,0 +1,21 @@
+error: Naming[2049] Unbound name: `HH\Contexts\Unsafe\nonsense` [1]
+
+test_no_enforcement_on_non_static_coeffects_and_default.php:13:47
+11 | }
+12 | 
+13 | function no_check_nonsense_coeffect(Foo $foo)[nonsense] : void {
+   |                                               ^^^^^^^^ [1]
+14 |     ++$foo->prop_int; // No error
+15 | }
+
+error: Naming[2049] Unbound name: `HH\Contexts\nonsense` [1]
+
+test_no_enforcement_on_non_static_coeffects_and_default.php:13:47
+11 | }
+12 | 
+13 | function no_check_nonsense_coeffect(Foo $foo)[nonsense] : void {
+   |                                               ^^^^^^^^ [1]
+14 |     ++$foo->prop_int; // No error
+15 | }
+
+2 errors found

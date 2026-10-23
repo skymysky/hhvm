@@ -1,0 +1,16 @@
+error: Typing[4057] Invalid argument [1]
+-> The field `z` is missing [2]
+-> The field `z` is required here [3]
+
+shape_creation_non_existing_field.php:8:8
+ 5 | function g(): void {
+ 6 |   ExampleDsl`{
+ 7 |     $f = (ExampleShape<shape('x' => ExampleInt)> $shape) ==> 3;
+   |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ [2]
+ 8 |     $f(shape('x' => 2, 'z' => 'hi'));
+   |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ [1]
+   |                        ^^^ [3]
+ 9 |   }`;
+10 | }
+
+1 error found

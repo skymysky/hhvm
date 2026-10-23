@@ -1,20 +1,21 @@
-<?php
+<?hh
 
-function main($a, $b, $c) {
+function main($a, $b, $c) :mixed{
   $i = 0;
   if ($c) {
     $t = 0;
-    goto head;
   } else {
     $t = 1;
-    goto head;
   }
-  if ($a > 0) {
-    head:
+  if ($i & 1) {
+    $t = 2;
+  }
+  while (true) {
+    ++$i;
+    if (!($i < $a)) break;
     if ($i & 1) {
       $t = 2;
     }
-    if (++$i < $a) goto head;
   }
 
   if ($b == 42) {
@@ -24,6 +25,9 @@ function main($a, $b, $c) {
   var_dump($t);
 }
 
+
+<<__EntryPoint>>
+function main_store_elim() :mixed{
 for ($i = 0; $i < 2; $i++) {
   main(1, 42, 0);
   main(2, 42, 0);
@@ -34,4 +38,5 @@ for ($i = 0; $i < 2; $i++) {
   main(2, 42, 1);
   main(1, 43, 1);
   main(2, 43, 1);
+}
 }

@@ -2,14 +2,14 @@
 
 class A {
 
-  public function testPublic() {
+  public function testPublic() :mixed{
     $a = function() {
       return $this->justReturn("foo");
     };
     return $a();
   }
 
-  public function testUse() {
+  public function testUse() :mixed{
     $a = "foo";
     $b = function() use ($a) {
       return $this->justReturn($a);
@@ -17,7 +17,7 @@ class A {
     return $b();
   }
 
-  public function testParam() {
+  public function testParam() :mixed{
     $a = "foo";
     $b = function($foo) {
       return $this->justReturn($foo);
@@ -25,7 +25,7 @@ class A {
     return $b($a);
   }
 
-  public function testParamAndClosure() {
+  public function testParamAndClosure() :mixed{
     $a = "foo";
     $b = "bar";
     $c = function($foo) use ($b) {
@@ -34,40 +34,31 @@ class A {
     return $c($a);
   }
 
-  public function testByRef() {
-    $a = "foo";
-    $b = "bar";
-    $c = function(&$foo) use (&$b) {
-      $this->double(&$foo, &$b);
-    };
-    $c(&$a);
-    return $a.$b;
-  }
-
-  public function testNotByRef() {
+  public function testNotByRef() :mixed{
     $a = "foo";
     $b = "bar";
     $c = function($foo) use ($b) {
-      $this->double(&$foo, &$b);
+      $this->double(inout $foo, inout $b);
     };
     $c($a);
     return $a.$b;
   }
 
-  private function justReturn() {
-    return func_get_args();
+  private function justReturn(...$args) :mixed{
+    return $args;
   }
 
-  private function double(&$a, &$b) {
+  private function double(inout $a, inout $b) :mixed{
     $a = $a.$a;
     $b = $b.$b;
   }
 
 }
+<<__EntryPoint>> function main(): void {
 $a = new A;
 var_dump($a->testPublic());
 var_dump($a->testUse());
 var_dump($a->testParam());
 var_dump($a->testParamAndClosure());
-var_dump($a->testByRef());
 var_dump($a->testNotByRef());
+}

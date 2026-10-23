@@ -7,5 +7,3 @@ class A {
     return $this->val - 1;
   }
 }
-
-echo (new A())->b(), "\n";

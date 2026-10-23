@@ -1,5 +1,9 @@
-<?php
+<?hh
 
-$a = array('a' => array(1));
- $a[2] = array(0);
+
+<<__EntryPoint>>
+function main_364() :mixed{
+$a = dict['a' => vec[1]];
+ $a[2] = vec[0];
       var_dump($a);
+}

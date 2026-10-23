@@ -1,0 +1,18 @@
+error: Typing[4411] Invalid argument [1]
+-> This expression is readonly [1]
+-> It is incompatible with this parameter, which is mutable [2]
+
+await_error.php:7:13
+1 | <?hh
+2 | 
+3 | async function f(int $i): Awaitable<void> {}
+  |                      ^^ [2]
+4 | 
+5 | async function g(readonly int $i): Awaitable<void> {
+6 |   concurrent {
+7 |     await f($i);
+  |             ^^ [1]
+8 |     await f(1);
+9 |   }
+
+1 error found

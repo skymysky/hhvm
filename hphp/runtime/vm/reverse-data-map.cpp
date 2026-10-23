@@ -16,7 +16,9 @@
 
 #include "hphp/runtime/vm/reverse-data-map.h"
 
+#include "hphp/runtime/base/array-data.h"
 #include "hphp/runtime/base/string-data.h"
+#include "hphp/runtime/base/vanilla-vec-defs.h"
 #include "hphp/runtime/vm/class.h"
 #include "hphp/runtime/vm/func.h"
 #include "hphp/runtime/vm/named-entity.h"
@@ -28,7 +30,7 @@
 #include <algorithm>
 #include <mutex>
 
-namespace HPHP { namespace data_map {
+namespace HPHP::data_map {
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -37,9 +39,11 @@ namespace {
 ///////////////////////////////////////////////////////////////////////////////
 
 #define META_TYPES \
+  X(ArrayData)\
   X(Class)\
   X(Func)\
-  X(NamedEntity)\
+  X(NamedType)\
+  X(NamedFunc)\
   X(StringData)\
   X(Unit)\
   /* */
@@ -47,9 +51,11 @@ namespace {
 enum class Kind : uint8_t {
   Class = 1,
   Func = 2,
-  NamedEntity = 3,
-  StringData = 4,
-  Unit = 5,
+  NamedType = 3,
+  NamedFunc = 4,
+  StringData = 5,
+  Unit = 6,
+  ArrayData = 7,
 };
 
 constexpr size_t kChunkSize = 1 << 21;
@@ -111,6 +117,13 @@ void deregister(Kind /*kind*/, const void* meta) {
  * These routines account for variable-length prefix or suffix allocations,
  * such as Class's funcVec and classVec, or StringData's data().
  */
+bool contains(const ArrayData* arr, const void* addr) {
+  auto const start = reinterpret_cast<const char*>(arr);
+  if (addr < start) return false;
+  size_t heapSize = arr->heapSize();
+  return addr < start + heapSize;
+}
+
 bool contains(const Class* cls, const void* addr) {
   return cls->funcVec() <= addr && addr < cls->mallocEnd();
 }
@@ -119,12 +132,18 @@ bool contains(const Func* func, const void* addr) {
   return func <= addr && addr < func->mallocEnd();
 }
 
-bool contains(const NamedEntity* ne, const void* addr) {
+bool contains(const NamedType* ne, const void* addr) {
+  return ne <= addr && addr < ne + 1;
+}
+
+bool contains(const NamedFunc* ne, const void* addr) {
   return ne <= addr && addr < ne + 1;
 }
 
 bool contains(const StringData* sd, const void* addr) {
-  auto const start = reinterpret_cast<const char*>(sd);
+  auto const symbol = sd->isSymbol();
+  auto const start = reinterpret_cast<const char*>(sd)
+                   - (symbol ? sizeof(SymbolPrefix) : 0);
   return (start <= addr && addr < start + sd->heapSize());
 }
 
@@ -201,4 +220,4 @@ result find_containing(const void* addr) {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-}}
+}

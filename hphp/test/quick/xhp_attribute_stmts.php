@@ -1,17 +1,17 @@
 <?hh
 
 abstract class :base {
-  private static $xhpAttributeDeclarationBase = darray[];
+  private static $xhpAttributeDeclarationBase = dict[];
 
-  protected static function __xhpAttributeDeclaration() {
-    return self::$xhpAttributeDeclarationBase;
+  protected static function __xhpAttributeDeclaration()[] :mixed{
+    return HH\Coeffects\backdoor(()[defaults] ==> self::$xhpAttributeDeclarationBase);
   }
 
-  public static function xhpAttributeDeclaration() {
+  public static function xhpAttributeDeclaration() :mixed{
     return static::__xhpAttributeDeclaration();
   }
 
-  public static function updateBase($d) {
+  public static function updateBase($d) :mixed{
     self::$xhpAttributeDeclarationBase = $d;
   }
 }
@@ -34,7 +34,7 @@ class :node3 extends :base {
     string attr2 = "world";
 }
 
-function repr($x) {
+function repr($x) :mixed{
   if ($x === null) {
     return 'null';
   } else if ($x === true) {
@@ -46,20 +46,21 @@ function repr($x) {
   }
 }
 
-function dump($arr) {
+function dump($arr) :mixed{
   foreach ($arr as $k => $v) {
     echo $k . "[" . join(",", array_map($x ==> repr($x), $v)) . "] ";
   }
   echo "\n";
 }
-
+<<__EntryPoint>> function main(): void {
 dump(:node1::xhpAttributeDeclaration());
 dump(:node2::xhpAttributeDeclaration());
 
 // Verify that the value is cached
 // Only node3 should have attr0
-:base::updateBase(darray["attr0" => array(6, null, null, 0)]);
+:base::updateBase(dict["attr0" => vec[6, null, null, 0]]);
 echo repr(array_key_exists("attr0", :base::xhpAttributeDeclaration())) . "\n";
 echo repr(array_key_exists("attr0", :node1::xhpAttributeDeclaration())) . "\n";
 echo repr(array_key_exists("attr0", :node2::xhpAttributeDeclaration())) . "\n";
 echo repr(array_key_exists("attr0", :node3::xhpAttributeDeclaration())) . "\n";
+}

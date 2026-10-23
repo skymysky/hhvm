@@ -2,7 +2,7 @@
 
 class Super {
   public function foo(): int {
-    if ($this instanceof IMarked) {
+    if ($this is IMarked) {
       return $this->methodOfMarked();
     }
     return 0;
@@ -19,7 +19,7 @@ interface IMarked {
   public function methodOfMarked(): int;
 }
 
-function f_marked(IMarked $inst) {
+function f_marked(IMarked $inst): void {
   $inst->methodOfSuper();
   f_super($inst);
   $inst->methodOfMarked();

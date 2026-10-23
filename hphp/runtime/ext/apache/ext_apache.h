@@ -15,23 +15,20 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_EXT_APACHE_H_
-#define incl_HPHP_EXT_APACHE_H_
+#pragma once
 
+#include "hphp/runtime/base/array-init.h"
 #include "hphp/runtime/ext/extension.h"
+#include "hphp/runtime/server/transport.h"
 #include "hphp/util/health-monitor-types.h"
+#include "hphp/util/text-util.h"
 
 namespace HPHP {
-
-Array HHVM_FUNCTION(apache_request_headers);
 
 struct ApacheExtension final : Extension {
   ApacheExtension();
   ~ApacheExtension() override;
-  void moduleInit() override;
-  void moduleLoad(const IniSetting::Map& ini, Hdf config) override;
-  static bool Enable;
-  bool moduleEnabled() const override { return Enable; }
+  void moduleRegisterNative() override;
 
   static void UpdateHealthLevel(HealthLevel newStatus) {
     m_healthLevel = newStatus;
@@ -45,6 +42,23 @@ struct ApacheExtension final : Extension {
   static HealthLevel m_healthLevel;
 };
 
+static Array get_headers(const HeaderMap& headers, bool allHeaders = false) {
+  DictInit ret(headers.size());
+  for (auto& iter : headers) {
+    const auto& values = iter.second;
+    if (auto size = values.size()) {
+      if (!allHeaders) {
+        ret.set(OptString(iter.first), OptString(values.back()));
+      } else {
+        VecInit dups(size);
+        for (auto& dup : values) {
+          dups.append(OptString(dup));
+        }
+        ret.set(OptString(toLower(iter.first)), dups.toArray());
+      }
+    }
+  }
+  return ret.toArray();
 }
 
-#endif // incl_HPHP_EXT_APACHE_H_
+}

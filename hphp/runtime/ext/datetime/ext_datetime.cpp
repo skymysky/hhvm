@@ -20,11 +20,12 @@
 #include "hphp/runtime/base/comparisons.h"
 #include "hphp/runtime/base/ini-setting.h"
 #include "hphp/runtime/vm/native-data.h"
+#include "hphp/runtime/vm/native-prop-handler.h"
 #include "hphp/system/systemlib.h"
 
 namespace HPHP {
 
-static int check_id_allowed(const String& id, long bf) {
+static int check_id_allowed(const OptString& id, long bf) {
   if (bf & DateTimeZoneData::AFRICA && id.find("Africa/") == 0) return 1;
   if (bf & DateTimeZoneData::AMERICA && id.find("America/") == 0) return 1;
   if (bf & DateTimeZoneData::ANTARCTICA && id.find("Antarctica/") == 0)
@@ -45,7 +46,7 @@ const StaticString
   s_formatID("e"),
   s_formatAbbr("T");
 
-static String zone_type_to_string(int zoneType, req::ptr<DateTime> dt) {
+static OptString zone_type_to_string(int zoneType, req::ptr<DateTime> dt) {
   switch (zoneType) {
     case TIMELIB_ZONETYPE_OFFSET:
       return dt->toString(s_formatOffset);
@@ -55,7 +56,7 @@ static String zone_type_to_string(int zoneType, req::ptr<DateTime> dt) {
       return dt->toString(s_formatAbbr);
   }
 
-  always_assert(!"Bad zone type");
+  always_assert(false && "Bad zone type");
 }
 
 struct DateGlobals {
@@ -64,16 +65,7 @@ struct DateGlobals {
   double sunset_zenith;
   double sunrise_zenith;
 };
-THREAD_LOCAL(DateGlobals, s_date_globals);
-
-#define IMPLEMENT_GET_CLASS(cls)                                               \
-  Class* cls::getClass() {                                                     \
-    if (s_class == nullptr) {                                                  \
-      s_class = Unit::lookupClass(s_className.get());                          \
-      assertx(s_class);                                                        \
-    }                                                                          \
-    return s_class;                                                            \
-  }                                                                            \
+RDS_LOCAL(DateGlobals, s_date_globals);
 
 ///////////////////////////////////////////////////////////////////////////////
 // constants
@@ -88,22 +80,51 @@ static const StaticString
 
 ///////////////////////////////////////////////////////////////////////////////
 
-static void raise_argument_warning(const char* func,
-                                   int param,
-                                   const StaticString& expected,
-                                   const Object& given) {
+namespace {
+
+void raise_argument_warning(const char* func,
+                            int param,
+                            const StaticString& expected,
+                            const Object& given) {
   raise_warning("%s() expects parameter %d to be %s, %s given",
                 func, param, expected.c_str(), given.get()->classname_cstr());
+}
+
+DateTimeData* getDateTimeData(ObjectData* this_) {
+  auto const data = Native::data<DateTimeData>(this_);
+  if (data->m_dt) return data;
+  SystemLib::throwInvalidArgumentExceptionObject(
+    "Use before DateTime::__construct() called"
+  );
+}
+
+DateTimeData* getDateTimeData(const Object& this_) {
+  return getDateTimeData(this_.get());
+}
+
+DateTimeZoneData* getDateTimeZoneData(ObjectData* this_) {
+  auto const data = Native::data<DateTimeZoneData>(this_);
+  if (data->m_tz) return data;
+  SystemLib::throwInvalidArgumentExceptionObject(
+    "Use before DateTimeZone::__construct() called"
+  );
+}
+
+DateIntervalData* getDateIntervalData(ObjectData* this_) {
+  auto const data = Native::data<DateIntervalData>(this_);
+  if (data->m_di) return data;
+  SystemLib::throwInvalidArgumentExceptionObject(
+    "Use before DateInterval::__construct() called"
+  );
+}
+
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 // DateTime
 
-Class* DateTimeData::s_class = nullptr;
-const StaticString DateTimeData::s_className("DateTime");
-
 void HHVM_METHOD(DateTime, __construct,
-                 const String& time /*= "now"*/,
+                 const OptString& time /*= "now"*/,
                  const Variant& timezone /*= uninit_variant*/) {
   DateTimeData* data = Native::data<DateTimeData>(this_);
   auto tz = TimeZone::Current();
@@ -123,8 +144,8 @@ void HHVM_METHOD(DateTime, __construct,
 }
 
 Variant HHVM_STATIC_METHOD(DateTime, createFromFormat,
-                           const String& format,
-                           const String& time,
+                           const OptString& format,
+                           const OptString& time,
                            const Variant& timezone /*= uninit_variant */) {
   auto tz = TimeZone::Current();
   if (!timezone.isNull()) {
@@ -136,9 +157,9 @@ Variant HHVM_STATIC_METHOD(DateTime, createFromFormat,
     }
     tz = DateTimeZoneData::unwrap(obj_timezone);
   }
-  Object obj{DateTimeData::getClass()};
+  Object obj{DateTimeData::classof()};
   DateTimeData* data = Native::data<DateTimeData>(obj);
-  const auto curr = (format.find("!") != String::npos) ? 0 : f_time() ;
+  const auto curr = (format.find("!") != OptString::npos) ? 0 : ::time(0);
   data->m_dt = req::make<DateTime>(curr, false);
   if (!data->m_dt->fromString(time, tz, format.data(), false)) {
     return false;
@@ -147,23 +168,18 @@ Variant HHVM_STATIC_METHOD(DateTime, createFromFormat,
   return obj;
 }
 
-Variant HHVM_METHOD(DateTime, diff,
-                    const Variant& datetime2,
+Object HHVM_METHOD(DateTime, diff,
+                    const Object& datetime2,
                     const Variant& absolute) {
-  DateTimeData* data = Native::data<DateTimeData>(this_);
-  const Object obj_datetime2 = datetime2.toObject();
-  if (!obj_datetime2.instanceof(s_DateTimeInterface)) {
-    raise_argument_warning("DateTime::diff", 1, s_DateTimeInterface,
-                           obj_datetime2);
-    return false;
-  }
-  auto dt = DateTimeData::unwrap(obj_datetime2);
-  return DateIntervalData::wrap(data->m_dt->diff(dt, absolute.toBoolean()));
+  auto const data = getDateTimeData(this_);
+  auto const& dt = DateTimeData::unwrap(datetime2);
+  auto dt2 = data->m_dt->diff(dt, absolute.toBoolean());
+  return DateIntervalData::wrap(dt2);
 }
 
-String HHVM_METHOD(DateTime, format,
-                   const Variant& format) {
-  DateTimeData* data = Native::data<DateTimeData>(this_);
+OptString HHVM_METHOD(DateTime, format,
+                      const Variant& format) {
+  auto const data = getDateTimeData(this_);
   return data->format(format.toString());
 }
 
@@ -175,28 +191,28 @@ static const StaticString s_errors("errors");
 Array HHVM_STATIC_METHOD(DateTime, getLastErrors) {
   Array errors = DateTime::getLastErrors();
   Array warnings = DateTime::getLastWarnings();
-  Array ret = Array::Create();
+  DictInit ret(4);
 
-  ret.add(s_warning_count, warnings.size());
-  ret.add(s_warnings, warnings);
-  ret.add(s_error_count, errors.size());
-  ret.add(s_errors, errors);
+  ret.set(s_warning_count, warnings.size());
+  ret.set(s_warnings, warnings);
+  ret.set(s_error_count, errors.size());
+  ret.set(s_errors, errors);
 
-  return ret;
+  return ret.toArray();
 }
 
 int64_t HHVM_METHOD(DateTime, getOffset) {
-  DateTimeData* data = Native::data<DateTimeData>(this_);
+  auto const data = getDateTimeData(this_);
   return data->m_dt->offset();
 }
 
 int64_t HHVM_METHOD(DateTime, getTimestamp) {
-  DateTimeData* data = Native::data<DateTimeData>(this_);
+  auto const data = getDateTimeData(this_);
   return data->getTimestamp();
 }
 
 Variant HHVM_METHOD(DateTime, getTimezone) {
-  DateTimeData* data = Native::data<DateTimeData>(this_);
+  auto const data = getDateTimeData(this_);
   req::ptr<TimeZone> tz = data->m_dt->timezone();
   if (tz->isValid()) {
     return DateTimeZoneData::wrap(tz);
@@ -205,8 +221,8 @@ Variant HHVM_METHOD(DateTime, getTimezone) {
 }
 
 Variant HHVM_METHOD(DateTime, modify,
-                   const String& modify) {
-  DateTimeData* data = Native::data<DateTimeData>(this_);
+                   const OptString& modify) {
+  auto const data = getDateTimeData(this_);
   if (!data->m_dt->modify(modify)) {
     return false;
   }
@@ -217,7 +233,7 @@ Object HHVM_METHOD(DateTime, setDate,
                    int64_t year,
                    int64_t month,
                    int64_t day) {
-  DateTimeData* data = Native::data<DateTimeData>(this_);
+  auto const data = getDateTimeData(this_);
   data->m_dt->setDate(year, month, day);
   return Object(this_);
 }
@@ -226,7 +242,7 @@ Object HHVM_METHOD(DateTime, setISODate,
                    int64_t year,
                    int64_t week,
                    int64_t day /*= 1*/) {
-  DateTimeData* data = Native::data<DateTimeData>(this_);
+  auto const data = getDateTimeData(this_);
   data->m_dt->setISODate(year, week, day);
   return Object(this_);
 }
@@ -235,49 +251,36 @@ Object HHVM_METHOD(DateTime, setTime,
                    int64_t hour,
                    int64_t minute,
                    int64_t second /*= 0*/) {
-  DateTimeData* data = Native::data<DateTimeData>(this_);
+  auto const data = getDateTimeData(this_);
   data->m_dt->setTime(hour, minute, second);
   return Object(this_);
 }
 
 Object HHVM_METHOD(DateTime, setTimestamp,
                    int64_t unixtimestamp) {
-  DateTimeData* data = Native::data<DateTimeData>(this_);
+  auto const data = getDateTimeData(this_);
   data->m_dt->fromTimeStamp(unixtimestamp, false);
   return Object(this_);
 }
 
-Variant HHVM_METHOD(DateTime, setTimezone,
+Object HHVM_METHOD(DateTime, setTimezone,
                     const Object& timezone) {
-  DateTimeData* data = Native::data<DateTimeData>(this_);
-  if (!timezone.instanceof(s_DateTimeZone)) {
-    raise_argument_warning("DateTime::setTimezone", 1, s_DateTimeZone,
-                           timezone);
-    return false;
-  }
+  auto const data = getDateTimeData(this_);
   data->m_dt->setTimezone(DateTimeZoneData::unwrap(timezone));
   return Object(this_);
 }
 
-Variant HHVM_METHOD(DateTime, add,
+Object HHVM_METHOD(DateTime, add,
                     const Object& interval) {
-  DateTimeData* data = Native::data<DateTimeData>(this_);
-  if (!interval.instanceof(s_DateInterval)) {
-    raise_argument_warning("DateTime::add", 1, s_DateInterval, interval);
-    return false;
-  }
+  auto const data = getDateTimeData(this_);
   auto di = DateIntervalData::unwrap(interval);
   data->m_dt->add(di);
   return Object(this_);
 }
 
-Variant HHVM_METHOD(DateTime, sub,
+Object HHVM_METHOD(DateTime, sub,
                     const Object& interval) {
-  DateTimeData* data = Native::data<DateTimeData>(this_);
-  if (!interval.instanceof(s_DateInterval)) {
-    raise_argument_warning("DateTime::sub", 1, s_DateInterval, interval);
-    return false;
-  }
+  auto const data = getDateTimeData(this_);
   auto di = DateIntervalData::unwrap(interval);
   data->m_dt->sub(di);
   return Object(this_);
@@ -290,39 +293,41 @@ const StaticString
   s_ISOformat("Y-m-d H:i:s.u");
 
 Array HHVM_METHOD(DateTime, __sleep) {
-  DateTimeData* data = Native::data<DateTimeData>(this_);
+  auto const data = getDateTimeData(this_);
 
   auto const formatted = data->format(s_ISOformat);
-  this_->setProp(nullptr, s_date.get(), formatted.asCell());
+  this_->setProp(nullctx, s_date.get(), formatted.asTypedValue());
   int zoneType = data->m_dt->zoneType();
-  this_->setProp(nullptr, s_timezone_type.get(),
+  this_->setProp(nullctx, s_timezone_type.get(),
                  make_tv<KindOfInt64>(zoneType));
   auto const timezone = zone_type_to_string(zoneType, data->m_dt);
-  this_->setProp(nullptr, s_timezone.get(), timezone.asCell());
-  return make_packed_array(s_date, s_timezone_type, s_timezone);
+  this_->setProp(nullctx, s_timezone.get(), timezone.asTypedValue());
+  return make_vec_array(s_date, s_timezone_type, s_timezone);
 }
 
 void HHVM_METHOD(DateTime, __wakeup) {
-  Object dtz_obj{DateTimeZoneData::getClass()};
+  Object dtz_obj{DateTimeZoneData::classof()};
   HHVM_MN(DateTimeZone, __construct)(dtz_obj.get(),
                                      this_->o_get(s_timezone).toString());
   HHVM_MN(DateTime, __construct)(this_, this_->o_get(s_date).toString(),
                                  std::move(dtz_obj));
 
   // cleanup
-  Class* cls = this_->getVMClass();
-  this_->unsetProp(cls, s_date.get());
-  this_->unsetProp(cls, s_timezone_type.get());
-  this_->unsetProp(cls, s_timezone.get());
+  auto const klass = this_->getVMClass();
+  auto const ctx = MemberLookupContext(klass, klass ? klass->moduleName() : nullptr);
+  this_->unsetProp(ctx, s_date.get());
+  this_->unsetProp(ctx, s_timezone_type.get());
+  this_->unsetProp(ctx, s_timezone.get());
 }
 
-Array HHVM_METHOD(DateTime, __debuginfo) {
-  DateTimeData* data = Native::data<DateTimeData>(this_);
+Array HHVM_METHOD(DateTime, __debugInfo) {
+  auto const data = getDateTimeData(this_);
   return data->getDebugInfo();
 }
 
 Array DateTimeData::getDebugInfo() const {
-  return make_map_array(
+  assertx(m_dt);
+  return make_dict_array(
     s_date, format(s_ISOformat),
     s_timezone_type, m_dt->zoneType(),
     s_timezone, zone_type_to_string(m_dt->zoneType(), m_dt)
@@ -333,11 +338,11 @@ Array DateTimeData::getDebugInfo() const {
 // DateTime helpers
 
 int64_t DateTimeData::getTimestamp(const Object& obj) {
-  if (LIKELY(obj.instanceof(getClass()))) {
-    return Native::data<DateTimeData>(obj)->getTimestamp();
+  if (LIKELY(obj.instanceof(classof()))) {
+    return getDateTimeData(obj)->getTimestamp();
   }
-  assertx(obj->instanceof(SystemLib::s_DateTimeInterfaceClass));
-  Variant result = obj->o_invoke(s_getTimestamp, Array::Create());
+  assertx(obj->instanceof(SystemLib::getDateTimeInterfaceClass()));
+  Variant result = obj->o_invoke(s_getTimestamp, Array::CreateVec());
   return result.toInt64();
 }
 
@@ -346,9 +351,9 @@ int64_t DateTimeData::getTimestamp(const ObjectData* od) {
 }
 
 int DateTimeData::compare(const Object& left, const Object &right) {
-  if (LIKELY(left.instanceof(getClass()) && right.instanceof(getClass()))) {
-    auto leftData = Native::data<DateTimeData>(left);
-    auto rightData = Native::data<DateTimeData>(right);
+  if (LIKELY(left.instanceof(classof()) && right.instanceof(classof()))) {
+    auto const leftData = getDateTimeData(left);
+    auto const rightData = getDateTimeData(right);
     return leftData->m_dt->compare(rightData->m_dt);
   } else {
     auto leftTime = getTimestamp(left);
@@ -369,20 +374,22 @@ int DateTimeData::compare(const ObjectData* left, const ObjectData* right) {
 }
 
 Object DateTimeData::wrap(req::ptr<DateTime> dt) {
-  Object obj{getClass()};
+  Object obj{classof()};
   DateTimeData* data = Native::data<DateTimeData>(obj);
   data->m_dt = dt;
   return obj;
 }
 
 req::ptr<DateTime> DateTimeData::unwrap(const Object& datetime) {
-  if (LIKELY(datetime.instanceof(getClass()))) {
+  if (LIKELY(datetime.instanceof(classof()))) {
     DateTimeData* data = Native::data<DateTimeData>(datetime);
     return data->m_dt;
   }
-  if (datetime->instanceof(SystemLib::s_DateTimeImmutableClass)) {
+  if (datetime->instanceof(SystemLib::getDateTimeImmutableClass())) {
     auto rval = datetime->getProp(
-      SystemLib::s_DateTimeImmutableClass,
+      MemberLookupContext(
+        SystemLib::getDateTimeImmutableClass(),
+        SystemLib::getDateTimeImmutableClass()->moduleName()),
       s_data.get()
     );
     assertx(rval.is_set() && type(rval) == KindOfObject);
@@ -392,16 +399,11 @@ req::ptr<DateTime> DateTimeData::unwrap(const Object& datetime) {
   return req::ptr<DateTime>();
 }
 
-IMPLEMENT_GET_CLASS(DateTimeData)
-
 ///////////////////////////////////////////////////////////////////////////////
 // DateTimeZone
 
-Class* DateTimeZoneData::s_class = nullptr;
-const StaticString DateTimeZoneData::s_className("DateTimeZone");
-
 void HHVM_METHOD(DateTimeZone, __construct,
-                 const String& timezone) {
+                 const OptString& timezone) {
   DateTimeZoneData* data = Native::data<DateTimeZoneData>(this_);
   data->m_tz = req::make<TimeZone>(timezone);
   if (!data->m_tz->isValid()) {
@@ -413,23 +415,19 @@ void HHVM_METHOD(DateTimeZone, __construct,
 }
 
 Array HHVM_METHOD(DateTimeZone, getLocation) {
-  DateTimeZoneData* data = Native::data<DateTimeZoneData>(this_);
+  auto const data = getDateTimeZoneData(this_);
   return data->m_tz->getLocation();
 }
 
-String HHVM_METHOD(DateTimeZone, getName) {
-  DateTimeZoneData* data = Native::data<DateTimeZoneData>(this_);
+OptString HHVM_METHOD(DateTimeZone, getName) {
+  auto const data = getDateTimeZoneData(this_);
   return data->getName();
 }
 
-Variant HHVM_METHOD(DateTimeZone, getOffset,
+int64_t HHVM_METHOD(DateTimeZone, getOffset,
                     const Object& datetime) {
-  DateTimeZoneData* data = Native::data<DateTimeZoneData>(this_);
+  auto const data = getDateTimeZoneData(this_);
   bool error;
-  if (!datetime.instanceof(s_DateTime)) {
-    raise_argument_warning("DateTimeZone::getOffset", 1, s_DateTime, datetime);
-    return false;
-  }
   auto dt = DateTimeData::unwrap(datetime);
   int64_t ts = dt->toTimeStamp(error);
   return data->m_tz->offset(ts);
@@ -438,7 +436,7 @@ Variant HHVM_METHOD(DateTimeZone, getOffset,
 TypedValue HHVM_METHOD(DateTimeZone, getTransitions,
                   int64_t timestamp_begin, /*=k_PHP_INT_MIN*/
                   int64_t timestamp_end /*=k_PHP_INT_MAX*/) {
-  DateTimeZoneData* data = Native::data<DateTimeZoneData>(this_);
+  auto const data = getDateTimeZoneData(this_);
   auto result = data->m_tz->transitions(timestamp_begin, timestamp_end);
   if (result.isNull()) {
     return make_tv<KindOfBoolean>(false);
@@ -452,7 +450,7 @@ Array HHVM_STATIC_METHOD(DateTimeZone, listAbbreviations) {
 
 Variant HHVM_STATIC_METHOD(DateTimeZone, listIdentifiers,
                            int64_t what,
-                           const String& country) {
+                           const OptString& country) {
   // This is the same check that PHP5 performs, no validation needed.
   // See ext/date/php_date.c lines 4496-4499
   if (what == DateTimeZoneData::PER_COUNTRY && country.length() != 2) {
@@ -464,20 +462,20 @@ Variant HHVM_STATIC_METHOD(DateTimeZone, listIdentifiers,
   int item_count = tzdb->index_size;
   const timelib_tzdb_index_entry *table = tzdb->index;
 
-  Array ret = Array::Create();
+  Array ret = Array::CreateVec();
   for (int i = 0; i < item_count; ++i) {
     // This string is what PHP considers as "data" or "info" which is basically
     // the string of "PHP1xx" where xx is country code that uses this timezone.
     // When country code is unknown or not in use anymore, ?? is used instead.
     // There is no known better way to extract this information out.
     const char* infoString = (const char*)&tzdb->data[table[i].pos];
-    String countryCode = String(&infoString[5], 2, CopyString);
-    if ((what == DateTimeZoneData::PER_COUNTRY && equal(country, countryCode))
+    OptString countryCode = OptString(&infoString[5], 2, CopyString);
+    if ((what == DateTimeZoneData::PER_COUNTRY && equal(country.get(), countryCode.get()))
         || what == DateTimeZoneData::ALL_WITH_BC
         || (check_id_allowed(table[i].id, what)
             && tzdb->data[table[i].pos + 4] == '\1')) {
 
-      ret.append(String(table[i].id, CopyString));
+      ret.append(OptString(table[i].id, CopyString));
     }
   }
   return ret;
@@ -487,29 +485,28 @@ Variant HHVM_STATIC_METHOD(DateTimeZone, listIdentifiers,
 // DateTimeZone helpers
 
 Object DateTimeZoneData::wrap(req::ptr<TimeZone> tz) {
-  Object obj{getClass()};
+  Object obj{classof()};
   DateTimeZoneData* data = Native::data<DateTimeZoneData>(obj);
   data->m_tz = tz;
   return obj;
 }
 
 req::ptr<TimeZone> DateTimeZoneData::unwrap(const Object& timezone) {
-  if (timezone.instanceof(getClass())) {
+  if (timezone.instanceof(classof())) {
     DateTimeZoneData* data = Native::data<DateTimeZoneData>(timezone);
     return data->m_tz;
   }
   return req::ptr<TimeZone>();
 }
 
-IMPLEMENT_GET_CLASS(DateTimeZoneData)
-
-Array HHVM_METHOD(DateTimeZone, __debuginfo) {
-  DateTimeZoneData* data = Native::data<DateTimeZoneData>(this_);
+Array HHVM_METHOD(DateTimeZone, __debugInfo) {
+  auto const data = getDateTimeZoneData(this_);
   return data->getDebugInfo();
 }
 
 Array DateTimeZoneData::getDebugInfo() const {
-  return make_map_array(
+  assertx(m_tz);
+  return make_dict_array(
     s_timezone_type, m_tz->type(),
     s_timezone, m_tz->name()
   );
@@ -518,11 +515,8 @@ Array DateTimeZoneData::getDebugInfo() const {
 ///////////////////////////////////////////////////////////////////////////////
 // DateInterval
 
-Class* DateIntervalData::s_class = nullptr;
-const StaticString DateIntervalData::s_className("DateInterval");
-
 void HHVM_METHOD(DateInterval, __construct,
-                 const String& interval_spec) {
+                 const OptString& interval_spec) {
   DateIntervalData* data = Native::data<DateIntervalData>(this_);
   data->m_di = req::make<DateInterval>(interval_spec);
   if (!data->m_di->isValid()) {
@@ -533,108 +527,59 @@ void HHVM_METHOD(DateInterval, __construct,
   }
 }
 
-const StaticString
-  s_y("y"),
-  s_m("m"),
-  s_d("d"),
-  s_h("h"),
-  s_i("i"),
-  s_s("s"),
-  s_invert("invert"),
-  s_days("days");
-
-Variant HHVM_METHOD(DateInterval, __get,
-                    const Variant& member) {
-  DateIntervalData* data = Native::data<DateIntervalData>(this_);
-  if (member.isString()) {
-    if (same(member, s_y)) {
-      return data->m_di->getYears();
-    }
-    if (same(member, s_m)) {
-      return data->m_di->getMonths();
-    }
-    if (same(member, s_d)) {
-      return data->m_di->getDays();
-    }
-    if (same(member, s_h)) {
-      return data->m_di->getHours();
-    }
-    if (same(member, s_i)) {
-      return data->m_di->getMinutes();
-    }
-    if (same(member, s_s)) {
-      return data->m_di->getSeconds();
-    }
-    if (same(member, s_invert)) {
-      return data->m_di->isInverted() ? 1 : 0;
-    }
-    if (same(member, s_days)) {
-      if (data->m_di->haveTotalDays()) {
-        return data->m_di->getTotalDays();
-      } else {
-        return false;
-      }
-    }
-  }
-  std::string msg = "Undefined property '";
-  msg += member.toString().data();
-  msg += ") on DateInterval object";
-  SystemLib::throwExceptionObject(msg);
+template <int64_t (DateInterval::*get)() const>
+static Variant get_prop(const Object& this_) {
+  return (getDateIntervalData(this_.get())->m_di.get()->*get)();
+}
+static Variant is_inverted(const Object& this_) {
+  return (int)getDateIntervalData(this_.get())->m_di->isInverted();
+}
+static Variant get_total_days(const Object& this_) {
+  auto di = getDateIntervalData(this_.get())->m_di;
+  if (!di->haveTotalDays()) return false;
+  return di->getTotalDays();
 }
 
-Variant HHVM_METHOD(DateInterval, __set,
-                    const Variant& member,
-                    const Variant& value) {
-  DateIntervalData* data = Native::data<DateIntervalData>(this_);
-  if (member.isString()) {
-    if (same(member, s_y)) {
-      data->m_di->setYears(value.toInt64());
-      return init_null();
-    }
-    if (same(member, s_m)) {
-      data->m_di->setMonths(value.toInt64());
-      return init_null();
-    }
-    if (same(member, s_d)) {
-      data->m_di->setDays(value.toInt64());
-      return init_null();
-    }
-    if (same(member, s_h)) {
-      data->m_di->setHours(value.toInt64());
-      return init_null();
-    }
-    if (same(member, s_i)) {
-      data->m_di->setMinutes(value.toInt64());
-      return init_null();
-    }
-    if (same(member, s_s)) {
-      data->m_di->setSeconds(value.toInt64());
-      return init_null();
-    }
-    if (same(member, s_invert)) {
-      data->m_di->setInverted(value.toBoolean());
-      return init_null();
-    }
-    if (same(member, s_days)) {
-      data->m_di->setTotalDays(value.toInt64());
-      return init_null();
-    }
-  }
-
-  std::string msg = "Undefined property '";
-  msg += member.toString().data();
-  msg += ") on DateInterval object";
-  SystemLib::throwExceptionObject(msg);
+template <typename T> using setter_t = void (DateInterval::*)(T);
+template <typename T> using cast_t = T (Variant::*)() const;
+template <typename T> static void set_prop_impl(
+  const Object& this_, const Variant& value, setter_t<T> set, cast_t<T> cast) {
+  (getDateIntervalData(this_.get())->m_di.get()->*set)((value.*cast)());
 }
+template <setter_t<bool> set>
+static void set_prop(const Object& this_, const Variant& value) {
+  set_prop_impl(this_, value, set, &Variant::toBoolean);
+}
+template <setter_t<int64_t> set>
+static void set_prop(const Object& this_, const Variant& value) {
+  set_prop_impl(this_, value, set, &Variant::toInt64);
+}
+
+static Native::PropAccessor date_interval_properties[] = {
+  { "y", get_prop<&DateInterval::getYears>, set_prop<&DateInterval::setYears> },
+  { "m", get_prop<&DateInterval::getMonths>, set_prop<&DateInterval::setMonths> },
+  { "d", get_prop<&DateInterval::getDays>, set_prop<&DateInterval::setDays> },
+  { "h", get_prop<&DateInterval::getHours>, set_prop<&DateInterval::setHours> },
+  { "i", get_prop<&DateInterval::getMinutes>, set_prop<&DateInterval::setMinutes> },
+  { "s", get_prop<&DateInterval::getSeconds>, set_prop<&DateInterval::setSeconds> },
+  { "invert", is_inverted, set_prop<&DateInterval::setInverted> },
+  { "days", get_total_days, set_prop<&DateInterval::setTotalDays> },
+  { nullptr }
+};
+
+Native::PropAccessorMap date_interval_properties_map{date_interval_properties};
+struct DateIntervalPropHandler : Native::MapPropHandler<DateIntervalPropHandler> {
+  static constexpr Native::PropAccessorMap& map = date_interval_properties_map;
+};
 
 Object HHVM_STATIC_METHOD(DateInterval, createFromDateString,
-                          const String& time) {
+                          const OptString& time) {
   return DateIntervalData::wrap(req::make<DateInterval>(time, true));
 }
 
-String HHVM_METHOD(DateInterval, format,
-                   const String& format) {
-  DateIntervalData* data = Native::data<DateIntervalData>(this_);
+OptString HHVM_METHOD(DateInterval, format,
+                      const OptString& format) {
+  auto const data = getDateIntervalData(this_);
   return data->m_di->format(format);
 }
 
@@ -642,22 +587,20 @@ String HHVM_METHOD(DateInterval, format,
 // DateInterval helpers
 
 Object DateIntervalData::wrap(req::ptr<DateInterval> di) {
-  Object obj{getClass()};
+  Object obj{classof()};
   DateIntervalData* data = Native::data<DateIntervalData>(obj);
   data->m_di = di;
   return obj;
 }
 
 req::ptr<DateInterval> DateIntervalData::unwrap(const Object& obj) {
-  if (obj.instanceof(getClass())) {
+  if (obj.instanceof(classof())) {
     DateIntervalData* data = Native::data<DateIntervalData>(obj);
     return data->m_di;
   }
 
   return req::ptr<DateInterval>();
 }
-
-IMPLEMENT_GET_CLASS(DateIntervalData)
 
 ///////////////////////////////////////////////////////////////////////////////
 // timestamp
@@ -727,76 +670,78 @@ Variant HHVM_FUNCTION(gmmktime,
   return ts;
 }
 
-static Variant HHVM_FUNCTION(idate, int64_t argc,
-                             const String& fmt, int64_t timestamp) {
+static TypedValue HHVM_FUNCTION(idate,
+                                const OptString& fmt, TypedValue timestamp) {
   if (fmt.size() != 1) {
-    throw_invalid_argument("format: %s", fmt.data());
-    return false;
+    raise_invalid_argument_warning("format: %s", fmt.data());
+    return make_tv<KindOfBoolean>(false);
   }
-  if (argc < 2) {
-    timestamp = TimeStamp::Current();
-  }
-  int64_t ret = req::make<DateTime>(timestamp, false)->toInteger(*fmt.data());
-  if (ret == -1) return false;
-  return ret;
+  int64_t ret = req::make<DateTime>(
+    tvIsNull(timestamp) ? TimeStamp::Current() : tvAssertInt(timestamp),
+    false
+  )->toInteger(*fmt.data());
+  if (ret == -1) return make_tv<KindOfBoolean>(false);
+  return make_tv<KindOfInt64>(ret);
 }
 
 template<bool gmt>
-static Variant date_impl(int64_t argc,
-                         const String& format, int64_t timestamp) {
-  if (!gmt && format.empty()) return empty_string_variant();
-  if (argc < 2) timestamp = TimeStamp::Current();
-  String ret = req::make<DateTime>(timestamp, gmt)->toString(format, false);
-  if (ret.isNull()) return false;
-  return ret;
+static TypedValue date_impl(const OptString& format, TypedValue timestamp) {
+  if (!gmt && format.empty()) {
+    return tvReturn(String::Empty());
+  }
+
+  OptString ret = req::make<DateTime>(
+    tvIsNull(timestamp) ? TimeStamp::Current() : tvAssertInt(timestamp),
+    gmt
+  )->toString(format, false);
+  if (ret.isNull()) return make_tv<KindOfBoolean>(false);
+  return tvReturn(ret);
 }
 
 template<bool gmt>
-static Variant strftime_impl(int64_t argc,
-                             const String& format, int64_t timestamp) {
-  if (argc < 2) timestamp = TimeStamp::Current();
-  String ret = req::make<DateTime>(timestamp, gmt)->toString(format, true);
-  if (ret.isNull()) return false;
-  return ret;
+static TypedValue strftime_impl(const OptString& format, TypedValue timestamp) {
+  OptString ret = req::make<DateTime>(
+    tvIsNull(timestamp) ? TimeStamp::Current() : tvAssertInt(timestamp),
+    gmt
+  )->toString(format, true);
+  if (ret.isNull()) return make_tv<KindOfBoolean>(false);
+  return tvReturn(ret);
 }
 
-static Variant HHVM_FUNCTION(strtotime, int64_t argc,
-                             const String& input, int64_t timestamp) {
+TypedValue HHVM_FUNCTION(strtotime,
+                         const OptString& input, TypedValue timestamp) {
   if (input.empty()) {
-    return false;
+    return make_tv<KindOfBoolean>(false);
   }
-  if (argc < 2) {
-    timestamp = TimeStamp::Current();
-  }
-  auto dt = req::make<DateTime>(timestamp);
+  auto dt = req::make<DateTime>(
+    tvIsNull(timestamp) ? TimeStamp::Current() : tvAssertInt(timestamp));
   if (!dt->fromString(input, req::ptr<TimeZone>(), nullptr, false)) {
-    return false;
+    return make_tv<KindOfBoolean>(false);
   }
   bool error;
-  return dt->toTimeStamp(error);
+  return make_tv<KindOfInt64>(dt->toTimeStamp(error));
 }
 
-static Array HHVM_FUNCTION(getdate, int64_t argc, int64_t timestamp) {
-  if (argc < 1) {
-    timestamp = TimeStamp::Current();
-  }
-  return req::make<DateTime>(timestamp, false)->
-           toArray(DateTime::ArrayFormat::TimeMap);
+static Array HHVM_FUNCTION(getdate, TypedValue timestamp) {
+  return req::make<DateTime>(
+    tvIsNull(timestamp) ? TimeStamp::Current() : tvAssertInt(timestamp),
+    false
+  )->toArray(DateTime::ArrayFormat::TimeMap);
 }
 
-static Array HHVM_FUNCTION(localtime, int64_t argc,
-                           int64_t timestamp, bool is_assoc) {
-  if (argc < 1) {
-    timestamp = TimeStamp::Current();
-  }
+static Variant HHVM_FUNCTION(localtime,
+                             TypedValue timestamp, bool is_assoc) {
   auto format = is_assoc ? DateTime::ArrayFormat::TmMap
                          : DateTime::ArrayFormat::TmVector;
-  return req::make<DateTime>(timestamp, false)->toArray(format);
+  return req::make<DateTime>(
+    tvIsNull(timestamp) ? TimeStamp::Current() : tvAssertInt(timestamp),
+    false
+  )->toArray(format);
 }
 
 Variant HHVM_FUNCTION(strptime,
-                      const String& date,
-                      const String& format) {
+                      const OptString& date,
+                      const OptString& format) {
   Array ret = DateTime::ParseAsStrptime(format, date);
   if (ret.empty()) {
     return false;
@@ -807,27 +752,27 @@ Variant HHVM_FUNCTION(strptime,
 ///////////////////////////////////////////////////////////////////////////////
 // timezone
 
-String HHVM_FUNCTION(date_default_timezone_get) {
+OptString HHVM_FUNCTION(date_default_timezone_get) {
   return TimeZone::Current()->name();
 }
 
 bool HHVM_FUNCTION(date_default_timezone_set,
-                   const String& name) {
+                   const OptString& name) {
   return TimeZone::SetCurrent(name.c_str());
 }
 
 Variant HHVM_FUNCTION(timezone_name_from_abbr,
-                      const String& abbr,
-                      int gmtoffset /* = -1 */,
-                      int isdst /* = 1 */) {
-  String ret = TimeZone::AbbreviationToName(abbr, gmtoffset, isdst);
+                      const OptString& abbr,
+                      int64_t gmtoffset /* = -1 */,
+                      int64_t isdst /* = 1 */) {
+  OptString ret = TimeZone::AbbreviationToName(abbr, gmtoffset, isdst);
   if (ret.isNull()) {
     return false;
   }
   return ret;
 }
 
-String HHVM_FUNCTION(timezone_version_get) {
+OptString HHVM_FUNCTION(timezone_version_get) {
   return TimeZone::getVersion();
 }
 
@@ -835,15 +780,15 @@ String HHVM_FUNCTION(timezone_version_get) {
 // datetime
 
 bool HHVM_FUNCTION(checkdate,
-                   int month,
-                   int day,
-                   int year) {
+                   int64_t month,
+                   int64_t day,
+                   int64_t year) {
   return DateTime::IsValid(year, month, day);
 }
 
 Variant HHVM_FUNCTION(date_parse_from_format,
-                      const String& format,
-                      const String& date) {
+                      const OptString& format,
+                      const OptString& date) {
   Array ret = DateTime::Parse(format, date);
   if (ret.empty()) {
     return false;
@@ -854,7 +799,7 @@ Variant HHVM_FUNCTION(date_parse_from_format,
 Variant HHVM_FUNCTION(date_create,
                       const Variant& time /* = null_string */,
                       const Variant& timezone /* = uninit_variant */) {
-  const String& str_time = time.isNull() ? null_string : time.toString();
+  const OptString& str_time = time.isNull() ? null_string : time.toString();
   auto tz = TimeZone::Current();
   if (!timezone.isNull()) {
     const Object& obj_timezone = timezone.toObject();
@@ -864,7 +809,7 @@ Variant HHVM_FUNCTION(date_create,
     }
     tz = DateTimeZoneData::unwrap(obj_timezone);
   }
-  Object ret{DateTimeData::getClass()};
+  Object ret{DateTimeData::classof()};
   // Don't set the time here because it will throw if it is bad
   HHVM_MN(DateTime, __construct)(ret.get());
   if (str_time.empty()) {
@@ -880,7 +825,7 @@ Variant HHVM_FUNCTION(date_create,
 
 Variant HHVM_FUNCTION(date_format,
                       const Object& datetime,
-                      const String& format) {
+                      const OptString& format) {
   if (!datetime.instanceof(s_DateTimeInterface)) {
     raise_argument_warning("date_format", 1, s_DateTimeInterface, datetime);
     return false;
@@ -890,7 +835,7 @@ Variant HHVM_FUNCTION(date_format,
 }
 
 Variant HHVM_FUNCTION(date_parse,
-                      const String& date) {
+                      const OptString& date) {
   Array ret = DateTime::Parse(date);
   if (ret.empty()) {
     return false;
@@ -910,28 +855,32 @@ Array HHVM_FUNCTION(date_sun_info,
 }
 
 template<bool sunset>
-Variant date_sunrise_sunset(int64_t numArgs,
-                            int64_t timestamp, int64_t format,
-                            double latitude, double longitude,
-                            double zenith, double offset) {
-  /* Fill in dynamic args (3..6) as needed */
-  switch (numArgs) {
-    case 0: case 1: /* fallthrough */
-    case 2: latitude  = s_date_globals->default_latitude;
-    case 3: longitude = s_date_globals->default_longitude;
-    case 4: zenith = sunset ? s_date_globals->sunset_zenith
-                            : s_date_globals->sunrise_zenith;
-    case 5: offset = TimeZone::Current()->offset(0) / 3600;
-  }
-  return req::make<DateTime>(timestamp, false)->getSunInfo
-    (static_cast<DateTime::SunInfoFormat>(format), latitude, longitude,
-     zenith, offset, sunset);
+TypedValue date_sunrise_sunset(int64_t timestamp, int64_t format,
+                               TypedValue latitude, TypedValue longitude,
+                               TypedValue zenith, TypedValue offset) {
+  return tvReturn(req::make<DateTime>(timestamp, false)->getSunInfo(
+    static_cast<DateTime::SunInfoFormat>(format),
+    tvIsNull(latitude)
+      ? s_date_globals->default_latitude
+      : tvAssertDouble(latitude),
+    tvIsNull(longitude)
+      ? s_date_globals->default_longitude
+      : tvAssertDouble(longitude),
+    tvIsNull(zenith)
+      ? (sunset
+        ? s_date_globals->sunset_zenith
+        : s_date_globals->sunrise_zenith)
+      : tvAssertDouble(zenith),
+    tvIsNull(offset)
+      ? TimeZone::Current()->offset(0) / 3600
+      : tvAssertDouble(offset),
+    sunset));
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 
 #define DATE_ATOM "Y-m-d\\TH:i:sP"
-#define DATE_COOKIE "l, d-M-y H:i:s T"
+#define DATE_COOKIE "D, d-M-Y H:i:s T"
 #define DATE_ISO8601 "Y-m-d\\TH:i:sO"
 #define DATE_RFC822 "D, d M y H:i:s O"
 #define DATE_RFC850 "l, d-M-y H:i:s T"
@@ -943,9 +892,9 @@ Variant date_sunrise_sunset(int64_t numArgs,
 #define DATE_W3C "Y-m-d\\TH:i:sP"
 
 static struct DateTimeExtension final : Extension {
-  DateTimeExtension() : Extension("date", get_PHP_VERSION().c_str()) { }
+  DateTimeExtension() : Extension("date", NO_EXTENSION_VERSION_YET, "hphp_hphpi") { }
 
-  void moduleInit() override {
+  void moduleRegisterNative() override {
     HHVM_ME(DateTime, __construct);
     HHVM_ME(DateTime, add);
     HHVM_ME(DateTime, diff);
@@ -962,12 +911,11 @@ static struct DateTimeExtension final : Extension {
     HHVM_ME(DateTime, sub);
     HHVM_ME(DateTime, __sleep);
     HHVM_ME(DateTime, __wakeup);
-    HHVM_ME(DateTime, __debuginfo);
+    HHVM_ME(DateTime, __debugInfo);
     HHVM_STATIC_ME(DateTime, createFromFormat);
     HHVM_STATIC_ME(DateTime, getLastErrors);
 
-    Native::registerNativeDataInfo<DateTimeData>(
-      DateTimeData::s_className.get(), Native::NDIFlags::NO_SWEEP);
+    Native::registerNativeDataInfo<DateTimeData>(Native::NDIFlags::NO_SWEEP);
 
     HHVM_RC_STR_SAME(DATE_ATOM);
     HHVM_RCC_STR(DateTime, ATOM, DATE_ATOM);
@@ -1008,7 +956,7 @@ static struct DateTimeExtension final : Extension {
     HHVM_RCC_INT(DateTimeZone, PER_COUNTRY, DateTimeZoneData::PER_COUNTRY);
 
     HHVM_ME(DateTimeZone, __construct);
-    HHVM_ME(DateTimeZone, __debuginfo);
+    HHVM_ME(DateTimeZone, __debugInfo);
     HHVM_ME(DateTimeZone, getLocation);
     HHVM_ME(DateTimeZone, getName);
     HHVM_ME(DateTimeZone, getOffset);
@@ -1017,16 +965,16 @@ static struct DateTimeExtension final : Extension {
     HHVM_STATIC_ME(DateTimeZone, listIdentifiers);
 
     Native::registerNativeDataInfo<DateTimeZoneData>(
-      DateTimeZoneData::s_className.get(), Native::NDIFlags::NO_SWEEP);
+      Native::NDIFlags::NO_SWEEP);
 
     HHVM_ME(DateInterval, __construct);
-    HHVM_ME(DateInterval, __get);
-    HHVM_ME(DateInterval, __set);
     HHVM_ME(DateInterval, format);
     HHVM_STATIC_ME(DateInterval, createFromDateString);
+    Native::registerNativePropHandler<DateIntervalPropHandler>(
+      DateIntervalData::className());
 
     Native::registerNativeDataInfo<DateIntervalData>(
-      DateIntervalData::s_className.get(), Native::NDIFlags::NO_SWEEP);
+      Native::NDIFlags::NO_SWEEP);
 
     HHVM_FE(checkdate);
     HHVM_FE(date_parse_from_format);
@@ -1061,13 +1009,15 @@ static struct DateTimeExtension final : Extension {
                 static_cast<int64_t>(DateTime::SunInfoFormat::ReturnString));
     HHVM_RC_INT(SUNFUNCS_RET_TIMESTAMP,
                 static_cast<int64_t>(DateTime::SunInfoFormat::ReturnTimeStamp));
+  }
 
-    loadSystemlib("datetime");
+  std::vector<std::string> hackFiles() const override {
+    return {"ext_datetime.php"};
   }
 
   void threadInit() override {
     IniSetting::Bind(
-      this, IniSetting::PHP_INI_ALL,
+      this, IniSetting::Mode::Request,
       "date.timezone",
       "",
       IniSetting::SetAndGet<std::string>(
@@ -1075,22 +1025,22 @@ static struct DateTimeExtension final : Extension {
       )
     );
     IniSetting::Bind(
-      this, IniSetting::PHP_INI_ALL,
+      this, IniSetting::Mode::Request,
       "date.default_latitude", "31.7667",
       &s_date_globals->default_latitude
     );
     IniSetting::Bind(
-      this, IniSetting::PHP_INI_ALL,
+      this, IniSetting::Mode::Request,
       "date.default_longitude", "35.2333",
       &s_date_globals->default_longitude
     );
     IniSetting::Bind(
-      this, IniSetting::PHP_INI_ALL,
+      this, IniSetting::Mode::Request,
       "date.sunset_zenith", "90.583333",
       &s_date_globals->sunset_zenith
     );
     IniSetting::Bind(
-      this, IniSetting::PHP_INI_ALL,
+      this, IniSetting::Mode::Request,
       "date.sunrise_zenith", "90.583333",
       &s_date_globals->sunrise_zenith
     );
@@ -1105,7 +1055,7 @@ private:
   }
 
   static std::string dateTimezoneIniGet() {
-    return RID().getTimeZone();
+    return RID().getTimezone();
   }
 } s_date_extension;
 

@@ -1,9 +1,13 @@
-<?php
+<?hh
 
-function bar() {
+function bar() :mixed{
 }
-function foo() {
+function foo() :mixed{
   $foo = bar();
-  unset($foo);
+  $foo = null;
 }
+
+<<__EntryPoint>>
+function main_1744() :mixed{
 foo();
+}

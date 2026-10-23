@@ -1,4 +1,18 @@
-File "fc_enum_case_9.php", line 13, characters 11-12:
-Switch statement nonexhaustive; the following cases are missing: BAZ, BAR (Typing[4019])
-File "fc_enum_case_9.php", line 3, characters 6-8:
-Enum declared here
+error: Typing[4019] This `switch` statement is nonexhaustive. At least the following cases are missing: `Bar::BAR`, `Bar::BAZ` [1]
+-> The scrutinee has type `Bar`. [2]
+
+fc_enum_case_9.php:13:3
+11 | // We can make it through typedefs
+12 | function do_case(Foo $x): int {
+13 |   switch ($x) {
+   |   ^^^^^^^^^^^^^ [1]
+   |           ^^ [2]
+14 |     case Bar::FOO:
+   |     ^^^^^^^^^^^^^^ [1]
+15 |       return 0;
+   |       ^^^^^^^^^ [1]
+16 |   }
+   |   ^ [1]
+17 | }
+
+1 error found

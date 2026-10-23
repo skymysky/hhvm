@@ -1,0 +1,213 @@
+(*
+ * Copyright (c) 2018, Facebook, Inc.
+ * All rights reserved.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the "hack" directory of this source tree.
+ *
+ *)
+
+open Hh_prelude
+open Aast
+open Nast_check_env
+
+class virtual iter =
+  object (self)
+    inherit [_] Aast.iter as super
+
+    (* Entry point *)
+    method go (ctx : Provider_context.t) (program : Nast.program) =
+      self#on_list (fun () -> self#go_def ctx) () program
+
+    method go_def ctx x = self#on_def (def_env ctx x) x
+
+    method! on_fun_def env x = super#on_fun_def (fun_def_env env x) x
+
+    method! on_fun_ env x = super#on_fun_ (fun_env env x) x
+
+    method! on_method_ env x = super#on_method_ (method_env env x) x
+
+    method! on_class_ env x = super#on_class_ (class_env env x) x
+
+    method! on_Try env b cl fb =
+      self#on_block env b;
+      List.iter cl ~f:(fun c -> self#on_catch env c);
+      self#on_block { env with is_finally = true } fb
+
+    method! on_Do env = super#on_Do { env with control_context = LoopContext }
+
+    method! on_While env =
+      super#on_While { env with control_context = LoopContext }
+
+    method! on_For env = super#on_For { env with control_context = LoopContext }
+
+    method! on_Foreach env =
+      super#on_Foreach { env with control_context = LoopContext }
+
+    method! on_Switch env =
+      super#on_Switch { env with control_context = SwitchContext }
+
+    method! on_Efun env =
+      super#on_Efun { env with is_finally = false; control_context = Toplevel }
+
+    method! on_Lfun env =
+      super#on_Lfun { env with is_finally = false; control_context = Toplevel }
+
+    method! on_Obj_get env =
+      super#on_Obj_get { env with array_append_allowed = false }
+
+    method! on_Array_get env =
+      super#on_Array_get { env with array_append_allowed = false }
+
+    method! on_Assign env lhs bop rhs =
+      match bop with
+      | None ->
+        self#on_expr { env with array_append_allowed = true } lhs;
+        self#on_expr env rhs
+      | _ -> super#on_Assign env lhs bop rhs
+
+    method! on_func_body env fb =
+      match fb.fb_ast with
+      | [(_, If (((_, _, Id (_, _)) as id), then_stmt, else_stmt))] ->
+        super#on_expr env id;
+        self#on_block env then_stmt;
+        self#on_block env else_stmt
+      | _ -> super#on_func_body env fb
+
+    method! on_expr env e =
+      match e with
+      | (_, _, Call call_expr) -> self#on_Call env call_expr
+      | (_, _, Assign (lhs, None, rhs)) -> self#on_Assign env lhs None rhs
+      | _ -> super#on_expr env e
+  end
+
+class virtual ['state] iter_with_state =
+  object (self)
+    inherit [_] Aast.iter as super
+
+    (* Entry point *)
+    method go
+        (state : 'state) (ctx : Provider_context.t) (program : Nast.program) =
+      self#on_list (fun () -> self#go_def state ctx) () program
+
+    method go_def state ctx x = self#on_def (def_env ctx x, state) x
+
+    method! on_fun_def (env, state) x =
+      super#on_fun_def (fun_def_env env x, state) x
+  end
+
+class type handler =
+  object
+    method at_fun_def : env -> Nast.fun_def -> unit
+
+    method at_fun_ : env -> Nast.fun_ -> unit
+
+    method at_class_ : env -> Nast.class_ -> unit
+
+    method at_method_ : env -> Nast.method_ -> unit
+
+    method at_expr : env -> Nast.expr -> unit
+
+    method at_stmt : env -> Nast.stmt -> unit
+
+    method at_hint : env -> hint -> unit
+
+    method at_contexts : env -> contexts -> unit
+
+    method at_typedef : env -> Nast.typedef -> unit
+
+    method at_gconst : env -> Nast.gconst -> unit
+
+    method at_file_attribute : env -> Nast.file_attribute -> unit
+
+    method at_user_attribute : env -> Nast.user_attribute -> unit
+  end
+
+class virtual handler_base : handler =
+  object
+    method at_fun_def _ _ = ()
+
+    method at_fun_ _ _ = ()
+
+    method at_class_ _ _ = ()
+
+    method at_method_ _ _ = ()
+
+    method at_expr _ _ = ()
+
+    method at_stmt _ _ = ()
+
+    method at_hint _ _ = ()
+
+    method at_contexts _ _ = ()
+
+    method at_typedef _ _ = ()
+
+    method at_gconst _ _ = ()
+
+    method at_file_attribute _ _ = ()
+
+    method at_user_attribute _ _ = ()
+  end
+
+let iter_with (handlers : handler list) : iter =
+  object
+    inherit iter as super
+
+    (* Visits file attributes through their per-definition copies
+       ([fd_file_attributes] / [c_file_attributes] / etc.). There is no
+       once-per-file alternative: naming strips the top-level [FileAttributes]
+       def (see [Typing_toplevel]), and the pipeline is per-definition — hh_distc
+       and zoncolan typecheck one definition at a time via separate FFI callbacks
+       ([Typecheck.typecheck_def]) with no per-file entry point. A file's
+       attributes are copied onto each of its definitions, so this fires once per
+       definition with identical positions; the error engine deduplicates the
+       resulting diagnostics at display time. *)
+    method! on_file_attribute env x =
+      List.iter handlers ~f:(fun v -> v#at_file_attribute env x);
+      super#on_file_attribute env x
+
+    method! on_fun_def env x =
+      List.iter handlers ~f:(fun v -> v#at_fun_def env x);
+      super#on_fun_def env x
+
+    method! on_fun_ env x =
+      List.iter handlers ~f:(fun v -> v#at_fun_ env x);
+      super#on_fun_ env x
+
+    method! on_class_ env x =
+      List.iter handlers ~f:(fun v -> v#at_class_ env x);
+      super#on_class_ env x
+
+    method! on_method_ env x =
+      List.iter handlers ~f:(fun v -> v#at_method_ env x);
+      super#on_method_ env x
+
+    method! on_expr env x =
+      List.iter handlers ~f:(fun v -> v#at_expr env x);
+      super#on_expr env x
+
+    method! on_stmt env x =
+      List.iter handlers ~f:(fun v -> v#at_stmt env x);
+      super#on_stmt env x
+
+    method! on_hint env h =
+      List.iter handlers ~f:(fun v -> v#at_hint env h);
+      super#on_hint env h
+
+    method! on_contexts env cl =
+      List.iter handlers ~f:(fun v -> v#at_contexts env cl);
+      super#on_contexts env cl
+
+    method! on_typedef env t =
+      List.iter handlers ~f:(fun v -> v#at_typedef env t);
+      super#on_typedef env t
+
+    method! on_gconst env gconst =
+      List.iter handlers ~f:(fun v -> v#at_gconst env gconst);
+      super#on_gconst env gconst
+
+    method! on_user_attribute env ua =
+      List.iter handlers ~f:(fun v -> v#at_user_attribute env ua);
+      super#on_user_attribute env ua
+  end

@@ -1,7 +1,6 @@
-Warning: class_implements(): Class A does not exist in %s
+Warning: class_implements(): Class A1530 does not exist in %s/test/slow/eval_order/1530.php on line 8
 bool(false)
-string(1) "A"
-array(1) {
+dict(1) {
   ["I"]=>
   string(1) "I"
 }

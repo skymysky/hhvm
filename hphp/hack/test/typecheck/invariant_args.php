@@ -8,9 +8,9 @@ function opt_c(): ?C {
   return null;
 }
 
-function f() {
+function f(): void {
   $c = opt_c();
   hh_show($c);
-  invariant($c instanceof C, 'format: %s', (string)($c?->y()));
+  invariant($c is C, 'format: %s', (string)($c?->y()));
   hh_show($c);
 }

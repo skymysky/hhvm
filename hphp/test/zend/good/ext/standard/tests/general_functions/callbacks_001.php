@@ -1,79 +1,78 @@
-<?php
+<?hh
 class A {
-    public static function who() {
+    public static function who() :mixed{
         echo "A\n";
     }
-    public static function who2() {
+    public static function who2() :mixed{
         echo "A\n";
     }
 }
 
 class B extends A {
-    public static function who() {
+    public static function who() :mixed{
         echo "B\n";
     }
 }
 
 class C extends B {
-    public function call($cb) {
+    public function call($cb) :mixed{
         echo join('|', $cb) . "\n";
-        call_user_func($cb);
+        $cb();
     }
-    public function test() {
-        $this->call(array('parent', 'who'));
-        $this->call(array('C', 'parent::who'));
-        $this->call(array('B', 'parent::who'));
-        $this->call(array('E', 'parent::who'));
-        $this->call(array('A', 'who'));
-        $this->call(array('C', 'who'));
-        $this->call(array('B', 'who2'));
+    public function test() :mixed{
+        $this->call(vec['parent', 'who']);
+        $this->call(vec['C', 'parent::who']);
+        $this->call(vec['B', 'parent::who']);
+        $this->call(vec['E', 'parent::who']);
+        $this->call(vec['A', 'who']);
+        $this->call(vec['C', 'who']);
+        $this->call(vec['B', 'who2']);
     }
 }
 
 class D {
-    public static function who() {
+    public static function who() :mixed{
         echo "D\n";
     }
 }
 
 class E extends D {
-    public static function who() {
+    public static function who() :mixed{
         echo "E\n";
     }
 }
 
-$o = new C;
-$o->test();
-
 class O {
-    public function who() {
+    public function who() :mixed{
         echo "O\n";
     }
 }
 
 class P extends O {
-    function __toString() {
+    function __toString() :mixed{
         return '$this';
     }
-    public function who() {
+    public function who() :mixed{
         echo "P\n";
     }
-    public function call($cb) {
-        echo join('|', $cb) . "\n";
-        call_user_func($cb);
+    public function call($cb) :mixed{
+        echo join('|', array_map($x ==> $x is P ? $x->__toString() : $x, $cb)) . "\n";
+        $cb();
     }
-    public function test() {
-        $this->call(array('parent', 'who'));
-        $this->call(array('P', 'parent::who'));
-        $this->call(array($this, 'O::who'));
-        $this->call(array($this, 'B::who'));
+    public function test() :mixed{
+        $this->call(vec['parent', 'who']);
+        $this->call(vec['P', 'parent::who']);
+        $this->call(vec[$this, 'O::who']);
     }
 }
+<<__EntryPoint>> function main(): void {
+$o = new C;
+$o->test();
 
 echo "===FOREIGN===\n";
 
 $o = new P;
 $o->test();
 
-?>
-===DONE===
+echo "===DONE===\n";
+}

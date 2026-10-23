@@ -1,0 +1,46 @@
+error: Typing[4110] Invalid argument [1]
+-> Expected `vec<mixed>` [2]
+-> But got `AnyArray<arraykey, mixed>` from this `is` expression test [3]
+
+is_any_array.php:6:15
+ 2 | 
+ 3 | function main(mixed $x): void {
+ 4 |   if (HH\is_any_array($x)) {
+   |       ^^^^^^^^^^^^^^^ [3]
+ 5 |     takes_container($x);
+ 6 |     takes_vec($x);
+   |               ^^ [1]
+ 7 |     $_ = $x['foo'];
+ 8 |     $_ = $x[0];
+   :
+16 | 
+17 | function takes_container(Container<mixed> $_): void {}
+18 | function takes_vec(vec<mixed> $_): void {}
+   |                    ^^^^^^^^^^ [2]
+19 | function takes_arraykey(arraykey $_): void {}
+
+error: Typing[4110] Invalid argument [1]
+-> Expected `Container<mixed>` [2]
+-> But got `?not AnyArray<_, _>` [3]
+
+is_any_array.php:13:21
+ 1 | <?hh
+ 2 | 
+ 3 | function main(mixed $x): void {
+   |               ^^^^^ [3]
+ 4 |   if (HH\is_any_array($x)) {
+ 5 |     takes_container($x);
+   :
+11 |     }
+12 |   } else {
+13 |     takes_container($x);
+   |                     ^^ [1]
+14 |   }
+15 | }
+16 | 
+17 | function takes_container(Container<mixed> $_): void {}
+   |                          ^^^^^^^^^^^^^^^^ [2]
+18 | function takes_vec(vec<mixed> $_): void {}
+19 | function takes_arraykey(arraykey $_): void {}
+
+2 errors found

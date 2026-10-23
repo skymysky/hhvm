@@ -1,0 +1,10 @@
+error: Naming[2049] Unbound name: `D` [1]
+
+tconst_unbound_class.php--file1.php:5:18
+3 | 
+4 | class C {
+5 |   const type T = D::T;
+  |                  ^ [1]
+6 | }
+
+1 error found

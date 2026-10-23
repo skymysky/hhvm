@@ -1,33 +1,32 @@
 <?hh
 
-function block() { // simulates blocking I/O
+function block() :mixed{ // simulates blocking I/O
   return RescheduleWaitHandle::create(
     RescheduleWaitHandle::QUEUE_NO_PENDING_IO,
     1,
   );
-};
-
+}
 class CWithClosures {
-  public function __construct(private $a) {}
+  public function __construct(private $a)[] {}
 
-  public function test($a) {
+  public function test($a) :mixed{
     $f = function (...$args) use ($a) {
       echo __METHOD__, "\n";
       var_dump($args);
       var_dump($a);
       var_dump($this->a);
-      $this->variadic($a, $this->a, reset(&$args));
+      $this->variadic($a, $this->a, $args[0]);
     };
     $f('a', 'b');
   }
 
-  private function variadic(...$args) {
+  private function variadic(...$args) :mixed{
     echo __METHOD__, "\n";
     var_dump($args);
   }
 }
 
-function main() {
+function main() :mixed{
   echo 'basic closure', "\n";
   $f = function (...$args) {
     var_dump($args);
@@ -50,4 +49,9 @@ function main() {
   $c = new CWithClosures('prop-a');
   $c->test('a');
 }
+
+<<__EntryPoint>>
+function main_closures() :mixed{
+;
 main();
+}

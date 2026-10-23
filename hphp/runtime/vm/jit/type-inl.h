@@ -18,39 +18,41 @@
 #error "type-inl.h should only be included by type.h"
 #endif
 
+#include "hphp/runtime/base/bespoke-array.h"
 #include "hphp/runtime/base/string-data.h"
 #include "hphp/runtime/vm/class.h"
+#include "hphp/runtime/vm/class-meth-data-ref.h"
 
 #include "hphp/util/hash.h"
 
 #include <cstring>
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 ///////////////////////////////////////////////////////////////////////////////
 
 ///////////////////////////////////////////////////////////////////////////////
 // Predefined Types
 
-constexpr inline Type::Type(bits_t bits, Ptr ptr, Mem mem)
+constexpr inline Type::Type(bits_t bits, PtrLocation ptr)
   : m_bits(bits)
   , m_ptr(ptr)
-  , m_mem(mem)
   , m_hasConstVal(false)
   , m_extra(0)
 {}
 
 #define IRT(name, ...) \
-  constexpr Type T##name{Type::k##name, Ptr::NotPtr, Mem::NotMem};
-#define IRTP(name, ptr, bits) \
-  constexpr Type T##name{Type::bits, Ptr::ptr, Mem::Ptr};
-#define IRTL(name, ptr, bits) \
-  constexpr Type T##name{Type::bits, Ptr::ptr, Mem::Lval};
-#define IRTM(name, ptr, bits) \
-  constexpr Type T##name{Type::bits, Ptr::ptr, Mem::Mem};
+  constexpr Type T##name{Type::k##name, PtrLocation::Bottom};
+#define IRTP(name, ptr) \
+  constexpr Type T##name{Type::kPtr, PtrLocation::ptr};
+#define IRTL(name, ptr) \
+  constexpr Type T##name{Type::kLval, PtrLocation::ptr};
+#define IRTM(name, ptr) \
+  constexpr Type T##name{Type::kMem, PtrLocation::ptr};
 #define IRTX(name, x, bits) \
-  constexpr Type T##name{Type::bits, Ptr::x, Mem::x};
-IRT_PHP(IRT_BOXES_PTRS_LVALS)
-IRT_PHP_UNIONS(IRT_BOXES_PTRS_LVALS)
+  constexpr Type T##name{Type::bits, PtrLocation::x};
+IRT_PHP
+IRT_PHP_UNIONS
+IRT_PTRS_LVALS
 IRT_SPECIAL
 #undef IRT
 #undef IRTP
@@ -59,9 +61,15 @@ IRT_SPECIAL
 #undef IRTX
 
 #define IRT(name, ...) \
-  constexpr Type T##name{Type::k##name, Ptr::Bottom, Mem::Bottom};
+  constexpr Type T##name{Type::k##name, PtrLocation::Bottom};
 IRT_RUNTIME
 #undef IRT
+
+// Vanilla types that appear in irgen.
+static auto const TVanillaVec     = TVec.narrowToVanilla();
+static auto const TVanillaDict    = TDict.narrowToVanilla();
+static auto const TVanillaKeyset  = TKeyset.narrowToVanilla();
+static auto const TVanillaArrLike = TArrLike.narrowToVanilla();
 
 /*
  * Abbreviated namespace for predefined types.
@@ -80,7 +88,7 @@ namespace TypeNames {
 #undef IRTL
 #undef IRTM
 #undef IRTX
-};
+}
 
 namespace type_detail {
 ///////////////////////////////////////////////////////////////////////////////
@@ -123,18 +131,18 @@ inline Type for_const(const StringData* sd) {
 }
 inline Type for_const(const ArrayData* ad) {
   assertx(ad->isStatic());
-  if (ad->isPHPArray()) return Type::StaticArray(ad->kind());
-  if (ad->isVecArray()) return TStaticVec;
-  if (ad->isDict()) return TStaticDict;
-  if (ad->isKeyset()) return TStaticKeyset;
+  if (ad->isVecType()) return TStaticVec;
+  if (ad->isDictType()) return TStaticDict;
+  if (ad->isKeysetType()) return TStaticKeyset;
   not_reached();
 }
 inline Type for_const(double)        { return TDbl; }
 inline Type for_const(const Func*)   { return TFunc; }
 inline Type for_const(const Class*)  { return TCls; }
-inline Type for_const(ConstCctx)     { return TCctx; }
+inline Type for_const(LazyClassData) { return TLazyCls; }
+inline Type for_const(ClsMethDataRef) { return TClsMeth; }
 inline Type for_const(TCA)           { return TTCA; }
-
+inline Type for_const(void*)         { return TVoidPtr; }
 ///////////////////////////////////////////////////////////////////////////////
 }
 
@@ -143,16 +151,14 @@ inline Type for_const(TCA)           { return TTCA; }
 
 inline Type::Type()
   : m_bits(kBottom)
-  , m_ptr(Ptr::Bottom)
-  , m_mem(Mem::Bottom)
+  , m_ptr(PtrLocation::Bottom)
   , m_hasConstVal(false)
   , m_extra(0)
 {}
 
-inline Type::Type(DataType outer, DataType inner)
-  : m_bits(bitsFromDataType(outer, inner))
-  , m_ptr(Ptr::NotPtr)
-  , m_mem(Mem::NotMem)
+inline Type::Type(DataType outer)
+  : m_bits(bitsFromDataType(outer))
+  , m_ptr(PtrLocation::Bottom)
   , m_hasConstVal(false)
   , m_extra(0)
 {}
@@ -160,9 +166,8 @@ inline Type::Type(DataType outer, DataType inner)
 inline size_t Type::hash() const {
   return hash_int64_pair(
     hash_int64_pair(
-      m_bits,
-      ((static_cast<uint64_t>(m_ptr) << sizeof(m_mem) * CHAR_BIT) |
-       static_cast<uint64_t>(m_mem)) ^ m_hasConstVal
+      m_bits.hash(),
+      static_cast<uint64_t>(m_ptr) ^ m_hasConstVal
     ),
     m_extra
   );
@@ -174,7 +179,6 @@ inline size_t Type::hash() const {
 inline bool Type::operator==(Type rhs) const {
   return m_bits == rhs.m_bits &&
     m_ptr == rhs.m_ptr &&
-    m_mem == rhs.m_mem &&
     m_hasConstVal == rhs.m_hasConstVal &&
     m_extra == rhs.m_extra;
 }
@@ -203,6 +207,10 @@ inline bool Type::subtypeOfAny() const {
   return false;
 }
 
+inline bool Type::nonTrivialSubtypeOf(Type t2) const {
+  return !(*this <= TBottom) && (*this <= t2);
+}
+
 inline bool Type::maybe(Type t2) const {
   return (*this & t2) != TBottom;
 }
@@ -224,27 +232,27 @@ inline Type Type::unionAll(Type t, Types... ts) {
 
 inline bool Type::isUnion() const {
   // This will return true iff more than 1 bit is set in m_bits.
-  return (m_bits & (m_bits - 1)) != 0;
+  return m_bits.count() > 1;
 }
 
 inline bool Type::isKnownDataType() const {
-  assertx(*this <= TGen);
+  assertx(*this <= TCell);
 
   // Some unions correspond to single KindOfs.
-  return subtypeOfAny(TStr, TArr, TVec, TDict,
-                      TKeyset, TBoxedCell) || !isUnion();
+  if (!isUnion()) return true;
+  return subtypeOfAny(TStr, TVec, TDict, TKeyset);
 }
 
 inline bool Type::needsReg() const {
-  return *this <= TGen && !isKnownDataType();
+  return *this <= TCell && !isKnownDataType();
 }
 
 inline bool Type::isSimpleType() const {
   return subtypeOfAny(TBool, TInt, TDbl, TNull);
 }
 
-inline bool Type::isReferenceType() const {
-  return subtypeOfAny(TStr, TArrLike, TObj, TRes);
+inline bool Type::isSingularReferenceType() const {
+  return *this != TBottom && subtypeOfAny(TStr, TVec, TDict, TKeyset, TObj, TRes);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -265,6 +273,7 @@ Type Type::cns(T val, Type ret) {
                 "Unexpected size for toCopy");
 
   std::memcpy(&ret.m_extra, &toCopy, sizeof(toCopy));
+  assertx(ret.checkValid());
   return ret;
 }
 
@@ -277,11 +286,18 @@ inline Type Type::cns(std::nullptr_t) {
   return TNullptr;
 }
 
-inline Type Type::cns(const TypedValue& tv) {
+inline Type Type::cns(TypedValue tv) {
+  if (auto const t = tryCns(tv)) return *t;
+  always_assert(false && "Invalid KindOf for constant TypedValue");
+}
+
+inline Optional<Type> Type::tryCns(TypedValue tv) {
+  assertx(tvIsPlausible(tv));
+
   if (tv.m_type == KindOfUninit) return TUninit;
   if (tv.m_type == KindOfNull)   return TInitNull;
 
-  auto ret = [&] {
+  auto ret = [&] () -> Optional<Type> {
     switch (tv.m_type) {
       case KindOfUninit:
       case KindOfNull:
@@ -290,6 +306,7 @@ inline Type Type::cns(const TypedValue& tv) {
       case KindOfBoolean:
       case KindOfInt64:
       case KindOfDouble:
+      case KindOfEnumClassLabel:
         return Type(tv.m_type);
 
       case KindOfPersistentString:
@@ -298,46 +315,46 @@ inline Type Type::cns(const TypedValue& tv) {
 
       case KindOfPersistentVec:
       case KindOfVec:
-        assertx(tv.m_data.parr->isVecArray());
-        return type_detail::for_const(tv.m_data.parr);
-
       case KindOfPersistentDict:
       case KindOfDict:
-        assertx(tv.m_data.parr->isDict());
-        return type_detail::for_const(tv.m_data.parr);
-
       case KindOfPersistentKeyset:
       case KindOfKeyset:
-        assertx(tv.m_data.parr->isKeyset());
         return type_detail::for_const(tv.m_data.parr);
-
-      case KindOfPersistentArray:
-      case KindOfArray:
-        assertx(tv.m_data.parr->isPHPArray());
-        return type_detail::for_const(tv.m_data.parr);
+      case KindOfLazyClass:
+        return type_detail::for_const(tv.m_data.plazyclass);
+      // TODO (T29639296)
+      case KindOfFunc:
+        return type_detail::for_const(tv.m_data.pfunc);
+      case KindOfClass:
+        return type_detail::for_const(tv.m_data.pclass);
+      case KindOfClsMeth:
+        return type_detail::for_const(tv.m_data.pclsmeth);
 
       case KindOfObject:
       case KindOfResource:
-      case KindOfRef:
-      // TODO (T29639296)
-      case KindOfFunc:
-        always_assert(false && "Invalid KindOf for constant TypedValue");
+      case KindOfRFunc:
+      case KindOfRClsMeth:
+        return std::nullopt;
     }
     not_reached();
   }();
-  ret.m_hasConstVal = true;
-  ret.m_extra = tv.m_data.num;
+  if (ret) {
+    ret->m_hasConstVal = true;
+    ret->m_extra = tv.m_data.num;
+  }
   return ret;
 }
 
 inline Type Type::dropConstVal() const {
   if (!m_hasConstVal) return *this;
-  assertx(!isUnion());
 
-  if (*this <= TStaticArr) {
-    return Type::StaticArray(arrVal()->kind());
+  assertx(!isUnion());
+  auto const result = Type(m_bits, ptrLocation());
+
+  if (*this <= TArrLike) {
+    return Type(result, ArraySpec(ArrayLayout::FromArray(m_arrVal)));
   }
-  return Type(m_bits, ptrKind(), memKind());
+  return result;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -375,39 +392,27 @@ IMPLEMENT_CNS_VAL(TBool,       bool, bool)
 IMPLEMENT_CNS_VAL(TInt,        int,  int64_t)
 IMPLEMENT_CNS_VAL(TDbl,        dbl,  double)
 IMPLEMENT_CNS_VAL(TStaticStr,  str,  const StringData*)
-IMPLEMENT_CNS_VAL(TStaticArr,  arr,  const ArrayData*)
 IMPLEMENT_CNS_VAL(TStaticVec,  vec,  const ArrayData*)
 IMPLEMENT_CNS_VAL(TStaticDict, dict, const ArrayData*)
 IMPLEMENT_CNS_VAL(TStaticKeyset, keyset, const ArrayData*)
 IMPLEMENT_CNS_VAL(TFunc,       func, const HPHP::Func*)
 IMPLEMENT_CNS_VAL(TCls,        cls,  const Class*)
-IMPLEMENT_CNS_VAL(TCctx,       cctx, ConstCctx)
+IMPLEMENT_CNS_VAL(TLazyCls,    lcls,  LazyClassData)
+IMPLEMENT_CNS_VAL(TClsMeth,    clsmeth,  ClsMethDataRef)
 IMPLEMENT_CNS_VAL(TTCA,        tca,  jit::TCA)
+IMPLEMENT_CNS_VAL(TVoidPtr,    voidPtr, void*)
 IMPLEMENT_CNS_VAL(TRDSHandle,  rdsHandle,  rds::Handle)
+IMPLEMENT_CNS_VAL(TMem,        ptr, const TypedValue*)
 
 #undef IMPLEMENT_CNS_VAL
 
+inline const StringData* Type::eclVal() const {
+  assertx(hasConstVal(TEnumClassLabel));
+  return m_strVal;
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 // Specialized type creation.
-
-inline Type Type::Array(ArrayData::ArrayKind kind) {
-  assertx(kind != ArrayData::kVecKind &&
-          kind != ArrayData::kDictKind &&
-          kind != ArrayData::kKeysetKind);
-  return Type(TArr, ArraySpec(kind));
-}
-
-inline Type Type::Array(const RepoAuthType::Array* rat) {
-  return Type(TArr, ArraySpec(rat));
-}
-
-inline Type Type::Array(ArrayData::ArrayKind kind,
-                        const RepoAuthType::Array* rat) {
-  assertx(kind != ArrayData::kVecKind &&
-          kind != ArrayData::kDictKind &&
-          kind != ArrayData::kKeysetKind);
-  return Type(TArr, ArraySpec(kind, rat));
-}
 
 inline Type Type::Vec(const RepoAuthType::Array* rat) {
   return Type(TVec, ArraySpec(rat));
@@ -419,25 +424,6 @@ inline Type Type::Dict(const RepoAuthType::Array* rat) {
 
 inline Type Type::Keyset(const RepoAuthType::Array* rat) {
   return Type(TKeyset, ArraySpec(rat));
-}
-
-inline Type Type::StaticArray(ArrayData::ArrayKind kind) {
-  assertx(kind != ArrayData::kVecKind &&
-          kind != ArrayData::kDictKind &&
-          kind != ArrayData::kKeysetKind);
-  return Type(TStaticArr, ArraySpec(kind));
-}
-
-inline Type Type::StaticArray(const RepoAuthType::Array* rat) {
-  return Type(TStaticArr, ArraySpec(rat));
-}
-
-inline Type Type::StaticArray(ArrayData::ArrayKind kind,
-                              const RepoAuthType::Array* rat) {
-  assertx(kind != ArrayData::kVecKind &&
-          kind != ArrayData::kDictKind &&
-          kind != ArrayData::kKeysetKind);
-  return Type(TStaticArr, ArraySpec(kind, rat));
 }
 
 inline Type Type::StaticVec(const RepoAuthType::Array* rat) {
@@ -452,8 +438,20 @@ inline Type Type::StaticKeyset(const RepoAuthType::Array* rat) {
   return Type(TStaticKeyset, ArraySpec(rat));
 }
 
+inline Type Type::CountedVec(const RepoAuthType::Array* rat) {
+  return Type(TCountedVec, ArraySpec(rat));
+}
+
+inline Type Type::CountedDict(const RepoAuthType::Array* rat) {
+  return Type(TCountedDict, ArraySpec(rat));
+}
+
+inline Type Type::CountedKeyset(const RepoAuthType::Array* rat) {
+  return Type(TCountedKeyset, ArraySpec(rat));
+}
+
 inline Type Type::SubObj(const Class* cls) {
-  if (cls->attrs() & AttrNoOverride) return ExactObj(cls);
+  if (cls->attrs() & AttrNoOverrideRegular) return ExactObj(cls);
   return Type(TObj, ClassSpec(cls, ClassSpec::SubTag{}));
 }
 
@@ -471,7 +469,7 @@ inline Type Type::ExactCls(const Class* cls) {
 }
 
 inline Type Type::unspecialize() const {
-  return Type(m_bits, ptrKind(), memKind());
+  return Type(m_bits, ptrLocation());
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -486,9 +484,9 @@ inline bool Type::supports(bits_t bits, SpecKind kind) {
     case SpecKind::None:
       return true;
     case SpecKind::Array:
-      return bits & kArrSpecBits;
+      return (bits & kArrSpecBits) != kBottom;
     case SpecKind::Class:
-      return bits & kClsSpecBits;
+      return (bits & kClsSpecBits) != kBottom;
   }
   not_reached();
 }
@@ -498,30 +496,36 @@ inline bool Type::supports(SpecKind kind) const {
 }
 
 inline ArraySpec Type::arrSpec() const {
-  if (!supports(SpecKind::Array)) return ArraySpec::Bottom;
+  if (!supports(SpecKind::Array)) return ArraySpec::Bottom();
 
-  // Currently, a Type which supports multiple specializations is trivial along
-  // all of them.
-  if (supports(SpecKind::Class)) return ArraySpec::Top;
+  // Currently, a Type which supports multiple specializations is trivial
+  // along all of them.
+  if (supports(SpecKind::Class)) return ArraySpec::Top();
 
+  // For constant pointers, we don't have an array-like val, so return Top.
+  // Else, use the layout of the array val. (We pun array-like types here.)
   if (m_hasConstVal) {
-    return ArraySpec(arrVal()->kind());
+    if (m_bits & kMem) return ArraySpec::Top();
+    return ArraySpec(ArrayLayout::FromArray(m_arrVal));
   }
-  assertx(m_arrSpec != ArraySpec::Bottom);
+
+  assertx(m_arrSpec != ArraySpec::Bottom());
   return m_arrSpec;
 }
 
 inline ClassSpec Type::clsSpec() const {
-  if (!supports(SpecKind::Class)) return ClassSpec::Bottom;
+  if (!supports(SpecKind::Class)) return ClassSpec::Bottom();
 
-  // Currently, a Type which supports multiple specializations is trivial along
-  // all of them.
-  if (supports(SpecKind::Array)) return ClassSpec::Top;
+  // Currently, a Type which supports multiple specializations is trivial
+  // along all of them.
+  if (supports(SpecKind::Array)) return ClassSpec::Top();
 
   if (m_hasConstVal) {
+    if (m_bits & kMem) return ClassSpec::Top();
     return ClassSpec(clsVal(), ClassSpec::ExactTag{});
   }
-  assertx(m_clsSpec != ClassSpec::Bottom);
+
+  assertx(m_clsSpec != ClassSpec::Bottom());
   return m_clsSpec;
 }
 
@@ -532,63 +536,36 @@ inline TypeSpec Type::spec() const {
 ///////////////////////////////////////////////////////////////////////////////
 // Inner types.
 
-inline Type Type::box() const {
-  assertx(*this <= TCell);
-  // Boxing Uninit returns InitNull but that logic doesn't belong here.
-  assertx(!maybe(TUninit) || *this == TCell);
-  return Type(m_bits << kBoxShift, ptrKind(), memKind()).specialize(spec());
-}
-
-inline Type Type::inner() const {
-  assertx(*this <= TBoxedCell);
-  return Type(m_bits >> kBoxShift, ptrKind(), memKind(), m_extra);
-}
-
-inline Type Type::unbox() const {
-  assertx(*this <= TGen);
-  return (*this & TCell) | (*this & TBoxedCell).inner();
-}
-
-inline Type Type::ptr(Ptr kind) const {
-  assertx(*this <= TGen);
-  assertx(kind <= Ptr::Ptr);
-  // Enforce a canonical representation for Bottom.
-  if (m_bits == kBottom) return TBottom;
-  return Type(m_bits, kind, Mem::Ptr).specialize(spec());
-}
-
-inline Type Type::deref() const {
-  assertx(*this <= TMemToGen);
-  if (m_bits == kBottom) return TBottom;
-  auto const extra = isSpecialized() ? m_extra : 0;
-  return Type(m_bits, Ptr::NotPtr, Mem::NotMem, extra);
-}
-
-inline Type Type::derefIfPtr() const {
-  assertx(*this <= (TGen | TMemToGen));
-  return *this <= TMemToGen ? deref() : *this;
-}
-
-inline Type Type::strip() const {
-  return derefIfPtr().unbox();
-}
-
-inline Ptr Type::ptrKind() const {
+inline PtrLocation Type::ptrLocation() const {
   return m_ptr;
 }
 
-inline Mem Type::memKind() const {
-  return m_mem;
+inline Type Type::ptrToLval() const {
+  auto temp = *this;
+  if (temp.m_bits & kPtr) {
+    temp.m_bits &= ~kPtr;
+    temp.m_bits |= kLval;
+  }
+  return temp;
+}
+
+inline Type Type::lvalToPtr() const {
+  auto temp = *this;
+  if (temp.m_bits & kLval) {
+    temp.m_bits &= ~kLval;
+    temp.m_bits |= kPtr;
+  }
+  return temp;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 // Private constructors.
 
-inline Type::Type(bits_t bits, Ptr ptr, Mem mem, uintptr_t extra)
+inline Type::Type(bits_t bits, PtrLocation ptr, bool hasConstVal,
+                  uintptr_t extra)
   : m_bits(bits)
   , m_ptr(ptr)
-  , m_mem(mem)
-  , m_hasConstVal(false)
+  , m_hasConstVal(hasConstVal)
   , m_extra(extra)
 {
   assertx(checkValid());
@@ -597,25 +574,23 @@ inline Type::Type(bits_t bits, Ptr ptr, Mem mem, uintptr_t extra)
 inline Type::Type(Type t, ArraySpec arraySpec)
   : m_bits(t.m_bits)
   , m_ptr(t.m_ptr)
-  , m_mem(t.m_mem)
   , m_hasConstVal(false)
   , m_arrSpec(arraySpec)
 {
   assertx(checkValid());
-  assertx(m_arrSpec != ArraySpec::Bottom);
+  assertx(m_arrSpec != ArraySpec::Bottom());
 }
 
 inline Type::Type(Type t, ClassSpec classSpec)
   : m_bits(t.m_bits)
   , m_ptr(t.m_ptr)
-  , m_mem(t.m_mem)
   , m_hasConstVal(false)
   , m_clsSpec(classSpec)
 {
   assertx(checkValid());
-  assertx(m_clsSpec != ClassSpec::Bottom);
+  assertx(m_clsSpec != ClassSpec::Bottom());
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 
-}}
+}

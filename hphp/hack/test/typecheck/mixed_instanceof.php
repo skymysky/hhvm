@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 /**
  * Copyright (c) 2014, Facebook, Inc.
  * All rights reserved.
@@ -16,7 +16,7 @@ function foo(): mixed {
 function test(bool $statement): bool {
   if(!$statement) {
     $y = foo();
-    assert($y instanceof Exception);
+    invariant($y is Exception, "");
     throw $y;
   }
   return $statement;

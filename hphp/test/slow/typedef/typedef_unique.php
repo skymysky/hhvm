@@ -5,4 +5,5 @@ class Foo {
 
 type Foo = Foo;
 
-function main() {}
+function main() :mixed{}
+

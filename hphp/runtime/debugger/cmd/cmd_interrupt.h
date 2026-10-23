@@ -14,8 +14,7 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_EVAL_DEBUGGER_CMD_INTERRUPT_H_
-#define incl_HPHP_EVAL_DEBUGGER_CMD_INTERRUPT_H_
+#pragma once
 
 #include <vector>
 
@@ -23,7 +22,7 @@
 #include "hphp/runtime/debugger/debugger_command.h"
 #include "hphp/util/process.h"
 
-namespace HPHP { namespace Eval {
+namespace HPHP::Eval {
 ///////////////////////////////////////////////////////////////////////////////
 
 struct CmdInterrupt : DebuggerCommand {
@@ -66,6 +65,8 @@ struct CmdInterrupt : DebuggerCommand {
     return m_site;
   }
 
+  std::string name() const override { return "interrupt"; }
+
 protected:
   void sendImpl(DebuggerThriftBuffer&) override;
   void recvImpl(DebuggerThriftBuffer&) override;
@@ -81,6 +82,5 @@ private:
 };
 
 ///////////////////////////////////////////////////////////////////////////////
-}}
+}
 
-#endif // incl_HPHP_EVAL_DEBUGGER_CMD_INTERRUPT_H_

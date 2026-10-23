@@ -1,26 +1,13 @@
-<?php
+<?hh
 
-$f = function() {
-  echo "in \$f\n";
-};
-$g = function($a = 'default') {
-  echo "in \$g; passed $a\n";
-};
-
-/** This doc comment is so helpful and descriptive. */
-$add = function($x, $y) {
-  $sum = $x + $y;
-  echo 'x + y = ' . $sum . "\n";
-};
-
-function show_params($params) {
+function show_params($params) :mixed{
   echo 'parameters => array(' . count($params) . ") {\n";
   foreach ($params as $p) {
     echo "  name => {$p->getName()}\n";
   }
   echo "}\n";
 }
-function show($rf) {
+function show($rf) :mixed{
   var_dump($rf->getName());
   var_dump($rf->isUserDefined());
   var_dump($rf->getStartLine());
@@ -31,27 +18,43 @@ function show($rf) {
   var_dump($rf->getNumberOfParameters());
   var_dump($rf->getNumberOfRequiredParameters());
 }
+<<__EntryPoint>>
+function entrypoint_1352(): void {
 
-$rf = new ReflectionFunction($f);
-$rg = new ReflectionFunction($g);
-$radd = new ReflectionFunction($add);
+  $f = function() {
+    echo "in \$f\n";
+  };
+  $g = function($a = 'default') {
+    echo "in \$g; passed $a\n";
+  };
 
-echo "invoking f\n";
-$rf->invoke();
+  /** This doc comment is so helpful and descriptive. */
+  $add = function($x, $y) {
+    $sum = $x + $y;
+    echo 'x + y = ' . $sum . "\n";
+  };
 
-echo "\ninvoking g\n";
-$rg->invoke('hello');
-$rg->invokeArgs(array('goodbye'));
+  $rf = new ReflectionFunction($f);
+  $rg = new ReflectionFunction($g);
+  $radd = new ReflectionFunction($add);
 
-echo "\ninvoking add\n";
-$radd->invoke(1, 2);
-$radd->invokeArgs(array(5000000000, 5000000000));
+  echo "invoking f\n";
+  $rf->invoke();
 
-echo "\nshowing f\n";
-show($rf);
+  echo "\ninvoking g\n";
+  $rg->invoke('hello');
+  $rg->invokeArgs(vec['goodbye']);
 
-echo "\nshowing g\n";
-show($rg);
+  echo "\ninvoking add\n";
+  $radd->invoke(1, 2);
+  $radd->invokeArgs(vec[5000000000, 5000000000]);
 
-echo "\nshowing add\n";
-show($radd);
+  echo "\nshowing f\n";
+  show($rf);
+
+  echo "\nshowing g\n";
+  show($rg);
+
+  echo "\nshowing add\n";
+  show($radd);
+}

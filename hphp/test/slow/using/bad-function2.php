@@ -1,7 +1,8 @@
 <?hh
 
-function main($x) {
+function main($x) :mixed{
   if ($x) {
     using $y;
   }
 }
+

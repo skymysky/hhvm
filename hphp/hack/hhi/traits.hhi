@@ -1,4 +1,4 @@
-<?hh // decl
+<?hh
 /**
  * Copyright (c) 2014, Facebook, Inc.
  * All rights reserved.
@@ -15,47 +15,35 @@
  */
 
 trait StrictIterable<+Tv> implements Iterable<Tv> {
-
-  /* HH_IGNORE_ERROR[2082] T30260145 */
-  public function toArray(): array;
-
-  public function toValuesArray(): varray;
-
-  /* HH_FIXME[4120]: While this violates our variance annotations, we are
-   * returning a copy of the underlying collection, so it is actually safe
-   * See #6853603. */
-  public function toVector(): Vector<Tv>;
+  public function toValuesArray(): varray<Tv>;
 
   public function toImmVector(): ImmVector<Tv>;
 
-  /* HH_FIXME[4120]: While this violates our variance annotations, we are
-   * returning a copy of the underlying collection, so it is actually safe
-   * See #6853603. */
-  public function toSet(): Set<Tv>;
-
-  public function toImmSet(): ImmSet<Tv>;
+  public function toImmSet(): ImmSet<Tv> where Tv as arraykey;
 
   public function lazy(): Iterable<Tv>;
 
   public function values(): Iterable<Tv>;
 
-  public function map<Tu>((function(Tv): Tu) $callback): Iterable<Tu>;
+  public function map<Tu>((function(Tv)[_]: Tu) $fn)[ctx $fn]: Iterable<Tu>;
 
-  public function filter((function(Tv): bool) $callback): Iterable<Tv>;
+  public function filter((function(Tv)[_]: bool) $fn)[ctx $fn]: Iterable<Tv>;
 
-  public function zip<Tu>(Traversable<Tu> $traversable): Iterable<Pair<Tv,Tu>>;
+  public function zip<Tu>(Traversable<Tu> $traversable): Iterable<Pair<Tv, Tu>>;
 
   public function take(int $n): Iterable<Tv>;
 
-  public function takeWhile((function(Tv): bool) $n): Iterable<Tv>;
+  public function takeWhile((function(Tv)[_]: bool) $fn)[ctx $fn]: Iterable<Tv>;
 
   public function skip(int $n): Iterable<Tv>;
 
-  public function skipWhile((function(Tv): bool) $n): Iterable<Tv>;
+  public function skipWhile((function(Tv)[_]: bool) $fn)[ctx $fn]: Iterable<Tv>;
 
   public function slice(int $start, int $len): Iterable<Tv>;
 
-  public function concat<Tu super Tv>(Traversable<Tu> $traversable): Iterable<Tu>;
+  public function concat<Tu super Tv>(
+    Traversable<Tu> $traversable,
+  ): Iterable<Tu>;
 
   public function firstValue(): ?Tv;
 
@@ -63,69 +51,60 @@ trait StrictIterable<+Tv> implements Iterable<Tv> {
 
 }
 
+trait StrictKeyedIterable<Tk, +Tv> implements KeyedIterable<Tk, Tv> {
+  public function toValuesArray(): varray<Tv>;
 
-trait StrictKeyedIterable<Tk,+Tv> implements KeyedIterable<Tk,Tv> {
-  /* HH_IGNORE_ERROR[2082] T30260145 */
-  public function toArray(): array;
-
-  public function toValuesArray(): varray;
-
-  public function toKeysArray(): varray;
-
-  /* HH_FIXME[4120]: While this violates our variance annotations, we are
-   * returning a copy of the underlying collection, so it is actually safe
-   * See #6853603. */
-  public function toVector(): Vector<Tv>;
+  public function toKeysArray(): varray<Tk>;
 
   public function toImmVector(): ImmVector<Tv>;
 
-  /* HH_FIXME[4120]: While this violates our variance annotations, we are
-   * returning a copy of the underlying collection, so it is actually safe
-   * See #6853603. */
-  public function toMap(): Map<Tk, Tv>;
+  public function toImmMap(): ImmMap<Tk, Tv> where Tk as arraykey;
 
-  public function toImmMap(): ImmMap<Tk, Tv>;
+  public function toImmSet(): ImmSet<Tv> where Tv as arraykey;
 
-  /* HH_FIXME[4120]: While this violates our variance annotations, we are
-   * returning a copy of the underlying collection, so it is actually safe
-   * See #6853603. */
-  public function toSet(): Set<Tv>;
-
-  public function toImmSet(): ImmSet<Tv>;
-
-  public function lazy(): KeyedIterable<Tk,Tv>;
+  public function lazy(): KeyedIterable<Tk, Tv>;
 
   public function values(): Iterable<Tv>;
 
   public function keys(): Iterable<Tk>;
 
-  public function map<Tu>((function(Tv): Tu) $callback): KeyedIterable<Tk,Tu>;
+  public function map<Tu>(
+    (function(Tv)[_]: Tu) $fn,
+  )[ctx $fn]: KeyedIterable<Tk, Tu>;
 
   public function mapWithKey<Tu>(
-    (function(Tk,Tv): Tu) $callback
-  ): KeyedIterable<Tk,Tu>;
+    (function(Tk, Tv)[_]: Tu) $fn,
+  )[ctx $fn]: KeyedIterable<Tk, Tu>;
 
-  public function filter((function(Tv): bool) $callback): KeyedIterable<Tk,Tv>;
+  public function filter(
+    (function(Tv)[_]: bool) $fn,
+  )[ctx $fn]: KeyedIterable<Tk, Tv>;
 
   public function filterWithKey(
-    (function(Tk,Tv): bool) $callback
-  ): KeyedIterable<Tk,Tv>;
+    (function(Tk, Tv)[_]: bool) $fn,
+  )[ctx $fn]: KeyedIterable<Tk, Tv>;
 
   public function zip<Tu>(
-    Traversable<Tu> $traversable
-  ): KeyedIterable<Tk,Pair<Tv,Tu>>;
+    Traversable<Tu> $traversable,
+  ): KeyedIterable<Tk, Pair<Tv, Tu>>;
 
   public function take(int $n): KeyedIterable<Tk, Tv>;
 
-  public function takeWhile((function(Tv): bool) $n): KeyedIterable<Tk, Tv>;
+  public function takeWhile(
+    (function(Tv)[_]: bool) $fn,
+  )[ctx $fn]: KeyedIterable<Tk, Tv>;
 
   public function skip(int $n): KeyedIterable<Tk, Tv>;
 
-  public function skipWhile((function(Tv): bool) $n): KeyedIterable<Tk, Tv>;
+  public function skipWhile(
+    (function(Tv)[_]: bool) $fn,
+  )[ctx $fn]: KeyedIterable<Tk, Tv>;
 
   public function slice(int $start, int $len): KeyedIterable<Tk, Tv>;
 
-  public function concat<Tu super Tv>(Traversable<Tu> $traversable): Iterable<Tu>;
+  public function concat<Tu super Tv>(
+    Traversable<Tu> $traversable,
+  ): Iterable<Tu>;
 
   public function firstValue(): ?Tv;
 
@@ -137,48 +116,38 @@ trait StrictKeyedIterable<Tk,+Tv> implements KeyedIterable<Tk,Tv> {
 
 }
 
-
 trait LazyIterable<+Tv> implements Iterable<Tv> {
-  /* HH_IGNORE_ERROR[2082] T30260145 */
-  public function toArray(): array;
-
-  public function toValuesArray(): varray;
-
-  /* HH_FIXME[4120]: While this violates our variance annotations, we are
-   * returning a copy of the underlying collection, so it is actually safe
-   * See #6853603. */
-  public function toVector(): Vector<Tv>;
+  public function toValuesArray(): varray<Tv>;
 
   public function toImmVector(): ImmVector<Tv>;
 
-  /* HH_FIXME[4120]: While this violates our variance annotations, we are
-   * returning a copy of the underlying collection, so it is actually safe
-   * See #6853603. */
-  public function toSet(): Set<Tv>;
-
-  public function toImmSet(): ImmSet<Tv>;
+  public function toImmSet(): ImmSet<Tv> where Tv as arraykey;
 
   public function lazy(): Iterable<Tv>;
 
   public function values(): Iterable<Tv>;
 
-  public function map<Tu>((function(Tv): Tu) $callback): Iterable<Tu>;
+  public function map<Tu>((function(Tv)[_]: Tu) $fn)[ctx $fn]: Iterable<Tu>;
 
-  public function filter((function(Tv): bool) $callback): Iterable<Tv>;
+  public function filter((function(Tv)[_]: bool) $fn)[ctx $fn]: Iterable<Tv>;
 
-  public function zip<Tu>(Traversable<Tu> $traversable): Iterable<Pair<Tv,Tu>>;
+  public function zip<Tu>(
+    Traversable<Tu> $traversable,
+  )[]: Iterable<Pair<Tv, Tu>>;
 
   public function take(int $n): Iterable<Tv>;
 
-  public function takeWhile((function(Tv): bool) $n): Iterable<Tv>;
+  public function takeWhile((function(Tv)[_]: bool) $fn)[ctx $fn]: Iterable<Tv>;
 
   public function skip(int $n): Iterable<Tv>;
 
-  public function skipWhile((function(Tv): bool) $n): Iterable<Tv>;
+  public function skipWhile((function(Tv)[_]: bool) $fn)[ctx $fn]: Iterable<Tv>;
 
   public function slice(int $start, int $len): Iterable<Tv>;
 
-  public function concat<Tu super Tv>(Traversable<Tu> $traversable): Iterable<Tu>;
+  public function concat<Tu super Tv>(
+    Traversable<Tu> $traversable,
+  ): Iterable<Tu>;
 
   public function firstValue(): ?Tv;
 
@@ -186,69 +155,60 @@ trait LazyIterable<+Tv> implements Iterable<Tv> {
 
 }
 
+trait LazyKeyedIterable<Tk, +Tv> implements KeyedIterable<Tk, Tv> {
+  public function toValuesArray(): varray<Tv>;
 
-trait LazyKeyedIterable<Tk,+Tv> implements KeyedIterable<Tk,Tv> {
-  /* HH_IGNORE_ERROR[2082] T30260145 */
-  public function toArray(): array;
-
-  public function toValuesArray(): varray;
-
-  public function toKeysArray(): varray;
-
-  /* HH_FIXME[4120]: While this violates our variance annotations, we are
-   * returning a copy of the underlying collection, so it is actually safe
-   * See #6853603. */
-  public function toVector(): Vector<Tv>;
+  public function toKeysArray(): varray<Tk>;
 
   public function toImmVector(): ImmVector<Tv>;
 
-  /* HH_FIXME[4120]: While this violates our variance annotations, we are
-   * returning a copy of the underlying collection, so it is actually safe
-   * See #6853603. */
-  public function toMap(): Map<Tk, Tv>;
+  public function toImmMap(): ImmMap<Tk, Tv> where Tk as arraykey;
 
-  public function toImmMap(): ImmMap<Tk, Tv>;
+  public function toImmSet(): ImmSet<Tv> where Tv as arraykey;
 
-  /* HH_FIXME[4120]: While this violates our variance annotations, we are
-   * returning a copy of the underlying collection, so it is actually safe
-   * See #6853603. */
-  public function toSet(): Set<Tv>;
-
-  public function toImmSet(): ImmSet<Tv>;
-
-  public function lazy(): KeyedIterable<Tk,Tv>;
+  public function lazy(): KeyedIterable<Tk, Tv>;
 
   public function values(): Iterable<Tv>;
 
   public function keys(): Iterable<Tk>;
 
-  public function map<Tu>((function(Tv): Tu) $callback): KeyedIterable<Tk,Tu>;
+  public function map<Tu>(
+    (function(Tv)[_]: Tu) $fn,
+  )[ctx $fn]: KeyedIterable<Tk, Tu>;
 
   public function mapWithKey<Tu>(
-    (function(Tk,Tv): Tu) $callback
-  ): KeyedIterable<Tk,Tu>;
+    (function(Tk, Tv)[_]: Tu) $fn,
+  )[ctx $fn]: KeyedIterable<Tk, Tu>;
 
-  public function filter((function(Tv): bool) $callback): KeyedIterable<Tk,Tv>;
+  public function filter(
+    (function(Tv)[_]: bool) $fn,
+  )[ctx $fn]: KeyedIterable<Tk, Tv>;
 
   public function filterWithKey(
-    (function(Tk,Tv): bool) $callback
-  ): KeyedIterable<Tk,Tv>;
+    (function(Tk, Tv)[_]: bool) $fn,
+  )[ctx $fn]: KeyedIterable<Tk, Tv>;
 
   public function zip<Tu>(
-    Traversable<Tu> $traversable
-  ): KeyedIterable<Tk,Pair<Tv,Tu>>;
+    Traversable<Tu> $traversable,
+  ): KeyedIterable<Tk, Pair<Tv, Tu>>;
 
   public function take(int $n): KeyedIterable<Tk, Tv>;
 
-  public function takeWhile((function(Tv): bool) $n): KeyedIterable<Tk, Tv>;
+  public function takeWhile(
+    (function(Tv)[_]: bool) $fn,
+  )[ctx $fn]: KeyedIterable<Tk, Tv>;
 
   public function skip(int $n): KeyedIterable<Tk, Tv>;
 
-  public function skipWhile((function(Tv): bool) $n): KeyedIterable<Tk, Tv>;
+  public function skipWhile(
+    (function(Tv)[_]: bool) $fn,
+  )[ctx $fn]: KeyedIterable<Tk, Tv>;
 
   public function slice(int $start, int $len): KeyedIterable<Tk, Tv>;
 
-  public function concat<Tu super Tv>(Traversable<Tu> $traversable): Iterable<Tv>;
+  public function concat<Tu super Tv>(
+    Traversable<Tu> $traversable,
+  ): Iterable<Tu>;
 
   public function firstValue(): ?Tv;
 

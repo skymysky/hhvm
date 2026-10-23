@@ -1,0 +1,80 @@
+error: Typing[4323] Some type arguments violate their constraints [1]
+-> Expected `dynamic` [2]
+-> Type `D` is not a subtype of `dynamic` under dynamic-aware subtyping [3]
+
+generic_constraint_dynamic.bad.php:19:12
+ 3 | 
+ 4 | <<__SupportDynamicType>>
+ 5 | class C<<<__RequireDynamic>>T as supportdyn<mixed>> {
+   |                                  ^^^^^^^^^^^^^^^^^ [2]
+ 6 |   public function __construct(private T $item) { }
+ 7 |   public function get():T {
+   :
+17 | 
+18 | function testit():void {
+19 |   $x = new C<D>(new D());
+   |            ^ [1]
+   |              ^ [3]
+20 |   $y = make<D>(new D());
+21 |   $a = new C(new D());
+
+error: Typing[4323] Some type arguments violate their constraints [1]
+-> Expected `dynamic` [2]
+-> Type `D` is not a subtype of `dynamic` under dynamic-aware subtyping [3]
+
+generic_constraint_dynamic.bad.php:20:8
+10 | }
+11 | 
+12 | function make<<<__RequireDynamic>>T as supportdyn<mixed>>(T $x): C<T> {
+   |                                        ^^^^^^^^^^^^^^^^^ [2]
+13 |   return new C<T>($x);
+14 | }
+   :
+18 | function testit():void {
+19 |   $x = new C<D>(new D());
+20 |   $y = make<D>(new D());
+   |        ^^^^ [1]
+   |             ^ [3]
+21 |   $a = new C(new D());
+22 |   $b = make(new D());
+
+error: Typing[4110] Invalid argument [1]
+-> Expected `dynamic` [2]
+-> Type `D` is not a subtype of `dynamic` under dynamic-aware subtyping [3]
+
+generic_constraint_dynamic.bad.php:21:14
+ 3 | 
+ 4 | <<__SupportDynamicType>>
+ 5 | class C<<<__RequireDynamic>>T as supportdyn<mixed>> {
+   |                                  ^^^^^^^^^^^^^^^^^ [2]
+ 6 |   public function __construct(private T $item) { }
+ 7 |   public function get():T {
+   :
+19 |   $x = new C<D>(new D());
+20 |   $y = make<D>(new D());
+21 |   $a = new C(new D());
+   |              ^^^^^^^ [1]
+   |                  ^ [3]
+22 |   $b = make(new D());
+23 | }
+
+error: Typing[4110] Invalid argument [1]
+-> Expected `dynamic` [2]
+-> Type `D` is not a subtype of `dynamic` under dynamic-aware subtyping [3]
+
+generic_constraint_dynamic.bad.php:22:13
+10 | }
+11 | 
+12 | function make<<<__RequireDynamic>>T as supportdyn<mixed>>(T $x): C<T> {
+   |                                        ^^^^^^^^^^^^^^^^^ [2]
+13 |   return new C<T>($x);
+14 | }
+   :
+20 |   $y = make<D>(new D());
+21 |   $a = new C(new D());
+22 |   $b = make(new D());
+   |             ^^^^^^^ [1]
+   |                 ^ [3]
+23 | }
+
+4 errors found

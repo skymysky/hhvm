@@ -14,10 +14,9 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_VM_CHECK_H_
-#define incl_HPHP_VM_CHECK_H_
+#pragma once
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 ///////////////////////////////////////////////////////////////////////////////
 
 struct IRInstruction;
@@ -31,15 +30,6 @@ struct RegAllocInfo;
 bool checkCfg(const IRUnit&);
 
 /*
- * We can't have SSATmps spanning php-level calls, except for frame pointers
- * and constant values.
- *
- * We have no callee-saved registers in php, and there'd be nowhere to spill
- * these because all translations share the spill space.
- */
-bool checkTmpsSpanningCalls(const IRUnit&);
-
-/*
  * Check that an instruction has operands of allowed types.
  */
 bool checkOperandTypes(const IRInstruction*, const IRUnit* unit = nullptr);
@@ -50,6 +40,4 @@ bool checkOperandTypes(const IRInstruction*, const IRUnit* unit = nullptr);
 bool checkEverything(const IRUnit&);
 
 ///////////////////////////////////////////////////////////////////////////////
-}}
-
-#endif
+}

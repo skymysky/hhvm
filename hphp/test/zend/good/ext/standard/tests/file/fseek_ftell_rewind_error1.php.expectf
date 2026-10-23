@@ -1,44 +1,13 @@
 *** Testing fseek() : error conditions ***
 -- Testing fseek() with zero argument --
 
-Warning: %s
-bool(false)
+Warning: fseek() expects at least 2 positional parameters, 0 given in %s/test/zend/good/ext/standard/tests/file/fseek_ftell_rewind_error1.php on line 16
 -- Testing fseek() with unexpected number of arguments --
 
-Warning: %s
-bool(false)
+Warning: fseek() expects at least 2 positional parameters, 1 given in %s/test/zend/good/ext/standard/tests/file/fseek_ftell_rewind_error1.php on line 21
 
-Warning: %s
-bool(false)
--- Testing fseek() with invalid arguments --
--- Iteration 1 --
-
-Warning: %s
-bool(false)
--- Iteration 2 --
-
-Warning: %s
-bool(false)
--- Iteration 3 --
-
-Warning: %s
-bool(false)
--- Iteration 4 --
-
-Warning: %s
-bool(false)
--- Iteration 5 --
-
-Warning: %s
-bool(false)
--- Iteration 6 --
-
-Warning: %s
-bool(false)
--- Testing fseek() with closed/unset file handle --
-Warning: %s
-bool(false)
-
-Warning: %s
+Warning: fseek() expects at most 3 positional parameters, 4 given in %s/test/zend/good/ext/standard/tests/file/fseek_ftell_rewind_error1.php on line 22
+-- Testing fseek() with closed file handle --
+Warning: Not a valid stream resource in %s/test/zend/good/ext/standard/tests/file/fseek_ftell_rewind_error1.php on line 27
 bool(false)
 Done

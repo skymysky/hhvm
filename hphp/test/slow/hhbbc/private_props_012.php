@@ -1,22 +1,30 @@
 <?hh
 
 class X {
-  private $x    = array();
+  private $x    = vec[null];
   private $prop = "string";
 
-  public function foo() {
-    $this->x[]->prop = 12;
+  public function foo() :mixed{
+    try {
+      $this->x[0]->prop = 12;
+    } catch (Exception $e) {
+      return $e->getMessage();
+    }
   }
-  public function bar() {
+  public function bar() :mixed{
     return $this->prop;
   }
-};
-
-function main() {
+}
+function main() :mixed{
   $x = new X;
   var_dump($x->foo());
   var_dump($x->bar());
 }
 
-main();
 
+<<__EntryPoint>>
+function main_private_props_012() :mixed{
+;
+
+main();
+}

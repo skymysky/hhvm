@@ -2,20 +2,22 @@
 // Copyright 2004-2015 Facebook. All Rights Reserved.
 
 class C {
-  public $x;
-  public function __construct($val) {
+  public int $x;
+  public function __construct(int $val) {
     $this->x = $val;
   }
-  public function getX() {
+  public function getX(): int{
     return $this->x;
   }
-  public function incX() {
-    return $this->x++;
+  public function incX(): int{
+    $__lval_tmp_0 = $this->x;
+    $this->x++;
+    return $__lval_tmp_0;
   }
 }
 
 
-function foo($o){
+function foo(C $o):void{
   echo $o->getX();
   echo "\n";
   echo $o->incX();
@@ -23,7 +25,7 @@ function foo($o){
   echo $o->getX();
   echo "\n";
 }
-
+<<__EntryPoint>> function main(): void {
 $c = new C(2); // change to 4.0
 foo($c);
-
+}

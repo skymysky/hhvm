@@ -13,32 +13,33 @@
    | license@php.net so we can mail you a copy immediately.               |
    +----------------------------------------------------------------------+
 */
-#ifndef incl_HPHP_HHIR_OPT_H_
-#define incl_HPHP_HHIR_OPT_H_
+#pragma once
 
+#include "hphp/runtime/vm/jit/id-set.h"
+#include "hphp/runtime/vm/jit/ssa-tmp.h"
 #include "hphp/runtime/vm/jit/types.h"
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 
 //////////////////////////////////////////////////////////////////////
 
 struct IRUnit;
-struct IRInstruction;
 
 //////////////////////////////////////////////////////////////////////
 
 /*
  * The main optimization passes.
  */
-void optimizeInlineReturns(IRUnit&);
 void optimizeRefcounts(IRUnit&);
-void optimizePredictions(IRUnit&);
-void gvn(IRUnit&);
+void selectiveWeakenDecRefs(IRUnit&);
+bool gvn(IRUnit&);
 void optimizeLoads(IRUnit&);
 void optimizeStores(IRUnit&);
-void optimizeLoopInvariantCode(IRUnit&);
+void optimizeVanillaChecks(IRUnit&);
 void cleanCfg(IRUnit&);
 bool optimizePhis(IRUnit&);
+bool optimizeCheckTypes(IRUnit&);
+void sinkDefs(IRUnit&);
 
 /*
  * For debugging, we can run this pass, which inserts various sanity checking
@@ -53,6 +54,4 @@ void optimize(IRUnit& unit, TransKind kind);
 
 //////////////////////////////////////////////////////////////////////
 
-}}
-
-#endif
+}

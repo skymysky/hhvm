@@ -1,24 +1,24 @@
 <?hh
 
 class one {
-  public function lol() {}
+  public function lol() :mixed{}
 
-  public function doit($o) {
+  public function doit($o) :mixed{
     $o->heh();
   }
 
-  private function heh() {
+  private function heh() :mixed{
     echo "one\n";
   }
 }
 
 class two extends one {
-  private function heh() {
+  private function heh() :mixed{
     echo "two\n";
   }
 }
 
-function main() {
+<<__EntryPoint>> function main(): void {
   $one = new one;
   $two = new two;
   $one->doit($two);
@@ -26,4 +26,3 @@ function main() {
   $one->doit($one);
   $one->doit($two);
 }
-main();

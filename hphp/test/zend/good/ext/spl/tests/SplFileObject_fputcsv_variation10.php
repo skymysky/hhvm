@@ -1,7 +1,7 @@
-<?php
+<?hh
 
 /* Testing fputcsv() to write to a file when the field has no CSV format */
-
+<<__EntryPoint>> function main(): void {
 echo "*** Testing fputcsv() : with no CSV format in the field ***\n";
 
 /* the array is with three elements in it. Each element should be read as 
@@ -9,18 +9,17 @@ echo "*** Testing fputcsv() : with no CSV format in the field ***\n";
    and 3rd element is csv fields
 */
 
-$fields = array( array('water_fruit\n'),
-                array("water_fruit\n"),
-                array("")
-         );
+$fields = vec[ vec['water_fruit\n'],
+                vec["water_fruit\n"],
+                vec[""]
+         ];
 
-$file_path = dirname(__FILE__);
-$file = "$file_path/fputcsv_variation10.tmp";
+$file = sys_get_temp_dir().'/'.'fputcsv_variation10.tmp';
 
-$file_modes = array ("r+", "r+b", "r+t",
+$file_modes = vec["r+", "r+b", "r+t",
                      "a+", "a+b", "a+t",
                      "w+", "w+b", "w+t",
-                     "x+", "x+b", "x+t"); 
+                     "x+", "x+b", "x+t"]; 
 
 $loop_counter = 1;
 foreach ($fields as $field) {
@@ -42,7 +41,7 @@ foreach ($fields as $field) {
     var_dump( $fo->ftell() );
     var_dump( $fo->eof() );
     //close the file
-    unset($fo);
+    $fo = null;
     
     // print the file contents 
     var_dump( file_get_contents($file) );
@@ -53,4 +52,4 @@ foreach ($fields as $field) {
 } // end of foreach
 
 echo "Done\n";
-?>
+}

@@ -1,16 +1,15 @@
-#ifndef incl_HPHP_ICU_TRANSLITERATOR_H
-#define incl_HPHP_ICU_TRANSLITERATOR_H
+#pragma once
 
 #include "hphp/runtime/ext/extension.h"
 #include "hphp/runtime/ext/icu/icu.h"
 
 #include <unicode/translit.h>
 
-namespace HPHP { namespace Intl {
+namespace HPHP::Intl {
 /////////////////////////////////////////////////////////////////////////////
 extern const StaticString s_Transliterator;
 
-struct Transliterator : IntlError {
+struct Transliterator : IntlError, SystemLib::ClassLoader<"Transliterator"> {
   Transliterator() {}
   Transliterator(const Transliterator&) = delete;
   Transliterator& operator=(const Transliterator& src) {
@@ -26,15 +25,11 @@ struct Transliterator : IntlError {
   }
 
   static Transliterator* Get(ObjectData* obj) {
-    return GetData<Transliterator>(obj, s_Transliterator);
+    return GetData<Transliterator>(obj, className());
   }
 
   static Object newInstance(icu::Transliterator* trans) {
-    if (!c_Transliterator) {
-      c_Transliterator = Unit::lookupClass(s_Transliterator.get());
-      assertx(c_Transliterator);
-    }
-    Object obj{c_Transliterator};
+    Object obj{ classof() };
     auto data = Native::data<Transliterator>(obj);
     data->setTransliterator(trans);
     return obj;
@@ -50,11 +45,8 @@ struct Transliterator : IntlError {
 
 private:
   icu::Transliterator* m_trans{nullptr};
-
-  static Class* c_Transliterator;
 };
 
 /////////////////////////////////////////////////////////////////////////////
-}} // namespace HPHP::Intl
+} // namespace HPHP::Intl
 
-#endif // incl_HPHP_ICU_TRANSLITERATOR_H

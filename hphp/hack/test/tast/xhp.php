@@ -1,6 +1,6 @@
-<?hh // strict
+<?hh
 
-class :foo implements XHPChild {
+class :foo extends XHPTest implements XHPChild {
   attribute enum {'herp', 'derp'} bar;
 }
 

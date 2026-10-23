@@ -1,0 +1,11 @@
+error: Typing[4195] Invalid `as` expression hint [1]
+-> The `as` operator cannot be used with the `nothing` type [1]
+
+invalid_as_nothing.php:5:9
+3 | 
+4 | function test(mixed $x): void {
+5 |   $x as nothing;
+  |         ^^^^^^^ [1]
+6 | }
+
+1 error found

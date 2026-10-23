@@ -1,23 +1,23 @@
-<?php
-
-foreach(array(array(1,2), array(3,4)) as list($a, $b)) {
+<?hh
+<<__EntryPoint>> function main(): void {
+foreach(vec[vec[1,2], vec[3,4]] as list($a, $b)) {
     var_dump($a . $b);
 }
 
-$array = array(
-    array('a', 'b'),
-    array('c', 'd'),
-);
+$array = vec[
+    vec['a', 'b'],
+    vec['c', 'd'],
+];
 
 foreach ($array as list($a, $b)) {
     var_dump($a . $b);
 }
 
 
-$multi = array(
-    array(array(1,2), array(3,4)),
-    array(array(5,6), array(7,8)),
-);
+$multi = vec[
+    vec[vec[1,2], vec[3,4]],
+    vec[vec[5,6], vec[7,8]],
+];
 
 foreach ($multi as list(list($a, $b), list($c, $d))) {
     var_dump($a . $b . $c . $d);
@@ -26,6 +26,4 @@ foreach ($multi as list(list($a, $b), list($c, $d))) {
 foreach ($multi as $key => list(list($a, $b), list($c, $d))) {
     var_dump($key . $a . $b . $c . $d);
 }
-
-
-?>
+}

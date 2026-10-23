@@ -1,6 +1,9 @@
-<?php
+<?hh
 
-$vals = array(null, 0, false, array(), 'test');
+
+<<__EntryPoint>>
+function main_1717() :mixed{
+$vals = vec[null, 0, false, vec[], 'test'];
 foreach ($vals as $val) {
   try {
     $val->foo();
@@ -8,4 +11,5 @@ foreach ($vals as $val) {
  catch (BadMethodCallException $e) {
     echo "BadMethodCallException thrown\n";
   }
+}
 }

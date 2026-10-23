@@ -1,0 +1,10 @@
+Autoload {
+  IndexedMethodAttributes {
+    * = NoArgMethodAttr
+    * = TwoArgMethodAttr
+  }
+  IndexedFunctionAttributes {
+    * = NoArgFunctionAttr
+    * = TwoArgFunctionAttr
+  }
+}

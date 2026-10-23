@@ -1,1 +1,2 @@
---parser ffp
+--config const_attribute=true
+--error-format plain_highlighted

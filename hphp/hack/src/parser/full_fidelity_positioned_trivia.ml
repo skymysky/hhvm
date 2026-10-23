@@ -1,4 +1,4 @@
-(**
+(*
  * Copyright (c) 2016, Facebook, Inc.
  * All rights reserved.
  *
@@ -6,6 +6,7 @@
  * LICENSE file in the "hack" directory of this source tree.
  *
  *)
+open Sexplib.Std
 
 (**
  * Positioned trivia
@@ -18,23 +19,17 @@
 
 module TriviaKind = Full_fidelity_trivia_kind
 module SourceText = Full_fidelity_source_text
-module MinimalTrivia = Full_fidelity_minimal_trivia
 
 type t = {
   kind: TriviaKind.t;
-  source_text : SourceText.t;
-  offset : int;
-  width : int
-} [@@deriving show]
+  source_text: SourceText.t;
+  offset: int;
+  width: int;
+}
+[@@deriving show, eq, sexp_of]
 
 let make_ignore_error source_text offset width =
   { kind = TriviaKind.IgnoreError; source_text; offset; width }
-
-let make_unsafe source_text offset width =
-  { kind = TriviaKind.Unsafe; source_text; offset; width }
-
-let make_unsafe_expression source_text offset width =
-  { kind = TriviaKind.UnsafeExpression; source_text; offset; width }
 
 let make_extra_token_error source_text offset width =
   { kind = TriviaKind.ExtraTokenError; source_text; offset; width }
@@ -44,6 +39,9 @@ let make_fallthrough source_text offset width =
 
 let make_fix_me source_text offset width =
   { kind = TriviaKind.FixMe; source_text; offset; width }
+
+let make_ignore source_text offset width =
+  { kind = TriviaKind.Ignore; source_text; offset; width }
 
 let make_whitespace source_text offset width =
   { kind = TriviaKind.WhiteSpace; source_text; offset; width }
@@ -57,45 +55,32 @@ let make_single_line_comment source_text offset width =
 let make_delimited_comment source_text offset width =
   { kind = TriviaKind.DelimitedComment; source_text; offset; width }
 
-let make_after_halt_compiler source_text offset width =
-  { kind = TriviaKind.AfterHaltCompiler; source_text; offset; width }
+let width trivia = trivia.width
 
-let width trivia =
-  trivia.width
+let kind trivia = trivia.kind
 
-let kind trivia =
-  trivia.kind
+let start_offset trivia = trivia.offset
 
-let start_offset trivia =
-  trivia.offset
+let end_offset trivia = trivia.offset + trivia.width - 1
 
-let end_offset trivia =
-  trivia.offset + trivia.width - 1
-
-let source_text trivia =
-  trivia.source_text
+let source_text trivia = trivia.source_text
 
 let text trivia =
   SourceText.sub (source_text trivia) (start_offset trivia) (width trivia)
 
-let from_minimal source_text minimal_trivia offset =
-  let kind = MinimalTrivia.kind minimal_trivia in
-  let width = MinimalTrivia.width minimal_trivia in
+let from_rust_trivium source_text rust_trivium =
+  let kind = rust_trivium.Rust_lazy_trivia_ffi.RustPositionedTrivium.kind in
+  let width = rust_trivium.Rust_lazy_trivia_ffi.RustPositionedTrivium.width in
+  let offset = rust_trivium.Rust_lazy_trivia_ffi.RustPositionedTrivium.offset in
   { kind; source_text; offset; width }
 
-let from_minimal_list source_text ts offset =
-  let rec aux acc ts offset =
-    match ts with
-    | [] -> acc
-    | h :: t ->
-      let et = from_minimal source_text h offset in
-      aux (et :: acc) t (offset + (MinimalTrivia.width h)) in
-  List.rev (aux [] ts offset)
+let from_rust_trivia source_text = List.map (from_rust_trivium source_text)
 
 let to_json trivia =
-  let open Hh_json in
-  JSON_Object [
-    ("kind", JSON_String (TriviaKind.to_string trivia.kind));
-    ("text", JSON_String (text trivia));
-    ("offset", int_ trivia.offset);
-    ("width", int_ trivia.width); ]
+  `Assoc
+    [
+      ("kind", `String (TriviaKind.to_string trivia.kind));
+      ("text", `String (text trivia));
+      ("offset", `Int trivia.offset);
+      ("width", `Int trivia.width);
+    ]

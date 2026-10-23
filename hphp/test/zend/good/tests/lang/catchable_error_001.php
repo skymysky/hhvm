@@ -1,17 +1,17 @@
-<?php
-	class Foo {
-	}
+<?hh
+class Foo {
+}
 
-	function blah (Foo $a)
-	{
-	}
+function blah (Foo $a)
+:mixed{
+}
 
-	function error()
-	{
-		$a = func_get_args();
-		var_dump($a);
-	}
-
-	blah (new StdClass);
-	echo "ALIVE!\n";
-?>
+function error()
+:mixed{
+    $a = func_get_args();
+    var_dump($a);
+}
+<<__EntryPoint>> function main(): void {
+blah (new stdClass);
+echo "ALIVE!\n";
+}

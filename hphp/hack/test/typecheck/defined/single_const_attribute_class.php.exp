@@ -1,0 +1,17 @@
+error: Other[0000] Cannot use experimental feature: The __Const attribute is not supported. [1]
+
+single_const_attribute_class.php:4:19
+2 | // Copyright 2004-present Facebook. All Rights Reserved.
+3 | 
+4 | <<__Const>> class A {}
+  |                   ^ [1]
+
+error: Parsing[1002] Classes, interfaces, traits and enums may not be declared `__Const` [1]
+
+single_const_attribute_class.php:4:1
+2 | // Copyright 2004-present Facebook. All Rights Reserved.
+3 | 
+4 | <<__Const>> class A {}
+  | ^^^^^^^^^^^^^^^^^^^^^^ [1]
+
+2 errors found

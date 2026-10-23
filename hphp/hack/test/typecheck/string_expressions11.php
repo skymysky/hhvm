@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 /**
  * Copyright (c) 2014, Facebook, Inc.
  * All rights reserved.
@@ -17,5 +17,7 @@ class Meh {
     print "Hello, ${Meh::$six}"; // hphp output: Hello, uh oh
   }
 }
-/* HH_FIXME[1002] */
-Meh::foo();
+
+function main(): void {
+  Meh::foo();
+}

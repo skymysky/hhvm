@@ -13,8 +13,7 @@
    | license@php.net so we can mail you a copy immediately.               |
    +----------------------------------------------------------------------+
 */
-#ifndef incl_HPHP_UTIL_FIXED_VECTOR_H_
-#define incl_HPHP_UTIL_FIXED_VECTOR_H_
+#pragma once
 
 #include <algorithm>
 #include <memory>
@@ -34,22 +33,46 @@ namespace HPHP {
  * Useful when you know the exact size something will take, and don't
  * need more than that many elements.
  */
-template<typename T, typename Allocator = std::allocator<T>>
+template<typename T, typename Alloc = std::allocator<T>>
 struct FixedVector {
-  typedef uint32_t size_type;
-  typedef T value_type;
-  typedef T* iterator;
-  typedef const T* const_iterator;
-  typedef std::reverse_iterator<iterator> reverse_iterator;
-  typedef std::reverse_iterator<const_iterator> const_reverse_iterator;
+  using Allocator =
+    typename std::allocator_traits<Alloc>::template rebind_alloc<T>;
+  using size_type = uint32_t;
+  using value_type = T;
+  using iterator = T*;
+  using const_iterator = const T*;
+  using reverse_iterator = std::reverse_iterator<iterator>;
+  using const_reverse_iterator = std::reverse_iterator<const_iterator>;
 
   /*
    * Default constructor leaves a FixedVector with size() == 0.
    */
   explicit FixedVector() {}
 
-  FixedVector(const FixedVector& fv) = delete;
-  FixedVector& operator=(const FixedVector&) = delete;
+  FixedVector(const FixedVector& fv) {
+    auto const neededSize = fv.size();
+    auto const ptr = neededSize > 0 ?
+      std::allocator_traits<Allocator>::allocate(m_impl, neededSize) :
+      nullptr;
+    size_t i = 0;
+    try {
+      for (; i < neededSize; ++i) {
+        std::allocator_traits<Allocator>::construct(
+          m_impl,
+          &ptr[i],
+          fv[i]
+        );
+      }
+    } catch (...) {
+      for (size_t j = 0; j < i; ++j) {
+        std::allocator_traits<Allocator>::destroy(m_impl, &ptr[j]);
+      }
+      std::allocator_traits<Allocator>::deallocate(m_impl, ptr, neededSize);
+      throw;
+    }
+    assert(i == neededSize);
+    m_impl.m_sp.set(neededSize, ptr);
+  }
 
   /*
    * Create a FixedVector using the supplied std::vector as a starting
@@ -58,12 +81,24 @@ struct FixedVector {
   explicit FixedVector(const std::vector<T>& sourceVec) {
     move(sourceVec);
   }
+  explicit FixedVector(std::vector<T>&& sourceVec) {
+    move(std::move(sourceVec));
+  }
 
-  FixedVector(FixedVector<T>&& fv) {
+  FixedVector(FixedVector&& fv) noexcept {
     swap(fv);
   }
 
+  FixedVector& operator=(FixedVector&& fv) {
+    swap(fv);
+    return *this;
+  }
+
   ~FixedVector() {
+    clear();
+  }
+
+  void clear() {
     T* p = m_impl.m_sp.ptr();
     for (uint32_t i = 0, sz = size(); i < sz; ++i) {
       std::allocator_traits<Allocator>::destroy(m_impl, &p[i]);
@@ -110,9 +145,13 @@ struct FixedVector {
     std::swap(m_impl, fv.m_impl);
   }
 
+  static constexpr size_t implOff() {
+    return offsetof(FixedVector, m_impl);
+  }
+
 private:
   template<class Src>
-  void move(Src& sourceVec) {
+  void move(Src&& sourceVec) {
     auto const neededSize = sourceVec.size();
 
     if (neededSize >> 16) {
@@ -155,5 +194,3 @@ private:
 //////////////////////////////////////////////////////////////////////
 
 }
-
-#endif

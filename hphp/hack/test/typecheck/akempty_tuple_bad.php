@@ -1,8 +1,8 @@
-<?hh // strict
+<?hh
 // Copyright 2004-present Facebook. All Rights Reserved.
 
-function omg(): (?string, array<int>) {
-  $x = array();
+function omg(): (?string, varray<int>) {
+  $x = vec[];
   return $x;
 }
 

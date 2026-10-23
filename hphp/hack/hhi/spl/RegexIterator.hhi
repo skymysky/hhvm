@@ -1,4 +1,4 @@
-<?hh // decl /* -*- mode: php -*- */
+<?hh /* -*- mode: php -*- */
 /**
  * Copyright (c) 2014, Facebook, Inc.
  * All rights reserved.
@@ -11,13 +11,13 @@
 class RegexIterator<Tv> extends FilterIterator<Tv> {
 
   // Constants
-  const MATCH = 0;
-  const GET_MATCH = 1;
-  const ALL_MATCHES = 2;
-  const SPLIT = 3;
-  const REPLACE = 4;
-  const USE_KEY = 1;
-  const INVERT_MATCH = 2;
+  const int MATCH;
+  const int GET_MATCH;
+  const int ALL_MATCHES;
+  const int SPLIT;
+  const int REPLACE;
+  const int USE_KEY;
+  const int INVERT_MATCH;
 
   // Methods
   public function __construct(
@@ -28,7 +28,7 @@ class RegexIterator<Tv> extends FilterIterator<Tv> {
     int $preg_flags = 0,
   );
   public function accept(): bool;
-  public function getRegex();
+  public function getRegex(): HH\FIXME\MISSING_RETURN_TYPE;
   public function getMode(): int;
   public function getFlags(): int;
   public function getPregFlags(): int;

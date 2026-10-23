@@ -21,6 +21,7 @@
 #include "hphp/runtime/base/builtin-functions.h"
 #include "hphp/runtime/base/execution-context.h"
 #include "hphp/runtime/base/program-functions.h"
+#include "hphp/runtime/base/unit-cache.h"
 #include "hphp/runtime/ext/std/ext_std_misc.h"
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -32,19 +33,19 @@ struct TestCppExt : TestCppBase {
   TestCppExt();
 };
 
-inline void evalCodeForCppExt(const String& code_str) {
-  String prefixedCode = concat("<?php ", code_str);
-  Unit* unit = g_context->compileEvalString(prefixedCode.get());
-  tvDecRefGen(g_context->invokeUnit(unit));
+inline void evalCodeForCppExt(const HPHP::OptString& code_str) {
+  HPHP::OptString prefixedCode = concat("<?hh ", code_str);
+  HPHP::Unit* unit = compileEvalString(prefixedCode.get());
+  tvDecRefGen(HPHP::g_context->invokeUnit(unit));
 }
 
 #define DECLARE_TEST_FUNCTIONS(s)                                       \
   char *argv[] = { const_cast<char*>(which.c_str()), nullptr };         \
-  execute_command_line_begin(1, argv, false);                           \
+  execute_command_line_begin(1, argv);                                  \
   evalCodeForCppExt(s);                                                 \
                                                                         \
   SCOPE_EXIT {                                                          \
-    execute_command_line_end(0, false, which.c_str());                  \
+    execute_command_line_end(false, which.c_str());                     \
   }
 
 ///////////////////////////////////////////////////////////////////////////////

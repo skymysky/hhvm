@@ -1,29 +1,26 @@
-<?php
+<?hh
 /* Prototype  : array array_diff_assoc(array $arr1, array $arr2 [, array ...])
- * Description: Returns the entries of arr1 that have values which are not present 
- * in any of the others arguments but do additional checks whether the keys are equal 
- * Source code: ext/standard/array.c 
+ * Description: Returns the entries of arr1 that have values which are not present
+ * in any of the others arguments but do additional checks whether the keys are equal
+ * Source code: ext/standard/array.c
  */
 
 /*
  * pass array_diff_assoc arguments which are not arrays in place of $arr2
  */
 
-echo "\n*** Testing array_diff_assoc() : usage variations ***\n";
-
-$array = array(1, 2, 3);
-
-//get an unset variable
-$unset_var = 10;
-unset ($unset_var);
-
 // get a class
 class classA
 {
-  public function __toString() {
+  public function __toString() :mixed{
     return "Class A object";
   }
 }
+<<__EntryPoint>> function main(): void {
+echo "\n*** Testing array_diff_assoc() : usage variations ***\n";
+
+$array = vec[1, 2, 3];
+
 
 // heredoc string
 $heredoc = <<<EOT
@@ -33,8 +30,8 @@ EOT;
 // get a resource variable
 $fp = fopen(__FILE__, "r");
 
-//array of unexpected values to be passed to $arr1 argument 
-$inputs = array(
+//array of unexpected values to be passed to $arr1 argument
+$inputs = vec[
 
        // int data
 /*1*/  0,
@@ -58,7 +55,7 @@ $inputs = array(
        false,
        TRUE,
        FALSE,
-       
+
        // empty data
 /*16*/ "",
        '',
@@ -67,23 +64,19 @@ $inputs = array(
 /*18*/ "string",
        'string',
        $heredoc,
-       
+
        // binary data
-/*21*/ b"binary",
-	   (binary)"binary",
-	   
+/*21*/ "binary",
+       (string)"binary",
+
        // object data
 /*23*/ new classA(),
 
-       // undefined data
-/*24*/ @$undefined_var,
 
-       // unset data
-/*25*/ @$unset_var,
 
        // resource variable
-/*26*/ $fp,
-);
+/*24*/ $fp,
+];
 
 // loop through each element of $inputs to check the behavior of array_diff_assoc
 $iterator = 1;
@@ -94,5 +87,4 @@ foreach($inputs as $input) {
 };
 fclose($fp);
 echo "Done";
-?>
-
+}

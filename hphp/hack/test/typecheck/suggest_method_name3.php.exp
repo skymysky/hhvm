@@ -1,2 +1,42 @@
-File "suggest_method_name3.php", line 13, characters 36-35:
-Non-abstract method X::myMethod must contain body (Parsing[1002])
+error: Parsing[1002] A method must have a body or be marked `abstract`. [1]
+
+suggest_method_name3.php:13:42
+11 | 
+12 | class X extends Y {
+13 |   public static function myMethod(): void;
+   |                                          ^ [1]
+14 | }
+15 | 
+
+error: Naming[2049] Unbound name: `Y` (an object type) [1]
+
+suggest_method_name3.php:12:17
+10 |  */
+11 | 
+12 | class X extends Y {
+   |                 ^ [1]
+13 |   public static function myMethod(): void;
+14 | }
+
+error: Typing[4053] No instance method `mymethod` in `X` [1]
+-> Did you mean static method `my~~M~~ethod` instead (which only differs by case)? [2]
+-> This is why I think it is an object of type X [3]
+-> Declaration of `X` is here [4]
+
+suggest_method_name3.php:18:7
+10 |  */
+11 | 
+12 | class X extends Y {
+   |       ^ [4]
+13 |   public static function myMethod(): void;
+   |                          ^^^^^^^^ [2]
+14 | }
+15 | 
+16 | function test(): void {
+17 |   $x = new X();
+   |            ^ [3]
+18 |   $x->mymethod();
+   |       ^^^^^^^^ [1]
+19 | }
+
+3 errors found

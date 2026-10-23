@@ -1,14 +1,18 @@
-<?php
+<?hh
 
-function foo() {
+function foo() :mixed{
   return '1';
 }
-function bar() {
+function bar() :mixed{
   $a = 1;
-  $a += foo();
+  $a += HH\Lib\Legacy_FIXME\cast_for_arithmetic(foo());
   var_dump($a);
   $b = 1;
-  $b -= foo();
+  $b -= HH\Lib\Legacy_FIXME\cast_for_arithmetic(foo());
   var_dump($b);
 }
+
+<<__EntryPoint>>
+function main_1434() :mixed{
 bar();
+}

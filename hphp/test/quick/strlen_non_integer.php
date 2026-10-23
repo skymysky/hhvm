@@ -1,34 +1,64 @@
 <?hh
 
-function none() {}
-set_error_handler('none');
+function none() :mixed{}
+
 
 class Foo {
 }
 
-function asdf($pattern) {
+function asdf($pattern) :mixed{
   $len = strlen($pattern);
   $len--;
   echo $len;
   echo "\n";
 }
 
-function main() {
+function main() :mixed{
   $foo = new Foo();
   for ($i=0; $i<100; $i++) {
-    asdf(new Foo());
-    asdf(array());
+    try {
+      asdf(new Foo());
+    } catch (Exception $e) {}
+    try {
+      asdf(vec[]);
+    } catch (Exception $e) {}
   }
 }
-main();
-main();
 
-function main2() {
-  echo "foo: " .strlen($x)."\n";
-  echo "foo: " .strlen(true)."\n";
-  echo "foo: " .strlen(NULL)."\n";
-  echo "foo: " .strlen(false)."\n";
+
+
+function main2() :mixed{
+  try {
+    echo "foo: " .strlen($x)."\n";
+  } catch (Exception $e) {
+    var_dump($e->getMessage());
+  }
+  try {
+    echo "foo: " .strlen(true)."\n";
+  } catch (Exception $e) {
+    var_dump($e->getMessage());
+  }
+  try {
+    echo "foo: " .strlen(NULL)."\n";
+  } catch (Exception $e) {
+    var_dump($e->getMessage());
+  }
+  try {
+    echo "foo: " .strlen(false)."\n";
+  } catch (Exception $e) {
+    var_dump($e->getMessage());
+  }
 }
-main2();
 
-echo "done\n";
+<<__EntryPoint>>
+function main_entry(): void {
+  set_error_handler(($errno, $errstr, ...$_rest)==> {
+    throw new Exception($errstr);
+  });
+
+  main();
+  main();
+  main2();
+
+  echo "done\n";
+}

@@ -1,28 +1,40 @@
-<?hh // decl
+<?hh
 
 class Marker {
-  public function __destruct() {
-    echo "destructing\n";
-  }
 }
 
-async function foo() {
+async function foo() :Awaitable<mixed>{
   return new Marker();
 }
 
-async function bar() {
+async function bar() :Awaitable<mixed>{
+  var_dump(objprof_get_data());
   echo "genva 1\n";
-  list($a, $b) = await genva(foo(), foo());
+  concurrent {
+    $a = await foo();
+    $b = await foo();
+  }
   echo "unset a\n";
-  unset($a);
+  $a = null;
   echo "unset b\n";
-  unset($b);
+  $b = null;
   echo "genva 2\n";
-  list(,) = await genva(foo(), foo());
+  concurrent {
+    await foo();
+    await foo();
+  }
   echo "genva 3\n";
-  await genva(foo(), foo());
+  concurrent {
+    await foo();
+    await foo();
+  }
   echo "done\n";
+  var_dump(objprof_get_data());
 }
 
+
+<<__EntryPoint>>
+function main_genva_refcnt() :mixed{
 \HH\Asio\join(bar());
 echo "exit\n";
+}

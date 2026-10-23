@@ -1,5 +1,7 @@
 <?hh
 
+namespace {
+
 /**
  * Close a bzip2 file
  *
@@ -30,7 +32,7 @@ function bzclose(resource $bz): bool;
  */
 <<__Native, __IsFoldable>>
 function bzcompress(string $source, int $blocksize = 4,
-                    int $workfactor = 0): mixed;
+                    int $workfactor = 0)[]: mixed;
 
 /**
  * Decompresses bzip2 encoded data
@@ -44,8 +46,8 @@ function bzcompress(string $source, int $blocksize = 4,
  * @return mixed - The decompressed string, or an error number if an error
  *                 occurred.
  */
-<<__Native, __ParamCoerceModeFalse, __IsFoldable>>
-function bzdecompress(string $source, int $small = 0): mixed;
+<<__Native, __IsFoldable>>
+function bzdecompress(string $source, int $small = 0)[]: mixed;
 
 /**
  * Returns a bzip2 error number
@@ -117,7 +119,7 @@ function bzopen(mixed $filename, string $mode): mixed;
  *
  * @return mixed - Returns the uncompressed data, or FALSE on error.
  */
-<<__Native, __ParamCoerceModeFalse>>
+<<__Native>>
 function bzread(resource $bz, int $length = 1024): mixed;
 
 /**
@@ -130,7 +132,26 @@ function bzread(resource $bz, int $length = 1024): mixed;
  *                       (uncompressed) bytes have been written or the end of
  *                       data is reached, whichever comes first.
  *
- * @return mized - Returns the number of bytes written, or FALSE on error.
+ * @return mixed - Returns the number of bytes written, or FALSE on error.
  */
 <<__Native>>
 function bzwrite(resource $bz, string $data, int $length = 0): mixed;
+
+} // root namespace
+
+/*
+ * Not a public API
+ */
+namespace __SystemLib {
+<<__NativeData>>
+class ChunkedBunzipper {
+  <<__Native>>
+  public function eof(): bool;
+
+  <<__Native>>
+  public function inflateChunk(string $chunk): ?string;
+
+  <<__Native>>
+  public function close(): void;
+}
+}

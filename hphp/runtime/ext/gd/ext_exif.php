@@ -33,6 +33,9 @@ function exif_tagname(int $index): mixed;
  */
 <<__Native>>
 function exif_thumbnail(string $filename,
-                        mixed &$width = null,
-                        mixed &$height = null,
-                        mixed &$imagetype = null): mixed;
+                        <<__OutOnly>>
+                        inout int $width,
+                        <<__OutOnly>>
+                        inout int $height,
+                        <<__OutOnly>>
+                        inout int $imagetype): mixed;

@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 // Copyright 2004-present Facebook. All Rights Reserved.
 
 class Base<-Tb> {}
@@ -10,7 +10,7 @@ class Derived<Td> extends Base<Td> {
     $args = Vector {};
     $i = 0;
     $el = $v[$i];
-    if (!$el instanceof Base) {
+    if (!$el is Base<_>) {
       throw new Exception('a');
     }
     // So here, $el has type Base<Tb#1>

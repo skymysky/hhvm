@@ -9,12 +9,9 @@
  *
  */
 
-function test() {
+function test(): void {
   {
     {
     }
   }
 }
-
-
-

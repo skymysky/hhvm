@@ -1,14 +1,14 @@
 <?hh
 
-type MyAlias = shape('foo'=>E);
+type MyAlias = shape('foo'=>DoesNotExist5);
 
-try {
-  $x = new ReflectionTypeAlias('MyAlias');
-  var_dump($x->getResolvedTypeStructure());
-} catch (ReflectionException $ex) {
-  echo 'ReflectionException: ', $ex->getMessage(), "\n";
-}
+<<__EntryPoint>>
+function entrypoint_ReflectionTypeAlias5(): void {
 
-enum E: int {
-  VAL = 42;
+  try {
+    $x = new ReflectionTypeAlias('MyAlias');
+    var_dump($x->getResolvedTypeStructure());
+  } catch (ReflectionException $ex) {
+    echo 'ReflectionException: ', $ex->getMessage(), "\n";
+  }
 }

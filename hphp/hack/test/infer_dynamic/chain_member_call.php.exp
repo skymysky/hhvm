@@ -1,0 +1,11 @@
+{ "function": "\\takes_int", "solutions": [] }
+{
+  "function": "\\test_chain_member",
+  "solutions": [
+    {
+      "name": "$d",
+      "pos": "File \"chain_member_call.php\", line 5, characters 36-37:",
+      "type": "mixed"
+    }
+  ]
+}

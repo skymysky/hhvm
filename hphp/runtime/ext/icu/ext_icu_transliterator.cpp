@@ -1,9 +1,7 @@
 #include "hphp/runtime/ext/icu/ext_icu_transliterator.h"
 
-namespace HPHP { namespace Intl {
+namespace HPHP::Intl {
 //////////////////////////////////////////////////////////////////////////////
-
-Class* Transliterator::c_Transliterator = nullptr;
 
 #define FETCH_TRANS(data, obj) \
   auto data = Transliterator::Get(obj); \
@@ -17,7 +15,7 @@ const icu::UnicodeString s_RulesTransPHP("RulesTransPHP",
                                          sizeof("RulesTransPHP") - 1, US_INV);
 
 static bool HHVM_METHOD(Transliterator, __init,
-                        const String&  idOrRules,
+                        const OptString&  idOrRules,
                         int64_t direction, bool rules) {
   auto data = Native::data<Transliterator>(this_);
   if ((direction != UTRANS_FORWARD) && (direction != UTRANS_REVERSE)) {
@@ -72,7 +70,7 @@ static int64_t HHVM_METHOD(Transliterator, getErrorCode) {
   return data->getErrorCode();
 }
 
-static String HHVM_METHOD(Transliterator, getErrorMessage) {
+static OptString HHVM_METHOD(Transliterator, getErrorMessage) {
   FETCH_TRANS(data, this_);
   return data->getErrorMessage();
 }
@@ -81,7 +79,7 @@ static Variant HHVM_METHOD(Transliterator, getId) {
   FETCH_TRANS(data, this_);
   auto id16 = data->trans()->getID();
   UErrorCode error = U_ZERO_ERROR;
-  String ret(u8(id16, error));
+  OptString ret(u8(id16, error));
   if (U_FAILURE(error)) {
     data->setError(error, "Unable to convert ID to UTF-8");
     return false;
@@ -100,7 +98,7 @@ static Variant HHVM_STATIC_METHOD(Transliterator, listIDs) {
     return false;
   }
   error = U_ZERO_ERROR;
-  Array ret = Array::Create();
+  Array ret = Array::CreateVec();
   for(;;) {
     int32_t len;
     auto str = se->next(&len, error);
@@ -110,14 +108,14 @@ static Variant HHVM_STATIC_METHOD(Transliterator, listIDs) {
       return false;
     }
     if (!str) break;
-    ret.append(String(str, len, CopyString));
+    ret.append(OptString(str, len, CopyString));
   }
   s_intl_error->clearError();
   return ret;
 }
 
 static Variant HHVM_METHOD(Transliterator, transliterate,
-                           const String& str, int64_t begin, int64_t end) {
+                           const OptString& str, int64_t begin, int64_t end) {
   FETCH_TRANS(data, this_);
   if (end < -1) {
     data->setError(U_ILLEGAL_ARGUMENT_ERROR,
@@ -147,7 +145,7 @@ static Variant HHVM_METHOD(Transliterator, transliterate,
   data->trans()->transliterate(str16, begin, (end < 0) ? str16.length() : end);
 
   error = U_ZERO_ERROR;
-  String ret(u8(str16, error));
+  OptString ret(u8(str16, error));
   if (U_FAILURE(error)) {
     data->setError(error, "String conversion of string to UTF-8 failed");
     return false;
@@ -158,7 +156,7 @@ static Variant HHVM_METHOD(Transliterator, transliterate,
 
 //////////////////////////////////////////////////////////////////////////////
 
-void IntlExtension::initTransliterator() {
+void IntlExtension::registerNativeTransliterator() {
   HHVM_ME(Transliterator, __init);
   HHVM_ME(Transliterator, __createInverse);
   HHVM_ME(Transliterator, getErrorCode);
@@ -170,10 +168,8 @@ void IntlExtension::initTransliterator() {
   HHVM_RCC_INT(Transliterator, FORWARD, UTRANS_FORWARD);
   HHVM_RCC_INT(Transliterator, REVERSE, UTRANS_REVERSE);
 
-  Native::registerNativeDataInfo<Transliterator>(s_Transliterator.get());
-
-  loadSystemlib("icu_transliterator");
+  Native::registerNativeDataInfo<Transliterator>();
 }
 
 //////////////////////////////////////////////////////////////////////////////
-}} // namespace HPHP::Intl
+} // namespace HPHP::Intl

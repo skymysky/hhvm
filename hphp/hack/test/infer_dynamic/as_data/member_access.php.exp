@@ -1,0 +1,11 @@
+{ "function": "\\takes_int", "solutions": [] }
+{
+  "function": "\\test_member",
+  "solutions": [
+    {
+      "name": "$d",
+      "pos": "File \"member_access.php\", line 5, characters 30-31:",
+      "type": "mixed"
+    }
+  ]
+}

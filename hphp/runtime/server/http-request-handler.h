@@ -14,8 +14,7 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_HTTP_REQUEST_HANDLER_H_
-#define incl_HPHP_HTTP_REQUEST_HANDLER_H_
+#pragma once
 
 #include "hphp/runtime/base/string-buffer.h"
 #include "hphp/runtime/server/virtual-host.h"
@@ -23,11 +22,8 @@
 #include "hphp/runtime/server/server.h"
 #include "hphp/runtime/server/source-root-info.h"
 
-#include <folly/Optional.h>
-
 namespace HPHP {
 
-struct SourceRootInfo;
 struct RequestURI;
 
 namespace ServiceData {
@@ -61,17 +57,15 @@ public:
 private:
   bool m_pathTranslation;
   ServiceData::ExportedTimeSeries* m_requestTimedOutOnQueue;
-  folly::Optional<SourceRootInfo> m_sourceRootInfo;
 
-  bool handleFileRequest(Transport *transport, const String& translated,
+  bool handleFileRequest(Transport *transport, const OptString& translated,
                          const std::string& path, const char* ext);
   bool handleProxyRequest(Transport *transport, bool force);
   void sendStaticContent(Transport *transport, const char *data, int len,
-                         time_t mtime, bool compressed,
+                         time_t mtime,
                          const std::string &cmd,
                          const char *ext);
-  bool executePHPRequest(Transport *transport, RequestURI &reqURI,
-                         SourceRootInfo &sourceRootInfo);
+  bool executePHPRequest(Transport *transport, RequestURI &reqURI);
 
   static THREAD_LOCAL(AccessLog::ThreadData, s_accessLogThreadData);
   static AccessLog s_accessLog;
@@ -83,5 +77,3 @@ private:
 
 ///////////////////////////////////////////////////////////////////////////////
 }
-
-#endif // incl_HPHP_HTTP_REQUEST_HANDLER_H_

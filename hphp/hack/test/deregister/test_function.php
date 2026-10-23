@@ -1,11 +1,5 @@
-<?hh // strict
-
-<<__PHPStdLib>>
-function ignored() : void {
-
-}
+<?hh
 
 function test () : void {
-  ignored();
-
+  trim();
 }

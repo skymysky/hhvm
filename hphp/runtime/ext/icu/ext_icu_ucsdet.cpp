@@ -1,10 +1,9 @@
 #include "hphp/runtime/ext/icu/ext_icu_ucsdet.h"
+#include "hphp/runtime/base/array-init.h"
 
-namespace HPHP { namespace Intl {
+namespace HPHP::Intl {
 /////////////////////////////////////////////////////////////////////////////
 // class EncodingDetector
-
-const StaticString s_EncodingDetector("EncodingDetector");
 
 #define FETCH_DET(dest, src) \
   auto dest = EncodingDetector::Get(src); \
@@ -51,13 +50,13 @@ std::shared_ptr<UCharsetDetector> EncodingDetector::detector() {
   return encodingDetector;
 }
 
-static void HHVM_METHOD(EncodingDetector, setText, const String& text) {
+static void HHVM_METHOD(EncodingDetector, setText, const OptString& text) {
   FETCH_DET(data, this_);
   data->setText(text);
 }
 
 static void HHVM_METHOD(EncodingDetector, setDeclaredEncoding,
-                        const String& declaredEncoding) {
+                        const OptString& declaredEncoding) {
   FETCH_DET(data, this_);
   data->setDeclaredEncoding(declaredEncoding);
 }
@@ -71,7 +70,8 @@ static Object HHVM_METHOD(EncodingDetector, detect) {
     data->throwException("Could not detect encoding, error %d (%s)",
                          error, u_errorName(error));
   }
-  return EncodingMatch::newInstance(match, detector);
+  return EncodingMatch::newInstance(
+    match, detector, data->text(), data->declaredEncoding());
 }
 
 static Array HHVM_METHOD(EncodingDetector, detectAll) {
@@ -84,18 +84,16 @@ static Array HHVM_METHOD(EncodingDetector, detectAll) {
     data->throwException("Could not detect all encodings, error %d (%s)",
                          error, u_errorName(error));
   }
-  Array ret = Array::Create();
+  VecInit ret{(uint32_t)count};
   for (int i = 0; i < count; ++i) {
-    ret.append(EncodingMatch::newInstance(matches[i], detector));
+    ret.append(EncodingMatch::newInstance(
+      matches[i], detector, data->text(), data->declaredEncoding()));
   }
-  return ret;
+  return ret.toArray();
 }
 
 //////////////////////////////////////////////////////////////////////////////
 // class EncodingMatch
-
-const StaticString s_EncodingMatch("EncodingMatch");
-Class* EncodingMatch::c_EncodingMatch = nullptr;
 
 #define FETCH_MATCH(dest, src) \
   auto dest = EncodingMatch::Get(src); \
@@ -109,7 +107,7 @@ static bool HHVM_METHOD(EncodingMatch, isValid) {
   return data && data->isValid();
 }
 
-static String HHVM_METHOD(EncodingMatch, getEncoding) {
+static OptString HHVM_METHOD(EncodingMatch, getEncoding) {
   FETCH_MATCH(data, this_);
   UErrorCode error = U_ZERO_ERROR;
   auto encoding = ucsdet_getName(data->match(), &error);
@@ -117,7 +115,7 @@ static String HHVM_METHOD(EncodingMatch, getEncoding) {
     data->throwException("Could not get encoding for match, error %d (%s)",
                          error, u_errorName(error));
   }
-  return String(encoding, CopyString);
+  return OptString(encoding, CopyString);
 }
 
 static int64_t HHVM_METHOD(EncodingMatch, getConfidence) {
@@ -131,7 +129,7 @@ static int64_t HHVM_METHOD(EncodingMatch, getConfidence) {
   return confidence;
 }
 
-static String HHVM_METHOD(EncodingMatch, getLanguage) {
+static OptString HHVM_METHOD(EncodingMatch, getLanguage) {
   FETCH_MATCH(data, this_);
   UErrorCode error = U_ZERO_ERROR;
   auto language = ucsdet_getLanguage(data->match(), &error);
@@ -139,10 +137,10 @@ static String HHVM_METHOD(EncodingMatch, getLanguage) {
     data->throwException("Could not get language for match, error %d (%s)",
                          error, u_errorName(error));
   }
-  return String(language, CopyString);
+  return OptString(language, CopyString);
 }
 
-static String HHVM_METHOD(EncodingMatch, getUTF8) {
+static OptString HHVM_METHOD(EncodingMatch, getUTF8) {
   FETCH_MATCH(data, this_);
   UErrorCode error;
   icu::UnicodeString ustr;
@@ -166,7 +164,7 @@ static String HHVM_METHOD(EncodingMatch, getUTF8) {
   }
 
   error = U_ZERO_ERROR;
-  String ret(u8(ustr, error));
+  OptString ret(u8(ustr, error));
   if (U_FAILURE(error)) {
     data->throwException("Error converting buffer to UTF8 %d (%d)",
                          error, u_errorName(error));
@@ -176,7 +174,7 @@ static String HHVM_METHOD(EncodingMatch, getUTF8) {
 
 //////////////////////////////////////////////////////////////////////////////
 
-void IntlExtension::initUcsDet() {
+void IntlExtension::registerNativeUcsDet() {
 
   HHVM_ME(EncodingDetector, setText);
   HHVM_ME(EncodingDetector, setDeclaredEncoding);
@@ -189,14 +187,9 @@ void IntlExtension::initUcsDet() {
   HHVM_ME(EncodingMatch, getLanguage);
   HHVM_ME(EncodingMatch, getUTF8);
 
-  Native::registerNativeDataInfo<EncodingDetector>(
-      s_EncodingDetector.get(),
-      Native::NDIFlags::NO_SWEEP
-  );
-  Native::registerNativeDataInfo<EncodingMatch>(s_EncodingMatch.get());
-
-  loadSystemlib("icu_ucsdet");
+  Native::registerNativeDataInfo<EncodingDetector>(Native::NDIFlags::NO_SWEEP);
+  Native::registerNativeDataInfo<EncodingMatch>();
 }
 
 //////////////////////////////////////////////////////////////////////////////
-}} // namespace HPHP::Intl
+} // namespace HPHP::Intl

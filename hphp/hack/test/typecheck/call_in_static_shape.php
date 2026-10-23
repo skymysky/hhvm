@@ -1,8 +1,8 @@
 <?hh
 
 class C {
-  public static function f() {
+  public static function f(): string {
     return "lol";
   }
-  static $x = shape('a' => C::f());
+  public static shape('a' => string) $x = shape('a' => C::f());
 }

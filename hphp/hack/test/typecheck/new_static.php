@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 /**
  * Copyright (c) 2014, Facebook, Inc.
  * All rights reserved.
@@ -13,6 +13,7 @@ abstract class A {
 
   public function foo(): void {}
 
+  <<__NeedsConcrete>>
   public static function bar(): void {
     $x = new static();
     $x->foo();

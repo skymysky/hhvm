@@ -1,83 +1,85 @@
-<?php
+<?hh
 
-function f(&$a, $v = 5) {
+function f(inout $a, $v = 5) :mixed{
   $a = $v;
   return 0;
 }
-$a = 2;
-var_dump($a . f(&$a));
-$a = 2;
-var_dump(($a.'') . f(&$a));
-$a = 2;
-var_dump(($a.$a) . f(&$a));
-f(&$a,2);
-var_dump($a . f(&$a));
-f(&$a,2);
-var_dump(($a.'') . f(&$a));
-f(&$a,2);
-var_dump(($a.$a) . f(&$a));
-class c {
-  public static $a;
-}
-c::$a = 2;
-var_dump(c::$a . f(&c::$a));
-function g(&$a) {
+
+
+
+function g(inout $a) :mixed{
   $a[0] = 5;
   return 0;
 }
-$a = array(2);
-var_dump($a[0] . g(&$a));
-$a = array(2);
-var_dump(($a[0] . '') . g(&$a));
-function h(&$a) {
+function h(inout $a) :mixed{
   $a = 5;
   return 0;
 }
-$a = array(2);
-var_dump($a[0] . h(&$a[0]));
-$a = array(2);
-var_dump(($a[0] . '') . h(&$a[0]));
-function k($a) {
+function k($a) :mixed{
   $a->prop = 5;
   return 0;
 }
-$a = new stdclass;
+function foo() :mixed{
+  return 'foo';
+}
+function dump($a, $b) :mixed{
+  var_dump($a, $b);
+}
+
+<<__EntryPoint>>
+function main_1523() :mixed{
+$a = 2;
+var_dump($a . f(inout $a));
+$a = 2;
+var_dump(($a.'') . f(inout $a));
+$a = 2;
+var_dump(($a.$a) . f(inout $a));
+f(inout $a,2);
+var_dump($a . f(inout $a));
+f(inout $a,2);
+var_dump(($a.'') . f(inout $a));
+f(inout $a,2);
+var_dump(($a.$a) . f(inout $a));
+
+
+$a = vec[2];
+var_dump($a[0] . g(inout $a));
+
+
+
+
+$a = vec[2];
+var_dump(($a[0] . '') . g(inout $a));
+$a = new stdClass;
 $a->prop = 2;
 var_dump($a->prop . k($a));
-$a = new stdclass;
+$a = new stdClass;
 $a->prop = 2;
 var_dump(($a->prop . '') . k($a));
 $i = 0;
-var_dump($i . ++$i);
+++$i; var_dump($i . $i);
 $i = 0;
-var_dump(($i . '') . ++$i);
-function foo() {
-  return 'foo';
-}
-f(&$a, 'test');
-var_dump(($a . 'x') . foo($a = ''));
-$a = array(2);
-var_dump($a[$a = 0]);
-$a = new stdclass;
+$l = $i . ''; ++$i; var_dump($l . $i);
+f(inout $a, 'test');
+$l = $a . 'x'; $a = ''; var_dump($l . foo($a));
+$a = new stdClass;
 $a->foo = 42;
-var_dump($a->{
-$a = 'foo'}
-);
+$a = 'foo';
+$t = $a->foo;
+var_dump($t);
 var_dump($a);
-$b = new stdclass;
+$b = new stdClass;
 $a = null;
 $a->{
-f(&$a,$b)}
+f(inout $a,$b)}
  = 5;
 var_dump($a, $b);
-function dump($a, $b) {
-  var_dump($a, $b);
-}
-f(&$a, 'foo');
-dump($a, $a = 'bar');
+f(inout $a, 'foo');
+$t = $a; $a = 'bar'; dump($t, $a);
 $a = 'foo';
-dump($a, $a = 'bar');
-f(&$a, 'foo');
-dump($a.'', $a = 'bar');
-f(&$a, 'foo');
-dump($a.$a, $a = 'bar');
+$t = $a; $a = 'bar'; dump($t, $a);
+f(inout $a, 'foo');
+$t = $a.''; $a = 'bar'; dump($t, $a);
+f(inout $a, 'foo');
+$t = $a.$a; $a = 'bar'; dump($t, $a);
+}

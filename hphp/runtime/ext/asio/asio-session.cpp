@@ -17,41 +17,37 @@
 
 #include "hphp/runtime/ext/asio/asio-session.h"
 
-#include <limits>
 #include <algorithm>
-
-#include <folly/String.h>
+#include <fmt/core.h>
 
 #include "hphp/runtime/base/array-init.h"
 #include "hphp/runtime/base/builtin-functions.h"
 #include "hphp/runtime/ext/asio/ext_async-function-wait-handle.h"
 #include "hphp/runtime/ext/asio/ext_await-all-wait-handle.h"
+#include "hphp/runtime/ext/asio/ext_concurrent-wait-handle.h"
 #include "hphp/runtime/ext/asio/ext_condition-wait-handle.h"
 #include "hphp/runtime/ext/asio/ext_external-thread-event-wait-handle.h"
+#include "hphp/runtime/ext/asio/ext_priority-bridge-wait-handle.h"
 #include "hphp/runtime/ext/asio/ext_sleep-wait-handle.h"
-#include "hphp/runtime/ext/asio/ext_wait-handle.h"
-#include "hphp/runtime/ext/std/ext_std_closure.h"
-#include "hphp/runtime/vm/bytecode.h"
+#include "hphp/runtime/ext/core/ext_core_closure.h"
 #include "hphp/runtime/vm/event-hook.h"
 #include "hphp/system/systemlib.h"
+#include "hphp/util/configs/eval.h"
 
 namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
 
-THREAD_LOCAL_PROXY(AsioSession, AsioSession::s_current);
+RDS_LOCAL_NO_CHECK(AsioSession*, AsioSession::s_current)(nullptr);
 
 namespace {
-  const context_idx_t MAX_CONTEXT_DEPTH =
-    std::numeric_limits<context_idx_t>::max();
-
   Object checkCallback(const Variant& callback, char* name) {
     if (!callback.isNull() &&
         (!callback.isObject() ||
          !callback.getObjectData()->instanceof(c_Closure::classof()))) {
-      auto msg = folly::format(
+      auto msg = fmt::format(
         "Unable to set {}: callback not a closure",
         name
-      ).str();
+      );
       SystemLib::throwInvalidArgumentExceptionObject(msg);
     }
     return Object{callback.getObjectDataOrNull()};
@@ -73,31 +69,34 @@ namespace {
 }
 
 void AsioSession::Init() {
-  s_current.set(req::make_raw<AsioSession>());
+  *s_current = req::make_raw<AsioSession>();
 }
 
 AsioSession::AsioSession()
-    : m_contexts(), m_externalThreadEventQueue() {
+  : m_contexts(), m_externalThreadEventQueue(), m_currCtxStateIdx(0) {
 }
 
 void AsioSession::enterContext(ActRec* savedFP) {
-  if (UNLIKELY(getCurrentContextIdx() >= MAX_CONTEXT_DEPTH)) {
+  assertx(getCurrentContextStateIndex().contextIndex().value == m_contexts.size());
+  if (UNLIKELY(m_contexts.size() >= ContextIndex::max().value)) {
     SystemLib::throwInvalidOperationExceptionObject(
       "Unable to enter asio context: too many contexts open");
   }
 
   m_contexts.push_back(req::make_raw<AsioContext>(savedFP));
-
-  assertx(static_cast<context_idx_t>(m_contexts.size()) == m_contexts.size());
+  setCurrentContextStateIndex(
+    ContextIndex{uint8_t(m_contexts.size())}.toRegular());
   assertx(isInContext());
 }
 
 void AsioSession::exitContext() {
   assertx(isInContext());
+  m_contexts.back()->exit(getCurrentContextStateIndex().contextIndex());
 
-  m_contexts.back()->exit(m_contexts.size());
   req::destroy_raw(m_contexts.back());
   m_contexts.pop_back();
+  setCurrentContextStateIndex(
+    ContextIndex{uint8_t(m_contexts.size())}.toRegular());
 }
 
 void AsioSession::initAbruptInterruptException() {
@@ -121,15 +120,19 @@ void AsioSession::setOnJoin(const Variant& callback) {
 }
 
 void AsioSession::onIOWaitEnter() {
-  runCallback(m_onIOWaitEnter, empty_array(), "Awaitable::onIOWaitEnter");
+  runCallback(m_onIOWaitEnter, empty_vec_array(), "Awaitable::onIOWaitEnter");
 }
 
-void AsioSession::onIOWaitExit() {
-  runCallback(m_onIOWaitExit, empty_array(), "Awaitable::onIOWaitExit");
+void AsioSession::onIOWaitExit(c_WaitableWaitHandle* waitHandle) {
+  runCallback(
+    m_onIOWaitExit,
+    make_vec_array(waitHandle),
+    "Awaitable::onIOWaitExit"
+  );
 }
 
-void AsioSession::onJoin(c_Awaitable* waitHandle) {
-  runCallback(m_onJoin, make_packed_array(waitHandle), "Awaitable::onJoin");
+void AsioSession::onJoin(c_WaitableWaitHandle* waitHandle) {
+  runCallback(m_onJoin, make_vec_array(waitHandle), "Awaitable::onJoin");
 }
 
 void AsioSession::setOnResumableCreate(const Variant& callback) {
@@ -157,7 +160,7 @@ void AsioSession::onResumableCreate(
   c_WaitableWaitHandle* child
 ) {
   runCallback(m_onResumableCreate,
-    make_packed_array(resumable, child),
+    make_vec_array(resumable, child),
     "ResumableWaitHandle::onCreate"
   );
 }
@@ -168,7 +171,7 @@ void AsioSession::onResumableAwait(
 ) {
   runCallback(
     m_onResumableAwait,
-    make_packed_array(resumable, child),
+    make_vec_array(resumable, child),
     "ResumableWaitHandle::onAwait"
   );
 }
@@ -179,7 +182,7 @@ void AsioSession::onResumableSuccess(
 ) {
   runCallback(
     m_onResumableSuccess,
-    make_packed_array(resumable, result),
+    make_vec_array(resumable, result),
     "ResumableWaitHandle::onSuccess"
   );
 }
@@ -190,7 +193,7 @@ void AsioSession::onResumableFail(
 ) {
   runCallback(
     m_onResumableFail,
-    make_packed_array(resumable, exception),
+    make_vec_array(resumable, exception),
     "ResumableWaitHandle::onFail"
   );
 }
@@ -214,12 +217,30 @@ void AsioSession::setOnAwaitAllCreate(const Variant& callback) {
 
 void AsioSession::onAwaitAllCreate(
   c_AwaitAllWaitHandle* waitHandle,
-  const Variant &dependencies
+  Array&& dependencies
 ) {
   runCallback(
     m_onAwaitAllCreate,
-    make_packed_array(waitHandle, dependencies),
+    make_vec_array(waitHandle, std::move(dependencies)),
     "AwaitAllWaitHandle::onCreate"
+  );
+}
+
+void AsioSession::setOnConcurrentCreate(const Variant& callback) {
+  m_onConcurrentCreate = checkCallback(
+    callback,
+    "ConcurrentWaitHandle::onCreate"
+  );
+}
+
+void AsioSession::onConcurrentCreate(
+  c_ConcurrentWaitHandle* waitHandle,
+  Array&& dependencies
+) {
+  runCallback(
+    m_onConcurrentCreate,
+    make_vec_array(waitHandle, std::move(dependencies)),
+    "ConcurrentWaitHandle::onCreate"
   );
 }
 
@@ -233,7 +254,7 @@ void AsioSession::onConditionCreate(
 ) {
   runCallback(
     m_onConditionCreate,
-    make_packed_array(waitHandle, child),
+    make_vec_array(waitHandle, child),
     "ConditionWaitHandle::onCreate"
   );
 }
@@ -270,7 +291,7 @@ void AsioSession::onExternalThreadEventCreate(
 ) {
   runCallback(
     m_onExtThreadEventCreate,
-    make_packed_array(waitHandle),
+    make_vec_array(waitHandle),
     "ExternalThreadEventWaitHandle::onCreate"
   );
 }
@@ -282,7 +303,7 @@ void AsioSession::onExternalThreadEventSuccess(
 ) {
   runCallback(
     m_onExtThreadEventSuccess,
-    make_packed_array(waitHandle, result, finish_time),
+    make_vec_array(waitHandle, result, finish_time),
     "ExternalThreadEventWaitHandle::onSuccess"
   );
 }
@@ -294,8 +315,26 @@ void AsioSession::onExternalThreadEventFail(
 ) {
   runCallback(
     m_onExtThreadEventFail,
-    make_packed_array(waitHandle, exception, finish_time),
+    make_vec_array(waitHandle, exception, finish_time),
     "ExternalThreadEventWaitHandle::onFail"
+  );
+}
+
+void AsioSession::setOnPriorityBridgeCreate(const Variant& callback) {
+  m_onPriorityBridgeCreate = checkCallback(
+    callback,
+    "PriorityBridgeWaitHandle::onCreate"
+  );
+}
+
+void AsioSession::onPriorityBridgeCreate(
+  c_PriorityBridgeWaitHandle* waitHandle,
+  c_WaitableWaitHandle* child
+) {
+  runCallback(
+    m_onPriorityBridgeCreate,
+    make_vec_array(waitHandle, child),
+    "PriorityBridgeWaitHandle::onCreate"
   );
 }
 
@@ -316,7 +355,7 @@ void AsioSession::setOnSleepSuccess(const Variant& callback) {
 void AsioSession::onSleepCreate(c_SleepWaitHandle* waitHandle) {
   runCallback(
     m_onSleepCreate,
-    make_packed_array(waitHandle),
+    make_vec_array(waitHandle),
     "SleepWaitHandle::onCreate"
   );
 }
@@ -327,7 +366,7 @@ void AsioSession::onSleepSuccess(
 ) {
   runCallback(
     m_onSleepSuccess,
-    make_packed_array(waitHandle, finish_time),
+    make_vec_array(waitHandle, finish_time),
     "SleepWaitHandle::onSuccess"
   );
 }

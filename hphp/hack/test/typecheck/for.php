@@ -9,24 +9,19 @@
  *
  */
 
-function f1() {
+function f1(): void {
   for ($i=0, $j=0; $i<10; $i++, $j++) {
     echo $i, "\t", $j, "\n";
   }
 }
 
-function f2() {
+function f2(): void {
   for ($i=0;$i<10;) {
   }
 }
 
-function f3() {
+function f3(): void {
   $i = 0;
   for (; $i<0;){
-  }
-}
-
-function f4() {
-  for($i=0, $j=1; $j+= $i, $i < 10; $i += $j) {
   }
 }

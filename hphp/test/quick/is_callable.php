@@ -1,6 +1,27 @@
 <?hh
 
-function f() {}
+function f() :mixed{}
+
+class C {
+  public static function foo() :mixed{}
+  private static function bar() :mixed{}
+}
+
+class D {
+  public function foo() :mixed{}
+  private function bar() :mixed{}
+}
+
+interface I {
+  public function foo():mixed;
+}
+
+abstract class A {
+  public function foo() :mixed{}
+  abstract public function bar():mixed;
+}
+
+<<__EntryPoint>> function main(): void {
 // user function
 var_dump(is_callable('f'));
 // builtin function
@@ -9,48 +30,33 @@ var_dump(is_callable('array_merge'));
 var_dump(is_callable('asdfjkl'));
 echo "\n";
 
-class C {
-  public static function foo() {}
-  private static function bar() {}
-}
 // user public static method
-var_dump(is_callable(array('C','foo')));
+var_dump(is_callable(vec['C','foo']));
 // user private static method
-var_dump(is_callable(array('C','bar')));
+var_dump(is_callable(vec['C','bar']));
 // nonexistent static method
-var_dump(is_callable(array('C','asdfjkl')));
+var_dump(is_callable(vec['C','asdfjkl']));
 echo "\n";
 
-class D {
-  public function foo() {}
-  private function bar() {}
-}
 $obj = new D;
 // user public instance method
-var_dump(is_callable(array($obj,'foo')));
+var_dump(is_callable(vec[$obj,'foo']));
 // user private instance method
-var_dump(is_callable(array($obj,'bar')));
+var_dump(is_callable(vec[$obj,'bar']));
 // nonexistent instance method
-var_dump(is_callable(array($obj,'asdfjkl')));
+var_dump(is_callable(vec[$obj,'asdfjkl']));
 echo "\n";
 
-interface I {
-  public function foo();
-}
 // user interface method
-var_dump(is_callable(array('I','foo')));
+var_dump(is_callable(vec['I','foo']));
 // nonexistent interface method
-var_dump(is_callable(array('I','asdfjkl')));
+var_dump(is_callable(vec['I','asdfjkl']));
 echo "\n";
 
-abstract class A {
-  public function foo() {}
-  abstract public function bar();
-}
 // user abstract class non-abstract function
-var_dump(is_callable(array('A', 'foo')));
+var_dump(is_callable(vec['A', 'foo']));
 // user abstract class abstract function
-var_dump(is_callable(array('A', 'bar')));
+var_dump(is_callable(vec['A', 'bar']));
 // nonexistent abstract class method
-var_dump(is_callable(array('A', 'asdfghjk')));
-
+var_dump(is_callable(vec['A', 'asdfghjk']));
+}

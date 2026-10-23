@@ -1,11 +1,11 @@
-<?hh // decl /* -*- php -*- */
+<?hh /* -*- php -*- */
 
 class IntervalTimer {
   public function __construct(
     float $interval,
     float $initial,
     mixed $callback,
-  );
-  public function start();
-  public function stop();
+  )[leak_safe];
+  public function start()[globals, leak_safe]: void;
+  public function stop()[globals, leak_safe]: void;
 }

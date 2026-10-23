@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 // Copyright 2004-present Facebook. All Rights Reserved.
 
 
@@ -6,5 +6,9 @@
 class C {
 }
 
+
+<<__EntryPoint>>
+function main_user_attribute_concat() :mixed{
 $r = new ReflectionClass("C");
 var_dump($r->getAttributes());
+}

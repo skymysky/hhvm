@@ -1,5 +1,6 @@
 <?hh
-
 class A {}
-$cb = meth_caller('B', 'c');
+<<__EntryPoint>> function main(): void {
+$cb = meth_caller(B::class, 'c');
 $cb(new A());
+}

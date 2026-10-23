@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 
 class P {
   const type T = int;
@@ -6,4 +6,9 @@ class P {
 
 class C extends P {
   const T = 'int';
+}
+
+<<__EntryPoint>>
+function main(): void {
+  echo "Done.\n";
 }

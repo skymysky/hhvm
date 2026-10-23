@@ -1,0 +1,20 @@
+(rule
+ (alias outline)
+ (deps
+  %{exe:../../src/hh_single_type_check.exe}
+  %{project_root}/hack/test/verify.py
+  %{project_root}/hack/test/review.sh
+  (glob_files %{project_root}/hack/test/outline/HH_FLAGS)
+  (glob_files %{project_root}/hack/test/outline/*.php)
+  (glob_files %{project_root}/hack/test/outline/*.exp))
+ (action
+  (run
+   %{project_root}/hack/test/verify.py
+   %{project_root}/hack/test/outline
+   --program
+   %{exe:../../src/hh_single_type_check.exe})))
+
+(alias
+ (name runtest)
+ (deps
+  (alias outline)))

@@ -1,39 +1,70 @@
 <?hh
 class A {
+
+  private static $oneArgMethI = 10;
   <<__Memoize>>
-  public function oneArgMeth($a) {
-    static $i = 10;
-    return $i++;
+  public function oneArgMeth($a) :mixed{
+    $__lval_tmp_0 = self::$oneArgMethI;
+    self::$oneArgMethI++;
+    return $__lval_tmp_0;
   }
+
+  private static $multiArgMethI = 20;
   <<__Memoize>>
-  public function multiArgMeth($a, $b, $c) {
-    static $i = 20;
-    return $i++;
+  public function multiArgMeth($a, $b, $c) :mixed{
+    $__lval_tmp_1 = self::$multiArgMethI;
+    self::$multiArgMethI++;
+    return $__lval_tmp_1;
   }
+
+  private static $oneArgStaticI = 30;
   <<__Memoize>>
-  public static function oneArgStatic($a) {
-    static $i = 30;
-    return $i++;
+  public static function oneArgStatic($a) :mixed{
+    $__lval_tmp_2 = self::$oneArgStaticI;
+    self::$oneArgStaticI++;
+    return $__lval_tmp_2;
   }
+
+  private static $multiArgStaticI = 40;
   <<__Memoize>>
-  public static function multiArgStatic($a, $b, $c) {
-    static $i = 40;
-    return $i++;
+  public static function multiArgStatic($a, $b, $c) :mixed{
+    $__lval_tmp_3 = self::$multiArgStaticI;
+    self::$multiArgStaticI++;
+    return $__lval_tmp_3;
   }
 }
 
+abstract final class OneargtoplevelStatics {
+  public static $i = 50;
+}
+
 <<__Memoize>>
-function oneArgTopLevel($a) {static $i = 50; return $i++;}
+function oneArgTopLevel($a) :mixed{
+  $__lval_tmp_4 = OneargtoplevelStatics::$i;
+  OneargtoplevelStatics::$i++;
+  return $__lval_tmp_4;
+}
+
+abstract final class MultiargtoplevelStatics {
+  public static $i = 60;
+}
 <<__Memoize>>
-function multiArgTopLevel($a, $b, $c) {static $i = 60; return $i++;}
+function multiArgTopLevel($a, $b, $c) :mixed{
+  $__lval_tmp_5 = MultiargtoplevelStatics::$i;
+  MultiargtoplevelStatics::$i++;
+  return $__lval_tmp_5;
+}
 <<__Memoize>>
-function passthrough($a) {return $a;}
+function passthrough($a) :mixed{return $a;}
 
 class O implements HH\IMemoizeParam {
-  public function __construct(public string $a) {}
+  public function __construct(public string $a)[] {}
   public function getInstanceKey(): string { return $this->a; }
 }
 
+
+<<__EntryPoint>>
+function main_untyped() :mixed{
 echo "Test each kind of function call with one and many args\n";
 $a = new A();
 echo $a->oneArgMeth(1).' ';
@@ -67,28 +98,28 @@ echo multiArgTopLevel(4.23, null, 6).' ';
 echo multiArgTopLevel(4.23, null, 6)."\n";
 
 echo "Test arrays\n";
-echo multiArgTopLevel(array(1,1,2,3), array(), array(1=>2)).' ';
-echo multiArgTopLevel(array(1,1,2,3), array(), array(1=>2)).' ';
-echo multiArgTopLevel(array(1,1,2,3), array("a"), array(1=>2)).' ';
-echo multiArgTopLevel(array(1,1,2,3), array("a"), array(1=>2)).' ';
-echo multiArgTopLevel(array(2,1,2,3), array(), array(1=>2)).' ';
-echo multiArgTopLevel(array(2,1,2,3), array(), array(1=>2)).' ';
-echo multiArgTopLevel(array(1,1,2,3), array(), array(2=>1)).' ';
-echo multiArgTopLevel(array(1,1,2,3), array(), array(2=>1)).' ';
-echo multiArgTopLevel(array(), array(1,1,2,3), array(1=>2)).' ';
-echo multiArgTopLevel(array(), array(1,1,2,3), array(1=>2)).' ';
-echo oneArgTopLevel(array(array(1), array(2))).' ';
-echo oneArgTopLevel(array(array(1), array(2)))."\n";
+echo multiArgTopLevel(vec[1,1,2,3], vec[], dict[1=>2]).' ';
+echo multiArgTopLevel(vec[1,1,2,3], vec[], dict[1=>2]).' ';
+echo multiArgTopLevel(vec[1,1,2,3], vec["a"], dict[1=>2]).' ';
+echo multiArgTopLevel(vec[1,1,2,3], vec["a"], dict[1=>2]).' ';
+echo multiArgTopLevel(vec[2,1,2,3], vec[], dict[1=>2]).' ';
+echo multiArgTopLevel(vec[2,1,2,3], vec[], dict[1=>2]).' ';
+echo multiArgTopLevel(vec[1,1,2,3], vec[], dict[2=>1]).' ';
+echo multiArgTopLevel(vec[1,1,2,3], vec[], dict[2=>1]).' ';
+echo multiArgTopLevel(vec[], vec[1,1,2,3], dict[1=>2]).' ';
+echo multiArgTopLevel(vec[], vec[1,1,2,3], dict[1=>2]).' ';
+echo oneArgTopLevel(vec[vec[1], vec[2]]).' ';
+echo oneArgTopLevel(vec[vec[1], vec[2]])."\n";
 
 echo "Test objects\n";
 echo multiArgTopLevel(new O("1"), new O("1"), new O("2")).' ';
 echo multiArgTopLevel(new O("1"), new O("1"), new O("2")).' ';
 echo multiArgTopLevel(new O("1"), new O("2"), new O("1")).' ';
 echo multiArgTopLevel(new O("1"), new O("2"), new O("1")).' ';
-echo oneArgTopLevel(array(new O("foo"))).' ';
-echo oneArgTopLevel(array(new O("foo"))).' ';
-echo oneArgTopLevel(array(array(new O("foo")), array(new O("bar")))).' ';
-echo oneArgTopLevel(array(array(new O("foo")), array(new O("bar"))))."\n";
+echo oneArgTopLevel(vec[new O("foo")]).' ';
+echo oneArgTopLevel(vec[new O("foo")]).' ';
+echo oneArgTopLevel(vec[vec[new O("foo")], vec[new O("bar")]]).' ';
+echo oneArgTopLevel(vec[vec[new O("foo")], vec[new O("bar")]])."\n";
 
 echo "Test Hack collections\n";
 echo oneArgTopLevel(Vector {1,2,3}).' ';
@@ -129,11 +160,11 @@ echo passthrough(0) === 0 ? '1 ' : '-1 ';
 echo passthrough(false) === false ? '2 ' : '-2 ';
 echo passthrough(null) === null ? '3 ' : '-3 ';
 echo passthrough('') === '' ? '4 ' : '-4 ';
-echo passthrough(array()) === array() ? '5 ' : '-5 ';
+echo passthrough(vec[]) === vec[] ? '5 ' : '-5 ';
 echo passthrough(1) === 1 ? '6 ' : '-6 ';
 echo passthrough(true) === true ? '7 ' : '-7 ';
 echo passthrough('foo') === 'foo' ? '8 ' : '-8 ';
-echo passthrough(array(1,2,3)) === array(1,2,3) ? '9 ' : '-9 ';
+echo passthrough(vec[1,2,3]) === vec[1,2,3] ? '9 ' : '-9 ';
 echo passthrough(1.2) === 1.2 ? '10 ' : '-10 ';
 echo passthrough($o) === $o ? '11 ' : '-11 ';
 $o = Vector {1};
@@ -148,3 +179,4 @@ echo oneArgTopLevel(new O('test1')).' ';
 echo oneArgTopLevel('test1').' ';
 echo oneArgTopLevel(new O('test2')).' ';
 echo oneArgTopLevel('test2')."\n";
+}

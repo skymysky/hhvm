@@ -1,68 +1,50 @@
 <?hh
+
 class A {
   public static $goo = 'foo';
 }
 
-function p() {
+function p() :mixed{
   print A::$goo . "\n";
 }
 
-function a() {
+function a() :mixed{
   $a = A::$goo;
   A::$goo = 'aoo';
   print $a . "\n";
 }
 
-function b() {
+function b() :mixed{
   $zoo = 'A';
   $b = $zoo::$goo;
   $zoo::$goo = 'boo';
   print $b . "\n";
 }
 
-function c() {
-  $yoo = 'goo';
-  $c = A::$$yoo;
-  A::$$yoo = 'coo';
-  print $c . "\n";
-}
-
-function d() {
-  $zoo = 'A';
-  $yoo = 'goo';
-  $d = $zoo::$$yoo;
-  $zoo::$$yoo = 'doo';
-  print $d . "\n";
-}
-
-if (1) {
-  class B {
-    public static $goo = 'bozo';
+<<__EntryPoint>>
+function test() :mixed{
+  if (__hhvm_intrinsics\launder_value(1)) {
+    include 'sp.inc';
   }
+
+  $a = B::$goo;
+  print $a . "\n";
+  B::$goo = 11;
+  $a = B::$goo;
+  print $a . "\n";
+  p();
+  a();
+  p();
+  b();
+  p();
+  print "round 2\n";
+  a();
+  p();
+  A::$goo = 'foo';
+  b();
+  p();
+  A::$goo = 'foo';
+  p();
+  A::$goo = 'foo';
+  p();
 }
-$a = B::$goo;
-print $a . "\n";
-B::$goo = 11;
-$a = B::$goo;
-print $a . "\n";
-p();
-a();
-p();
-b();
-p();
-c();
-p();
-d();
-p();
-print "round 2\n";
-a();
-p();
-A::$goo = 'foo';
-b();
-p();
-A::$goo = 'foo';
-c();
-p();
-A::$goo = 'foo';
-d();
-p();

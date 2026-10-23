@@ -1,10 +1,9 @@
-<?php
-
-$data = array('foo' => 123);
+<?hh
+<<__EntryPoint>> function main(): void {
+$data = dict['foo' => 123];
 
 var_dump(
-	filter_var_array($data, array('foo' => array('filter' => FILTER_DEFAULT), 'bar' => array('filter' => FILTER_DEFAULT)), false),
-	filter_var_array($data, array('foo' => array('filter' => FILTER_DEFAULT), 'bar' => array('filter' => FILTER_DEFAULT)))
+	filter_var_array($data, dict['foo' => dict['filter' => FILTER_DEFAULT], 'bar' => dict['filter' => FILTER_DEFAULT]], false),
+	filter_var_array($data, dict['foo' => dict['filter' => FILTER_DEFAULT], 'bar' => dict['filter' => FILTER_DEFAULT]])
 );
-
-?>
+}

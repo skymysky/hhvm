@@ -1,0 +1,183 @@
+error: Typing[4110] Invalid return type [1]
+-> Expected `Foo` [2]
+-> But got `Blah` [3]
+->   by the definition of `Ty` [4]
+->   by the definition of `Ty1` [5]
+
+super_constraint_4.php:12:10
+ 6 | class Blah extends BlahBase {}
+ 7 | class BlahDerived extends Blah {}
+ 8 | function bar<Tx super Tx1, Tx1 super Foo, Ty as Ty1, Ty1 as Blah>(
+   |                                      ^^^ [2]
+   |                                                 ^^^ [4]
+   |                                                             ^^^^ [5]
+ 9 |   Ty $val,
+   |   ^^ [3]
+10 |   Tx $dummy,
+11 | ): Tx {
+12 |   return $val;
+   |          ^^^^ [1]
+13 | }
+14 | function test(BlahBase $blah_base, FooDerived $foo_derived): void {
+
+error: Typing[4110] Invalid return type [1]
+-> Expected `Foo` [2]
+-> But got `Ty as Ty1` [3]
+
+super_constraint_4.php:12:10
+ 6 | class Blah extends BlahBase {}
+ 7 | class BlahDerived extends Blah {}
+ 8 | function bar<Tx super Tx1, Tx1 super Foo, Ty as Ty1, Ty1 as Blah>(
+   |                                      ^^^ [2]
+ 9 |   Ty $val,
+   |   ^^ [3]
+10 |   Tx $dummy,
+11 | ): Tx {
+12 |   return $val;
+   |          ^^^^ [1]
+13 | }
+14 | function test(BlahBase $blah_base, FooDerived $foo_derived): void {
+
+error: Typing[4110] Invalid return type [1]
+-> Expected `Foo` [2]
+-> But got `Ty1 where Ty1 super Ty, Ty1 as Blah` [3]
+->   by the definition of `Ty` [4]
+
+super_constraint_4.php:12:10
+ 6 | class Blah extends BlahBase {}
+ 7 | class BlahDerived extends Blah {}
+ 8 | function bar<Tx super Tx1, Tx1 super Foo, Ty as Ty1, Ty1 as Blah>(
+   |                                      ^^^ [2]
+   |                                                 ^^^ [4]
+ 9 |   Ty $val,
+   |   ^^ [3]
+10 |   Tx $dummy,
+11 | ): Tx {
+12 |   return $val;
+   |          ^^^^ [1]
+13 | }
+14 | function test(BlahBase $blah_base, FooDerived $foo_derived): void {
+
+error: Typing[4110] Invalid return type [1]
+-> Expected `Foo` [2]
+-> But got `mixed` [3]
+->   by the definition of `Ty` [4]
+
+super_constraint_4.php:12:10
+ 6 | class Blah extends BlahBase {}
+ 7 | class BlahDerived extends Blah {}
+ 8 | function bar<Tx super Tx1, Tx1 super Foo, Ty as Ty1, Ty1 as Blah>(
+   |                                      ^^^ [2]
+   |                                           ^^ [4]
+ 9 |   Ty $val,
+   |   ^^ [3]
+10 |   Tx $dummy,
+11 | ): Tx {
+12 |   return $val;
+   |          ^^^^ [1]
+13 | }
+14 | function test(BlahBase $blah_base, FooDerived $foo_derived): void {
+
+error: Typing[4110] Invalid return type [1]
+-> Expected `Tx` [2]
+-> But got `Blah` [3]
+->   by the definition of `Ty` [4]
+->   by the definition of `Ty1` [5]
+
+super_constraint_4.php:12:10
+ 6 | class Blah extends BlahBase {}
+ 7 | class BlahDerived extends Blah {}
+ 8 | function bar<Tx super Tx1, Tx1 super Foo, Ty as Ty1, Ty1 as Blah>(
+   |                                                 ^^^ [4]
+   |                                                             ^^^^ [5]
+ 9 |   Ty $val,
+   |   ^^ [3]
+10 |   Tx $dummy,
+11 | ): Tx {
+   |    ^^ [2]
+12 |   return $val;
+   |          ^^^^ [1]
+13 | }
+14 | function test(BlahBase $blah_base, FooDerived $foo_derived): void {
+
+error: Typing[4110] Invalid return type [1]
+-> Expected `Tx` [2]
+-> But got `Ty as Ty1` [3]
+
+super_constraint_4.php:12:10
+ 7 | class BlahDerived extends Blah {}
+ 8 | function bar<Tx super Tx1, Tx1 super Foo, Ty as Ty1, Ty1 as Blah>(
+ 9 |   Ty $val,
+   |   ^^ [3]
+10 |   Tx $dummy,
+11 | ): Tx {
+   |    ^^ [2]
+12 |   return $val;
+   |          ^^^^ [1]
+13 | }
+14 | function test(BlahBase $blah_base, FooDerived $foo_derived): void {
+
+error: Typing[4110] Invalid return type [1]
+-> Expected `Tx` [2]
+-> But got `Ty1 where Ty1 super Ty, Ty1 as Blah` [3]
+->   by the definition of `Ty` [4]
+
+super_constraint_4.php:12:10
+ 6 | class Blah extends BlahBase {}
+ 7 | class BlahDerived extends Blah {}
+ 8 | function bar<Tx super Tx1, Tx1 super Foo, Ty as Ty1, Ty1 as Blah>(
+   |                                                 ^^^ [4]
+ 9 |   Ty $val,
+   |   ^^ [3]
+10 |   Tx $dummy,
+11 | ): Tx {
+   |    ^^ [2]
+12 |   return $val;
+   |          ^^^^ [1]
+13 | }
+14 | function test(BlahBase $blah_base, FooDerived $foo_derived): void {
+
+error: Typing[4110] Invalid return type [1]
+-> Expected `Tx` [2]
+-> But got `mixed` [3]
+->   by the definition of `Ty` [4]
+
+super_constraint_4.php:12:10
+ 6 | class Blah extends BlahBase {}
+ 7 | class BlahDerived extends Blah {}
+ 8 | function bar<Tx super Tx1, Tx1 super Foo, Ty as Ty1, Ty1 as Blah>(
+   |                                           ^^ [4]
+ 9 |   Ty $val,
+   |   ^^ [3]
+10 |   Tx $dummy,
+11 | ): Tx {
+   |    ^^ [2]
+12 |   return $val;
+   |          ^^^^ [1]
+13 | }
+14 | function test(BlahBase $blah_base, FooDerived $foo_derived): void {
+
+error: Typing[4323] Invalid argument [1]
+-> `Ty1` is a constrained type parameter [2]
+-> This type constraint is violated [3]
+-> Expected `Blah` [3]
+-> But got `FooDerived` [4]
+
+super_constraint_4.php:15:7
+ 6 | class Blah extends BlahBase {}
+ 7 | class BlahDerived extends Blah {}
+ 8 | function bar<Tx super Tx1, Tx1 super Foo, Ty as Ty1, Ty1 as Blah>(
+   |                                                      ^^^ [2]
+   |                                                             ^^^^ [3]
+ 9 |   Ty $val,
+10 |   Tx $dummy,
+11 | ): Tx {
+12 |   return $val;
+13 | }
+14 | function test(BlahBase $blah_base, FooDerived $foo_derived): void {
+   |                                    ^^^^^^^^^^ [4]
+15 |   bar($foo_derived, $blah_base);
+   |       ^^^^^^^^^^^^ [1]
+16 | }
+
+9 errors found

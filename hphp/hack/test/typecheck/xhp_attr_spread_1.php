@@ -1,5 +1,5 @@
-<?hh // strict
-class :foo {
+<?hh
+class :foo extends XHPTest {
   attribute string bar;
 }
 

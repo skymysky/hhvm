@@ -1,14 +1,17 @@
-<?php
+<?hh
 
-function err($x, $y) { echo $y; echo "\n"; }
-set_error_handler('err');
-abstract class Asd {
-  private function __construct() {}
+function err($x, $y) :mixed{ echo $y; echo "\n"; }
+class Asd {
+  private function __construct()[] {}
 }
 
-function get_name() {
+function get_name() :mixed{
   apc_store('name', 'Asd'); // make invisible to static analysis
-  return apc_fetch('name');
+  return __hhvm_intrinsics\apc_fetch_no_check('name');
 }
 
-function x() { $name = get_name(); new $name(); } x();
+function x() :mixed{ $name = get_name(); new $name(); } <<__EntryPoint>>
+function entrypoint_ctor_fail2(): void {
+  set_error_handler(err<>);
+  x();
+}

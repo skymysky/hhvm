@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 /**
  * Copyright (c) 2014, Facebook, Inc.
  * All rights reserved.
@@ -64,18 +64,3 @@ class Z<T1, T2> extends Y<Z<T2, T1>> {
 
 class G extends Z<int, float> {
 }
-
-/*
-void function test2() {
-  $s = 'foo';
-  $z = new Y();
-  $opt = $z->get();
-  if($opt !== null) {
-    $s = $opt;
-    $d = 0;
-    $d = $opt;
-  }
-}
-
-*/
-

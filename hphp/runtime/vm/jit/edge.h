@@ -14,14 +14,13 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_VM_EDGE_H_
-#define incl_HPHP_VM_EDGE_H_
+#pragma once
 
 #include <boost/intrusive/list.hpp>
 
 #include "hphp/runtime/vm/jit/containers.h"
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 
 struct Block;
 struct IRInstruction;
@@ -38,7 +37,7 @@ struct Edge {
 
   // The instruction that owns this edge
   IRInstruction* inst() const { return m_inst; }
-  void setInst(IRInstruction* inst) { m_inst = inst; };
+  void setInst(IRInstruction* inst) { m_inst = inst; }
 
   // The block this edge takes us to.  Changing this property updates
   // the affected Block's preds property.
@@ -71,6 +70,4 @@ using EdgeHookOption = boost::intrusive::member_hook<
 using EdgeList = boost::intrusive::list<Edge, EdgeHookOption>;
 using EdgeSet = jit::flat_set<Edge*>;
 
-}}
-
-#endif
+}

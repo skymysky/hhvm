@@ -1,8 +1,8 @@
-<?php
+<?hh
 
 // based on example at http://www.php.net/manual/en/normalizer.normalize.php
 
-function main() {
+function main() :mixed{
   // 'LATIN CAPITAL LETTER A WITH RING ABOVE' (U+00C5)
   $char_A_ring = "\xC3\x85";
   // 'COMBINING RING ABOVE' (U+030A)
@@ -21,4 +21,8 @@ function main() {
   var_dump(intl_get_error_message());
 }
 
+
+<<__EntryPoint>>
+function main_normalizer_normalize() :mixed{
 main();
+}

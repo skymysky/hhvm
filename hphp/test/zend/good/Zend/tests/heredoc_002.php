@@ -1,17 +1,15 @@
-<?php
+<?hh
 
-require_once 'nowdoc.inc';
-
-print b<<<ENDOFHEREDOC
+<<__EntryPoint>> function main(): void {
+print <<<ENDOFHEREDOC
 This is a heredoc test.
 
 ENDOFHEREDOC;
 
-$x = b<<<ENDOFHEREDOC
+$x = <<<ENDOFHEREDOC
 This is another heredoc test.
 
 ENDOFHEREDOC;
 
 print "{$x}";
-
-?>
+}

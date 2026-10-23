@@ -23,7 +23,7 @@
 #include "hphp/runtime/vm/jit/ssa-tmp.h"
 #include "hphp/runtime/vm/jit/type.h"
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -39,8 +39,10 @@ void copyProp(IRInstruction* inst) {
   for (auto& src : inst->srcs()) {
     while (src->inst()->is(Mov)) src = src->inst()->src(0);
   }
+  assertx(!inst->marker().fixupFP() ||
+          !inst->marker().fixupFP()->inst()->is(Mov));
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 
-}}
+}

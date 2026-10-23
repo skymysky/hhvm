@@ -1,16 +1,16 @@
-<?php
+<?hh
 class Foo {
 
-  function Foo() {
+  function Foo() :mixed{
   }
 
-  function test() {
+  function test() :mixed{
     return $this->str;
   }
 }
-
-$server = new soapserver(null,array('uri'=>"http://testuri.org"));
-$server->setclass("Foo");
+<<__EntryPoint>> function main(): void {
+$server = new SoapServer(null,dict['uri'=>"http://testuri.org"]);
+$server->setClass("Foo");
 var_dump($server->getfunctions());
 echo "ok\n";
-?>
+}

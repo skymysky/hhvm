@@ -1,17 +1,47 @@
-File "iface_require_incompat4.php", line 15, characters 11-12:
-Class I3 does not correctly implement all required methods  (Typing[4110])
-File "iface_require_incompat4.php", line 15, characters 26-27:
-Some methods are incompatible with those declared in type I2
-Read the following to see why:
-File "iface_require_incompat4.php", line 4, characters 10-11:
-Member x has the wrong type
-File "iface_require_incompat4.php", line 4, characters 10-11:
-Typing error
-File "iface_require_incompat4.php", line 12, characters 25-29:
-This is a float
-File "iface_require_incompat4.php", line 4, characters 11-11:
-  via this generic T
-File "iface_require_incompat4.php", line 8, characters 25-27:
-It is incompatible with an int
-File "iface_require_incompat4.php", line 4, characters 11-11:
-  via this generic T
+error: Typing[4111] This class does not satisfy all the requirements of its traits or interfaces. [1]
+-> This requires to extend or implement Super [2]
+-> Required here [3]
+-> Expected `float` [4]
+-> But got `int` [5]
+-> This type argument to `Super` must match exactly (it is invariant) [5]
+
+iface_require_incompat4.php:19:7
+10 | 
+11 | interface I2 {
+12 |   require extends Super<float>;
+   |                   ^^^^^^^^^^^^ [3]
+   |                         ^^^^^ [4]
+13 | }
+14 | 
+   :
+17 | 
+18 | // But as soon as it is used, we fail to extend Super<float>
+19 | class C extends Super<int> implements I3 { }
+   |       ^ [1]
+   |                       ^^^ [5]
+   |                                       ^^ [2]
+
+error: Typing[4111] This class does not satisfy all the requirements of its traits or interfaces. [1]
+-> This requires to extend or implement Super [2]
+-> Required here [3]
+-> Expected `int` [4]
+-> But got `float` [5]
+-> This type argument to `Super` must match exactly (it is invariant) [5]
+
+iface_require_incompat4.php:19:7
+10 | 
+11 | interface I2 {
+12 |   require extends Super<float>;
+   |                   ^^^^^^^^^^^^ [3]
+   |                         ^^^^^ [5]
+13 | }
+14 | 
+   :
+17 | 
+18 | // But as soon as it is used, we fail to extend Super<float>
+19 | class C extends Super<int> implements I3 { }
+   |       ^ [1]
+   |                       ^^^ [4]
+   |                                       ^^ [2]
+
+2 errors found

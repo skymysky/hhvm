@@ -1,0 +1,226 @@
+warning: Warn[12009] This `is` check is always `true`. The expression on the left has type `bool` which is a subtype of `bool`. [1]
+
+cross_package_with_package_syntax_invalid_conds.php--pkg3/pkg3.php:7:11
+5 |         pkg8_call(); // error; comparison binops don't register package info
+6 |       }
+7 |       if (package pkg8 is bool) {
+  |           ^^^^^^^^^^^^^^^^^^^^ [1]
+8 |         pkg8_call(); // error; type ops don't register package info
+9 |       }
+
+error: Parsing[1002] Assignments can no longer be used as expressions. Pull the assignment out into a separate statement. [1]
+
+cross_package_with_package_syntax_invalid_conds.php--pkg3/pkg3.php:13:11
+11 |         pkg8_call(); // error; function calls don't register package info
+12 |       }
+13 |       if ($loaded = package pkg8) {
+   |           ^^^^^^^ [1]
+14 |         pkg8_call(); // error; assignments aren't allowed in conditionals
+15 | 
+
+error: Typing[4472] Cannot access function `pkg8_call` defined in package `pkg8` which may not be available [1]
+-> `pkg8_call` is defined in cross_package_with_package_syntax_invalid_conds.php--pkg8/pkg8.php [2]
+-> `pkg8_call` belongs to package `pkg8` by this entry in the package config [3]
+-> package `pkg3` is available because the current file belongs to it by this entry in the package config [4]
+-> `pkg3` includes `pkg2` via its definition [5]
+-> `pkg3` includes `pkg2_soft` via its definition [6]
+-> `pkg3` includes `pkg1` via its definition [7]
+
+cross_package_with_package_syntax_invalid_conds.php--pkg3/pkg3.php:5:9
+ 3 |     public function test() : void {
+ 4 |       if (package pkg8 == package pkg7) {
+ 5 |         pkg8_call(); // error; comparison binops don't register package info
+   |         ^^^^^^^^^ [1]
+ 6 |       }
+ 7 |       if (package pkg8 is bool) {
+
+cross_package_with_package_syntax_invalid_conds.php--pkg8/pkg8.php:2:10
+ 1 | <?hh
+ 2 | function pkg8_call(): void {}
+   |          ^^^^^^^^^ [2]
+
+PACKAGES.toml:41:11
+19 | allow_deployed_packages_checking = true
+20 | 
+21 | [packages.pkg3]
+   |           ^^^^ [4]
+22 | include_paths=["//pkg3/"]
+23 | includes = ["pkg2", "pkg2_soft", "pkg1"]
+   |             ^^^^^^ [5]
+   |                     ^^^^^^^^^^^ [6]
+   |                                  ^^^^^^ [7]
+24 | allow_deployed_packages_checking = true
+25 | 
+   :
+39 | allow_deployed_packages_checking = true
+40 | 
+41 | [packages.pkg8]
+   |           ^^^^ [3]
+42 | include_paths=["//pkg8/"]
+43 | includes = ["pkg3", "pkg2", "pkg2_soft", "pkg1"]
+
+error: Typing[4472] Cannot access function `pkg8_call` defined in package `pkg8` which may not be available [1]
+-> `pkg8_call` is defined in cross_package_with_package_syntax_invalid_conds.php--pkg8/pkg8.php [2]
+-> `pkg8_call` belongs to package `pkg8` by this entry in the package config [3]
+-> package `pkg3` is available because the current file belongs to it by this entry in the package config [4]
+-> `pkg3` includes `pkg2` via its definition [5]
+-> `pkg3` includes `pkg2_soft` via its definition [6]
+-> `pkg3` includes `pkg1` via its definition [7]
+
+cross_package_with_package_syntax_invalid_conds.php--pkg3/pkg3.php:8:9
+ 6 |       }
+ 7 |       if (package pkg8 is bool) {
+ 8 |         pkg8_call(); // error; type ops don't register package info
+   |         ^^^^^^^^^ [1]
+ 9 |       }
+10 |       if ($this->expect(package pkg8)) {
+
+cross_package_with_package_syntax_invalid_conds.php--pkg8/pkg8.php:2:10
+ 1 | <?hh
+ 2 | function pkg8_call(): void {}
+   |          ^^^^^^^^^ [2]
+
+PACKAGES.toml:41:11
+19 | allow_deployed_packages_checking = true
+20 | 
+21 | [packages.pkg3]
+   |           ^^^^ [4]
+22 | include_paths=["//pkg3/"]
+23 | includes = ["pkg2", "pkg2_soft", "pkg1"]
+   |             ^^^^^^ [5]
+   |                     ^^^^^^^^^^^ [6]
+   |                                  ^^^^^^ [7]
+24 | allow_deployed_packages_checking = true
+25 | 
+   :
+39 | allow_deployed_packages_checking = true
+40 | 
+41 | [packages.pkg8]
+   |           ^^^^ [3]
+42 | include_paths=["//pkg8/"]
+43 | includes = ["pkg3", "pkg2", "pkg2_soft", "pkg1"]
+
+error: Typing[4472] Cannot access function `pkg8_call` defined in package `pkg8` which may not be available [1]
+-> `pkg8_call` is defined in cross_package_with_package_syntax_invalid_conds.php--pkg8/pkg8.php [2]
+-> `pkg8_call` belongs to package `pkg8` by this entry in the package config [3]
+-> package `pkg3` is available because the current file belongs to it by this entry in the package config [4]
+-> `pkg3` includes `pkg2` via its definition [5]
+-> `pkg3` includes `pkg2_soft` via its definition [6]
+-> `pkg3` includes `pkg1` via its definition [7]
+
+cross_package_with_package_syntax_invalid_conds.php--pkg3/pkg3.php:11:9
+ 9 |       }
+10 |       if ($this->expect(package pkg8)) {
+11 |         pkg8_call(); // error; function calls don't register package info
+   |         ^^^^^^^^^ [1]
+12 |       }
+13 |       if ($loaded = package pkg8) {
+
+cross_package_with_package_syntax_invalid_conds.php--pkg8/pkg8.php:2:10
+ 1 | <?hh
+ 2 | function pkg8_call(): void {}
+   |          ^^^^^^^^^ [2]
+
+PACKAGES.toml:41:11
+19 | allow_deployed_packages_checking = true
+20 | 
+21 | [packages.pkg3]
+   |           ^^^^ [4]
+22 | include_paths=["//pkg3/"]
+23 | includes = ["pkg2", "pkg2_soft", "pkg1"]
+   |             ^^^^^^ [5]
+   |                     ^^^^^^^^^^^ [6]
+   |                                  ^^^^^^ [7]
+24 | allow_deployed_packages_checking = true
+25 | 
+   :
+39 | allow_deployed_packages_checking = true
+40 | 
+41 | [packages.pkg8]
+   |           ^^^^ [3]
+42 | include_paths=["//pkg8/"]
+43 | includes = ["pkg3", "pkg2", "pkg2_soft", "pkg1"]
+
+error: Typing[4472] Cannot access function `pkg8_call` defined in package `pkg8` which may not be available [1]
+-> `pkg8_call` is defined in cross_package_with_package_syntax_invalid_conds.php--pkg8/pkg8.php [2]
+-> `pkg8_call` belongs to package `pkg8` by this entry in the package config [3]
+-> package `pkg3` is available because the current file belongs to it by this entry in the package config [4]
+-> `pkg3` includes `pkg2` via its definition [5]
+-> `pkg3` includes `pkg2_soft` via its definition [6]
+-> `pkg3` includes `pkg1` via its definition [7]
+
+cross_package_with_package_syntax_invalid_conds.php--pkg3/pkg3.php:14:9
+12 |       }
+13 |       if ($loaded = package pkg8) {
+14 |         pkg8_call(); // error; assignments aren't allowed in conditionals
+   |         ^^^^^^^^^ [1]
+15 | 
+16 |         if ($loaded) {
+
+cross_package_with_package_syntax_invalid_conds.php--pkg8/pkg8.php:2:10
+ 1 | <?hh
+ 2 | function pkg8_call(): void {}
+   |          ^^^^^^^^^ [2]
+
+PACKAGES.toml:41:11
+19 | allow_deployed_packages_checking = true
+20 | 
+21 | [packages.pkg3]
+   |           ^^^^ [4]
+22 | include_paths=["//pkg3/"]
+23 | includes = ["pkg2", "pkg2_soft", "pkg1"]
+   |             ^^^^^^ [5]
+   |                     ^^^^^^^^^^^ [6]
+   |                                  ^^^^^^ [7]
+24 | allow_deployed_packages_checking = true
+25 | 
+   :
+39 | allow_deployed_packages_checking = true
+40 | 
+41 | [packages.pkg8]
+   |           ^^^^ [3]
+42 | include_paths=["//pkg8/"]
+43 | includes = ["pkg3", "pkg2", "pkg2_soft", "pkg1"]
+
+error: Typing[4472] Cannot access function `pkg8_call` defined in package `pkg8` which may not be available [1]
+-> `pkg8_call` is defined in cross_package_with_package_syntax_invalid_conds.php--pkg8/pkg8.php [2]
+-> `pkg8_call` belongs to package `pkg8` by this entry in the package config [3]
+-> package `pkg3` is available because the current file belongs to it by this entry in the package config [4]
+-> `pkg3` includes `pkg2` via its definition [5]
+-> `pkg3` includes `pkg2_soft` via its definition [6]
+-> `pkg3` includes `pkg1` via its definition [7]
+
+cross_package_with_package_syntax_invalid_conds.php--pkg3/pkg3.php:17:11
+15 | 
+16 |         if ($loaded) {
+17 |           pkg8_call(); // error; cannot infer $loaded to be a package expression
+   |           ^^^^^^^^^ [1]
+18 |         }
+19 |       }
+
+cross_package_with_package_syntax_invalid_conds.php--pkg8/pkg8.php:2:10
+ 1 | <?hh
+ 2 | function pkg8_call(): void {}
+   |          ^^^^^^^^^ [2]
+
+PACKAGES.toml:41:11
+19 | allow_deployed_packages_checking = true
+20 | 
+21 | [packages.pkg3]
+   |           ^^^^ [4]
+22 | include_paths=["//pkg3/"]
+23 | includes = ["pkg2", "pkg2_soft", "pkg1"]
+   |             ^^^^^^ [5]
+   |                     ^^^^^^^^^^^ [6]
+   |                                  ^^^^^^ [7]
+24 | allow_deployed_packages_checking = true
+25 | 
+   :
+39 | allow_deployed_packages_checking = true
+40 | 
+41 | [packages.pkg8]
+   |           ^^^^ [3]
+42 | include_paths=["//pkg8/"]
+43 | includes = ["pkg3", "pkg2", "pkg2_soft", "pkg1"]
+
+7 errors found

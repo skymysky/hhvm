@@ -1,11 +1,15 @@
-<?php
+<?hh
 
-require_once('test_base.inc');
-
-requestAll(array(
+<<__EntryPoint>> function main(): void {
+  require_once('test_base.inc');
+  init();
+requestAll(vec[
   "test_status.php",
   "test_get.php?name=Foo",
   "test_get.php?name=Bar",
+  "apc_treadmill.php",
+  "apc_treadmill.php",
+  "apc_treadmill.php",
   "apc_apache_note.php",
   "apc_apache_note.php",
   "apc_apache_note.php",
@@ -28,11 +32,14 @@ requestAll(array(
   "test_header.php?test_string=foo",
   // This is expected to fatal due to embedded newline in the header.
   "test_header.php?test_string=f%0d%0aoo",
-  array(
-    "test_duplicate_headers.php", null, array(
+  vec[
+    "test_duplicate_headers.php", null, dict[
       'xyzzy' => 42, 'XyZZy' => 43, 'XYZZY' => 44, 'xxxxx' => 45
-    )
-  ),
+    ]
+  ],
   "test_curl_multi_except.php",
   "test_pagelet.php",
-));
+  "test_cookie2.php",
+  "test_curl_empty_post.php",
+]);
+}

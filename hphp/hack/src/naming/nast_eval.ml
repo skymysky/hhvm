@@ -1,4 +1,4 @@
-(**
+(*
  * Copyright (c) 2015, Facebook, Inc.
  * All rights reserved.
  *
@@ -7,20 +7,21 @@
  *
  *)
 
-open Nast
+open Hh_prelude
+open Aast
 
 (* this should never be exposed / thrown outside of this module; translate
  * it into a result type first *)
 exception Not_static_exn of Pos.t
 
 let rec static_string_exn = function
-  | _, Binop (Ast.Dot, s1, s2) ->
-    let s1 = static_string_exn s1 in
-    let s2 = static_string_exn s2 in
+  | (_, _, Binop { bop = Ast_defs.Dot; lhs; rhs }) ->
+    let s1 = static_string_exn lhs in
+    let s2 = static_string_exn rhs in
     s1 ^ s2
-  | _, String s -> s
-  | p, _ -> raise (Not_static_exn p)
+  | (_, _, String s) -> s
+  | (_, p, _) -> raise (Not_static_exn p)
 
-let static_string expr =
-  try Ok (static_string_exn expr)
-  with Not_static_exn p -> Error p
+let static_string (expr : Nast.expr) =
+  try Ok (static_string_exn expr) with
+  | Not_static_exn p -> Error p

@@ -26,10 +26,11 @@
 #include "hphp/runtime/ext/soap/soap.h"
 #include "hphp/runtime/ext/string/ext_string.h"
 #include "hphp/runtime/base/array-init.h"
+#include "hphp/runtime/base/array-iterator.h"
 #include "hphp/runtime/base/zend-functions.h"
 #include "hphp/runtime/base/comparisons.h"
-#include "hphp/runtime/base/string-buffer.h"
 #include "hphp/runtime/base/string-util.h"
+#include "hphp/runtime/base/type-array.h"
 #include "hphp/runtime/vm/native-data.h"
 
 namespace HPHP {
@@ -460,26 +461,15 @@ static encodePtr find_encoder_by_type_name(sdl *sdl, const char *type) {
   return encodePtr();
 }
 
-static Variant soap_find_xml_ref(xmlNodePtr node) {
-  USE_SOAP_GLOBAL;
-  Array& ref_map = SOAP_GLOBAL(ref_map);
-  if (ref_map.exists((int64_t)node)) {
-    return Variant::wrap(ref_map.lvalAt((int64_t)node).tv());
-  }
-  return uninit_null();
-}
-
 static bool soap_check_zval_ref(const Variant& data, xmlNodePtr node) {
   USE_SOAP_GLOBAL;
-  int64_t hash = 0;
+  HeapObject* hash = nullptr;
   if (data.isObject()) {
-    hash = (int64_t)data.getObjectData();
-  } else if (data.isReferenced()) {
-    hash = (int64_t)data.getRefData();
+    hash = data.getObjectData();
   }
   if (hash) {
-    Array &ref_map = SOAP_GLOBAL(ref_map);
-    xmlNodePtr node_ptr = (xmlNodePtr)ref_map[hash].toInt64();
+    auto& node_map = SOAP_GLOBAL(node_map);
+    auto node_ptr = folly::get_default(node_map, hash);
     if (node_ptr) {
       if (node_ptr == node) {
         return false;
@@ -526,29 +516,31 @@ static bool soap_check_zval_ref(const Variant& data, xmlNodePtr node) {
       }
       return true;
     }
-    ref_map.set(hash, (int64_t)node);
+    node_map.emplace(hash, node);
   }
   return false;
 }
 
 static bool soap_check_xml_ref(Variant& data, xmlNodePtr node) {
   USE_SOAP_GLOBAL;
-  Array& ref_map = SOAP_GLOBAL(ref_map);
-  if (ref_map.exists((int64_t)node)) {
-    auto const data2 = ref_map.lvalAt((int64_t)node);
-    auto const inner2 = data2.unboxed();
-    if (!(data.isObject() && isObjectType(inner2.type()) &&
-          data.getObjectData() == inner2.val().pobj) &&
-        !(data.isReferenced() && tvIsReferenced(data2.tv()) &&
-          data.getRefData() == val(data2).pref->var())) {
-      tvBoxIfNeeded(data2);
-      tvBind(data2.tv(), *data.asTypedValue());
+  auto& ref_map = SOAP_GLOBAL(ref_map);
+  auto const it = ref_map.find(node);
+  if (it != ref_map.end()) {
+    auto const& data2 = it->second;
+    if (!data.isObject() ||
+        !data2.isObject() ||
+        data.getObjectData() != data2.getObjectData()) {
+      data = data2;
       return true;
     }
-  } else {
-    ref_map.setRef((int64_t)node, data);
   }
   return false;
+}
+
+static void soap_add_xml_ref(Variant& data, xmlNodePtr node) {
+  USE_SOAP_GLOBAL;
+  auto& ref_map = SOAP_GLOBAL(ref_map);
+  ref_map.emplace(node, data);
 }
 
 static xmlNodePtr master_to_xml_int(encodePtr encode, const Variant& data, int style,
@@ -558,7 +550,7 @@ static xmlNodePtr master_to_xml_int(encodePtr encode, const Variant& data, int s
   bool add_type = false;
 
   /* Special handling of class SoapVar */
-  if (data.isObject() && data.toObject().instanceof(SoapVar::getClass())) {
+  if (data.isObject() && data.toObject().instanceof(SoapVar::classof())) {
     auto dobj = data.toObject().get();
     auto enc_stype = SoapVar::getEncSType(dobj);
     auto enc_ns = SoapVar::getEncNS(dobj);
@@ -600,11 +592,11 @@ static xmlNodePtr master_to_xml_int(encodePtr encode, const Variant& data, int s
       xmlSetNs(node, nsp);
     }
   } else {
-    if (check_class_map && !SOAP_GLOBAL(classmap).empty() &&
+    if (check_class_map && !SOAP_GLOBAL(soap_classmap).empty() &&
         data.isObject()) {
       auto clsname = data.toObject()->getClassName();
-      for (ArrayIter iter(SOAP_GLOBAL(classmap)); iter; ++iter) {
-        if (same(iter.second(), clsname)) {
+      for (ArrayIter iter(SOAP_GLOBAL(soap_classmap)); iter; ++iter) {
+        if (same(iter.second(), clsname.get())) {
           /* TODO: namespace isn't stored */
           encodePtr enc = nullptr;
           if (SOAP_GLOBAL(sdl)) {
@@ -722,9 +714,9 @@ xmlNodePtr to_xml_user(encodeType* type, const Variant& data, int style,
   xmlNodePtr ret = nullptr;
   if (type && type->map && !type->map->to_xml.isNull()) {
     Variant return_value = vm_call_user_func(type->map->to_xml,
-                                                  make_packed_array(data));
+                                             make_vec_array(data));
     if (return_value.isString()) {
-      String sdoc = return_value.toString();
+      OptString sdoc = return_value.toString();
       xmlDocPtr doc = soap_xmlParseMemory(sdoc.data(), sdoc.size());
       if (doc && doc->children) {
         ret = xmlDocCopyNode(doc->children, parent->doc, 1);
@@ -748,12 +740,12 @@ Variant to_zval_user(encodeType* type, xmlNodePtr node) {
     xmlNodePtr copy = xmlCopyNode(node, 1);
     xmlBufferPtr buf = xmlBufferCreate();
     xmlNodeDump(buf, nullptr, copy, 0, 0);
-    String data((char*)xmlBufferContent(buf), CopyString);
+    OptString data((char*)xmlBufferContent(buf), CopyString);
     xmlBufferFree(buf);
     xmlFreeNode(copy);
 
     return_value = vm_call_user_func(type->map->to_zval,
-                                          make_packed_array(data));
+                                     make_vec_array(data));
   }
   return return_value;
 }
@@ -775,18 +767,18 @@ static Variant to_zval_string(encodeType* /*type*/, xmlNodePtr data) {
         xmlBufferPtr out = xmlBufferCreate();
         int n = xmlCharEncOutFunc(SOAP_GLOBAL(encoding), out, in);
         if (n >= 0) {
-          ret = String((char*)xmlBufferContent(out), CopyString);
+          ret = OptString((char*)xmlBufferContent(out), CopyString);
         } else {
-          ret = String((char*)data->children->content, CopyString);
+          ret = OptString((char*)data->children->content, CopyString);
         }
         xmlBufferFree(out);
         xmlBufferFree(in);
       } else {
-        ret = String((char*)data->children->content, CopyString);
+        ret = OptString((char*)data->children->content, CopyString);
       }
     } else if (data->children->type == XML_CDATA_SECTION_NODE &&
                data->children->next == nullptr) {
-      ret = String((char*)data->children->content, CopyString);
+      ret = OptString((char*)data->children->content, CopyString);
     } else {
       throw SoapException("Encoding: Violation of encoding rules");
     }
@@ -811,18 +803,18 @@ static Variant to_zval_stringr(encodeType* /*type*/, xmlNodePtr data) {
         xmlBufferPtr out = xmlBufferCreate();
         int n = xmlCharEncOutFunc(SOAP_GLOBAL(encoding), out, in);
         if (n >= 0) {
-          ret = String((char*)xmlBufferContent(out), CopyString);
+          ret = OptString((char*)xmlBufferContent(out), CopyString);
         } else {
-          ret = String((char*)data->children->content, CopyString);
+          ret = OptString((char*)data->children->content, CopyString);
         }
         xmlBufferFree(out);
         xmlBufferFree(in);
       } else {
-        ret = String((char*)data->children->content, CopyString);
+        ret = OptString((char*)data->children->content, CopyString);
       }
     } else if (data->children->type == XML_CDATA_SECTION_NODE &&
                data->children->next == nullptr) {
-      ret = String((char*)data->children->content, CopyString);
+      ret = OptString((char*)data->children->content, CopyString);
     } else {
       throw SoapException("Encoding: Violation of encoding rules");
     }
@@ -847,18 +839,18 @@ static Variant to_zval_stringc(encodeType* /*type*/, xmlNodePtr data) {
         xmlBufferPtr out = xmlBufferCreate();
         int n = xmlCharEncOutFunc(SOAP_GLOBAL(encoding), out, in);
         if (n >= 0) {
-          ret = String((char*)xmlBufferContent(out), CopyString);
+          ret = OptString((char*)xmlBufferContent(out), CopyString);
         } else {
-          ret = String((char*)data->children->content, CopyString);
+          ret = OptString((char*)data->children->content, CopyString);
         }
         xmlBufferFree(out);
         xmlBufferFree(in);
       } else {
-        ret = String((char*)data->children->content, CopyString);
+        ret = OptString((char*)data->children->content, CopyString);
       }
     } else if (data->children->type == XML_CDATA_SECTION_NODE &&
                data->children->next == nullptr) {
-      ret = String((char*)data->children->content, CopyString);
+      ret = OptString((char*)data->children->content, CopyString);
     } else {
       throw SoapException("Encoding: Violation of encoding rules");
     }
@@ -875,16 +867,16 @@ static Variant to_zval_base64(encodeType* /*type*/, xmlNodePtr data) {
     if (data->children->type == XML_TEXT_NODE &&
         data->children->next == nullptr) {
       whiteSpace_collapse(data->children->content);
-      String str =
-        StringUtil::Base64Decode(String((const char*)data->children->content));
+      OptString str =
+        StringUtil::Base64Decode(OptString((const char*)data->children->content));
       if (str.isNull()) {
         throw SoapException("Encoding: Violation of encoding rules");
       }
       ret = str;
     } else if (data->children->type == XML_CDATA_SECTION_NODE &&
                data->children->next == nullptr) {
-      String str =
-        StringUtil::Base64Decode(String((const char*)data->children->content));
+      OptString str =
+        StringUtil::Base64Decode(OptString((const char*)data->children->content));
       if (str.isNull()) {
         throw SoapException("Encoding: Violation of encoding rules");
       }
@@ -910,7 +902,7 @@ static Variant to_zval_hexbin(encodeType* /*type*/, xmlNodePtr data) {
       throw SoapException("Encoding: Violation of encoding rules");
     }
     auto const str =
-      HHVM_FN(hex2bin)(String((const char*)data->children->content)).toString();
+      HHVM_FN(hex2bin)(OptString((const char*)data->children->content)).toString();
     if (str.isNull()) {
       throw SoapException("Encoding: Violation of encoding rules");
     }
@@ -929,20 +921,20 @@ xmlNodePtr to_xml_string(encodeType* type, const Variant& data, int style,
   xmlAddChild(parent, ret);
   FIND_ZVAL_NULL(data, ret, style);
 
-  String str = data.toString();
+  OptString str = data.toString();
   if (SOAP_GLOBAL(encoding) != nullptr) {
     xmlBufferPtr in  = xmlBufferCreateStatic((void*)str.data(), str.size());
     xmlBufferPtr out = xmlBufferCreate();
     int n = xmlCharEncInFunc(SOAP_GLOBAL(encoding), out, in);
     if (n >= 0) {
-      str = String((char*)xmlBufferContent(out), n, CopyString);
+      str = OptString((char*)xmlBufferContent(out), n, CopyString);
     }
     xmlBufferFree(out);
     xmlBufferFree(in);
   }
 
   if (!php_libxml_xmlCheckUTF8(BAD_CAST(str.data()))) {
-    char *err = (char*)malloc(str.size() + 8);
+    char *err = (char*)req::malloc_noptrs(str.size() + 8);
     char c;
     memcpy(err, str.data(), str.size() + 1);
     int i = 0;
@@ -980,7 +972,7 @@ xmlNodePtr to_xml_string(encodeType* type, const Variant& data, int style,
       err[i++] = 0;
     }
     std::string serr = err;
-    free(err);
+    req::free(err);
     throw SoapException("Encoding: string '%s' is not a valid utf-8 string",
                         serr.c_str());
   }
@@ -1001,7 +993,7 @@ xmlNodePtr to_xml_base64(encodeType* type, const Variant& data, int style,
   xmlAddChild(parent, ret);
   FIND_ZVAL_NULL(data, ret, style);
 
-  String str = StringUtil::Base64Encode(data.toString());
+  OptString str = StringUtil::Base64Encode(data.toString());
   xmlAddChild(ret, xmlNewTextLen(BAD_CAST(str.data()), str.size()));
 
   if (style == SOAP_ENCODED) {
@@ -1017,7 +1009,7 @@ xmlNodePtr to_xml_hexbin(encodeType* type, const Variant& data, int style,
   xmlAddChild(parent, ret);
   FIND_ZVAL_NULL(data, ret, style);
 
-  String str = HHVM_FN(bin2hex)(data.toString());
+  OptString str = HHVM_FN(bin2hex)(data.toString());
   xmlAddChild(ret, xmlNewTextLen(BAD_CAST(str.data()), str.size()));
 
   if (style == SOAP_ENCODED) {
@@ -1034,7 +1026,7 @@ static Variant to_zval_double(encodeType* /*type*/, xmlNodePtr data) {
         data->children->next == nullptr) {
       int64_t lval; double dval;
       whiteSpace_collapse(data->children->content);
-      String content((char*)data->children->content, CopyString);
+      OptString content((char*)data->children->content, CopyString);
 
       auto dt = is_numeric_string((const char *)data->children->content,
                                   data->children->content ?
@@ -1107,7 +1099,7 @@ static xmlNodePtr to_xml_long(encodeType* type, const Variant& data, int style,
     xmlNodeSetContent(ret, BAD_CAST(s));
   } else {
     Variant d = data.toInt64();
-    String sd = d.toString();
+    OptString sd = d.toString();
     xmlNodeSetContentLen(ret, BAD_CAST(sd.data()), sd.size());
   }
 
@@ -1125,7 +1117,7 @@ xmlNodePtr to_xml_double(encodeType* type, const Variant& data, int style,
   FIND_ZVAL_NULL(data, ret, style);
 
   Variant d = data.toDouble();
-  String sd = d.toString();
+  OptString sd = d.toString();
   xmlNodeSetContentLen(ret, BAD_CAST(sd.data()), sd.size());
 
   if (style == SOAP_ENCODED) {
@@ -1151,7 +1143,7 @@ static Variant to_zval_bool(encodeType* /*type*/, xmlNodePtr data) {
                  strcmp((char*)content, "0") == 0) {
         ret = false;
       } else {
-        ret = String((char*)content, CopyString).toBoolean();
+        ret = OptString((char*)content, CopyString).toBoolean();
       }
     } else {
       throw SoapException("Encoding: Violation of encoding rules");
@@ -1193,32 +1185,20 @@ static xmlNodePtr to_xml_null(encodeType* /*type*/, const Variant& /*data*/,
   return ret;
 }
 
-static bool get_zval_property(Variant &object, const char* name,
-                              Variant *ret = nullptr) {
-  String sname(name);
+namespace {
+// Returns Uninit for a missing property. May also return Uninit for properties
+// on objects that haven't yet been initialized.
+TypedValue get_property(const Variant &object, const char* name) {
+  OptString sname(name);
   if (object.isObject()) {
-    Object obj = object.toObject();
-    auto const prop = obj->vGetPropIgnoreAccessibility(sname.get());
-    if (!prop) return false;
-    if (ret) {
-      tvBoxIfNeeded(prop);
-      tvBind(prop.tv(), *ret->asTypedValue());
-    }
-    return true;
+    auto const obj = object.toObject();
+    auto const lval = obj->getPropIgnoreAccessibility(sname.get());
+    return lval ? lval.tv() : make_tv<KindOfUninit>();
+  } else if (object.isArray()) {
+    return object.asCArrRef()->get(sname.get());
   }
-  if (object.isArray()) {
-    Array arr = object.toArray();
-    if (!arr.exists(sname)) {
-      return false;
-    }
-    if (ret) {
-      auto const lval = object.toArrRef().lvalAt(sname);
-      tvBoxIfNeeded(lval);
-      tvBind(lval.tv(), *ret->asTypedValue());
-    }
-    return true;
-  }
-  return false;
+  return make_tv<KindOfUninit>();
+}
 }
 
 const StaticString
@@ -1229,13 +1209,14 @@ static void model_to_zval_any(Variant &ret, xmlNodePtr node) {
   const char* name = nullptr;
   Variant any;
   while (node != nullptr) {
-    if (!get_zval_property(ret, (const char *)node->name)) {
+    auto const prop = get_property(ret, (const char *)node->name);
+    if (type(prop) == KindOfUninit) {
       Variant val = master_to_zval(get_conversion(XSD_ANYXML), node);
 
       if (!any.isNull() && !any.isArray()) {
-        Array arr = Array::Create();
+        Array arr = Array::CreateDict();
         if (name) {
-          arr.set(String(name, CopyString), any);
+          arr.set(OptString(name, CopyString), any);
         } else {
           arr.append(any);
         }
@@ -1259,8 +1240,8 @@ static void model_to_zval_any(Variant &ret, xmlNodePtr node) {
 
       if (any.isNull()) {
         if (name) {
-          Array arr = Array::Create();
-          arr.set(String(name, CopyString), val);
+          Array arr = Array::CreateDict();
+          arr.set(OptString(name, CopyString), val);
           any = arr;
           name = nullptr;
         } else {
@@ -1269,21 +1250,21 @@ static void model_to_zval_any(Variant &ret, xmlNodePtr node) {
       } else {
         /* Add array element */
         if (name) {
-          String name_str(name);
-          if (any.toArrRef().exists(name_str)) {
-            auto const el = any.toArrRef().lvalAt(name_str).unboxed();
+          OptString name_str(name);
+          if (any.asArrRef().exists(name_str)) {
+            auto const el = any.asArrRef().lval(name_str);
             if (!isArrayLikeType(el.type())) {
               /* Convert into array */
-              Array arr = Array::Create();
+              Array arr = Array::CreateVec();
               arr.append(el.tv());
-              cellSet(make_tv<KindOfArray>(arr.get()), el);
+              tvSet(make_array_like_tv(arr.get()), el);
             }
             asArrRef(el).append(val);
           } else {
-            any.toArrRef().set(name_str, val);
+            any.asArrRef().set(name_str, val);
           }
         } else {
-          any.toArrRef().append(val);
+          any.asArrRef().append(val);
         }
         name = nullptr;
       }
@@ -1292,9 +1273,9 @@ static void model_to_zval_any(Variant &ret, xmlNodePtr node) {
   }
   if (any.toBoolean()) {
     if (name) {
-      ret.toObject()->o_set(String(name), any);
+      ret.toObject()->o_set(OptString(name), any);
     } else {
-      ret.toObject()->setProp(nullptr, s_any.get(), *any.asCell());
+      ret.toObject()->setProp(nullctx, s_any.get(), *any.asTypedValue());
     }
   }
 }
@@ -1337,7 +1318,7 @@ static void model_to_zval_object(Variant &ret, sdlContentModelPtr model,
         }
         if ((node = get_node(node->next,
                            (char*)model->u_element->name.c_str())) != nullptr) {
-          Array array = Array::Create();
+          Array array = Array::CreateVec();
           array.append(val);
           do {
             if (node && node->children && node->children->content) {
@@ -1374,11 +1355,11 @@ static void model_to_zval_object(Variant &ret, sdlContentModelPtr model,
         } else if ((!val.isNull() || !model->u_element->nillable) &&
                    (SOAP_GLOBAL(features) & SOAP_SINGLE_ELEMENT_ARRAYS) &&
                    (model->max_occurs == -1 || model->max_occurs > 1)) {
-          Array array = Array::Create();
+          Array array = Array::CreateVec();
           array.append(val);
           val = array;
         }
-        ret.toObject()->o_set(String(model->u_element->name), val);
+        ret.toObject()->o_set(OptString(model->u_element->name), val);
       }
     }
     break;
@@ -1408,28 +1389,28 @@ static void model_to_zval_object(Variant &ret, sdlContentModelPtr model,
 }
 
 /* Struct encode/decode */
-static Variant to_zval_object_ex(encodeType* type, xmlNodePtr data,
+static Variant to_zval_object_ex(encodeType* etype, xmlNodePtr data,
                                  const char *pce) {
   USE_SOAP_GLOBAL;
   const char *ce = "stdClass";
-  String clsname;
+  OptString clsname;
   if (pce) {
     ce = pce;
-  } else if (!SOAP_GLOBAL(classmap).empty() && !type->type_str.empty()) {
-    String type_str(type->type_str);
-    if (SOAP_GLOBAL(classmap).exists(type_str)) {
-      clsname = SOAP_GLOBAL(classmap)[type_str].toString();
+  } else if (!SOAP_GLOBAL(soap_classmap).empty() && !etype->type_str.empty()) {
+    OptString type_str(etype->type_str);
+    if (SOAP_GLOBAL(soap_classmap).exists(type_str)) {
+      clsname = SOAP_GLOBAL(soap_classmap)[type_str].toString();
       ce = clsname.data();
     }
   }
 
   Variant ret;
   bool redo_any = false;
-  sdlType *sdlType = type->sdl_type;
+  sdlType *sdlType = etype->sdl_type;
   sdl *sdl = SOAP_GLOBAL(sdl);
   if (sdlType) {
     if (sdlType->kind == XSD_TYPEKIND_RESTRICTION &&
-        sdlType->encode && type != &sdlType->encode->details) {
+        sdlType->encode && etype != &sdlType->encode->details) {
       encodePtr enc = sdlType->encode;
       while (enc && enc->details.sdl_type &&
              enc->details.sdl_type->kind != XSD_TYPEKIND_SIMPLE &&
@@ -1442,18 +1423,19 @@ static Variant to_zval_object_ex(encodeType* type, xmlNodePtr data,
           return ret;
         }
         ret = create_object(ce, Array());
-        ret.toObject()->setProp(nullptr, s__.get(),
-                                *master_to_zval_int(enc, data).asCell());
+        ret.toObject()->setProp(nullctx, s__.get(),
+                                *master_to_zval_int(enc, data).asTypedValue());
       } else {
         FIND_XML_NULL(data, ret);
         if (soap_check_xml_ref(ret, data)) {
           return ret;
         }
         ret = create_object(ce, Array());
+        soap_add_xml_ref(ret, data);
       }
     } else if (sdlType->kind == XSD_TYPEKIND_EXTENSION &&
                sdlType->encode &&
-               type != &sdlType->encode->details) {
+               etype != &sdlType->encode->details) {
       encodeType &details = sdlType->encode->details;
       if (details.sdl_type &&
           details.sdl_type->kind != XSD_TYPEKIND_SIMPLE &&
@@ -1461,7 +1443,7 @@ static Variant to_zval_object_ex(encodeType* type, xmlNodePtr data,
           details.sdl_type->kind != XSD_TYPEKIND_UNION) {
 
         CHECK_XML_NULL(data)
-        if (!(ret = soap_find_xml_ref(data)).isNull()) {
+        if (soap_check_xml_ref(ret, data)) {
           return ret;
         }
 
@@ -1477,19 +1459,19 @@ static Variant to_zval_object_ex(encodeType* type, xmlNodePtr data,
         } else {
           ret = master_to_zval_int(sdlType->encode, data);
         }
-        if (soap_check_xml_ref(ret, data)) {
-          return ret;
-        }
-        redo_any = get_zval_property(ret, "any");
+
+        soap_add_xml_ref(ret, data);
+        redo_any = type(get_property(ret, "any")) != KindOfUninit;
       } else {
         if (soap_check_xml_ref(ret, data)) {
           return ret;
         }
         ret = create_object(ce, Array());
+        soap_add_xml_ref(ret, data);
         ret.toObject()->setProp(
-          nullptr,
+          nullctx,
           s__.get(),
-          *master_to_zval_int(sdlType->encode, data).asCell()
+          *master_to_zval_int(sdlType->encode, data).asTypedValue()
         );
       }
     } else {
@@ -1498,10 +1480,12 @@ static Variant to_zval_object_ex(encodeType* type, xmlNodePtr data,
         return ret;
       }
       ret = create_object(ce, Array());
+      soap_add_xml_ref(ret, data);
     }
     if (sdlType->model) {
       if (redo_any) {
-        ret.toObject()->setProp(nullptr, s_any.get(), make_tv<KindOfUninit>());
+        ret.toObject()->unsetProp(nullctx, s_any.get());
+        soap_add_xml_ref(ret, data);
       }
       model_to_zval_object(ret, sdlType->model, data, sdl);
       if (redo_any) {
@@ -1535,7 +1519,7 @@ static Variant to_zval_object_ex(encodeType* type, xmlNodePtr data,
             xmlAddChild(dummy, text);
             Variant data = master_to_zval(attr->encode, dummy);
             xmlFreeNode(dummy);
-            ret.toObject()->o_set(String(attr->name), data);
+            ret.toObject()->o_set(OptString(attr->name), data);
           }
         }
       }
@@ -1547,31 +1531,35 @@ static Variant to_zval_object_ex(encodeType* type, xmlNodePtr data,
     }
 
     ret = create_object(ce, Array());
+    soap_add_xml_ref(ret, data);
     xmlNodePtr trav = data->children;
+    auto obj = ret.asObjRef();
+
     while (trav != nullptr) {
       if (trav->type == XML_ELEMENT_NODE) {
         Variant tmpVal = master_to_zval(encodePtr(), trav);
-        Variant prop;
-        if (!get_zval_property(ret, (char*)trav->name, &prop)) {
-          if (!trav->next || !get_node(trav->next, (char*)trav->name)) {
-            ret.toObject()->o_set(
-              String((char*)trav->name, CopyString), tmpVal);
+        auto const propName = (char*)trav->name;
+        // $prop = $ret->{$propName}
+        auto const name = OptString(propName, CopyString);
+        auto const prop = obj->getPropIgnoreAccessibility(name.get());
+        if (!prop.is_set() || prop.type() == KindOfUninit) {
+          if (!trav->next || !get_node(trav->next, propName)) {
+            obj->o_set(name, tmpVal);
           } else {
-            Array arr = Array::Create();
+            VecInit arr{1};
             arr.append(tmpVal);
-            ret.toObject()->o_set(String((char*)trav->name, CopyString), arr);
+            obj->o_set(name, arr.toArray());
           }
         } else {
-          /* Property already exist - make array */
-          if (!prop.isArray()) {
+          if (!tvIsVec(prop)) {
             /* Convert into array */
-            Array arr = Array::Create();
-            arr.append(prop);
-            ret.toObject()->o_set(String((char*)trav->name, CopyString), arr);
-            prop = arr;
+            VecInit arr{2};
+            arr.append(prop.tv());
+            arr.append(tmpVal);
+            obj->o_set(name, arr.toArray());
+          } else {
+            asArrRef(prop).append(tmpVal);
           }
-          /* Add array element */
-          prop.toArrRef().append(tmpVal);
         }
       }
       trav = trav->next;
@@ -1591,18 +1579,17 @@ static int model_to_xml_object(xmlNodePtr node, sdlContentModelPtr model,
     xmlNodePtr property;
     encodePtr enc;
 
-    Variant data;
-    bool propExists =
-      get_zval_property(object, model->u_element->name.c_str(), &data);
-    if (propExists && data.isNull() && !model->u_element->nillable &&
-        model->min_occurs > 0 && !strict) {
-      return 0;
-    }
-    if (propExists) {
+    auto const data = get_property(object, model->u_element->name.c_str());
+    if (type(data) != KindOfUninit) {
+      if (type(data) == KindOfNull &&
+          !model->u_element->nillable && model->min_occurs > 0 && !strict) {
+        return 0;
+      }
       enc = model->u_element->encode;
       if ((model->max_occurs == -1 || model->max_occurs > 1) &&
-          data.isArray() && data.toArray()->isVectorData()) {
-        for (ArrayIter iter(data.toArray()); iter; ++iter) {
+          isArrayLikeType(type(data)) &&
+          val(data).parr->isVectorData()) {
+        for (ArrayIter iter(val(data).parr); iter; ++iter) {
           Variant val = iter.second();
           if (val.isNull() && model->u_element->nillable) {
             property = xmlNewNode(nullptr, BAD_CAST("BOGUS"));
@@ -1630,14 +1617,14 @@ static int model_to_xml_object(xmlNodePtr node, sdlContentModelPtr model,
           }
         }
       } else {
-        if (data.isNull() && model->u_element->nillable) {
+        if (type(data) == KindOfNull && model->u_element->nillable) {
           property = xmlNewNode(nullptr, BAD_CAST("BOGUS"));
           xmlAddChild(node, property);
           set_xsi_nil(property);
-        } else if (data.isNull() && model->min_occurs == 0) {
+        } else if (type(data) == KindOfNull && model->min_occurs == 0) {
           return 1;
         } else {
-          property = master_to_xml(enc, data, style, node);
+          property = master_to_xml(enc, tvAsCVarRef(data), style, node);
           if (property->children && property->children->content &&
               !model->u_element->fixed.empty() &&
               model->u_element->fixed != (char*)property->children->content) {
@@ -1683,16 +1670,17 @@ static int model_to_xml_object(xmlNodePtr node, sdlContentModelPtr model,
   case XSD_CONTENT_ANY: {
     encodePtr enc;
 
-    Variant data;
-    if (get_zval_property(object, "any", &data)) {
+    auto const data = get_property(object, "any");
+    if (type(data) != KindOfUninit) {
       enc = get_conversion(XSD_ANYXML);
       if ((model->max_occurs == -1 || model->max_occurs > 1) &&
-          data.isArray() && data.toArray()->isVectorData()) {
-        for (ArrayIter iter(data.toArray()); iter; ++iter) {
+          isArrayLikeType(type(data)) &&
+          val(data).parr->isVectorData()) {
+        for (ArrayIter iter(val(data).parr); iter; ++iter) {
           master_to_xml(enc, iter.second(), style, node);
         }
       } else {
-        master_to_xml(enc, data, style, node);
+        master_to_xml(enc, tvAsCVarRef(data), style, node);
       }
       return 1;
     } else if (model->min_occurs == 0) {
@@ -1795,9 +1783,9 @@ xmlNodePtr to_xml_object(encodeType* type, const Variant& data_, int style,
         enc = enc->details.sdl_type->encode;
       }
       if (enc) {
-        Variant tmp;
-        if (get_zval_property(data, "_", &tmp)) {
-          xmlParam = master_to_xml(enc, tmp, style, parent);
+        auto const tmp = get_property(data, "_");
+        if (tmp.m_type != KindOfUninit) {
+          xmlParam = master_to_xml(enc, tvAsCVarRef(tmp), style, parent);
         } else if (prop.isNull()) {
           xmlParam = master_to_xml(enc, data, style, parent);
         } else {
@@ -1817,11 +1805,12 @@ xmlNodePtr to_xml_object(encodeType* type, const Variant& data_, int style,
         xmlParam = master_to_xml_int(sdlType->encode, data, style,
                                      parent, false);
       } else {
-        Variant tmp;
-        if (get_zval_property(data, "_", &tmp)) {
-          xmlParam = master_to_xml(sdlType->encode, tmp, style, parent);
+        auto const enc = sdlType->encode;
+        auto const tmp = get_property(data, "_");
+        if (tmp.m_type != KindOfUninit) {
+          xmlParam = master_to_xml(enc, tvAsCVarRef(tmp), style, parent);
         } else if (prop.isNull()) {
-          xmlParam = master_to_xml(sdlType->encode, data, style, parent);
+          xmlParam = master_to_xml(enc, data, style, parent);
         } else {
           xmlParam = xmlNewNode(nullptr, BAD_CAST("BOGUS"));
           xmlAddChild(parent, xmlParam);
@@ -1862,14 +1851,12 @@ xmlNodePtr to_xml_object(encodeType* type, const Variant& data_, int style,
         model_to_xml_object(xmlParam, sdlType->model, data, style, 1);
       }
       if (!sdlType->attributes.empty()) {
-        for (sdlAttributeMap::const_iterator iter =
-               sdlType->attributes.begin(); iter != sdlType->attributes.end();
-             ++iter) {
-          sdlAttributePtr attr = iter->second;
+        for (auto const& iter : sdlType->attributes) {
+          sdlAttributePtr attr = iter.second;
           if (!attr->name.empty()) {
-            Variant zattr;
-            if (get_zval_property(data, attr->name.c_str(), &zattr)) {
-              xmlNodePtr dummy = master_to_xml(attr->encode, zattr,
+            auto const rattr = get_property(data, attr->name.c_str());
+            if (rattr.m_type != KindOfUninit) {
+              xmlNodePtr dummy = master_to_xml(attr->encode, tvAsCVarRef(rattr),
                                                SOAP_LITERAL, xmlParam);
               if (dummy->children && dummy->children->content) {
                 if (!attr->fixed.empty() &&
@@ -1917,7 +1904,7 @@ xmlNodePtr to_xml_object(encodeType* type, const Variant& data_, int style,
           get_conversion(dataTypeToSoap(zprop.getType())),
           zprop, style, xmlParam);
         if (key.isString()) {
-          String skey = key.toString();
+          OptString skey = key.toString();
           const char *prop_name;
           if (data.isObject()) {
             const char *class_name;
@@ -1981,14 +1968,14 @@ static int calc_dimension_12(const char* str) {
     }
     str++;
   }
-  return i;
+  return i < 1 ? 1 : i;
 }
 
 static int* get_position_12(int dimension, const char* str) {
   int *pos;
   int i = -1, flag = 0;
 
-  pos = (int*)calloc(dimension, sizeof(int));
+  pos = (int*)req::calloc_noptrs(dimension, sizeof(int));
   while (*str != '\0' && (*str < '0' || *str > '9') && (*str != '*')) {
     str++;
   }
@@ -2039,7 +2026,7 @@ static void get_position_ex(int dimension, const char* str, int** pos) {
 }
 
 static int* get_position(int dimension, const char* str) {
-  int *pos = (int*)malloc(sizeof(int) * dimension);
+  int *pos = (int*)req::malloc_noptrs(sizeof(int) * dimension);
   get_position_ex(dimension, str, &pos);
   return pos;
 }
@@ -2171,13 +2158,13 @@ xmlNodePtr to_xml_array(encodeType* type, const Variant& data_, int style,
   }
 
   if (data.isObject() &&
-      data.toObject().instanceof(SystemLib::s_IteratorClass)) {
-    array_copy = Array::Create();
+      data.toObject().instanceof(SystemLib::getHH_IteratorClass())) {
+    array_copy = Array::CreateDict();
     for (ArrayIter iter(data.toObject().get()); iter; ++iter) {
       if (!iter.first().isNull() && iter.first().isString()) {
-        array_copy.toArrRef().set(iter.first(), iter.second());
+        array_copy.asArrRef().set(iter.first(), iter.second());
       } else {
-        array_copy.toArrRef().append(iter.second());
+        array_copy.asArrRef().append(iter.second());
       }
     }
     data = array_copy;
@@ -2195,7 +2182,7 @@ xmlNodePtr to_xml_array(encodeType* type, const Variant& data_, int style,
     if ((ext = get_extra_attributes(sdl_type,
                                     SOAP_1_1_ENC_NAMESPACE":arrayType",
                                     WSDL_NAMESPACE":arrayType"))) {
-      String value(ext->val);
+      OptString value(ext->val);
       char *end = const_cast<char*>(strrchr(value.data(), '['));
       if (end) {
         *end = '\0';
@@ -2209,7 +2196,7 @@ xmlNodePtr to_xml_array(encodeType* type, const Variant& data_, int style,
         array_type += value.data();
       }
 
-      dims = (int*)malloc(sizeof(int) * dimension);
+      dims = (int*)req::malloc_noptrs(sizeof(int) * dimension);
       dims[0] = i;
       Array el = data.toArray();
       for (i = 1; i < dimension; i++) {
@@ -2259,7 +2246,7 @@ xmlNodePtr to_xml_array(encodeType* type, const Variant& data_, int style,
           }
         }
       } else {
-        dims = (int*)malloc(sizeof(int));
+        dims = (int*)req::malloc_noptrs(sizeof(int));
         *dims = 0;
         array_size += folly::to<string>(i);
       }
@@ -2301,13 +2288,13 @@ xmlNodePtr to_xml_array(encodeType* type, const Variant& data_, int style,
                    elementType->encode->details.type_str.c_str(), array_type);
 
       array_size += folly::to<string>(i);
-      dims = (int*)malloc(sizeof(int) * dimension);
+      dims = (int*)req::malloc_noptrs(sizeof(int) * dimension);
       dims[0] = i;
     } else {
 
       enc = get_array_type(xmlParam, data, array_type);
       array_size += folly::to<string>(i);
-      dims = (int*)malloc(sizeof(int) * dimension);
+      dims = (int*)req::malloc_noptrs(sizeof(int) * dimension);
       dims[0] = i;
     }
 
@@ -2342,7 +2329,7 @@ xmlNodePtr to_xml_array(encodeType* type, const Variant& data_, int style,
                            enc ? encode_add_ns(xmlParam,
                                              enc->details.ns.c_str()) : nullptr,
                            dimension, dims, data, style);
-    free(dims);
+    req::free(dims);
   }
   if (style == SOAP_ENCODED) {
     if (SOAP_GLOBAL(features) & SOAP_USE_XSI_ARRAY_TYPE) {
@@ -2382,7 +2369,7 @@ static Variant to_zval_array(encodeType* type, xmlNodePtr data) {
     parse_namespace(attr->children->content, type, ns);
     nsptr = xmlSearchNs(attr->doc, attr->parent, NS_STRING(ns));
 
-    String stype(type);
+    OptString stype(type);
     char *end = const_cast<char*>(strrchr(stype.data(), '['));
     if (end) {
       *end = '\0';
@@ -2409,7 +2396,7 @@ static Variant to_zval_array(encodeType* type, xmlNodePtr data) {
       dimension = calc_dimension_12((char*)attr->children->content);
       dims = get_position_12(dimension, (char*)attr->children->content);
     } else {
-      dims = (int*)malloc(sizeof(int));
+      dims = (int*)req::malloc_noptrs(sizeof(int));
       *dims = 0;
     }
 
@@ -2423,7 +2410,7 @@ static Variant to_zval_array(encodeType* type, xmlNodePtr data) {
               (type->sdl_type,
                SOAP_1_1_ENC_NAMESPACE":arrayType",
                WSDL_NAMESPACE":arrayType"))) {
-    String type(ext->val);
+    OptString type(ext->val);
     char *end = const_cast<char*>(strrchr(type.data(), '['));
     if (end) {
       *end = '\0';
@@ -2432,9 +2419,8 @@ static Variant to_zval_array(encodeType* type, xmlNodePtr data) {
       enc = get_encoder(sdl, ext->ns.c_str(), type.data());
     }
 
-    dims = (int*)malloc(sizeof(int));
+    dims = (int*)req::malloc_noptrs(sizeof(int));
     *dims = 0;
-
   } else if ((ext = get_extra_attributes
               (type->sdl_type,
                SOAP_1_2_ENC_NAMESPACE":itemType",
@@ -2450,7 +2436,7 @@ static Variant to_zval_array(encodeType* type, xmlNodePtr data) {
       dimension = calc_dimension_12(ext->val.c_str());
       dims = get_position_12(dimension, ext->val.c_str());
     } else {
-      dims = (int*)malloc(sizeof(int));
+      dims = (int*)req::malloc_noptrs(sizeof(int));
       *dims = 0;
     }
   } else if ((ext = get_extra_attributes
@@ -2471,10 +2457,10 @@ static Variant to_zval_array(encodeType* type, xmlNodePtr data) {
   }
   if (dims == nullptr) {
     dimension = 1;
-    dims = (int*)malloc(sizeof(int));
+    dims = (int*)req::malloc_noptrs(sizeof(int));
     *dims = 0;
   }
-  pos = (int*)calloc(sizeof(int), dimension);
+  pos = (int*)req::calloc_noptrs(sizeof(int), dimension);
   if (data && (attr = get_attribute(data->properties,"offset")) &&
       attr->children && attr->children->content) {
     char* tmp = strrchr((char*)attr->children->content,'[');
@@ -2484,7 +2470,7 @@ static Variant to_zval_array(encodeType* type, xmlNodePtr data) {
     get_position_ex(dimension, tmp, &pos);
   }
 
-  ret = Array::Create();
+  ret = Array::CreateDict();
   trav = data->children;
   while (trav) {
     if (trav->type == XML_ELEMENT_NODE) {
@@ -2505,14 +2491,14 @@ static Variant to_zval_array(encodeType* type, xmlNodePtr data) {
       i = 0;
       tv_lval ar = ret.asTypedValue();
       while (i < dimension-1) {
-        auto& arr = toArrRef(ar);
+        auto& arr = asArrRef(ar);
         if (!arr.exists(pos[i])) {
-          arr.set(pos[i], Array::Create());
+          arr.set(pos[i], Array::CreateDict());
         }
-        ar = arr.lvalAt(pos[i]);
+        ar = arr.lval(pos[i]);
         i++;
       }
-      toArrRef(ar).set(pos[i], tmpVal);
+      asArrRef(ar).set(pos[i], tmpVal);
 
       /* Increment position */
       i = dimension;
@@ -2532,8 +2518,8 @@ static Variant to_zval_array(encodeType* type, xmlNodePtr data) {
     }
     trav = trav->next;
   }
-  free(dims);
-  free(pos);
+  req::free(dims);
+  req::free(pos);
   return ret;
 }
 
@@ -2571,7 +2557,7 @@ static xmlNodePtr to_xml_map(encodeType* type, const Variant& data, int style,
         if (style == SOAP_ENCODED) {
           set_xsi_type(key, "xsd:int");
         }
-        String skey = temp_key.toString();
+        OptString skey = temp_key.toString();
         xmlNodeSetContentLen(key, BAD_CAST(skey.data()), skey.size());
       }
 
@@ -2699,7 +2685,7 @@ static Variant guess_zval_convert(encodeType* type, xmlNodePtr data) {
   }
   ret = master_to_zval_int(enc, data);
   if (SOAP_GLOBAL(sdl) && type_name && enc->details.sdl_type) {
-    Object obj{SoapVar::getClass()};
+    Object obj{SoapVar::classof()};
     SoapVar::setEncType(obj.get(), enc->details.type);
     SoapVar::setEncValue(obj.get(), ret);
 
@@ -2709,7 +2695,7 @@ static Variant guess_zval_convert(encodeType* type, xmlNodePtr data) {
 
     SoapVar::setEncSType(obj.get(), cptype);
     if (nsptr) {
-      SoapVar::setEncNS(obj.get(), String((char*)nsptr->href, CopyString));
+      SoapVar::setEncNS(obj.get(), OptString((char*)nsptr->href, CopyString));
     }
     ret = std::move(obj);
   }
@@ -2766,7 +2752,7 @@ static xmlNodePtr to_xml_datetime_ex(encodeType* type, const Variant& data,
     xmlNodeSetContent(xmlParam, BAD_CAST(buf));
     req::free(buf);
   } else if (data.isString()) {
-    String sdata = data.toString();
+    OptString sdata = data.toString();
     xmlNodeSetContentLen(xmlParam, BAD_CAST(sdata.data()), sdata.size());
   }
 
@@ -2862,8 +2848,8 @@ static xmlNodePtr to_xml_list(encodeType* enc, const Variant& data, int style,
     }
     xmlNodeSetContentLen(ret, BAD_CAST(list.c_str()), list.size());
   } else {
-    String sdata = data.toString();
-    char *str = strndup(sdata.data(), sdata.size());
+    OptString sdata = data.toString();
+    char *str = req::strndup(sdata.data(), sdata.size());
     whiteSpace_collapse(BAD_CAST(str));
     char *start = str;
     char *next;
@@ -2877,7 +2863,7 @@ static xmlNodePtr to_xml_list(encodeType* enc, const Variant& data, int style,
         *next = '\0';
         next++;
       }
-      dummy_zval = String(start);
+      dummy_zval = OptString(start);
       dummy = master_to_xml(list_enc, dummy_zval, SOAP_LITERAL, ret);
       if (dummy && dummy->children && dummy->children->content) {
         if (!list.empty()) {
@@ -2893,7 +2879,7 @@ static xmlNodePtr to_xml_list(encodeType* enc, const Variant& data, int style,
       start = next;
     }
     xmlNodeSetContentLen(ret, BAD_CAST(list.c_str()), list.size());
-    free(str);
+    req::free(str);
   }
   return ret;
 }
@@ -2936,7 +2922,7 @@ static Variant to_zval_any(encodeType* /*type*/, xmlNodePtr data) {
 
   buf = xmlBufferCreate();
   xmlNodeDump(buf, nullptr, data, 0, 0);
-  ret = String((char*)xmlBufferContent(buf), CopyString);
+  ret = OptString((char*)xmlBufferContent(buf), CopyString);
   xmlBufferFree(buf);
   return ret;
 }
@@ -2957,7 +2943,7 @@ static xmlNodePtr to_xml_any(encodeType* /*type*/, const Variant& data,
     }
     return ret;
   }
-  String sdata = data.toString();
+  OptString sdata = data.toString();
   ret = xmlNewTextLen(BAD_CAST(sdata.data()), sdata.size());
   ret->name = xmlStringTextNoenc;
   ret->parent = parent;
@@ -3263,6 +3249,7 @@ void encode_reset_ns() {
   SOAP_GLOBAL(cur_uniq_ns) = 0;
   SOAP_GLOBAL(cur_uniq_ref) = 0;
   SOAP_GLOBAL(ref_map).clear();
+  SOAP_GLOBAL(node_map).clear();
 }
 
 void encode_finish() {
@@ -3270,6 +3257,7 @@ void encode_finish() {
   SOAP_GLOBAL(cur_uniq_ns) = 0;
   SOAP_GLOBAL(cur_uniq_ref) = 0;
   SOAP_GLOBAL(ref_map).clear();
+  SOAP_GLOBAL(node_map).clear();
 }
 
 encodePtr get_conversion(int encode) {
@@ -3303,7 +3291,7 @@ static encodePtr get_array_type(xmlNodePtr node, const Variant& array,
   ArrayIter iter(ht);
   for (i = 0;i < count;i++) {
     Variant tmp = iter.second();
-    if (tmp.isObject() && tmp.toObject().instanceof(SoapVar::getClass())) {
+    if (tmp.isObject() && tmp.toObject().instanceof(SoapVar::classof())) {
       auto svobj = tmp.toObject().get();
       cur_type = SoapVar::getEncType(svobj);
       auto enc_stype = SoapVar::getEncSType(svobj);

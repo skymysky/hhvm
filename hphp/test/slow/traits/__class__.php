@@ -1,21 +1,25 @@
 #!/bin/env php
-<?php
+<?hh
 
 trait bar {
-  public function call() {
+  public function call() :mixed{
     var_dump(self::class);
     var_dump(__CLASS__);
-    var_dump(array(__CLASS__ => __CLASS__));
+    var_dump(dict[__CLASS__ => __CLASS__]);
   }
 }
-
-var_dump(__CLASS__);
-function a() {
+function a() :mixed{
   var_dump(__CLASS__);
 }
-a();
 
 class foo { use bar; }
 class baz extends foo {}
+
+
+<<__EntryPoint>>
+function main_class() :mixed{
+var_dump(__CLASS__);
+a();
 (new foo)->call();
 (new baz)->call();
+}

@@ -23,7 +23,7 @@ function bcscale(int $scale): bool;
  * @return string - The sum of the two operands, as a string.
  */
 <<__Native>>
-function bcadd(string $left, string $right, int $scale = -1): string;
+function bcadd(string $left, string $right, int $scale = -1): ?string;
 
 /**
  * bcsub() - http://php.net/function.bcsub
@@ -38,7 +38,7 @@ function bcadd(string $left, string $right, int $scale = -1): string;
  * @return string - The result of the subtraction, as a string.
  */
 <<__Native>>
-function bcsub(string $left, string $right, int $scale = -1): string;
+function bcsub(string $left, string $right, int $scale = -1): ?string;
 
 /**
  * bccomp() - http://php.net/function.bccomp
@@ -69,7 +69,7 @@ function bccomp(string $left, string $right, int $scale = -1): int;
  * @return string - Returns the result as a string.
  */
 <<__Native>>
-function bcmul(string $left, string $right, int $scale = -1): string;
+function bcmul(string $left, string $right, int $scale = -1): ?string;
 
 /**
  * bcdiv() - http://php.net/function.bcdiv
@@ -111,7 +111,7 @@ function bcmod(string $left, string $right): ?string;
  * @return string - Returns the result as a string.
  */
 <<__Native>>
-function bcpow(string $left, string $right, int $scale = -1): string;
+function bcpow(string $left, string $right, int $scale = -1): ?string;
 
 /**
  * bcpowmod() - http://php.net/function.bcpowmod
@@ -124,11 +124,11 @@ function bcpow(string $left, string $right, int $scale = -1): string;
  *                          can also set the global default scale for all
  *                          functions by using bcscale().
  *
- * @return string - Returns the result as a string, or NULL if modulus is 0.
+ * @return string - Returns the result as a string, or FALSE if modulus is 0.
  */
 <<__Native>>
 function bcpowmod(string $left, string $right, string $modulus,
-                  int $scale = -1): ?string;
+                  int $scale = -1): mixed;
 
 /**
  * bcsqrt() - http://php.net/function.bcsqrt

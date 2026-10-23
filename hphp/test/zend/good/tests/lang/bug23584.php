@@ -1,8 +1,7 @@
 #!php
-<?php
-
-error_reporting(E_ALL);
-
-echo $foo;
-
-?>
+<?hh
+<<__EntryPoint>>
+function main(): void {
+  error_reporting(E_ALL);
+  echo $foo;
+}

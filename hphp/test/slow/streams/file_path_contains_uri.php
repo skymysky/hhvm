@@ -1,12 +1,12 @@
-<?php
+<?hh
 
 /**
  * The purpose of this test is to make sure that '/tmp/foo/http://example.com'
  * is treated as a file path, not a URI with a scheme of
  * /tmp/foo/http - if it is, an unknown stream type warning will be raised.
  */
-function main() {
-  $root = tempnam('/tmp', 'hhvmtest');
+function main() :mixed{
+  $root = tempnam(sys_get_temp_dir(), 'hhvmtest');
   unlink($root);
   mkdir($root);
   $fnam = $root.'/http://example.com';
@@ -20,4 +20,8 @@ function main() {
   rmdir($root);
 }
 
+
+<<__EntryPoint>>
+function main_file_path_contains_uri() :mixed{
 main();
+}

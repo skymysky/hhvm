@@ -14,12 +14,11 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_JIT_ABI_REGS_H
-#define incl_HPHP_JIT_ABI_REGS_H
+#pragma once
 
 #include "hphp/runtime/vm/jit/phys-reg.h"
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -33,7 +32,6 @@ struct Abi {
   RegSet simdReserved;   // reserved floating point / simd 128-bit registers
   RegSet calleeSaved;    // callee-saved (gp and simd)
   RegSet sf;             // status flags
-  bool   canSpill;       // are we allowed to spill values to the stack?
 
   // convenience methods
   RegSet reserved() const { return gpReserved | simdReserved; }
@@ -45,6 +43,5 @@ struct Abi {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-}}
+}
 
-#endif

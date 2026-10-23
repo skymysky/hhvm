@@ -9,4 +9,4 @@
  *
  */
 
-function foo(tuple<int> $x) {}
+function foo(tuple<int> $x): void {}

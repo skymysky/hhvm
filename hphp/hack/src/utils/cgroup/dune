@@ -1,0 +1,16 @@
+(library
+ (name cgroupprofiler)
+ (wrapped false)
+ (modules Cgroup_profiler)
+ (libraries cgroup core_kernel heap_shared_mem logging utils_core)
+ (foreign_stubs
+  (language c)
+  (names cgroupWatcher))
+ (preprocess
+  (pps lwt_ppx)))
+
+(library
+  (name cgroup)
+  (wrapped false)
+  (modules C_group)
+  (libraries core_kernel core_kernel.caml_unix procfs))

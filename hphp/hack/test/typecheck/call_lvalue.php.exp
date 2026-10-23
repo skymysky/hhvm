@@ -1,0 +1,40 @@
+error: Parsing[1002] You cannot use this syntax on the left-hand side of an assignment. [1]
+
+call_lvalue.php:23:3
+21 | 
+22 |   // Bad: array update in a temporary value.
+23 |   get_arr()[] = 1;
+   |   ^^^^^^^^^ [1]
+24 |   get_arr()[0] = 1;
+25 |   list($_, get_arr()[0]) = vec[1, 2];
+
+error: Parsing[1002] You cannot use this syntax on the left-hand side of an assignment. [1]
+
+call_lvalue.php:24:3
+22 |   // Bad: array update in a temporary value.
+23 |   get_arr()[] = 1;
+24 |   get_arr()[0] = 1;
+   |   ^^^^^^^^^ [1]
+25 |   list($_, get_arr()[0]) = vec[1, 2];
+26 | 
+
+error: Parsing[1002] You cannot use this syntax on the left-hand side of an assignment. [1]
+
+call_lvalue.php:25:12
+23 |   get_arr()[] = 1;
+24 |   get_arr()[0] = 1;
+25 |   list($_, get_arr()[0]) = vec[1, 2];
+   |            ^^^^^^^^^ [1]
+26 | 
+27 |   $vals = vec[1, 2];
+
+error: Parsing[1002] You cannot use this syntax as the iterator variable in a `foreach` loop. [1]
+
+call_lvalue.php:28:20
+26 | 
+27 |   $vals = vec[1, 2];
+28 |   foreach($vals as get_arr()[0]) {}
+   |                    ^^^^^^^^^ [1]
+29 | }
+
+4 errors found

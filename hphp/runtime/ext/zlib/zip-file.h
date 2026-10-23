@@ -15,8 +15,7 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_ZIP_FILE_H_
-#define incl_HPHP_ZIP_FILE_H_
+#pragma once
 
 #include "hphp/runtime/base/plain-file.h"
 #include <zlib.h>
@@ -28,16 +27,16 @@ namespace HPHP {
  * zlib based files.
  */
 struct ZipFile : File {
-  DECLARE_RESOURCE_ALLOCATION(ZipFile);
+  DECLARE_RESOURCE_ALLOCATION(ZipFile)
 
   ZipFile();
   virtual ~ZipFile();
 
   // overriding ResourceData
-  const String& o_getClassNameHook() const override { return classnameof(); }
+  const OptString& o_getClassNameHook() const override { return classnameof(); }
 
-  bool open(const String& filename, const String& mode) override;
-  bool close() override;
+  bool open(const OptString& filename, const OptString& mode) override;
+  bool close(int* unused = nullptr) final;
   int64_t readImpl(char *buffer, int64_t length) override;
   int64_t writeImpl(const char *buffer, int64_t length) override;
   bool seekable() override { return true;}
@@ -64,11 +63,8 @@ private:
   gzFile m_gzFile;
   req::ptr<File> m_innerFile;
   req::ptr<File> m_tempFile;
-
-  bool closeImpl();
 };
 
 ///////////////////////////////////////////////////////////////////////////////
 }
 
-#endif // incl_HPHP_ZIP_FILE_H_

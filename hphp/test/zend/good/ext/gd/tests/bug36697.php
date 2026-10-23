@@ -1,5 +1,5 @@
-<?php
-$dest = dirname(__FILE__) . "/36697.gif";
+<?hh <<__EntryPoint>> function main(): void {
+$dest = sys_get_temp_dir().'/'.'36697.gif';
 
 $im = imagecreatetruecolor(192, 36);
 $trans_color = imagecolorallocate($im, 255, 0, 0);
@@ -13,5 +13,5 @@ $im = imagecreatefromgif($dest);
 $c = imagecolorat($im, 191, 35);
 $colors = imagecolorsforindex($im, $c);
 echo $colors['red'] . ' ' . $colors['green'] . ' ' . $colors['blue'];
-@unlink($dest);
-?>
+unlink($dest);
+}

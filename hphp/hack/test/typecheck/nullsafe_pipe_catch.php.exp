@@ -1,0 +1,24 @@
+error: Parsing[1002] Pipe variables must occur only in the RHS of pipe expressions [1]
+
+nullsafe_pipe_catch.php:11:10
+ 9 |   }
+10 |   catch (Exception $_) {
+11 |     echo($$);
+   |          ^^ [1]
+12 |   }
+13 | }
+
+error: Naming[2050] Variable `$$` is undefined, or not always defined. [1]
+-> Did you mean `$_` instead? [2]
+
+nullsafe_pipe_catch.php:11:10
+ 8 |     $x = getit() |?> $$ / 0;
+ 9 |   }
+10 |   catch (Exception $_) {
+   |                    ^^ [2]
+11 |     echo($$);
+   |          ^^ [1]
+12 |   }
+13 | }
+
+2 errors found

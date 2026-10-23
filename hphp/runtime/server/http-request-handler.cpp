@@ -15,19 +15,22 @@
 */
 #include "hphp/runtime/server/http-request-handler.h"
 
+#include <atomic>
 #include <string>
 #include <vector>
 
 #include "hphp/runtime/base/datetime.h"
 #include "hphp/runtime/base/execution-context.h"
-#include "hphp/runtime/base/hhprof.h"
 #include "hphp/runtime/base/init-fini-node.h"
 #include "hphp/runtime/base/preg.h"
 #include "hphp/runtime/base/program-functions.h"
+#include "hphp/runtime/base/profiling-counters.h"
+#include "hphp/runtime/base/request-id.h"
 #include "hphp/runtime/base/resource-data.h"
 #include "hphp/runtime/base/runtime-option.h"
 #include "hphp/runtime/debugger/debugger.h"
 #include "hphp/runtime/ext/extension-registry.h"
+#include "hphp/runtime/ext/server/ext_server.h"
 #include "hphp/runtime/ext/std/ext_std_function.h"
 #include "hphp/runtime/server/access-log.h"
 #include "hphp/runtime/server/files-match.h"
@@ -40,6 +43,10 @@
 #include "hphp/runtime/vm/treadmill.h"
 
 #include "hphp/util/alloc.h"
+#include "hphp/util/configs/debug.h"
+#include "hphp/util/configs/debugger.h"
+#include "hphp/util/configs/eval.h"
+#include "hphp/util/configs/proxy.h"
 #include "hphp/util/hardware-counter.h"
 #include "hphp/util/lock.h"
 #include "hphp/util/mutex.h"
@@ -51,6 +58,40 @@
 
 namespace HPHP {
 
+#ifdef __roar__
+extern "C" void __roar_api_trigger_warmup() __attribute__((__weak__));
+#endif
+
+namespace {
+const StaticString s_defaultCharset("default_charset");
+
+#ifdef __roar__
+/*
+ * Interpreter-only ServiceLab runs hold ROAR warmup until Treadmill starts
+ * replaying traffic so both A/B sides profile equivalent request windows.
+ * The replay cookie distinguishes that traffic from HHVM health checks.
+ */
+void maybeTriggerROARWarmupForServiceLab(Transport* transport) {
+  static std::atomic<bool> triggered{false};
+
+  if (!__roar_api_trigger_warmup ||
+      !transport->cookieExists("perflab_stats_rep_info")) {
+    return;
+  }
+
+  auto expected = false;
+  if (!triggered.compare_exchange_strong(
+        expected, true, std::memory_order_acq_rel)) {
+    return;
+  }
+
+  // The ROAR API is fire-and-forget, so there is no result to handle here.
+  __roar_api_trigger_warmup();
+  Logger::Info("Requested ROAR warmup from first ServiceLab request");
+}
+#endif
+}
+
 using std::string;
 using std::vector;
 
@@ -61,10 +102,10 @@ static __thread unsigned int s_randState = 0xfaceb00c;
 
 static bool matchAnyPattern(const std::string &path,
                             const std::vector<std::string> &patterns) {
-  String spath(path.c_str(), path.size(), CopyString);
+  OptString spath(path.c_str(), path.size(), CopyString);
   for (unsigned int i = 0; i < patterns.size(); i++) {
-    Variant ret = preg_match(String(patterns[i].c_str(), patterns[i].size(),
-                                    CopyString),
+    Variant ret = preg_match(OptString(patterns[i].c_str(), patterns[i].size(),
+                                       CopyString),
                              spath);
     if (ret.toInt64() > 0) return true;
   }
@@ -78,19 +119,19 @@ static bool matchAnyPattern(const std::string &path,
 static bool shouldProxyPath(const std::string& path) {
   ReadLock lock(s_proxyMutex);
 
-  if (RuntimeOption::ProxyOriginRaw.empty()) return false;
+  if (Cfg::Proxy::Origin.empty()) return false;
 
-  if (RuntimeOption::UseServeURLs && RuntimeOption::ServeURLs.count(path)) {
+  if (Cfg::Proxy::UseServeURLs && Cfg::Proxy::ServeURLs.count(path)) {
     return true;
   }
 
-  if (RuntimeOption::UseProxyURLs) {
-    if (RuntimeOption::ProxyURLs.count(path)) return true;
-    if (matchAnyPattern(path, RuntimeOption::ProxyPatterns)) return true;
+  if (Cfg::Proxy::UseProxyURLs) {
+    if (Cfg::Proxy::ProxyURLs.contains(path)) return true;
+    if (matchAnyPattern(path, Cfg::Proxy::ProxyPatterns)) return true;
   }
 
-  if (RuntimeOption::ProxyPercentageRaw > 0) {
-    if ((abs(rand_r(&s_randState)) % 100) < RuntimeOption::ProxyPercentageRaw) {
+  if (Cfg::Proxy::Percentage > 0) {
+    if ((abs(rand_r(&s_randState)) % 100) < Cfg::Proxy::Percentage) {
       return true;
     }
   }
@@ -101,14 +142,14 @@ static bool shouldProxyPath(const std::string& path) {
 static std::string getProxyPath(const char* origPath) {
   ReadLock lock(s_proxyMutex);
 
-  return RuntimeOption::ProxyOriginRaw + origPath;
+  return Cfg::Proxy::Origin + origPath;
 }
 
 void setProxyOriginPercentage(const std::string& origin, int percentage) {
   WriteLock lock(s_proxyMutex);
 
-  RuntimeOption::ProxyOriginRaw = origin;
-  RuntimeOption::ProxyPercentageRaw = percentage;
+  Cfg::Proxy::Origin = origin;
+  Cfg::Proxy::Percentage = percentage;
   Logger::Warning("Updated proxy origin to `%s' and percentage to %d\n",
                   origin.c_str(), percentage);
 }
@@ -129,7 +170,6 @@ HttpRequestHandler::HttpRequestHandler(int timeout)
 void HttpRequestHandler::sendStaticContent(Transport *transport,
                                            const char *data, int len,
                                            time_t mtime,
-                                           bool compressed,
                                            const std::string &cmd,
                                            const char *ext) {
   assertx(ext);
@@ -145,7 +185,7 @@ void HttpRequestHandler::sendStaticContent(Transport *transport,
          strcmp(valp + 5, "html")  == 0)) {
       // Apache adds character set for these two types
       val += "; charset=";
-      val += IniSetting::Get("default_charset");
+      val += IniSetting::Get(s_defaultCharset);
       valp = val.c_str();
     }
     transport->addHeader("Content-Type", valp);
@@ -154,10 +194,10 @@ void HttpRequestHandler::sendStaticContent(Transport *transport,
   }
 
   time_t base = time(nullptr);
-  if (RuntimeOption::ExpiresActive) {
-    time_t exp = base + RuntimeOption::ExpiresDefault;
+  if (Cfg::Server::ExpiresActive) {
+    time_t exp = base + Cfg::Server::ExpiresDefault;
     char age[20];
-    snprintf(age, sizeof(age), "max-age=%d", RuntimeOption::ExpiresDefault);
+    snprintf(age, sizeof(age), "max-age=%d", Cfg::Server::ExpiresDefault);
     transport->addHeader("Cache-Control", age);
     transport->addHeader("Expires",
       req::make<DateTime>(exp, true)->toString(
@@ -176,16 +216,18 @@ void HttpRequestHandler::sendStaticContent(Transport *transport,
     if (rule.match(cmd)) {
       const vector<string> &headers = rule.getHeaders();
       for (unsigned int j = 0; j < headers.size(); j++) {
-        transport->addHeader(String(headers[j]));
+        transport->addHeader(OptString(headers[j]));
       }
     }
   }
 
   // misnomer, it means we have made decision on compression, transport
   // should not attempt to compress it.
-  transport->disableCompression();
+  if (!Cfg::Server::AllowStaticAssetsCompression) {
+    transport->disableCompression();
+  }
 
-  transport->sendRaw((void*)data, len, 200, compressed);
+  transport->sendRaw(data, len, 200, false);
   transport->onSendEnd();
 }
 
@@ -195,10 +237,8 @@ void HttpRequestHandler::logToAccessLog(Transport* transport) {
 }
 
 void HttpRequestHandler::setupRequest(Transport* transport) {
-  MemoryManager::requestInit();
-  HHProf::Request::Setup(transport);
+  g_context.getCheck()->setTransport(transport);
 
-  g_context.getCheck();
   GetAccessLog().onNewRequest();
 
   // Set current virtual host.
@@ -214,24 +254,22 @@ void HttpRequestHandler::teardownRequest(Transport* transport) noexcept {
   // HPHP logs may need to access data in ServerStats, so we have to clear the
   // hashtable after writing the log entry.
   ServerStats::Reset();
-  m_sourceRootInfo.clear();
+  SourceRootInfo::ResetLogging();
 
   if (is_hphp_session_initialized()) {
-    hphp_session_exit(transport);
+    hphp_session_exit();
   } else {
     // Even though there are no sessions, memory is allocated to perform
     // INI setting bindings when the thread is initialized.
     hphp_memory_cleanup();
   }
-
-  MemoryManager::requestShutdown();
-  HHProf::Request::Teardown();
 }
 
 void HttpRequestHandler::handleRequest(Transport *transport) {
-  ExecutionProfiler ep(ThreadInfo::RuntimeFunctions);
+  ExecutionProfiler ep(RequestInfo::RuntimeFunctions);
 
-  Logger::OnNewRequest();
+  auto const requestId = RequestId::allocate();
+  Logger::OnNewRequest(requestId.id());
   transport->enableCompression();
 
   ServerStatsHelper ssh("all",
@@ -263,6 +301,10 @@ void HttpRequestHandler::handleRequest(Transport *transport) {
     const timespec& queueTime = transport->getQueueTime();
 
     if (gettime_diff_us(queueTime, now) > requestTimeoutSeconds * 1000000LL) {
+      if (Cfg::Server::Five0ThreeRetryAfterSeconds >= 0) {
+        transport->addHeader("Retry-After", folly::to<std::string>(
+              Cfg::Server::Five0ThreeRetryAfterSeconds).c_str());
+      }
       transport->sendString("Service Unavailable", 503);
       transport->onSendEnd();
       m_requestTimedOutOnQueue->addValue(1);
@@ -275,10 +317,8 @@ void HttpRequestHandler::handleRequest(Transport *transport) {
                             vhost->getName().c_str());
 
   // resolve source root
-  always_assert(!m_sourceRootInfo.hasValue());
-  m_sourceRootInfo.emplace(transport);
-  if (m_sourceRootInfo->error()) {
-    m_sourceRootInfo->handleError(transport);
+  if (!SourceRootInfo::Init(transport)) {
+    transport->sendString("Sandbox not found", 200);
     return;
   }
 
@@ -286,17 +326,13 @@ void HttpRequestHandler::handleRequest(Transport *transport) {
   string pathTranslation = m_pathTranslation ?
     vhost->getPathTranslation().c_str() : "";
   RequestURI reqURI(vhost, transport, pathTranslation,
-                    m_sourceRootInfo->path());
+                    SourceRootInfo::GetCurrentSourceRoot());
   if (reqURI.done()) {
     return; // already handled with redirection or 404
   }
   string path = reqURI.path().data();
   string absPath = reqURI.absolutePath().data();
 
-  // determine whether we should compress response
-  bool compressed = transport->decideCompression();
-
-  const char *data; int len;
   const char *ext = reqURI.ext();
 
   if (reqURI.forbidden()) {
@@ -311,34 +347,32 @@ void HttpRequestHandler::handleRequest(Transport *transport) {
   bool treatAsContent = ext &&
        strcasecmp(ext, "php") != 0 &&
        strcasecmp(ext, "hh") != 0 &&
+       strcasecmp(ext, "hack") != 0 &&
+       strcasecmp(ext, "hackpartial") != 0 &&
        (RuntimeOption::PhpFileExtensions.empty() ||
         !RuntimeOption::PhpFileExtensions.count(ext));
 
   // If this is not a php file, check the static content cache
   if (treatAsContent) {
-    bool original = compressed;
+    // bool compressed = acceptsPrecompressed;
     // check against static content cache
-    if (StaticContentCache::TheCache.find(path, data, len, compressed)) {
-      ScopedMem decompressed_data;
-      // (qigao) not calling stat at this point because the timestamp of
-      // local cache file is not valuable, maybe misleading. This way
-      // the Last-Modified header will not show in response.
-      // stat(RuntimeOption::FileCache.c_str(), &st);
-      if (!original && compressed) {
-        data = gzdecode(data, len);
-        if (data == nullptr) {
-          raise_fatal_error("cannot unzip compressed data");
-        }
-        decompressed_data = const_cast<char*>(data);
-        compressed = false;
+    if (StaticContentCache::TheFileCache) {
+      auto content = StaticContentCache::TheFileCache->content(path);
+      if (content) {
+        ScopedMem decompressed_data;
+        // (qigao) not calling stat at this point because the timestamp of
+        // local cache file is not valuable, maybe misleading. This way
+        // the Last-Modified header will not show in response.
+        // stat(Cfg::Server::FileCache.c_str(), &st);
+        sendStaticContent(transport, content->buffer, content->size, 0,
+                          path, ext);
+        ServerStats::LogPage(path, 200);
+        return;
       }
-      sendStaticContent(transport, data, len, 0, compressed, path, ext);
-      ServerStats::LogPage(path, 200);
-      return;
     }
 
-    if (RuntimeOption::EnableStaticContentFromDisk) {
-      String translated = File::TranslatePath(String(absPath));
+    if (Cfg::Server::EnableStaticContentFromDisk) {
+      OptString translated = File::TranslatePath(OptString(absPath));
       if (!translated.empty() &&
           handleFileRequest(transport, translated, path, ext)) {
         return;
@@ -348,8 +382,8 @@ void HttpRequestHandler::handleRequest(Transport *transport) {
 
   // proxy any URLs that not specified in ServeURLs
   if (shouldProxyPath(path)) {
-    for (int i = 0; i < RuntimeOption::ProxyRetry; i++) {
-      bool force = (i == RuntimeOption::ProxyRetry - 1); // last one
+    for (int i = 0; i < Cfg::Proxy::Retry; i++) {
+      bool force = (i == Cfg::Proxy::Retry - 1); // last one
       if (handleProxyRequest(transport, force)) break;
     }
     return;
@@ -359,13 +393,13 @@ void HttpRequestHandler::handleRequest(Transport *transport) {
   std::string tmpfile = HttpProtocol::RecordRequest(transport);
 
   // main body
-  hphp_session_init(Treadmill::SessionKind::HttpRequest, transport);
-  ThreadInfo::s_threadInfo->m_reqInjectionData.
+  hphp_session_init(Treadmill::SessionKind::HttpRequest, transport, requestId);
+  RequestInfo::s_requestInfo->m_reqInjectionData.
     setTimeout(requestTimeoutSeconds);
 
   bool ret = false;
   try {
-    ret = executePHPRequest(transport, reqURI, m_sourceRootInfo.value());
+    ret = executePHPRequest(transport, reqURI);
   } catch (...) {
     string emsg;
     string response;
@@ -377,7 +411,7 @@ void HttpRequestHandler::handleRequest(Transport *transport) {
       response = e.what();
     } catch (Object &e) {
       try {
-        emsg = e.toString().data();
+        emsg = throwable_to_string(e.get()).data();
       } catch (...) {
         emsg = "Unknown";
       }
@@ -400,13 +434,26 @@ void HttpRequestHandler::handleRequest(Transport *transport) {
 
 void HttpRequestHandler::abortRequest(Transport* transport) {
   // TODO: t5284137 add some tests for abortRequest
+  if (Cfg::Server::Five0ThreeRetryAfterSeconds >= 0) {
+    transport->addHeader("Retry-After", folly::to<std::string>(
+          Cfg::Server::Five0ThreeRetryAfterSeconds).c_str());
+  }
   transport->sendString("Service Unavailable", 503);
   transport->onSendEnd();
 }
 
 bool HttpRequestHandler::executePHPRequest(Transport *transport,
-                                           RequestURI &reqURI,
-                                           SourceRootInfo &sourceRootInfo) {
+                                           RequestURI &reqURI) {
+  tracing::Request _{
+    "http-request",
+    reqURI.originalURL().c_str(),
+    [&] {
+      return tracing::Props{}
+        .add("url", reqURI.originalURL().c_str())
+        .add("absolute_path", reqURI.absolutePath().c_str());
+    }
+  };
+
   auto context = g_context.getNoCheck();
   OBFlags obFlags = OBFlags::Default;
   if (transport->getHTTPVersion() != "1.1") {
@@ -414,14 +461,14 @@ bool HttpRequestHandler::executePHPRequest(Transport *transport,
   }
   context->obStart(uninit_null(), 0, obFlags);
   context->obProtect(true);
-  if (RuntimeOption::ImplicitFlush) {
+  if (Cfg::Server::ImplicitFlush) {
     context->obSetImplicitFlush(true);
   }
-  if (RuntimeOption::EnableOutputBuffering) {
-    if (RuntimeOption::OutputHandler.empty()) {
+  if (Cfg::Server::EnableOutputBuffering) {
+    if (Cfg::Server::OutputHandler.empty()) {
       context->obStart();
     } else {
-      context->obStart(String(RuntimeOption::OutputHandler));
+      context->obStart(OptString(Cfg::Server::OutputHandler));
     }
   }
   InitFiniNode::RequestStart();
@@ -429,16 +476,14 @@ bool HttpRequestHandler::executePHPRequest(Transport *transport,
   string file = reqURI.absolutePath().c_str();
   {
     ServerStatsHelper ssh("input");
-    HttpProtocol::PrepareSystemVariables(transport, reqURI, sourceRootInfo);
-    InitFiniNode::GlobalsInit();
+    HttpProtocol::PrepareSystemVariables(transport, reqURI);
 
-    if (RuntimeOption::EnableHphpdDebugger) {
-      Eval::DSandboxInfo sInfo = sourceRootInfo.getSandboxInfo();
+    if (Cfg::Debugger::EnableHphpd) {
+      Eval::DSandboxInfo sInfo = SourceRootInfo::GetSandboxInfo();
       Eval::Debugger::RegisterSandbox(sInfo);
       context->setSandboxId(sInfo.id());
     }
     reqURI.clear();
-    sourceRootInfo.clear();
   }
 
   int code;
@@ -447,48 +492,50 @@ bool HttpRequestHandler::executePHPRequest(Transport *transport,
   // Let the debugger initialize.
   // FIXME: hphpd can be initialized this way as well
   DEBUGGER_ATTACHED_ONLY(phpDebuggerRequestInitHook());
-  if (RuntimeOption::EnableHphpdDebugger) {
+  if (Cfg::Debugger::EnableHphpd) {
     Eval::Debugger::InterruptRequestStarted(transport->getUrl());
   }
 
   bool error = false;
   std::string errorMsg = "Internal Server Error";
-  ret = hphp_invoke(context, file, false, Array(), uninit_null(),
-                    RuntimeOption::RequestInitFunction,
-                    RuntimeOption::RequestInitDocument,
+  ret = hphp_invoke(context, file, false, Array(), nullptr,
+                    Cfg::Server::RequestInitFunction,
+                    Cfg::Server::RequestInitDocument,
                     error, errorMsg,
                     true /* once */,
                     false /* warmupOnly */,
                     false /* richErrorMessage */,
-                    RuntimeOption::EvalPreludePath);
+                    Cfg::Eval::PreludePath,
+                    true /* allowDynCallNoPointer */);
 
   if (ret) {
-    String content = context->obDetachContents();
-    transport->sendRaw((void*)content.data(), content.size());
+    OptString content = context->obDetachContents();
+    transport->sendRaw(content.data(), content.size());
     code = transport->getResponseCode();
   } else if (error) {
     code = 500;
 
     string errorPage = context->getErrorPage().data();
     if (errorPage.empty()) {
-      errorPage = RuntimeOption::ErrorDocument500;
+      errorPage = Cfg::Server::ErrorDocument500;
     }
     if (!errorPage.empty()) {
       context->obProtect(false);
       context->obEndAll();
       context->obStart();
       context->obProtect(true);
-      ret = hphp_invoke(context, errorPage, false, Array(), uninit_null(),
-                        RuntimeOption::RequestInitFunction,
-                        RuntimeOption::RequestInitDocument,
+      ret = hphp_invoke(context, errorPage, false, Array(), nullptr,
+                        Cfg::Server::RequestInitFunction,
+                        Cfg::Server::RequestInitDocument,
                         error, errorMsg,
                         true /* once */,
                         false /* warmupOnly */,
                         false /* richErrorMessage */,
-                        RuntimeOption::EvalPreludePath);
+                        Cfg::Eval::PreludePath,
+                        true /* allowDynCallNoPointer */);
       if (ret) {
-        String content = context->obDetachContents();
-        transport->sendRaw((void*)content.data(), content.size());
+        OptString content = context->obDetachContents();
+        transport->sendRaw(content.data(), content.size());
         code = transport->getResponseCode();
       } else {
         Logger::Error("Unable to invoke error page %s", errorPage.c_str());
@@ -496,10 +543,10 @@ bool HttpRequestHandler::executePHPRequest(Transport *transport,
       }
     }
     if (errorPage.empty()) {
-      if (RuntimeOption::ServerErrorMessage) {
+      if (Cfg::Debug::ServerErrorMessage) {
         transport->sendString(errorMsg, 500, false, false, "hphp_invoke");
       } else {
-        transport->sendString(RuntimeOption::FatalErrorMessage,
+        transport->sendString(Cfg::Server::FatalErrorMessage,
                               500, false, false, "hphp_invoke");
       }
     }
@@ -508,41 +555,64 @@ bool HttpRequestHandler::executePHPRequest(Transport *transport,
     transport->sendString("RequestInitDocument Not Found", 404);
   }
 
-  if (RuntimeOption::EnableHphpdDebugger) {
+  if (Cfg::Debugger::EnableHphpd) {
     Eval::Debugger::InterruptRequestEnded(transport->getUrl());
   }
 
-  std::unique_ptr<StructuredLogEntry> entry;
-  if (RuntimeOption::EvalProfileHWStructLog) {
-    entry = std::make_unique<StructuredLogEntry>();
+  StructuredLogEntry* entry = nullptr;
+  if (Cfg::Eval::ProfileHWStructLog) {
+    entry = transport->createStructuredLogEntry();
     entry->setInt("response_code", code);
     auto queueBegin = transport->getQueueTime();
     auto const queueTimeUs = gettime_diff_us(queueBegin,
                                              transport->getWallTime());
     entry->setInt("queue-time-us", queueTimeUs);
+    StructuredLog::recordRequestGlobals(*entry);
+    tl_heap->recordStats(*entry);
+    entry->setInt("uptime", HHVM_FN(server_uptime)());
   }
   HardwareCounter::UpdateServiceData(transport->getCpuTime(),
                                      transport->getWallTime(),
-                                     entry.get(),
+                                     entry,
                                      false /*psp*/);
-  if (entry) StructuredLog::log("hhvm_request_perf", *entry);
-
-  // If we have registered post-send shutdown functions, end the request before
-  // executing them. If we don't, be compatible with Zend by allowing usercode
-  // in hphp_context_shutdown to run before we end the request.
-  bool hasPostSend =
-    context->hasShutdownFunctions(ExecutionContext::ShutdownType::PostSend);
-  if (hasPostSend) {
-    transport->onSendEnd();
+  if (entry) {
+    StructuredLog::log("hhvm_request_perf", *entry);
   }
+
+  transport->onSendEnd();
   context->onShutdownPostSend();
   Eval::Debugger::InterruptPSPEnded(transport->getUrl());
-  hphp_context_shutdown();
-  if (!hasPostSend) {
-    transport->onSendEnd();
+
+  if (Cfg::Eval::ProfileHWStructLog) {
+    // We now reuse the same entry created previously for non-psp, with updates
+    // on certain metrics (memory and hardware counters).
+    entry->setInt("response_code", transport->getResponseCode());
+    entry->setInt("response_size", transport->getResponseSize());
+    tl_heap->recordStats(*entry);
+    entry->setInt("uptime", HHVM_FN(server_uptime)());
+    entry->setInt("rss", ProcStatus::adjustedRssKb());
+    entry->setInt("low_mem", alloc::getLowMapped());
+    entry->setInt("mid_mem", alloc::getMidMapped());
   }
-  hphp_context_exit(false);
+  HardwareCounter::UpdateServiceData(transport->getCpuTime(),
+                                     transport->getWallTime(),
+                                     entry,
+                                     true /*psp*/);
+  // use data logged during the request to update ODS counters for profiling
+  // e.g. memcache.get_duration_us.sum.60
+  ProfilingCounters::UpdateCountersBasedOnServerNotes();
+  if (entry) {
+    StructuredLog::log("hhvm_request_perf", *entry);
+    transport->resetStructuredLogEntry();
+  }
+
+  hphp_context_exit();
   ServerStats::LogPage(file, code);
+#ifdef __roar__
+  if (UNLIKELY(Cfg::Server::TriggerROARWarmupOnServiceLabRequest)) {
+    maybeTriggerROARWarmupForServiceLab(transport);
+  }
+#endif
   return ret;
 }
 
@@ -565,12 +635,12 @@ bool HttpRequestHandler::handleProxyRequest(Transport *transport, bool force) {
   if (!respData) {
     respData = "";
   }
-  transport->sendRaw((void*)respData, response.size(), code);
+  transport->sendRaw(respData, response.size(), code);
   return true;
 }
 
 bool HttpRequestHandler::handleFileRequest(Transport* transport,
-                                           const String& translated,
+                                           const OptString& translated,
                                            const std::string& path,
                                            const char* ext) {
   static constexpr size_t kMaxCap = INT_MAX - 1;
@@ -586,7 +656,7 @@ bool HttpRequestHandler::handleFileRequest(Transport* transport,
         auto const str = folly::to<std::string>(
           "file ", filename, " is too large"
         );
-        throw StringBufferLimitException(kMaxCap, String(str.c_str()));
+        throw StringBufferLimitException(kMaxCap, OptString(str.c_str()));
       }
       auto buffer = (char*)safe_malloc(cap + 1);
       size_t len = 0;
@@ -599,7 +669,7 @@ bool HttpRequestHandler::handleFileRequest(Transport* transport,
       ::close(fd);
       buffer[len] = 0;
       sendStaticContent(transport, buffer, len, stat_buf.st_mtime,
-                        false, path, ext);
+                        path, ext);
       ServerStats::LogPage(path, 200);
       return true;
     }

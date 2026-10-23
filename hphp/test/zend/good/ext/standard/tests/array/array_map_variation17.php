@@ -1,6 +1,6 @@
-<?php
+<?hh
 /* Prototype  : array array_map  ( callback $callback  , array $arr1  [, array $...  ] )
- * Description: Applies the callback to the elements of the given arrays 
+ * Description: Applies the callback to the elements of the given arrays
  * Source code: ext/standard/array.c
  */
 
@@ -8,23 +8,23 @@
  * Test array_map() by passing different scalar/nonscalar values in place of $callback
  */
 
-echo "*** Testing array_map() : unexpected values for 'callback' argument ***\n";
-
-$arr1 = array(1, 2, 3);
-
 // get a class
 class classA
 {
-  public function __toString() {
+  public function __toString() :mixed{
     return "Class A object";
   }
 }
+<<__EntryPoint>> function main(): void {
+echo "*** Testing array_map() : unexpected values for 'callback' argument ***\n";
+
+$arr1 = vec[1, 2, 3];
 
 // get a resource variable
 $fp = fopen(__FILE__, "r");
 
 // unexpected values to be passed to $input argument
-$unexpected_callbacks = array(
+$unexpected_callbacks = vec[
 
        // int data
 /*1*/  0,
@@ -44,22 +44,22 @@ $unexpected_callbacks = array(
        false,
        TRUE,
        FALSE,
-       
+
        // empty data
 /*14*/ "",
        '',
 
        // array data
-/*16*/ array(),
-       array(1, 2),
-       array(1, array(2)),
+/*16*/ vec[],
+       vec[1, 2],
+       vec[1, vec[2]],
 
        // object data
 /*19*/ new classA(),
 
        // resource variable
 /*20*/ $fp
-);
+];
 
 // loop through each element of $inputs to check the behavior of array_map
 for($count = 0; $count < count($unexpected_callbacks); $count++) {
@@ -69,4 +69,4 @@ for($count = 0; $count < count($unexpected_callbacks); $count++) {
 
 fclose($fp);
 echo "Done";
-?>
+}

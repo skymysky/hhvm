@@ -13,8 +13,7 @@
    | license@php.net so we can mail you a copy immediately.               |
    +----------------------------------------------------------------------+
 */
-#ifndef incl_HPHP_VM_DISAS_H_
-#define incl_HPHP_VM_DISAS_H_
+#pragma once
 
 #include <string>
 
@@ -27,11 +26,9 @@ struct UserAttributeMap;
 
 //////////////////////////////////////////////////////////////////////
 
-std::string disassemble(const Unit*);
+std::string disassemble(const Unit* unit);
 std::string user_attrs(const UserAttributeMap*);
 
 //////////////////////////////////////////////////////////////////////
 
 }
-
-#endif

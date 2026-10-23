@@ -1,13 +1,12 @@
-<?php
-
-foreach (array(array(1,2), array(3,4)) as list($a, )) {
+<?hh
+<<__EntryPoint>> function main(): void {
+foreach (vec[vec[1,2], vec[3,4]] as list($a, )) {
     var_dump($a);
 }
 
-$array = [['a', 'b'], 'c', 'd'];
+$array = vec[vec['a', 'b'], 'c', 'd'];
 
 foreach($array as list(list(), $a)) {
-   var_dump($a); 
+   var_dump($a);
 }
-
-?>
+}

@@ -1,0 +1,191 @@
+// Copyright (c) Facebook, Inc. and its affiliates.
+//
+// This source code is licensed under the MIT license found in the
+// LICENSE file in the "hack" directory of this source tree.
+
+// Keep root discovery in sync with
+// //hphp/hack/src/facebook/find_hh/find_hh.sh.
+
+use std::path::Path;
+use std::path::PathBuf;
+
+use thiserror::Error;
+
+/// Maximum number of parent steps after checking the starting directory.
+pub const TRAVERSAL_LIMIT: usize = 50;
+
+/// Check the current dir and up to `TRAVERSAL_LIMIT` ancestors, returning the
+/// first one containing an hh config file. If that search fails, also check
+/// the starting dir's `www` child.
+pub fn guess_root_from_current_dir() -> Result<PathBuf, GuessRootError> {
+    let root = std::env::current_dir().map_err(GuessRootError::CurrentDir)?;
+    guess_root_from(&root)
+}
+
+/// Check the starting dir and up to `TRAVERSAL_LIMIT` ancestors, returning the
+/// first one containing an hh config file. If that search fails, also check
+/// the starting dir's `www` child.
+pub fn guess_root_from(start: &std::path::Path) -> Result<PathBuf, GuessRootError> {
+    if !start.exists() {
+        return Err(GuessRootError::StartNotFound(start.to_owned()));
+    }
+    match guess_root_from_ancestors(start) {
+        Ok(root) => Ok(root),
+        Err(error) => {
+            let www_child = start.join("www");
+            if is_root(&www_child) {
+                Ok(www_child)
+            } else {
+                Err(error)
+            }
+        }
+    }
+}
+
+fn guess_root_from_ancestors(start: &Path) -> Result<PathBuf, GuessRootError> {
+    let mut possible_root = start;
+    for _ in 0..=TRAVERSAL_LIMIT {
+        if is_root(possible_root) {
+            return Ok(possible_root.to_owned());
+        }
+        possible_root = possible_root
+            .parent()
+            .ok_or(GuessRootError::ParentNotFound)?;
+    }
+    Err(GuessRootError::TraversalLimitReached(TRAVERSAL_LIMIT))
+}
+
+pub fn is_root(possible_root: &Path) -> bool {
+    let config_path = possible_root.join(hh_config::FILE_PATH_RELATIVE_TO_ROOT);
+    config_path.exists()
+}
+
+#[derive(Debug, Error)]
+pub enum GuessRootError {
+    #[error("unable to get the current directory: {0}")]
+    CurrentDir(#[source] std::io::Error),
+    #[error("starting path does not exist: {0:?}")]
+    StartNotFound(PathBuf),
+    #[error("unable to find the root before traversal limit of {0}")]
+    TraversalLimitReached(usize),
+    #[error("no parent or parent couldn't be found")]
+    ParentNotFound,
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs::create_dir_all;
+    use std::path::Path;
+
+    use pretty_assertions::assert_eq;
+    use tempfile::TempDir;
+
+    use super::*;
+
+    // A simple, panicky touch
+    fn touch(path: &Path) {
+        // Guarantee the file exists, but don't truncate it if it does.
+        std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(path)
+            .unwrap();
+    }
+
+    #[test]
+    fn guess_root_finds_root() {
+        let repo_parent = TempDir::with_prefix("repo_root_tests.").unwrap();
+        let contains_hhconfig = repo_parent.path().join("www");
+        let current_dir = contains_hhconfig.join("a/b/c");
+
+        create_dir_all(&current_dir).unwrap();
+        touch(&contains_hhconfig.join(".hhconfig"));
+
+        let root = guess_root_from(&current_dir).unwrap();
+        assert_eq!(root, contains_hhconfig);
+    }
+
+    #[test]
+    fn guess_root_finds_www_child() {
+        let repo_parent = TempDir::with_prefix("repo_root_tests.").unwrap();
+        let fbsource = repo_parent.path().join("fbsource");
+        let www = fbsource.join("www");
+
+        create_dir_all(&www).unwrap();
+        touch(&www.join(".hhconfig"));
+
+        let root = guess_root_from(&fbsource).unwrap();
+        assert_eq!(root, www);
+    }
+
+    #[test]
+    fn guess_root_prefers_ancestor_over_www_child() {
+        let repo_parent = TempDir::with_prefix("repo_root_tests.").unwrap();
+        let outer_www = repo_parent.path().join("www");
+        let current_dir = outer_www.join("foo/bar");
+        let inner_www = current_dir.join("www");
+
+        create_dir_all(&inner_www).unwrap();
+        touch(&outer_www.join(".hhconfig"));
+        touch(&inner_www.join(".hhconfig"));
+
+        let root = guess_root_from(&current_dir).unwrap();
+        assert_eq!(root, outer_www);
+    }
+
+    #[test]
+    fn guess_root_cant_find_root() {
+        let repo_parent = TempDir::with_prefix("repo_root_tests.").unwrap();
+        let current_dir = repo_parent.path().join("a/b/c");
+        create_dir_all(&current_dir).unwrap();
+
+        let root = guess_root_from(&current_dir);
+        assert!(matches!(root, Err(GuessRootError::ParentNotFound)));
+    }
+
+    #[test]
+    fn guess_root_rejects_nonexistent_start() {
+        let repo_root = TempDir::with_prefix("repo_root_tests.").unwrap();
+        touch(&repo_root.path().join(".hhconfig"));
+        let nonexistent = repo_root.path().join("missing");
+
+        let root = guess_root_from(&nonexistent);
+        assert!(matches!(root, Err(GuessRootError::StartNotFound(path)) if path == nonexistent));
+    }
+
+    #[test]
+    fn guess_root_finds_root_at_traversal_limit() {
+        let repo_root = TempDir::with_prefix("repo_root_tests.").unwrap();
+        touch(&repo_root.path().join(".hhconfig"));
+        let mut current_dir = repo_root.path().to_owned();
+        for _ in 0..50 {
+            current_dir.push("dir");
+        }
+        create_dir_all(&current_dir).unwrap();
+
+        assert_eq!(guess_root_from(&current_dir).unwrap(), repo_root.path());
+        current_dir.pop();
+        assert_eq!(guess_root_from(&current_dir).unwrap(), repo_root.path());
+    }
+
+    #[test]
+    fn guess_root_traversal_limit() {
+        let repo_parent = TempDir::with_prefix("repo_root_tests.").unwrap();
+        touch(&repo_parent.path().join(".hhconfig"));
+        let mut current_dir = repo_parent.path().to_owned();
+        // The TRAVERSAL_LIMIT is 50. We could do TRAVERSAL_LIMIT + 1 here, but
+        // maybe it's better to avoid a test accidentally creating a million
+        // folders if we update TRAVERSAL_LIMIT in the future.
+        for ii in 0..51 {
+            current_dir.push(format!("dir{}", ii));
+        }
+        create_dir_all(&current_dir).unwrap();
+
+        let root = guess_root_from(&current_dir);
+        assert!(matches!(
+            root,
+            Err(GuessRootError::TraversalLimitReached(TRAVERSAL_LIMIT))
+        ));
+    }
+}

@@ -14,13 +14,13 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_UTIL_STRUCT_LOG_H_
-#define incl_HPHP_UTIL_STRUCT_LOG_H_
+#pragma once
 
 #include <set>
 #include <string>
 #include <vector>
-#include <folly/json.h>
+#include <folly/futures/Future.h>
+#include <folly/json/json.h>
 #include <folly/Range.h>
 
 namespace HPHP {
@@ -40,6 +40,11 @@ struct StructuredLogEntry {
   void setVec(folly::StringPiece key,
               const std::vector<folly::StringPiece>& values);
   void setStackTrace(folly::StringPiece key, const StackTrace& st);
+
+  // Set the given key to a randomly generated UUID stable for this
+  // process lifetime.
+  void setProcessUuid(folly::StringPiece key);
+
   void clear();
 
   bool force_init{false};
@@ -48,21 +53,22 @@ struct StructuredLogEntry {
 
 std::string show(const StructuredLogEntry&);
 
-using StructuredLogImpl = void (*)(const std::string&,
-                                   const StructuredLogEntry&);
-
 /*
  * Interface for recording structured data for relatively infrequent events.
  */
 namespace StructuredLog {
+using LogFn = void (*)(const std::string&,
+                       const StructuredLogEntry&);
+using RecordGlobalsFn = void (*)(StructuredLogEntry&);
+
 bool enabled();
 bool coinflip(uint32_t rate);
-void enable(StructuredLogImpl impl);
-void log(const std::string& tableName, const StructuredLogEntry&);
-};
+void enable(LogFn log, RecordGlobalsFn globals);
+void log(const std::string&, const StructuredLogEntry&);
+void recordRequestGlobals(StructuredLogEntry&);
+}
 
 ///////////////////////////////////////////////////////////////////////////////
 
 }
 
-#endif

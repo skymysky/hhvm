@@ -16,73 +16,79 @@
 
 #include "hphp/runtime/server/admin-request-handler.h"
 
-#include "hphp/runtime/base/apc-file-storage.h"
 #include "hphp/runtime/base/apc-stats.h"
-#include "hphp/runtime/base/datetime.h"
-#include "hphp/runtime/base/hhprof.h"
+#include "hphp/runtime/base/file-util.h"
 #include "hphp/runtime/base/http-client.h"
-#include "hphp/runtime/base/init-fini-node.h"
 #include "hphp/runtime/base/ini-setting.h"
-#include "hphp/runtime/base/memory-manager.h"
+#include "hphp/runtime/base/init-fini-node.h"
 #include "hphp/runtime/base/preg.h"
 #include "hphp/runtime/base/program-functions.h"
-#include "hphp/runtime/base/rds.h"
+#include "hphp/runtime/base/request-tracing.h"
 #include "hphp/runtime/base/runtime-option.h"
 #include "hphp/runtime/base/timestamp.h"
-#include "hphp/runtime/base/thread-hooks.h"
 #include "hphp/runtime/base/unit-cache.h"
 
+#include "hphp/runtime/vm/debug/debug.h"
 #include "hphp/runtime/vm/jit/cg-meta.h"
 #include "hphp/runtime/vm/jit/fixup.h"
-#include "hphp/runtime/vm/debug/debug.h"
-#include "hphp/runtime/vm/jit/mcgen.h"
+#include "hphp/runtime/vm/jit/prof-data-serialize.h"
 #include "hphp/runtime/vm/jit/prof-data.h"
-#include "hphp/runtime/vm/jit/relocation.h"
-#include "hphp/runtime/vm/jit/tc.h"
 #include "hphp/runtime/vm/jit/tc-record.h"
+#include "hphp/runtime/vm/jit/tc.h"
 #include "hphp/runtime/vm/named-entity.h"
-#include "hphp/runtime/vm/repo.h"
-#include "hphp/runtime/vm/type-profile.h"
 #include "hphp/runtime/vm/treadmill.h"
+#include "hphp/runtime/vm/type-profile.h"
 
 #include "hphp/runtime/ext/apc/ext_apc.h"
-#include "hphp/runtime/ext/json/ext_json.h"
 #include "hphp/runtime/ext/xenon/ext_xenon.h"
 
 #include "hphp/runtime/server/http-request-handler.h"
 #include "hphp/runtime/server/http-server.h"
 #include "hphp/runtime/server/memory-stats.h"
 #include "hphp/runtime/server/pagelet-server.h"
-#include "hphp/runtime/server/rpc-request-handler.h"
 #include "hphp/runtime/server/server-stats.h"
+#include "hphp/runtime/server/xbox-request-handler.h"
 
 #include "hphp/util/alloc.h"
-#include "hphp/util/hphp-config.h"
-#include "hphp/util/hugetlb.h"
-#include "hphp/util/logger.h"
-#include "hphp/util/managed-arena.h"
-#include "hphp/util/mutex.h"
-#include "hphp/util/process.h"
 #include "hphp/util/build-info.h"
+#include "hphp/util/configs/adminserver.h"
+#include "hphp/util/configs/eval.h"
+#include "hphp/util/configs/stats.h"
+#include "hphp/util/hphp-config.h"
+#include "hphp/util/logger.h"
+#include "hphp/util/numa.h"
+#include "hphp/util/process.h"
 #include "hphp/util/service-data.h"
-#include "hphp/util/stacktrace-profiler.h"
-#include "hphp/util/timer.h"
+#include "hphp/util/struct-log.h"
+
+#ifdef USE_JEMALLOC
+#include "hphp/runtime/base/memory-manager.h"
+#endif
+
+#if USE_JEMALLOC
+#include "hphp/util/hugetlb.h"
+#include "hphp/util/managed-arena.h"
+#endif
 
 #ifdef ENABLE_EXTENSION_MYSQL
 #include "hphp/runtime/ext/mysql/mysql_stats.h"
 #endif
 
+#include <fmt/format.h>
 #include <folly/Conv.h>
+#include <folly/File.h>
+#include <folly/FileUtil.h>
+#include <folly/String.h>
+#include <folly/json/json.h>
 #include <folly/Random.h>
 #include <folly/portability/Unistd.h>
 
 #include <cstdio>
-#include <fstream>
 #include <string>
 #include <sstream>
 #include <iomanip>
 
-#if defined(FACEBOOK) || defined(HAVE_LIBSODIUM)
+#if defined(HHVM_FACEBOOK) || defined(HAVE_LIBSODIUM)
 #include <sodium.h>
 #ifdef crypto_pwhash_STRBYTES
 #define HAVE_CRYPTO_PWHASH_STR
@@ -100,6 +106,8 @@ using std::endl;
 using std::string;
 
 ///////////////////////////////////////////////////////////////////////////////
+
+AdminCommandExt* AdminCommandExt::s_head{nullptr};
 
 THREAD_LOCAL(AccessLog::ThreadData, AdminRequestHandler::s_accessLogThreadData);
 
@@ -159,7 +167,8 @@ static void malloc_write_cb(void *cbopaque, const char *s) {
 void WarnIfNotOK(Transport* transport) {
   auto code = static_cast<Transport::StatusCode>(transport->getResponseCode());
   if (code != Transport::StatusCode::OK) {
-    Logger::Warning("Non-OK response from admin server: %d %s",
+    Logger::Warning("Non-OK response from admin server for command %s: %d %s",
+                    transport->getCommand().c_str(),
                     static_cast<int>(code),
                     transport->getResponseInfo().c_str());
   }
@@ -226,19 +235,34 @@ void AdminRequestHandler::logToAccessLog(Transport* transport) {
 void AdminRequestHandler::setupRequest(Transport* transport) {
   auto const cmd = transport->getCommand();
 
-  if (strncmp(cmd.c_str(), "dump-apc", 8) == 0) {
+  if (strncmp(cmd.c_str(), "dump-apc", 8) == 0 || cmd == "sb-prof-deser") {
     hphp_session_init(Treadmill::SessionKind::AdminPort);
   } else {
     g_context.getCheck();
   }
   GetAccessLog().onNewRequest();
+
+  if (StructuredLog::enabled()) {
+    auto entry = StructuredLogEntry{};
+    entry.setStr("protocol", "http");
+
+    entry.setStr("local_ip", transport->getServerAddr());
+    entry.setInt("local_port", transport->getServerPort());
+    entry.setStr("remote_ip", transport->getRemoteHost());
+    entry.setInt("remote_port", transport->getRemotePort());
+
+    entry.setStr("command", transport->getCommand());
+    entry.setStr("client_id", transport->getHeader("User-Agent"));
+
+    StructuredLog::log("hhvm_admin_log", entry);
+  }
 }
 
 void AdminRequestHandler::teardownRequest(Transport* transport) noexcept {
   SCOPE_EXIT {
     auto const cmd = transport->getCommand();
 
-    if (strncmp(cmd.c_str(), "dump-apc", 8) == 0) {
+    if (strncmp(cmd.c_str(), "dump-apc", 8) == 0 || cmd == "sb-prof-deser") {
       hphp_context_exit();
       hphp_session_exit();
     } else {
@@ -249,8 +273,57 @@ void AdminRequestHandler::teardownRequest(Transport* transport) noexcept {
   WarnIfNotOK(transport);
 }
 
+namespace {
+
+// When this struct is destroyed, it will close the file.
+struct DumpFile {
+  std::string path;
+  folly::File file;
+};
+
+Optional<DumpFile> dump_file(const char* name) {
+  auto const path = fmt::format("{}/{}", Cfg::AdminServer::DumpPath, name);
+
+  // mkdir -p the directory prefix of `path`
+  if (FileUtil::mkdir(path) != 0) return std::nullopt;
+
+  // If remove fails because of a permissions issue, then we won't be
+  // able to open the file for exclusive write below.
+  remove(path.c_str());
+
+  // Create the file, failing if it already exists. Doing so ensures
+  // that we have write access to the file and that no other user does.
+  auto const fd = open(path.c_str(), O_CREAT|O_EXCL|O_RDWR, 0666);
+  if (fd < 0) return std::nullopt;
+
+  return DumpFile{path, folly::File(fd, /*owns=*/true)};
+}
+
+Optional<jit::SBWarmupFlags> parseSBWarmupFlags(const std::string& param) {
+  if (param.empty()) return jit::SBWarmupFlags::All;
+
+  auto flags = jit::SBWarmupFlags::None;
+  std::vector<std::string> phases;
+  folly::split(',', param, phases);
+  for (auto const& phase : phases) {
+    if (phase == "preload") {
+      flags = flags | jit::SBWarmupFlags::Preload;
+    } else if (phase == "apc") {
+      flags = flags | jit::SBWarmupFlags::Apc;
+    } else if (phase == "jit") {
+      flags = flags | jit::SBWarmupFlags::Jit;
+    } else {
+      return {};
+    }
+  }
+  if (!flags) return {};
+  return flags;
+}
+
+}
+
 void AdminRequestHandler::handleRequest(Transport *transport) {
-  transport->addHeader("Content-Type", "text/plain");
+  transport->addHeader("Content-Type", "text/plain; charset=utf-8");
   std::string cmd = transport->getCommand();
 
   do {
@@ -258,8 +331,11 @@ void AdminRequestHandler::handleRequest(Transport *transport) {
       string usage =
         "/stop:            stop the web server\n"
         "    instance-id   optional, if specified, instance ID has to match\n"
+        "/oom-kill:        abort all requests whose memory usage exceed\n"
+        "                  the adaptive OOMKillThreshold\n"
         "/free-mem:        ask allocator to release unused memory to system\n"
         "/prepare-to-stop: ask the server to prepare for stopping\n"
+        "/flush-profile:   flush profiling counters (in -fprofile-gen builds)\n"
         "/flush-logs:      trigger batching log-writers to flush all content\n"
         "/translate:       translate hex encoded stacktrace in 'stack' param\n"
         "    stack         required, stack trace to translate\n"
@@ -269,6 +345,7 @@ void AdminRequestHandler::handleRequest(Transport *transport) {
         "\n"
         "/instance-id:     instance id that's passed in from command line\n"
         "/compiler-id:     returns the compiler id that built this app\n"
+        "/config-id:       returns the config id passed in from command line\n"
         "/repo-schema:     return the repo schema id used by this app\n"
         "/ini-get-all:     dump all settings as JSON\n"
         "/check-load:      how many threads are actively handling requests\n"
@@ -281,15 +358,17 @@ void AdminRequestHandler::handleRequest(Transport *transport) {
         "/check-pl-queued: how many pagelet requests are queued waiting to\n"
         "                  be handled\n"
         "/check-sql:       report SQL table statistics\n"
-        "/check-sat        how many satellite threads are actively handling\n"
-        "                  requests and queued waiting to be handled\n"
         "/status.xml:      show server status in XML\n"
         "/status.json:     show server status in JSON\n"
         "/status.html:     show server status in HTML\n"
 
+        "/rqtrace-stats:   show aggregate request trace stats in JSON\n"
+
         "/memory.xml:      show memory status in XML\n"
         "/memory.json:     show memory status in JSON\n"
         "/memory.html:     show memory status in HTML\n"
+
+        "/statcache-clear: clear the stat cache entries\n"
 
         "/stats-on:        main switch: enable server stats\n"
         "/stats-off:       main switch: disable server stats\n"
@@ -314,8 +393,8 @@ void AdminRequestHandler::handleRequest(Transport *transport) {
 
         "/xenon-snap:      generate a Xenon snapshot, which is logged later\n"
         "/hugepage:        show stats about hugepage usage\n"
+        "/jit-des-info:    show information about deserialized profile data\n"
 
-        "/const-ss:        get const_map_size\n"
         "/static-strings:  get number of static strings\n"
         "/static-strings-rds: ... that correspond to defined constants\n"
         "/dump-static-strings: dump static strings to /tmp/static_strings\n"
@@ -329,20 +408,39 @@ void AdminRequestHandler::handleRequest(Transport *transport) {
         "/dump-apc-info:   show basic APC stats\n"
         "/dump-apc-meta:   dump meta information for all objects in APC to\n"
         "                  /tmp/apc_dump_meta\n"
-        "/advise-out-apc:  forcibly madvise out APC prime data\n"
         "/random-apc:      dump the key and size of a random APC entry\n"
         "    count         number of entries to return\n"
+        "/dump-units:      dump all loaded units to /tmp/loaded_units\n"
         "/treadmill:       dump treadmill information\n"
 
         "/pcre-cache-size: get pcre cache map size\n"
         "/dump-pcre-cache: dump cached pcre's to /tmp/pcre_cache\n"
         "/dump-array-info: dump array tracer info to /tmp/array_tracer_dump\n"
 
-        "/start-stacktrace-profiler: set enable_stacktrace_profiler to true\n"
+        "/invalidate-units: remove specified files from the unit cache\n"
+        "    path           absolute path of files to invalidate\n"
+
+        "/set-server-threads: set the number of server threads. This is a\n"
+        "                     temporary setting and may be overridden by \n"
+        "                     server logic\n"
+        "    count            maximum number of threads to set\n"
+        "/get-server-threads: get the number of server threads\n"
+
         "/relocate:        relocate translations\n"
         "    random        optional, default false, relocate random subset\n"
         "       all        optional, default false, relocate all translations\n"
         "      time        optional, default 20 (seconds)\n"
+
+        "/sb-prof-deser:   deserialize sandbox profiles\n"
+        "    root          path of sandbox root\n"
+        "    path          absolute path of profile data\n"
+        "    warmup        optional, comma-separated warmup phases to enable\n"
+        "                  (preload,apc,jit). Default: all phases\n"
+        "/sb-prof-ser:     serialize sandbox profiles\n"
+        "    root          path of sandbox root\n"
+        "    path          absolute path of profile data\n"
+        "    warmup        optional, comma-separated payloads to serialize\n"
+        "                  (preload,apc,jit). Default: all payloads\n"
 #ifdef HPHP_TRACE
         "/trace-request:   write trace for next request(s) to "
         + RuntimeOption::getTraceOutputFile() + "\n"
@@ -359,13 +457,11 @@ void AdminRequestHandler::handleRequest(Transport *transport) {
 #endif
         "/vm-tcspace:      show space used by translator caches\n"
         "/vm-tcaddr:       show addresses of translation cache sections\n"
+        "/vm-rds-usage:    show RDS usage breakdown by category (JSON)\n"
         "/vm-dump-tc:      dump translation cache to /tmp/tc_dump_a and\n"
         "                  /tmp/tc_dump_astub\n"
-        "/vm-namedentities:show size of the NamedEntityTable\n"
-        "/thread-mem:      show memory usage per thread\n"
-        "/proxy:           set up request proxy\n"
-        "    origin        URL to proxy requests to\n"
-        "    percentage    percentage of requests to proxy\n"
+        "/vm-namedentities:show combined size of the NamedType and\n"
+        "                  NamedFunc tables\n"
         "/load-factor:     get or set load factor\n"
         "    set           optional, set new load factor (default 1.0,\n"
         "                  valid range [-1.0, 10.0])\n"
@@ -403,22 +499,13 @@ void AdminRequestHandler::handleRequest(Transport *transport) {
               "                  the next request that runs\n"
               "    file          optional, filesystem path\n"
           );
-#ifdef ENABLE_HHPROF
-          usage.append(
-              "/hhprof/start:    start profiling\n"
-              "    requestType   \"all\" or \"next\"*\n"
-              "    url           profile next matching url for \"next\"\n"
-              "    lgSample      lg sample rate\n"
-              "    profileType   \"current\"* or \"cumulative\"\n"
-              "/hhprof/status:   configuration and current dump status\n"
-              "/hhprof/stop:     stop profiling\n"
-              "/pprof/cmdline:   program command line\n"
-              "/pprof/heap:      heap dump\n"
-              "/pprof/symbol:    symbol lookup\n"
-          );
-#endif // ENABLE_HHPROF
         }
 #endif // USE_JEMALLOC
+
+      AdminCommandExt::iterate([&](AdminCommandExt* ace) {
+        usage.append(ace->usage());
+        return false;
+      });
 
       transport->sendString(usage);
       break;
@@ -426,23 +513,27 @@ void AdminRequestHandler::handleRequest(Transport *transport) {
 
     bool needs_password = (cmd != "build-id") && (cmd != "compiler-id") &&
                           (cmd != "instance-id") && (cmd != "flush-logs") &&
-                          (cmd != "warmup-status")
-#if defined(ENABLE_HHPROF) && defined(USE_JEMALLOC)
-                          && (mallctl == nullptr || (
-                                 (cmd != "hhprof/start")
-                              && (cmd != "hhprof/status")
-                              && (cmd != "hhprof/stop")
-                              && (cmd != "pprof/cmdline")
-                              && (cmd != "pprof/heap")
-                              && (cmd != "pprof/symbol")))
-#endif
-                          ;
+                          (cmd != "warmup-status") && (cmd != "config-id");
 
-    if (needs_password && !RuntimeOption::HashedAdminPasswords.empty()) {
+    // When configured, we allow read-only stats to be read without a password.
+    if (needs_password && !Cfg::AdminServer::StatsNeedPassword) {
+      if ((strncmp(cmd.c_str(), "memory.", 7) == 0) ||
+          (strncmp(cmd.c_str(), "stats.", 6) == 0) ||
+          (strncmp(cmd.c_str(), "check-", 6) == 0) ||
+          (strncmp(cmd.c_str(), "static-strings", 14) == 0) ||
+          cmd == "hugepage" || cmd == "pcre-cache-size" ||
+          cmd == "vm-tcspace" || cmd == "vm-tcaddr" ||
+          cmd == "vm-rds-usage" ||
+          cmd == "vm-namedentities" || cmd == "jemalloc-stats") {
+        needs_password = false;
+      }
+    }
+
+    if (needs_password && !Cfg::AdminServer::HashedPasswords.empty()) {
       bool matched = false;
 #ifdef HAVE_CRYPTO_PWHASH_STR
       const auto password = transport->getParam("auth");
-      for (const std::string& hash : RuntimeOption::HashedAdminPasswords) {
+      for (const std::string& hash : Cfg::AdminServer::HashedPasswords) {
         if (crypto_pwhash_str_verify(hash.data(),
                                      password.data(),
                                      password.size()) == 0) {
@@ -455,16 +546,16 @@ void AdminRequestHandler::handleRequest(Transport *transport) {
         transport->sendString("Unauthorized", 401);
         break;
       }
-    } else if (needs_password && !RuntimeOption::AdminPasswords.empty()) {
+    } else if (needs_password && !Cfg::AdminServer::Passwords.empty()) {
       std::set<std::string>::const_iterator iter =
-        RuntimeOption::AdminPasswords.find(transport->getParam("auth"));
-      if (iter == RuntimeOption::AdminPasswords.end()) {
+        Cfg::AdminServer::Passwords.find(transport->getParam("auth"));
+      if (iter == Cfg::AdminServer::Passwords.end()) {
         transport->sendString("Unauthorized", 401);
         break;
       }
     } else {
-      if (needs_password && !RuntimeOption::AdminPassword.empty() &&
-          RuntimeOption::AdminPassword != transport->getParam("auth")) {
+      if (needs_password && !Cfg::AdminServer::Password.empty() &&
+          Cfg::AdminServer::Password != transport->getParam("auth")) {
         transport->sendString("Unauthorized", 401);
         break;
       }
@@ -483,13 +574,21 @@ void AdminRequestHandler::handleRequest(Transport *transport) {
       HttpServer::Server->stop();
       break;
     }
+    if (cmd == "oom-kill") {
+      Logger::Info("Invoking OOM killer upon admin port request from %s",
+                   transport->getRemoteHost());
+      auto const server = HttpServer::Server->getPageServer();
+      RequestInfo::InvokeOOMKiller(server->getActiveWorker());
+      transport->sendString("OOM killer invoked");
+      break;
+    }
     if (cmd == "free-mem") {
       const auto before = Process::GetMemUsageMb();
       std::string errStr;
       if (purge_all(&errStr)) {
         const auto after = Process::GetMemUsageMb();
         transport->sendString(
-          folly::sformat("Purged {} -> {} MB RSS", before, after).c_str());
+          fmt::format("Purged {} -> {} MB RSS", before, after).c_str());
       } else {
         transport->sendString(errStr.c_str(), 500);
       }
@@ -519,12 +618,19 @@ void AdminRequestHandler::handleRequest(Transport *transport) {
                     newInfo.freeMb, newInfo.cachedMb, newInfo.buffersMb);
       break;
     }
+    if (cmd == "flush-profile") {
+      HttpServer::ProfileFlush();
+      // send the response *after* flushing, so the caller knows the
+      // data has been updated.
+      transport->sendString("OK\n");
+      break;
+    }
     if (cmd == "flush-logs") {
       transport->sendString("OK\n");
       Logger::FlushAll();
       HttpRequestHandler::GetAccessLog().flushAllWriters();
       AdminRequestHandler::GetAccessLog().flushAllWriters();
-      RPCRequestHandler::GetAccessLog().flushAllWriters();
+      XboxRequestHandler::GetAccessLog().flushAllWriters();
       break;
     }
     if (cmd == "set-log-level") {
@@ -572,6 +678,10 @@ void AdminRequestHandler::handleRequest(Transport *transport) {
       transport->sendString(compilerId().begin(), 200);
       break;
     }
+    if (cmd == "config-id") {
+      transport->sendString(std::to_string(RuntimeOption::ConfigId), 200);
+      break;
+    }
     if (cmd == "repo-schema") {
       transport->sendString(repoSchemaId().begin(), 200);
       break;
@@ -586,6 +696,53 @@ void AdminRequestHandler::handleRequest(Transport *transport) {
       string translated = translate_stack(transport->getParam("stack").c_str(),
                                           transport->getParam("bare").empty());
       transport->sendString(translated);
+      break;
+    }
+    if (cmd == "set-server-threads") {
+      try {
+        const auto maxThreads = folly::to<size_t>(transport->getParam("count"));
+        HttpServer::Server->getPageServer()->setMaxThreadCount(maxThreads);
+
+        // New value may not be equal to `maxThreads` due to dispatcher logic
+        transport->sendString(fmt::format(
+            "Server threads updated to {}\n",
+            HttpServer::Server->getPageServer()->getMaxThreadCount()));
+      } catch (...) {
+        transport->sendString("Something went wrong.\n");
+      }
+      break;
+    }
+    if (cmd == "get-server-threads") {
+      transport->sendString(fmt::format(
+          "Server threads currently set to to {}\n",
+          HttpServer::Server->getPageServer()->getMaxThreadCount()));
+      break;
+    }
+    if (cmd == "sb-prof-deser") {
+      auto const sbRoot = transport->getParam("root");
+      auto const profPath = transport->getParam("path");
+      auto const warmupParam = transport->getParam("warmup");
+      auto const flags = parseSBWarmupFlags(warmupParam);
+      if (!flags) {
+        transport->sendString("invalid warmup payload list\n", 400);
+        break;
+      }
+      auto const status =
+        jit::deserializeSBProfData(sbRoot, profPath, *flags);
+      transport->sendString(status);
+      break;
+    }
+    if (cmd == "sb-prof-ser") {
+      auto const sbRoot = transport->getParam("root");
+      auto const profPath = transport->getParam("path");
+      auto const warmupParam = transport->getParam("warmup");
+      auto const flags = parseSBWarmupFlags(warmupParam);
+      if (!flags) {
+        transport->sendString("invalid warmup payload list\n", 400);
+        break;
+      }
+      auto const status = jit::serializeSBProfData(sbRoot, profPath, *flags);
+      transport->sendString(status);
       break;
     }
     if (strncmp(cmd.c_str(), "check", 5) == 0 &&
@@ -612,6 +769,10 @@ void AdminRequestHandler::handleRequest(Transport *transport) {
         handleDumpCacheRequest(cmd, transport)) {
       break;
     }
+    if (strncmp(cmd.c_str(), "invalidate-units", 16) == 0 &&
+        handleInvalidateUnitRequest(cmd, transport)) {
+      break;
+    }
     if (strncmp(cmd.c_str(), "xenon-snap", 10) == 0) {
       static int64_t s_lastSampleTime = 0;
       auto const current = TimeStamp::Current();
@@ -623,9 +784,13 @@ void AdminRequestHandler::handleRequest(Transport *transport) {
       break;
     }
     if (strncmp(cmd.c_str(), "hugepage", 9) == 0) {
-#if USE_JEMALLOC_EXTENT_HOOKS
+#if USE_JEMALLOC
       std::string msg =
-        folly::sformat("{} 1G huge pages active\n", num_1g_pages());
+        fmt::format(
+          "{} {} huge pages active\n",
+          num_1g_pages(),
+          huge1g_page_size() == size1g ? "1G" : "512M"
+        );
       if (auto a = alloc::lowArena()) {
         msg += a->reportStats();
       }
@@ -638,35 +803,46 @@ void AdminRequestHandler::handleRequest(Transport *transport) {
 #endif
       break;
     }
-    if (strncmp(cmd.c_str(), "const-ss", 8) == 0 &&
-        handleConstSizeRequest(cmd, transport)) {
-      break;
+    if (strncmp(cmd.c_str(), "jit-des-info", 13) == 0) {
+      if (isJitSerializing() || !jit::ProfData::wasDeserialized()) {
+        transport->sendString("", 200);
+        break;
+      }
+      auto msg = fmt::format("{}:{}",
+                                jit::ProfData::buildHost()->slice(),
+                                jit::ProfData::buildTime());
+      transport->sendString(msg, 200);
     }
+
     if (strncmp(cmd.c_str(), "static-strings", 14) == 0 &&
         handleStaticStringsRequest(cmd, transport)) {
       break;
     }
     if (strncmp(cmd.c_str(), "dump-static-strings", 19) == 0) {
-      auto filename = transport->getParam("file");
-      if (filename == "") filename = "/tmp/static_strings";
-      handleDumpStaticStringsRequest(cmd, filename);
-      transport->sendString("OK\n");
+      if (auto file = dump_file("static_strings")) {
+        handleDumpStaticStringsRequest(file->file);
+        transport->sendString(fmt::format("dumped to {}\n", file->path));
+      } else {
+        transport->sendString("Unable to mkdir or file already exists.\n");
+      }
       break;
     }
     if (strncmp(cmd.c_str(), "random-static-strings", 21) == 0) {
       handleRandomStaticStringsRequest(cmd, transport);
       break;
     }
+    if (strncmp(cmd.c_str(), "dump-units", 10) == 0) {
+      if (auto file = dump_file("loaded_units")) {
+        if (handleDumpUnitsRequest(file->file)) {
+          transport->sendString(fmt::format("dumped to {}\n", file->path));
+        }
+      } else {
+        transport->sendString("Unable to mkdir or file already exists.\n");
+      }
+      break;
+    }
     if (strncmp(cmd.c_str(), "vm-", 3) == 0 &&
         handleVMRequest(cmd, transport)) {
-      break;
-    }
-    if (cmd == "proxy") {
-      handleProxyRequest(cmd, transport);
-      break;
-    }
-    if (!strcmp(cmd.c_str(), "thread-mem")) {
-      transport->sendString(get_thread_mem_usage());
       break;
     }
 
@@ -678,47 +854,17 @@ void AdminRequestHandler::handleRequest(Transport *transport) {
     }
 
     if (cmd == "dump-pcre-cache") {
-      auto filename = transport->getParam("file");
-      if (filename == "") filename = "/tmp/pcre_cache";
-      pcre_dump_cache(filename);
-      transport->sendString("OK\n");
-      break;
-    }
-
-    if (cmd == "start-stacktrace-profiler") {
-      enable_stacktrace_profiler = true;
-      transport->sendString("OK\n");
-      break;
-    }
-
-    if (cmd == "relocate") {
-      auto randomParam = transport->getParam("random");
-      auto allParam = transport->getParam("all");
-      auto time = transport->getIntParam("time");
-      bool random = randomParam == "true" || randomParam == "1";
-      if (allParam == "true" || allParam == "1") {
-        jit::tc::liveRelocate(-2);
-      } else if (random || time == 0) {
-        jit::tc::liveRelocate(random);
+      if (auto file = dump_file("pcre_cache")) {
+        pcre_dump_cache(file->file);
+        transport->sendString(fmt::format("dumped to {}\n", file->path));
       } else {
-        jit::tc::liveRelocate(time);
+        transport->sendString("Unable to mkdir or file already exists.\n");
       }
-      transport->sendString("OK\n");
       break;
     }
 
     if (cmd == "warmup-status") {
       transport->sendString(jit::tc::warmupStatusString());
-      break;
-    }
-
-    if (cmd == "advise-out-apc") {
-      if (!apcExtension::Enable) {
-        transport->sendString("No APC\n");
-        break;
-      }
-      apc_advise_out();
-      transport->sendString("Done\n");
       break;
     }
 
@@ -746,8 +892,8 @@ void AdminRequestHandler::handleRequest(Transport *transport) {
         transport->sendString("Invalid load factor spec: " + factorStr, 400);
         break;
       }
-      HttpServer::LoadFactor.store(factor, std::memory_order_relaxed);
-      transport->sendString(folly::sformat("Load factor updated to {}\n",
+      HttpServer::LoadFactor.store(factor, std::memory_order_release);
+      transport->sendString(fmt::format("Load factor updated to {}\n",
                                            factor));
       Logger::Info("Load factor updated to %lf", factor);
       break;
@@ -756,7 +902,7 @@ void AdminRequestHandler::handleRequest(Transport *transport) {
       auto const discountStr = transport->getParam("set");
       if (discountStr.empty()) {
         transport->sendString(folly::to<string>(
-          HttpServer::QueueDiscount.load(std::memory_order_relaxed)));
+          HttpServer::QueueDiscount.load(std::memory_order_acquire)));
         break;
       }
       int queue_discount = 0;
@@ -767,84 +913,38 @@ void AdminRequestHandler::handleRequest(Transport *transport) {
         break;
       }
       HttpServer::QueueDiscount.store(queue_discount,
-        std::memory_order_relaxed);
-      transport->sendString(folly::sformat("Queue Discount updated to {}\n",
+        std::memory_order_release);
+      transport->sendString(fmt::format("Queue Discount updated to {}\n",
         queue_discount));
       Logger::Info("Queue Discount updated to %d", queue_discount);
       break;
     }
     if (cmd == "ini-get-all") {
-      auto out = IniSetting::GetAllAsJSON();
+      auto out = folly::toJson(IniSetting::GetAllAsDynamic());
       transport->sendString(out.c_str());
       break;
     }
 
-#ifdef USE_TCMALLOC
-    if (MallocExtensionInstance) {
-      if (cmd == "tcmalloc-stats") {
-        std::ostringstream stats;
-        size_t user_allocated, heap_size, slack_bytes;
-        size_t pageheap_free, pageheap_unmapped;
-        size_t tc_max, tc_allocated;
-
-        MallocExtensionInstance()->
-          GetNumericProperty("generic.current_allocated_bytes",
-              &user_allocated);
-        MallocExtensionInstance()->
-          GetNumericProperty("generic.heap_size", &heap_size);
-        MallocExtensionInstance()->
-          GetNumericProperty("tcmalloc.slack_bytes", &slack_bytes);
-        MallocExtensionInstance()->
-          GetNumericProperty("tcmalloc.pageheap_free_bytes", &pageheap_free);
-        MallocExtensionInstance()->
-          GetNumericProperty("tcmalloc.pageheap_unmapped_bytes",
-              &pageheap_unmapped);
-        MallocExtensionInstance()->
-          GetNumericProperty("tcmalloc.max_total_thread_cache_bytes",
-              &tc_max);
-        MallocExtensionInstance()->
-          GetNumericProperty("tcmalloc.current_total_thread_cache_bytes",
-              &tc_allocated);
-        stats << "<tcmalloc-stats>" << endl;
-        stats << "  <user_allocated>" << user_allocated << "</user_allocated>"
-          << endl;
-        stats << "  <heap_size>" << heap_size << "</heap_size>" << endl;
-        stats << "  <slack_bytes>" << slack_bytes << "</slack_bytes>" << endl;
-        stats << "  <pageheap_free>" << pageheap_free
-          << "</pageheap_free>" << endl;
-        stats << "  <pageheap_unmapped>" << pageheap_unmapped
-          << "</pageheap_unmapped>" << endl;
-        stats << "  <thread_cache_max>" << tc_max
-          << "</thread_cache_max>" << endl;
-        stats << "  <thread_cache_allocated>" << tc_allocated
-          << "</thread_cache_allocated>" << endl;
-        stats << "</tcmalloc-stats>" << endl;
-        transport->sendString(stats.str());
-        break;
-      }
-      if (cmd == "tcmalloc-set-tc") {
-        size_t tc_max;
-
-        MallocExtensionInstance()->
-          GetNumericProperty("tcmalloc.max_total_thread_cache_bytes", &tc_max);
-
-        size_t tcache = transport->getInt64Param("s");
-        bool retval = MallocExtensionInstance()->
-          SetNumericProperty("tcmalloc.max_total_thread_cache_bytes", tcache);
-        transport->sendString(retval == true ? "OK\n" : "FAILED\n");
-        break;
-      }
-    }
+    if (cmd == "numa-info") {
+      std::ostringstream out;
+#ifdef HAVE_NUMA
+      out << "use_numa: " << use_numa << endl;
+      out << "numa_num_nodes: " << numa_num_nodes << endl;
+      out << "numa_node_mask: " << numa_node_mask << endl;
+      out << "numa_node_set: " << numa_node_set << endl;
+#else
+      out << "HAVE_NUMA not defined" << endl;
 #endif
+      transport->sendString(out.str());
+      break;
+    }
 
 #ifdef USE_JEMALLOC
     assertx(mallctlnametomib && mallctlbymib);
     if (cmd == "jemalloc-stats") {
-      // Force jemalloc to update stats cached for use by mallctl().
+      // jemalloc stats update is periodically triggered in the
+      // host-health-monitor thread.
       uint32_t error = 0;
-      if (mallctlWrite<uint64_t, true>("epoch", 1) != 0) {
-        error = 1;
-      }
 
       auto call_mallctl = [&](const char* statName) {
         size_t value = 0;
@@ -856,18 +956,8 @@ void AdminRequestHandler::handleRequest(Transport *transport) {
       size_t allocated = call_mallctl("stats.allocated");
       size_t active = call_mallctl("stats.active");
       size_t mapped = call_mallctl("stats.mapped");
-      size_t low_mapped = call_mallctl(
-          folly::sformat("stats.arenas.{}.mapped",
-                         low_arena).c_str());
-      size_t low_small_allocated = call_mallctl(
-          folly::sformat("stats.arenas.{}.small.allocated",
-                         low_arena).c_str());
-      size_t low_large_allocated = call_mallctl(
-          folly::sformat("stats.arenas.{}.large.allocated",
-                         low_arena).c_str());
-      size_t low_active = call_mallctl(
-          folly::sformat("stats.arenas.{}.pactive",
-                         low_arena).c_str()) * sysconf(_SC_PAGESIZE);
+      auto const low_mapped = alloc::getLowMapped();
+      auto const mid_mapped = alloc::getMidMapped();
 
       std::ostringstream stats;
       stats << "<jemalloc-stats>" << endl;
@@ -875,13 +965,7 @@ void AdminRequestHandler::handleRequest(Transport *transport) {
       stats << "  <active>" << active << "</active>" << endl;
       stats << "  <mapped>" << mapped << "</mapped>" << endl;
       stats << "  <low_mapped>" << low_mapped << "</low_mapped>" << endl;
-      stats << "  <low_allocated>"
-            << (low_small_allocated + low_large_allocated)
-            << "</low_allocated>" << endl;
-      stats << "  <low_active>"
-            << low_active
-            << "</low_active>" << endl;
-      stats << "  <error>" << error << "</error>" << endl;
+      stats << "  <mid_mapped>" << mid_mapped << "</low_mapped>" << endl;
       stats << "</jemalloc-stats>" << endl;
       transport->sendString(stats.str());
       break;
@@ -937,33 +1021,34 @@ void AdminRequestHandler::handleRequest(Transport *transport) {
       }
       break;
     }
-#ifdef ENABLE_HHPROF
-    if (cmd == "hhprof/start") {
-      HHProf::HandleHHProfStart(transport);
-      break;
-    }
-    if (cmd == "hhprof/status") {
-      HHProf::HandleHHProfStatus(transport);
-      break;
-    }
-    if (cmd == "hhprof/stop") {
-      HHProf::HandleHHProfStop(transport);
-      break;
-    }
-    if (cmd == "pprof/cmdline") {
-      HHProf::HandlePProfCmdline(transport);
-      break;
-    }
-    if (cmd == "pprof/heap") {
-      HHProf::HandlePProfHeap(transport);
-      break;
-    }
-    if (cmd == "pprof/symbol") {
-      HHProf::HandlePProfSymbol(transport);
-      break;
-    }
-#endif // ENABLE_HHPROF
 #endif // USE_JEMALLOC
+
+    if (cmd == "rqtrace-stats") {
+      std::stringstream out;
+      bool first = true;
+      out << "{" << endl;
+      auto appendStat =
+        [&](folly::StringPiece name, folly::StringPiece kind, int64_t value) {
+          out << folly::format(
+            "{} \"{}_{}\":{}\n", first ? "" : ",", name, kind, value);
+          first = false;
+        };
+      rqtrace::visit_process_stats(
+        [&] (const StringData* name, rqtrace::EventStats stats) {
+          appendStat(name->data(), "duration", stats.total_duration);
+          appendStat(name->data(), "count", stats.total_count);
+        }
+      );
+      out << "}" << endl;
+      transport->sendString(out.str());
+      break;
+    }
+
+    if (AdminCommandExt::iterate([&](AdminCommandExt* ace) {
+          return ace->handleRequest(transport);
+       })) {
+      break;
+    }
 
     transport->sendString("Unknown command: " + cmd + "\n", 404);
   } while (0);
@@ -986,11 +1071,10 @@ static bool toggle_switch(Transport *transport, bool &setting) {
 }
 
 static bool send_report(Transport *transport) {
-  std::string keys   = transport->getParam      ("keys");
-  std::string prefix = transport->getParam      ("prefix");
+  std::string keys = transport->getParam("keys");
+  std::string prefix = transport->getParam("prefix");
 
-  std::string out;
-  ServerStats::Report(out, keys, prefix);
+  std::string out = ServerStats::ReportString(keys, prefix);
 
   transport->replaceHeader("Content-Type", "text/plain");
   transport->sendString(out);
@@ -999,11 +1083,8 @@ static bool send_report(Transport *transport) {
 
 static bool send_status(Transport *transport, Writer::Format format,
                         const char *mime) {
-  string out;
-  ServerStats::ReportStatus(out, format);
-
   transport->replaceHeader("Content-Type", mime);
-  transport->sendString(out);
+  transport->sendString(ServerStats::ReportStatus(format));
   return true;
 }
 
@@ -1029,36 +1110,29 @@ bool AdminRequestHandler::handleCheckRequest(const std::string &cmd,
     std::stringstream out;
     bool first = true;
     out << "{" << endl;
-    auto appendStat = [&](folly::StringPiece name, int64_t value) {
+    auto const appendStat = [&](folly::StringPiece name, int64_t value) {
        out << folly::format("{} \"{}\":{}\n", first ? "" : ",", name, value);
        first = false;
     };
-    HPHP::Server* server = HttpServer::Server->getPageServer();
-    appendStat("load", server->getActiveWorker());
-    appendStat("queued", server->getQueuedJobs());
-    appendStat("hhbc-roarena-capac", hhbc_arena_capacity());
-    appendStat("hhbc-size", g_hhbc_size->getSum());
-    auto const memInfos = jit::tc::getTCMemoryUsage();
-    for (auto const info : memInfos) {
-        auto isMain = info.name == "main";
-        appendStat(folly::format("tc-{}size",
-                                 isMain ? "" : info.name).str(),
-                   info.used);
-    }
+
+    auto const arena = get_swappable_readonly_arena();
+    appendStat("swappable-roarena-capac", arena ? arena->capacity() : 0);
+    appendStat("hhbc-size", g_hhbc_size->getValue());
     appendStat("rds", rds::usedBytes());
     appendStat("rds-local", rds::usedLocalBytes());
     appendStat("rds-persistent", rds::usedPersistentBytes());
     appendStat("catch-traces", jit::numCatchTraces());
     appendStat("fixups", jit::FixupMap::size());
     appendStat("units", numLoadedUnits());
-    appendStat("funcs", Func::nextFuncId());
-    appendStat("named-entities", NamedEntity::tableSize());
-    for (auto& pair : NamedEntity::tableStats()) {
-      appendStat(folly::sformat("named-entities-{}", pair.first), pair.second);
+    appendStat("funcs", Func::maxFuncIdNum());
+    appendStat("named-entities", namedEntityTableSize());
+    for (auto& pair : namedEntityStats()) {
+      appendStat(fmt::format("named-entities-{}", pair.first), pair.second);
     }
     appendStat("static-strings", makeStaticStringCount());
     appendStat("request-count", requestCount());
-    appendStat("single-jit-requests", singleJitRequestCount());
+    appendStat("jit-des", jit::ProfData::triedDeserialization());
+    appendStat("jit-des-succ", jit::ProfData::wasDeserialized());
 
     /*
      * We're only using globalProfData() here because admin requests don't call
@@ -1072,8 +1146,9 @@ bool AdminRequestHandler::handleCheckRequest(const std::string &cmd,
       appendStat("opt-funcs", profData->optimizedFuncs());
     }
 
-    if (RuntimeOption::EvalEnableReusableTC) {
-      for (auto const info : memInfos) {
+    if (Cfg::Eval::EnableReusableTC) {
+      auto const memInfos = jit::tc::getTCMemoryUsage();
+      for (auto const& info : memInfos) {
         appendStat(folly::format("tc-{}-allocs", info.name).str(), info.allocs);
         appendStat(folly::format("tc-{}-frees", info.name).str(), info.frees);
         appendStat(folly::format("tc-{}-free-size", info.name).str(),
@@ -1081,7 +1156,6 @@ bool AdminRequestHandler::handleCheckRequest(const std::string &cmd,
         appendStat(folly::format("tc-{}-free-blocks", info.name).str(),
                    info.free_blocks);
       }
-      appendStat("tc-recorded-funcs", jit::tc::recordedFuncs());
       appendStat("tc-smashed-calls", jit::tc::smashedCalls());
       appendStat("tc-smashed-branches", jit::tc::smashedBranches());
     }
@@ -1098,23 +1172,6 @@ bool AdminRequestHandler::handleCheckRequest(const std::string &cmd,
   if (cmd == "check-pl-queued") {
     int count = PageletServer::GetQueuedJobs();
     transport->sendString(folly::to<string>(count));
-    return true;
-  }
-  if (cmd == "check-sat") {
-    std::vector<std::pair<std::string, int>> stats;
-    HttpServer::Server->getSatelliteStats(&stats);
-    std::stringstream out;
-    bool first = true;
-    out << "{" << endl;
-    auto appendStat = [&](const std::string &name, int value) {
-       out << (!first ? "," : "") << "  \"" << name << "\":" << value << endl;
-       first = false;
-    };
-    for (auto i : stats) {
-      appendStat(i.first, i.second);
-    }
-    out << "}" << endl;
-    transport->sendString(out.str());
     return true;
   }
   if (cmd == "check-sql") {
@@ -1145,23 +1202,54 @@ bool AdminRequestHandler::handleStatusRequest(const std::string &cmd,
   return false;
 }
 
+bool AdminRequestHandler::handleInvalidateUnitRequest(const std::string &cmd,
+                                                      Transport *transport) {
+  if (Cfg::Repo::Authoritative) {
+    transport->sendString("Cannot invalidate units in repo authoritative mode\n", 400);
+    return true;
+  }
+
+  std::string invalidated;
+  std::vector<std::string> paths;
+  // Support GET for convenience, and POST for large requests.
+  transport->getArrayParam("path", paths, Transport::Method::AUTO);
+
+  bool first = true;
+  for (auto const& path : paths) {
+    OptString translatedPath = File::TranslatePathKeepRelative(path);
+    invalidateUnit(translatedPath.get());
+
+    if (first) {
+      first = false;
+    } else {
+      invalidated += " ";
+    }
+    invalidated += translatedPath.c_str();
+  }
+
+  auto msg = fmt::format("Invalidated {} path(s): {}\n",
+                            paths.size(), invalidated);
+  transport->sendString(msg);
+  return true;
+}
+
 bool AdminRequestHandler::handleMemoryRequest(const std::string &cmd,
                                               Transport *transport){
   std::string out;
   if (cmd == "memory.xml") {
-      MemoryStats::GetInstance()->ReportMemory(out, Writer::Format::XML);
+      MemoryStats::ReportMemory(out, Writer::Format::XML);
       transport->replaceHeader("Content-Type","application/xml");
       transport->sendString(out);
       return true;
   }
   if (cmd == "memory.json") {
-      MemoryStats::GetInstance()->ReportMemory(out, Writer::Format::JSON);
+      MemoryStats::ReportMemory(out, Writer::Format::JSON);
       transport->replaceHeader("Content-Type","application/json");
       transport->sendString(out);
       return true;
   }
   if (cmd == "memory.html" || cmd == "memory.htm") {
-      MemoryStats::GetInstance()->ReportMemory(out, Writer::Format::HTML);
+      MemoryStats::ReportMemory(out, Writer::Format::HTML);
       transport->replaceHeader("Content-Type","text/html");
       transport->sendString(out);
       return true;
@@ -1172,12 +1260,12 @@ bool AdminRequestHandler::handleMemoryRequest(const std::string &cmd,
 bool AdminRequestHandler::handleStatsRequest(const std::string &cmd,
                                              Transport *transport) {
   if (cmd == "stats-on") {
-    RuntimeOption::EnableStats = true;
+    Cfg::Stats::Enable = true;
     transport->sendString("OK\n");
     return true;
   }
   if (cmd == "stats-off") {
-    RuntimeOption::EnableStats = false;
+    Cfg::Stats::Enable = false;
     transport->sendString("OK\n");
     return true;
   }
@@ -1188,14 +1276,10 @@ bool AdminRequestHandler::handleStatsRequest(const std::string &cmd,
   }
 
   if (cmd == "stats-web") {
-    return toggle_switch(transport, RuntimeOption::EnableWebStats);
-  }
-  if (cmd == "stats-mem") {
-    toggle_switch(transport, RuntimeOption::EnableMemoryStats);
-    return true;
+    return toggle_switch(transport, Cfg::Stats::Web);
   }
   if (cmd == "stats-sql") {
-    return toggle_switch(transport, RuntimeOption::EnableSQLStats);
+    return toggle_switch(transport, Cfg::Stats::SQL);
   }
   if (cmd == "stats-mutex") {
     int sampling = transport->getIntParam("sampling");
@@ -1206,9 +1290,7 @@ bool AdminRequestHandler::handleStatsRequest(const std::string &cmd,
   }
 
   if (cmd == "stats.keys") {
-    string out;
-    ServerStats::GetKeys(out);
-    transport->sendString(out);
+    transport->sendString(ServerStats::GetKeys());
     return true;
   }
   if (cmd == "stats.kvp") {
@@ -1217,9 +1299,9 @@ bool AdminRequestHandler::handleStatsRequest(const std::string &cmd,
 
   if (cmd == "stats.xsl") {
     string xsl;
-    if (!RuntimeOption::StatsXSLProxy.empty()) {
+    if (!Cfg::Stats::XSLProxy.empty()) {
       StringBuffer response;
-      if (HttpClient().get(RuntimeOption::StatsXSLProxy.c_str(), response) ==
+      if (HttpClient().get(Cfg::Stats::XSLProxy.c_str(), response) ==
           200) {
         xsl = response.data();
         if (!xsl.empty()) {
@@ -1242,11 +1324,11 @@ bool AdminRequestHandler::handleStatsRequest(const std::string &cmd,
 bool AdminRequestHandler::handleProfileRequest(const std::string &cmd,
                                                Transport *transport) {
   if (cmd == "prof-exe") {
-    std::map<ThreadInfo::Executing, int> counts;
-    ThreadInfo::GetExecutionSamples(counts);
+    std::map<RequestInfo::Executing, int> counts;
+    RequestInfo::GetExecutionSamples(counts);
 
     string res = "[ ";
-    for (std::map<ThreadInfo::Executing, int>::const_iterator iter =
+    for (std::map<RequestInfo::Executing, int>::const_iterator iter =
            counts.begin(); iter != counts.end(); ++iter) {
       res += folly::to<string>(iter->first) + ", " +
         folly::to<string>(iter->second) + ", ";
@@ -1289,22 +1371,6 @@ bool AdminRequestHandler::handleCPUProfilerRequest(const std::string &cmd,
 }
 #endif
 
-bool AdminRequestHandler::handleConstSizeRequest(const std::string &cmd,
-                                                 Transport *transport) {
-  if (!apcExtension::EnableConstLoad && cmd == "const-ss") {
-    transport->sendString("Not Enabled\n");
-    return true;
-  }
-  if (cmd == "const-ss") {
-    std::ostringstream result;
-    size_t size = get_const_map_size();
-    result << "{ \"hphp.const_map.size\":" << size << "}\n";
-    transport->sendString(result.str());
-    return true;
-  }
-  return false;
-}
-
 bool AdminRequestHandler::handleStaticStringsRequest(const std::string& cmd,
                                                      Transport* transport) {
   if (cmd == "static-strings") {
@@ -1322,20 +1388,17 @@ bool AdminRequestHandler::handleStaticStringsRequest(const std::string& cmd,
 }
 
 std::string formatStaticString(StringData* str) {
-  return folly::sformat(
+  return fmt::format(
       "----\n{} bytes\n{}\n", str->size(), str->toCppString());
 }
 
-bool AdminRequestHandler::handleDumpStaticStringsRequest(
-  const std::string& /*cmd*/, const std::string& filename) {
-  std::vector<StringData*> list = lookupDefinedStaticStrings();
-  std::ofstream out(filename.c_str());
-  SCOPE_EXIT { out.close(); };
+bool AdminRequestHandler::handleDumpStaticStringsRequest(folly::File& file) {
+  auto const& list = lookupDefinedStaticStrings();
   for (auto item : list) {
-    out << formatStaticString(item);
-    if (RuntimeOption::EvalPerfDataMap) {
-      size_t len = item->size();
-      if (len > 255) len = 255;
+    auto const line = formatStaticString(item);
+    folly::writeFull(file.fd(), line.data(), line.size());
+    if (Cfg::Eval::PerfDataMap) {
+      auto const len = std::min<size_t>(item->size(), 255);
       std::string str(item->data(), len);
       // Only print the first line (up to 255 characters). Since we want '\0' in
       // the list of characters to avoid, we need to use the version of
@@ -1362,7 +1425,7 @@ bool AdminRequestHandler::handleRandomStaticStringsRequest(
     }
   }
   std::string output;
-  std::vector<StringData*> list = lookupDefinedStaticStrings();
+  auto list = lookupDefinedStaticStrings();
   if (count < list.size()) {
     for (size_t i = 0; i < count; i++) {
       size_t j = folly::Random::rand64(i, list.size());
@@ -1377,10 +1440,27 @@ bool AdminRequestHandler::handleRandomStaticStringsRequest(
   return true;
 }
 
+bool AdminRequestHandler::handleDumpUnitsRequest(folly::File& file) {
+  if (!Cfg::Repo::Authoritative) return false;
+  auto const& loaded = loadedUnitsRepoAuth();
+  for (auto const unit : loaded) {
+    if (auto path = unit->origFilepath()) {
+      folly::writeFull(file.fd(), path->data(), path->size());
+      folly::writeFull(file.fd(), "\n", 1);
+    }
+  }
+  return true;
+}
+
 bool AdminRequestHandler::handleVMRequest(const std::string &cmd,
                                           Transport *transport) {
   if (cmd == "vm-tcspace") {
     transport->sendString(jit::tc::getTCSpace());
+    return true;
+  }
+  if (cmd == "vm-rds-usage") {
+    transport->replaceHeader("Content-Type", "application/json");
+    transport->sendString(jit::tc::getRDSUsageJSON());
     return true;
   }
   if (cmd == "vm-tcaddr") {
@@ -1389,7 +1469,7 @@ bool AdminRequestHandler::handleVMRequest(const std::string &cmd,
   }
   if (cmd == "vm-namedentities") {
     std::ostringstream result;
-    result << NamedEntity::tableSize();
+    result << namedEntityTableSize();
     transport->sendString(result.str());
     return true;
   }
@@ -1404,21 +1484,6 @@ bool AdminRequestHandler::handleVMRequest(const std::string &cmd,
   return false;
 }
 
-void AdminRequestHandler::handleProxyRequest(const std::string& /*cmd*/,
-                                             Transport* transport) {
-  try {
-    auto const percentStr = transport->getParam("percentage");
-    auto const percent    = percentStr.empty() ? 0 : folly::to<int>(percentStr);
-    if (percent < 0 || percent > 100) {
-      throw std::range_error("must be in [0, 100]");
-    }
-
-    setProxyOriginPercentage(transport->getParam("origin"), percent);
-    transport->sendString("Origin and percentage updated");
-  } catch (const std::range_error& re) {
-    transport->sendString(folly::sformat("Invalid percentage: {}", re.what()));
-  }
-}
 
 ///////////////////////////////////////////////////////////////////////////////
 // Dump cache content

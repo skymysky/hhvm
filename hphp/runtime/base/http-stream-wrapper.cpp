@@ -18,13 +18,13 @@
 
 #include "hphp/runtime/base/comparisons.h"
 #include "hphp/runtime/base/ini-setting.h"
-#include "hphp/runtime/base/runtime-option.h"
 #include "hphp/runtime/base/string-util.h"
-#include "hphp/runtime/base/thread-info.h"
+#include "hphp/runtime/base/request-info.h"
 #include "hphp/runtime/base/url-file.h"
 #include "hphp/runtime/ext/stream/ext_stream.h"
 #include "hphp/runtime/ext/url/ext_url.h"
 #include "hphp/runtime/server/cli-server.h"
+#include "hphp/util/configs/server.h"
 #include <memory>
 
 namespace HPHP {
@@ -43,10 +43,10 @@ const StaticString
   s_user_agent("user_agent"),
   s_User_Agent("User-Agent");
 
-req::ptr<File> HttpStreamWrapper::open(const String& filename,
-                                       const String& mode, int /*options*/,
+req::ptr<File> HttpStreamWrapper::open(const OptString& filename,
+                                       const OptString& mode, int /*options*/,
                                        const req::ptr<StreamContext>& context) {
-  if (RuntimeOption::ServerHttpSafeMode && !is_cli_mode()) {
+  if (Cfg::Server::HttpSafeMode && !is_cli_server_mode()) {
     return nullptr;
   }
 
@@ -56,11 +56,11 @@ req::ptr<File> HttpStreamWrapper::open(const String& filename,
   }
 
   Array headers;
-  String method = s_GET;
-  String post_data = null_string;
-  String proxy_host;
-  String proxy_user;
-  String proxy_pass;
+  OptString method = s_GET;
+  OptString post_data = null_string;
+  OptString proxy_host;
+  OptString proxy_user;
+  OptString proxy_pass;
   int proxy_port = -1;
   int max_redirs = 20;
   int timeout = -1;
@@ -84,7 +84,7 @@ req::ptr<File> HttpStreamWrapper::open(const String& filename,
       for (ArrayIter it(lines); it; ++it) {
         Array parts = StringUtil::Explode(
           it.second().toString(), ":", 2).toArray();
-        headers.set(parts.rvalAt(0).unboxed().tv(), parts.rvalAt(1).tv());
+        headers.set(parts.lookup(0), parts.lookup(1));
       }
     }
     if (opts.exists(s_user_agent) && !headers.exists(s_User_Agent)) {
@@ -100,13 +100,13 @@ req::ptr<File> HttpStreamWrapper::open(const String& filename,
       ignore_errors = opts[s_ignore_errors].toBoolean();
     }
     if (opts.exists(s_proxy)) {
-      Variant host = f_parse_url(opts[s_proxy].toString(), k_PHP_URL_HOST);
-      Variant port = f_parse_url(opts[s_proxy].toString(), k_PHP_URL_PORT);
+      Variant host = HHVM_FN(parse_url)(opts[s_proxy].toString(), k_PHP_URL_HOST);
+      Variant port = HHVM_FN(parse_url)(opts[s_proxy].toString(), k_PHP_URL_PORT);
       if (!same(host, false) && !same(port, false)) {
         proxy_host = host.toString();
         proxy_port = port.toInt64();
-        Variant user = f_parse_url(opts[s_proxy].toString(), k_PHP_URL_USER);
-        Variant pass = f_parse_url(opts[s_proxy].toString(), k_PHP_URL_PASS);
+        Variant user = HHVM_FN(parse_url)(opts[s_proxy].toString(), k_PHP_URL_USER);
+        Variant pass = HHVM_FN(parse_url)(opts[s_proxy].toString(), k_PHP_URL_PASS);
         if (!same(user, false) && !same(pass, false)) {
           proxy_user = user.toString();
           proxy_pass = pass.toString();
@@ -117,7 +117,7 @@ req::ptr<File> HttpStreamWrapper::open(const String& filename,
   }
 
   if (!headers.exists(s_User_Agent)) {
-    auto default_user_agent = ThreadInfo::s_threadInfo.getNoCheck()
+    auto default_user_agent = RequestInfo::s_requestInfo.getNoCheck()
       ->m_reqInjectionData.getUserAgent();
     if (!default_user_agent.empty()) {
       headers.set(s_User_Agent, default_user_agent);

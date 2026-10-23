@@ -1,0 +1,21 @@
+{ "function": "\\takes_int", "solutions": [] }
+{
+  "function": "\\test_foreach",
+  "solutions": [
+    {
+      "name": "$d",
+      "pos": "File \"foreach.php\", line 5, characters 31-32:",
+      "type": "Traversable<int>"
+    }
+  ]
+}
+{
+  "function": "\\test_foreach_kv",
+  "solutions": [
+    {
+      "name": "$d",
+      "pos": "File \"foreach.php\", line 11, characters 34-35:",
+      "type": "KeyedTraversable<mixed, int>"
+    }
+  ]
+}

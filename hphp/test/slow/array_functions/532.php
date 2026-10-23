@@ -1,3 +1,7 @@
-<?php
+<?hh
 
-var_dump(array_filter(array(4294967295 => 22)));
+
+<<__EntryPoint>>
+function main_532() :mixed{
+var_dump(array_filter(dict[4294967295 => 22]));
+}

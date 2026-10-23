@@ -1,41 +1,38 @@
-<?php
+<?hh
 /* Prototype  : array array_diff_uassoc(array arr1, array arr2 [, array ...], callback key_comp_func)
- * Description: Computes the difference of arrays with additional index check which is performed by a 
- * 				user supplied callback function
+ * Description: Computes the difference of arrays with additional index check which is performed by a
+ *                 user supplied callback function
  * Source code: ext/standard/array.c
  */
-
-echo "*** Testing array_diff_uassoc() : usage variation ***\n";
-
-//Initialize variables
-$array2 = array("a" => "green", "yellow", "red");
-
-function key_compare_func($a, $b)
-{
-    if ($a === $b) {
-        return 0;
-    }
-    return ($a > $b)? 1:-1;
-}
-
-//get an unset variable
-$unset_var = 10;
-unset ($unset_var);
-
-//resource variable
-$fp = fopen(__FILE__, "r");
 
 // define some classes
 class classWithToString
 {
-	public function __toString() {
-		return "Class A object";
-	}
+    public function __toString() :mixed{
+        return "Class A object";
+    }
 }
 
 class classWithoutToString
 {
 }
+
+function key_compare_func($a, $b)
+:mixed{
+    if ($a === $b) {
+        return 0;
+    }
+    return ($a > $b)? 1:-1;
+}
+<<__EntryPoint>> function main(): void {
+echo "*** Testing array_diff_uassoc() : usage variation ***\n";
+
+//Initialize variables
+$array2 = dict["a" => "green", 0 => "yellow", 1 => "red"];
+
+
+//resource variable
+$fp = fopen(__FILE__, "r");
 
 // heredoc string
 $heredoc = <<<EOT
@@ -43,11 +40,11 @@ hello world
 EOT;
 
 // add arrays
-$index_array = array (1, 2, 3);
-$assoc_array = array ('one' => 1, 'two' => 2);
+$index_array = vec[1, 2, 3];
+$assoc_array = dict['one' => 1, 'two' => 2];
 
 //array of values to iterate over
-$inputs = array(
+$inputs = dict[
 
       // int data
       'int 0' => 0,
@@ -86,23 +83,19 @@ $inputs = array(
       'instance of classWithToString' => new classWithToString(),
       'instance of classWithoutToString' => new classWithoutToString(),
 
-      // undefined data
-      'undefined var' => @$undefined_var,
 
-      // unset data
-      'unset var' => @$unset_var,
 
       // resource data
       'resource' => $fp,
-);
+];
 
 // loop through each element of the array for arr1
 
 foreach($inputs as $key =>$value) {
       echo "\n--$key--\n";
-      var_dump( array_diff_uassoc($value, $array2, "key_compare_func") );
+      var_dump( array_diff_uassoc($value, $array2, key_compare_func<>) );
 };
 
 fclose($fp);
-?>
-===DONE===
+echo "===DONE===\n";
+}

@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 /**
  * Copyright (c) 2014, Facebook, Inc.
  * All rights reserved.
@@ -15,5 +15,5 @@ function f(): (function (int): void) {
       break;
     };
   }
-  return function ($x) {};
+  return ($x)[] ==> {};
 }

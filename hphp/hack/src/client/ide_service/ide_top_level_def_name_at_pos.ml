@@ -1,0 +1,33 @@
+(*
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the "hack" directory of this source tree.
+ *
+ *)
+
+open Hh_prelude
+
+let first_top_level_def symbols =
+  List.fold symbols ~init:None ~f:(fun res symbol ->
+      match res with
+      | Some _ -> res
+      | None ->
+        if Symbol_occurrence.is_top_level_definition symbol then
+          Some (Utils.strip_ns symbol.Symbol_occurrence.name)
+        else
+          None)
+
+let go_quarantined ctx entry pos : string option =
+  let (symbols : _ Symbol_occurrence.t list) =
+    Identify_symbol_service.go_quarantined
+      ~ctx
+      ~entry
+      pos
+      ~use_declaration_spans:true
+  in
+  match first_top_level_def symbols with
+  | Some def -> Some def
+  | None ->
+    let symbols = Identify_symbol_service.all_symbols_ctx ~ctx ~entry in
+    first_top_level_def symbols

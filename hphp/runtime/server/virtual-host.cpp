@@ -62,7 +62,7 @@ const VirtualHost *VirtualHost::GetCurrent() {
 }
 
 VirtualHost* VirtualHost::Resolve(const std::string& host) {
-  auto const hostString = String(host.c_str(), host.size(), CopyString);
+  auto const hostString = OptString(host.c_str(), host.size(), CopyString);
   for (auto vhost : RuntimeOption::VirtualHosts) {
     if (vhost->match(hostString)) {
       return vhost.get();
@@ -75,11 +75,11 @@ int64_t VirtualHost::getMaxPostSize() const {
   if (m_runtimeOption.maxPostSize != -1) {
     return m_runtimeOption.maxPostSize;
   }
-  return RuntimeOption::MaxPostSize;
+  return Cfg::Server::MaxPostSize;
 }
 
 int64_t VirtualHost::GetLowestMaxPostSize() {
-  auto lowest = RuntimeOption::MaxPostSize;
+  auto lowest = Cfg::Server::MaxPostSize;
   for (auto vhost : RuntimeOption::VirtualHosts) {
     auto max = vhost->getMaxPostSize();
     lowest = std::min(lowest, max);
@@ -99,22 +99,22 @@ int64_t VirtualHost::GetUploadMaxFileSize() {
   if (vh->m_runtimeOption.uploadMaxFileSize != -1) {
     return vh->m_runtimeOption.uploadMaxFileSize;
   }
-  return RuntimeOption::UploadMaxFileSize;
+  return Cfg::Server::UploadMaxFileSize;
 }
 
 void VirtualHost::UpdateSerializationSizeLimit() {
   const VirtualHost *vh = GetCurrent();
   assertx(vh);
   if (vh->m_runtimeOption.serializationSizeLimit != StringData::MaxSize) {
-    VariableSerializer::serializationSizeLimit =
+    VariableSerializer::serializationSizeLimit->value =
       vh->m_runtimeOption.serializationSizeLimit;
   }
 }
 
-bool VirtualHost::alwaysDecodePostData(const String& origPath) const {
+bool VirtualHost::alwaysDecodePostData(const OptString& origPath) const {
   if (!m_alwaysDecodePostData) return false;
   if (m_decodePostDataBlackList.empty()) return true;
-  return !m_decodePostDataBlackList.count(origPath.toCppString());
+  return !m_decodePostDataBlackList.contains(origPath.toCppString());
 }
 
 const std::vector<std::string> &VirtualHost::GetAllowedDirectories() {
@@ -123,7 +123,7 @@ const std::vector<std::string> &VirtualHost::GetAllowedDirectories() {
   if (!vh->m_runtimeOption.allowedDirectories.empty()) {
     return vh->m_runtimeOption.allowedDirectories;
   }
-  return RuntimeOption::AllowedDirectories;
+  return Cfg::Server::AllowedDirectories;
 }
 
 void VirtualHost::SortAllowedDirectories(std::vector<std::string>& dirs) {
@@ -185,7 +185,7 @@ void VirtualHost::initRuntimeOption(const IniSetting::Map& ini, const Hdf& vh) {
   m_runtimeOption.uploadMaxFileSize = uploadMaxFileSize;
   m_runtimeOption.serializationSizeLimit = serializationSizeLimit;
 
-  m_documentRoot = RuntimeOption::SourceRoot + m_pathTranslation;
+  m_documentRoot = Cfg::Server::SourceRoot + m_pathTranslation;
   if (m_documentRoot.length() > 1 &&
       m_documentRoot.back() == '/') {
     m_documentRoot.pop_back();
@@ -253,7 +253,7 @@ void VirtualHost::init(const IniSetting::Map& ini, const Hdf& vh,
     ini,
     vh,
     "AlwaysDecodePostData",
-    RuntimeOption::AlwaysDecodePostDataDefault,
+    Cfg::Server::AlwaysDecodePostDataDefault,
     false);
 
   m_decodePostDataBlackList =
@@ -355,7 +355,7 @@ void VirtualHost::init(const IniSetting::Map& ini, const Hdf& vh,
   }
 }
 
-bool VirtualHost::match(const String &host) const {
+bool VirtualHost::match(const OptString &host) const {
   if (m_pattern) {
     Variant ret = preg_match(m_pattern, host.get());
     return ret.toInt64() > 0;
@@ -376,11 +376,11 @@ static int get_backref(const char **s) {
   return val;
 }
 
-bool VirtualHost::rewriteURL(const String& host, String &url, bool &qsa,
+bool VirtualHost::rewriteURL(const OptString& host, OptString &url, bool &qsa,
                              int &redirect) const {
-  String normalized = url;
+  OptString normalized = url;
   if (normalized.empty() || normalized.charAt(0) != '/') {
-    normalized = String("/") + normalized;
+    normalized = OptString("/") + normalized;
   }
 
   Logger::Verbose("Matching host:%s url:%s using vhost:%s",
@@ -392,14 +392,14 @@ bool VirtualHost::rewriteURL(const String& host, String &url, bool &qsa,
     bool passed = true;
     for (auto it = rule.rewriteConds.begin();
         it != rule.rewriteConds.end(); ++it) {
-      String subject;
+      OptString subject;
       if (it->type == RewriteCond::Type::Request) {
         subject = normalized;
       } else {
         subject = host;
       }
       Variant ret = preg_match(it->pattern, subject.get());
-      if (!same(ret, it->negate ? 0 : 1)) {
+      if (!same(ret, static_cast<int64_t>(it->negate ? 0 : 1))) {
         passed = false;
         break;
       }
@@ -440,7 +440,7 @@ bool VirtualHost::rewriteURL(const String& host, String &url, bool &qsa,
           }
         }
         if (backref >= 0) {
-          String br = matches.toArray()[backref].toString();
+          OptString br = matches.toArray()[backref].toString();
           if (rule.encode_backrefs) {
             br = StringUtil::UrlEncode(br);
           }
@@ -475,29 +475,29 @@ std::string VirtualHost::serverName(const std::string &host) const {
     return m_serverName;
   }
 
-  if (!RuntimeOption::DefaultServerNameSuffix.empty()) {
+  if (!Cfg::Server::DefaultServerNameSuffix.empty()) {
     if (m_pattern) {
       Variant matches;
       Variant ret = preg_match(m_pattern,
-                               String(host.c_str(), host.size(),
-                                      CopyString).get(),
+                               OptString(host.c_str(), host.size(),
+                                         CopyString).get(),
                                &matches);
       if (ret.toInt64() > 0) {
-        String prefix = matches.toArray()[1].toString();
+        OptString prefix = matches.toArray()[1].toString();
         if (prefix.empty()) {
           prefix = matches.toArray()[0].toString();
         }
         if (!prefix.empty()) {
           return std::string(prefix.data()) +
-            RuntimeOption::DefaultServerNameSuffix;
+            Cfg::Server::DefaultServerNameSuffix;
         }
       }
     } else if (!m_prefix.empty()) {
-      return m_prefix + RuntimeOption::DefaultServerNameSuffix;
+      return m_prefix + Cfg::Server::DefaultServerNameSuffix;
     }
   }
 
-  return RuntimeOption::Host;
+  return Cfg::Server::Host;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -511,11 +511,11 @@ std::string VirtualHost::filterUrl(const std::string &url) const {
 
     bool match = true;
     if (!filter.urlPattern.empty()) {
-      Variant ret = preg_match(String(filter.urlPattern.c_str(),
-                                      filter.urlPattern.size(),
-                                      CopyString),
-                               String(url.c_str(), url.size(),
-                                      CopyString));
+      Variant ret = preg_match(OptString(filter.urlPattern.c_str(),
+                                         filter.urlPattern.size(),
+                                         CopyString),
+                               OptString(url.c_str(), url.size(),
+                                         CopyString));
       match = (ret.toInt64() > 0);
     }
 
@@ -526,11 +526,11 @@ std::string VirtualHost::filterUrl(const std::string &url) const {
 
       Variant ret;
       int count = preg_replace(ret, filter.namePattern.c_str(),
-                               String(filter.replaceWith.c_str(),
-                                      filter.replaceWith.size(),
-                                      CopyString),
-                               String(url.c_str(), url.size(),
-                                      CopyString));
+                               OptString(filter.replaceWith.c_str(),
+                                         filter.replaceWith.size(),
+                                         CopyString),
+                               OptString(url.c_str(), url.size(),
+                                         CopyString));
       if (!same(ret, false) && count > 0) {
         return ret.toString().data();
       }

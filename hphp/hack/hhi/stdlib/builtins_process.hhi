@@ -1,4 +1,4 @@
-<?hh // decl /* -*- php -*- */
+<?hh /* -*- php -*- */
 /**
  * Copyright (c) 2014, Facebook, Inc.
  * All rights reserved.
@@ -8,101 +8,143 @@
  *
  */
 
-const int WNOHANG   = 0b001;
-const int WUNTRACED = 0b010;
+const int WNOHANG;
+const int WUNTRACED;
 
 <<__PHPStdLib>>
-function pcntl_alarm($seconds);
+function pcntl_alarm(int $seconds): int;
 <<__PHPStdLib>>
-function pcntl_exec($path, $args = null, $envs = null);
+function pcntl_exec(
+  string $path,
+  HH\FIXME\MISSING_PARAM_TYPE $args = null,
+  HH\FIXME\MISSING_PARAM_TYPE $envs = null,
+): void;
 <<__PHPStdLib>>
-function pcntl_fork();
+function pcntl_fork(): int;
 <<__PHPStdLib>>
-function pcntl_getpriority($pid = 0, $process_identifier = 0);
+function pcntl_getpriority(
+  int $pid = 0,
+  int $process_identifier = 0,
+): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function pcntl_setpriority($priority, $pid = 0, $process_identifier = 0);
+function pcntl_setpriority(
+  int $priority,
+  int $pid = 0,
+  int $process_identifier = 0,
+): bool;
 <<__PHPStdLib>>
-function pcntl_signal($signo, $handler, $restart_syscalls = true);
+function pcntl_signal(
+  int $signo,
+  HH\FIXME\MISSING_PARAM_TYPE $handler,
+  bool $restart_syscalls = true,
+): bool;
 
 <<__PHPStdLib>>
-function pcntl_wait(&$status, $options = 0);
+function pcntl_wait(
+  inout ?int $status,
+  int $options = 0,
+): int;
 <<__PHPStdLib>>
-function pcntl_waitpid($pid, &$status, $options = 0);
+function pcntl_waitpid(
+  int $pid,
+  inout ?int $status,
+  int $options = 0,
+): int;
 <<__PHPStdLib>>
-function pcntl_wexitstatus($status);
+function pcntl_wexitstatus(int $status): int;
 <<__PHPStdLib>>
-function pcntl_wifexited($status);
+function pcntl_wifexited(int $status): bool;
 <<__PHPStdLib>>
-function pcntl_wifsignaled($status);
+function pcntl_wifsignaled(int $status): bool;
 <<__PHPStdLib>>
-function pcntl_wifstopped($status);
+function pcntl_wifstopped(int $status): bool;
 <<__PHPStdLib>>
-function pcntl_wstopsig($status);
+function pcntl_wstopsig(int $status): int;
 <<__PHPStdLib>>
-function pcntl_wtermsig($status);
+function pcntl_wtermsig(int $status): int;
 <<__PHPStdLib>>
-function pcntl_signal_dispatch();
+function pcntl_signal_dispatch(): bool;
 <<__PHPStdLib>>
-function shell_exec($cmd);
+function shell_exec(string $cmd): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function exec($command, &$output = null, &$return_var = null);
+function exec(
+  string $command,
+  inout dynamic $output,
+  inout int $return_var,
+): string;
 <<__PHPStdLib>>
-function passthru($command, &$return_var = null);
+function passthru(
+  string $command,
+  inout int $return_var,
+): void;
 <<__PHPStdLib>>
-function system($command, &$return_var = null);
+function system(
+  string $command,
+  inout int $return_var,
+): string;
 <<__PHPStdLib>>
-function proc_open($cmd, $descriptorspec, &$pipes, $cwd = null, $env = null, $other_options = null);
+function proc_open(
+  string $cmd,
+  darray<int, mixed> $descriptorspec,
+  inout ?vec_or_dict<resource> $pipes,
+  ?string $cwd = null,
+  HH\FIXME\MISSING_PARAM_TYPE $env = null,
+  HH\FIXME\MISSING_PARAM_TYPE $other_options = null,
+): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function proc_terminate($process, $signal = 0);
+function proc_terminate(
+  resource $process,
+  int $signal = 0,
+): bool;
 <<__PHPStdLib>>
-function proc_close($process);
+function proc_close(resource $process): int;
 <<__PHPStdLib>>
-function proc_get_status($process);
+function proc_get_status(resource $process): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function proc_nice($increment);
+function proc_nice(int $increment): bool;
 <<__PHPStdLib>>
-function escapeshellarg($arg);
+function escapeshellarg(string $arg)[]: string;
 <<__PHPStdLib>>
-function escapeshellcmd($command);
+function escapeshellcmd(string $command): string;
 
-const int SIGABRT = 6;
-const int SIGALRM = 14;
-const int SIGBABY = 31;
-const int SIGBUS = 7;
-const int SIGCHLD = 17;
-const int SIGCLD = 17;
-const int SIGCONT = 18;
-const int SIGFPE = 8;
-const int SIGHUP = 1;
-const int SIGILL = 4;
-const int SIGINT = 2;
-const int SIGIO = 29;
-const int SIGIOT = 6;
-const int SIGKILL = 9;
-const int SIGPIPE = 13;
-const int SIGPOLL = 29;
-const int SIGPROF = 27;
-const int SIGPWR = 30;
-const int SIGQUIT = 3;
-const int SIGSEGV = 11;
-const int SIGSTKFLT = 16;
-const int SIGSTOP = 19;
-const int SIGSYS = 31;
-const int SIGTERM = 15;
-const int SIGTRAP = 5;
-const int SIGTSTP = 20;
-const int SIGTTIN = 21;
-const int SIGTTOU = 22;
-const int SIGURG = 23;
-const int SIGUSR1 = 10;
-const int SIGUSR2 = 12;
-const int SIGVTALRM = 26;
-const int SIGWINCH = 28;
-const int SIGXCPU = 24;
-const int SIGXFSZ = 25;
-const int SIG_DFL = 0;
-const int SIG_ERR = -1;
-const int SIG_IGN = 1;
-const int SIG_BLOCK = 0;
-const int SIG_UNBLOCK = 1;
-const int SIG_SETMASK = 2;
+const int SIGABRT;
+const int SIGALRM;
+const int SIGBABY;
+const int SIGBUS;
+const int SIGCHLD;
+const int SIGCLD;
+const int SIGCONT;
+const int SIGFPE;
+const int SIGHUP;
+const int SIGILL;
+const int SIGINT;
+const int SIGIO;
+const int SIGIOT;
+const int SIGKILL;
+const int SIGPIPE;
+const int SIGPOLL;
+const int SIGPROF;
+const int SIGPWR;
+const int SIGQUIT;
+const int SIGSEGV;
+const int SIGSTKFLT;
+const int SIGSTOP;
+const int SIGSYS;
+const int SIGTERM;
+const int SIGTRAP;
+const int SIGTSTP;
+const int SIGTTIN;
+const int SIGTTOU;
+const int SIGURG;
+const int SIGUSR1;
+const int SIGUSR2;
+const int SIGVTALRM;
+const int SIGWINCH;
+const int SIGXCPU;
+const int SIGXFSZ;
+const int SIG_DFL;
+const int SIG_ERR;
+const int SIG_IGN;
+const int SIG_BLOCK;
+const int SIG_UNBLOCK;
+const int SIG_SETMASK;

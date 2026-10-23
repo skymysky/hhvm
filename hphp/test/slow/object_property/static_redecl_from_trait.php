@@ -1,4 +1,4 @@
-<?php
+<?hh
 
 trait T {
   protected $foo;
@@ -9,7 +9,11 @@ class X {
 }
 
 class Y extends X {
-  static $foo;
+  public static $foo;
 }
 
+
+<<__EntryPoint>>
+function main_static_redecl_from_trait() :mixed{
 echo "Ok\n";
+}

@@ -1,0 +1,41 @@
+error: Typing[4148] Not a valid class name [1]
+
+instantiability.php:14:13
+12 | 
+13 | function bad<T as arraykey>(
+14 |   classname<?Box with { type T = T }> $bad1,
+   |             ^^^^^^^^^^^^^^^^^^^^^^^^ [1]
+15 |   classname<shape() with { type T = int }> $bad2,
+16 | ): void {}
+
+error: Typing[4469] Invalid type hint [1]
+-> Unsupported refinement, only class types can be refined [2]
+
+instantiability.php:15:3
+13 | function bad<T as arraykey>(
+14 |   classname<?Box with { type T = T }> $bad1,
+15 |   classname<shape() with { type T = int }> $bad2,
+   |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ [1]
+   |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ [2]
+16 | ): void {}
+
+error: Typing[4148] Not a valid class name [1]
+
+instantiability.php:15:13
+13 | function bad<T as arraykey>(
+14 |   classname<?Box with { type T = T }> $bad1,
+15 |   classname<shape() with { type T = int }> $bad2,
+   |             ^^^^^^^ [1]
+16 | ): void {}
+
+error: Typing[4469] Invalid type hint [1]
+-> Unsupported refinement, only class types can be refined [1]
+
+instantiability.php:15:13
+13 | function bad<T as arraykey>(
+14 |   classname<?Box with { type T = T }> $bad1,
+15 |   classname<shape() with { type T = int }> $bad2,
+   |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ [1]
+16 | ): void {}
+
+4 errors found

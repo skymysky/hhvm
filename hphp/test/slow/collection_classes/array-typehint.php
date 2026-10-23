@@ -1,6 +1,5 @@
 <?hh
-error_reporting(-1);
-function handler($errno, $errmsg) {
+function handler($errno, $errmsg) :mixed{
   if ($errno === E_RECOVERABLE_ERROR) {
     throw new Exception("Type constraint failed");
   } else if ($errno === E_WARNING) {
@@ -11,60 +10,76 @@ function handler($errno, $errmsg) {
     return false;
   }
 }
-set_error_handler('handler');
 
-function helper($x) {
+function helper($x) :mixed{
   var_dump($x);
-  if ($x instanceof Map) {
+  if ($x is Map) {
     $x['z'] = 4;
     var_dump($x);
-  } else if (is_array($x) || $x instanceof Collection) {
+  } else if (is_array($x) || $x is Collection) {
     $x[] = 4;
     var_dump($x);
   }
 }
-function helper_ref(&$x) {
+function helper_ref(inout $x) :mixed{
   var_dump($x);
-  if ($x instanceof Map) {
+  if ($x is Map) {
     $x['z'] = 4;
     var_dump($x);
-  } else if (is_array($x) || $x instanceof Collection) {
+  } else if (is_array($x) || $x is Collection) {
     $x[] = 4;
     var_dump($x);
   }
 }
 
-function f1(array $x) { helper($x); }
-function f2(?array $x) { helper($x); }
-function f3(@array $x) { helper($x); }
-function f4(@?array $x) { helper($x); }
-function f5(array &$x) { helper_ref(&$x); }
-function f6(?array &$x) { helper_ref(&$x); }
-function f7(@array &$x) { helper_ref(&$x); }
-function f8(@?array &$x) { helper_ref(&$x); }
+function f1(varray $x) :mixed{ helper($x); }
+function f2(?varray $x) :mixed{ helper($x); }
+function f3(<<__Soft>> varray $x) :mixed{ helper($x); }
+function f4(<<__Soft>> ?varray $x) :mixed{ helper($x); }
+function f5(inout varray $x) :mixed{ helper_ref(inout $x); }
+function f6(inout ?varray $x) :mixed{ helper_ref(inout $x); }
+function f7(<<__Soft>> inout varray $x) :mixed{ helper_ref(inout $x); }
+function f8(<<__Soft>> inout ?varray $x) :mixed{ helper_ref(inout $x); }
 
-function main() {
+function main() :mixed{
   $containers = Map {
-    'array' => array(1, 2, 3),
+    'array' => vec[1, 2, 3],
     'Vector' => Vector {1, 2, 3},
     'Map' => Map {'a' => 1, 'b' => 2, 'c' => 3},
     'Set' => Set {1, 2, 3},
     'stdClass' => new stdClass()
   };
   $first = true;
+
+  $funcs = vec[
+    tuple("f1", f1<>),
+    tuple("f2", f2<>),
+    tuple("f3", f3<>),
+    tuple("f4", f4<>),
+    tuple("f5", f5<>),
+    tuple("f6", f6<>),
+    tuple("f7", f7<>),
+    tuple("f8", f8<>),
+  ];
+
   foreach ($containers as $name => $c) {
     echo "==== $name ====\n";
-    for ($i = 1; $i <= 8; ++$i) {
-      $fn = 'f' . $i;
-      echo "$fn:\n";
-      $x = ($c instanceof Collection) ? clone $c : $c;
+    foreach ($funcs as $i => list($name, $fn)) {
+      echo "$name:\n";
+      $x = ($c is Collection) ? clone $c : $c;
       try {
-        $i <= 4 ? $fn($x) : $fn(&$x);
+        $i <= 3 ? $fn($x) : $fn(inout $x);
       } catch (Exception $e) {
-        echo $fn . "() threw an exception\n";
+        echo $name . "() threw an exception\n";
       }
-      unset($x);
+      $x = null;
     }
   }
 }
+
+<<__EntryPoint>>
+function main_array_typehint() :mixed{
+error_reporting(-1);
+set_error_handler(handler<>);
 main();
+}

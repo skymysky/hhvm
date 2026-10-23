@@ -1,90 +1,96 @@
-array(2) {
-  [0]=>
-  array(7) {
+vec(3) {
+  dict(7) {
     ["file"]=>
-    string(%d) "%s"
+    string(%d) "%s/test/slow/debug_backtrace/metadata_obj.php"
     ["line"]=>
-    int(10)
+    int(12)
     ["function"]=>
     string(3) "bar"
     ["class"]=>
     string(3) "Baz"
     ["object"]=>
-    object(Baz)#1 (0) {
+    object(Baz) (0) {
     }
     ["type"]=>
     string(2) "->"
     ["args"]=>
-    array(1) {
-      [0]=>
+    vec(1) {
       int(1)
     }
   }
-  [1]=>
-  array(7) {
+  dict(7) {
     ["file"]=>
-    string(%d) "%s"
+    string(%d) "%s/test/slow/debug_backtrace/metadata_obj.php"
     ["line"]=>
-    int(15)
+    int(19)
     ["function"]=>
     string(3) "foo"
     ["class"]=>
     string(3) "Baz"
     ["object"]=>
-    object(Baz)#1 (0) {
+    object(Baz) (0) {
     }
     ["type"]=>
     string(2) "->"
     ["args"]=>
-    array(1) {
-      [0]=>
+    vec(1) {
       int(1)
+    }
+  }
+  dict(2) {
+    ["function"]=>
+    string(4) "main"
+    ["args"]=>
+    vec(0) {
     }
   }
 }
-array(2) {
-  [0]=>
-  array(7) {
+vec(3) {
+  dict(7) {
     ["file"]=>
-    string(%d) "%s"
+    string(%d) "%s/test/slow/debug_backtrace/metadata_obj.php"
     ["line"]=>
-    int(10)
+    int(12)
     ["function"]=>
     string(3) "bar"
     ["class"]=>
     string(3) "Baz"
     ["object"]=>
-    object(Baz)#1 (0) {
+    object(Baz) (0) {
     }
     ["type"]=>
     string(2) "->"
     ["args"]=>
-    array(1) {
-      [0]=>
+    vec(1) {
       int(65537)
     }
   }
-  [1]=>
-  array(8) {
+  dict(8) {
     ["file"]=>
-    string(%d) "%s"
+    string(%d) "%s/test/slow/debug_backtrace/metadata_obj.php"
     ["line"]=>
-    int(16)
+    int(20)
     ["function"]=>
     string(3) "foo"
     ["class"]=>
     string(3) "Baz"
     ["object"]=>
-    object(Baz)#1 (0) {
+    object(Baz) (0) {
     }
     ["type"]=>
     string(2) "->"
     ["args"]=>
-    array(1) {
-      [0]=>
+    vec(1) {
       int(65537)
     }
     ["metadata"]=>
     string(8) "I am foo"
+  }
+  dict(2) {
+    ["function"]=>
+    string(4) "main"
+    ["args"]=>
+    vec(0) {
+    }
   }
 }

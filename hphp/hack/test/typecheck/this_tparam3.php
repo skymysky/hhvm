@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 /**
  * Copyright (c) 2014, Facebook, Inc.
  * All rights reserved.
@@ -15,6 +15,6 @@ interface IFoo<T> {
 
 class Foo implements IFoo<Awaitable<this>> {
   public function run(): Awaitable<Awaitable<this>> {
-    // UNSAFE
+    throw new Exception();
   }
 }

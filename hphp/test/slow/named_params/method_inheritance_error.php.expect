@@ -1,0 +1,16 @@
+vec(4) {
+  int(1)
+  int(2)
+  int(3)
+  int(4)
+}
+Function did not throw
+Caught RuntimeException: Call to C::foo() has no argument matching required named parameter a
+Caught RuntimeException: Call to D::foo() has no argument matching required named parameter x
+vec(4) {
+  int(101)
+  int(102)
+  int(103)
+  int(104)
+}
+Function did not throw

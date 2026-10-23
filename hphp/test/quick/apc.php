@@ -1,23 +1,23 @@
 <?hh
 
-function nop($unused) { /* value sink */ }
+function nop($unused) :mixed{ /* value sink */ }
 
-function testApc($before) {
+function testApc($before) :mixed{
   apc_delete("indep");
   if (!apc_add("indep", $before)) {
     echo "add failure. weird.\n";
     exit(1);
   }
 
-  # fetch.
-  $after = apc_fetch("indep");
+  // fetch.
+  $after = __hhvm_intrinsics\apc_fetch_no_check("indep");
   var_dump($after);
   if (!$after) {
     echo "fetch failure. surprising.\n";
     exit(2);
   }
 
-  # cgetm.
+  // cgetm.
   foreach ($before as $k => $v) {
     var_dump($after[$k]);
     if ($after[$k] != $v) {
@@ -32,7 +32,7 @@ function testApc($before) {
     }
   }
 
-  # iterate over the APC array, too
+  // iterate over the APC array, too
   foreach ($after as $k => $v) {
     var_dump($after[$k]);
     if ($after[$k] != $v) {
@@ -42,37 +42,53 @@ function testApc($before) {
     }
   }
 
-  # setM
-  $after['newKey'] = array();
+  // varrays don't support setStr or general-purpose unset.
+  if (isset($after[0])) {
+    $after[] = 'new varray entry';
+    var_dump($after);
+    return;
+  }
+
+  // setM
+  $after['newKey'] = vec[];
   var_dump($after);
 
-  # unsetm
+  // unsetm
   foreach($after as $k => $v) {
     unset($after[$k]);
   }
   var_dump($after);
 }
 
-function testKeyTypes() {
-  apc_add("keysarray", array(2 => 'two', '3' => 'three'));
-  $arr = apc_fetch("keysarray");
-  foreach (array(2, 3, '2', '3') as $k) {
-    var_dump($arr[$k]);
+function testKeyTypes() :mixed{
+  apc_add("keysarray", dict[2 => 'two', '3' => 'three']);
+  $arr = __hhvm_intrinsics\apc_fetch_no_check("keysarray");
+  foreach (vec[2, 3, '2', '3'] as $k) {
+    try { var_dump($arr[$k]); } catch (Exception $e) { echo $e->getMessage()."\n"; }
   }
 }
 
-function main() {
-  testApc(array(7, 4, 1776));
-  testApc(array("sv0", "sv1"));
-  testApc(array("sk0" => "sv0", "sk1" => "sv1"));
+function testInvalidKeys() :mixed{
+    // Reject keys with null bytes
+    apc_add("bar\x00baz", 10);
+    apc_store("test\x00xyz", "hello");
+    apc_store(dict["validkey" => "validvalue", "invalid\x00key" => "value"]);
+    foreach (vec['bar', 'test', 'validkey', 'invalid'] as $k) {
+        var_dump(__hhvm_intrinsics\apc_fetch_no_check($k));
+    }
+}
+
+<<__EntryPoint>> function main(): void {
+  testApc(vec[7, 4, 1776]);
+  testApc(vec["sv0", "sv1"]);
+  testApc(dict["sk0" => "sv0", "sk1" => "sv1"]);
 
   // Also check that foreign arrays work for indirect calls
-  apc_store('foo', array("a"));
-  $a = apc_fetch('foo');
-  $b = call_user_func_array("strtoupper", $a);
+  apc_store('foo', vec["a"]);
+  $a = __hhvm_intrinsics\apc_fetch_no_check('foo');
+  $b = call_user_func_array(strtoupper<>, $a);
   var_dump($b);
 
   testKeyTypes();
+  testInvalidKeys();
 }
-
-main();

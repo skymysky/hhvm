@@ -1,0 +1,11 @@
+error: Parsing[1002] Expression trees only support static method calls on `static` and named classes. [1]
+
+self_static_method_call.php:13:28
+11 | 
+12 |   public function test(): void {
+13 |     $fun_call = ExampleDsl`self::bar("baz")`;
+   |                            ^^^^^^^^^^^^^^^^ [1]
+14 |   }
+15 | }
+
+1 error found

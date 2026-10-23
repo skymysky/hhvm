@@ -1,0 +1,9 @@
+error: Parsing[1002] Interfaces cannot be declared `final`. [1]
+
+override_final_class2.php:12:1
+10 |  */
+11 | 
+12 | final interface A {}
+   | ^^^^^^^^^^^^^^^^^^^^ [1]
+
+1 error found

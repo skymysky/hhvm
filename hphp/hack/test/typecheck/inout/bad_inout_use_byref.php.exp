@@ -1,2 +1,37 @@
-File "bad_inout_use_byref.php", line 7, characters 5-12:
-Cannot use both 'inout' and '&' on the same argument. (Parsing[1002])
+error: Parsing[1002] You cannot use this syntax with `inout`. [1]
+
+bad_inout_use_byref.php:7:11
+5 | function test(): void {
+6 |   $x = vec['bar', 'baz'];
+7 |   f(inout &$x);
+  |           ^ [1]
+8 | }
+
+error: Parsing[1002] An expression is expected here. [1]
+
+bad_inout_use_byref.php:7:12
+5 | function test(): void {
+6 |   $x = vec['bar', 'baz'];
+7 |   f(inout &$x);
+  |            ^ [1]
+8 | }
+
+error: Naming[2049] Unbound name: `&` (a global constant) [1]
+
+bad_inout_use_byref.php:7:11
+5 | function test(): void {
+6 |   $x = vec['bar', 'baz'];
+7 |   f(inout &$x);
+  |           ^ [1]
+8 | }
+
+error: Typing[4106] Unbound global constant (Typing) [1]
+
+bad_inout_use_byref.php:7:11
+5 | function test(): void {
+6 |   $x = vec['bar', 'baz'];
+7 |   f(inout &$x);
+  |           ^ [1]
+8 | }
+
+4 errors found

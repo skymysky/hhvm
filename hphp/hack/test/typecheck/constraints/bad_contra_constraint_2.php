@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 // Copyright 2004-present Facebook. All Rights Reserved.
 
 class ConfigChooser<-TContextProvider, +TResult> {
@@ -8,7 +8,7 @@ class ConfigChooser<-TContextProvider, +TResult> {
   ) {}
 
   public function getValue(TContextProvider $context_provider): TResult {
-    //UNSAFE
+    throw new Exception();
   }
 }
 

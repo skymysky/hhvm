@@ -1,0 +1,22 @@
+//// pkg2/bar.php
+<?hh
+// package pkg2
+class MyInternClass {}
+
+//// foo.php
+<?hh
+// package pkg1
+
+abstract class MyProdBase {
+  abstract const type T1;
+  <<__Reifiable>> abstract const type T2;
+}
+
+class MyProd extends MyProdBase {
+  const type T1 = MyInternClass; // error when package_allow_all_tconst_violations is turned off
+  const type T2 = MyInternClass; // error: reifiable type constant cross-package violation
+}
+
+class MyProdDirect {
+  <<__Reifiable>> const type T3 = MyInternClass; // error: reifiable directly on the const type itself
+}

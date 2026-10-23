@@ -19,29 +19,29 @@
 #include <array>
 #include <folly/MapUtil.h>
 
+#include "hphp/util/configs/hhir.h"
+#include "hphp/util/match.h"
 #include "hphp/util/trace.h"
 
-#include "hphp/runtime/vm/runtime.h"
 #include "hphp/runtime/vm/jit/analysis.h"
 #include "hphp/runtime/vm/jit/cfg.h"
 #include "hphp/runtime/vm/jit/check.h"
 #include "hphp/runtime/vm/jit/ir-opcode.h"
 #include "hphp/runtime/vm/jit/ir-unit.h"
 #include "hphp/runtime/vm/jit/mutation.h"
+#include "hphp/runtime/vm/jit/memory-effects.h"
 #include "hphp/runtime/vm/jit/opt.h"
 #include "hphp/runtime/vm/jit/print.h"
 #include "hphp/runtime/vm/jit/simple-propagation.h"
 #include "hphp/runtime/vm/jit/state-vector.h"
 #include "hphp/runtime/vm/jit/timer.h"
-#include "hphp/runtime/vm/jit/translator-inline.h"
 
-namespace HPHP { namespace jit {
-namespace {
+namespace HPHP::jit {
 
-TRACE_SET_MOD(hhir_dce);
+TRACE_SET_MOD(hhir_dce)
 
-bool canDCE(IRInstruction* inst) {
-  switch (inst->op()) {
+bool canDCE(const IRInstruction& inst) {
+  switch (inst.op()) {
   case AssertNonNull:
   case AssertType:
   case AbsDbl:
@@ -57,20 +57,15 @@ bool canDCE(IRInstruction* inst) {
   case XorInt:
   case Shl:
   case Shr:
+  case Lshr:
   case Floor:
   case Ceil:
   case XorBool:
   case Mod:
-  case ConvBoolToArr:
-  case ConvDblToArr:
-  case ConvIntToArr:
-  case ConvArrToBool:
+  case PseudoRandomInt:
   case ConvDblToBool:
   case ConvIntToBool:
   case ConvStrToBool:
-  case ConvObjToBool:
-  case ConvCellToBool:
-  case ConvArrToDbl:
   case ConvBoolToDbl:
   case ConvIntToDbl:
   case ConvStrToDbl:
@@ -81,8 +76,10 @@ bool canDCE(IRInstruction* inst) {
   case ConvResToInt:
   case ConvDblToStr:
   case ConvIntToStr:
-  case ConvClsToCctx:
   case DblAsBits:
+  case IntAsPtrToElem:
+  case PtrToElemAsInt:
+  case ConvPtrToLval:
   case NewColFromArray:
   case GtInt:
   case GteInt:
@@ -102,18 +99,9 @@ bool canDCE(IRInstruction* inst) {
   case GteStr:
   case LtStr:
   case LteStr:
-  case EqStr:
-  case NeqStr:
   case SameStr:
   case NSameStr:
   case CmpStr:
-  case GtStrInt:
-  case GteStrInt:
-  case LtStrInt:
-  case LteStrInt:
-  case EqStrInt:
-  case NeqStrInt:
-  case CmpStrInt:
   case GtBool:
   case GteBool:
   case LtBool:
@@ -123,96 +111,93 @@ bool canDCE(IRInstruction* inst) {
   case CmpBool:
   case SameObj:
   case NSameObj:
-  case SameVec:
-  case NSameVec:
-  case SameDict:
-  case NSameDict:
-  case EqKeyset:
-  case NeqKeyset:
-  case SameKeyset:
-  case NSameKeyset:
-  case GtRes:
-  case GteRes:
-  case LtRes:
-  case LteRes:
   case EqRes:
   case NeqRes:
-  case CmpRes:
   case EqCls:
+  case EqLazyCls:
   case EqFunc:
   case EqStrPtr:
   case EqArrayDataPtr:
+  case FuncHasReifiedGenerics:
+  case ClassHasReifiedGenerics:
+  case HasReifiedParent:
   case InstanceOf:
   case InstanceOfIface:
   case InstanceOfIfaceVtable:
   case ExtendsClass:
   case InstanceOfBitmask:
   case NInstanceOfBitmask:
-  case InterfaceSupportsArr:
-  case InterfaceSupportsVec:
-  case InterfaceSupportsDict:
-  case InterfaceSupportsKeyset:
+  case InterfaceSupportsArrLike:
   case InterfaceSupportsStr:
   case InterfaceSupportsInt:
   case InterfaceSupportsDbl:
   case HasToString:
-  case IsType:
-  case IsNType:
-  case IsTypeMem:
-  case IsNTypeMem:
+  case IsLegacyArrLike:
   case IsWaitHandle:
   case IsCol:
-  case IsDVArray:
-  case UnboxPtr:
   case LdStk:
   case LdLoc:
-  case LdClsRef:
+  case LdLocForeign:
   case LdStkAddr:
   case LdLocAddr:
   case LdRDSAddr:
   case LdMem:
   case LdContField:
-  case LdElem:
-  case LdRef:
-  case LdCtx:
-  case LdCctx:
-  case LdClosure:
-  case LdClsCtx:
-  case LdClsCctx:
-  case FwdCtxStaticCall:
+  case LdClsInitElem:
+  case LdIterPos:
+  case LdIterEnd:
+  case LdFrameThis:
+  case LdFrameCls:
+  case LdSmashable:
+  case LdSmashableFunc:
+  case LdClsFromClsMeth:
+  case LdFuncFromClsMeth:
+  case LdClsFromRClsMeth:
+  case LdFuncFromRClsMeth:
+  case LdGenericsFromRClsMeth:
+  case LdFuncFromRFunc:
+  case LdGenericsFromRFunc:
+  case LdTVFromRDS:
+  case ConvFuncPrologueFlagsToARFlags:
   case DefConst:
   case Conjure:
   case LdClsInitData:
-  case LookupClsRDS:
   case LdClsMethodCacheCls:
   case LdFuncVecLen:
   case LdClsMethod:
+  case LdSubClsCns:
   case LdIfaceMethod:
+  case LdClosureArg:
   case LdPropAddr:
+  case LdPublicFunc:
   case LdObjClass:
+  case LdObjInvoke:
   case LdClsName:
-  case LdARFuncPtr:
-  case LdARIsDynamic:
-  case LdARNumParams:
+  case LdLazyClsName:
+  case LdEnumClassLabelName:
+  case LdFuncCls:
+  case LdFuncInOutBits:
   case LdFuncNumParams:
+  case LdFuncName:
+  case LdMethCallerName:
   case LdStrLen:
+  case LdMonotypeDictTombstones:
+  case LdMonotypeDictKey:
+  case LdMonotypeDictVal:
+  case LdMonotypeVecElem:
   case LdVecElem:
-  case LdPackedElem:
-  case LdPackedArrayDataElemAddr:
-  case LdClosureStaticLoc:
+  case LdVecElemAddr:
+  case LookupCls:
   case NewInstanceRaw:
-  case NewArray:
-  case NewMixedArray:
-  case NewDArray:
+  case NewLoggingArray:
   case NewDictArray:
-  case NewLikeArray:
   case NewCol:
   case NewPair:
-  case DefInlineFP:
+  case NewRFunc:
+  case NewClsMeth:
+  case NewRClsMeth:
   case LdRetVal:
   case Mov:
-  case CountArray:
-  case CountArrayFast:
   case CountVec:
   case CountDict:
   case CountKeyset:
@@ -221,11 +206,12 @@ bool canDCE(IRInstruction* inst) {
   case AKExistsDict:
   case AKExistsKeyset:
   case LdBindAddr:
-  case LdSwitchDblIndex:
-  case LdSwitchStrIndex:
-  case LdSSwitchDestFast:
-  case LdClosureCtx:
+  case LdSwitchDest:
+  case LdSSwitchDest:
+  case LdClosureCls:
+  case LdClosureThis:
   case CreateSSWH:
+  case CreateFSWH:
   case LdContActRec:
   case LdContArValue:
   case LdContArKey:
@@ -233,7 +219,7 @@ bool canDCE(IRInstruction* inst) {
   case LdWHResult:
   case LdWHNotDone:
   case LdAFWHActRec:
-  case LdMIStateAddr:
+  case LdMIStateTempBaseAddr:
   case StringIsset:
   case ColIsEmpty:
   case ColIsNEmpty:
@@ -243,117 +229,131 @@ bool canDCE(IRInstruction* inst) {
   case OrdStr:
   case ChrInt:
   case CheckRange:
-  case LdARInvName:
-  case PackMagicArgs:
   case LdMBase:
   case MethodExists:
   case LdTVAux:
   case DictGetQuiet:
   case DictGetK:
   case DictIsset:
-  case DictEmptyElem:
   case DictIdx:
   case KeysetGetQuiet:
   case KeysetGetK:
   case KeysetIsset:
-  case KeysetEmptyElem:
   case KeysetIdx:
+  case VecFirst:
+  case VecLast:
+  case DictFirst:
+  case DictFirstKey:
+  case DictLast:
+  case DictLastKey:
+  case DictIterEnd:
+  case KeysetFirst:
+  case KeysetLast:
+  case KeysetIterEnd:
   case GetTime:
   case GetTimeNs:
   case Select:
-  case LdARCtx:
-  case LdCufIterFunc:
-  case LdCufIterCtx:
-  case LdCufIterInvName:
-  case LdCufIterDynamic:
-  case LdStaticLoc:
-  case LdARNumArgsAndFlags:
-  case IsFuncDynCallable:
+  case LdARFlags:
+  case FuncHasAttr:
+  case ClassHasAttr:
+  case IsFunReifiedGenericsMatched:
+  case LdFuncRequiredCoeffects:
+  case LdARFunc:
   case StrictlyIntegerConv:
   case GetMemoKeyScalar:
-    assertx(!inst->isControlFlow());
+  case LookupSPropSlot:
+  case ConstructClosure:
+  case AllocBespokeStructDict:
+  case AllocStructDict:
+  case AllocVec:
+  case GetDictPtrIter:
+  case GetKeysetPtrIter:
+  case GetVecPtrIter:
+  case AdvanceDictPtrIter:
+  case AdvanceKeysetPtrIter:
+  case AdvanceVecPtrIter:
+  case LdPtrIterKey:
+  case LdPtrIterVal:
+  case EqPtrIter:
+  case LdUnitPerRequestFilepath:
+  case DirFromFilepath:
+  case BespokeGet:
+  case BespokeIterFirstPos:
+  case BespokeIterLastPos:
+  case BespokeIterEnd:
+  case BespokeIterGetKey:
+  case BespokeIterGetVal:
+  case IterGetKeyArr:
+  case IterGetValArr:
+  case LoadBCSP:
+  case LdResolvedTypeCnsNoCheck:
+  case LdResolvedTypeCnsClsName:
+  case LdClsCtxCns:
+  case AllocInitROM:
+  case VoidPtrAsDataType:
+  case CopyArray:
+  case StructDictElemAddr:
+  case StructDictSlotInPos:
+  case LdStructDictKey:
+  case LdStructDictVal:
+  case LdImplicitContext:
+  case LdImplicitContextMemoKey:
+  case LdMemoAgnosticIC:
+  case CallViolatesModuleBoundary:
+    assertx(!inst.isControlFlow());
     return true;
+
+  // These may raise oom, but its still ok to delete them if the
+  // result is unused
+  case ConcatIntStr:
+  case ConcatStrInt:
+  case ConcatStrStr:
+  case ConcatStr3:
+  case ConcatStr4:
+  case AddNewElemKeyset:
+  case AddNewElemVec:
+    return true;
+
+  // Some of these conversion functions can run arbitrary PHP code.
+  case ConvObjToDbl:
+  case ConvTVToDbl:
+  case ConvObjToInt:
+  case ConvTVToInt:
+  case ConvTVToBool:
+  case ConvObjToBool:
+  case ConvObjToStr:
+  case ConvTVToStr:
+  case ConvArrLikeToVec:
+  case ConvObjToVec:
+  case ConvArrLikeToDict:
+  case ConvObjToDict:
+  case ConvArrLikeToKeyset:
+  case ConvObjToKeyset:
+  case LdOutAddr:
+    return !opcodeMayRaise(inst.op()) &&
+      (inst.producesReference() || !inst.consumesReferences());
 
   case DbgTraceCall:
   case AKExistsObj:
   case StStk:
+  case StStkMeta:
+  case StStkRange:
   case StOutValue:
-  case SpillFrame:
   case CheckType:
   case CheckNullptr:
-  case CheckTypeMem:
-  case CheckVArray:
-  case CheckDArray:
-  case HintLocInner:
-  case HintStkInner:
-  case HintMBaseInner:
+  case CheckDictKeys:
+  case CheckPtrIterTombstone:
+  case CheckSmashableClass:
   case CheckLoc:
-  case CheckStk:
-  case CheckMBase:
   case AssertLoc:
   case AssertStk:
   case AssertMBase:
-  case AssertARFunc:
-  case CastStk:
-  case CastMem:
-  case CoerceStk:
-  case CoerceMem:
-  case CoerceCellToBool:
-  case CoerceCellToInt:
-  case CoerceStrToInt:
-  case CoerceCellToDbl:
-  case CoerceStrToDbl:
-  case CheckInit:
-  case CheckInitMem:
   case CheckCold:
-  case CheckRefs:
-  case EndGuards:
   case CheckNonNull:
   case DivDbl:
   case DivInt:
-  case AddIntO:
-  case SubIntO:
+  case AddOffset:
   case MulIntO:
-
-    // These conversion functions either can run arbitrary PHP code, or decref
-    // their inputs.
-  case ConvObjToArr:
-  case ConvCellToArr:
-  case ConvStrToArr:
-  case ConvVecToArr:
-  case ConvDictToArr:
-  case ConvKeysetToArr:
-  case ConvArrToNonDVArr:
-  case ConvObjToDbl:
-  case ConvCellToDbl:
-  case ConvObjToInt:
-  case ConvCellToInt:
-  case ConvCellToObj:
-  case ConvObjToStr:
-  case ConvResToStr:
-  case ConvCellToStr:
-  case ConvArrToVec:
-  case ConvDictToVec:
-  case ConvKeysetToVec:
-  case ConvObjToVec:
-  case ConvArrToDict:
-  case ConvVecToDict:
-  case ConvKeysetToDict:
-  case ConvObjToDict:
-  case ConvArrToKeyset:
-  case ConvVecToKeyset:
-  case ConvDictToKeyset:
-  case ConvObjToKeyset:
-  case ConvArrToVArr:
-  case ConvVecToVArr:
-  case ConvDictToVArr:
-  case ConvKeysetToVArr:
-  case ConvObjToVArr:
-  case ConvArrToDArr:
-  case ConvVecToDArr:
-  case ConvDictToDArr:
-  case ConvKeysetToDArr:
-  case ConvObjToDArr:
 
   case GtObj:
   case GteObj:
@@ -362,29 +362,26 @@ bool canDCE(IRInstruction* inst) {
   case EqObj:
   case NeqObj:
   case CmpObj:
-  case GtArr:
-  case GteArr:
-  case LtArr:
-  case LteArr:
-  case EqArr:
-  case NeqArr:
-  case CmpArr:
-  case GtVec:
-  case GteVec:
-  case LtVec:
-  case LteVec:
-  case EqVec:
-  case NeqVec:
-  case CmpVec:
-  case EqDict:
-  case NeqDict:
+  case CmpRes:
+  case EqFuncId:
+  case GtRes:
+  case GteRes:
+  case LtRes:
+  case LteRes:
+  case GtArrLike:
+  case GteArrLike:
+  case LtArrLike:
+  case LteArrLike:
+  case CmpArrLike:
   case JmpZero:
   case JmpNZero:
-  case JmpSSwitchDest:
-  case JmpSwitchDest:
+  case JmpExit:
   case ProfileSwitchDest:
   case CheckSurpriseFlags:
-  case CheckSurpriseAndStack:
+  case CheckSurpriseFlagsEnter:
+  case CheckStackOverflow:
+  case HandleRequestSurprise:
+  case HandleSurpriseEnter:
   case ReturnHook:
   case SuspendHookAwaitEF:
   case SuspendHookAwaitEG:
@@ -395,29 +392,24 @@ bool canDCE(IRInstruction* inst) {
   case Unreachable:
   case Jmp:
   case DefLabel:
-  case Box:
-  case LdLocPseudoMain:
-  case LdVectorBase:
-  case LdPairBase:
-  case CheckRefInner:
-  case CheckCtxThis:
-  case CheckFuncStatic:
-  case DefCls:
+  case LdPairElem:
   case LdClsCtor:
   case LdCls:
   case LdClsCached:
-  case LdClsCachedSafe:
-  case LdClsTypeCns:
+  case LookupClsCached:
   case LdCns:
-  case LookupCns:
+  case LdTypeCns:
+  case LdTypeCnsNoThrow:
+  case LdTypeCnsClsName:
+  case IsTypeStructCached:
   case LookupCnsE:
-  case LookupCnsU:
   case LdClsCns:
   case InitClsCns:
-  case LdSubClsCns:
-  case LdTypeCns:
+  case InitSubClsCns:
+  case LdResolvedTypeCns:
   case CheckSubClsCns:
   case LdClsCnsVecLen:
+  case EqClassId:
   case LookupClsMethodFCache:
   case LookupClsMethodCache:
   case LookupClsMethod:
@@ -425,125 +417,166 @@ bool canDCE(IRInstruction* inst) {
   case LdGblAddrDef:
   case LdClsPropAddrOrNull:
   case LdClsPropAddrOrRaise:
-  case LdObjMethod:
-  case LdObjInvoke:
-  case LdArrFuncCtx:
+  case LdInitRDSAddr:
+  case LdInitPropAddr:
+  case LdObjMethodD:
+  case LdObjMethodS:
   case LdFunc:
   case LdFuncCached:
-  case LdFuncCachedU:
   case LookupFuncCached:
   case AllocObj:
-  case RegisterLiveObj:
-  case CheckInitProps:
+  case FuncCred:
   case InitProps:
-  case CheckInitSProps:
+  case PropTypeRedefineCheck:
+  case PropTypeValid:
   case InitSProps:
   case InitObjProps:
+  case InitObjMemoSlots:
+  case LockObj:
   case DebugBacktrace:
-  case DebugBacktraceFast:
   case InitThrowableFileAndLine:
   case ConstructInstance:
-  case AllocPackedArray:
-  case AllocVArray:
-  case AllocVecArray:
-  case InitPackedLayoutArray:
-  case InitPackedLayoutArrayLoop:
+  case InitDictElem:
+  case InitStructElem:
+  case InitStructPositions:
+  case InitVecElem:
+  case InitVecElemLoop:
   case NewKeysetArray:
-  case NewStructArray:
-  case NewStructDArray:
   case NewStructDict:
+  case NewBespokeStructDict:
   case Clone:
-  case InlineReturn:
-  case CallUnpack:
+  case InlineCall:
+  case InlineSideExit:
+  case InlineSideExitSyncStack:
   case Call:
+  case CallFuncEntry:
   case NativeImpl:
   case CallBuiltin:
   case RetCtrl:
   case AsyncFuncRet:
+  case AsyncFuncRetPrefetch:
   case AsyncFuncRetSlow:
+  case AsyncGenRetR:
+  case AsyncGenYieldR:
   case AsyncSwitchFast:
-  case ReleaseVVAndSkip:
   case GenericRetDecRefs:
+  case StClsInitElem:
+  case StImplicitContext:
   case StMem:
-  case StElem:
+  case StMemMeta:
+  case StIterEnd:
+  case StIterPos:
   case StLoc:
-  case StLocPseudoMain:
+  case StLocMeta:
   case StLocRange:
-  case StClsRef:
-  case StRef:
-  case EagerSyncVMRegs:
+  case StPtrAt:
+  case StPtrIterVal:
+  case StVMFP:
+  case StVMSP:
+  case StVMPC:
+  case StVMReturnAddr:
+  case StVMRegState:
+  case StTVInRDS:
+  case StTypeAt:
   case ReqBindJmp:
+  case ReqInterpBBNoTranslate:
   case ReqRetranslate:
   case ReqRetranslateOpt:
+  case RetranslateOptAsync:
   case IncRef:
   case DecRef:
   case DecRefNZ:
-  case FuncGuard:
+  case ProfileDecRef:
+  case ReleaseShallow:
+  case DecReleaseCheck:
   case DefFP:
-  case DefSP:
+  case DefFrameRelSP:
+  case DefRegSP:
+  case DefFuncPrologueCallee:
+  case DefFuncPrologueCtx:
+  case DefFuncPrologueFlags:
+  case DefFuncPrologueNumArgs:
+  case DefFuncPrologueNamedArgs:
+  case DefFuncEntryFP:
+  case DefFuncEntryPrevFP:
+  case DefFuncEntryArFlags:
+  case DefFuncEntryCalleeId:
+  case DefFuncEntryCtx:
+  case EnterFrame:
   case Count:
-  case VerifyParamCls:
+  case VerifyParam:
   case VerifyParamCallable:
+  case VerifyParamCls:
+  case VerifyParamCoerce:
   case VerifyParamFail:
   case VerifyParamFailHard:
+  case VerifyReifiedLocalType:
+  case VerifyReifiedReturnType:
+  case VerifyType:
+  case VerifyRet:
   case VerifyRetCallable:
   case VerifyRetCls:
+  case VerifyRetCoerce:
   case VerifyRetFail:
   case VerifyRetFailHard:
-  case RaiseHackArrParamNotice:
-  case RaiseUninitLoc:
-  case RaiseUndefProp:
-  case RaiseMissingArg:
+  case VerifyProp:
+  case VerifyPropAll:
+  case VerifyPropCls:
+  case VerifyPropCoerce:
+  case VerifyPropCoerceAll:
+  case VerifyPropFail:
+  case VerifyPropFailHard:
+  case ThrowUninitLoc:
+  case ThrowUndefPropException:
+  case RaiseTooManyArg:
   case RaiseError:
+  case RaiseErrorOnInvalidIsAsExpressionType:
   case RaiseWarning:
-  case RaiseMissingThis:
-  case FatalMissingThis:
   case RaiseNotice:
-  case RaiseArrayIndexNotice:
-  case RaiseArrayKeyNotice:
-  case RaiseVarEnvDynCall:
-  case RaiseHackArrCompatNotice:
-  case RaiseParamRefMismatchForFunc:
-  case RaiseParamRefMismatchForFuncName:
+  case StaticAnalysisError:
+  case ThrowArrayIndexException:
+  case ThrowArrayKeyException:
   case RaiseForbiddenDynCall:
-  case InitStaticLoc:
+  case RaiseForbiddenDynConstruct:
+  case CheckStrictPackageDynamicReference:
+  case RaiseMissingDynamicallyReferenced:
+  case RaiseCoeffectsCallViolation:
+  case RaiseCoeffectsFunParamTypeViolation:
+  case RaiseCoeffectsFunParamCoeffectRulesViolation:
+  case RaiseStrToClassNotice:
+  case RaiseModuleBoundaryViolation:
+  case RaiseModulePropertyViolation:
+  case ThrowMissingNamedParam:
+  case ThrowNamedArgumentNameMismatch:
+  case ThrowUnexpectedNamedArguments:
+  case CheckClsMethFunc:
+  case CheckClsReifiedGenericMismatch:
+  case CheckClsRGSoft:
+  case CheckFunReifiedGenericMismatch:
+  case CheckFunNamedArgsMismatch:
+  case CheckFunReifiedGenericsWithNamedArgs:
+  case PushEmptyReifiedGenericsWithNamedArgs:
+  case CheckInOutMismatch:
+  case CheckReadonlyMismatch:
   case PrintStr:
   case PrintInt:
   case PrintBool:
-  case ConcatIntStr:
-  case ConcatStrInt:
-  case ConcatStrStr:
-  case ConcatStr3:
-  case ConcatStr4:
-  case AddElemStrKey:
-  case AddElemIntKey:
-  case AddNewElem:
-  case AddNewElemKeyset:
-  case AddNewElemVec:
-  case DictAddElemStrKey:
-  case DictAddElemIntKey:
-  case ArrayAdd:
   case GetMemoKey:
-  case LdSwitchObjIndex:
-  case LdSSwitchDestSlow:
   case InterpOne:
   case InterpOneCF:
   case OODeclExists:
-  case StClosureCtx:
   case StClosureArg:
   case CreateGen:
   case CreateAGen:
-  case CreateAAWH:
+  case CreateCCWH:
   case CreateAFWH:
-  case CreateAFWHNoVV:
+  case CreateAFWHL:
   case CreateAGWH:
   case AFWHPrepareChild:
   case StArResumeAddr:
   case ContEnter:
-  case ContPreNext:
-  case ContStartedCheck:
+  case ContCheckNext:
   case ContValid:
-  case ContStarted:
   case ContArIncKey:
   case ContArIncIdx:
   case ContArUpdateIdx:
@@ -552,149 +585,129 @@ bool canDCE(IRInstruction* inst) {
   case StContArValue:
   case StContArKey:
   case AFWHBlockOn:
+  case AFWHPushTailFrame:
   case CountWHNotDone:
   case IncStat:
   case IncProfCounter:
+  case IncCallCounter:
+  case IncStatCounter:
   case DbgAssertRefCount:
-  case DbgAssertARFunc:
   case DbgAssertFunc:
+  case DbgCheckLocalsDecRefd:
   case RBTraceEntry:
   case RBTraceMsg:
-  case ZeroErrorLevel:
-  case RestoreErrorLevel:
-  case IterInit:
-  case IterInitK:
-  case WIterInit:
-  case WIterInitK:
-  case MIterInit:
-  case MIterInitK:
-  case LIterInit:
-  case LIterInitK:
-  case IterNext:
-  case IterNextK:
-  case WIterNext:
-  case WIterNextK:
-  case MIterNext:
-  case MIterNextK:
-  case LIterNext:
-  case LIterNextK:
-  case IterFree:
-  case MIterFree:
-  case DecodeCufIter:
-  case StCufIterFunc:
-  case StCufIterCtx:
-  case StCufIterInvName:
-  case StCufIterDynamic:
-  case BaseG:
+  case IterExtractBase:
+  case IterInitArr:
+  case IterInitObj:
+  case IterNextArr:
+  case IterNextObj:
+  case KillActRec:
+  case KillIter:
+  case KillLoc:
   case PropX:
   case PropQ:
   case PropDX:
   case CGetProp:
   case CGetPropQ:
-  case VGetProp:
-  case BindProp:
   case SetProp:
-  case UnsetProp:
   case SetOpProp:
   case IncDecProp:
-  case EmptyProp:
   case IssetProp:
   case ElemX:
-  case ProfileMixedArrayOffset:
-  case CheckMixedArrayOffset:
+  case CheckMissingKeyInArrLike:
   case CheckArrayCOW:
-  case ProfileDictOffset:
+  case ProfileDictAccess:
+  case ProfileIterInit:
   case CheckDictOffset:
-  case ProfileKeysetOffset:
+  case ProfileKeysetAccess:
   case CheckKeysetOffset:
-  case ElemArrayX:
-  case ElemArrayD:
-  case ElemArrayU:
-  case ElemMixedArrayK:
-  case ElemVecD:
-  case ElemVecU:
-  case ElemDictX:
+  case ProfileArrayCOW:
   case ElemDictD:
   case ElemDictU:
   case ElemDictK:
-  case ElemKeysetX:
-  case ElemKeysetU:
-  case ElemKeysetK:
   case ElemDX:
   case ElemUX:
-  case ArrayGet:
-  case MixedArrayGetK:
   case DictGet:
   case KeysetGet:
   case StringGet:
   case OrdStrIdx:
   case MapGet:
   case CGetElem:
-  case VGetElem:
-  case BindElem:
-  case ArraySet:
-  case ArraySetRef:
-  case VecSet:
-  case VecSetRef:
   case DictSet:
-  case DictSetRef:
   case MapSet:
+  case VectorSet:
+  case BespokeSet:
+  case BespokeSetPos:
+  case BespokeUnset:
+  case StructDictUnset:
+  case BespokeAppend:
   case SetElem:
-  case SetWithRefElem:
+  case SetRange:
+  case SetRangeRev:
   case UnsetElem:
   case SetOpElem:
   case IncDecElem:
   case SetNewElem:
-  case SetNewElemArray:
-  case SetNewElemVec:
-  case SetNewElemKeyset:
-  case ReservePackedArrayDataNewElem:
-  case BindNewElem:
+  case ReserveVecNewElem:
   case VectorIsset:
   case PairIsset:
   case MapIsset:
   case IssetElem:
-  case EmptyElem:
-  case ProfileArrayKind:
   case ProfileType:
-  case ProfileFunc:
+  case ProfileCall:
   case ProfileMethod:
   case ProfileSubClsCns:
-  case CheckPackedArrayDataBounds:
+  case ProfileGlobal:
+  case ProfileCoeffectFunParam:
+  case CheckVecBounds:
+  case BespokeElem:
+  case BespokeEscalateToVanilla:
+  case BespokeGetThrow:
+  case LdTypeStructureVal:
+  case LdTypeStructureValCns:
   case LdVectorSize:
-  case VectorDoCow:
-  case VectorHasImmCopy:
   case BeginCatch:
   case EndCatch:
+  case StUnwinderExn:
   case UnwindCheckSideExit:
+  case DbgTrap:
   case DbgTrashStk:
   case DbgTrashFrame:
   case DbgTrashMem:
-  case DbgTrashRetVal:
-  case EnterFrame:
-  case CheckStackOverflow:
-  case InitExtraArgs:
-  case InitCtx:
-  case CheckSurpriseFlagsEnter:
-  case CheckARMagicFlag:
-  case StARNumArgsAndFlags:
-  case StARInvName:
-  case ExitPlaceholder:
+  case EnterPrologue:
+  case ExitPrologue:
+  case EnterTranslation:
   case ThrowOutOfBounds:
   case ThrowInvalidArrayKey:
   case ThrowInvalidOperation:
-  case ThrowArithmeticError:
-  case ThrowDivisionByZeroError:
+  case ThrowCallReifiedFunctionWithoutGenerics:
+  case ThrowDivisionByZeroException:
+  case ThrowHasThisNeedStatic:
+  case ThrowLateInitPropError:
+  case ThrowMissingArg:
+  case ThrowMissingThis:
+  case ThrowInOutMismatch:
+  case ThrowReadonlyMismatch:
+  case ThrowCannotModifyReadonlyCollection:
+  case ThrowLocalMustBeValueTypeException:
+  case ThrowMustBeEnclosedInReadonly:
+  case ThrowMustBeMutableException:
+  case ThrowMustBeReadonlyException:
+  case ThrowMustBeValueTypeException:
   case StMBase:
+  case StMROProp:
+  case CheckMROProp:
   case FinishMemberOp:
-  case InlineReturnNoFrame:
-  case BeginInlining:
-  case SyncReturnBC:
-  case SetOpCell:
-  case ConjureUse:
-  case CheckStaticLoc:
+  case DefCalleeFP:
+  case LeaveInlineFrame:
+  case EnterInlineFrame:
+  case SetOpTV:
+  case OutlineSetOp:
   case LdClsMethodFCacheFunc:
   case LdClsMethodCacheFunc:
+  case LogArrayReach:
+  case LogGuardFailure:
+  case LogClsSpeculation:
   case ProfileInstanceCheck:
   case MemoGetStaticValue:
   case MemoGetStaticCache:
@@ -708,57 +721,62 @@ bool canDCE(IRInstruction* inst) {
   case MemoSetLSBCache:
   case MemoSetInstanceValue:
   case MemoSetInstanceCache:
-  case KillClsRef:
-  case KillCufIter:
-  case BoxPtr:
-  case AsTypeStruct:
+  case ThrowAsTypeStructException:
+  case ThrowAsTypeStructError:
+  case RecordReifiedGenericsAndGetTSList:
   case ResolveTypeStruct:
+  case CheckRDSInitialized:
+  case MarkRDSInitialized:
+  case MarkRDSAccess:
+  case ProfileProp:
+  case ProfileIsTypeStruct:
+  case StFrameCtx:
+  case StFrameFunc:
+  case StFrameMeta:
+  case LookupClsCns:
+  case LookupClsCtxCns:
+  case ArrayMarkLegacyShallow:
+  case ArrayMarkLegacyRecursive:
+  case ArrayUnmarkLegacyShallow:
+  case ArrayUnmarkLegacyRecursive:
+  case ProfileArrLikeProps:
+  case CheckFuncNeedsCoverage:
+  case RecordFuncCall:
+  case StructDictSlot:
+  case StructDictAddNextSlot:
+  case StructDictTypeBoundCheck:
+  case LdCoeffectFunParamNaive:
+  case DeserializeLazyProp:
+  case GetClsRGProp:
+  case ReifiedInit:
     return false;
 
-  case AKExistsArr:
-  case ArrayIsset:
-  case ArrayIdx:
-    return !RuntimeOption::EvalHackArrCompatNotices;
-
-  case SameArr:
-  case NSameArr:
-    return !RuntimeOption::EvalHackArrCompatDVCmpNotices;
-
   case IsTypeStruct:
-    return !opcodeMayRaise(IsTypeStruct);
+  case IsTypeStructShallow:
+  case EqStr:
+  case NeqStr:
+    return !opcodeMayRaise(inst.op());
+
+  case EqArrLike:
+  case NeqArrLike:
+  case SameArrLike:
+  case NSameArrLike:
+    return !inst.mayRaiseErrorWithSources();
   }
   not_reached();
 }
+
+namespace {
 
 /* DceFlags tracks the state of one instruction during dead code analysis. */
 struct DceFlags {
   DceFlags()
     : m_state(DEAD)
-    , m_weakUseCount(0)
   {}
 
   bool isDead() const { return m_state == DEAD; }
   void setDead()      { m_state = DEAD; }
   void setLive()      { m_state = LIVE; }
-
-  /*
-   * "Weak" uses are used in optimizeActRecs.
-   *
-   * If a frame pointer is used for something that can be modified to
-   * not be a use as long as the whole frame can go away, we'll track
-   * that here.
-   */
-  void incWeakUse() {
-    if (m_weakUseCount + 1 > kMaxWeakUseCount) {
-      // Too many weak uses for us to know we can optimize it away.
-      return;
-    }
-    ++m_weakUseCount;
-  }
-
-  int32_t weakUseCount() const {
-    return m_weakUseCount;
-  }
 
   std::string toString() const {
     std::array<const char*,2> const names = {{
@@ -777,31 +795,109 @@ private:
     LIVE,
   };
   uint8_t m_state:1;
-  static constexpr uint8_t kMaxWeakUseCount = 0x7f;
-  uint8_t m_weakUseCount:7;
 };
 static_assert(sizeof(DceFlags) == 1, "sizeof(DceFlags) should be 1 byte");
 
 // DCE state indexed by instr->id().
-typedef StateVector<IRInstruction, DceFlags> DceState;
-typedef StateVector<SSATmp, uint32_t> UseCounts;
-typedef jit::vector<const IRInstruction*> WorkList;
+using DceState = StateVector<IRInstruction, DceFlags>;
+using UseCounts = StateVector<SSATmp, uint32_t>;
+// Set of live DefLabel operands (keyed by DefLabel and index)
+using DefLabelLiveness = jit::fast_set<std::pair<IRInstruction*, size_t>>;
+// Worklist is instruction to process. If the instruction is a
+// DefLabel, the second item is the index of the operand (DefLabel is
+// treated separately for each operand).
+using WorkList = jit::vector<std::pair<IRInstruction*, size_t>>;
 
-void removeDeadInstructions(IRUnit& unit, const DceState& state) {
-  postorderWalk(unit, [&](Block* block) {
-    block->remove_if([&] (const IRInstruction& inst) {
-      ONTRACE(4,
-              if (state[inst].isDead()) {
-                FTRACE(1, "Removing dead instruction {}\n", inst.toString());
-              });
+void removeDeadInstructions(IRUnit& unit,
+                            const DceState& state,
+                            const DefLabelLiveness& defLabelLive) {
+  postorderWalk(
+    unit,
+    [&](Block* block) {
+      auto const next = block->next();
+      auto const bcctx = block->back().bcctx();
+      block->remove_if(
+        [&] (const IRInstruction& inst) {
+          // Don't attempt to remove a Jmp feeding a DefLabel. It will
+          // be dealt with below.
+          if (inst.is(Jmp) && inst.numSrcs() > 0) return false;
 
-      // For now, all control flow instructions are essential. If we ever
-      // change this, we'll need to be careful about unlinking dead CF
-      // instructions here.
-      assertx(IMPLIES(inst.isControlFlow(), !state[inst].isDead()));
-      return state[inst].isDead();
-    });
-  });
+          // DecReleaseCheck will be dealt with below.
+          if (inst.is(DecReleaseCheck)) return false;
+
+          ONTRACE(
+            4,
+            if (state[inst].isDead()) {
+              FTRACE(1, "Removing dead instruction {}\n", inst.toString());
+            }
+          );
+
+          auto const dead = state[inst].isDead();
+          assertx(!dead || !inst.taken() || inst.taken()->isCatch());
+          return dead;
+        }
+      );
+
+      if (!block->empty()) {
+        auto& front = block->front();
+        if (front.is(DefLabel)) {
+          // If the DefLabel was completely dead, it would have been
+          // removed above.
+          assertx(!state[&front].isDead());
+          // Remove any dead individual operands
+          auto dstIdx = 0;
+          auto const numDsts = front.numDsts();
+          for (auto i = 0; i < numDsts; ++i) {
+            if (!defLabelLive.contains(std::make_pair(&front, i))) {
+              FTRACE(1, "Removing dead DefLabel dst {}: {}\n",
+                     i, front.toString());
+              front.deleteDst(dstIdx);
+            } else {
+              ++dstIdx;
+            }
+          }
+          assertx(front.numDsts() > 0);
+        }
+
+        auto& back = block->back();
+        if (back.is(Jmp) && back.numSrcs() > 0) {
+          if (state[&back].isDead()) {
+            // If the Jmp's operands are completely dead, we can't
+            // remove it (because it's control flow), but we can turn
+            // it into a normal Jmp.
+            FTRACE(1, "Removing dead instruction {}\n", back.toString());
+            back.setSrcs(0, nullptr);
+          } else {
+            // Otherwise, similarily to the DefLabel, remove
+            // individual dead operands.
+            auto srcIdx = 0;
+            auto const numSrcs = back.numSrcs();
+            for (auto i = 0; i < numSrcs; ++i) {
+              auto& defLabel = block->taken()->front();
+              assertx(defLabel.is(DefLabel));
+              if (!defLabelLive.contains(std::make_pair(&defLabel, i))) {
+                FTRACE(1, "Removing dead Jmp src {}: {}\n",
+                       i, back.toString());
+                back.deleteSrc(srcIdx);
+              } else {
+                ++srcIdx;
+              }
+            }
+          }
+        }
+
+        if (back.is(DecReleaseCheck) && state[&back].isDead()) {
+          block->erase(block->backIter());
+          block->push_back(unit.gen(Jmp, bcctx, next));
+        }
+      }
+
+      if (block->empty() || !block->back().isBlockEnd()) {
+        assertx(next);
+        block->push_back(unit.gen(Jmp, bcctx, next));
+      }
+    }
+  );
 }
 
 // removeUnreachable erases unreachable blocks from unit, and returns
@@ -836,470 +932,433 @@ WorkList initInstructions(const IRUnit& unit, const BlockList& blocks,
   // Mark reachable, essential, instructions live and enqueue them.
   WorkList wl;
   wl.reserve(unit.numInsts());
-  forEachInst(blocks, [&] (IRInstruction* inst) {
-    if (!canDCE(inst)) {
-      state[inst].setLive();
-      wl.push_back(inst);
+  for (auto const block : blocks) {
+    std::vector<IRInstruction*> enterInlineFrames;
+
+    for (auto& inst : *block) {
+      auto const setLive = [&] (IRInstruction* inst) {
+        state[inst].setLive();
+        wl.push_back(std::make_pair(inst, 0));
+      };
+
+      switch (inst.op()) {
+        case EnterInlineFrame:
+          // Defer decision in case there is a matching LeaveInlineFrame.
+          enterInlineFrames.push_back(&inst);
+          continue;
+        case LeaveInlineFrame:
+          if (enterInlineFrames.empty()) {
+            setLive(&inst);
+          } else {
+            // Kill the empty pair of EnterInlineFrame and LeaveInlineFrame.
+            assertx(enterInlineFrames.back()->src(0) == inst.src(0));
+            enterInlineFrames.pop_back();
+          }
+          continue;
+        case DefLabel:
+          // DefLabel is handled specially.
+          break;
+        case Jmp:
+          // Jmps that feed a DefLabel is handled specially.
+          if (inst.numSrcs() == 0) setLive(&inst);
+          break;
+        default:
+          // All other instructions that cannot be removed are automatically
+          // live.
+          if (!canDCE(inst)) setLive(&inst);
+          break;
+      }
+
+      // All open EnterInlineFrames are non-empty, set them live.
+      while (!enterInlineFrames.empty()) {
+        setLive(enterInlineFrames.back());
+        enterInlineFrames.pop_back();
+      }
     }
-  });
+
+    // Block's last instruction can't be EnterInlineFrame or LeaveInlineFrame.
+    assertx(enterInlineFrames.empty());
+  }
   TRACE(1, "DCE:^^^^^^^^^^^^^^^^^^^^\n");
   return wl;
 }
 
 //////////////////////////////////////////////////////////////////////
 
-/*
- * A use of an inlined frame that can be modified to work without the
- * frame is called a "weak use" here.  For example, storing to a local
- * on a frame is weak because if no other uses of the frame are
- * keeping it alive (for example a load of that same local), we can
- * just remove the store.
- *
- * This routine counts the weak uses of inlined frames and marks them
- * dead if they have no non-weak uses.  Returns true if any inlined
- * frames were marked dead.
- */
-bool findWeakActRecUses(const BlockList& blocks,
-                        DceState& state,
-                        IRUnit& unit,
-                        const UseCounts& uses) {
-  bool killedFrames = false;
+struct TrackedInstr {
+  // DecRefs which refer to the tracked instruction.
+  jit::vector<IRInstruction*> decs;
 
-  auto const incWeak = [&] (const IRInstruction* inst, const SSATmp* src) {
-    assertx(src->isA(TFramePtr));
-    auto const frameInst = src->inst();
-    if (frameInst->op() == DefInlineFP) {
-      ITRACE(3, "weak use of {} from {}\n", *frameInst, *inst);
-      state[frameInst].incWeakUse();
-    }
-  };
+  // Auxiliary instructions which must be killed if the tracked instruction is
+  // killed.
+  jit::vector<IRInstruction*> aux;
 
-  forEachInst(blocks, [&] (IRInstruction* inst) {
-    if (state[inst].isDead()) return;
+  // Stores to the stack in catch traces that can be killed to kill the
+  // tracked instruction.
+  jit::vector<IRInstruction*> stores;
 
-    switch (inst->op()) {
-    // these can be made stack relative
-    case StLoc:
-    case LdLoc:
-    case CheckLoc:
-    case AssertLoc:
-    case LdLocAddr:
-    case HintLocInner:
-    // these can be rewritten to use an outer frame pointer
-    case LdClsRef:
-    case StClsRef:
-    case KillClsRef:
-      incWeak(inst, inst->src(0));
-      break;
+  // Passthrough instructions that canonicalize to this instr, stored *only*
+  // when this instruction produces reference
+  jit::vector<IRInstruction*> passthroughs;
+};
 
-    case InlineReturn:
-      {
-        auto const frameInst = inst->src(0)->inst();
-        assertx(frameInst->is(DefInlineFP));
-        auto const frameUses = uses[frameInst->dst()];
-        auto const weakUses  = state[frameInst].weakUseCount();
-        /*
-         * We can kill the frame if all uses of the frame are counted
-         * as weak uses.  Note that this InlineReturn counts as a weak
-         * use, but we haven't incremented for it yet, which is where
-         * the "+ 1" comes from below.
-         */
-        ITRACE(2, "frame {}: weak/strong {}/{}\n",
-          *frameInst, weakUses, frameUses);
-        if (frameUses - (weakUses + 1) == 0) {
-          ITRACE(1, "killing frame {}\n", *frameInst);
-          killedFrames = true;
-          state[frameInst].setDead();
+void processCatchBlock(IRUnit& unit, DceState& state, Block* block,
+                       const UseCounts& uses,
+                       jit::fast_map<IRInstruction*, TrackedInstr>& rcInsts) {
+  assertx(block->front().is(BeginCatch));
+  assertx(block->back().is(EndCatch));
 
-          // Ensure that the frame is still dead for the purposes of
-          // memory-effects
-          convertToInlineReturnNoFrame(unit, *inst);
-        }
+  auto constexpr numTrackedSlots = 64;
+  auto constexpr wholeRange = std::make_pair(0, numTrackedSlots);
+  auto const stackTop = block->back().extra<EndCatch>()->offset;
+  auto const stackRange = [&] {
+    // If the catch block occurs within an inlined frame the outer stack
+    // locations (those above the inlined frame) are not dead and cannot be
+    // elided as we may not throw through the outer callers.
+    if (block->back().src(0)->inst()->is(DefCalleeFP)) {
+      auto const extra = block->back().src(0)->inst()->extra<DefCalleeFP>();
+      auto const spOff = extra->spOffset;
+      assertx(stackTop <= spOff);
+      if (spOff < stackTop + numTrackedSlots) {
+        return AStack::range(stackTop, spOff);
       }
-      break;
-
-    default:
-      // Default is conservative: we don't increment a weak use if it
-      // uses the frame (or stack), so they can't be eliminated.
-      break;
     }
-  });
-
-  return killedFrames;
-}
-
-/*
- * Convert a localId in a callee frame into an SP relative offset in the caller
- * frame.
- */
-IRSPRelOffset locToStkOff(IRInstruction& inst) {
-  assertx(inst.is(LdLoc, StLoc, LdLocAddr, AssertLoc, CheckLoc, HintLocInner));
-
-  auto locId = inst.extra<LocalId>()->locId;
-  auto fpInst = inst.src(0)->inst();
-  assertx(fpInst->is(DefInlineFP));
-
-  return fpInst->extra<DefInlineFP>()->spOffset - locId - 1;
-}
-
-/*
- * Convert an instruction using the frame pointer into one that uses the
- * caller's frame pointer, skipping frames marked as dead.
- */
-template <typename F>
-void rewriteToParentFrameImpl(IRUnit& /*unit*/, IRInstruction& inst, F dead) {
-  assertx(inst.is(LdClsRef, StClsRef, KillClsRef));
-
-  auto fp = inst.src(0);
-  assertx(canonical(fp)->inst()->is(DefInlineFP, DefLabel));
-
-  auto const chaseFpTmp = [](const SSATmp* s) {
-    s = canonical(s);
-    auto i = s->inst();
-    if (UNLIKELY(i->is(DefLabel))) {
-      i = resolveFpDefLabel(s);
-      assertx(i);
-    }
-    always_assert(i->is(DefFP, DefInlineFP));
-    return i->dst();
-  };
-
-  fp = chaseFpTmp(fp);
-  assertx(fp->inst()->is(DefInlineFP));
-
-  // Figure out the FPInvOffset of the stack pointer from the outermost frame
-  // pointer. We'll use this to find the offsets of the various frame pointers.
-  auto const spOffsetFromTop = [&]{
-    auto const sp = fp->inst()->src(0);
-    auto const defSp = sp->inst();
-    assertx(defSp->is(DefSP));
-    return defSp->extra<DefSP>()->offset;
+    return AStack::range(stackTop, stackTop + numTrackedSlots);
   }();
 
-  // Given a frame pointer, determine its offset from the outermost frame
-  // pointer in the unit.
-  auto const getFpOffsetFromTop = [&](const SSATmp* s) {
-    auto const i = s->inst();
-    if (i->is(DefFP)) return FPInvOffset{0};
-    if (i->is(DefInlineFP)) {
-      return i->extra<DefInlineFP>()->spOffset.to<FPInvOffset>(spOffsetFromTop);
+  // Nothing to optimize if the stack is empty
+  if (stackRange.size() == 0) return;
+
+  std::bitset<numTrackedSlots> usedLocations = {};
+  // stores that are only read by the EndCatch
+  jit::fast_set<IRInstruction*> candidateStores;
+  // Any IncRefs we see; if they correspond to stores above, we can
+  // replace the store with a store of Null, and kill the IncRef.
+  jit::fast_map<SSATmp*, std::vector<Block::iterator>> candidateIncRefs;
+
+  auto const range =
+    [&] (const AliasClass& cls) -> std::pair<int, int> {
+      if (!cls.maybe(stackRange)) return {};
+      auto const stk = cls.stack();
+      if (!stk) return wholeRange;
+      auto const lowest_upper = std::min(stackRange.high, stk->high);
+      auto const highest_lower = std::max(stackRange.low, stk->low);
+      if (lowest_upper <= highest_lower) return {};
+      return {
+        highest_lower.offset - stackRange.low.offset,
+        lowest_upper.offset - stackRange.low.offset
+      };
+    };
+
+  auto const process_stack =
+    [&] (const AliasClass& cls) {
+      auto r = range(cls);
+      if (r == wholeRange) {
+        usedLocations.set();
+      } else {
+        while (r.first < r.second) {
+          usedLocations.set(r.first++);
+        }
+      }
+      return false;
+    };
+
+  auto const do_store =
+    [&] (const AliasClass& cls, IRInstruction* store) {
+      if (!store->is(StStk, StStkMeta)) return false;
+      auto const stk = cls.is_stack();
+      if (!stk) return process_stack(cls);
+      auto const r = range(cls);
+      if (r.first != r.second) {
+        assertx(r.second == r.first + 1);
+        if (!usedLocations.test(r.first)) {
+          usedLocations.set(r.first);
+          candidateStores.insert(store);
+        }
+      }
+      return false;
+    };
+
+  auto done = false;
+  for (auto inst = block->end(); inst != block->begin(); ) {
+    --inst;
+    if (inst->is(EndCatch)) {
+      continue;
     }
-    always_assert(false);
-  };
-
-  // Given a frame pointer, determine the associated Func*.
-  auto const getFunc = [](const SSATmp* s) {
-    auto const i = s->inst();
-    if (i->is(DefFP)) return i->func();
-    if (i->is(DefInlineFP)) return i->extra<DefInlineFP>()->target;
-    always_assert(false);
-  };
-
-  auto const slot = inst.extra<ClsRefSlotData>()->slot;
-  auto const origFpOffset = getFpOffsetFromTop(fp);
-  auto const origFunc = getFunc(fp);
-
-  // Walk up the def/use chain of the frame pointers, stopping if we encounter
-  // the outermost frame pointer, or if we find an inlined frame which is not
-  // dead. This will be the frame pointer we rewrite the instruction to.
-  do {
-    fp = chaseFpTmp(fp->inst()->src(1));
-  } while (!fp->inst()->is(DefFP) && dead(fp->inst()));
-
-  // Calculate the new offset (in bytes) that should be used to calculate the
-  // new slot. Take the difference between the original frame pointer offset and
-  // the new frame pointer offset. This is in slots, so multiple by the slot
-  // size. Add in the space between the original frame pointer to the original
-  // slot, and subtract out the space between the new frame pointer and the
-  // first slot. (frame_clsref_offset returns negative numbers, hence the
-  // reversed operations).
-
-  /*
-   *  --------------------------------
-   *  |   ActRec                     |
-   *  -------------------------------- fp <---------------------|
-   *  |   ..................         |                          |
-   *  |   ..................         |                          |
-   *  |   ..................         |                          |
-   *  --------------------------------                          |
-   *  |   ActRec                     |                          |
-   *  -------------------------------- origFp <-|               |- new offset
-   *  |   Locals + Iterators         |          |               |
-   *  --------------------------------          |               |
-   *  |   Class-ref slots #0 -> N-1  |          |- orig offset  |
-   *  --------------------------------          |               |
-   *  |   Class-ref slot #N          |          |               |
-   *  -------------------------------- <--------- <--------------
-   */
-
-  auto const newOffset =
-    cellsToBytes(origFpOffset - getFpOffsetFromTop(fp))
-    - frame_clsref_offset(origFunc, slot)
-    + frame_clsref_offset(getFunc(fp), 0);
-  assertx((newOffset % sizeof(LowPtr<Class>)) == 0);
-  // Now that we have the new offset in bytes, convert it to an actual slot
-  // number.
-  auto const newSlot = newOffset / sizeof(LowPtr<Class>);
-
-  // Sanity check that both the before and after result in the same byte offset
-  if (debug) {
-    DEBUG_ONLY auto const origOffset =
-      cellsToBytes(origFpOffset.offset)
-      - frame_clsref_offset(origFunc, slot);
-    DEBUG_ONLY auto const newOffset =
-      cellsToBytes(getFpOffsetFromTop(fp).offset)
-      - frame_clsref_offset(getFunc(fp), newSlot);
-    assertx(origOffset == newOffset);
+    if (inst->is(IncRef)) {
+      candidateIncRefs[canonical(inst->src(0))].push_back(inst);
+      continue;
+    }
+    if (done) continue;
+    auto const effects = canonicalize(memory_effects(*inst));
+    done = match<bool>(
+      effects,
+      [&] (const IrrelevantEffects&)    { return false; },
+      [&] (const UnknownEffects&)       { return true; },
+      [&] (const ReturnEffects&)        { return true; },
+      [&] (const CallEffects&)          { return true; },
+      [&] (const GeneralEffects& x)     {
+        return
+          process_stack(x.loads) ||
+          process_stack(x.inout) ||
+          process_stack(x.stores) ||
+          process_stack(x.kills);
+      },
+      [&] (const PureLoad& x)           { return process_stack(x.src); },
+      [&] (const PureStore& x)          { return do_store(x.dst, &*inst); },
+      [&] (const ExitEffects& x)        { return process_stack(x.live); },
+      [&] (const PureInlineCall& x) {
+        return
+          process_stack(x.base) ||
+          process_stack(x.actrec);
+      }
+    );
   }
 
-  ITRACE(3, "rewriting {} to use frame-ptr {} with slot {}\n",
-         inst, *fp, newSlot);
-
-  // Update the instruction:
-  inst.setSrc(0, fp);
-  switch (inst.op()) {
-    case LdClsRef:   inst.extra<LdClsRef>()->slot = newSlot; break;
-    case StClsRef:   inst.extra<StClsRef>()->slot = newSlot; break;
-    case KillClsRef: inst.extra<KillClsRef>()->slot = newSlot; break;
-    default: not_reached();
+  for (auto store : candidateStores) {
+    auto const src = store->src(1);
+    auto const canonicalSrc = canonical(store->src(1));
+    auto const it = candidateIncRefs.find(canonicalSrc);
+    if (it != candidateIncRefs.end()) {
+      FTRACE(3, "Erasing {} for {}\n",
+             it->second.back()->toString(), store->toString());
+      block->erase(it->second.back());
+      if (it->second.size() > 1) {
+        it->second.pop_back();
+      } else {
+        candidateIncRefs.erase(it);
+      }
+    } else if (src->type().maybe(TCounted)) {
+      auto const srcInst = canonicalSrc->inst();
+      if (!srcInst->producesReference() ||
+          !canDCE(*srcInst) ||
+          uses[canonicalSrc] != 1) {
+        if (srcInst->producesReference() && canDCE(*srcInst)) {
+          rcInsts[srcInst].stores.emplace_back(store);
+        }
+        continue;
+      } else {
+        FTRACE(3, "Erasing {} for {}\n",
+               srcInst->toString(), store->toString());
+        state[srcInst].setDead();
+      }
+    }
+    store->setSrc(1, unit.cns(TInitNull));
   }
 }
 
 /*
- * The first time through, we've counted up weak uses of the frame and then
- * finally marked it dead.  The instructions in between that were weak uses may
- * need modifications now that their frame is going away.
- *
- * Also, if we eliminated some frames, DecRef instructions (which can re-enter
- * the VM without requiring a materialized frame) need to have stack depths in
- * their markers adjusted so they can't stomp on parts of the outer function.
- * We handle this conservatively by just pushing all DecRef markers where the
- * DecRef is from a function other than the outer function down to a safe
- * re-entry depth.
- *
- * Finally, any removed frame pointers in BCMarkers must be rewritten to point
- * to the outer frame of that frame.
+ * A store to the stack which is post-dominated by the EndCatch and
+ * not otherwise read is only there to ensure the unwinder DecRefs the
+ * value it contains. If there's also an IncRef of the value in the
+ * catch trace we can just store InitNull to the stack location and
+ * drop the IncRef (and later, maybe adjust the sp of the
+ * catch-trace's owner so we don't even have to do the store).
  */
-void performActRecFixups(const BlockList& blocks,
+void optimizeCatchBlocks(const BlockList& blocks,
                          DceState& state,
                          IRUnit& unit,
-                         const UseCounts& uses) {
-  // We limit the total stack depth during inlining, so this is the deepest
-  // we'll ever have to worry about.
-  auto const outerFunc = blocks.front()->front().marker().func();
-  auto const safeDepth = outerFunc->maxStackCells() + kStackCheckLeafPadding;
-  ITRACE(3, "safeDepth: {}, outerFunc depth: {}\n",
-         safeDepth,
-         outerFunc->maxStackCells());
-
+                         const UseCounts& uses,
+                         jit::fast_map<IRInstruction*, TrackedInstr>& rcInsts) {
+  FTRACE(1, "OptimizeCatchBlocks:vvvvvvvvvvvvvvvvvvvv\n");
+  SCOPE_EXIT { FTRACE(1, "OptimizeCatchBlocks:^^^^^^^^^^^^^^^^^^^^\n"); };
   for (auto block : blocks) {
-    ITRACE(2, "Visiting block {}\n", block->id());
-    Trace::Indent indenter;
-
-    for (auto& inst : *block) {
-      ITRACE(5, "{}\n", inst.toString());
-
-      if (auto const fp = inst.marker().fp()) {
-        if (state[fp->inst()].isDead()) {
-          always_assert(fp->inst()->is(DefInlineFP));
-          auto const prev = fp->inst()->src(1);
-          inst.marker() = inst.marker().adjustFP(prev);
-          assertx(!state[prev->inst()].isDead());
-        }
-      }
-
-      switch (inst.op()) {
-      case DefInlineFP:
-        ITRACE(3, "DefInlineFP ({}): weak/strong uses: {}/{}\n",
-             inst, state[inst].weakUseCount(), uses[inst.dst()]);
-        break;
-
-      case StLoc:
-      case LdLoc:
-      case LdLocAddr:
-      case AssertLoc:
-      case CheckLoc:
-      case HintLocInner:
-        if (state[inst.src(0)->inst()].isDead()) {
-          convertToStackInst(unit, inst);
-        }
-        break;
-
-      case LdClsRef:
-      case StClsRef:
-      case KillClsRef:
-        if (state[inst.src(0)->inst()].isDead()) {
-          rewriteToParentFrameImpl(
-            unit,
-            inst,
-            [&](const IRInstruction* i){ return state[i].isDead(); }
-          );
-        }
-        break;
-
-      /*
-       * These are special: they're the only instructions that can reenter
-       * but not throw. This means it's safe to elide their inlined frame, as
-       * long as we adjust their markers to a depth that is guaranteed to not
-       * stomp on the caller's frame if it reenters.
-       */
-      case DecRef:
-      case MemoSetStaticValue:
-      case MemoSetLSBValue:
-      case MemoSetInstanceValue:
-        if (inst.marker().func() != outerFunc) {
-          ITRACE(3, "pushing stack depth of {} to {}\n", safeDepth, inst);
-          inst.marker() = inst.marker().adjustSP(FPInvOffset{safeDepth});
-        }
-        break;
-
-      default:
-        break;
-      }
+    if (block->back().is(EndCatch) && block->front().is(BeginCatch)) {
+      processCatchBlock(unit, state, block, uses, rcInsts);
     }
   }
 }
 
-/*
- * Look for InlineReturn instructions that are the only "non-weak" use
- * of a DefInlineFP.  In this case we can kill both, which may allow
- * removing a SpillFrame as well.
- *
- * Prior to calling this routine, `uses' should contain the direct
- * (non-transitive) use counts of each DefInlineFP instruction.  If
- * the weak references are equal to the normal references, the
- * instruction is not necessary and can be removed (if we make the
- * required changes to each instruction that used it weakly).
- */
-void optimizeActRecs(const BlockList& blocks,
+void optimizeConcats(jit::vector<IRInstruction*>& concats,
                      DceState& state,
                      IRUnit& unit,
-                     const UseCounts& uses) {
-  FTRACE(1, "AR:vvvvvvvvvvvvvvvvvvvvv\n");
-  SCOPE_EXIT { FTRACE(1, "AR:^^^^^^^^^^^^^^^^^^^^^\n"); };
+                     UseCounts& uses,
+                     jit::fast_map<IRInstruction*, TrackedInstr>& rcInsts) {
+  FTRACE(1, "OptimizeConcats:vvvvvvvvvvvvvvvvvvvv\n");
+  SCOPE_EXIT { FTRACE(1, "OptimizeConcats:^^^^^^^^^^^^^^^^^^^^\n"); };
+  auto const incref = [&] (auto inst, auto src) {
+    auto const blk = inst->block();
+    auto const ins = unit.gen(IncRef, inst->bcctx(), src);
+    blk->insert(blk->iteratorTo(inst), ins);
+    state[ins].setLive();
+    ++uses[canonical(src)];
+    FTRACE(3, "Adding {}\n", ins->toString());
+  };
+  auto const decref = [&] (auto inst, auto src) {
+    auto const blk = inst->block();
+    auto const ins = unit.gen(DecRef, inst->bcctx(), DecRefData{}, src);
+    blk->insert(blk->iteratorTo(inst), ins);
+    state[ins].setLive();
+    ++uses[canonical(src)];
+    FTRACE(3, "Adding {}\n", ins->toString());
+  };
+  auto const combine = [&] (auto inst, auto inst_prev,
+                            auto src1, auto src2, auto src3,
+                            bool leftConcat) {
+    /*
+     * ~~ Converting ~~
+     * t1 = ConcatStrStr a b (implicit Decref a)
+     * DecRef b
+     * t2 = ConcatStrStr t1 c (implicit Decref t1)
+     * DecRef c
+     *
+     * to
+     *
+     * IncRef a
+     * IncRef b
+     * t1 = ConcatStrStr a b (implicit Decref a)
+     * DecRef b
+     * t2 = ConcatStr3 a b c (implicit Decref a)
+     * DecRef b
+     * DecRef c
 
-  // Make a pass to find if we can kill any of the frames.  If so, we
-  // have to do some fixups.  These two routines are coupled---most
-  // cases in findWeakActRecUses should have a corresponding case in
-  // performActRecFixups to deal with the frame being removed.
-  auto const killedFrames = findWeakActRecUses(blocks, state, unit, uses);
-  if (killedFrames) {
-    ITRACE(1, "Killed some frames. Iterating over blocks for fixups.\n");
-    performActRecFixups(blocks, state, unit, uses);
+     * ~~ Converting ~~
+     * t1 = ConcatStrStr a b (implicit Decref a)
+     * DecRef b
+     * t2 = ConcatStrStr c t1 (implicit Decref c)
+     * DecRef t1
+     *
+     * to
+     *
+     * IncRef a
+     * IncRef b
+     * t1 = ConcatStrStr a b (implicit Decref a)
+     * DecRef b
+     * t2 = ConcatStr3 c a b (implicit Decref c)
+     * DecRef a
+     * DecRef b
+     * DecRef t1
+     *
+     * We need to make sure refcounts are correct. We do this by increffing
+     * the sources of the first ConcatStrStr and then decreffing them after
+     * ConcatStr3 unless ConcatStr3 already consumes the reference
+     *
+     * Note that later stages of DCE will kill the extra ConcatStrStr and the
+     * refcounting.
+     */
+    assertx(inst_prev->is(ConcatStrStr)); // dst of inst_prev is already canonical
+    assertx(inst->is(ConcatStrStr)); // dst of inst is already canonical
+
+    auto const trackedUses = 1 + rcInsts[inst_prev].decs.size()
+                               + rcInsts[inst_prev].stores.size()
+                               + rcInsts[inst_prev].passthroughs.size();
+
+    if (uses[inst_prev->dst()] != trackedUses) return;
+
+
+    FTRACE(3, "Combining {} into {}",
+            inst_prev->toString(), inst->toString());
+    auto next = inst->next();
+    unit.replace(inst, ConcatStr3, inst->taken(), src1, src2, src3);
+    inst->setNext(next);
+    FTRACE(3, " and got {}\n", inst->toString());
+    state[inst].setLive();
+    --uses[inst_prev->dst()];
+    ++uses[canonical(inst_prev->src(0))];
+    ++uses[canonical(inst_prev->src(1))];
+    // Incref the first source since the first ConcatStrStr controls
+    // its refcount
+    incref(inst_prev, inst_prev->src(0));
+    incref(inst_prev, inst_prev->src(1));
+    // ConcatStr3 ends the blocks, so insert the decrefs to the next block
+    assertx(inst->next() && !inst->next()->empty());
+    decref(&inst->next()->front(), src2);
+    // We might be combining in one of the following ways
+    // 1. ConcatStr3(a, b, c) -> ConcatStrStr(a, b) + {String} (c)
+    // 2. ConcatStr3(a, b, c) -> String (a) + ConcatStrStr(b, c)
+    // leftConcat is case 1, decRef src3 if it is case 2
+    if (!leftConcat) decref(&inst->next()->front(), src3);
+
+  };
+
+  for (auto& inst : concats) {
+    if (!inst->is(ConcatStrStr)) continue;
+    auto const src1 = inst->src(0);
+    auto const src2 = inst->src(1);
+    if (src1->inst()->is(ConcatStrStr)) {
+      combine(inst, src1->inst(),
+              src1->inst()->src(0), src1->inst()->src(1), src2, true);
+    } else if (src2->inst()->is(ConcatStrStr)) {
+      combine(inst, src2->inst(),
+              src1, src2->inst()->src(0), src2->inst()->src(1), false);
+    }
   }
 }
 
-IRInstruction* resolveFpDefLabelImpl(
-  const SSATmp* fp,
-  jit::flat_set<const IRInstruction*>& visited
+////////////////////////////////////////////////////////////////////////////////
+
+void killInstrAdjustRC(
+  DceState& state,
+  IRUnit& unit,
+  IRInstruction* inst,
+  jit::vector<IRInstruction*>& decs
 ) {
-  auto const inst = fp->inst();
-  assertx(inst->is(DefLabel));
-
-  // We already examined this, avoid loops.
-  if (visited.count(inst)) return nullptr;
-
-  auto const dests = inst->dsts();
-  auto const destIdx =
-    std::find(dests.begin(), dests.end(), fp) - dests.begin();
-  always_assert(destIdx >= 0 && destIdx < inst->numDsts());
-
-  // If any of the inputs to the Phi aren't Phis themselves, then just choose
-  // that.
-  IRInstruction* outInst = nullptr;
-  inst->block()->forEachSrc(
-    destIdx,
-    [&] (const IRInstruction*, const SSATmp* tmp) {
-      if (outInst) return;
-      auto const i = canonical(tmp)->inst();
-      if (!i->is(DefLabel)) outInst = i;
+  auto const insertDecRef = [&] (auto before, auto src) {
+    auto const blk = before->block();
+    auto const ins = unit.gen(DecRef, before->bcctx(), DecRefData{}, src);
+    blk->insert(blk->iteratorTo(before), ins);
+    FTRACE(3, "Inserting {} before {} for {}\n",
+           ins->toString(), before->toString(), inst->toString());
+    state[ins].setLive();
+  };
+  auto anyRemaining = false;
+  auto srcIx = 0;
+  for (auto src : inst->srcs()) {
+    // ConsumesReference inputs that are definitely not moved can
+    // simply be decreffed as a replacement for the dead consumesref
+    // instruction
+    auto const ix = srcIx++;
+    if (inst->consumesReference(ix) && src->type().maybe(TCounted)) {
+      if (inst->mayMoveReference(ix)) {
+        anyRemaining = true;
+        continue;
+      }
+      insertDecRef(inst, src);
     }
-  );
-  if (outInst) return outInst;
+  }
 
-  // Otherwise we need to recursively look at the linked Phis, avoiding visiting
-  // this Phi again.
-  visited.insert(inst);
-  inst->block()->forEachSrc(
-    destIdx,
-    [&] (const IRInstruction*, const SSATmp* tmp) {
-      if (outInst) return;
-      tmp = canonical(tmp);
-      auto const DEBUG_ONLY label = tmp->inst();
-      assertx(label->is(DefLabel));
-      outInst = resolveFpDefLabelImpl(tmp, visited);
+    for (auto dec : decs) {
+    auto replaced = canonical(dec->src(0)) != canonical(inst->dst());
+    auto srcIx = 0;
+    if (dec->is(DecReleaseCheck)) {
+      if (inst->is(ConstructClosure) && inst->src(0)->type().maybe(TCounted)) {
+        assertx(!replaced);
+        assertx(anyRemaining);
+        assertx(inst->mayMoveReference(0));
+
+        // While the closure is going to be released via ReleaseShallow it will
+        // still be responsible for releasing the captured context.
+        insertDecRef(dec, inst->src(0));
+      }
+    } else if (anyRemaining) {
+      assertx(dec->is(DecRef));
+      // The remaining inputs might be moved, so may need to survive
+      // until this instruction is decreffed
+      for (auto src : inst->srcs()) {
+        if (inst->mayMoveReference(srcIx++) && src->type().maybe(TCounted)) {
+          if (!replaced) {
+            FTRACE(3, "Converting {} to ", dec->toString());
+            dec->setSrc(0, src);
+            FTRACE(3, "{} for {}\n", dec->toString(), inst->toString());
+            replaced = true;
+            state[dec].setLive();
+          } else {
+            insertDecRef(dec, src);
+          }
+        }
+      }
     }
-  );
-
-  return outInst;
+    if (!replaced) {
+      FTRACE(3, "Killing {} for {}\n", dec->toString(), inst->toString());
+      state[dec].setDead();
+    }
+  }
+  state[inst].setDead();
 }
 
 //////////////////////////////////////////////////////////////////////
 
 } // anonymous namespace
-
-IRInstruction* resolveFpDefLabel(const SSATmp* fp) {
-  jit::flat_set<const IRInstruction*> visited;
-  return resolveFpDefLabelImpl(fp, visited);
-}
-
-void convertToStackInst(IRUnit& unit, IRInstruction& inst) {
-  assertx(inst.is(CheckLoc, AssertLoc, LdLoc, StLoc, LdLocAddr, HintLocInner));
-  assertx(inst.src(0)->inst()->is(DefInlineFP));
-
-  auto const data = IRSPRelOffsetData { locToStkOff(inst) };
-  auto const mainSP = unit.mainSP();
-
-  switch (inst.op()) {
-    case StLoc:
-      unit.replace(&inst, StStk, data, mainSP, inst.src(1));
-      return;
-    case LdLoc:
-      unit.replace(&inst, LdStk, data, inst.typeParam(), mainSP);
-      return;
-    case LdLocAddr:
-      unit.replace(&inst, LdStkAddr, data, mainSP);
-      retypeDests(&inst, &unit);
-      return;
-    case AssertLoc:
-      unit.replace(&inst, AssertStk, data, inst.typeParam(), mainSP);
-      return;
-    case CheckLoc: {
-      auto next = inst.next();
-      unit.replace(&inst, CheckStk, data, inst.typeParam(),
-                   inst.taken(), mainSP);
-      inst.setNext(next);
-      return;
-    }
-    case HintLocInner:
-      unit.replace(&inst, HintStkInner, data, inst.typeParam(), mainSP);
-      return;
-
-    default: break;
-  }
-  not_reached();
-}
-
-void rewriteToParentFrame(IRUnit& unit, IRInstruction& inst) {
-  rewriteToParentFrameImpl(
-    unit, inst, [&](const IRInstruction*) { return false; }
-  );
-}
-
-void convertToInlineReturnNoFrame(IRUnit& unit, IRInstruction& inst) {
-  assertx(inst.is(InlineReturn));
-  auto const frameInst = inst.src(0)->inst();
-  auto const spInst = frameInst->src(0)->inst();
-
-  auto const calleeAROff = frameInst->extra<DefInlineFP>()->spOffset;
-  auto const spOff = spInst->extra<DefSP>()->offset;
-
-  auto const data = FPRelOffsetData {
-    // Offset of the callee's return value relative to the frame pointer.
-    calleeAROff.to<FPRelOffset>(spOff) + (kArRetOff / sizeof(TypedValue))
-  };
-  unit.replace(&inst, InlineReturnNoFrame, data);
-}
 
 void mandatoryDCE(IRUnit& unit) {
   if (removeUnreachable(unit)) {
@@ -1311,13 +1370,13 @@ void mandatoryDCE(IRUnit& unit) {
 }
 
 void fullDCE(IRUnit& unit) {
-  if (!RuntimeOption::EvalHHIRDeadCodeElim) {
+  if (!Cfg::HHIR::DeadCodeElim) {
     // This portion of DCE cannot be turned off, because it restores IR
     // invariants, and callers of fullDCE are allowed to rely on it for that.
     return mandatoryDCE(unit);
   }
 
-  Timer dceTimer(Timer::optimize_dce);
+  Timer dceTimer(Timer::optimize_dce, unit.logEntry().get_pointer());
 
   // kill unreachable code and remove any traces that are now empty
   auto const blocks = prepareBlocks(unit);
@@ -1330,37 +1389,129 @@ void fullDCE(IRUnit& unit) {
   // work list; this will also mark reachable exit traces. All
   // other instructions marked dead.
   DceState state(unit, DceFlags());
-  UseCounts uses(unit, 0);
   WorkList wl = initInstructions(unit, blocks, state);
+
+  UseCounts uses(unit, 0);
+  jit::fast_map<IRInstruction*, TrackedInstr> rcInsts;
+  DefLabelLiveness defLabelLive;
+  jit::vector<IRInstruction*> concats;
 
   // process the worklist
   while (!wl.empty()) {
-    auto* inst = wl.back();
+    auto const [inst, defLabelIdx] = wl.back();
     wl.pop_back();
-    for (auto src : inst->srcs()) {
-      IRInstruction* srcInst = src->inst();
-      if (srcInst->op() == DefConst) continue;
+    assertx(!state[inst].isDead());
+    // Jmps which feed a DefLabel are dealt with as part of processing
+    // the DefLabel. They should never appear on the worklist.
+    assertx(IMPLIES(inst->is(Jmp), inst->numSrcs() == 0));
+    assertx(IMPLIES(!inst->is(DefLabel), defLabelIdx == 0));
 
-      if (RuntimeOption::EvalHHIRInlineFrameOpts) {
-        if (srcInst->is(DefInlineFP)) {
-          FTRACE(3, "adding use to {} from {}\n", *src, *inst);
-          ++uses[src];
+    auto const process = [&] (IRInstruction* inst, uint32_t ix) {
+      if (inst->is(ConcatStrStr)) concats.emplace_back(inst);
+      auto const src = inst->src(ix);
+      IRInstruction* srcInst = src->inst();
+      auto const srcCanonical = canonical(src);
+      auto const srcCanonicalInst = srcCanonical->inst();
+      FTRACE(4, "Processing inst {}; srcCanonical {}; srcCanonicalInst {};\n",
+        inst->toString(), srcCanonical->toString(), srcCanonicalInst->toString()
+      );
+      if (srcInst->op() == DefConst) return;
+
+      // Use the Canonical source for accounting
+      if (srcCanonicalInst->producesReference() && canDCE(*srcCanonicalInst)) {
+        ++uses[srcCanonical];
+        switch (inst->op()) {
+          case DecRef:
+          case DecReleaseCheck:
+            rcInsts[srcCanonicalInst].decs.emplace_back(inst);
+            break;
+          case InitVecElem:
+          case InitDictElem:
+          case InitStructElem:
+          case InitStructPositions:
+          case ReleaseShallow:
+          case StClosureArg:
+            if (ix == 0) rcInsts[srcCanonicalInst].aux.emplace_back(inst);
+            break;
+          case ConvPtrToLval:
+            // this is a special case passthrough for canonicalization
+            rcInsts[srcCanonicalInst].passthroughs.emplace_back(inst);
+            break;
+          default:
+            if (inst->isPassthrough() && canDCE(*inst)) {
+              // Only DCEable passthroughs can be killed along with their
+              // source. Non-DCEable passthroughs (for example CheckType) are
+              // real uses and must keep the source alive.
+              rcInsts[srcCanonicalInst].passthroughs.emplace_back(inst);
+            }
         }
       }
 
-      if (state[srcInst].isDead()) {
+      if (srcInst->is(DefLabel)) {
+        // If the source instruction is a DefLabel, figure out which
+        // operand this SSATmp corresponds to, and schedule that
+        // particular operand.
+        auto dstIdx = 0;
+        for (; dstIdx < srcInst->numDsts(); dstIdx++) {
+          if (src == srcInst->dst(dstIdx)) break;
+        }
+        assertx(dstIdx != srcInst->numDsts());
+        // If the operand isn't already live, schedule it.
+        if (defLabelLive.emplace(std::make_pair(srcInst, dstIdx)).second) {
+          state[srcInst].setLive();
+          wl.push_back(std::make_pair(srcInst, dstIdx));
+        }
+      } else if (state[srcInst].isDead()) {
         state[srcInst].setLive();
-        wl.push_back(srcInst);
+        wl.push_back(std::make_pair(srcInst, 0));
       }
+    };
+
+    if (inst->is(DefLabel)) {
+      // For a DefLabel operand, look "through" each corresponding Jmp
+      // and process the source as if we were processing that Jmp.
+      assertx(defLabelIdx < inst->numDsts());
+      assertx(defLabelLive.contains(std::make_pair(inst, defLabelIdx)));
+      inst->block()->forEachPred(
+        [&, inst = inst, defLabelIdx = defLabelIdx] (Block* pred) {
+          auto& jmp = pred->back();
+          assertx(jmp.is(Jmp));
+          assertx(jmp.numSrcs() == inst->numDsts());
+          state[&jmp].setLive();
+          process(&jmp, defLabelIdx);
+        }
+      );
+      continue;
     }
+    // For a normal instruction, just process each source
+    for (uint32_t ix = 0; ix < inst->numSrcs(); ++ix) process(inst, ix);
   }
 
-  if (RuntimeOption::EvalHHIRInlineFrameOpts) {
-    optimizeActRecs(blocks, state, unit, uses);
+  optimizeCatchBlocks(blocks, state, unit, uses, rcInsts);
+  optimizeConcats(concats, state, unit, uses, rcInsts);
+
+  // If every use of a dce-able PRc instruction is a DecRef or PureStore based
+  // on its dst, then we can kill it, and DecRef any of its consumesReference
+  // inputs.
+  for (auto& pair : rcInsts) {
+    auto& info = pair.second;
+    auto const trackedUses =
+      info.decs.size() + info.aux.size() + info.stores.size() + info.passthroughs.size();
+    FTRACE(5, "Instr {}; uses = {} trackedUses = {}\n",
+      pair.first->toString(), uses[pair.first->dst()], trackedUses
+    );
+    if (uses[pair.first->dst()] != trackedUses) continue;
+    killInstrAdjustRC(state, unit, pair.first, info.decs);
+    for (auto inst : info.aux) killInstrAdjustRC(state, unit, inst, info.decs);
+    for (auto inst : info.passthroughs) state[inst].setDead();
+    for (auto store : info.stores) store->setSrc(1, unit.cns(TInitNull));
   }
 
   // Now remove instructions whose state is DEAD.
-  removeDeadInstructions(unit, state);
+  removeDeadInstructions(unit, state, defLabelLive);
+
+  // Kill unreachable catch blocks.
+  mandatoryDCE(unit);
 }
 
-}}
+}

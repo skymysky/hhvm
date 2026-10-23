@@ -14,10 +14,9 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_JIT_VASM_PROF_H_
-#define incl_HPHP_JIT_VASM_PROF_H_
+#pragma once
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 
 struct Vunit;
 
@@ -30,6 +29,5 @@ void profile_branches(Vunit& unit);
 
 ///////////////////////////////////////////////////////////////////////////////
 
-}}
+}
 
-#endif

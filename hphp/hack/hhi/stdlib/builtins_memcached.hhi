@@ -1,4 +1,4 @@
-<?hh // decl /* -*- php -*- */
+<?hh /* -*- php -*- */
 /**
  * Copyright (c) 2014, Facebook, Inc.
  * All rights reserved.
@@ -10,109 +10,245 @@
 
 <<__PHPStdLib>>
 class Memcached {
-  const OPT_COMPRESSION = 0;
-  const OPT_SERIALIZER = 0;
-  const SERIALIZER_PHP = 0;
-  const SERIALIZER_IGBINARY = 0;
-  const SERIALIZER_JSON = 0;
-  const OPT_PREFIX_KEY = 0;
-  const OPT_HASH = 0;
-  const HASH_DEFAULT = 0;
-  const HASH_MD5 = 0;
-  const HASH_CRC = 0;
-  const HASH_FNV1_64 = 0;
-  const HASH_FNV1A_64 = 0;
-  const HASH_FNV1_32 = 0;
-  const HASH_FNV1A_32 = 0;
-  const HASH_HSIEH = 0;
-  const HASH_MURMUR = 0;
-  const OPT_DISTRIBUTION = 0;
-  const DISTRIBUTION_MODULA = 0;
-  const DISTRIBUTION_CONSISTENT = 0;
-  const OPT_LIBKETAMA_COMPATIBLE = 0;
-  const OPT_LIBKETAMA_HASH = 0;
-  const bool GET_ERROR_RETURN_VALUE = false;
-  const int LIBMEMCACHED_VERSION_HEX = 0;
-  const OPT_BUFFER_WRITES = 0;
-  const OPT_BINARY_PROTOCOL = 0;
-  const OPT_NO_BLOCK = 0;
-  const OPT_TCP_NODELAY = 0;
-  const OPT_SOCKET_SEND_SIZE = 0;
-  const OPT_SOCKET_RECV_SIZE = 0;
-  const OPT_CONNECT_TIMEOUT = 0;
-  const OPT_RETRY_TIMEOUT = 0;
-  const OPT_SEND_TIMEOUT = 0;
-  const OPT_RECV_TIMEOUT = 0;
-  const OPT_POLL_TIMEOUT = 0;
-  const OPT_CACHE_LOOKUPS = 0;
-  const OPT_SERVER_FAILURE_LIMIT = 0;
-  const HAVE_IGBINARY = 0;
-  const HAVE_JSON = 0;
-  const GET_PRESERVE_ORDER = 0;
-  const RES_SUCCESS = 0;
-  const RES_FAILURE = 0;
-  const RES_HOST_LOOKUP_FAILURE = 0;
-  const RES_UNKNOWN_READ_FAILURE = 0;
-  const RES_PROTOCOL_ERROR = 0;
-  const RES_CLIENT_ERROR = 0;
-  const RES_SERVER_ERROR = 0;
-  const RES_WRITE_FAILURE = 0;
-  const RES_DATA_EXISTS = 0;
-  const RES_NOTSTORED = 0;
-  const RES_NOTFOUND = 0;
-  const RES_PARTIAL_READ = 0;
-  const RES_SOME_ERRORS = 0;
-  const RES_NO_SERVERS = 0;
-  const RES_END = 0;
-  const RES_ERRNO = 0;
-  const RES_BUFFERED = 0;
-  const RES_TIMEOUT = 0;
-  const RES_BAD_KEY_PROVIDED = 0;
-  const RES_CONNECTION_SOCKET_CREATE_FAILURE = 0;
-  const RES_PAYLOAD_FAILURE = 0;
-  public function __construct($persistent_id = null) { }
-  public function add($key, $value, $expiration = 0) { }
-  public function addByKey($server_key, $key, $value, $expiration = 0) { }
-  public function addServer($host, $port, $weight = 0) { }
-  public function addServers($servers) { }
-  public function append($key, $value) { }
-  public function appendByKey($server_key, $key, $value) { }
-  public function cas($cas_token, $key, $value, $expiration = 0) { }
-  public function casByKey($cas_token, $server_key, $key, $value, $expiration = 0) { }
-  public function decrement($key, $offset = 1) { }
-  public function delete($key, $time = 0) { }
-  public function deleteByKey($server_key, $key, $time = 0) { }
-  public function deleteMulti(array $keys, int $time = 0): mixed { }
-  public function deleteMultiByKey(string $server_key, array $keys,
-                                   int $time = 0): mixed { }
-  public function fetch() { }
-  public function fetchAll() { }
-  public function flush($delay = 0) { }
-  public function get($key, $cache_cb = null, &$cas_token = null) { }
-  public function getByKey($server_key, $key, $cache_cb = null, &$cas_token = null) { }
-  public function getDelayed($keys, $with_cas = false, $value_cb = null) { }
-  public function getDelayedByKey($server_key, $keys, $with_cas = false, $value_cb = null) { }
-  public function getMulti($keys, &$cas_tokens = null, $flags = 0) { }
-  public function getMultiByKey($server_key, $keys, &$cas_tokens = null, $flags = 0) { }
-  public function getOption($option) { }
-  public function getResultCode() { }
-  public function getResultMessage() { }
-  public function getServerByKey($server_key) { }
-  public function getServerList() { }
-  public function getStats() { }
-  public function getVersion() { }
-  public function increment($key, $offset = 1) { }
-  public function prepend($key, $value) { }
-  public function prependByKey($server_key, $key, $value) { }
-  public function replace($key, $value, $expiration = 0) { }
-  public function replaceByKey($server_key, $key, $value, $expiration = 0) { }
-  public function set($key, $value, $expiration = 0) { }
-  public function setByKey($server_key, $key, $value, $expiration = 0) { }
-  public function setMulti($items, $expiration = 0) { }
-  public function setMultiByKey($server_key, $items, $expiration = 0) { }
-  public function setOption($option, $value) { }
-  public function touch(string $key, int $expiration = 0): bool { }
-  public function touchByKey(string $server_key,
-                             string $key,
-                             int $expiration = 0): bool { }
+  const int OPT_COMPRESSION;
+  const int OPT_SERIALIZER;
+  const int SERIALIZER_PHP;
+  const int SERIALIZER_IGBINARY;
+  const int SERIALIZER_JSON;
+  const int OPT_PREFIX_KEY;
+  const int OPT_HASH;
+  const int HASH_DEFAULT;
+  const int HASH_MD5;
+  const int HASH_CRC;
+  const int HASH_FNV1_64;
+  const int HASH_FNV1A_64;
+  const int HASH_FNV1_32;
+  const int HASH_FNV1A_32;
+  const int HASH_HSIEH;
+  const int HASH_MURMUR;
+  const int OPT_DISTRIBUTION;
+  const int DISTRIBUTION_MODULA;
+  const int DISTRIBUTION_CONSISTENT;
+  const int OPT_LIBKETAMA_COMPATIBLE;
+  const int OPT_LIBKETAMA_HASH;
+  const bool GET_ERROR_RETURN_VALUE;
+  const int LIBMEMCACHED_VERSION_HEX;
+  const int OPT_BUFFER_WRITES;
+  const int OPT_BINARY_PROTOCOL;
+  const int OPT_NO_BLOCK;
+  const int OPT_TCP_NODELAY;
+  const int OPT_SOCKET_SEND_SIZE;
+  const int OPT_SOCKET_RECV_SIZE;
+  const int OPT_CONNECT_TIMEOUT;
+  const int OPT_RETRY_TIMEOUT;
+  const int OPT_SEND_TIMEOUT;
+  const int OPT_RECV_TIMEOUT;
+  const int OPT_POLL_TIMEOUT;
+  const int OPT_CACHE_LOOKUPS;
+  const int OPT_SERVER_FAILURE_LIMIT;
+  const int HAVE_IGBINARY;
+  const int HAVE_JSON;
+  const int GET_PRESERVE_ORDER;
+  const int RES_SUCCESS;
+  const int RES_FAILURE;
+  const int RES_HOST_LOOKUP_FAILURE;
+  const int RES_UNKNOWN_READ_FAILURE;
+  const int RES_PROTOCOL_ERROR;
+  const int RES_CLIENT_ERROR;
+  const int RES_SERVER_ERROR;
+  const int RES_WRITE_FAILURE;
+  const int RES_DATA_EXISTS;
+  const int RES_NOTSTORED;
+  const int RES_NOTFOUND;
+  const int RES_PARTIAL_READ;
+  const int RES_SOME_ERRORS;
+  const int RES_NO_SERVERS;
+  const int RES_END;
+  const int RES_ERRNO;
+  const int RES_BUFFERED;
+  const int RES_TIMEOUT;
+  const int RES_BAD_KEY_PROVIDED;
+  const int RES_CONNECTION_SOCKET_CREATE_FAILURE;
+  const int RES_PAYLOAD_FAILURE;
+
+  public function __construct(
+    ?string $persistent_id = null,
+  );
+  public function add(
+    HH\FIXME\MISSING_PARAM_TYPE $key,
+    HH\FIXME\MISSING_PARAM_TYPE $value,
+    int $expiration = 0,
+  ): bool;
+  public function addByKey(
+    string $server_key,
+    string $key,
+    HH\FIXME\MISSING_PARAM_TYPE $value,
+    int $expiration = 0,
+  ): bool;
+  public function addServer(
+    string $host,
+    int $port,
+    int $weight = 0,
+  ): bool;
+  public function addServers(
+    HH\FIXME\MISSING_PARAM_TYPE $servers,
+  ): bool;
+  public function append(
+    HH\FIXME\MISSING_PARAM_TYPE $key,
+    HH\FIXME\MISSING_PARAM_TYPE $value,
+  ): bool;
+  public function appendByKey(
+    string $server_key,
+    string $key,
+    string $value,
+  ): bool;
+  public function cas(
+    float $cas_token,
+    string $key,
+    HH\FIXME\MISSING_PARAM_TYPE $value,
+    int $expiration = 0,
+  ): bool;
+  public function casByKey(
+    float $cas_token,
+    string $server_key,
+    string $key,
+    HH\FIXME\MISSING_PARAM_TYPE $value,
+    int $expiration = 0,
+  ): bool;
+  public function decrement(
+    string $key,
+    int $offset = 1,
+  ): HH\FIXME\MISSING_RETURN_TYPE;
+  public function delete(
+    string $key,
+    int $time = 0,
+  ): bool;
+  public function deleteByKey(
+    string $server_key,
+    string $key,
+    int $time = 0,
+  ): bool;
+  public function deleteMulti(varray<string> $keys, int $time = 0): mixed;
+  public function deleteMultiByKey(
+    string $server_key,
+    varray<string> $keys,
+    int $time = 0,
+  ): mixed;
+  public function fetch(): HH\FIXME\MISSING_RETURN_TYPE;
+  public function fetchAll(): HH\FIXME\MISSING_RETURN_TYPE;
+  public function flush(int $delay = 0): bool;
+  public function get(
+    HH\FIXME\MISSING_PARAM_TYPE $key,
+    HH\FIXME\MISSING_PARAM_TYPE $cache_cb = null,
+  ): HH\FIXME\MISSING_RETURN_TYPE;
+  public function getByKey(
+    string $server_key,
+    string $key,
+    HH\FIXME\MISSING_PARAM_TYPE $cache_cb = null,
+  ): HH\FIXME\MISSING_RETURN_TYPE;
+  public function getWithCasToken(
+    HH\FIXME\MISSING_PARAM_TYPE $key,
+    HH\FIXME\MISSING_PARAM_TYPE $cache_cb,
+    inout HH\FIXME\MISSING_PARAM_TYPE $cas_token,
+  ): HH\FIXME\MISSING_RETURN_TYPE;
+  public function getByKeyWithCasToken(
+    string $server_key,
+    string $key,
+    HH\FIXME\MISSING_PARAM_TYPE $cache_cb,
+    inout HH\FIXME\MISSING_PARAM_TYPE $cas_token,
+  ): HH\FIXME\MISSING_RETURN_TYPE;
+  public function getDelayed(
+    HH\FIXME\MISSING_PARAM_TYPE $keys,
+    HH\FIXME\MISSING_PARAM_TYPE $with_cas = false,
+    HH\FIXME\MISSING_PARAM_TYPE $value_cb = null,
+  ): bool;
+  public function getDelayedByKey(
+    string $server_key,
+    HH\FIXME\MISSING_PARAM_TYPE $keys,
+    bool $with_cas = false,
+    HH\FIXME\MISSING_PARAM_TYPE $value_cb = null,
+  ): bool;
+  public function getMulti(
+    HH\FIXME\MISSING_PARAM_TYPE $keys,
+    int $flags = 0,
+  ): HH\FIXME\MISSING_RETURN_TYPE;
+  public function getMultiByKey(
+    string $server_key,
+    HH\FIXME\MISSING_PARAM_TYPE $keys,
+    int $flags = 0,
+  ): HH\FIXME\MISSING_RETURN_TYPE;
+  public function getMultiWithCasTokens(
+    HH\FIXME\MISSING_PARAM_TYPE $keys,
+    inout HH\FIXME\MISSING_PARAM_TYPE $cas_tokens,
+    int $flags = 0,
+  ): HH\FIXME\MISSING_RETURN_TYPE;
+  public function getMultiByKeyWithCasTokens(
+    string $server_key,
+    HH\FIXME\MISSING_PARAM_TYPE $keys,
+    inout HH\FIXME\MISSING_PARAM_TYPE $cas_tokens,
+    int $flags = 0,
+  ): HH\FIXME\MISSING_RETURN_TYPE;
+  public function getOption(int $option): HH\FIXME\MISSING_RETURN_TYPE;
+  public function getResultCode(): int;
+  public function getResultMessage(): string;
+  public function getServerByKey(
+    string $server_key,
+  ): HH\FIXME\MISSING_RETURN_TYPE;
+  public function getServerList(): HH\FIXME\MISSING_RETURN_TYPE;
+  public function getStats(): HH\FIXME\MISSING_RETURN_TYPE;
+  public function getVersion(): HH\FIXME\MISSING_RETURN_TYPE;
+  public function increment(
+    string $key,
+    int $offset = 1,
+  ): HH\FIXME\MISSING_RETURN_TYPE;
+  public function prepend(
+    HH\FIXME\MISSING_PARAM_TYPE $key,
+    HH\FIXME\MISSING_PARAM_TYPE $value,
+  ): bool;
+  public function prependByKey(
+    string $server_key,
+    string $key,
+    string $value,
+  ): bool;
+  public function replace(
+    HH\FIXME\MISSING_PARAM_TYPE $key,
+    HH\FIXME\MISSING_PARAM_TYPE $value,
+    int $expiration = 0,
+  ): bool;
+  public function replaceByKey(
+    string $server_key,
+    string $key,
+    HH\FIXME\MISSING_PARAM_TYPE $value,
+    int $expiration = 0,
+  ): bool;
+  public function set(
+    HH\FIXME\MISSING_PARAM_TYPE $key,
+    HH\FIXME\MISSING_PARAM_TYPE $value,
+    int $expiration = 0,
+  ): bool;
+  public function setByKey(
+    string $server_key,
+    string $key,
+    HH\FIXME\MISSING_PARAM_TYPE $value,
+    int $expiration = 0,
+  ): bool;
+  public function setMulti(
+    HH\FIXME\MISSING_PARAM_TYPE $items,
+    int $expiration = 0,
+  ): bool;
+  public function setMultiByKey(
+    string $server_key,
+    HH\FIXME\MISSING_PARAM_TYPE $items,
+    int $expiration = 0,
+  ): bool;
+  public function setOption(
+    int $option,
+    HH\FIXME\MISSING_PARAM_TYPE $value,
+  ): bool;
+  public function touch(string $key, int $expiration = 0): bool;
+  public function touchByKey(
+    string $server_key,
+    string $key,
+    int $expiration = 0,
+  ): bool;
 }

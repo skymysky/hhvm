@@ -1,6 +1,6 @@
 <?hh
-function foo($t0, $t1, $t2, $t3, $t4, $t5, $t6, $t7,
-             $t8, $t9, $t10, $t11, $t12, $t13, $t14, $t15) {
+function foo(int $t0, int $t1, int $t2, int $t3, int $t4, int $t5, int $t6, int $t7,
+             int $t8, int $t9, int $t10, int $t11, int $t12, int $t13, int $t14, int $t15) :void{
   $sum = 0;
 
   $sum = $sum + $t0;
@@ -49,5 +49,6 @@ function foo($t0, $t1, $t2, $t3, $t4, $t5, $t6, $t7,
   if ($sum != 0)
     echo $sum . "\n";
 }
-
+<<__EntryPoint>> function main(): void {
 foo(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
+}

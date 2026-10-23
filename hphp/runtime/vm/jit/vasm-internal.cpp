@@ -19,9 +19,6 @@
 #include "hphp/runtime/vm/jit/asm-info.h"
 #include "hphp/runtime/vm/jit/cg-meta.h"
 #include "hphp/runtime/vm/jit/containers.h"
-#include "hphp/runtime/vm/jit/func-guard.h"
-#include "hphp/runtime/vm/jit/ir-opcode.h"
-#include "hphp/runtime/vm/jit/service-requests.h"
 #include "hphp/runtime/vm/jit/smashable-instr.h"
 #include "hphp/runtime/vm/jit/srcdb.h"
 #include "hphp/runtime/vm/jit/tc.h"
@@ -33,11 +30,12 @@
 #include "hphp/runtime/vm/jit/vasm-unit.h"
 #include "hphp/runtime/vm/jit/vasm.h"
 
+#include "hphp/util/configs/jit.h"
 #include "hphp/util/data-block.h"
 
 #include <vector>
 
-namespace HPHP { namespace jit { namespace vasm_detail {
+namespace HPHP::jit { namespace vasm_detail {
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -49,7 +47,7 @@ IRMetadataUpdater::IRMetadataUpdater(const Venv& env, AsmInfo* asm_info)
     m_area_to_blockinfos.resize(m_env.text.areas().size());
     for (auto& r : m_area_to_blockinfos) r.resize(m_env.unit.blocks.size());
   }
-  if (transdb::enabled() || RuntimeOption::EvalJitUseVtuneAPI) {
+  if (transdb::enabled() || Cfg::Jit::UseVtuneAPI) {
     m_bcmap = &env.meta.bcMap;
   }
 }
@@ -73,12 +71,11 @@ void IRMetadataUpdater::register_inst(const Vinstr& inst) {
   // Update HHBC mappings for the TransDB.
   if (m_bcmap && m_origin) {
     auto const sk = inst.origin->marker().sk();
-    if (m_bcmap->empty() ||
-        m_bcmap->back().md5 != sk.unit()->md5() ||
-        m_bcmap->back().bcStart != sk.offset()) {
+    if (m_bcmap->empty() || m_bcmap->back().sk != sk) {
       m_bcmap->push_back(TransBCMapping{
-        sk.unit()->md5(),
-        sk.offset(),
+        sk.unit()->sha1(),
+        sk.unit()->sn(),
+        sk,
         m_env.text.main().code.frontier(),
         m_env.text.cold().code.frontier(),
         m_env.text.frozen().code.frontier()
@@ -146,7 +143,9 @@ bool is_empty_catch(const Vblock& block) {
 void register_catch_block(const Venv& env, const Venv::LabelPatch& p) {
   // If the catch block is empty, we can just let tc_unwind_resume() and
   // tc_unwind_personality() skip over our frame.
-  if (is_empty_catch(env.unit.blocks[p.target])) return;
+  if (is_empty_catch(env.unit.blocks[p.target])) {
+    return;
+  }
 
   auto const catch_target = env.addrs[p.target];
   assertx(catch_target);
@@ -158,15 +157,16 @@ void register_catch_block(const Venv& env, const Venv::LabelPatch& p) {
 namespace {
 
 /*
- * Record in ProfData that the control-transfer instruction `jmp' is associated
- * with the current translation being emitted.
+ * For profiling translations, record in ProfData that the control-transfer
+ * instruction `jmp' is associated with the current translation being emitted.
  */
 void setJmpTransID(Venv& env, TCA jmp) {
-  if (!env.unit.context) return;
+  if (!env.unit.context || env.unit.context->kind != TransKind::Profile) return;
 
-  env.meta.setJmpTransID(
-    jmp, env.unit.context->transID, env.unit.context->kind
-  );
+  assertx(env.unit.context->transIDs.size() == 1);
+  auto const transID = *env.unit.context->transIDs.begin();
+
+  env.meta.setJmpTransID(jmp, transID, env.unit.context->kind);
 }
 
 void registerFallbackJump(Venv& env, TCA jmp, ConditionCode cc) {
@@ -178,152 +178,81 @@ void registerFallbackJump(Venv& env, TCA jmp, ConditionCode cc) {
 
 }
 
-bool emit(Venv& env, const callphp& i) {
-  const auto call = emitSmashableCall(*env.cb, env.meta, i.stub);
+bool emit(Venv& env, const callphps& i) {
+  const auto call = emitSmashableCall(*env.cb, env.meta, i.target);
   setJmpTransID(env, call);
-  // If the callee is known, keep metadata to be able to eagerly smash the call.
-  if (i.func != nullptr) {
-    env.meta.smashableCallData[call] = PrologueID(i.func, i.nargs);
-  }
+  env.meta.smashableCallData[call] = PrologueID(i.func, i.nargs);
+  setCallFuncId(env, call + smashableCallLen());
+  return true;
+}
+
+bool emit(Venv& env, const callphpfe& i) {
+  assertx(i.target.anyFuncEntry());
+  auto const call = emitSmashableCall(*env.cb, env.meta, env.cb->frontier());
+  setJmpTransID(env, call);
+  env.meta.smashableBinds.push_back({
+    IncomingBranch::callFrom(call), i.target, SBInvOffset{0},
+    false /* fallback */});
   return true;
 }
 
 bool emit(Venv& env, const bindjmp& i) {
   auto const jmp = emitSmashableJmp(*env.cb, env.meta, env.cb->frontier());
-  env.stubs.push_back({jmp, nullptr, i});
   setJmpTransID(env, jmp);
-  env.meta.smashableJumpData[jmp] = {i.target, CGMeta::JumpKind::Bindjmp};
+  env.meta.smashableBinds.push_back({
+    IncomingBranch::jmpFrom(jmp), i.target, i.spOff, false /* fallback */});
   return true;
 }
 
 bool emit(Venv& env, const bindjcc& i) {
   auto const jcc =
     emitSmashableJcc(*env.cb, env.meta, env.cb->frontier(), i.cc);
-  env.stubs.push_back({nullptr, jcc, i});
   setJmpTransID(env, jcc);
-  env.meta.smashableJumpData[jcc] = {i.target, CGMeta::JumpKind::Bindjcc};
+  env.meta.smashableBinds.push_back({
+    IncomingBranch::jccFrom(jcc), i.target, i.spOff, false /* fallback */});
   return true;
 }
 
 bool emit(Venv& env, const bindaddr& i) {
-  env.stubs.push_back({nullptr, nullptr, i});
   setJmpTransID(env, TCA(i.addr.get()));
   env.meta.codePointers.emplace(i.addr.get());
+  env.meta.smashableBinds.push_back({
+    IncomingBranch::addr(i.addr.get()), i.target, i.spOff,
+    false /* fallback */});
+  return true;
+}
+
+bool emit(Venv& env, const ldbindaddr& i) {
+  auto const mov_addr =
+    emitSmashableMovq(
+      *env.cb,
+      env.meta,
+      0,
+      r64(i.d),
+      env.unit.farLiteralEnabled()
+    );
+  setJmpTransID(env, mov_addr);
+  env.meta.smashableBinds.push_back({
+    IncomingBranch::ldaddr(mov_addr), i.target, i.spOff,
+    false /* fallback */});
   return true;
 }
 
 bool emit(Venv& env, const fallback& i) {
   auto const jmp = emitSmashableJmp(*env.cb, env.meta, env.cb->frontier());
-  env.stubs.push_back({jmp, nullptr, i});
   registerFallbackJump(env, jmp, CC_None);
-  env.meta.smashableJumpData[jmp] = {i.target, CGMeta::JumpKind::Fallback};
+  env.meta.smashableBinds.push_back({
+    IncomingBranch::jmpFrom(jmp), i.target, i.spOff, true /* fallback */});
   return true;
 }
 
 bool emit(Venv& env, const fallbackcc& i) {
   auto const jcc =
     emitSmashableJcc(*env.cb, env.meta, env.cb->frontier(), i.cc);
-  env.stubs.push_back({nullptr, jcc, i});
   registerFallbackJump(env, jcc, i.cc);
-  env.meta.smashableJumpData[jcc] = {i.target, CGMeta::JumpKind::Fallbackcc};
+  env.meta.smashableBinds.push_back({
+    IncomingBranch::jccFrom(jcc), i.target, i.spOff, true /* fallback */});
   return true;
-}
-
-bool emit(Venv& env, const retransopt& i) {
-  svcreq::emit_retranslate_opt_stub(*env.cb, env.text.data(), env.meta,
-                                    i.spOff, i.sk);
-  return true;
-}
-
-bool emit(Venv& env, const funcguard& i) {
-  emitFuncGuard(i.func, *env.cb, env.meta, i.watch);
-  return true;
-}
-
-bool emit(Venv& env, const debugguardjmp& i) {
-  auto const jmp = emitSmashableJmp(*env.cb, env.meta, i.realCode);
-  if (i.watch) {
-    *i.watch = jmp;
-    env.meta.watchpoints.push_back(i.watch);
-  }
-  return true;
-}
-
-///////////////////////////////////////////////////////////////////////////////
-
-void emit_svcreq_stub(Venv& env, const Venv::SvcReqPatch& p) {
-  auto& frozen = env.text.frozen().code;
-
-  TCA stub = nullptr;
-
-  switch (p.svcreq.op) {
-    case Vinstr::bindjmp:
-      { auto const& i = p.svcreq.bindjmp_;
-        assertx(p.jmp && !p.jcc);
-        stub = svcreq::emit_bindjmp_stub(frozen, env.text.data(),
-                                         env.meta, i.spOff, p.jmp,
-                                         i.target, i.trflags);
-      } break;
-
-    case Vinstr::bindjcc:
-      { auto const& i = p.svcreq.bindjcc_;
-        assertx(!p.jmp && p.jcc);
-        stub = svcreq::emit_bindjmp_stub(frozen, env.text.data(),
-                                         env.meta, i.spOff, p.jcc,
-                                         i.target, i.trflags);
-      } break;
-
-    case Vinstr::bindaddr:
-      { auto const& i = p.svcreq.bindaddr_;
-        assertx(!p.jmp && !p.jcc);
-        stub = svcreq::emit_bindaddr_stub(frozen, env.text.data(),
-                                          env.meta, i.spOff, i.addr.get(),
-                                          i.target, TransFlags{});
-        // The bound pointer may not belong to the data segment, as is the case
-        // with SSwitchMap (see #10347945)
-        auto realAddr = env.text.data().contains((TCA)i.addr.get())
-          ? (TCA*)env.text.data().toDestAddress((TCA)i.addr.get())
-          : (TCA*)i.addr.get();
-        *realAddr = stub;
-      } break;
-
-    case Vinstr::fallback:
-      { auto const& i = p.svcreq.fallback_;
-        assertx(p.jmp && !p.jcc);
-
-        auto const srcrec = tc::findSrcRec(i.target);
-        always_assert(srcrec);
-        stub = i.trflags.packed
-          ? svcreq::emit_retranslate_stub(frozen, env.text.data(), env.meta,
-                                          i.spOff, i.target, i.trflags)
-          : srcrec->getFallbackTranslation();
-      } break;
-
-    case Vinstr::fallbackcc:
-      { auto const& i = p.svcreq.fallbackcc_;
-        assertx(!p.jmp && p.jcc);
-
-        auto const srcrec = tc::findSrcRec(i.target);
-        always_assert(srcrec);
-        stub = i.trflags.packed
-          ? svcreq::emit_retranslate_stub(frozen, env.text.data(), env.meta,
-                                          i.spOff, i.target, i.trflags)
-          : srcrec->getFallbackTranslation();
-      } break;
-
-    default: always_assert(false);
-  }
-  assertx(stub != nullptr);
-
-  // Register any necessary patches by creating fake labels for the stubs.
-  if (p.jmp) {
-    env.jmps.push_back({p.jmp, Vlabel { env.addrs.size() }});
-    env.addrs.push_back(stub);
-  }
-  if (p.jcc) {
-    env.jccs.push_back({p.jcc, Vlabel { env.addrs.size() }});
-    env.addrs.push_back(stub);
-  }
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -356,4 +285,13 @@ const uint64_t* alloc_literal(Venv& env, uint64_t val) {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-}}
+void setCallFuncId(Venv& env, TCA callRetAddr) {
+  if (!env.unit.context) return;
+
+  env.meta.setCallFuncId(callRetAddr, env.unit.context->initSrcKey.funcID(),
+                         env.unit.context->kind);
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
+}

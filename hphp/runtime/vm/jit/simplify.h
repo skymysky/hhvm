@@ -14,16 +14,13 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_JIT_SIMPLIFY_H_
-#define incl_HPHP_JIT_SIMPLIFY_H_
-
-#include <folly/Optional.h>
+#pragma once
 
 #include "hphp/runtime/vm/jit/bc-marker.h"
 #include "hphp/runtime/vm/jit/containers.h"
 #include "hphp/runtime/vm/jit/ir-opcode.h"
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 
 struct IRInstruction;
 struct IRUnit;
@@ -82,13 +79,11 @@ void simplifyInPlace(IRUnit&, IRInstruction*);
 /*
  * Perform a simplification pass in the entire unit.
  *
- * After running this pass, the caller must run a manditoryDCE to restore IR
+ * After running this pass, the caller must run a mandatoryDCE to restore IR
  * invariants.
  */
 void simplifyPass(IRUnit&);
 
 //////////////////////////////////////////////////////////////////////
 
-}}
-
-#endif
+}

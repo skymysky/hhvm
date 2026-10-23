@@ -18,6 +18,8 @@ function h(): Awaitable<int> {
   };
 }
 
-$a = async {
-  return 1;
-};
+function main(): void {
+  $a = async {
+    return 1;
+  };
+}

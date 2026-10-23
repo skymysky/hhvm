@@ -20,35 +20,34 @@
 #include "hphp/runtime/base/array-init.h"
 #include "hphp/runtime/base/file-stream-wrapper.h"
 #include "hphp/runtime/base/file.h"
+#include "hphp/runtime/base/init-fini-node.h"
 #include "hphp/runtime/base/request-event-handler.h"
-#include "hphp/runtime/base/request-local.h"
 #include "hphp/runtime/base/root-map.h"
 #include "hphp/runtime/base/stream-wrapper-registry.h"
 #include "hphp/runtime/base/string-util.h"
 #include "hphp/runtime/base/zend-url.h"
 #include "hphp/runtime/ext/std/ext_std_file.h"
-
-#include <folly/FBVector.h>
+#include "hphp/util/alloc.h"
+#include "hphp/util/configs/eval.h"
+#include "hphp/util/rds-local.h"
 
 #include <libxml/parserInternals.h>
 #include <libxml/tree.h>
-#include <libxml/uri.h>
 #include <libxml/xmlerror.h>
 #include <libxml/xmlsave.h>
+#include <libxml/xmlversion.h>
 #ifdef LIBXML_SCHEMAS_ENABLED
-#include <libxml/relaxng.h>
 #include <libxml/xmlschemas.h>
 #endif
 
-#include <memory>
-#include <cstring>
+#include <folly/FBVector.h>
 
-TRACE_SET_MOD(libxml);
+TRACE_SET_MOD(libxml)
 
 namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
 
-struct xmlErrorVec : folly::fbvector<xmlError> {
+struct xmlErrorVec : folly::fbvector<xmlError, LocalAllocator<xmlError>> {
   ~xmlErrorVec() {
     clearErrors();
   }
@@ -70,28 +69,28 @@ struct LibXmlRequestData final : RequestEventHandler {
   void requestInit() override {
     m_use_error = false;
     m_suppress_error = false;
-    m_errors = xmlErrorVec();
     m_entity_loader_disabled = false;
     m_streams_context = nullptr;
     m_streams.reset();
+    m_errors.reset();
   }
 
   void requestShutdown() override {
     m_use_error = false;
-    m_errors = xmlErrorVec();
     m_streams_context = nullptr;
     m_streams.reset();
+    m_errors.reset();
   }
 
   bool m_entity_loader_disabled;
   bool m_suppress_error;
   bool m_use_error;
-  xmlErrorVec m_errors;
   req::ptr<StreamContext> m_streams_context;
   RootMap<File> m_streams;
+  xmlErrorVec m_errors;
 };
 
-IMPLEMENT_STATIC_REQUEST_LOCAL(LibXmlRequestData, tl_libxml_request_data);
+IMPLEMENT_STATIC_REQUEST_LOCAL(LibXmlRequestData, rl_libxml_request_data);
 
 namespace {
 
@@ -106,7 +105,7 @@ namespace {
 // or are able to store it in a object.
 inline void* rememberStream(req::ptr<File>&& stream) {
   return reinterpret_cast<void*>(
-    tl_libxml_request_data->m_streams.addRoot(std::move(stream))
+    rl_libxml_request_data->m_streams.addRoot(std::move(stream))
   );
 }
 
@@ -114,29 +113,28 @@ inline void* rememberStream(req::ptr<File>&& stream) {
 // If the token is not in the m_streams map, it means a pointer to
 // the File has been stored directly in the XML context.
 inline req::ptr<File> getStream(void* userData) {
-  auto file = tl_libxml_request_data->m_streams.lookupRoot(userData);
+  auto file = rl_libxml_request_data->m_streams.lookupRoot(userData);
   return file ? file : *reinterpret_cast<req::ptr<File>*>(userData);
 }
 
 // This closes and deletes the File associated with the given token.
 // It is used by the XML callback that destroys a context.
 inline bool forgetStream(void* userData) {
-  auto ptr = tl_libxml_request_data->m_streams.removeRoot(userData);
+  auto ptr = rl_libxml_request_data->m_streams.removeRoot(userData);
   return ptr->close();
 }
 
 }
 
-static Class* s_LibXMLError_class;
-
 const StaticString
-  s_LibXMLError("LibXMLError"),
   s_level("level"),
   s_code("code"),
   s_column("column"),
   s_message("message"),
   s_file("file"),
   s_line("line");
+
+struct LibXMLError : SystemLib::ClassLoader<"LibXMLError"> {};
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -186,7 +184,7 @@ static req::ptr<File> libxml_streams_IO_open_wrapper(
   ITRACE(1, "libxml_open_wrapper({}, {}, {})\n", filename, mode, read_only);
   Trace::Indent _i;
 
-  auto strFilename = String::attach(StringData::Make(filename, CopyString));
+  auto strFilename = OptString::attach(StringData::Make(filename, CopyString));
   /* FIXME: PHP calls stat() here if the wrapper has a non-null stat handler,
    * in order to skip the open of a missing file, thus suppressing warnings.
    * Our stat handlers are virtual, so there's no easy way to tell if stat
@@ -207,7 +205,7 @@ static req::ptr<File> libxml_streams_IO_open_wrapper(
   // PHP unescapes the URI here, but that should properly be done by the
   // wrapper.  The wrapper should expect a valid URI, e.g. file:///foo%20bar
   return File::Open(strFilename, mode, 0,
-                    tl_libxml_request_data->m_streams_context);
+                    rl_libxml_request_data->m_streams_context);
 }
 
 int libxml_streams_IO_read(void* context, char* buffer, int len) {
@@ -217,7 +215,7 @@ int libxml_streams_IO_read(void* context, char* buffer, int len) {
   auto stream = getStream(context);
   assertx(len >= 0);
   if (len > 0) {
-    String str = stream->read(len);
+    OptString str = stream->read(len);
     if (str.size() <= len) {
       std::memcpy(buffer, str.data(), str.size());
       return str.size();
@@ -232,7 +230,7 @@ int libxml_streams_IO_write(void* context, const char* buffer, int len) {
   Trace::Indent _i;
 
   auto stream = getStream(context);
-  int64_t ret = stream->write(String(buffer, len, CopyString));
+  int64_t ret = stream->write(OptString(buffer, len, CopyString));
   return (ret < INT_MAX) ? ret : -1;
 }
 
@@ -263,11 +261,11 @@ static xmlExternalEntityLoader s_default_entity_loader = nullptr;
 static std::unordered_set<
   const StringData*,
   string_data_hash,
-  string_data_isame
+  string_data_same_nocase
 > s_ext_entity_whitelist;
 
-static bool allow_ext_entity_protocol(const String& protocol) {
-  return s_ext_entity_whitelist.count(protocol.get());
+static bool allow_ext_entity_protocol(const OptString& protocol) {
+  return s_ext_entity_whitelist.contains(protocol.get());
 }
 
 static xmlParserInputPtr libxml_ext_entity_loader(const char *url,
@@ -294,7 +292,7 @@ libxml_create_input_buffer(const char* URI, xmlCharEncoding enc) {
   ITRACE(1, "libxml_create_input_buffer({}, {})\n", URI, static_cast<int>(enc));
   Trace::Indent _i;
 
- if (tl_libxml_request_data->m_entity_loader_disabled || !URI) return nullptr;
+ if (rl_libxml_request_data->m_entity_loader_disabled || !URI) return nullptr;
 
   auto stream = libxml_streams_IO_open_wrapper(URI, "rb", true);
   if (!stream || stream->isInvalid()) return nullptr;
@@ -342,14 +340,14 @@ libxml_create_output_buffer(const char *URI,
 ///////////////////////////////////////////////////////////////////////////////
 
 bool libxml_use_internal_error() {
-  return tl_libxml_request_data->m_use_error;
+  return rl_libxml_request_data->m_use_error;
 }
 
 void libxml_add_error(const std::string &msg) {
-  if (tl_libxml_request_data->m_suppress_error) {
+  if (rl_libxml_request_data->m_suppress_error) {
     return;
   }
-  xmlErrorVec* error_list = &tl_libxml_request_data->m_errors;
+  xmlErrorVec* error_list = &rl_libxml_request_data->m_errors;
 
   error_list->resize(error_list->size() + 1);
   xmlError &error_copy = error_list->back();
@@ -373,10 +371,10 @@ void libxml_add_error(const std::string &msg) {
 void php_libxml_node_free(xmlNodePtr node, bool force) {
   if (node) {
     if (node->_private) {
-      // When running in Eval.LibXMLUseSafeSubtrees, linked nodes should only be
-      // freed out from under their resources when in requestShutdown() or
-      // sweeping. In all other cases release should be deferred.
-      assertx(!RuntimeOption::EvalLibXMLUseSafeSubtrees || force);
+      // Linked nodes should only be freed out from under their resources when
+      // in requestShutdown() or sweeping. In all other cases release should
+      // be deferred.
+      assertx(force);
 
       // XXX: we may be sweeping- so don't create a smart pointer
       reinterpret_cast<XMLNodeData*>(node->_private)->reset();
@@ -408,6 +406,7 @@ void php_libxml_node_free(xmlNodePtr node, bool force) {
         node->ns = NULL;
       }
       node->type = XML_ELEMENT_NODE;
+      [[fallthrough]];
     default:
       xmlFreeNode(node);
     }
@@ -475,9 +474,6 @@ bool isOrphanedRoot(xmlNodePtr node) {
 
 }
 
-struct LibXmlDeferredTrees;
-THREAD_LOCAL(LibXmlDeferredTrees, tl_libxml_trees);
-
 // Unfortunately this struct can't be declared with internal linkage as it
 // contains pointers to request allocated resources
 struct LibXmlDeferredTrees final {
@@ -486,7 +482,7 @@ struct LibXmlDeferredTrees final {
     // they need to be dealt with now. We can't just walk the list because some
     // of these nodes may actually be in the same tree so first find the ones
     // that are definitely orphaned (and therefore the roots of their trees)
-    std::vector<xmlNodePtr> toFree;
+    req::vector<xmlNodePtr> toFree;
     for (auto par : m_refCounts) {
       if (isOrphanedRoot(par.first)) toFree.push_back(par.first);
     }
@@ -497,10 +493,10 @@ struct LibXmlDeferredTrees final {
   static void decref(xmlNodePtr root) {
     if (!root) return;
 
-    auto it = tl_libxml_trees->m_refCounts.find(root);
-    assertx(it != tl_libxml_trees->m_refCounts.end() && it->second > 0);
+    auto it = rl_libxml_trees->m_refCounts.find(root);
+    assertx(it != rl_libxml_trees->m_refCounts.end() && it->second > 0);
     if (!--it->second) {
-      tl_libxml_trees->m_refCounts.erase(it);
+      rl_libxml_trees->m_refCounts.erase(it);
 
       // There may be new undiscovered roots, this free will find them and
       // re-add the root to the deferred list.
@@ -509,17 +505,17 @@ struct LibXmlDeferredTrees final {
   }
 
   static bool hasRefs(xmlNodePtr root) {
-    if (!RuntimeOption::EvalLibXMLUseSafeSubtrees) return false;
-
     // If we are cleaning up the request then all roots must be freed, don't
     // bother with additional work. Callers of php_libxml_node_free_resource
     // should force unconditional cleanup.
     assertx(!MemoryManager::sweeping());
 
-    auto it = tl_libxml_trees->m_refCounts.find(root);
-    if (it != tl_libxml_trees->m_refCounts.end()) {
-      assertx(it->second != 0);
-      return true;
+    {
+      auto it = rl_libxml_trees->m_refCounts.find(root);
+      if (it != rl_libxml_trees->m_refCounts.end()) {
+        assertx(it->second != 0);
+        return true;
+      }
     }
     uint32_t count = 0;
     walk_tree(
@@ -536,9 +532,11 @@ struct LibXmlDeferredTrees final {
       [&] (xmlNodePtr node) {}
     );
     if (!count) return false;
-    tl_libxml_trees->m_refCounts.emplace(root, count);
+    rl_libxml_trees->m_refCounts.emplace(root, count);
     return true;
   }
+
+  static RDS_LOCAL(LibXmlDeferredTrees, rl_libxml_trees);
 
 private:
   static xmlNodePtr& rootOf(xmlNodePtr node) {
@@ -546,20 +544,21 @@ private:
     return reinterpret_cast<XMLNodeData*>(node->_private)->m_lastSeenRoot;
   }
 
-  req::hash_map<xmlNodePtr,uint32_t> m_refCounts;
+  req::fast_map<xmlNodePtr,uint32_t, pointer_hash<xmlNode>> m_refCounts;
 };
+RDS_LOCAL(LibXmlDeferredTrees, LibXmlDeferredTrees::rl_libxml_trees);
 
 static void php_libxml_node_free_resource(xmlNodePtr node, bool force) {
   // If we are sweeping or otherwise iterating the list of roots or ref counts
-  // it is unsafe to perform hasRefs as that may allocate a new tl_libxml_trees
+  // it is unsafe to perform hasRefs as that may allocate a new rl_libxml_trees
   // or invalidate an active iterator. When called with force we are always
   // shutting down and therefore about to lose track of any stored root data
   // so the loss of consistency is fine.
   assertx(!MemoryManager::sweeping() || force);
   if (!isOrphanedRoot(node)) return;
 
-  // If we are running in Eval.LibXMLUseSafeSubtrees mode and a subtree still
-  // holds a reference to the root then don't do anything here.
+  // If we are a subtree still holds a reference to the root then we cannot
+  // free our resources here.
   if (!force && LibXmlDeferredTrees::hasRefs(node)) {
     // We shouldn't have even attempted to free the document until all of its
     // children have been released (it's shared/reference counted).
@@ -599,15 +598,15 @@ void php_libxml_node_free_resource(xmlNodePtr node, xmlNodePtr root) {
   LibXmlDeferredTrees::decref(root);
 }
 
-String libxml_get_valid_file_path(const char* source) {
-  return libxml_get_valid_file_path(String(source, CopyString));
+OptString libxml_get_valid_file_path(const char* source) {
+  return libxml_get_valid_file_path(OptString(source, CopyString));
 }
 
-String libxml_get_valid_file_path(const String& source) {
+OptString libxml_get_valid_file_path(const OptString& source) {
   bool isFileUri = false;
   bool isUri = false;
 
-  String file_dest(source);
+  OptString file_dest(source);
 
   Url url;
   if (url_parse(url, file_dest.data(), file_dest.size())) {
@@ -624,11 +623,15 @@ String libxml_get_valid_file_path(const String& source) {
   return file_dest;
 }
 
+#if LIBXML_VERSION >= 21200
+static void libxml_error_handler(void* /*userData*/, const xmlError* error) {
+#else
 static void libxml_error_handler(void* /*userData*/, xmlErrorPtr error) {
-  if (tl_libxml_request_data->m_suppress_error) {
+#endif
+  if (rl_libxml_request_data->m_suppress_error) {
     return;
   }
-  xmlErrorVec* error_list = &tl_libxml_request_data->m_errors;
+  xmlErrorVec* error_list = &rl_libxml_request_data->m_errors;
 
   error_list->resize(error_list->size() + 1);
   xmlError &error_copy = error_list->back();
@@ -642,34 +645,35 @@ static void libxml_error_handler(void* /*userData*/, xmlErrorPtr error) {
   }
 }
 
-static Object create_libxmlerror(xmlError &error) {
-  Object ret{s_LibXMLError_class};
-  ret->setProp(nullptr, s_level.get(), make_tv<KindOfInt64>(error.level));
-  ret->setProp(nullptr, s_code.get(), make_tv<KindOfInt64>(error.code));
-  ret->setProp(nullptr, s_column.get(), make_tv<KindOfInt64>(error.int2));
+static Object create_libxmlerror(const xmlError &error) {
+  Object ret{ LibXMLError::classof() };
+  // Setting only public properties
+  ret->setProp(nullctx, s_level.get(), make_tv<KindOfInt64>(error.level));
+  ret->setProp(nullctx, s_code.get(), make_tv<KindOfInt64>(error.code));
+  ret->setProp(nullctx, s_column.get(), make_tv<KindOfInt64>(error.int2));
   if (error.message) {
-    String message(error.message);
-    ret->setProp(nullptr, s_message.get(), message.asCell());
+    OptString message(error.message);
+    ret->setProp(nullctx, s_message.get(), message.asTypedValue());
   } else {
-    ret->setProp(nullptr, s_message.get(), make_tv<KindOfNull>());
+    ret->setProp(nullctx, s_message.get(), make_tv<KindOfNull>());
   }
   if (error.file) {
-    String file(error.file);
-    ret->setProp(nullptr, s_file.get(), file.asCell());
+    OptString file(error.file);
+    ret->setProp(nullctx, s_file.get(), file.asTypedValue());
   } else {
-    ret->setProp(nullptr, s_file.get(), make_tv<KindOfNull>());
+    ret->setProp(nullctx, s_file.get(), make_tv<KindOfNull>());
   }
-  ret->setProp(nullptr, s_line.get(), make_tv<KindOfInt64>(error.line));
+  ret->setProp(nullctx, s_line.get(), make_tv<KindOfInt64>(error.line));
   return ret;
 }
 
 Array HHVM_FUNCTION(libxml_get_errors) {
-  xmlErrorVec* error_list = &tl_libxml_request_data->m_errors;
+  xmlErrorVec* error_list = &rl_libxml_request_data->m_errors;
   const auto length = error_list->size();
   if (!length) {
-    return empty_array();
+    return empty_vec_array();
   }
-  PackedArrayInit ret(length);
+  VecInit ret(length);
   for (int64_t i = 0; i < length; i++) {
     ret.append(create_libxmlerror(error_list->at(i)));
   }
@@ -677,7 +681,7 @@ Array HHVM_FUNCTION(libxml_get_errors) {
 }
 
 Variant HHVM_FUNCTION(libxml_get_last_error) {
-  xmlErrorPtr error = xmlGetLastError();
+  auto error = xmlGetLastError();
   if (error) {
     return create_libxmlerror(*error);
   }
@@ -686,38 +690,38 @@ Variant HHVM_FUNCTION(libxml_get_last_error) {
 
 void HHVM_FUNCTION(libxml_clear_errors) {
   xmlResetLastError();
-  tl_libxml_request_data->m_errors.reset();
+  rl_libxml_request_data->m_errors.reset();
 }
 
 bool HHVM_FUNCTION(libxml_use_internal_errors, bool use_errors) {
   bool ret = (xmlStructuredError == libxml_error_handler);
   if (!use_errors) {
     xmlSetStructuredErrorFunc(nullptr, nullptr);
-    tl_libxml_request_data->m_use_error = false;
-    tl_libxml_request_data->m_suppress_error = false;
-    tl_libxml_request_data->m_errors.reset();
+    rl_libxml_request_data->m_use_error = false;
+    rl_libxml_request_data->m_suppress_error = false;
+    rl_libxml_request_data->m_errors.reset();
   } else {
     xmlSetStructuredErrorFunc(nullptr, libxml_error_handler);
-    tl_libxml_request_data->m_use_error = true;
-    tl_libxml_request_data->m_suppress_error = false;
+    rl_libxml_request_data->m_use_error = true;
+    rl_libxml_request_data->m_suppress_error = false;
   }
   return ret;
 }
 
 void HHVM_FUNCTION(libxml_suppress_errors, bool suppress_errors) {
-  tl_libxml_request_data->m_suppress_error = suppress_errors;
+  rl_libxml_request_data->m_suppress_error = suppress_errors;
 }
 
 bool HHVM_FUNCTION(libxml_disable_entity_loader, bool disable /* = true */) {
-  bool old = tl_libxml_request_data->m_entity_loader_disabled;
+  bool old = rl_libxml_request_data->m_entity_loader_disabled;
 
-  tl_libxml_request_data->m_entity_loader_disabled = disable;
+  rl_libxml_request_data->m_entity_loader_disabled = disable;
 
   return old;
 }
 
-void HHVM_FUNCTION(libxml_set_streams_context, const Resource & context) {
-  tl_libxml_request_data->m_streams_context =
+void HHVM_FUNCTION(libxml_set_streams_context, const OptResource & context) {
+  rl_libxml_request_data->m_streams_context =
     dyn_cast_or_null<StreamContext>(context);
 }
 
@@ -725,7 +729,7 @@ void HHVM_FUNCTION(libxml_set_streams_context, const Resource & context) {
 // Extension
 
 struct LibXMLExtension final : Extension {
-    LibXMLExtension() : Extension("libxml") {}
+    LibXMLExtension() : Extension("libxml", NO_EXTENSION_VERSION_YET, "hphp_hphpi") {}
 
     void moduleLoad(const IniSetting::Map& ini, Hdf config) override {
 
@@ -744,7 +748,7 @@ struct LibXMLExtension final : Extension {
       }
     }
 
-    void moduleInit() override {
+    void moduleRegisterNative() override {
       HHVM_RC_INT_SAME(LIBXML_VERSION);
       HHVM_RC_STR_SAME(LIBXML_DOTTED_VERSION);
       HHVM_RC_STR(LIBXML_LOADED_VERSION, xmlParserVersion);
@@ -794,11 +798,9 @@ struct LibXMLExtension final : Extension {
       HHVM_FE(libxml_suppress_errors);
       HHVM_FE(libxml_disable_entity_loader);
       HHVM_FE(libxml_set_streams_context);
+    }
 
-      loadSystemlib();
-
-      s_LibXMLError_class = Unit::lookupClass(s_LibXMLError.get());
-
+    void moduleInit() override {
       // Set up callbacks to support stream wrappers for reading and writing
       // xml files and loading external entities.
       xmlParserInputBufferCreateFilenameDefault(libxml_create_input_buffer);
@@ -815,15 +817,87 @@ struct LibXMLExtension final : Extension {
     }
 
     void requestInit() override {
-      assertx(tl_libxml_trees.isNull());
+      assertx(LibXmlDeferredTrees::rl_libxml_trees.isNull());
       xmlResetLastError();
     }
 
     void requestShutdown() override {
-      tl_libxml_trees.destroy();
+      LibXmlDeferredTrees::rl_libxml_trees.destroy();
     }
 
 } s_libxml_extension;
+
+///////////////////////////////////////////////////////////////////////////////
+
+namespace {
+
+// Only check memory stats when allocating more than 64k.
+constexpr ssize_t kOOMCheckThreshold = 65536;
+
+// Return whether it OOMed, also safe to call in non-VM threads.
+inline bool checkOOM(size_t size) {
+  if (!Cfg::Eval::MoreAccurateMemStats) return false;
+  if (tl_heap) return tl_heap->preAllocOOM(size);
+  return false;
+}
+
+void* checked_local_malloc(size_t size) {
+  if (!size) return nullptr;
+  if (size > kOOMCheckThreshold) {
+    // We are not ready to return nullptr here yet. libxml seems to check
+    // for allocation failures in most places, but the extension itself doesn't
+    // interface with libxml correctly in the presence of allocation failures.
+    checkOOM(size);
+  }
+  return local_malloc(size);
+}
+
+void checked_local_free(void* ptr) {
+  if (ptr) local_free(ptr);
+}
+
+void* checked_local_realloc(void* ptr, size_t size) {
+  if (ptr == NULL) {
+    // system realloc with a nullptr behaves like malloc
+    return checked_local_malloc(size);
+  }
+
+  if (!size) {
+    checked_local_free(ptr);
+    return nullptr;
+  }
+#ifdef USE_JEMALLOC
+  if (size > kOOMCheckThreshold) {
+    size_t origSize = 0;
+    if (ptr) origSize = sallocx(ptr, local_arena_flags);
+    auto const increase = static_cast<ssize_t>(size - origSize);
+    if (increase > kOOMCheckThreshold) checkOOM(increase);
+  }
+#endif
+  return local_realloc(ptr, size);
+}
+
+char* local_strdup(const char* str) {
+  auto const size = strlen(str) + 1;
+  if (size > kOOMCheckThreshold) checkOOM(size);
+  auto ret = local_malloc(size);
+  return (char*)memcpy(ret, str, size);
+}
+
+void processInitLibXML() {
+  // Use request-local allocator functions.
+  if (Cfg::Eval::XmlParserUseLocalArena) {
+    xmlMemSetup(checked_local_free,
+                checked_local_malloc,
+                checked_local_realloc,
+                local_strdup);
+  }
+  xmlInitParser();
+}
+
+InitFiniNode libxmlInit(processInitLibXML,
+                        InitFiniNode::When::ProcessPreInit);
+}
 
 ///////////////////////////////////////////////////////////////////////////////
 }

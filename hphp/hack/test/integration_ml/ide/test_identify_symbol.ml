@@ -1,4 +1,4 @@
-(**
+(*
  * Copyright (c) 2016, Facebook, Inc.
  * All rights reserved.
  *
@@ -7,8 +7,6 @@
  *
  *
  *)
-
-open Integration_test_base_types
 
 module Test = Integration_test_base
 
@@ -26,32 +24,29 @@ function test() {
 }"
 
 let identify_foo_request =
-  ServerCommandTypes.IDENTIFY_FUNCTION
-    (ServerCommandTypes.FileContent bar_contents, 4, 4)
+  Server_command_types.IDENTIFY_FUNCTION
+    ( "",
+      Server_command_types.FileContent bar_contents,
+      File_content.Position.from_one_based 4 4 )
 
 let check_identify_foo_response = function
-  | Some [_, Some def] ->
-    let string_pos = Pos.string def.SymbolDefinition.pos in
+  | [(_, def)] ->
+    let string_pos = Pos.string def.Symbol_definition.pos |> Test.relativize in
     let expected_pos = "File \"/foo.php\", line 3, characters 10-12:" in
     Test.assertEqual expected_pos string_pos
   | _ -> Test.fail "Expected to find exactly one definition"
 
-let () =
+let test () =
+  Test.Client.with_env ~custom_config:None @@ fun env ->
+  let env = Test.Client.setup_disk env [("foo.php", foo_contents)] in
+  let (env, response) =
+    Client_ide_daemon.Test.handle
+      env
+      (Client_ide_message.Definition
+         ( Test.doc "bar.php" bar_contents,
+           File_content.Position.from_one_based 4 4 ))
+  in
+  check_identify_foo_response response;
 
-  let env = Test.setup_server () in
-  let env = Test.setup_disk env [
-    "foo.php", foo_contents
-  ] in
-
-  let env, loop_output = Test.(run_loop_once env { default_loop_input with
-    new_client = Some (RequestResponse identify_foo_request)
-  }) in
-  check_identify_foo_response loop_output.new_client_response;
-
-  let env = Test.connect_persistent_client env in
-
-  let _, loop_output = Test.(run_loop_once env { default_loop_input with
-    persistent_client_request = Some (Request identify_foo_request)
-  }) in
-
-  check_identify_foo_response loop_output.persistent_client_response
+  ignore env;
+  ()

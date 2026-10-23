@@ -1,18 +1,18 @@
-<?php
+<?hh
 /* Prototype  : bool rmdir(string dirname[, resource context])
  * Description: Remove a directory 
  * Source code: ext/standard/file.c
  * Alias to functions: 
  */
-
+<<__EntryPoint>> function main(): void {
 echo "*** Testing rmdir() : variation ***\n";
-
+chdir(sys_get_temp_dir());
 $workDir = "rmdirVar3.tmp";
 $subDir = "aSubDir";
 mkdir($workDir);
 $cwd = getcwd();
 
-$dirs = array(
+$dirs = vec[
              // relative
              $workDir.'/'.$subDir,
              './'.$workDir.'/'.$subDir,
@@ -38,7 +38,7 @@ $dirs = array(
              $workDir.'//'.$subDir,
              $cwd.'//'.$workDir.'//'.$subDir,
              
-             );
+             ];
              
 
 foreach($dirs as $dir) {
@@ -55,5 +55,5 @@ foreach($dirs as $dir) {
 
 rmdir($workDir);
 
-?>
-===DONE===
+echo "===DONE===\n";
+}

@@ -1,6 +1,6 @@
-<?php
+<?hh
 /* Prototype  : bool ctype_lower(mixed $c)
- * Description: Checks for lowercase character(s)  
+ * Description: Checks for lowercase character(s)
  * Source code: ext/ctype/ctype.c
  */
 
@@ -8,21 +8,18 @@
  * Pass different data types as $c argument to ctype_lower() to test behaviour
  */
 
+// get a class
+class classA
+{
+    public function __toString() :mixed{
+        return "class";
+    }
+}
+<<__EntryPoint>> function main(): void {
 echo "*** Testing ctype_lower() : usage variations ***\n";
 
 $orig = setlocale(LC_CTYPE, "C");
 
-//get an unset variable
-$unset_var = 10;
-unset ($unset_var);
-
-// get a class
-class classA
-{
-	public function __toString() {
-		return "class";
-	}
-}
 
 // heredoc string
 $heredoc = <<<EOT
@@ -33,7 +30,7 @@ EOT;
 $fp = fopen(__FILE__, "r");
 
 // unexpected values to be passed to $c argument
-$inputs = array(
+$inputs = vec[
 
        // int data
 /*1*/  0,
@@ -57,40 +54,36 @@ $inputs = array(
        false,
        TRUE,
        FALSE,
-       
+
        // empty data
 /*16*/ "",
        '',
-       array(),
+       vec[],
 
        // string data
 /*19*/ "string",
        'string',
        $heredoc,
-       
+
        // object data
 /*22*/ new classA(),
 
-       // undefined data
-/*23*/ @$undefined_var,
 
-       // unset data
-/*24*/ @$unset_var,
 
        // resource variable
-/*25*/ $fp
-);
+/*23*/ $fp
+];
 
 // loop through each element of $inputs to check the behavior of ctype_lower()
 $iterator = 1;
 foreach($inputs as $input) {
-	echo "\n-- Iteration $iterator --\n";
-	var_dump( ctype_lower($input) );
-	$iterator++;
+    echo "\n-- Iteration $iterator --\n";
+    var_dump( ctype_lower($input) );
+    $iterator++;
 };
 
 fclose($fp);
- 
+
 setlocale(LC_CTYPE, $orig);
-?>
-===DONE===
+echo "===DONE===\n";
+}

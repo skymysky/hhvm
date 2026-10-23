@@ -1,14 +1,12 @@
 <?hh
 class B {
-  public function foo() {
+  public function foo() :mixed{
     echo isset($this);
     echo "#\n";
   }
 }
 
-function main() {
+<<__EntryPoint>> function main(): void {
   $b = new B;
   $b->foo();
 }
-
-main();

@@ -14,8 +14,7 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_STRING_DATA_H_
-#define incl_HPHP_STRING_DATA_H_
+#pragma once
 
 #include <folly/Range.h>
 
@@ -26,9 +25,12 @@
 
 #include "hphp/runtime/base/countable.h"
 #include "hphp/runtime/base/datatype.h"
-#include "hphp/runtime/base/exceptions.h"
 #include "hphp/runtime/base/memory-manager.h"
+#include "hphp/runtime/base/static-literals.h"
 #include "hphp/runtime/base/string-data-macros.h"
+#include "hphp/util/assertions.h"
+#include "hphp/util/blob-encoder.h"
+#include "hphp/util/hash-map.h"
 
 namespace HPHP {
 
@@ -36,8 +38,11 @@ namespace HPHP {
 
 struct APCString;
 struct Array;
-struct String;
+struct OptString;
 struct APCHandle;
+struct NamedType;
+struct UnitEmitter;
+struct Unit;
 
 //////////////////////////////////////////////////////////////////////
 
@@ -52,23 +57,15 @@ enum CopyStringMode { CopyString };
 /*
  * Runtime representation of PHP strings.
  *
- * StringData's have two different modes, not all of which we want to
- * keep forever.  The main mode is Flat, which means StringData is a
- * header in a contiguous allocation with the character array for the
- * string.  The other (Proxy) is for APCString-backed StringDatas.
+ * All StringData have the same layout: a 16-byte header containing a
+ * HeapObject header, a length, and a hash, followed by a co-allocated,
+ * \0-terminated array of characters. (Note that \0 can be a character
+ * within the array, as well.)
  *
  * StringDatas can also be allocated in multiple ways.  Normally, they
  * are created through one of the Make overloads, which drops them in
  * the request-local heap.  They can also be low-malloced (for static
  * strings), or uncounted-malloced for APC shared or uncounted strings.
- *
- * Here's a breakdown of string modes, and which configurations are
- * allowed in which allocation mode:
- *
- *          | Static | Malloced | Normal (request local)
- *          +--------+----------+-----------------------
- *   Flat   |   X    |     X    |    X
- *   Proxy  |        |          |    X
  */
 struct StringData final : MaybeCountable,
                           type_scan::MarkCollectable<StringData> {
@@ -81,11 +78,7 @@ struct StringData final : MaybeCountable,
    * This is smaller than MAX_INT, and it plus StringData overhead should
    * exactly equal a size class.
    */
-#ifdef NO_M_DATA
   static constexpr uint32_t MaxSize = 0x80000000U - 16 - 1;
-#else
-  static constexpr uint32_t MaxSize = 0x80000000U - 24 - 1;
-#endif
 
   /*
    * Creates an empty request-local string with an unspecified amount of
@@ -137,12 +130,6 @@ struct StringData final : MaybeCountable,
   static StringData* Make(size_t reserve);
 
   /*
-   * Create a request-local "Proxy" StringData that wraps an APCString.
-   * Ref-count is pre-initialized to 1.
-   */
-  static StringData* MakeProxy(const APCString* apcstr);
-
-  /*
    * Allocate a string with malloc, using the low-memory allocator if
    * jemalloc is available, and setting it as a static string.
    *
@@ -155,15 +142,15 @@ struct StringData final : MaybeCountable,
   /*
    * Same as MakeStatic but the string allocated will *not* be in the static
    * string table, will not be in low-memory, and should be deleted using
-   * ReleaseUncounted once the root goes out of scope.
+   * ReleaseShared once the root goes out of scope.
    */
-  static StringData* MakeUncounted(folly::StringPiece);
+  static StringData* MakeShared(folly::StringPiece);
 
   /*
-   * Same as MakeStatic but initializes the empty string in aligned storage.
-   * This should be called by the static string table initialization code.
+   * Same as MakeStatic, but initializes the empty string in reserved storage.
+   * This should only be called by the static string table initialization code.
    */
-  static StringData* MakeEmpty();
+  static StringData* InitializeEmpty();
 
   /*
    * return estimated capacity for a string of the given size, due to
@@ -174,18 +161,8 @@ struct StringData final : MaybeCountable,
   /*
    * Offset accessors for the JIT compiler.
    */
-#ifndef NO_M_DATA
-  static constexpr ptrdiff_t dataOff() { return offsetof(StringData, m_data); }
-#endif
   static constexpr ptrdiff_t sizeOff() { return offsetof(StringData, m_len); }
   static constexpr ptrdiff_t hashOff() { return offsetof(StringData, m_hash); }
-
-  /*
-   * Proxy StringData's have a sweep list running through them for
-   * decrefing the APCString they are fronting.  This function
-   * must be called at request cleanup time to handle this.
-   */
-  static unsigned sweepAll();
 
   /*
    * Called to return a StringData to the request allocator.  This is
@@ -202,18 +179,12 @@ struct StringData final : MaybeCountable,
   void destructStatic();
 
   /*
-   * StringData objects allocated with MakeUncounted should be freed
+   * StringData objects allocated with MakeShared should be freed
    * using this function. It will remove a reference via
-   * uncountedDecRef, and if necessary destroy the StringData and
+   * sharedDecRef, and if necessary destroy the StringData and
    * return true.
    */
-  static void ReleaseUncounted(const StringData*);
-
-  /*
-   * root is the address of the top-level APCHandle which contains this string
-   * register {allocation, root} with APCGCManager
-   */
-  void registerUncountedAllocation(APCHandle* rootAPCHandle);
+  static void ReleaseShared(StringData*);
 
   /*
    * Reference-counting related.
@@ -243,7 +214,7 @@ struct StringData final : MaybeCountable,
    * Reserve space for a string of length `maxLen' (not counting null
    * terminator).
    *
-   * May not be called for strings created with MakeUncounted or
+   * May not be called for strings created with MakeShared or
    * MakeStatic.
    *
    * Returns: possibly a new StringData, if we had to reallocate.  The new
@@ -254,14 +225,11 @@ struct StringData final : MaybeCountable,
   /*
    * Shrink a string down to length `len` (not counting null terminator).
    *
-   * May not be called for strings created with MakeUncounted or
+   * May not be called for strings created with MakeShared or
    * MakeStatic.
    *
-   * Returns: possibly a new StringData, if we decided to reallocate. The new
-   * string's reference count is be pre-initialized to 1.  shrinkImpl
-   * always returns a new StringData.
+   * Returns: a new StringData with reference count 1
    */
-  StringData* shrink(size_t len);
   StringData* shrinkImpl(size_t len);
 
   /*
@@ -293,12 +261,12 @@ struct StringData final : MaybeCountable,
    * Pre: !hasMultipleRefs()
    */
   void invalidateHash();
-  void setSize(int len);
+  void setSize(int64_t len);
 
   /*
    * StringData should not generally be allocated on the stack,
    * because references to it could escape.  This function is for
-   * debugging: it asserts that the addres of this doesn't point into
+   * debugging: it asserts that the address of this doesn't point into
    * the C++ stack.
    */
   void checkStack() const;
@@ -326,10 +294,9 @@ struct StringData final : MaybeCountable,
   /*
    * Accessor for the length of a string.
    *
-   * Note: size() returns a signed int for historical reasons.  It is
-   * guaranteed to be in the range (0 <= size() <= MaxSize)
+   * Note: size() is guaranteed to be >= 0 and <= MaxSize.
    */
-  int size() const;
+  int64_t size() const;
 
   /*
    * Returns: size() == 0
@@ -350,7 +317,7 @@ struct StringData final : MaybeCountable,
    * undocumented.
    *
    * If overflow is set its value is initialized to either zero to
-   * indicate that no overflow occurred or 1/-1 to inidicate the direction
+   * indicate that no overflow occurred or 1/-1 to indicate the direction
    * of overflow.
    *
    * Returns: KindOfNull, KindOfInt64 or KindOfDouble.  The int64_t or
@@ -367,13 +334,6 @@ struct StringData final : MaybeCountable,
    * In effect: isNumericWithVal(i, d, false) != KindOfNull
    */
   bool isNumeric() const;
-
-  /*
-   * Returns whether this string is numeric and an integer.
-   *
-   * In effect: isNumericWithVal(i, d, false) == KindOfInt64
-   */
-  bool isInteger() const;
 
   /*
    * Returns true if this string is "strictly" an integer in the sense
@@ -418,12 +378,53 @@ struct StringData final : MaybeCountable,
   StringData* increment();
 
   /*
+   * We identify certain strings as "symbols", which store a small cache.
+   * This concept is just an optimization; nothing is required to be a symbol.
+   *
+   * After loading a majority of symbols, call StringData::markSymbolsLoaded
+   * to avoid allocating these extra caches on any more static strings.
+   */
+  bool isSymbol() const;
+
+  /*
+   * A static string may be assigned a "color" which to be used as the hash key
+   * in implementations of perfect hashing for bespoke arrays. The color is
+   * present only in static arrays, and is stored in  the lower 14 bits of
+   * m_aux16.
+   */
+  uint16_t color() const;
+  void setColor(uint16_t color);
+
+  /*
+   * Get or set the cached class or named type. Get will return nullptr
+   * if the corresponding cached value hasn't been set yet.
+   *
+   * Pre: isSymbol()
+   */
+  Class* getCachedClass() const;
+  NamedType* getNamedType() const;
+  void setCachedClass(Class* cls);
+  void setNamedType(NamedType* ne);
+
+  /*
+   * Helpers used to JIT access to the symbol cache.
+   */
+  constexpr static uint8_t kIsSymbolMask = 0x80;
+  static ptrdiff_t isSymbolOffset();
+  static ptrdiff_t cachedClassOffset();
+
+  /*
+   * Helpers used to JIT access to the color field.
+   */
+  constexpr static uint16_t kColorMask = 0x3fff;
+  constexpr static uint16_t kInvalidColor = 0x0000;
+  constexpr static uint16_t kDupColor = 0x0001;
+  static ptrdiff_t colorOffset();
+
+  /*
    * Type conversion functions.
    */
   bool toBoolean() const;
-  char toByte(int base = 10) const { return toInt64(base); }
-  short toInt16(int base = 10) const { return toInt64(base); }
-  int toInt32(int base = 10) const { return toInt64(base); }
   int64_t toInt64(int base = 10) const;
   double toDouble() const;
   DataType toNumeric(int64_t& lval, double& dval) const;
@@ -431,9 +432,10 @@ struct StringData final : MaybeCountable,
 
   /*
    * Returns: case insensitive hash value for this string.
+   * hashStatic() requires isStatic() as a precondition.
    */
   strhash_t hash() const;
-  NEVER_INLINE strhash_t hashHelper() const;
+  strhash_t hashStatic() const;
   static strhash_t hash(const char* s, size_t len);
   static strhash_t hash_unsafe(const char* s, size_t len);
 
@@ -452,8 +454,17 @@ struct StringData final : MaybeCountable,
   /*
    * Case-insensitive exact string comparison.  (Numeric strings are
    * not treated specially.)
+   * DEPRECATED: use same_nocase() for case-insensitive strings that
+   * are not language symbols.
    */
-  bool isame(const StringData* s) const;
+  bool tsame(const StringData* s) const;
+  bool fsame(const StringData* s) const;
+
+  /*
+   * Case-insensitive exact string comparison.  (Numeric strings are
+   * not treated specially.)
+   */
+  bool same_nocase(const StringData* s) const;
 
   /*
    * Implements comparison in the sense of php's operator < on
@@ -480,55 +491,29 @@ struct StringData final : MaybeCountable,
    */
   void dump() const;
 
-  static StringData* node2str(StringDataNode* node) {
-    return reinterpret_cast<StringData*>(
-      uintptr_t(node) - offsetof(Proxy, node)
-                   - sizeof(StringData)
-    );
-  }
-#ifdef NO_M_DATA
-  static constexpr bool isProxy() { return false; }
-#else
-  bool isProxy() const;
-#endif
-
-  bool isImmutable() const;
-
   bool checkSane() const;
-
-  void unProxy();
-
-private:
-  struct Proxy {
-    StringDataNode node;
-    const APCString* apcstr;
-  };
 
 private:
   template<bool trueStatic>
-  static StringData* MakeShared(folly::StringPiece sl);
+  static MemBlock AllocatePersistent(folly::StringPiece sl);
+  template<bool trueStatic>
+  static StringData* MakePersistent(folly::StringPiece sl);
+  template<bool trueStatic>
+  static StringData* MakePersistentAt(folly::StringPiece sl, MemBlock range);
+
+  /*
+   * Initialize a static string on a pre-allocated range of memory. This is
+   * useful when we need to create static strings at designated addresses when
+   * optimizing locality.
+   */
+  static StringData* MakeStaticAt(folly::StringPiece, MemBlock);
 
   StringData(const StringData&) = delete;
   StringData& operator=(const StringData&) = delete;
   ~StringData() = delete;
 
 private:
-  const void* payload() const;
-  void* payload();
-  const Proxy* proxy() const;
-  Proxy* proxy();
-
-#ifdef NO_M_DATA
-  static constexpr bool isFlat() { return true; }
-#else
-  bool isFlat() const;
-#endif
-
-  void releaseProxy();
   int numericCompare(const StringData *v2) const;
-  StringData* escalate(size_t cap);
-  void enlist();
-  void delist();
   void incrementHelper();
   void preCompute();
 
@@ -536,10 +521,6 @@ private:
   // StringData initialization can do fewer stores to initialize the
   // fields.  (gcc does not combine the stores itself.)
 private:
-#ifndef NO_M_DATA
-  // TODO(5601154): Add KindOfApcString and remove StringData m_data field.
-  char* m_data;
-#endif
   union {
     struct {
       uint32_t m_len;
@@ -548,6 +529,16 @@ private:
     uint64_t m_lenAndHash;
   };
 };
+
+/*
+ * Some static StringData has a SymbolPrefix allocated right in front.
+ */
+struct SymbolPrefix {
+  AtomicPackedPtr<NamedType> nty;
+  AtomicPackedPtr<Class> cls;
+};
+
+static_assert(sizeof(SymbolPrefix) % alignof(StringData) == 0, "");
 
 //////////////////////////////////////////////////////////////////////
 
@@ -603,26 +594,72 @@ void decRefStr(StringData* s);
  */
 struct string_data_hash;
 struct string_data_same;
-struct string_data_isame;
+struct string_data_tsame; // for type names
+struct string_data_fsame; // for func names
 struct string_data_lt;
-struct string_data_lti;
+struct string_data_lt_type; // for type names
+struct string_data_hash_tsame; // for type names
 
 //////////////////////////////////////////////////////////////////////
 
-extern std::aligned_storage<
-  kStringOverhead,
-  alignof(StringData)
->::type s_theEmptyString;
-
-/*
- * Return the "static empty string". This is a singleton StaticString
- * that can be used to return a StaticString for the empty string in
- * as lightweight a manner as possible.
- */
 ALWAYS_INLINE StringData* staticEmptyString() {
-  void* vp = &s_theEmptyString;
-  return static_cast<StringData*>(vp);
+  auto constexpr ptr = StaticLiterals::EmptyString() + sizeof(SymbolPrefix);
+  return reinterpret_cast<StringData*>(ptr);
 }
+
+//////////////////////////////////////////////////////////////////////
+
+template<>
+struct BlobEncoderHelper<const StringData*> {
+  static void serde(BlobEncoder&, const StringData*);
+  static void serde(BlobDecoder&, const StringData*&,
+                    bool makeStatic = true);
+
+  static folly::StringPiece asStringPiece(BlobDecoder&);
+
+  static void skip(BlobDecoder&);
+  static size_t peekSize(BlobDecoder&);
+
+  // Encode each string once. If a string occurs more than once, use a
+  // small integer to refer to it. Faster and smaller if you have a
+  // lot of duplicate strings.
+  struct Indexer {
+    hphp_fast_map<const StringData*, uint32_t> m_indices;
+    std::vector<const StringData*> m_strs;
+  };
+
+  // If set, will utilize the UnitEmitter's string table.
+  static __thread UnitEmitter* tl_unitEmitter;
+  // Likewise, but only for lazy loading (so only deserializing
+  // supported).
+  static __thread Unit* tl_unit;
+  // If set, use that Indexer to encode strings.
+  static __thread Indexer* tl_indexer;
+};
+
+// Use an Indexer for string serialization (if one isn't already being
+// used) while this is in scope.
+struct ScopedStringDataIndexer {
+  ScopedStringDataIndexer() {
+    if (!BlobEncoderHelper<const StringData*>::tl_indexer) {
+      BlobEncoderHelper<const StringData*>::tl_indexer = &m_indexer;
+      m_used = true;
+    }
+  }
+  ~ScopedStringDataIndexer() {
+    if (m_used) {
+      assertx(BlobEncoderHelper<const StringData*>::tl_indexer == &m_indexer);
+      BlobEncoderHelper<const StringData*>::tl_indexer = nullptr;
+    }
+  }
+  ScopedStringDataIndexer(const ScopedStringDataIndexer&) = delete;
+  ScopedStringDataIndexer(ScopedStringDataIndexer&&) = delete;
+  ScopedStringDataIndexer& operator=(const ScopedStringDataIndexer&) = delete;
+  ScopedStringDataIndexer& operator=(ScopedStringDataIndexer&&) = delete;
+private:
+  BlobEncoderHelper<const StringData*>::Indexer m_indexer;
+  bool m_used{false};
+};
 
 //////////////////////////////////////////////////////////////////////
 
@@ -658,5 +695,3 @@ template<> class FormatValue<HPHP::StringData*> {
 }
 
 #include "hphp/runtime/base/string-data-inl.h"
-
-#endif

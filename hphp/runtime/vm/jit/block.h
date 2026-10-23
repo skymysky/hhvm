@@ -14,8 +14,7 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_VM_BLOCK_H_
-#define incl_HPHP_VM_BLOCK_H_
+#pragma once
 
 #include <algorithm>
 
@@ -24,7 +23,7 @@
 #include "hphp/runtime/vm/jit/ir-instruction.h"
 #include "hphp/runtime/vm/jit/ir-opcode.h"
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 
 /*
  * A Block refers to a basic block: single-entry, single-exit, list of
@@ -37,12 +36,12 @@ namespace HPHP { namespace jit {
  * IRInstruction::m_block transparently.
  */
 struct Block {
-  typedef InstructionList::iterator iterator;
-  typedef InstructionList::const_iterator const_iterator;
-  typedef InstructionList::reverse_iterator reverse_iterator;
-  typedef InstructionList::const_reverse_iterator const_reverse_iterator;
-  typedef InstructionList::reference reference;
-  typedef InstructionList::const_reference const_reference;
+  using iterator = InstructionList::iterator;
+  using const_iterator = InstructionList::const_iterator;
+  using reverse_iterator = InstructionList::reverse_iterator;
+  using const_reverse_iterator = InstructionList::const_reverse_iterator;
+  using reference = InstructionList::reference;
+  using const_reference = InstructionList::const_reference;
 
   /*
    * Execution frequency hint; codegen will put Unlikely blocks in acold,
@@ -73,10 +72,10 @@ struct Block {
 
   enum class Hint { Unused, Unlikely, Neither, Likely };
 
-  explicit Block(unsigned id, uint64_t profCount)
-    : m_id(id)
-    , m_hint(Hint::Neither)
-    , m_profCount(checkedProfCount(profCount))
+  explicit Block(unsigned id, uint64_t profCount, Hint hint)
+    : m_profCount(checkedProfCount(profCount))
+    , m_id(id)
+    , m_hint(hint)
   {}
 
   Block(const Block&) = delete;
@@ -84,8 +83,16 @@ struct Block {
 
   unsigned    id() const           { return m_id; }
   Hint        hint() const         { return m_hint; }
-  void        setHint(Hint hint)   { m_hint = hint; }
   uint64_t    profCount() const    { return m_profCount; }
+
+  void setHint(Hint hint) {
+    // Do not downgrade likeliness of the entry block. Translations are entered
+    // at their first code emitted to the 'a' section, so downgrading the
+    // likeliness of the entry block may cause the translation to be entered
+    // at an incorrect block.
+    if (isEntry() && hint < m_hint) return;
+    m_hint = hint;
+  }
 
   void setProfCount(uint64_t count) { m_profCount = checkedProfCount(count); }
 
@@ -106,8 +113,12 @@ struct Block {
     return !empty() && back().isTerminal() && (!taken() || taken()->isCatch());
   }
 
+  bool isUnreachable() const {
+    return !empty() && back().is(Unreachable);
+  }
+
   // If its a catch block, the BeginCatch's marker
-  BCMarker catchMarker() const;
+  const BCMarker& catchMarker() const;
 
   // return the fallthrough block.  Should be nullptr if the last instruction
   // is a Terminal.
@@ -128,8 +139,13 @@ struct Block {
   // then return an iterator to the newly inserted instruction.
   iterator prepend(IRInstruction* inst);
 
-  // return iterator to first instruction after any DefFP, DefSP, DefLabel,
-  // and/or BeginCatch instructions.
+  // Insert inst at the end of the block before any branching or terminal
+  // instruction ending the block, then return an iterator to the newly inserted
+  // instruction.
+  iterator append(IRInstruction* inst);
+
+  // return iterator to first instruction after any DefFP, DefFrameRelSP,
+  // DefRegSP, DefLabel, and/or BeginCatch instructions.
   iterator skipHeader();
   const_iterator skipHeader() const;
 
@@ -208,12 +224,15 @@ struct Block {
   static uint64_t checkedProfCount(uint64_t profCount);
 
   InstructionList m_instrs; // instructions in this block
-  const unsigned m_id;      // unit-assigned unique id of this block
   EdgeList m_preds;         // Edges that point to this block
-  Hint m_hint;              // execution frequency hint
   uint64_t m_profCount;     // execution profile count of the region block
                             // containing this IR block.
+  const unsigned m_id;      // unit-assigned unique id of this block
+  Hint m_hint;              // execution frequency hint
 };
+
+// Try to keep this structure small; watch for alignment issues.
+static_assert(sizeof(Block) == 64, "");
 
 using BlockList = jit::vector<Block*>;
 using BlockSet = jit::flat_set<Block*>;
@@ -251,10 +270,21 @@ inline Block::iterator Block::prepend(IRInstruction* inst) {
   return insert(it, inst);
 }
 
+inline Block::iterator Block::append(IRInstruction* inst) {
+  assertx(inst->marker().valid());
+  if (empty()) return insert(end(), inst);
+  auto it = backIter();
+  if (!it->isBlockEnd()) ++it;
+  return insert(it, inst);
+}
+
 inline Block::iterator Block::skipHeader() {
   auto it = begin();
   auto e = end();
-  while (it != e && it->is(DefFP, DefSP, DefLabel, BeginCatch)) ++it;
+  while (it != e &&
+         it->is(DefFP, DefFrameRelSP, DefRegSP, DefLabel, BeginCatch)) {
+    ++it;
+  }
   return it;
 }
 
@@ -342,7 +372,15 @@ inline void Block::push_back(IRInstruction* inst) {
 
 template <class Predicate>
 inline void Block::remove_if(Predicate p) {
-  m_instrs.remove_if(p);
+  auto it = begin();
+  auto const e = end();
+  while (it != e) {
+    if (!p(*it)) {
+      ++it;
+    } else {
+      it = erase(it);
+    }
+  }
 }
 
 inline InstructionList&& Block::moveInstrs() {
@@ -369,7 +407,7 @@ inline uint64_t Block::checkedProfCount(uint64_t profCount) {
   return profCount;
 }
 
-inline BCMarker Block::catchMarker() const {
+inline const BCMarker& Block::catchMarker() const {
   assertx(isCatch());
   auto it = skipHeader();
   assertx(it != begin());
@@ -395,6 +433,12 @@ inline const char* blockHintName(Block::Hint hint) {
   not_reached();
 }
 
-}}
+inline Optional<Block::Hint> nameToHint(const std::string& hintStr) {
+  if (hintStr == "Unused")   return Block::Hint::Unused;
+  if (hintStr == "Unlikely") return Block::Hint::Unlikely;
+  if (hintStr == "Neither")  return Block::Hint::Neither;
+  if (hintStr == "Likely")   return Block::Hint::Likely;
+  return std::nullopt;
+}
 
-#endif
+}

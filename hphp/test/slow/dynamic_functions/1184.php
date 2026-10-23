@@ -1,13 +1,15 @@
-<?php
+<?hh
 
-$a = 'test';
- function &test() {
- global $a;
- return $a;
+abstract final class DynamicFunctions1184 {
+  public static $a;
 }
-  $b = $a();
- $b = 'ok';
- var_dump($a);
-  $b = &$a();
- $b = 'ok';
- var_dump($a);
+<<__DynamicallyCallable>>
+function test() :mixed{
+ return DynamicFunctions1184::$a;
+}
+<<__EntryPoint>> function main(): void {
+DynamicFunctions1184::$a = 'test';
+$b = (HH\dynamic_fun(DynamicFunctions1184::$a))();
+$b = 'ok';
+var_dump(DynamicFunctions1184::$a);
+}

@@ -1,14 +1,18 @@
-<?php
+<?hh
 
-$array1 = array(
+
+<<__EntryPoint>>
+function main_array_intersect_assoc() :mixed{
+$array1 = dict[
   "a" => "green",
   "b" => "brown",
   "c" => "blue",
-  "red"
-);
-$array2 = array(
+  0 => "red"
+];
+$array2 = dict[
   "a" => "green",
-  "yellow",
-  "red"
-);
+  0 => "yellow",
+  1 => "red"
+];
 var_dump(array_intersect_assoc($array1, $array2));
+}

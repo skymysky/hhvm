@@ -1,11 +1,11 @@
-<?hh // strict
+<?hh
 
 function correct(): noreturn {
   throw new Exception('not returning here');
 }
 
 async function meh(): Awaitable<int> {
-  // UNSAFE
+  return 4;
 }
 
 async function generic(): Awaitable<noreturn> {

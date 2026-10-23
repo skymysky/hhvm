@@ -2,26 +2,9 @@
 
 -- Testing escapeshellarg() function with no arguments --
 
-Warning: %s
-NULL
+Warning: escapeshellarg() expects exactly 1 positional parameter, 0 given in %s/test/zend/good/ext/standard/tests/general_functions/escapeshellarg_error.php on line 16
 
 -- Testing escapeshellarg() function with more than expected no. of arguments --
 
-Warning: %s
-NULL
-
--- Testing escapeshellarg() function with a object supplied for argument --
-
-Warning: %s
-NULL
-
--- Testing escapeshellarg() function with a resource supplied for argument --
-
-Warning: %s
-NULL
-
--- Testing escapeshellarg() function with a array supplied for argument --
-
-Warning: %s
-NULL
+Warning: escapeshellarg() expects exactly 1 positional parameter, 2 given in %s/test/zend/good/ext/standard/tests/general_functions/escapeshellarg_error.php on line 21
 ===Done===

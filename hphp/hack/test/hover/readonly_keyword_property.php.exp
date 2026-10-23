@@ -1,0 +1,3 @@
+readonly
+---
+A `readonly` method treats `$this` as `readonly`.

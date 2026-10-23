@@ -1,21 +1,23 @@
 #include "hphp/runtime/ext/curl/curl-resource.h"
-#include "hphp/runtime/ext/curl/curl-pool.h"
+#include "hphp/runtime/ext/curl/curl-multi-resource.h"
 #include "hphp/runtime/ext/curl/curl-share-resource.h"
 #include "hphp/runtime/ext/curl/ext_curl.h"
 
 #include "hphp/runtime/base/array-init.h"
+#include "hphp/runtime/base/array-iterator.h"
 #include "hphp/runtime/base/builtin-functions.h"
 #include "hphp/runtime/base/curl-tls-workarounds.h"
 #include "hphp/runtime/base/file.h"
-#include "hphp/runtime/base/file-util.h"
 #include "hphp/runtime/base/plain-file.h"
 #include "hphp/runtime/base/stack-logger.h"
-#include "hphp/runtime/ext/extension.h"
 #include "hphp/runtime/server/server-stats.h"
 #include "hphp/runtime/vm/vm-regs.h"
 
+#include "hphp/util/configs/http.h"
+#include "hphp/util/configs/php7.h"
+
+#include <curl/curl.h>
 #include <curl/easy.h>
-#include <curl/multi.h>
 #include <folly/portability/OpenSSL.h>
 
 #define PHP_CURL_STDOUT 0
@@ -50,16 +52,10 @@ CurlResource::ToFree::~ToFree() {
   }
 }
 
-CurlResource::CurlResource(const String& url,
-                           CurlHandlePoolPtr pool /*=nullptr */)
-: m_emptyPost(true), m_safeUpload(true), m_connPool(pool),
-  m_pooledHandle(nullptr) {
-  if (m_connPool) {
-    m_pooledHandle = m_connPool->fetch();
-    m_cp = m_pooledHandle->useHandle();
-  } else {
-    m_cp = curl_easy_init();
-  }
+CurlResource::CurlResource(const OptString& url)
+    : m_emptyPost(true), m_safeUpload(true) {
+  m_cp = curl_easy_init();
+  m_multi = nullptr;
   m_url = url;
 
   memset(m_error_str, 0, sizeof(m_error_str));
@@ -86,40 +82,6 @@ CurlResource::CurlResource(const String& url,
   }
 }
 
-CurlResource::CurlResource(req::ptr<CurlResource> src)
-: m_connPool(nullptr), m_pooledHandle(nullptr) {
-  // NOTE: we never pool copied curl handles, because all spots in
-  // the pool are pre-populated
-
-  assertx(src && src != this);
-  assertx(!src->m_exception);
-
-  m_cp = curl_easy_duphandle(src->get());
-  m_url = src->m_url;
-
-  memset(m_error_str, 0, sizeof(m_error_str));
-  m_error_no = CURLE_OK;
-
-  m_write.method = src->m_write.method;
-  m_write.type   = src->m_write.type;
-  m_read.method  = src->m_read.method;
-  m_write_header.method = src->m_write_header.method;
-
-  m_write.fp        = src->m_write.fp;
-  m_write_header.fp = src->m_write_header.fp;
-  m_read.fp         = src->m_read.fp;
-
-  m_write.callback = src->m_write.callback;
-  m_read.callback = src->m_read.callback;
-  m_write_header.callback = src->m_write_header.callback;
-
-  reseat();
-
-  m_to_free = src->m_to_free;
-  m_emptyPost = src->m_emptyPost;
-  m_safeUpload = src->m_safeUpload;
-}
-
 void CurlResource::sweep() {
   m_write.buf.release();
   m_write_header.buf.release();
@@ -127,11 +89,8 @@ void CurlResource::sweep() {
 }
 
 void CurlResource::close() {
-  // If we try to close while we're in a callback, warn.
   if (m_in_callback) {
-    raise_warning(
-      "curl_close(): Attempt to close cURL in callback, ignored."
-    );
+    raise_warning("curl_close(): Attempt to close cURL in callback, ignored.");
     return;
   }
   closeForSweep();
@@ -141,17 +100,11 @@ void CurlResource::close() {
 
 void CurlResource::closeForSweep() {
   assertx(!m_exception);
-  if (m_cp) {
-    if (m_connPool) {
-      // reuse this curl handle if we're pooling
-      assertx(m_pooledHandle);
-      m_connPool->store(m_pooledHandle);
-      m_pooledHandle = nullptr;
-    } else {
-      curl_easy_cleanup(m_cp);
-    }
-    m_cp = nullptr;
-  }
+  assertx(IMPLIES(m_multi, m_cp));
+  if (!m_cp) return;
+  if (m_multi) m_multi->remove(this, /*leak=*/true);
+  curl_easy_cleanup(m_cp);
+  m_cp = nullptr;
 }
 
 void CurlResource::check_exception() {
@@ -194,10 +147,30 @@ void CurlResource::setDefaultOptions() {
                    CurlResource::ssl_ctx_callback);
 
   curl_easy_setopt(m_cp, CURLOPT_TIMEOUT,
-                   minTimeout(RuntimeOption::HttpDefaultTimeout));
+                   minTimeout(Cfg::Http::DefaultTimeout));
   curl_easy_setopt(m_cp, CURLOPT_CONNECTTIMEOUT,
-                   minTimeout(RuntimeOption::HttpDefaultTimeout));
+                   minTimeout(Cfg::Http::DefaultTimeout));
   reseat();
+}
+
+void CurlResource::prepare() {
+  if (!useCertCache()) {
+    if (auto const path = cainfo(false).get()) {
+      curl_easy_setopt(m_cp, CURLOPT_CAINFO, path->data());
+    }
+    if (auto const path = cainfo(true).get()) {
+      curl_easy_setopt(m_cp, CURLOPT_PROXY_CAINFO, path->data());
+    }
+  } else {
+    curl_easy_setopt(m_cp, CURLOPT_CAINFO, NULL);
+    curl_easy_setopt(m_cp, CURLOPT_PROXY_CAINFO, NULL);
+  }
+
+  if (m_emptyPost) {
+    // As per curl docs, an empty post must set POSTFIELDSIZE to be 0 or
+    // the reader function will be called
+    curl_easy_setopt(m_cp, CURLOPT_POSTFIELDSIZE, 0);
+  }
 }
 
 Variant CurlResource::execute() {
@@ -205,15 +178,12 @@ Variant CurlResource::execute() {
   if (m_cp == nullptr) {
     return false;
   }
-  if (m_emptyPost) {
-    // As per curl docs, an empty post must set POSTFIELDSIZE to be 0 or
-    // the reader function will be called
-    curl_easy_setopt(m_cp, CURLOPT_POSTFIELDSIZE, 0);
-  }
   m_write.buf.clear();
   m_write.content.clear();
   m_header.clear();
   memset(m_error_str, 0, sizeof(m_error_str));
+
+  prepare();
 
   {
     IOStatusHelper io("curl_easy_perform", m_url.data());
@@ -255,14 +225,14 @@ Variant CurlResource::execute() {
   return true;
 }
 
-String CurlResource::getContents() {
+OptString CurlResource::getContents() {
   if (m_write.method == PHP_CURL_RETURN) {
     if (!m_write.buf.empty()) {
       m_write.content = m_write.buf.detach();
     }
     return m_write.content;
   }
-  return String();
+  return OptString();
 }
 
 bool CurlResource::setOption(long option, const Variant& value) {
@@ -286,6 +256,8 @@ bool CurlResource::setOption(long option, const Variant& value) {
     ret = setStringListOption(option, value);
   } else if (isNonCurlOption(option)) {
     ret = setNonCurlOption(option, value);
+  } else if (isBlobOption(option)) {
+    ret = setBlobOption(option, value.toString());
   } else if (option == CURLOPT_POSTFIELDS) {
     ret = setPostFieldsOption(value);
   } else if (option == CURLOPT_SHARE) {
@@ -308,7 +280,7 @@ bool CurlResource::setOption(long option, const Variant& value) {
     ret = true;
   } else {
     m_error_no = CURLE_FAILED_INIT;
-    throw_invalid_argument("option: %ld", option);
+    raise_invalid_argument_warning("option: %ld", option);
     ret = false;
   }
 
@@ -330,8 +302,8 @@ Variant CurlResource::getOption(long option) {
   return false;
 }
 
-CURL* CurlResource::get(bool nullOkay /*=false*/) {
-  if (m_cp == nullptr && !nullOkay) {
+CURL* CurlResource::get() {
+  if (!m_cp) {
     throw_null_pointer_exception();
   }
   return m_cp;
@@ -526,11 +498,58 @@ bool CurlResource::isLongOption(long option) {
 #if LIBCURL_VERSION_NUM >= 0x073300 /* Available since 7.51.0 */
     case CURLOPT_KEEP_SENDING_ON_ERROR:
 #endif
+#if LIBCURL_VERSION_NUM >= 0x073400 /* Available since 7.52.0 */
+    case CURLOPT_PROXY_SSLVERSION:
+    case CURLOPT_PROXY_SSL_OPTIONS:
+    case CURLOPT_PROXY_SSL_VERIFYHOST:
+    case CURLOPT_PROXY_SSL_VERIFYPEER:
+#endif
 #if LIBCURL_VERSION_NUM >= 0x073600 /* Available since 7.54.0 */
     case CURLOPT_SUPPRESS_CONNECT_HEADERS:
 #endif
 #if LIBCURL_VERSION_NUM >= 0x073700 /* Available since 7.55.0 */
     case CURLOPT_SOCKS5_AUTH:
+#endif
+#if LIBCURL_VERSION_NUM >= 0x073800 /* Available since 7.56.0 */
+    case CURLOPT_SSH_COMPRESSION:
+#endif
+#if LIBCURL_VERSION_NUM >= 0x073b00 /* Available since 7.59.0 */
+    case CURLOPT_HAPPY_EYEBALLS_TIMEOUT_MS:
+    case CURLOPT_TIMEVALUE_LARGE:
+#endif
+#if LIBCURL_VERSION_NUM >= 0x073c00 /* Available since 7.60.0 */
+    case CURLOPT_DNS_SHUFFLE_ADDRESSES:
+    case CURLOPT_HAPROXYPROTOCOL:
+#endif
+#if LIBCURL_VERSION_NUM >= 0x073d00 /* Available since 7.61.0 */
+    case CURLOPT_DISALLOW_USERNAME_IN_URL:
+#endif
+#if LIBCURL_VERSION_NUM >= 0x073e00 /* Available since 7.62.0 */
+    case CURLOPT_UPKEEP_INTERVAL_MS:
+    case CURLOPT_UPLOAD_BUFFERSIZE:
+#endif
+#if LIBCURL_VERSION_NUM >= 0x074000 /* Available since 7.64.0 */
+    case CURLOPT_HTTP09_ALLOWED:
+#endif
+#if LIBCURL_VERSION_NUM >= 0x074001 /* Available since 7.64.1 */
+    case CURLOPT_ALTSVC_CTRL:
+#endif
+#if LIBCURL_VERSION_NUM >= 0x074100 /* Available since 7.65.0 */
+    case CURLOPT_MAXAGE_CONN:
+#endif
+#if LIBCURL_VERSION_NUM >= 0x074a00 /* Available since 7.74.0 */
+    case CURLOPT_HSTS_CTRL:
+#endif
+#if LIBCURL_VERSION_NUM >= 0x074c00 /* Available since 7.76.0 */
+    case CURLOPT_DOH_SSL_VERIFYHOST:
+    case CURLOPT_DOH_SSL_VERIFYPEER:
+    case CURLOPT_DOH_SSL_VERIFYSTATUS:
+#endif
+#if LIBCURL_VERSION_NUM >= 0x075000 /* Available since 7.80.0 */
+    case CURLOPT_MAXLIFETIME_CONN:
+#endif
+#if LIBCURL_VERSION_NUM >= 0x075100 /* Available since 7.81.0 */
+    case CURLOPT_MIME_OPTIONS:
 #endif
 #if CURLOPT_MUTE != 0
     case CURLOPT_MUTE:
@@ -580,6 +599,13 @@ bool CurlResource::isStringFilePathOption(long option) {
 #if LIBCURL_VERSION_NUM >= 0x071306 /* Available since 7.19.6 */
     case CURLOPT_SSH_KNOWNHOSTS:
 #endif
+#if LIBCURL_VERSION_NUM >= 0x073400 /* Available since 7.52.0 */
+    case CURLOPT_PROXY_CRLFILE:
+    case CURLOPT_PROXY_SSLCERT:
+#endif
+#if LIBCURL_VERSION_NUM >= 0x074700 /* Available since 7.71.0 */
+    case CURLOPT_PROXY_ISSUERCERT:
+#endif
       return true;
     default:
       return false;
@@ -600,7 +626,6 @@ bool CurlResource::isStringOption(long option) {
     case CURLOPT_EGDSOCKET:
     case CURLOPT_INTERFACE:
     case CURLOPT_PROXY:
-    case CURLOPT_PROXYUSERPWD:
     case CURLOPT_REFERER:
     case CURLOPT_SSLCERTTYPE:
     case CURLOPT_SSLENGINE:
@@ -610,7 +635,6 @@ bool CurlResource::isStringOption(long option) {
     case CURLOPT_SSLKEYTYPE:
     case CURLOPT_SSL_CIPHER_LIST:
     case CURLOPT_USERAGENT:
-    case CURLOPT_USERPWD:
 #if LIBCURL_VERSION_NUM >= 0x070e01 /* Available since 7.14.1 */
     case CURLOPT_COOKIELIST:
 #endif
@@ -664,19 +688,57 @@ bool CurlResource::isStringOption(long option) {
 #if LIBCURL_VERSION_NUM >= 0x072d00 /* Available since 7.45.0 */
     case CURLOPT_DEFAULT_PROTOCOL:
 #endif
+#if LIBCURL_VERSION_NUM >= 0x073400 /* Available since 7.52.0 */
+    case CURLOPT_PROXY_CAINFO:
+    case CURLOPT_PROXY_CAPATH:
+    case CURLOPT_PROXY_KEYPASSWD:
+    case CURLOPT_PROXY_PINNEDPUBLICKEY:
+    case CURLOPT_PROXY_SSLCERTTYPE:
+    case CURLOPT_PROXY_SSLKEY:
+    case CURLOPT_PROXY_SSLKEYTYPE:
+    case CURLOPT_PROXY_SSL_CIPHER_LIST:
+    case CURLOPT_PROXY_TLSAUTH_PASSWORD:
+    case CURLOPT_PROXY_TLSAUTH_TYPE:
+    case CURLOPT_PROXY_TLSAUTH_USERNAME:
+#endif
+#if LIBCURL_VERSION_NUM >= 0x073d00 /* Available since 7.61.0 */
+    case CURLOPT_PROXY_TLS13_CIPHERS:
+    case CURLOPT_TLS13_CIPHERS:
+#endif
+#if LIBCURL_VERSION_NUM >= 0x073e00 /* Available since 7.62.0 */
+    case CURLOPT_DOH_URL:
+#endif
+#if LIBCURL_VERSION_NUM >= 0x074001 /* Available since 7.64.1 */
+    case CURLOPT_ALTSVC:
+#endif
+#if LIBCURL_VERSION_NUM >= 0x074200 /* Available since 7.66.0 */
+    case CURLOPT_SASL_AUTHZID:
+#endif
+#if LIBCURL_VERSION_NUM >= 0x074900 /* Available since 7.73.0 */
+    case CURLOPT_SSL_EC_CURVES:
+#endif
+#if LIBCURL_VERSION_NUM >= 0x074a00 /* Available since 7.74.0 */
+    case CURLOPT_HSTS:
+#endif
+#if LIBCURL_VERSION_NUM >= 0x074b00 /* Available since 7.75.0 */
+    case CURLOPT_AWS_SIGV4:
+#endif
+#if LIBCURL_VERSION_NUM >= 0x075000 /* Available since 7.80.0 */
+    case CURLOPT_SSH_HOST_PUBLIC_KEY_SHA256:
+#endif
       return true;
     default:
       return isStringFilePathOption(option);
   }
 }
 
-bool CurlResource::setStringOption(long option, const String& value) {
+bool CurlResource::setStringOption(long option, const OptString& value) {
   assertx(isStringOption(option));
 
   // the following options deal with files, therefore the open_basedir check
   // is required.
   if (isStringFilePathOption(option) && !value.empty()) {
-    String filename = File::TranslatePath(value);
+    OptString filename = File::TranslatePath(value);
     if (filename.empty()) {
       raise_warning(
         "open_basedir restriction in effect. File(%s) is not within "
@@ -706,7 +768,9 @@ bool CurlResource::isNullableStringOption(long option) {
   switch (option) {
     case CURLOPT_CUSTOMREQUEST:
     case CURLOPT_FTPPORT:
+    case CURLOPT_PROXYUSERPWD:
     case CURLOPT_RANGE:
+    case CURLOPT_USERPWD:
 #if LIBCURL_VERSION_NUM >= 0x070d00 /* Available since 7.13.0 */
     case CURLOPT_FTP_ACCOUNT:
 #endif
@@ -760,11 +824,46 @@ bool CurlResource::setNullableStringOption(long option, const Variant& value) {
   return m_error_no == CURLE_OK;
 }
 
+bool CurlResource::isBlobOption(long option) {
+  switch (option) {
+#if LIBCURL_VERSION_NUM >= 0x074700 /* Available since 7.71.0 */
+    case CURLOPT_SSLCERT_BLOB:
+    case CURLOPT_SSLKEY_BLOB:
+    case CURLOPT_PROXY_SSLCERT_BLOB:
+    case CURLOPT_PROXY_SSLKEY_BLOB:
+    case CURLOPT_ISSUERCERT_BLOB:
+    case CURLOPT_PROXY_ISSUERCERT_BLOB:
+      return true;
+#endif
+#if LIBCURL_VERSION_NUM >= 0x074d00 /* Available since 7.77.0 */
+    case CURLOPT_CAINFO_BLOB:
+    case CURLOPT_PROXY_CAINFO_BLOB:
+      return true;
+#endif
+    default:
+      return false;
+  }
+}
+
+bool CurlResource::setBlobOption(long option, const OptString& value) {
+#if LIBCURL_VERSION_NUM >= 0x074700 /* Available since 7.71.0 */
+  assertx(isBlobOption(option));
+  struct curl_blob blob;
+  blob.data = (void *)value.data();
+  blob.len = value.size();
+  blob.flags = CURL_BLOB_COPY;
+  m_error_no = curl_easy_setopt(m_cp, (CURLoption)option, &blob);
+  return m_error_no == CURLE_OK;
+#else
+  return false;
+#endif
+}
+
 bool CurlResource::setPostFieldsOption(const Variant& value) {
   m_emptyPost = false;
 
   if (!value.isArray() && !value.is(KindOfObject)) {
-    String svalue = value.toString();
+    OptString svalue = value.toString();
 #if LIBCURL_VERSION_NUM >= 0x071100
     /* with curl 7.17.0 and later, we can use COPYPOSTFIELDS,
        but we have to provide size before */
@@ -787,15 +886,15 @@ bool CurlResource::setPostFieldsOption(const Variant& value) {
   curl_httppost *first = nullptr;
   curl_httppost *last  = nullptr;
   for (ArrayIter iter(arr); iter; ++iter) {
-    String key = iter.first().toString();
+    OptString key = iter.first().toString();
     Variant var_val = iter.second();
     if (UNLIKELY(var_val.isObject()
-        && var_val.toObject()->instanceof(SystemLib::s_CURLFileClass))) {
+        && var_val.toObject()->instanceof(SystemLib::getCURLFileClass()))) {
       Object val = var_val.toObject();
 
-      String name = val->o_get(s_name).toString();
-      String mime = val->o_get(s_mime).toString();
-      String postname = val->o_get(s_postname).toString();
+      OptString name = val->o_get(s_name).toString();
+      OptString mime = val->o_get(s_mime).toString();
+      OptString postname = val->o_get(s_postname).toString();
 
       m_error_no = (CURLcode)curl_formadd
         (&first, &last,
@@ -810,10 +909,10 @@ bool CurlResource::setPostFieldsOption(const Variant& value) {
          CURLFORM_FILE, name.c_str(),
          CURLFORM_END);
     } else {
-      String val = var_val.toString();
+      OptString val = var_val.toString();
       auto postval = val.data();
 
-      if (!RuntimeOption::PHP7_DisallowUnsafeCurlUploads &&
+      if (!Cfg::PHP7::DisallowUnsafeCurlUploads &&
           !m_safeUpload &&
           *postval == '@' &&
           strlen(postval) == val.size()) {
@@ -830,8 +929,8 @@ bool CurlResource::setPostFieldsOption(const Variant& value) {
           "is deprecated. Please use the CURLFile class instead"
         );
 
-        if (val.get()->isImmutable()) {
-          val = String::attach(
+        if (val.get()->hasMultipleRefs()) {
+          val = OptString::attach(
             StringData::Make(val.data(), val.size(), CopyString));
         }
         auto slice = val.bufferSlice();
@@ -842,7 +941,7 @@ bool CurlResource::setPostFieldsOption(const Variant& value) {
         if (type) { *type = '\0'; }
         if (filename) { *filename = '\0'; }
 
-        String localName = File::TranslatePath(mutablePostval);
+        OptString localName = File::TranslatePath(mutablePostval);
 
         /* The arguments after _NAMELENGTH and _CONTENTSLENGTH
          * must be explicitly cast to long in curl_formadd
@@ -970,8 +1069,8 @@ bool CurlResource::setStringListOption(long option, const Variant& value) {
   Array arr = value.toArray();
   curl_slist *slist = nullptr;
   for (ArrayIter iter(arr); iter; ++iter) {
-    String key = iter.first().toString();
-    String val = iter.second().toString();
+    OptString key = iter.first().toString();
+    OptString val = iter.second().toString();
 
     slist = curl_slist_append(slist, val.c_str());
     if (!slist) {
@@ -1044,7 +1143,7 @@ bool CurlResource::setNonCurlOption(long option, const Variant& value) {
       }
       return false;
     case CURLOPT_SAFE_UPLOAD:
-      if (RuntimeOption::PHP7_DisallowUnsafeCurlUploads &&
+      if (Cfg::PHP7::DisallowUnsafeCurlUploads &&
           value.toInt64() == 0) {
         raise_warning(
           "curl_setopt(): Disabling safe uploads is no longer supported"
@@ -1058,7 +1157,7 @@ bool CurlResource::setNonCurlOption(long option, const Variant& value) {
 }
 
 inline int64_t minTimeoutImpl(int64_t timeout, int64_t multiple) {
-  auto info = ThreadInfo::s_threadInfo.getNoCheck();
+  auto info = RequestInfo::s_requestInfo.getNoCheck();
   auto& data = info->m_reqInjectionData;
   if (!data.getTimeout()) {
     return timeout;
@@ -1079,18 +1178,19 @@ void CurlResource::handle_exception() {
   try {
     throw;
   } catch (const Object& e) {
-    m_exception.assign(e);
+    m_exception.emplace(e);
   } catch (Exception& e) {
-    m_exception.assign(e.clone());
+    m_exception.emplace(e.clone());
   } catch (std::exception& e) {
-    m_exception.assign(
+    m_exception.emplace(
       new FatalErrorException(0,
                               "Unexpected error in curl callback: %s",
                               e.what())
     );
   } catch (...) {
-    m_exception.assign(
-      new FatalErrorException("Unknown error in curl callback"));
+    m_exception.emplace(
+      new FatalErrorException("Unknown error in curl callback")
+    );
   }
 }
 
@@ -1109,7 +1209,7 @@ size_t CurlResource::curl_read(char *data,
       case PHP_CURL_DIRECT:
         if (t->fp) {
           int data_size = size * nmemb;
-          String ret = t->fp->read(data_size);
+          OptString ret = t->fp->read(data_size);
           length = ret.size();
           if (length) {
             memcpy(data, ret.data(), length);
@@ -1124,9 +1224,9 @@ size_t CurlResource::curl_read(char *data,
         };
         Variant ret = vm_call_user_func(
           t->callback,
-          make_packed_array(Resource(ch), Resource(t->fp), data_size));
+          make_vec_array(OptResource(ch), OptResource(t->fp), data_size));
         if (ret.isString()) {
-          String sret = ret.toString();
+          OptString sret = ret.toString();
           length = data_size < sret.size() ? data_size : sret.size();
           memcpy(data, sret.data(), length);
         }
@@ -1156,7 +1256,7 @@ size_t CurlResource::curl_write(char *data,
         g_context->write(data, length);
         break;
       case PHP_CURL_FILE:
-        return t->fp->write(String(data, length, CopyString), length);
+        return t->fp->write(OptString(data, length, CopyString), length);
       case PHP_CURL_RETURN:
         if (length > 0) {
           t->buf.append(data, (int)length);
@@ -1169,7 +1269,7 @@ size_t CurlResource::curl_write(char *data,
         };
         Variant ret = vm_call_user_func(
           t->callback,
-          make_packed_array(Resource(ch), String(data, length, CopyString)));
+          make_vec_array(OptResource(ch), OptString(data, length, CopyString)));
         length = ret.toInt64();
         break;
       }
@@ -1202,7 +1302,7 @@ size_t CurlResource::curl_write_header(char *data,
         }
         break;
       case PHP_CURL_FILE:
-        return t->fp->write(String(data, length, CopyString), length);
+        return t->fp->write(OptString(data, length, CopyString), length);
       case PHP_CURL_USER: {
         ch->m_in_callback = true;
         SCOPE_EXIT {
@@ -1210,7 +1310,7 @@ size_t CurlResource::curl_write_header(char *data,
         };
         Variant ret = vm_call_user_func(
           t->callback,
-          make_packed_array(Resource(ch), String(data, length, CopyString)));
+          make_vec_array(OptResource(ch), OptString(data, length, CopyString)));
         length = ret.toInt64();
         break;
       }
@@ -1230,7 +1330,7 @@ int CurlResource::curl_debug(CURL* /*cp*/, curl_infotype type, char* buf,
                              size_t buf_len, void* ctx) {
   CurlResource *ch = (CurlResource *)ctx;
   if (type == CURLINFO_HEADER_OUT && buf_len > 0) {
-    ch->m_header = String(buf, buf_len, CopyString);
+    ch->m_header = OptString(buf, buf_len, CopyString);
   }
   return 0;
 }
@@ -1245,8 +1345,8 @@ int CurlResource::curl_progress(void* p,
     log_native_stack("unexpected curl_progress");
   }
 
-  PackedArrayInit pai(5);
-  pai.append(Resource(curl));
+  VecInit pai(5);
+  pai.append(OptResource(curl));
   pai.append(dltotal);
   pai.append(dlnow);
   pai.append(ultotal);
@@ -1266,6 +1366,55 @@ int CurlResource::curl_progress(void* p,
   }
 }
 
+namespace {
+hphp_fast_string_map<X509_STORE*> s_certCache;
+folly::SharedMutex s_mutex;
+}
+
+bool CurlResource::useCertCache() const {
+  auto const isNonEmpty = [&](int64_t option) {
+    if (!m_opts.exists(option)) return false;
+    Variant untyped_value = m_opts[option];
+    if (untyped_value.isString() && !untyped_value.toString().empty()) {
+      return true;
+    }
+    return false;
+  };
+
+  if (isNonEmpty(CURLOPT_PROXY) && cainfo(false) != cainfo(true)) {
+    return false;
+  }
+  if (isNonEmpty(CURLOPT_CRLFILE)) {
+    return false;
+  }
+  if (isNonEmpty(CURLOPT_CAPATH)) {
+    return false;
+  }
+
+  return true;
+}
+
+OptString CurlResource::cainfo(bool proxy) const {
+  auto const option = proxy ? CURLOPT_PROXY_CAINFO : CURLOPT_CAINFO;
+
+  static auto const defaultCainfoData = [&] () -> StringData* {
+    auto const curlInfo = curl_version_info(CURLVERSION_NOW);
+    if (!curlInfo->cainfo) return nullptr;
+    return makeStaticString(curlInfo->cainfo);
+  }();
+
+  auto const defaultCainfo = defaultCainfoData ? OptString{defaultCainfoData} : OptString{};
+  if (!m_opts.exists(int64_t(option))) return defaultCainfo;
+
+  Variant untyped_value = m_opts[int64_t(option)];
+  if (!untyped_value.isString()) return defaultCainfo;
+
+  auto const string_value = untyped_value.toString();
+  if (string_value.empty()) return defaultCainfo;
+
+  return string_value;
+}
+
 CURLcode CurlResource::ssl_ctx_callback(CURL *curl, void *sslctx, void *parm) {
   // Set defaults from config.hdf
   CURLcode r = curl_tls_workarounds_cb(curl, sslctx, parm);
@@ -1281,6 +1430,74 @@ CURLcode CurlResource::ssl_ctx_callback(CURL *curl, void *sslctx, void *parm) {
   if (cp == nullptr) {
     raise_warning("supplied argument is not a valid cURL handle resource");
     return CURLE_FAILED_INIT;
+  }
+
+  // Load the CA from the cache.
+  if (cp->useCertCache()) {
+    auto const cainfo = cp->cainfo(false).toCppString();
+    if (!cainfo.empty()) {
+      auto const store = [&] () -> X509_STORE* {
+        {
+          std::shared_lock lock(s_mutex);
+          auto const iter = s_certCache.find(cainfo);
+          if (iter != s_certCache.end()) return iter->second;
+        }
+
+        STACK_OF(X509_INFO) *stack;
+        BIO *in;
+
+        in = BIO_new_file(cainfo.data(), "r");
+        if (!in) return nullptr;
+        stack = PEM_X509_INFO_read_bio(in, nullptr, nullptr, (void*)"");
+        BIO_free(in);
+        if (!stack) return nullptr;
+
+        auto const store = X509_STORE_new();
+        if (!store) return nullptr;
+        X509_STORE_set_flags(store, X509_V_FLAG_TRUSTED_FIRST);
+        X509_STORE_set_flags(store, X509_V_FLAG_PARTIAL_CHAIN);
+
+        unsigned count = 0;
+        for (int i = 0; i < sk_X509_INFO_num(stack); i++) {
+          X509_INFO* info;
+          info = sk_X509_INFO_value(stack, i);
+          if (info->x509) {
+            if (!X509_STORE_add_cert(store, info->x509)) {
+              X509_STORE_free(store);
+              sk_X509_INFO_pop_free(stack, X509_INFO_free);
+              return nullptr;
+            }
+            count++;
+          }
+          if (info->crl) {
+            if (!X509_STORE_add_crl(store, info->crl)) {
+              X509_STORE_free(store);
+              sk_X509_INFO_pop_free(stack, X509_INFO_free);
+              return nullptr;
+            }
+            count++;
+          }
+        }
+        sk_X509_INFO_pop_free(stack, X509_INFO_free);
+        if (count == 0) {
+          X509_STORE_free(store);
+          return nullptr;
+        }
+
+        std::unique_lock lock(s_mutex);
+        auto const iter = s_certCache.find(cainfo);
+        if (iter != s_certCache.end()) {
+          // Lost the race to parse & insert the cached item.
+          X509_STORE_free(store);
+          return iter->second;
+        } else {
+          s_certCache.emplace(cainfo, store);
+          return store;
+        }
+      }();
+      if (!store) return CURLE_FAILED_INIT;
+      SSL_CTX_set1_cert_store(ctx, store);
+    }
   }
 
   // Override cipher specs if necessary.

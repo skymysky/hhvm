@@ -1,0 +1,13 @@
+error: Typing[4110] `delay` can only operate on an `Awaitable` [1]
+-> Expected `Awaitable<mixed>` [1]
+-> But got `int` [2]
+
+delay_non_awaitable.php:5:3
+3 | 
+4 | async function foo(): Awaitable<void> {
+5 |   delay 42;
+  |   ^^^^^^^^ [1]
+  |         ^^ [2]
+6 | }
+
+1 error found

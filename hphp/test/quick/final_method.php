@@ -1,12 +1,12 @@
 <?hh
 
-print "Test begin\n";
-
 class C {
-  final public function f() {}
+  final public function f() :mixed{}
 }
 class D extends C {
-  public function f() {}
+  public function f() :mixed{}
 }
-
-print "Test end\n";
+<<__EntryPoint>>
+function entrypoint_final_method(): void {
+  print "Test\n";
+}

@@ -1,7 +1,11 @@
-<?php
+<?hh
 class A {
-  public static function b() {
-    return \STDIN;
+  public static function b() :mixed{
+    return \HH\stdin();
   }
 }
-var_dump(A::b());
+
+<<__EntryPoint>>
+function main_stdin() :mixed{
+  var_dump(A::b());
+}

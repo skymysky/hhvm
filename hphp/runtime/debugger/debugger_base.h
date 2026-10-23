@@ -14,8 +14,7 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_EVAL_DEBUGGER_BASE_H_
-#define incl_HPHP_EVAL_DEBUGGER_BASE_H_
+#pragma once
 
 #include <memory>
 #include <string>
@@ -26,12 +25,13 @@
 #include "hphp/runtime/debugger/debugger_thrift_buffer.h"
 #include "hphp/util/hdf.h"
 
-namespace HPHP { namespace Eval {
+namespace HPHP::Eval {
 ///////////////////////////////////////////////////////////////////////////////
 // startup options for debugger client
 
 struct DebuggerClientOptions {
   std::string host;
+  bool isNotebook;
   int port{-1};
   std::string extension;
   std::vector<std::string> cmds;
@@ -39,6 +39,7 @@ struct DebuggerClientOptions {
   std::string user;
   std::string configFName;
   std::string fileName;
+  std::string from;
 };
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -64,7 +65,7 @@ struct DebuggerServerLostException : DebuggerClientException {};
 
 // Both client- and server-side exceptions
 struct DebuggerException : Exception {
-  EXCEPTION_COMMON_IMPL(DebuggerException);
+  EXCEPTION_COMMON_IMPL(DebuggerException)
 };
 
 // Exception thrown in two cases:
@@ -81,7 +82,7 @@ struct DebuggerClientExitException : DebuggerException {
   const char* what() const noexcept override {
     return "Debugger client has just quit, request (if any) terminated.";
   }
-  EXCEPTION_COMMON_IMPL(DebuggerClientExitException);
+  EXCEPTION_COMMON_IMPL(DebuggerClientExitException)
 };
 
 // Exception thrown when a DebuggerClientExitException occurs specifically
@@ -100,7 +101,7 @@ struct DebuggerRestartException : DebuggerException {
   const char* what() const noexcept override {
     return "Debugger restarting program or aborting web request.";
   }
-  EXCEPTION_COMMON_IMPL(DebuggerRestartException);
+  EXCEPTION_COMMON_IMPL(DebuggerRestartException)
 
   std::shared_ptr<std::vector<std::string>> m_args;
 };
@@ -124,14 +125,14 @@ enum CodeColor {
 /**
  * "line", starting line number, or 0 for no line number display.
  * "lineFocus", the line to highlight, with gray background.
- * highlight_code() doesn't need <?php and will treat source entirely PHP.
+ * highlight_code() doesn't need <?hh and will treat source entirely PHP.
  */
-String highlight_php(const String& source, int line = 0, int lineFocus0 = 0,
-                     int charFocus0 = 0, int lineFocus1 = 0,
-                     int charFocus1 = 0);
-String highlight_code(const String& source, int line = 0, int lineFocus0 = 0,
-                      int charFocus0 = 0, int lineFocus1 = 0,
-                      int charFocus1 = 0);
+OptString highlight_php(const OptString& source, int line = 0, int lineFocus0 = 0,
+                        int charFocus0 = 0, int lineFocus1 = 0,
+                        int charFocus1 = 0);
+OptString highlight_code(const OptString& source, int line = 0, int lineFocus0 = 0,
+                         int charFocus0 = 0, int lineFocus1 = 0,
+                         int charFocus1 = 0);
 
 extern const char* PHP_KEYWORDS[];
 
@@ -146,14 +147,13 @@ using DSandboxInfoPtr = std::shared_ptr<DSandboxInfo>;
 struct DMachineInfo {
   std::string m_name;
   int m_port{0};
-  DebuggerThriftBuffer m_thrift;
+  DebuggerThriftBuffer m_read_thrift;
+  DebuggerThriftBuffer m_write_thrift;
 
   DSandboxInfoPtr m_sandbox;
-  std::string m_rpcHost;
   bool m_interrupting{false}; // If the machine is paused at an interrupt
   bool m_sandboxAttached{false};
   bool m_initialized{false}; // If the initial connection protocol is complete
-  int m_rpcPort{0};
 };
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -232,12 +232,15 @@ struct Macro {
 struct DebuggerUsageLogger {
   virtual ~DebuggerUsageLogger() {}
   virtual void init() {}
+  virtual void clearClientInfo() {}
+  virtual void setClientInfo(const std::string& /*username*/, uid_t /*uid*/,
+                             pid_t /*clientPid*/) {}
+  virtual void setFrom(const std::string& /*from*/) {}
   virtual void
-  log(const std::string& /*mode*/, const std::string& /*sandboxId*/,
-      const std::string& /*cmd*/, const std::string& /*data*/) {}
+  log(const std::string& /*clientId*/, const std::string& /*mode*/,
+      const std::string& /*sandboxId*/, const std::string& /*cmd*/,
+      const std::string& /*data*/) {}
 };
 
 ///////////////////////////////////////////////////////////////////////////////
-}}
-
-#endif // incl_HPHP_EVAL_DEBUGGER_BASE_H_
+}

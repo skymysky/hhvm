@@ -1,0 +1,10 @@
+error: Parsing[1002] Cannot use unstable feature: `shape_field_punning` [1]
+
+disabled.php:6:14
+4 |   $foo = 1;
+5 |   // This should fail because the feature is not enabled
+6 |   $s = shape($foo);
+  |              ^^^^ [1]
+7 | }
+
+1 error found

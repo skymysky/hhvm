@@ -1,6 +1,6 @@
 <?hh
 
-function profile($what, $fn) {
+function profile($what, $fn) :mixed{
   if ($what == 'exit' && $fn == 'X::foo') {
     fb_setprofile(null);
     var_dump(debug_backtrace(0));
@@ -8,14 +8,13 @@ function profile($what, $fn) {
 }
 
 class X {
-  function foo() {
+  <<__NEVER_INLINE>>
+  function foo() :mixed{
     var_dump('hello');
   }
 }
-
-function main() {
-  fb_setprofile('profile');
+<<__EntryPoint>>
+function main() :mixed{
+  fb_setprofile(profile<>);
   (new X)->foo();
 }
-
-main();

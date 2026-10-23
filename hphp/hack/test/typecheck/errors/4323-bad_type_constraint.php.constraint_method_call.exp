@@ -1,0 +1,20 @@
+error: Typing[4323] Typing error [1]
+-> `T` is a constrained type parameter [2]
+-> This type constraint is violated [3]
+-> Expected `arraykey` [3]
+-> But got `bool` [4]
+
+4323-bad_type_constraint.php:7:5
+3 | 
+4 | class BadTypeConstraint {
+5 |   public function foo<T as arraykey>(T $t) : void {}
+  |                       ^ [2]
+  |                            ^^^^^^^^ [3]
+6 |   public function bar() : void {
+7 |     $this->foo(true);
+  |     ^^^^^^^^^^^^^^^^ [1]
+  |                ^^^^ [4]
+8 |   }
+9 | }
+
+1 error found

@@ -1,11 +1,22 @@
-File "interface_constructor2.php", line 16, characters 7-7:
-Class A does not correctly implement all required methods  (Typing[4110])
-File "interface_constructor2.php", line 16, characters 20-22:
-Some methods are incompatible with those declared in type Foo
-Read the following to see why:
-File "interface_constructor2.php", line 17, characters 19-29:
-Member __construct has the wrong type
-File "interface_constructor2.php", line 17, characters 31-34:
-This is a bool
-File "interface_constructor2.php", line 13, characters 31-33:
-It is incompatible with an int
+error: Typing[4341] The method `__construct` is not compatible with the overridden method [1]
+-> Method `__construct` has type `(function(bool $x): void)` in `A` [1]
+-> But it has type `(function(int $x): void)` in parent `Foo` [2]
+-> Type `(function(bool $x): void)` is not a subtype of `(function(int $x): void)` [1]
+-> Expected `bool` [3]
+-> But got `int` [4]
+
+interface_constructor2.php:17:19
+11 | 
+12 | interface Foo {
+13 |   public function __construct(int $x);
+   |                   ^^^^^^^^^^^ [2]
+   |                               ^^^ [4]
+14 | }
+15 | 
+16 | class A implements Foo {
+17 |   public function __construct(bool $x) {}
+   |                   ^^^^^^^^^^^ [1]
+   |                               ^^^^ [3]
+18 | }
+
+1 error found

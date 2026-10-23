@@ -1,19 +1,18 @@
-Class \Bar -> Class \Bar
-Class \Bar -> Class \Foo
-Class \Bar -> Cstr \Foo
-Class \Bar -> Extends \Foo
-Class \Baz -> Class \Bar
-Class \Baz -> Class \Baz
-Class \Baz -> Class \Foo
-Class \Baz -> Cstr \Bar
-Class \Baz -> Extends \Bar
-Class \Foo -> Class \Foo
-Class \N\Bar -> Class \N\Bar
-Class \N\Bar -> Class \N\Foo
-Class \N\Bar -> Cstr \N\Foo
-Class \N\Bar -> Extends \N\Foo
-Class \N\Foo -> Class \N\Foo
-Class \Qux -> Class \N\Foo
-Class \Qux -> Class \Qux
-Class \Qux -> Cstr \N\Foo
-Class \Qux -> Extends \N\Foo
+Const Bar::TInner -> Type Bar
+Const Baz::TInner -> Type Baz
+Const Foo::TInner -> Type Foo
+Const N\Bar::TInner -> Type N\Bar
+Const N\Foo::TInner -> Type N\Foo
+Const Qux::TInner -> Type Qux
+Constructor Bar -> Type Bar, Type Baz
+Constructor Baz -> Type Baz
+Constructor Foo -> Type Bar, Type Foo
+Constructor N\Bar -> Type N\Bar
+Constructor N\Foo -> Type N\Bar, Type N\Foo, Type Qux
+Constructor Qux -> Type Qux
+Extends Bar -> Type Baz
+Extends Foo -> Type Bar
+Extends N\Foo -> Type N\Bar, Type Qux
+Type Bar -> Type Baz
+Type Foo -> Type Bar, Type Baz
+Type N\Foo -> Type N\Bar, Type Qux

@@ -4,7 +4,7 @@
 // 1. Basic nullsafe, base is in a local var
 // --------------------------------------------
 
-function basic() {
+function basic() :mixed{
   echo "= ".__FUNCTION__.":\n\n";
   $x = null;
   var_dump($x?->y);
@@ -13,7 +13,7 @@ function basic() {
 
 // Non-short-circuit.
 
-function sideEffect($fn) {
+function sideEffect($fn) :mixed{
   echo "sideEffect is called from '$fn'\n";
 }
 
@@ -21,7 +21,7 @@ function sideEffect($fn) {
 // 2. Nested with a side effect
 // --------------------------------------------
 
-function nested() {
+function nested() :mixed{
   echo "= ".__FUNCTION__.":\n\n";
   $x = null;
   var_dump($x?->y?->z(sideEffect(__FUNCTION__)));
@@ -40,12 +40,12 @@ class X {
 }
 
 class Y {
-  function z() {
+  function z() :mixed{
     return 'z';
   }
 }
 
-function notNull() {
+function notNull() :mixed{
   echo "= ".__FUNCTION__.":\n\n";
   $x = new X;
   var_dump($x?->y?->z(sideEffect(__FUNCTION__)));
@@ -57,7 +57,7 @@ function notNull() {
 // 4. Base is on the stack
 // --------------------------------------------
 
-function nonLocalBase() {
+function nonLocalBase() :mixed{
   echo "= ".__FUNCTION__.":\n\n";
   var_dump((() ==> null)()?->y); // null
   var_dump((() ==> new X)()?->y?->z(sideEffect(__FUNCTION__))); // 10
@@ -65,22 +65,10 @@ function nonLocalBase() {
 }
 
 // --------------------------------------------
-// 5. Var name of the base var.
-// --------------------------------------------
-
-function varNameBase() {
-  echo "= ".__FUNCTION__.":\n\n";
-  $x = null;
-  $xName = 'x';
-  var_dump($$xName?->y?->z(sideEffect(__FUNCTION__)));
-  echo "\n";
-}
-
-// --------------------------------------------
 // 6. XHP attribute
 // --------------------------------------------
 
-function xhpAttr() {
+function xhpAttr() :mixed{
   echo "= ".__FUNCTION__.":\n\n";
   $x = null;
   var_dump($x?->:foo);
@@ -91,7 +79,7 @@ function xhpAttr() {
 // 7. isset
 // --------------------------------------------
 
-function issetProp() {
+function issetProp() :mixed{
   echo "= ".__FUNCTION__.":\n\n";
   $x = null;
   var_dump(isset($x?->foo)); // false
@@ -103,19 +91,22 @@ function issetProp() {
 // 8. empty
 // --------------------------------------------
 
-function emptyProp() {
+function emptyProp() :mixed{
   echo "= ".__FUNCTION__.":\n\n";
   $x = null;
-  var_dump(empty($x?->foo)); // true
+  var_dump(!($x?->foo ?? false)); // true
   var_dump($x); // null
   echo "\n";
 }
 
+
+<<__EntryPoint>>
+function main_nullsafe_prop_1() :mixed{
 basic();
 nested();
 notNull();
 nonLocalBase();
-varNameBase();
 xhpAttr();
 issetProp();
 emptyProp();
+}

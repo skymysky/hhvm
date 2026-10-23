@@ -1,17 +1,23 @@
-<?php
+<?hh
 
-function test(closure $a) {
-	var_dump($a());
+function test(Closure $a) :mixed{
+  var_dump($a());
 }
 
+<<__EntryPoint>>
+function main(): void {
+  test(function() {
+    return new stdClass;
+  });
 
-test(function() { return new stdclass; });
+  test(function() {});
 
-test(function() { });
+  try {
+    $a = function($x) use ($y) {};
+    test($a);
+  } catch (Exception $e) {
+    var_dump($e->getMessage());
+  }
 
-$a = function($x) use ($y) {};
-test($a);
-
-test(new stdclass);
-
-?>
+  test(new stdClass);
+}

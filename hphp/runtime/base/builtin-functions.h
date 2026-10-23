@@ -14,15 +14,16 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_BUILTIN_FUNCTIONS_H_
-#define incl_HPHP_BUILTIN_FUNCTIONS_H_
+#pragma once
 
+#include "hphp/runtime/base/req-root.h"
 #include "hphp/runtime/base/type-variant.h"
 #include "hphp/runtime/base/variable-unserializer.h"
 #include "hphp/runtime/vm/bytecode.h"
+#include "hphp/runtime/vm/native.h"
+#include "hphp/util/configs/eval.h"
 #include "hphp/util/functional.h"
 #include "hphp/util/portability.h"
-#include "hphp/runtime/base/req-root.h"
 
 namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
@@ -34,25 +35,33 @@ extern const StaticString s_cmpWithCollection;
 extern const StaticString s_cmpWithVec;
 extern const StaticString s_cmpWithDict;
 extern const StaticString s_cmpWithKeyset;
+extern const StaticString s_cmpWithClsMeth;
+extern const StaticString s_cmpWithRClsMeth;
+extern const StaticString s_cmpWithRFunc;
+extern const StaticString s_cmpWithNonArr;
+extern const StaticString s_cmpWithFunc;
 
 ///////////////////////////////////////////////////////////////////////////////
 // operators
 
-inline String concat(const String& s1, const String& s2) {
+inline OptString concat(const OptString& s1, const OptString& s2) {
   return s1 + s2;
 }
 
-String concat3(const String& s1, const String& s2, const String& s3);
-String concat4(const String& s1, const String& s2, const String& s3,
-               const String& s4);
+OptString concat3(const OptString& s1, const OptString& s2, const OptString& s3);
+OptString concat4(const OptString& s1, const OptString& s2, const OptString& s3,
+                  const OptString& s4);
 
 ///////////////////////////////////////////////////////////////////////////////
 
-void NEVER_INLINE raise_missing_this(const Func* f);
-bool NEVER_INLINE needs_missing_this_check(const Func* f);
-void NEVER_INLINE throw_invalid_property_name(const String& name);
-void NEVER_INLINE throw_null_get_object_prop();
-void NEVER_INLINE raise_null_object_prop();
+[[noreturn]] void NEVER_INLINE throw_missing_this(const Func* f);
+[[noreturn]] void NEVER_INLINE throw_has_this_need_static(const Func* f);
+void NEVER_INLINE throw_invalid_property_name(const OptString& name);
+
+[[noreturn]]
+void NEVER_INLINE throw_call_reified_func_without_generics(const Func* f);
+
+void NEVER_INLINE raise_implicit_context_warning(std::string);
 
 [[noreturn]]
 void throw_exception(const Object& e);
@@ -60,38 +69,86 @@ void throw_exception(const Object& e);
 ///////////////////////////////////////////////////////////////////////////////
 // type testing
 
-inline bool is_null(const Variant& v)   { return v.isNull();}
-inline bool is_not_null(const Variant& v) { return !v.isNull();}
-inline bool is_bool(const Variant& v)   { return v.is(KindOfBoolean);}
-inline bool is_int(const Variant& v)    { return v.isInteger();}
-inline bool is_double(const Variant& v) { return v.is(KindOfDouble);}
-inline bool is_string(const Variant& v) { return v.isString();}
-inline bool is_array(const Variant& v)  { return v.isPHPArray();}
-inline bool is_vec(const Variant& v)    { return v.isVecArray();}
-inline bool is_dict(const Variant& v)   { return v.isDict();}
-inline bool is_keyset(const Variant& v) { return v.isKeyset();}
-inline bool is_varray(const Variant& v) {
-  return RuntimeOption::EvalHackArrDVArrs
-    ? v.isVecArray()
-    : (v.isArray() && v.asCArrRef().isVArray());
-}
-inline bool is_darray(const Variant& v) {
-  return RuntimeOption::EvalHackArrDVArrs
-    ? v.isDict()
-    : (v.isArray() && v.asCArrRef().isDArray());
+inline bool is_null(tv_rval c) {
+  assertx(tvIsPlausible(*c));
+  return tvIsNull(c);
 }
 
-inline bool is_object(const Variant& var) {
-  if (!var.is(KindOfObject)) {
-    return false;
+inline bool is_bool(const TypedValue* c) {
+  assertx(tvIsPlausible(*c));
+  return tvIsBool(c);
+}
+
+inline bool is_int(const TypedValue* c) {
+  assertx(tvIsPlausible(*c));
+  return tvIsInt(c);
+}
+
+inline bool is_double(const TypedValue* c) {
+  assertx(tvIsPlausible(*c));
+  return tvIsDouble(c);
+}
+
+inline bool is_string(const TypedValue* c) {
+  if (tvIsString(c)) return true;
+  if (tvIsClass(c) || tvIsLazyClass(c)) {
+    if (Cfg::Eval::ClassIsStringNotices) {
+      raise_notice("Class used in is_string");
+    }
+    return true;
   }
-  auto cls = var.toObject().get()->getVMClass();
-  auto incompleteClass = SystemLib::s___PHP_Incomplete_ClassClass;
-  return cls != incompleteClass;
+  return false;
 }
 
-inline bool is_empty_string(const Variant& v) {
-  return v.isString() && v.getStringData()->empty();
+inline bool is_any_array(const TypedValue* c) {
+  assertx(tvIsPlausible(*c));
+  return tvIsArrayLike(c);
+}
+
+inline bool is_vec(const TypedValue* c) {
+  assertx(tvIsPlausible(*c));
+  return tvIsVec(c);
+}
+
+inline bool is_dict(const TypedValue* c) {
+  assertx(tvIsPlausible(*c));
+  return tvIsDict(c);
+}
+
+inline bool is_keyset(const TypedValue* c) {
+  assertx(tvIsPlausible(*c));
+  return tvIsKeyset(c);
+}
+
+inline bool is_object(const TypedValue* c) {
+  assertx(tvIsPlausible(*c));
+  if (!tvIsObject(c)) return false;
+  auto const cls = val(c).pobj->getVMClass();
+  if (Cfg::Eval::NoticeOnMethCallerHelperIsObject) {
+    if (cls == SystemLib::getMethCallerHelperClass()) {
+      raise_notice("is_object() called on MethCaller");
+    }
+  }
+  return cls != SystemLib::get__PHP_Incomplete_ClassClass();
+}
+
+inline bool is_clsmeth(const TypedValue* c) {
+  assertx(tvIsPlausible(*c));
+  return tvIsClsMeth(c) || tvIsRClsMeth(c);
+}
+
+inline bool is_class(const TypedValue* c) {
+  assertx(tvIsPlausible(*c));
+  return tvIsClass(c) || tvIsLazyClass(c);
+}
+
+inline bool is_fun(const TypedValue* c) {
+  assertx(tvIsPlausible(*c));
+  return (tvIsFunc(c) && !val(c).pfunc->isMethCaller()) || tvIsRFunc(c);
+}
+
+inline bool is_empty_string(const TypedValue* c) {
+  return tvIsString(c) && c->m_data.pstr->empty();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -101,7 +158,7 @@ inline bool is_empty_string(const Variant& v) {
  * Semantics of is_callable defined here:
  * http://php.net/manual/en/function.is-callable.php
  */
-bool is_callable(const Variant& v, bool syntax_only, RefData* name);
+bool is_callable(const Variant& v, bool syntax_only, Variant* name);
 /*
  * Equivalent to is_callable(v, false, nullptr)
  */
@@ -112,68 +169,104 @@ enum class DecodeFlags { Warn, NoWarn, LookupOnly };
 const HPHP::Func*
 vm_decode_function(const_variant_ref function,
                    ActRec* ar,
-                   bool forwarding,
                    ObjectData*& this_,
                    HPHP::Class*& cls,
-                   StringData*& invName,
                    bool& dynamic,
-                   DecodeFlags flags = DecodeFlags::Warn);
+                   DecodeFlags flags = DecodeFlags::Warn,
+                   bool genericsAlreadyGiven = false);
 
 inline void
 vm_decode_function(const_variant_ref function,
-                   ActRec* ar,
-                   bool forwarding,
                    CallCtx& ctx,
-                   DecodeFlags flags = DecodeFlags::Warn) {
-  ctx.func = vm_decode_function(function, ar, forwarding, ctx.this_, ctx.cls,
-                                ctx.invName, ctx.dynamic, flags);
+                   DecodeFlags flags = DecodeFlags::Warn,
+                   bool genericsAlreadyGiven = false) {
+  ctx.func = vm_decode_function(function, nullptr, ctx.this_, ctx.cls,
+                                ctx.dynamic, flags, genericsAlreadyGiven);
 }
 
+bool checkMethCallerTarget(const Func* meth, const Class* ctx, bool error);
+void checkMethCaller(const Func* func, const Class* ctx);
+
 Variant vm_call_user_func(const_variant_ref function, const Variant& params,
-                          bool forwarding = false, bool checkRef = false);
+                          RuntimeCoeffects providedCoeffects
+                            = RuntimeCoeffects::fixme(),
+                          bool checkRef = false,
+                          bool allowDynCallNoPointer = false);
 template<typename T>
 Variant vm_call_user_func(T&& t, const Variant& params,
-                          bool forwarding = false, bool checkRef = false) {
+                          RuntimeCoeffects providedCoeffects
+                            = RuntimeCoeffects::fixme(),
+                          bool checkRef = false,
+                          bool allowDynCallNoPointer = false) {
   const Variant function{std::forward<T>(t)};
   return vm_call_user_func(
-    const_variant_ref{function}, params, forwarding, checkRef
+    const_variant_ref{function}, params, providedCoeffects,
+    checkRef, allowDynCallNoPointer
   );
 }
 
-Variant invoke_static_method(const String& s, const String& method,
-                             const Variant& params, bool fatal = true);
+// Invoke an arbitrary user-defined function.
+// If you're considering calling this function for some new code, don't.
+Variant invoke(const OptString& function, const Variant& params,
+               bool allowDynCallNoPointer = false);
 
-Variant o_invoke_failed(const char *cls, const char *meth,
-                        bool fatal = true);
+Variant invoke_static_method(const OptString& s, const OptString& method,
+                             const Variant& params, const ArrayData* namedArgNames,
+                             bool fatal = true);
+
+void o_invoke_failed(const char *cls, const char *meth, bool fatal = true);
 
 bool is_constructor_name(const char* func);
-void throw_instance_method_fatal(const char *name);
+[[noreturn]] void throw_instance_method_fatal(const char *name);
 
 [[noreturn]] void throw_invalid_collection_parameter();
 [[noreturn]] void throw_invalid_operation_exception(StringData*);
-[[noreturn]] void throw_arithmetic_error(StringData*);
-[[noreturn]] void throw_division_by_zero_error(StringData*);
+[[noreturn]] void throw_division_by_zero_exception();
 [[noreturn]] void throw_iterator_not_valid();
 [[noreturn]] void throw_collection_property_exception();
 [[noreturn]] void throw_collection_compare_exception();
 [[noreturn]] void throw_vec_compare_exception();
 [[noreturn]] void throw_dict_compare_exception();
 [[noreturn]] void throw_keyset_compare_exception();
+[[noreturn]] void throw_clsmeth_compare_exception();
+[[noreturn]] void throw_rclsmeth_compare_exception();
+[[noreturn]] void throw_rfunc_compare_exception();
+[[noreturn]] void throw_opaque_resource_compare_exception();
+[[noreturn]] void throw_ecl_compare_exception();
+[[noreturn]] void throw_rec_non_rec_compare_exception();
+[[noreturn]] void throw_func_compare_exception();
 [[noreturn]] void throw_param_is_not_container();
 [[noreturn]] void throw_invalid_inout_base();
 [[noreturn]] void throw_cannot_modify_immutable_object(const char* className);
+[[noreturn]] void throw_cannot_modify_const_object(const char* className);
 [[noreturn]] void throw_object_forbids_dynamic_props(const char* className);
-[[noreturn]] void throw_cannot_modify_immutable_prop(const char* className,
-                                                     const char* propName);
-[[noreturn]] void throw_cannot_bind_immutable_prop(const char* className,
-                                                   const char* propName);
-void check_collection_compare(const ObjectData* obj);
-void check_collection_compare(const ObjectData* obj1, const ObjectData* obj2);
+[[noreturn]] void throw_cannot_modify_const_prop(const char* className,
+                                                 const char* propName);
+[[noreturn]] void throw_cannot_modify_static_const_prop(const char* className,
+                                                        const char* propName);
+[[noreturn]] void throw_late_init_prop(const Class* cls,
+                                       const StringData* propName,
+                                       bool isSProp);
+
+[[noreturn]] void throw_must_be_mutable(const char* className, const char* propName);
+[[noreturn]] void throw_must_be_readonly(const char* className, const char* propName);
+[[noreturn]] void throw_must_be_enclosed_in_readonly(const char* className, const char* propName);
+[[noreturn]] void throw_must_be_value_type(const char* className, const char* propName);
+[[noreturn]] void throw_local_must_be_value_type(const char* locName);
+[[noreturn]] void throw_cannot_modify_readonly_collection();
+void checkReadonly(const TypedValue* tv, const Class* cls, const StringData* name,
+                   bool readonly, ReadonlyOp op, bool writeMode);
+bool readonlyLocalShouldThrow(TypedValue tv, ReadonlyOp op);
+
 void check_collection_cast_to_array();
 
-Object create_object_only(const String& s);
-Object create_object(const String& s, const Array &params, bool init = true);
-Object init_object(const String& s, const Array &params, ObjectData* o);
+Object create_object_only(const OptString& s);
+Object create_object(const OptString& s, const Array &params,
+                     const ArrayData* namedArgNames = nullptr, bool init = true);
+Object create_object(const Class* cls, const Array &params,
+                     const ArrayData* namedArgNames = nullptr, bool init = true);
+Object init_object(const OptString& s, const Array &params,
+                   const ArrayData* namedArgNames, ObjectData* o);
 
 [[noreturn]] void throw_object(const Object& e);
 #if ((__GNUC__ != 4) || (__GNUC_MINOR__ != 8))
@@ -183,28 +276,19 @@ Object init_object(const String& s, const Array &params, ObjectData* o);
 #endif
 
 [[noreturn]] inline
-void throw_object(const String& s, const Array& params, bool init = true) {
-  throw_object(create_object(s, params, init));
+void throw_object(const OptString& s, const Array& params,
+                  const ArrayData* namedArgNames = nullptr, bool init = true) {
+  throw_object(create_object(s, params, namedArgNames, init));
 }
 
-/**
- * Argument count handling.
- *   - When level is 2, it's from constructors that turn these into fatals
- *   - When level is 1, it's from system funcs that turn both into warnings
- *   - When level is 0, it's from user funcs that turn missing arg in warnings
- */
-void throw_wrong_argument_count_nr(const char *fn, int expected, int got,
-                                   const char *expectDesc, int level = 0,
-                                   TypedValue *rv = nullptr)
-  __attribute__((__cold__));
-void throw_missing_arguments_nr(const char *fn, int expected, int got,
-                                int level = 0, TypedValue *rv = nullptr)
-  __attribute__((__cold__));
-void throw_toomany_arguments_nr(const char *fn, int expected, int got,
-                                int level = 0, TypedValue *rv = nullptr)
-  __attribute__((__cold__));
-void throw_wrong_arguments_nr(const char *fn, int count, int cmin, int cmax,
-                              int level = 0, TypedValue *rv = nullptr)
+[[noreturn]] inline
+void throw_object(const Class* cls, const Array& params,
+                  const ArrayData* namedArgNames = nullptr, bool init = true) {
+  throw_object(create_object(cls, params, namedArgNames, init));
+}
+
+void throw_missing_arguments_nr(const char *fn, int expected, int got)
+
   __attribute__((__cold__));
 
 /**
@@ -220,17 +304,12 @@ void handle_destructor_exception(const char* situation = "Destructor");
  *
  * Don't use in new code.
  */
-void throw_bad_type_exception(ATTRIBUTE_PRINTF_STRING const char *fmt, ...)
+void raise_bad_type_warning(ATTRIBUTE_PRINTF_STRING const char *fmt, ...)
   ATTRIBUTE_PRINTF(1,2);
-void throw_expected_array_exception(const char* fn = nullptr);
-void throw_expected_array_or_collection_exception(const char* fn = nullptr);
-void throw_invalid_argument(ATTRIBUTE_PRINTF_STRING const char *fmt, ...)
+void raise_expected_array_warning(const char* fn = nullptr);
+void raise_expected_array_or_collection_warning(const char* fn = nullptr);
+void raise_invalid_argument_warning(ATTRIBUTE_PRINTF_STRING const char *fmt, ...)
   ATTRIBUTE_PRINTF(1,2) __attribute__((__cold__));
-
-/**
- * Unsetting ClassName::StaticProperty.
- */
-Variant throw_fatal_unset_static_property(const char *s, const char *prop);
 
 // unserializable default value arguments such as TimeStamp::Current()
 // are serialized as "\x01"
@@ -241,38 +320,43 @@ char const kUnserializableString[] = "\x01";
  * two functions in runtime/base, as there are functions in
  * runtime/base that depend on these two functions.
  */
-String f_serialize(const Variant& value);
-Variant unserialize_ex(const String& str,
+OptString HHVM_FUNCTION(serialize, const Variant& value);
+OptString serialize_keep_dvarrays(const Variant& value);
+Variant unserialize_ex(const OptString& str,
                        VariableUnserializer::Type type,
-                       const Array& options = null_array);
+                       const Array& options = null_array,
+                       bool pure = false);
 Variant unserialize_ex(const char* str, int len,
                        VariableUnserializer::Type type,
-                       const Array& options = null_array);
+                       const Array& options = null_array,
+                       bool pure = false);
 
 inline Variant unserialize_from_buffer(const char* str, int len,
                                        VariableUnserializer::Type type,
-                                       const Array& options = null_array) {
-  return unserialize_ex(str, len, type, options);
+                                       const Array& options = null_array,
+                                       bool pure = false) {
+  return unserialize_ex(str, len, type, options, pure);
 }
 
-inline Variant unserialize_from_string(const String& str,
+inline Variant unserialize_from_string(const OptString& str,
                                        VariableUnserializer::Type type,
-                                       const Array& options = null_array) {
-  return unserialize_from_buffer(str.data(), str.size(), type, options);
+                                       const Array& options = null_array,
+                                       bool pure = false) {
+  return unserialize_from_buffer(str.data(), str.size(), type, options, pure);
 }
 
-String resolve_include(const String& file, const char* currentDir,
-                       bool (*tryFile)(const String& file, void* ctx),
-                       void* ctx);
-Variant include_impl_invoke(const String& file, bool once = false,
+OptString resolve_include(const OptString& file, const char* currentDir,
+                          bool (*tryFile)(const OptString& file, void* ctx),
+                          void* ctx);
+Variant include_impl_invoke(const OptString& file, bool once = false,
                             const char *currentDir = "",
                             bool callByHPHPInvoke = false);
-Variant require(const String& file, bool once, const char* currentDir,
+Variant require(const OptString& file, bool once, const char* currentDir,
                 bool raiseNotice);
 
-bool function_exists(const String& function_name);
+bool function_exists(const OptString& function_name);
+
+bool is_generated(const StringData* name);
 
 ///////////////////////////////////////////////////////////////////////////////
 }
-
-#endif

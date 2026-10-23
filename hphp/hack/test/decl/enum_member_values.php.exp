@@ -1,0 +1,303 @@
+[("\\Bits",
+  (Shallow_decl_defs.Class
+     { Shallow_decl_defs.sc_mode = Mstrict; sc_final = false;
+       sc_abstract = false; sc_is_xhp = false; sc_internal = false;
+       sc_has_xhp_keyword = false; sc_kind = Cenum; sc_module = None;
+       sc_name = ([7:6-10], "\\Bits"); sc_tparams = [];
+       sc_extends =
+       [(Rhint ([7:6-10]),
+         (Tapply (([7:6-10], "\\HH\\BuiltinEnum"),
+            [(Rhint ([7:6-10]), (Tapply (([7:6-10], "\\Bits"), [])))])))
+         ];
+       sc_uses = []; sc_xhp_attr_uses = []; sc_xhp_enum_values = {};
+       sc_xhp_marked_empty = false; sc_req_extends = [];
+       sc_req_implements = []; sc_req_constraints = []; sc_implements = [];
+       sc_support_dynamic_type = false;
+       sc_consts =
+       [{ Shallow_decl_defs.scc_abstract = Typing_defs.CCConcrete;
+          scc_name = ([8:3-7], "Zero");
+          scc_type = (Rwitness_from_decl ([8:10-11]), (Tprim Tint));
+          scc_refs = []; scc_value = None; scc_is_shape_key = false;
+          scc_const_value = (Typing_defs.Const_value.CVInt 0) };
+         { Shallow_decl_defs.scc_abstract = Typing_defs.CCConcrete;
+           scc_name = ([9:3-6], "One");
+           scc_type = (Rwitness_from_decl ([9:9-10]), (Tprim Tint));
+           scc_refs = []; scc_value = None; scc_is_shape_key = false;
+           scc_const_value = (Typing_defs.Const_value.CVInt 1) };
+         { Shallow_decl_defs.scc_abstract = Typing_defs.CCConcrete;
+           scc_name = ([10:3-10], "AlsoOne");
+           scc_type = (Rwitness_from_decl ([10:13-14]), (Tprim Tint));
+           scc_refs = []; scc_value = None; scc_is_shape_key = false;
+           scc_const_value = (Typing_defs.Const_value.CVInt 1) }
+         ];
+       sc_typeconsts = []; sc_props = []; sc_sprops = [];
+       sc_constructor = None; sc_static_methods = []; sc_methods = [];
+       sc_user_attributes = [];
+       sc_enum_type =
+       (Some { Typing_defs.te_base = (Rhint ([7:12-15]), (Tprim Tint));
+               te_constraint = None; te_includes = [] });
+       sc_docs_url = None; sc_package = None }));
+  ("\\MoreBits",
+   (Shallow_decl_defs.Class
+      { Shallow_decl_defs.sc_mode = Mstrict; sc_final = false;
+        sc_abstract = false; sc_is_xhp = false; sc_internal = false;
+        sc_has_xhp_keyword = false; sc_kind = Cenum; sc_module = None;
+        sc_name = ([13:6-14], "\\MoreBits"); sc_tparams = [];
+        sc_extends =
+        [(Rhint ([13:6-14]),
+          (Tapply (([13:6-14], "\\HH\\BuiltinEnum"),
+             [(Rhint ([13:6-14]), (Tapply (([13:6-14], "\\MoreBits"), [])))]
+             )))
+          ];
+        sc_uses = []; sc_xhp_attr_uses = []; sc_xhp_enum_values = {};
+        sc_xhp_marked_empty = false; sc_req_extends = [];
+        sc_req_implements = []; sc_req_constraints = []; sc_implements = [];
+        sc_support_dynamic_type = false;
+        sc_consts =
+        [{ Shallow_decl_defs.scc_abstract = Typing_defs.CCConcrete;
+           scc_name = ([15:3-6], "Two");
+           scc_type = (Rwitness_from_decl ([15:9-10]), (Tprim Tint));
+           scc_refs = []; scc_value = None; scc_is_shape_key = false;
+           scc_const_value = (Typing_defs.Const_value.CVInt 2) }
+          ];
+        sc_typeconsts = []; sc_props = []; sc_sprops = [];
+        sc_constructor = None; sc_static_methods = []; sc_methods = [];
+        sc_user_attributes = [];
+        sc_enum_type =
+        (Some { Typing_defs.te_base = (Rhint ([13:16-19]), (Tprim Tint));
+                te_constraint = None;
+                te_includes =
+                [(Rhint ([14:7-11]), (Tapply (([14:7-11], "\\Bits"), [])))] });
+        sc_docs_url = None; sc_package = None }));
+  ("\\Letters",
+   (Shallow_decl_defs.Class
+      { Shallow_decl_defs.sc_mode = Mstrict; sc_final = false;
+        sc_abstract = false; sc_is_xhp = false; sc_internal = false;
+        sc_has_xhp_keyword = false; sc_kind = Cenum; sc_module = None;
+        sc_name = ([18:6-13], "\\Letters"); sc_tparams = [];
+        sc_extends =
+        [(Rhint ([18:6-13]),
+          (Tapply (([18:6-13], "\\HH\\BuiltinEnum"),
+             [(Rhint ([18:6-13]), (Tapply (([18:6-13], "\\Letters"), [])))])))
+          ];
+        sc_uses = []; sc_xhp_attr_uses = []; sc_xhp_enum_values = {};
+        sc_xhp_marked_empty = false; sc_req_extends = [];
+        sc_req_implements = []; sc_req_constraints = []; sc_implements = [];
+        sc_support_dynamic_type = false;
+        sc_consts =
+        [{ Shallow_decl_defs.scc_abstract = Typing_defs.CCConcrete;
+           scc_name = ([19:3-4], "A");
+           scc_type =
+           (Rwitness_from_decl ([19:7-10]),
+            (Tapply (([19:7-10], "\\HH\\string"), [])));
+           scc_refs = []; scc_value = None; scc_is_shape_key = false;
+           scc_const_value = (Typing_defs.Const_value.CVString "a") };
+          { Shallow_decl_defs.scc_abstract = Typing_defs.CCConcrete;
+            scc_name = ([20:3-4], "B");
+            scc_type =
+            (Rwitness_from_decl ([20:7-10]),
+             (Tapply (([20:7-10], "\\HH\\string"), [])));
+            scc_refs = []; scc_value = None; scc_is_shape_key = false;
+            scc_const_value = (Typing_defs.Const_value.CVString "b") }
+          ];
+        sc_typeconsts = []; sc_props = []; sc_sprops = [];
+        sc_constructor = None; sc_static_methods = []; sc_methods = [];
+        sc_user_attributes = [];
+        sc_enum_type =
+        (Some { Typing_defs.te_base =
+                (Rhint ([18:15-21]),
+                 (Tapply (([18:15-21], "\\HH\\string"), [])));
+                te_constraint = None; te_includes = [] });
+        sc_docs_url = None; sc_package = None }));
+  ("\\IntForms",
+   (Shallow_decl_defs.Class
+      { Shallow_decl_defs.sc_mode = Mstrict; sc_final = false;
+        sc_abstract = false; sc_is_xhp = false; sc_internal = false;
+        sc_has_xhp_keyword = false; sc_kind = Cenum; sc_module = None;
+        sc_name = ([25:6-14], "\\IntForms"); sc_tparams = [];
+        sc_extends =
+        [(Rhint ([25:6-14]),
+          (Tapply (([25:6-14], "\\HH\\BuiltinEnum"),
+             [(Rhint ([25:6-14]), (Tapply (([25:6-14], "\\IntForms"), [])))]
+             )))
+          ];
+        sc_uses = []; sc_xhp_attr_uses = []; sc_xhp_enum_values = {};
+        sc_xhp_marked_empty = false; sc_req_extends = [];
+        sc_req_implements = []; sc_req_constraints = []; sc_implements = [];
+        sc_support_dynamic_type = false;
+        sc_consts =
+        [{ Shallow_decl_defs.scc_abstract = Typing_defs.CCConcrete;
+           scc_name = ([26:3-6], "Dec");
+           scc_type = (Rwitness_from_decl ([26:9-11]), (Tprim Tint));
+           scc_refs = []; scc_value = None; scc_is_shape_key = false;
+           scc_const_value = (Typing_defs.Const_value.CVInt 16) };
+          { Shallow_decl_defs.scc_abstract = Typing_defs.CCConcrete;
+            scc_name = ([27:3-6], "Hex");
+            scc_type = (Rwitness_from_decl ([27:9-13]), (Tprim Tint));
+            scc_refs = []; scc_value = None; scc_is_shape_key = false;
+            scc_const_value = (Typing_defs.Const_value.CVInt 16) };
+          { Shallow_decl_defs.scc_abstract = Typing_defs.CCConcrete;
+            scc_name = ([28:3-6], "Bin");
+            scc_type = (Rwitness_from_decl ([28:9-16]), (Tprim Tint));
+            scc_refs = []; scc_value = None; scc_is_shape_key = false;
+            scc_const_value = (Typing_defs.Const_value.CVInt 16) };
+          { Shallow_decl_defs.scc_abstract = Typing_defs.CCConcrete;
+            scc_name = ([29:3-6], "Oct");
+            scc_type = (Rwitness_from_decl ([29:9-12]), (Tprim Tint));
+            scc_refs = []; scc_value = None; scc_is_shape_key = false;
+            scc_const_value = (Typing_defs.Const_value.CVInt 16) };
+          { Shallow_decl_defs.scc_abstract = Typing_defs.CCConcrete;
+            scc_name = ([30:3-6], "Neg");
+            scc_type = (Rwitness_from_decl ([30:9-11]), (Tprim Tint));
+            scc_refs = []; scc_value = None; scc_is_shape_key = false;
+            scc_const_value = (Typing_defs.Const_value.CVInt -5) }
+          ];
+        sc_typeconsts = []; sc_props = []; sc_sprops = [];
+        sc_constructor = None; sc_static_methods = []; sc_methods = [];
+        sc_user_attributes = [];
+        sc_enum_type =
+        (Some { Typing_defs.te_base = (Rhint ([25:16-19]), (Tprim Tint));
+                te_constraint = None; te_includes = [] });
+        sc_docs_url = None; sc_package = None }));
+  ("\\BigInts",
+   (Shallow_decl_defs.Class
+      { Shallow_decl_defs.sc_mode = Mstrict; sc_final = false;
+        sc_abstract = false; sc_is_xhp = false; sc_internal = false;
+        sc_has_xhp_keyword = false; sc_kind = Cenum; sc_module = None;
+        sc_name = ([36:6-13], "\\BigInts"); sc_tparams = [];
+        sc_extends =
+        [(Rhint ([36:6-13]),
+          (Tapply (([36:6-13], "\\HH\\BuiltinEnum"),
+             [(Rhint ([36:6-13]), (Tapply (([36:6-13], "\\BigInts"), [])))])))
+          ];
+        sc_uses = []; sc_xhp_attr_uses = []; sc_xhp_enum_values = {};
+        sc_xhp_marked_empty = false; sc_req_extends = [];
+        sc_req_implements = []; sc_req_constraints = []; sc_implements = [];
+        sc_support_dynamic_type = false;
+        sc_consts =
+        [{ Shallow_decl_defs.scc_abstract = Typing_defs.CCConcrete;
+           scc_name = ([37:3-7], "Fits");
+           scc_type = (Rwitness_from_decl ([37:10-29]), (Tprim Tint));
+           scc_refs = []; scc_value = None; scc_is_shape_key = false;
+           scc_const_value =
+           (Typing_defs.Const_value.CVInt 4611686018427387903) };
+          { Shallow_decl_defs.scc_abstract = Typing_defs.CCConcrete;
+            scc_name = ([38:3-6], "Big");
+            scc_type = (Rwitness_from_decl ([38:9-28]), (Tprim Tint));
+            scc_refs = []; scc_value = None; scc_is_shape_key = false;
+            scc_const_value =
+            (Typing_defs.Const_value.CVLargeInt "4611686018427387904") };
+          { Shallow_decl_defs.scc_abstract = Typing_defs.CCConcrete;
+            scc_name = ([39:3-9], "BigHex");
+            scc_type = (Rwitness_from_decl ([39:12-30]), (Tprim Tint));
+            scc_refs = []; scc_value = None; scc_is_shape_key = false;
+            scc_const_value =
+            (Typing_defs.Const_value.CVLargeInt "4611686018427387905") };
+          { Shallow_decl_defs.scc_abstract = Typing_defs.CCConcrete;
+            scc_name = ([40:3-6], "Max");
+            scc_type = (Rwitness_from_decl ([40:9-28]), (Tprim Tint));
+            scc_refs = []; scc_value = None; scc_is_shape_key = false;
+            scc_const_value =
+            (Typing_defs.Const_value.CVLargeInt "9223372036854775807") }
+          ];
+        sc_typeconsts = []; sc_props = []; sc_sprops = [];
+        sc_constructor = None; sc_static_methods = []; sc_methods = [];
+        sc_user_attributes = [];
+        sc_enum_type =
+        (Some { Typing_defs.te_base = (Rhint ([36:15-18]), (Tprim Tint));
+                te_constraint = None; te_includes = [] });
+        sc_docs_url = None; sc_package = None }));
+  ("\\C",
+   (Shallow_decl_defs.Class
+      { Shallow_decl_defs.sc_mode = Mstrict; sc_final = false;
+        sc_abstract = false; sc_is_xhp = false; sc_internal = false;
+        sc_has_xhp_keyword = false; sc_kind = (Cclass Concrete);
+        sc_module = None; sc_name = ([43:7-8], "\\C"); sc_tparams = [];
+        sc_extends = []; sc_uses = []; sc_xhp_attr_uses = [];
+        sc_xhp_enum_values = {}; sc_xhp_marked_empty = false;
+        sc_req_extends = []; sc_req_implements = []; sc_req_constraints = [];
+        sc_implements = []; sc_support_dynamic_type = false; sc_consts = [];
+        sc_typeconsts = []; sc_props = []; sc_sprops = [];
+        sc_constructor = None; sc_static_methods = []; sc_methods = [];
+        sc_user_attributes = []; sc_enum_type = None; sc_docs_url = None;
+        sc_package = None }));
+  ("\\StrForms",
+   (Shallow_decl_defs.Class
+      { Shallow_decl_defs.sc_mode = Mstrict; sc_final = false;
+        sc_abstract = false; sc_is_xhp = false; sc_internal = false;
+        sc_has_xhp_keyword = false; sc_kind = Cenum; sc_module = None;
+        sc_name = ([46:6-14], "\\StrForms"); sc_tparams = [];
+        sc_extends =
+        [(Rhint ([46:6-14]),
+          (Tapply (([46:6-14], "\\HH\\BuiltinEnum"),
+             [(Rhint ([46:6-14]), (Tapply (([46:6-14], "\\StrForms"), [])))]
+             )))
+          ];
+        sc_uses = []; sc_xhp_attr_uses = []; sc_xhp_enum_values = {};
+        sc_xhp_marked_empty = false; sc_req_extends = [];
+        sc_req_implements = []; sc_req_constraints = []; sc_implements = [];
+        sc_support_dynamic_type = false;
+        sc_consts =
+        [{ Shallow_decl_defs.scc_abstract = Typing_defs.CCConcrete;
+           scc_name = ([47:3-8], "Plain");
+           scc_type =
+           (Rwitness_from_decl ([47:11-15]),
+            (Tapply (([47:11-15], "\\HH\\string"), [])));
+           scc_refs = []; scc_value = None; scc_is_shape_key = false;
+           scc_const_value = (Typing_defs.Const_value.CVString "hi") };
+          { Shallow_decl_defs.scc_abstract = Typing_defs.CCConcrete;
+            scc_name = ([48:3-8], "Named");
+            scc_type = (Rwitness_from_decl ([48:3-8]), Tany); scc_refs = [];
+            scc_value = None; scc_is_shape_key = false;
+            scc_const_value = (Typing_defs.Const_value.CVNameof "\\C") }
+          ];
+        sc_typeconsts = []; sc_props = []; sc_sprops = [];
+        sc_constructor = None; sc_static_methods = []; sc_methods = [];
+        sc_user_attributes = [];
+        sc_enum_type =
+        (Some { Typing_defs.te_base =
+                (Rhint ([46:16-22]),
+                 (Tapply (([46:16-22], "\\HH\\string"), [])));
+                te_constraint = None; te_includes = [] });
+        sc_docs_url = None; sc_package = None }));
+  ("\\GLOBAL_FIVE",
+   (Shallow_decl_defs.Const
+      { Typing_defs.cd_pos = [52:1-27];
+        cd_type = (Rhint ([52:7-10]), (Tprim Tint)); cd_value = None;
+        cd_package = None }));
+  ("\\Computed",
+   (Shallow_decl_defs.Class
+      { Shallow_decl_defs.sc_mode = Mstrict; sc_final = false;
+        sc_abstract = false; sc_is_xhp = false; sc_internal = false;
+        sc_has_xhp_keyword = false; sc_kind = Cenum; sc_module = None;
+        sc_name = ([54:6-14], "\\Computed"); sc_tparams = [];
+        sc_extends =
+        [(Rhint ([54:6-14]),
+          (Tapply (([54:6-14], "\\HH\\BuiltinEnum"),
+             [(Rhint ([54:6-14]), (Tapply (([54:6-14], "\\Computed"), [])))]
+             )))
+          ];
+        sc_uses = []; sc_xhp_attr_uses = []; sc_xhp_enum_values = {};
+        sc_xhp_marked_empty = false; sc_req_extends = [];
+        sc_req_implements = []; sc_req_constraints = []; sc_implements = [];
+        sc_support_dynamic_type = false;
+        sc_consts =
+        [{ Shallow_decl_defs.scc_abstract = Typing_defs.CCConcrete;
+           scc_name = ([55:3-12], "FromConst");
+           scc_type = (Rwitness_from_decl ([55:3-12]), Tany); scc_refs = [];
+           scc_value = None; scc_is_shape_key = false;
+           scc_const_value = Typing_defs.Const_value.CVAbsent };
+          { Shallow_decl_defs.scc_abstract = Typing_defs.CCConcrete;
+            scc_name = ([56:3-11], "FromExpr");
+            scc_type = (Rwitness_from_decl ([56:3-11]), Tany); scc_refs = [];
+            scc_value = None; scc_is_shape_key = false;
+            scc_const_value = Typing_defs.Const_value.CVAbsent }
+          ];
+        sc_typeconsts = []; sc_props = []; sc_sprops = [];
+        sc_constructor = None; sc_static_methods = []; sc_methods = [];
+        sc_user_attributes = [];
+        sc_enum_type =
+        (Some { Typing_defs.te_base = (Rhint ([54:16-19]), (Tprim Tint));
+                te_constraint = None; te_includes = [] });
+        sc_docs_url = None; sc_package = None }))
+  ]

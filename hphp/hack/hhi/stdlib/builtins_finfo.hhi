@@ -1,4 +1,4 @@
-<?hh // decl     /* -*- php -*- */
+<?hh /* -*- php -*- */
 /**
  * Copyright(c) 2014, Facebook, Inc.
  * All rights reserved.
@@ -8,44 +8,62 @@
  *
  */
 
-const FILEINFO_NONE = 0;
-const FILEINFO_SYMLINK = 2;
-const FILEINFO_MIME = 1040;
-const FILEINFO_MIME_TYPE = 16;
-const FILEINFO_MIME_ENCODING = 1024;
-const FILEINFO_DEVICES = 8;
-const FILEINFO_CONTINUE = 32;
-const FILEINFO_PRESERVE_ATIME = 128;
-const FILEINFO_RAW = 256;
+const int FILEINFO_NONE;
+const int FILEINFO_SYMLINK;
+const int FILEINFO_MIME;
+const int FILEINFO_MIME_TYPE;
+const int FILEINFO_MIME_ENCODING;
+const int FILEINFO_DEVICES;
+const int FILEINFO_CONTINUE;
+const int FILEINFO_PRESERVE_ATIME;
+const int FILEINFO_RAW;
 
 <<__PHPStdLib>>
-function finfo_open($options = null, $magic_file = null) {}
+function finfo_open(
+  int $options = FILEINFO_NONE,
+  ?string $magic_file = null,
+): HH\FIXME\MISSING_RETURN_TYPE {}
 <<__PHPStdLib>>
-function finfo_close($finfo) {}
+function finfo_close(resource $finfo): bool;
 <<__PHPStdLib>>
-function finfo_set_flags($finfo, $options) {}
+function finfo_set_flags(
+  resource $finfo,
+  int $options,
+): bool {}
 <<__PHPStdLib>>
-function finfo_file($finfo, $file_name, $options = null, $context = null) {}
+function finfo_file(
+  resource $finfo,
+  ?string $file_name,
+  int $options = FILEINFO_NONE,
+  ?resource $context = null,
+): string {}
 <<__PHPStdLib>>
-function finfo_buffer($finfo ,$string, $options = FILEINFO_NONE, $context = NULL) {}
+function finfo_buffer(
+  resource $finfo,
+  ?string $string,
+  int $options = FILEINFO_NONE,
+  ?resource $context = null,
+): string;
 <<__PHPStdLib>>
-function mime_content_type($filename) {}
+function mime_content_type(
+  HH\FIXME\MISSING_PARAM_TYPE $filename,
+): string {}
 
 class finfo {
   // Methods
   public function __construct(
     int $options = FILEINFO_NONE,
-    $magic_file = null,
+    ?string $magic_file = null,
   );
   public function buffer(
-    $string = null,
+    ?string $string = null,
     int $options = FILEINFO_NONE,
-    $context = null,
+    ?resource $context = null,
   ): string;
   public function file(
-    $file_name = null,
+    ?string $file_name = null,
     int $options = FILEINFO_NONE,
-    $context = null,
+    ?resource $context = null,
   ): string;
   public function set_flags(int $options): bool;
 

@@ -1,28 +1,25 @@
 <?hh
-assert_options(ASSERT_ACTIVE, 1);
-assert_options(ASSERT_WARNING, 1);
 
-function block() {
+function block() :mixed{
   return RescheduleWaitHandle::create(
     RescheduleWaitHandle::QUEUE_NO_PENDING_IO,
     1,
   );
-};
+}
+async function aThrow() :Awaitable<mixed>{ throw new Exception(__FUNCTION__); }
+async function aaThrow() :Awaitable<mixed>{ await aThrow(); }
 
-async function aThrow() { throw new Exception(__function__); }
-async function aaThrow() { await aThrow(); }
+async function bThrow() :Awaitable<mixed>{ await block(); throw new Exception(__FUNCTION__); }
+async function bbThrow() :Awaitable<mixed>{ await block(); await bThrow(); }
 
-async function bThrow() { await block(); throw new Exception(__function__); }
-async function bbThrow() { await block(); await bThrow(); }
-
-function verify($a, $e) {
+function verify($a, $e) :mixed{
   try { \HH\Asio\result($a); }
   catch (Exception $ae) {}
-  assert($ae->getMessage() == $e->getMessage());
+  invariant($ae->getMessage() == $e->getMessage(), "");
   var_dump($e->getMessage());
 }
 
-function normalCatch() {
+function normalCatch() :mixed{
   try { $a = aThrow(); HH\Asio\join($a); }
   catch (Exception $e) { verify($a, $e); }
 
@@ -36,7 +33,7 @@ function normalCatch() {
   catch (Exception $e) { verify($a, $e); }
 }
 
-async function asyncCatch() {
+async function asyncCatch() :Awaitable<mixed>{
   try { $a = aThrow(); HH\Asio\join($a); }
   catch (Exception $e) { verify($a, $e); }
 
@@ -49,8 +46,12 @@ async function asyncCatch() {
   try { $a = bbThrow(); HH\Asio\join($a); }
   catch (Exception $e) { verify($a, $e); }
 }
+
+
+<<__EntryPoint>>
+function main_exceptions() :mixed{
 
 normalCatch();
 echo "---\n";
 HH\Asio\join(asyncCatch());
-
+}

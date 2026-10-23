@@ -1,19 +1,17 @@
-<?php
+<?hh
 
 namespace foo {
-  function bar() {
+  function bar() :mixed{
     return __FUNCTION__;
   }
 }
 
 namespace {
-  function bar() {
+  function bar() :mixed{
     return __FUNCTION__;
   }
-
-  var_dump(bar());
-
   use function foo\bar as bar;
 
-  var_dump(bar());
+  <<__EntryPoint>>
+  function main() :mixed{}
 }

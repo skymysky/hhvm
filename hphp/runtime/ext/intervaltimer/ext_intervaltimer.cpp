@@ -19,17 +19,17 @@
 #include "hphp/runtime/base/array-init.h"
 #include "hphp/runtime/base/builtin-functions.h"
 #include "hphp/runtime/base/req-optional.h"
-#include "hphp/runtime/base/request-local.h"
 #include "hphp/runtime/base/surprise-flags.h"
-#include "hphp/runtime/base/thread-info.h"
+#include "hphp/runtime/base/request-info.h"
 #include "hphp/runtime/ext/asio/ext_waitable-wait-handle.h"
 #include "hphp/runtime/vm/native-data.h"
+#include "hphp/util/rds-local.h"
 
 namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
 
 struct TimerPool final : RequestEventHandler {
-  using TimerSet = req::hash_set<IntervalTimer*>;
+  using TimerSet = req::fast_set<IntervalTimer*>;
   TimerSet& timers() { return *m_timers; }
 
   void requestInit() override {
@@ -37,14 +37,11 @@ struct TimerPool final : RequestEventHandler {
   }
 
   void requestShutdown() override {
-    do {
-      for (auto it = m_timers->begin(); it != m_timers->end(); ) {
-        auto timer = *it;
-        it = m_timers->erase(it);
-        timer->~IntervalTimer();
-      }
-    } while (!m_timers->empty());
-    m_timers.clear();
+    while (!m_timers->empty()) {
+      (*m_timers->begin())->stop();
+    }
+
+    m_timers.reset();
   }
 
  private:
@@ -56,6 +53,8 @@ IMPLEMENT_STATIC_REQUEST_LOCAL(TimerPool, s_timer_pool);
 ///////////////////////////////////////////////////////////////////////////////
 
 namespace {
+
+bool Enabled;
 
 const StaticString
   s_IOWait("IOWait"),
@@ -79,11 +78,11 @@ void IntervalTimer::RunCallbacks(
   IntervalTimer::SampleType type,
   c_WaitableWaitHandle* wh
 ) {
-  clearSurpriseFlag(IntervalTimerFlag);
+  stackLimitAndSurprise().clearFlag(IntervalTimerFlag);
 
   auto const timers = s_timer_pool->timers(); // makes a copy!
   for (auto timer : timers) {
-    if (!s_timer_pool->timers().count(timer)) {
+    if (!s_timer_pool->timers().contains(timer)) {
       // This timer has been removed from the pool by one of the callbacks.
       continue;
     }
@@ -97,13 +96,11 @@ void IntervalTimer::RunCallbacks(
       }
     }
     try {
-      Array args = make_packed_array(sample_type_string(type),
-                                     count,
-                                     Object{wh});
+      auto args = make_vec_array(sample_type_string(type), count, Object{wh});
       vm_call_user_func(timer->m_callback, args);
     } catch (Object& ex) {
       raise_error("Uncaught exception escaping IntervalTimer: %s",
-                  ex.toString().data());
+                  throwable_to_string(ex.get()).data());
     }
   }
 }
@@ -116,6 +113,7 @@ void IntervalTimer::init(double interval,
                          double initial,
                          const Variant& callback,
                          RequestInjectionData* data) {
+  assertx(data);
   m_interval = interval;
   m_initial = initial;
   m_callback = callback;
@@ -123,22 +121,20 @@ void IntervalTimer::init(double interval,
 }
 
 void IntervalTimer::start() {
-  if (!m_data) return;
   if (m_thread.joinable()) return;
-  m_done = false;
   m_thread = std::thread([](IntervalTimer* t) { t->run(); }, this);
   s_timer_pool->timers().insert(this);
 }
 
 void IntervalTimer::stop() {
-  if (!m_data) return;
   if (!m_thread.joinable()) return;
   {
     std::lock_guard<std::mutex> lock(m_mutex);
-    m_done = true;
+    m_stopping = true;
   }
   m_cv.notify_one();
   m_thread.join();
+  m_stopping = false;
   s_timer_pool->timers().erase(this);
 }
 
@@ -152,7 +148,7 @@ void IntervalTimer::run() {
 #else
                                 std::chrono::duration<double>(waitTime),
 #endif
-                                [this]{ return m_done; });
+                                [this]{ return m_stopping; });
     if (status) break;
     {
       std::lock_guard<std::mutex> l(m_signalMutex);
@@ -174,15 +170,17 @@ void HHVM_METHOD(IntervalTimer, __construct,
                  const Variant& callback) {
   auto data = Native::data<IntervalTimer>(this_);
   data->init(interval, initial, callback,
-             &ThreadInfo::s_threadInfo->m_reqInjectionData);
+             &RequestInfo::s_requestInfo->m_reqInjectionData);
 }
 
 void HHVM_METHOD(IntervalTimer, start) {
+  if (!Enabled) return;
   auto data = Native::data<IntervalTimer>(this_);
   data->start();
 }
 
 void HHVM_METHOD(IntervalTimer, stop) {
+  if (!Enabled) return;
   auto data = Native::data<IntervalTimer>(this_);
   data->stop();
 }
@@ -190,17 +188,19 @@ void HHVM_METHOD(IntervalTimer, stop) {
 ///////////////////////////////////////////////////////////////////////////////
 
 static struct IntervalTimerExtension final : Extension {
-  IntervalTimerExtension() : Extension("intervaltimer") {}
+  IntervalTimerExtension() : Extension("intervaltimer", NO_EXTENSION_VERSION_YET, NO_ONCALL_YET) {}
 
-  void moduleInit() override {
+  void moduleLoad(const IniSetting::Map& ini, Hdf hdf) override {
+    Config::Bind(Enabled, ini, hdf, "IntervalTimer.Enable", true);
+  }
+
+  void moduleRegisterNative() override {
     HHVM_ME(IntervalTimer, __construct);
     HHVM_ME(IntervalTimer, start);
     HHVM_ME(IntervalTimer, stop);
     Native::registerNativeDataInfo<IntervalTimer>(
       IntervalTimer::c_ClassName.get(),
       Native::NDIFlags::NO_SWEEP);
-
-    loadSystemlib("intervaltimer");
   }
 } s_intervaltimer_extension;
 

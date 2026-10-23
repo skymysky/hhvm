@@ -9,61 +9,40 @@
  *
  */
 
-function foo1(array $arr) {
+function foo3(varray<string> $arr): void {
   foreach ($arr as $v) {
     f2($v);
   }
   $arr[] = 'meh';
   $arr[10] = 'meh';
   f2($arr[10]);
-  foo1($arr);
   foo3($arr);
   foo5($arr);
 }
 
-function foo2(array $arr) {
+function foo4(varray<string> $arr): void {
   foreach ($arr as $k => $v) {
     f1($k);
     f2($v);
   }
 }
 
-function foo3(array<string> $arr) {
-  foreach ($arr as $v) {
-    f2($v);
-  }
-  $arr[] = 'meh';
-  $arr[10] = 'meh';
-  f2($arr[10]);
-  foo1($arr);
-  foo3($arr);
-  foo5($arr);
-}
-
-function foo4(array<string> $arr) {
-  foreach ($arr as $k => $v) {
-    f1($k);
-    f2($v);
-  }
-}
-
-function foo5(array<int, string> $arr) {
+function foo5(darray<int, string> $arr): void {
   foreach ($arr as $v) {
     f2($v);
   }
   $arr[10] = 'meh';
   f2($arr[10]);
-  foo1($arr);
   foo5($arr);
 }
 
-function foo6(array<int, string> $arr) {
+function foo6(darray<int, string> $arr): void {
   foreach ($arr as $k => $v) {
     f1($k);
     f2($v);
   }
 }
 
-function f1(int $k) {}
+function f1(int $k): void {}
 
-function f2(string $v) {}
+function f2(string $v): void {}

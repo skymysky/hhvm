@@ -1,20 +1,15 @@
-<?php
+<?hh
 
 namespace AutoimportTest;
 
-include 'autoimport_defs.inc';
+
 
 class ContainerExt extends Container {}
-class TraversableExt extends Traversable {}
-
-$a = new Container;
-var_dump(get_class($a));
+<<__EntryPoint>> function main(): void {
+include 'autoimport_defs.inc';
+\var_dump(Container::class);
 
 $a = new ContainerExt;
-var_dump(get_class($a));
-
-$a = new Traversable;
-var_dump(get_class($a));
-
-$a = new TraversableExt;
-var_dump(get_class($a));
+\var_dump(\get_class($a));
+\var_dump(\get_parent_class($a));
+}

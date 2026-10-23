@@ -1,26 +1,26 @@
-<?php
+<?hh
 
-require 'fix_exceptions.inc';
+class Stringable {
+    public function __toString()[] :mixed{
+        return "foobar";
+    }
+}
 
-$errnames = [
+<<__EntryPoint>> function main(): void {
+require 'fix_exceptions.inc'; fix_exceptions();
+$errnames = dict[
     E_NOTICE => 'E_NOTICE',
     E_WARNING => 'E_WARNING',
 ];
 
-$functions = [
+$functions = dict[
     'int' => function (int $i) { return $i; },
     'float' => function (float $f) { return $f; },
     'string' => function (string $s) { return $s; },
     'bool' => function (bool $b) { return $b; }
 ];
 
-class Stringable {
-    public function __toString() {
-        return "foobar";
-    }
-}
-
-$values = [
+$values = vec[
     1,
     "1",
     1.0,
@@ -33,8 +33,8 @@ $values = [
     TRUE,
     FALSE,
     NULL,
-    [],
-    new StdClass,
+    vec[],
+    new stdClass,
     new Stringable,
     fopen("data:text/plain,foobar", "r")
 ];
@@ -52,4 +52,4 @@ foreach ($functions as $type => $function) {
     }
 }
 echo PHP_EOL . "Done";
-?>
+}

@@ -14,50 +14,20 @@
    +----------------------------------------------------------------------+
 */
 
+#include "hphp/runtime/base/datatype-macros.h"
 #include "hphp/runtime/base/hash-table-x64.h"
 #include "hphp/runtime/base/string-data-macros.h"
 #include "hphp/util/etch-helpers.h"
 
-#if defined(__SSE4_2__) && defined(NO_M_DATA) && !defined(NO_HWCRC) && \
-    !defined(_MSC_VER)
+#ifdef USE_X86_STRING_HELPERS
 
         .file     "hphp/runtime/base/hash-table-x64.S"
-.macro implement_nvgetstr MANGLED_NAME SCALE DATA ELM_HASH ELM_KEY ELM_DATA ELM_QUADWORDS
+.macro implement_nvgetstr MANGLED_NAME SCALE DATA ELM_HASH ELM_KEY ELM_DATA ELM_TYPE ELM_QUADWORDS
 ETCH_SECTION(\MANGLED_NAME)
         .globl   \MANGLED_NAME
 
-        ETCH_TYPE(ETCH_NAME(hashHelper_NvGetStr\MANGLED_NAME), @function)
-ETCH_NAME(hashHelper_NvGetStr\MANGLED_NAME):
-        CFI(startproc)
-
-        mov       SD_LEN(%rsi), %ecx       // key->size()
-        lea       SD_DATA(%rsi, %rcx), %r9 // key->data() + key->size()
-        not       %edx                     // initialize to -1 (assert: it was 0)
-        neg       %rcx
-        jnz       ETCH_LABEL(hheader\MANGLED_NAME)
-        jmp       ETCH_LABEL(hend\MANGLED_NAME)
-ETCH_LABEL(hloop\MANGLED_NAME):
-        crc32q    %r11, %rdx
-ETCH_LABEL(hheader\MANGLED_NAME):
-        movabs    $0xdfdfdfdfdfdfdfdf, %r11
-        and       (%r9, %rcx), %r11
-        add       $8, %rcx
-        js        ETCH_LABEL(hloop\MANGLED_NAME)
-
-        shl       $3, %ecx
-        shl       %cl, %r11
-        crc32q    %r11, %rdx
-
-ETCH_LABEL(hend\MANGLED_NAME):
-        shr       %edx
-        or        %edx, SD_HASH(%rsi)   // store hash
-        jmp       ETCH_LABEL(hasHash\MANGLED_NAME)
-
-        CFI(endproc)
-        ETCH_SIZE(hashHelper_NvGetStr\MANGLED_NAME)
-
 /*
- * HPHP::MixedArray::NvGetStr(const ArrayData* ad, const StringData* k);
+ * HPHP::VanillaDict::NvGetStr(const ArrayData* ad, const StringData* k);
  */
 
         ETCH_ALIGN16
@@ -67,11 +37,11 @@ ETCH_NAME(\MANGLED_NAME):
 
         mov       SD_HASH(%rsi), %edx   // key->hash
         mov       \SCALE(%rdi), %eax  // scale
-        push      %rbp
-        mov       %rsp, %rbp
+        and       $0x7fffffff, %edx
+        jz        ETCH_LABEL(hashHelper_NvGetStr\MANGLED_NAME)
+ETCH_LABEL(hasHash\MANGLED_NAME):
         add       $\DATA, %rdi        // rdi: ad->data()
-        push      %rbx
-        lea       -1(, %eax, 4), %ebx // mask = scale * 4 -1
+        lea       -1(, %eax, 4), %r9d // mask = scale * 4 -1
 .if \ELM_QUADWORDS==2
         lea       (%rax, %rax, 2), %rax
         lea       (%rax, %rax), %rax
@@ -79,12 +49,39 @@ ETCH_NAME(\MANGLED_NAME):
         lea       (%rax, %rax, 8), %rax
 .endif
         lea       (%rdi, %rax, 8), %r10 // ad->hashTab()
-        and       $0x7fffffff, %edx
-        jz        ETCH_NAME(hashHelper_NvGetStr\MANGLED_NAME)
 
-ETCH_LABEL(hasHash\MANGLED_NAME):
-        xor       %r9, %r9              // probe count
+ETCH_LABEL(unrollFirst\MANGLED_NAME):
         mov       %edx, %eax            // eax: index into hashTab
+        and       %r9d, %eax
+        mov       (%r10, %rax, 4), %r8d
+        test      %r8d, %r8d
+        js        ETCH_LABEL(failTrampoline\MANGLED_NAME)      // EMPTY or TOMBSTONE
+        lea       (%r8, %r8, \ELM_QUADWORDS - 1), %r8
+        lea       (%rdi, %r8, 8), %r8
+        cmp       %edx, \ELM_HASH(%r8)   // Same hash?
+        jne       ETCH_LABEL(firstprobe\MANGLED_NAME)
+        mov       \ELM_KEY(%r8), %r11    // StringData* in the table
+        cmp       %rsi, %r11            // Same pointer?
+        jne       ETCH_LABEL(cmplengthTrampoline\MANGLED_NAME)
+        mov       \ELM_DATA(%r8), %rax
+        movzbl    \ELM_TYPE(%r8), %edx
+        ret
+
+ETCH_LABEL(failTrampoline\MANGLED_NAME):
+        jnp       ETCH_LABEL(firstprobe\MANGLED_NAME) // Tombstone
+        mov       $UNINIT_DT_VALUE, %edx
+        ret
+
+ETCH_LABEL(cmplengthTrampoline\MANGLED_NAME):
+        push      %rbx
+        mov       %r9d, %ebx
+        mov       $1, %r9d
+        jmp       ETCH_LABEL(cmplength\MANGLED_NAME)
+
+ETCH_LABEL(firstprobe\MANGLED_NAME):
+        push      %rbx
+        mov       %r9d, %ebx
+        mov       $1, %r9d
 
 ETCH_LABEL(nextprobe\MANGLED_NAME):
         add       %r9d, %eax
@@ -114,19 +111,19 @@ ETCH_LABEL(cmphash\MANGLED_NAME):
         cmp       %rsi, %r11            // Same pointer?
         jne       ETCH_LABEL(cmplength\MANGLED_NAME)
 ETCH_LABEL(found\MANGLED_NAME):
-        lea       \ELM_DATA(%r8), %rax
+        mov       \ELM_DATA(%r8), %rax
+        movzbl    \ELM_TYPE(%r8), %edx
         pop       %rbx
-        pop       %rbp
         ret
 
 ETCH_LABEL(fail\MANGLED_NAME):
 /*
  * Use the PF to distinguish between EMPTY and TOMBSTONE.
+ * If the element is missing, we only need to clear the type register.
  */
         jnp       ETCH_LABEL(nextprobe\MANGLED_NAME) // Tombstone
-        xor       %eax, %eax
+        mov       $UNINIT_DT_VALUE, %edx
         pop       %rbx
-        pop       %rbp
         ret
 
 ETCH_LABEL(cmplength\MANGLED_NAME):
@@ -163,22 +160,45 @@ ETCH_LABEL(tail\MANGLED_NAME):                       // assert(ecx >= 0)
         pop       %rdx
         pop       %rdi
         jnz       ETCH_LABEL(nextprobe\MANGLED_NAME)
-
-        lea       \ELM_DATA(%r8), %rax
+        mov       \ELM_DATA(%r8), %rax
+        movzbl    \ELM_TYPE(%r8), %edx
         pop       %rbx
-        pop       %rbp
         ret
+
+ETCH_LABEL(hashHelper_NvGetStr\MANGLED_NAME):
+        mov       SD_LEN(%rsi), %ecx       // key->size()
+        lea       SD_DATA(%rsi, %rcx), %r9 // key->data() + key->size()
+        not       %edx                     // initialize to -1 (assert: it was 0)
+        neg       %rcx
+        jnz       ETCH_LABEL(hheader\MANGLED_NAME)
+        jmp       ETCH_LABEL(hend\MANGLED_NAME)
+ETCH_LABEL(hloop\MANGLED_NAME):
+        crc32q    %r11, %rdx
+ETCH_LABEL(hheader\MANGLED_NAME):
+        movabs    $0xdfdfdfdfdfdfdfdf, %r11
+        and       (%r9, %rcx), %r11
+        add       $8, %rcx
+        js        ETCH_LABEL(hloop\MANGLED_NAME)
+
+        shl       $3, %ecx
+        shl       %cl, %r11
+        crc32q    %r11, %rdx
+
+ETCH_LABEL(hend\MANGLED_NAME):
+        shr       %edx
+        or        %edx, SD_HASH(%rsi)   // store hash
+        jmp       ETCH_LABEL(hasHash\MANGLED_NAME)
 
         CFI(endproc)
         ETCH_SIZE(\MANGLED_NAME)
 .endm
 
 #define IMPLEMENT_NV_GET_STR(MangledName, ArrayType, ElmType) \
-  implement_nvgetstr MangledName ArrayType ## _SCALE ArrayType ## _DATA ElmType ## _HASH ElmType ## _KEY  ElmType ## _DATA ElmType ## _QUADWORDS
+  implement_nvgetstr MangledName ArrayType ## _SCALE ArrayType ## _DATA ElmType ## _HASH ElmType ## _KEY  ElmType ## _DATA ElmType ## _TYPE ElmType ## _QUADWORDS
 
-IMPLEMENT_NV_GET_STR(_ZN4HPHP5array9HashTableINS_10MixedArrayENS_13MixedArrayElmEE8NvGetStrEPKNS_9ArrayDataEPKNS_10StringDataE, MixedArray, MixedArrayElm)
+IMPLEMENT_NV_GET_STR(_ZN4HPHP5array9HashTableINS_11VanillaDictENS_14VanillaDictElmEE8NvGetStrEPKNS_9ArrayDataEPKNS_10StringDataE, VanillaDict, VanillaDictElm)
 
-IMPLEMENT_NV_GET_STR(_ZN4HPHP5array9HashTableINS_8SetArrayENS_11SetArrayElmEE8NvGetStrEPKNS_9ArrayDataEPKNS_10StringDataE, SetArray, SetArrayElm)
+IMPLEMENT_NV_GET_STR(_ZN4HPHP5array9HashTableINS_13VanillaKeysetENS_16VanillaKeysetElmEE8NvGetStrEPKNS_9ArrayDataEPKNS_10StringDataE, VanillaKeyset, VanillaKeysetElm)
 
 #undef IMPLEMENT_NV_GET_STR
 

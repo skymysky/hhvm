@@ -7,12 +7,18 @@
 <<__Native>>
 function icu_match(string $pattern,
                    string $subject,
-                   mixed &$matches = null,
                    int $flags = 0): mixed;
 
 <<__Native>>
-function icu_transliterate(string $str,
-                           bool $remove_accents): string;
+function icu_match_with_matches(string $pattern,
+                                string $subject,
+                                <<__OutOnly>>
+                                inout vec<mixed> $matches,
+                                int $flags = 0): mixed;
 
 <<__Native>>
-function icu_tokenize(string $text): array;
+function icu_transliterate(string $str,
+                           bool $remove_accents): ?string;
+
+<<__Native>>
+function icu_tokenize(string $text): varray<string>;

@@ -1,5 +1,5 @@
-<?php
-$xml = new XmlWriter();
+<?hh <<__EntryPoint>> function main(): void {
+$xml = new XMLWriter();
 $xml->openMemory();
 $xml->setIndent(true);
 $xml->startDocument();
@@ -8,7 +8,7 @@ $xml->writeElement('foo', null);
 $xml->writeElement('foo2', "");
 $xml->writeElement('foo3');
 $xml->startElement('bar');
-$xml->endElement('bar');
+try { $xml->endElement('bar'); } catch (Exception $e) { echo "\n".'Warning: '.$e->getMessage().' in '.__FILE__.' on line '.__LINE__."\n"; }
 $xml->endElement();
 $xml->endElement();
 print $xml->flush(true);
@@ -28,4 +28,4 @@ $xw->writeElementNS(null, 'bar', '', '');
 $xw->endElement();
 $xw->endDocument();
 print $xw->flush(true);
-?>
+}

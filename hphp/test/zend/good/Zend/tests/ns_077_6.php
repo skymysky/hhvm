@@ -1,7 +1,8 @@
-<?php
+<?hh
 
-function foo($a = array(0 => \unknown))
-{
+function foo($a = dict[0 => \unknown])
+:mixed{
 }
-
+<<__EntryPoint>> function main(): void {
 foo();
+}

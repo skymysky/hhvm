@@ -1,0 +1,22 @@
+File "explicit_type_collection_passing_map2.php", line 6, characters 3-13:
+  Map<arraykey, bool>
+error: Typing[4110] Invalid argument [1]
+-> Expected `string` [2]
+-> But got `arraykey` [3]
+-> This type argument to `Map` must match exactly (it is invariant) [3]
+
+explicit_type_collection_passing_map2.php:8:10
+1 | <?hh
+2 | // Copyright 2004-present Facebook. All Rights Reserved.
+3 | function expect(Map<string,bool> $m):void { }
+  |                     ^^^^^^ [2]
+4 | function testit():void {
+5 |   $n = Map<arraykey,bool>{};
+  |        ^^^^^^^^^^^^^^^^^^^^ [3]
+6 |   hh_show($n);
+7 |   // Likewise this
+8 |   expect($n);
+  |          ^^ [1]
+9 | }
+
+1 error found

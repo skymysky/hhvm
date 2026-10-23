@@ -1,6 +1,10 @@
-<?php
+<?hh
 
+
+<<__EntryPoint>>
+function main_421() :mixed{
 $a = 1;
- $a = array($a);
- $a = array($a);
+ $a = vec[$a];
+ $a = vec[$a];
  var_dump($a);
+}

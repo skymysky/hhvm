@@ -1,20 +1,5 @@
-<?hh // strict
-
-
-class Foo {
-  <<__PHPStdLib>>
-  public function foo() : void {
-
-  }
-
-
-  public function bar() : void {
-
-  }
-}
+<?hh
 
 function test() : void {
-  $x = new Foo();
-  $x->bar();
-  $x->foo();
+  IntlChar::getUnicodeVersion();
 }

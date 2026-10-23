@@ -1,13 +1,10 @@
 <?hh
 
-error_reporting(-1);
-
 class CVarSome {
   public $x;
   public $v;
   public function __construct($x, ...$v) {
     echo "\n", '* ', __METHOD__, "\n";
-    var_dump(func_num_args());
     var_dump(isset($x));
     var_dump(is_array($v));
     var_dump($v);
@@ -20,7 +17,6 @@ class CVarSome {
 class CVarMod {
   public function __construct(public $x, public ...$v) {
     echo "\n", '* ', __METHOD__, "\n";
-    var_dump(func_num_args());
     var_dump(isset($x));
     var_dump(is_array($v));
     var_dump($v);
@@ -28,7 +24,7 @@ class CVarMod {
   }
 }
 
-function test_constructor() {
+function test_constructor() :mixed{
   $inst = new CVarSome('a', 'b', 'c');
   $inst = new CVarSome('a');
   $inst = new CVarSome(); // some undefined variable warnings
@@ -38,11 +34,17 @@ function test_constructor() {
   $inst = new CVarMod(); // some undefined variable warnings
 }
 
-function test_reflection() {
+function test_reflection() :mixed{
   // TODO: there's ReflectionClass::newInstance
 }
 
-function main() {
+function main() :mixed{
   test_constructor();
   test_reflection();
+}
+
+
+<<__EntryPoint>>
+function main_constructors() :mixed{
+error_reporting(-1);
 }

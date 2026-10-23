@@ -1,6 +1,6 @@
 <?hh
 
-function f() {
+function f() :void{
   $a = true;
   $b = true;
   $i = 0;
@@ -20,10 +20,8 @@ function f() {
   }
 }
 
-function main() {
+<<__EntryPoint>> function main(): void {
   for($i = 0; $i < 1000; $i++) {
     f();
   }
 }
-main();
-

@@ -1,4 +1,4 @@
-<?php
+<?hh
 
 /*
  * Measures and reports on the relative cost of basic HHVM operations.
@@ -6,10 +6,6 @@
  * aid early design choices for writing performant PHP/Hack.
  * Run it via './hhmeasure (or ./hhmeasure basic)'.
  */
-
-
-// Include microbenchmark code
-require(dirname(__FILE__)."/BasicOps.php");
 
 function mean($array) {
   return (array_sum($array) / count($array));
@@ -51,7 +47,7 @@ class TimeHHOperations {
     echo "\n{$opname} result = {$result}";
 
     // Record time
-    $time = array();
+    $time = darray[];
     for ($iter = 0; $iter < $run_count; $iter++) {
       $start_time = microtime(true);
       $result = $time_function(10000);
@@ -90,9 +86,9 @@ class TimeHHOperations {
     echo "\n{$opname} time measurement complete. Run count = {$run_count}.";
     echo "\n";
     // Write stats to csv file
-    fputcsv(TimeHhOperations::$file, array($opname,
+    fputcsv(TimeHhOperations::$file, varray[$opname,
     $max / TimeHHOperations::$nmedian, $min / TimeHHOperations::$nmedian,
-    $mean / TimeHHOperations::$nmedian, $median / TimeHHOperations::$nmedian));
+    $mean / TimeHHOperations::$nmedian, $median / TimeHHOperations::$nmedian]);
   }
 }
 
@@ -958,6 +954,32 @@ class Runner {
         $loop_regular_setinstanceintprop);
   }
 
+  public static function runMathOp() {
+    $loop_modulus = function($count) {
+      $instance = new MathTest();
+      $result = 0;
+      for ($iter = 0; $iter < $count; $iter++) {
+        $result += $instance->intMod(\rand(PHP_INT_MIN, PHP_INT_MAX));
+      }
+      return $result;
+    };
+    TimeHHOperations::
+      timeop('run_modulus',
+        $loop_modulus);
+
+    $loop_modulus_opt = function($count) {
+      $instance = new MathTest();
+      $result = 0;
+      for ($iter = 0; $iter < $count; $iter++) {
+        $result += $instance->intModOpt(\rand(PHP_INT_MIN, PHP_INT_MAX));
+      }
+      return $result;
+    };
+    TimeHHOperations::
+      timeop('run_modulus_opt',
+        $loop_modulus_opt);
+  }
+
   public static function closefile() {
     TimeHHOperations::closefile();
   }
@@ -1014,7 +1036,7 @@ class Runner {
     }
 
     // Cache info
-    $cachefiles = array();
+    $cachefiles = darray[];
     $dirpath = '/sys/devices/system/cpu/cpu0/cache/';
     $dirhandle = opendir($dirpath);
     $count = 0;
@@ -1026,8 +1048,8 @@ class Runner {
     }
     closedir($dirhandle);
     $num_caches = $count;
-    $cachesizes = array();
-    $cachetypes = array();
+    $cachesizes = darray[];
+    $cachetypes = darray[];
     for ($count = 0 ; $count < $num_caches; $count++) {
       $fh_size = fopen($dirpath . $cachefiles[$count] . "/size", "r");
       $fh_type = fopen($dirpath . $cachefiles[$count] . "/type", "r");
@@ -1040,7 +1062,8 @@ class Runner {
     echo "\nAttributes of the machine used to collect the data";
     echo "\n--------------------------------------------------";
     echo "\nComputer Name\t\t\t";
-    system('hostname');
+    $return_var = -1;
+    system('hostname', inout $return_var);
     echo "Number of Processors\t\t" . "{$processorcount}";
     echo "\nProcessor Model\t\t\t" . "{$processormodel}";
     echo "\nProcessor MHz\t\t\t" . "{$processorspeed}";
@@ -1055,9 +1078,9 @@ class Runner {
     }
     echo "Memory \t\t\t\t" . "{$memsize}";
     echo "\nOperating System\t\t";
-    system('cat /etc/system-release');
+    system('cat /etc/system-release', inout $return_var);
     echo "OS Version\t\t\t";
-    system('uname -mrs');
+    system('uname -mrs', inout $return_var);
     echo "Compile Type\t\t\t" .
       "JIT-compiled, repo authoritative mode, inlining turned off";
     echo "\n";
@@ -1065,17 +1088,24 @@ class Runner {
   }
 }
 
-Runner::openfile();
-if ($argv[1] == 'basic') {
-  Runner::runtestsBasic();
+<<__EntryPoint>>
+function main() {
+  // Include microbenchmark code
+  require(dirname(__FILE__)."/BasicOps.php");
+
+  $argv = $_SERVER['argv'];
+  Runner::openfile();
+  if ($argv[1] == 'basic') {
+    Runner::runtestsBasic();
+  } else {
+    Runner::runtestsBasic();
+    Runner::runtestsInstanceof();
+    Runner::runtestsIsset();
+    Runner::runtestsIteration();
+    Runner::runtestsRegex();
+    Runner::runtestsReflection();
+    Runner::runMathOp();
+  }
+  Runner::closefile();
+  Runner::reportresults();
 }
-else {
-  Runner::runtestsBasic();
-  Runner::runtestsInstanceof();
-  Runner::runtestsIsset();
-  Runner::runtestsIteration();
-  Runner::runtestsRegex();
-  Runner::runtestsReflection();
-}
-Runner::closefile();
-Runner::reportresults();

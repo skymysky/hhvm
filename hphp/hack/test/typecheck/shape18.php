@@ -1,3 +1,3 @@
 <?hh
 
-type foo = shape('bar' => array);
+type foo = shape('bar' => varray<mixed>);

@@ -13,8 +13,7 @@
    | license@php.net so we can mail you a copy immediately.               |
    +----------------------------------------------------------------------+
 */
-#ifndef incl_HPHP_COMPILATION_FLAGS_H_
-#define incl_HPHP_COMPILATION_FLAGS_H_
+#pragma once
 
 namespace HPHP {
 
@@ -32,7 +31,7 @@ namespace HPHP {
 //////////////////////////////////////////////////////////////////////
 
 constexpr bool debug =
-#ifdef DEBUG
+#ifndef NDEBUG
   true
 #else
   false
@@ -55,16 +54,8 @@ constexpr bool use_tsan =
 #endif
   ;
 
-constexpr bool one_bit_refcount =
-#ifdef ONE_BIT_REFCOUNT
-  true
-#else
-  false
-#endif
-  ;
-
 constexpr bool facebook =
-#ifdef FACEBOOK
+#ifdef HHVM_FACEBOOK
   true
 #else
   false
@@ -74,5 +65,3 @@ constexpr bool facebook =
 //////////////////////////////////////////////////////////////////////
 
 }
-
-#endif

@@ -1,16 +1,11 @@
 *** Testing error conditions ***
-Warning: %s
-NULL
+Warning: file() expects at least 1 positional parameter, 0 given in %s/test/zend/good/ext/standard/tests/file/file_error.php on line 10
 
-Warning: %s
-NULL
-
-Warning: %s
-NULL
-array(0) {
+Warning: file() expects at most 3 positional parameters, 4 given in %s/test/zend/good/ext/standard/tests/file/file_error.php on line 13
+vec(0) {
 }
 
-Warning: %s
+Warning: No such file or directory in %s/test/zend/good/ext/standard/tests/file/file_error.php on line 17
 bool(false)
 
 --- Done ---

@@ -1,6 +1,8 @@
-<?php
+<?hh
 
-assert_options(1);
+
+<<__EntryPoint>>
+function main_ext_options() :mixed{
 var_dump(dl(""));
 
 var_dump(extension_loaded("bcmath"));
@@ -10,18 +12,21 @@ var_dump(extension_loaded("mysql"));
 var_dump(extension_loaded("date"));
 var_dump(extension_loaded("datetime"));
 $x = get_loaded_extensions();
-var_dump(empty($x));
+var_dump(!($x ?? false));
 
 var_dump(get_included_files()[0] === __FILE__);
-var_dump(array());
+var_dump(vec[]);
 
-var_dump(get_magic_quotes_gpc());
-var_dump(get_magic_quotes_runtime());
-
-
-clock_getres(CLOCK_THREAD_CPUTIME_ID, $sec, $nsec);
+$sec = null;
+$nsec = null;
+clock_getres(CLOCK_THREAD_CPUTIME_ID, inout $sec, inout $nsec);
 var_dump($sec);
 var_dump($nsec);
+$sec = null;
+$nsec = null;
+clock_gettime(CLOCK_THREAD_CPUTIME_ID, inout $sec, inout $nsec);
+var_dump($sec is nonnull);
+var_dump($nsec is nonnull);
 
 var_dump(ini_get(""));
 var_dump(ini_get("setting_that_does_not_exist"));
@@ -44,10 +49,7 @@ var_dump(!putenv("FOO"));
 
 var_dump(!version_compare("1.3.0.dev", "1.1.2", "<"));
 
-var_dump(version_compare(zend_version(), "2.4.99", ">="));
-
-define("MY_CONSTANT", 1);
-define("YOUR_CONSTANT", 2);
 $arr = get_defined_constants(true);
 var_dump(count($arr["user"]) === 2);
-var_dump(in_array('PHP_BINARY', $arr["Core"]));
+var_dump(HH\Lib\C\any($arr["Core"], $elt ==> HH\Lib\Legacy_FIXME\eq($elt, 'PHP_OS')));
+}

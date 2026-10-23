@@ -14,19 +14,21 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_CPP_BASE_EXCEPTIONS_H_
-#define incl_HPHP_CPP_BASE_EXCEPTIONS_H_
+#pragma once
 
 #include <string>
 #include <atomic>
 #include <utility>
 
+#include <fmt/format.h>
 #include <folly/String.h>
 
 #include "hphp/util/portability.h"
 #include "hphp/util/exception.h"
+#include "hphp/runtime/base/location.h"
 #include "hphp/runtime/base/type-array.h"
 #include "hphp/runtime/base/req-root.h"
+#include "hphp/util/rds-local.h"
 
 namespace HPHP {
 
@@ -59,11 +61,11 @@ struct ExtendedException : Exception {
   ExtendedException& operator=(const ExtendedException& other);
   ExtendedException& operator=(ExtendedException&& other) noexcept;
 
-  EXCEPTION_COMMON_IMPL(ExtendedException);
+  EXCEPTION_COMMON_IMPL(ExtendedException)
 
   Array getBacktrace() const;
   void leakBacktrace() { m_btp.detach(); }
-  std::pair<String,int> getFileAndLine() const;
+  std::pair<OptString,int> getFileAndLine() const;
 
   // a silent exception does not have its exception message logged
   bool isSilent() const { return m_silent; }
@@ -88,7 +90,7 @@ struct FatalErrorException : ExtendedException {
   FatalErrorException(const std::string&, const Array& backtrace,
                       bool isRecoverable = false);
 
-  EXCEPTION_COMMON_IMPL(FatalErrorException);
+  EXCEPTION_COMMON_IMPL(FatalErrorException)
 
   bool isRecoverable() const { return m_recoverable; }
 
@@ -101,27 +103,31 @@ void raise_fatal_error(const char* msg, const Array& bt = null_array,
                        bool recoverable = false, bool silent = false,
                        bool throws = true);
 
+[[noreturn]] void raise_parse_error(const StringData*,
+                                    const char*,
+                                    const Location::Range& loc);
+
 //////////////////////////////////////////////////////////////////////
 
 struct ResourceExceededException : FatalErrorException {
   ResourceExceededException(const std::string& msg, const Array& backtrace)
     : FatalErrorException(msg, backtrace)
   {}
-  EXCEPTION_COMMON_IMPL(ResourceExceededException);
+  EXCEPTION_COMMON_IMPL(ResourceExceededException)
 };
 
 struct RequestTimeoutException : ResourceExceededException {
   RequestTimeoutException(const std::string& msg, const Array& backtrace)
     : ResourceExceededException(msg, backtrace)
   {}
-  EXCEPTION_COMMON_IMPL(RequestTimeoutException);
+  EXCEPTION_COMMON_IMPL(RequestTimeoutException)
 };
 
 struct RequestCPUTimeoutException : ResourceExceededException {
   RequestCPUTimeoutException(const std::string& msg, const Array& backtrace)
     : ResourceExceededException(msg, backtrace)
   {}
-  EXCEPTION_COMMON_IMPL(RequestCPUTimeoutException);
+  EXCEPTION_COMMON_IMPL(RequestCPUTimeoutException)
 };
 
 struct RequestMemoryExceededException : ResourceExceededException {
@@ -129,28 +135,30 @@ struct RequestMemoryExceededException : ResourceExceededException {
                                  const Array& backtrace)
     : ResourceExceededException(msg, backtrace)
   {}
-  EXCEPTION_COMMON_IMPL(RequestMemoryExceededException);
+  EXCEPTION_COMMON_IMPL(RequestMemoryExceededException)
 };
 
 struct RequestOOMKilledException : ResourceExceededException {
-  RequestOOMKilledException(size_t usedBytes)
+  explicit RequestOOMKilledException(size_t usedBytes)
     : ResourceExceededException(
-        folly::sformat("request aborted due to memeory presure, "
+        fmt::format("request aborted due to memory pressure, "
                        "used {} bytes", usedBytes),
-        empty_array())
+        empty_vec_array())
+    , m_usedBytes(usedBytes)
   {}
-  EXCEPTION_COMMON_IMPL(RequestOOMKilledException);
+  const size_t m_usedBytes;
+  EXCEPTION_COMMON_IMPL(RequestOOMKilledException)
 };
 
 //////////////////////////////////////////////////////////////////////
 
-extern __thread int tl_exit_code;
+extern RDS_LOCAL(int, rl_exit_code);
 
 struct ExitException : ExtendedException {
   explicit ExitException(int exitCode) {
-    tl_exit_code = exitCode;
+    *rl_exit_code = exitCode;
   }
-  EXCEPTION_COMMON_IMPL(ExitException);
+  EXCEPTION_COMMON_IMPL(ExitException)
 };
 
 struct PhpFileDoesNotExistException : ExtendedException {
@@ -161,7 +169,7 @@ struct PhpFileDoesNotExistException : ExtendedException {
       : ExtendedException("%s", msg) {
     assertx(empty_file);
   }
-  EXCEPTION_COMMON_IMPL(PhpFileDoesNotExistException);
+  EXCEPTION_COMMON_IMPL(PhpFileDoesNotExistException)
 };
 
 //////////////////////////////////////////////////////////////////////
@@ -177,6 +185,7 @@ struct PhpFileDoesNotExistException : ExtendedException {
 [[noreturn]] void throw_not_implemented(const char* feature);
 [[noreturn]]
 void throw_not_supported(const char* feature, const char* reason);
+[[noreturn]] void throw_stack_overflow();
 
 /*
  * Initialize Throwable's file name and line number assuming the stack trace
@@ -189,8 +198,21 @@ void throwable_init_file_and_line_from_builtin(ObjectData* throwable);
  */
 void throwable_init(ObjectData* throwable);
 
+/*
+ * Reinitialize Throwable's stack trace, file name and line number based on wait
+ * handle.
+ */
+void throwable_recompute_backtrace_from_wh(ObjectData* throwable,
+                                           c_WaitableWaitHandle* wh);
+
+/*
+ * Mark the result of an array cast on a throwable object so that it's safe
+ * to perform Hack-Array-Migration-sensitive operations on it.
+ */
+void throwable_mark_array(const ObjectData* throwable, Array& props);
+
+OptString throwable_to_string(ObjectData* throwable);
+
 //////////////////////////////////////////////////////////////////////
 
 }
-
-#endif

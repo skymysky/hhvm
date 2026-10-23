@@ -11,11 +11,11 @@
 
 function foo(): int {
   $x = null;
-  foreach (array(1,2,3) as $y) {
-    if ($y % 2) { continue; }
-    $x = array($y);
+  foreach (vec[1,2,3] as $y) {
+    if ($y % 2 !== 0) { continue; }
+    $x = vec[$y];
   }
-  if (!$x) {
+  if ($x === null) {
     throw new Exception('Boom');
   }
   return $x[123];

@@ -11,8 +11,12 @@ class Map {
   }
 }
 
-function main() {
+function main() :mixed{
   $custom_map = new Map();
 }
 
+
+<<__EntryPoint>>
+function main_hh_map4() :mixed{
 main();
+}

@@ -1,20 +1,23 @@
 <?hh
 
-function f() {
-  $n = "x";
-  $g = "y";
-  global $$g;
+abstract final class quickEmpty {
+  public static $y;
+}
+
+<<__EntryPoint>>
+function f() :mixed{
 
   $x = 0;
-  $$g = 0;
-  print ":".empty($x).":\n";
-  print ":".empty($$n).":\n";
-  print ":".empty($$g).":\n";
+  \HH\global_set('y', 0);
+  quickEmpty::$y = 0;
+  print ":".(string)(!($x ?? false)).":\n";
+  print ":".(string)(!(\HH\global_get('y') ?? false)).":\n";
+  print ":".(string)(!(quickEmpty::$y ?? false)).":\n";
 
   $x = 1;
-  $$g = 1;
-  print ":".empty($x).":\n";
-  print ":".empty($$n).":\n";
-  print ":".empty($$g).":\n";
+  \HH\global_set('y', 1);
+  quickEmpty::$y = 1;
+  print ":".(string)(!($x ?? false)).":\n";
+  print ":".(string)(!(\HH\global_get('y') ?? false)).":\n";
+  print ":".(string)(!(quickEmpty::$y ?? false)).":\n";
 }
-f();

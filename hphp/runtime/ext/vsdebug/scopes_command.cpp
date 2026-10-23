@@ -15,7 +15,6 @@
 */
 
 #include "hphp/runtime/base/backtrace.h"
-#include "hphp/runtime/base/tv-variant.h"
 #include "hphp/runtime/ext/vsdebug/command.h"
 #include "hphp/runtime/ext/vsdebug/debugger.h"
 
@@ -58,18 +57,30 @@ bool ScopesCommand::executeImpl(
   DebuggerSession* session,
   folly::dynamic* responseMsg
 ) {
+  // The request thread should not re-enter the debugger while
+  // processing this command.
+  DebuggerNoBreakContext noBreak(m_debugger);
 
   folly::dynamic body = folly::dynamic::object;
   folly::dynamic scopes = folly::dynamic::array;
 
-  if (getFrameObject(session) != nullptr) {
-    scopes.push_back(getScopeDescription(session, "Locals", ScopeType::Locals));
+  if (auto const frame = getFrameObject(session)) {
+    session->setCurrFrameId(m_frameId);
     scopes.push_back(getScopeDescription(session,
+                                         frame,
+                                         "Locals",
+                                         ScopeType::Locals,
+                                         false));
+    scopes.push_back(getScopeDescription(session,
+                                         frame,
                                          "Superglobals",
-                                         ScopeType::Superglobals));
+                                         ScopeType::Superglobals,
+                                         false));
     scopes.push_back(getScopeDescription(session,
+                                         frame,
                                          "Constants",
-                                         ScopeType::ServerConstants));
+                                         ScopeType::ServerConstants,
+                                         true));
   }
 
   body["scopes"] = scopes;
@@ -81,13 +92,15 @@ bool ScopesCommand::executeImpl(
 
 folly::dynamic ScopesCommand::getScopeDescription(
   DebuggerSession* session,
+  const FrameObject* frame,
   const char* displayName,
-  ScopeType type
+  ScopeType type,
+  bool expensive
 ) {
-  FrameObject* frame = getFrameObject(session);
   assert (frame != nullptr);
 
   request_id_t req = frame->m_requestId;
+  assertx(req == m_debugger->getCurrentThreadId());
   int depth = frame->m_frameDepth;
 
   folly::dynamic scope = folly::dynamic::object;
@@ -95,11 +108,11 @@ folly::dynamic ScopesCommand::getScopeDescription(
 
   scope["name"] = displayName;
   scope["variablesReference"] = scopeId;
-  scope["expensive"] = true;
+  scope["expensive"] = expensive;
 
   const ScopeObject* scopeObj = session->getScopeObject(scopeId);
   scope["namedVariables"] =
-    VariablesCommand::countScopeVariables(session, scopeObj, req);
+    VariablesCommand::countScopeVariables(session, m_debugger, scopeObj, req);
 
   return scope;
 }

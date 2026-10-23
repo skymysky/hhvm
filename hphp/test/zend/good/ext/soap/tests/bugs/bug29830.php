@@ -1,18 +1,18 @@
-<?php
+<?hh
 
-class hello_world {   
-  public function hello($to) {
+class hello_world {
+  public function hello($to) :mixed{
     return 'Hello ' . $to;
-  }    
-  private function bye($to) {
+  }
+  private function bye($to) :mixed{
     return 'Bye ' . $to;
-  }    
+  }
 }
-
-$server = new SoapServer(NULL, array("uri"=>"test://"));
+<<__EntryPoint>> function main(): void {
+$server = new SoapServer(NULL, dict["uri"=>"test://"]);
 $server->setClass('hello_world');
-$functions = $server->getFunctions();
+$functions = $server->getfunctions();
 foreach($functions as $func) {
   echo $func . "\n";
 }
-?>
+}

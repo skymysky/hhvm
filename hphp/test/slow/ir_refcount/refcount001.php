@@ -1,21 +1,25 @@
-<?php
+<?hh
 
 class X {
   private $rc_prop;
-  function __construct(array $x) {
+  function __construct(varray $x) {
     $this->rc_prop = $x;
   }
-  function thing() {
+  function thing() :mixed{
     return $this->rc_prop;
   }
 }
 
-function go() {
-  var_dump((new X(array(new stdclass)))->thing());
-  var_dump((new X(array(new stdclass)))->thing());
-  var_dump((new X(array(new stdclass)))->thing());
-  var_dump((new X(array(new stdclass)))->thing());
+function go() :mixed{
+  var_dump((new X(vec[new stdClass]))->thing());
+  var_dump((new X(vec[new stdClass]))->thing());
+  var_dump((new X(vec[new stdClass]))->thing());
+  var_dump((new X(vec[new stdClass]))->thing());
   var_dump((new X("yoyoyo"))->thing());
 }
 
+
+<<__EntryPoint>>
+function main_refcount001() :mixed{
 go();
+}

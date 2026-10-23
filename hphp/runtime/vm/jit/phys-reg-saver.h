@@ -14,12 +14,11 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_JIT_PHYS_REG_SAVER_H_
-#define incl_HPHP_JIT_PHYS_REG_SAVER_H_
+#pragma once
 
 #include "hphp/runtime/vm/jit/phys-reg.h"
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -46,7 +45,7 @@ struct PhysRegSaver {
   PhysRegSaver& operator=(const PhysRegSaver&) = delete;
   PhysRegSaver& operator=(PhysRegSaver&&) = default;
 
-  size_t dwordsPushed() const;
+  size_t qwordsPushed() const;
 
 private:
   Vout& m_v;
@@ -55,6 +54,5 @@ private:
 
 ///////////////////////////////////////////////////////////////////////////////
 
-}}
+}
 
-#endif

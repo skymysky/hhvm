@@ -2,5 +2,9 @@
 
 type MyType = void;
 
-$x = new ReflectionTypeAlias('mytype');
+
+<<__EntryPoint>>
+function main_reflection_type_alias7() :mixed{
+$x = new ReflectionTypeAlias('MyType');
 echo $x->getName(), "\n";
+}

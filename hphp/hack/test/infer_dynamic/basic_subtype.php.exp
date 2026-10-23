@@ -1,0 +1,12 @@
+{ "function": "\\takes_int", "solutions": [] }
+{ "function": "\\takes_arraykey", "solutions": [] }
+{
+  "function": "\\test_basic",
+  "solutions": [
+    {
+      "name": "$d",
+      "pos": "File \"basic_subtype.php\", line 6, characters 29-30:",
+      "type": "int"
+    }
+  ]
+}

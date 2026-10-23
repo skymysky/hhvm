@@ -1,6 +1,6 @@
-<?php
+<?hh
 
-function main() {
+function main() :mixed{
   $a = new stdClass();
   $ro = new ReflectionObject($a);
   var_dump($ro->getMethods());
@@ -16,4 +16,8 @@ function main() {
   }
 }
 
+
+<<__EntryPoint>>
+function main_reflection_object() :mixed{
 main();
+}

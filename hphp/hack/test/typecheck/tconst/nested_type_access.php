@@ -1,15 +1,15 @@
-<?hh // strict
+<?hh
 
 abstract class A {
   const type T = Container<int>;
 }
 
 class C {
-  const type B as D = D;
+  const type B = D;
   const type Test = this::B::X;
 
   public static function foo(): this::Test::T {
-    return array();
+    return vec[];
   }
 }
 

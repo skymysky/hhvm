@@ -1,0 +1,27 @@
+error: Typing[4110] Invalid argument [1]
+-> Expected `string` or `int` [2]
+-> But got `dynamic` [2]
+
+lambda_called_on_2string.php:4:6
+1 | <?hh
+2 | function f(): void {
+3 |   $f = (($v, $w) ==> $v[0] . $w[0]);
+  |                      ^^^^^ [2]
+4 |   $f("abc", "def");
+  |      ^^^^^ [1]
+5 | }
+
+error: Typing[4110] Invalid argument [1]
+-> Expected `string` or `int` [2]
+-> But got `dynamic` [2]
+
+lambda_called_on_2string.php:4:13
+1 | <?hh
+2 | function f(): void {
+3 |   $f = (($v, $w) ==> $v[0] . $w[0]);
+  |                              ^^^^^ [2]
+4 |   $f("abc", "def");
+  |             ^^^^^ [1]
+5 | }
+
+2 errors found

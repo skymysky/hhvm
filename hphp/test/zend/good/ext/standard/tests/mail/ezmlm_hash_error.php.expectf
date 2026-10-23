@@ -2,26 +2,9 @@
 
 -- Testing ezmlm_hash() function with fewer than expected no. of arguments --
 
-Warning: %s
-NULL
+Warning: ezmlm_hash() expects exactly 1 positional parameter, 0 given in %s/test/zend/good/ext/standard/tests/mail/ezmlm_hash_error.php on line 13
 
 -- Testing ezmlm_hash() function with more than expected no. of arguments --
 
-Warning: %s
-NULL
-
--- Testing ezmlm_hash() function with invalid input - ARRAY --
-
-Warning: %s
-NULL
-
--- Testing ezmlm_hash() function with invalid input - OBJECT without 'cast_object' method --
-
-Warning: %s
-NULL
-
--- Testing ezmlm_hash() function with invalid input - RESOURCE --
-
-Warning: %s
-NULL
+Warning: ezmlm_hash() expects exactly 1 positional parameter, 2 given in %s/test/zend/good/ext/standard/tests/mail/ezmlm_hash_error.php on line 17
 ===DONE===

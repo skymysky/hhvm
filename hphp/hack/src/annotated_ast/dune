@@ -1,0 +1,21 @@
+(library
+ (name annotated_ast)
+ (modules aast aast_defs aast_defs_visitors_ancestors)
+ (wrapped false)
+ (libraries ast namespace_env)
+ (preprocess
+  (pps visitors.ppx ppx_transform ppx_deriving.std ppx_hash)))
+
+(library
+ (name namespace_env)
+ (wrapped false)
+ (modules namespace_env)
+ (libraries collections core_kernel hh_autoimport parser_options)
+ (preprocess
+  (pps ppx_hash visitors.ppx ppx_deriving.std)))
+
+(library
+ (name annotated_ast_utils)
+ (modules aast_utils)
+ (wrapped false)
+ (libraries annotated_ast logging))

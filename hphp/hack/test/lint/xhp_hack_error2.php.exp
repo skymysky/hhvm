@@ -1,0 +1,6 @@
+warning: Lint[5542] DO NOT USE XhpHackError::clownyCastStringish() IN NEW CODE. You should not be passing :fbt to XHP elements. Use fbt() and pass the FBTResult objects that come out of it.
+   --> xhp_hack_error2.php
+  8 |         label={XhpHackError
+    |                ^^^^^^^^^^^^
+
+

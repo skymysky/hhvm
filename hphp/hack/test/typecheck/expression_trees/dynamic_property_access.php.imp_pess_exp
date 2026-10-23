@@ -1,0 +1,42 @@
+error: Parsing[1002] Expression trees only support named property or instance method access. [1]
+
+dynamic_property_access.php:12:5
+10 |   ExampleDsl`(MyClass $x) ==> {
+11 |     $z = ${ $splice_var };
+12 |     $x->$z;
+   |     ^^^^^^ [1]
+13 |   }`;
+14 | }
+
+error: Naming[2050] Variable `$z` is undefined, or not always defined. [1]
+-> Did you mean `$splice_var` instead? [2]
+
+dynamic_property_access.php:12:9
+ 7 | }
+ 8 | 
+ 9 | function test(ExampleExpression<string> $splice_var): void {
+   |                                         ^^^^^^^^^^^ [2]
+10 |   ExampleDsl`(MyClass $x) ==> {
+11 |     $z = ${ $splice_var };
+12 |     $x->$z;
+   |         ^^ [1]
+13 |   }`;
+14 | }
+
+error: Typing[4525] Dynamic access of a property is only permitted on a receiver of type `dynamic`, but this receiver has type `MyClass` [1]
+-> Did you mean `->z` instead? [2]
+-> The receiver's type is defined here [3]
+
+dynamic_property_access.php:12:5
+ 8 | 
+ 9 | function test(ExampleExpression<string> $splice_var): void {
+10 |   ExampleDsl`(MyClass $x) ==> {
+   |               ^^^^^^^ [3]
+11 |     $z = ${ $splice_var };
+12 |     $x->$z;
+   |     ^^ [1]
+   |         ^^ [2]
+13 |   }`;
+14 | }
+
+3 errors found

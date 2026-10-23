@@ -1,6 +1,6 @@
-<?php
+<?hh
 
-function squares_cubes() {
+function squares_cubes() :AsyncGenerator<mixed,mixed,void>{
   $i = 0;
   for (;;) {
     $i++;
@@ -8,9 +8,14 @@ function squares_cubes() {
   }
 }
 
-$c = squares_cubes();
-var_dump($c->key());
-var_dump($c->current());
-$c->next();
-var_dump($c->key());
-var_dump($c->current());
+
+<<__EntryPoint>>
+function main_2229() :mixed{
+  $c = squares_cubes();
+  $c->next();
+  var_dump($c->key());
+  var_dump($c->current());
+  $c->next();
+  var_dump($c->key());
+  var_dump($c->current());
+}

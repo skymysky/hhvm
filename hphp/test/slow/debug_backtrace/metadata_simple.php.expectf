@@ -1,62 +1,46 @@
-array(2) {
-  [0]=>
-  array(4) {
+vec(3) {
+  dict(3) {
     ["file"]=>
-    string(%d) "%s"
+    string(%d) "%s/test/slow/debug_backtrace/metadata_simple.php"
     ["line"]=>
     int(9)
     ["function"]=>
     string(3) "bar"
-    ["args"]=>
-    array(1) {
-      [0]=>
-      int(0)
-    }
   }
-  [1]=>
-  array(4) {
+  dict(3) {
     ["file"]=>
-    string(%d) "%s"
+    string(%d) "%s/test/slow/debug_backtrace/metadata_simple.php"
     ["line"]=>
-    int(12)
+    int(14)
     ["function"]=>
     string(3) "foo"
-    ["args"]=>
-    array(1) {
-      [0]=>
-      int(0)
-    }
+  }
+  dict(1) {
+    ["function"]=>
+    string(4) "main"
   }
 }
-array(2) {
-  [0]=>
-  array(4) {
+vec(3) {
+  dict(3) {
     ["file"]=>
-    string(%d) "%s"
+    string(%d) "%s/test/slow/debug_backtrace/metadata_simple.php"
     ["line"]=>
     int(9)
     ["function"]=>
     string(3) "bar"
-    ["args"]=>
-    array(1) {
-      [0]=>
-      int(65536)
-    }
   }
-  [1]=>
-  array(5) {
+  dict(4) {
     ["file"]=>
-    string(%d) "%s"
+    string(%d) "%s/test/slow/debug_backtrace/metadata_simple.php"
     ["line"]=>
-    int(13)
+    int(15)
     ["function"]=>
     string(3) "foo"
-    ["args"]=>
-    array(1) {
-      [0]=>
-      int(65536)
-    }
     ["metadata"]=>
     string(8) "I am foo"
+  }
+  dict(1) {
+    ["function"]=>
+    string(4) "main"
   }
 }

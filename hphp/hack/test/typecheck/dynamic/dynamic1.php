@@ -8,7 +8,7 @@ function expect_bool(bool $x): dynamic {
   return $x;
 }
 
-async function test(dynamic $x, classname<dynamic> $cx, $y): Awaitable<mixed> {
+async function test(dynamic $x, class<dynamic> $cx, /* TAny */ $y): Awaitable<mixed> {
   $y = $x->read_property;
   hh_show($y);
   $y->write_property = 10;
@@ -45,7 +45,7 @@ async function test(dynamic $x, classname<dynamic> $cx, $y): Awaitable<mixed> {
   hh_show($y);
   $y = expect_string("$x");
   hh_show($y);
-  invariant(is_string($x), "");
+  invariant($x is string, "");
   hh_show($x);
   $x = expect_string($x);
   hh_show($x);

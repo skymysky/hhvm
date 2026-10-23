@@ -1,26 +1,24 @@
 <?hh
 
-print "Test begin\n";
-
-function r($r) {
+function r($r) :mixed{
   print ($r ? " true" : "false")."\n";
 }
 
-function build() {
-  $a = array("A0" => 0,
-             "A1" => "a1");
-  $b = array("A" => $a,
+function build() :mixed{
+  $a = dict["A0" => 0,
+             "A1" => "a1"];
+  $b = dict["A" => $a,
              "B0" => 0,
-             "B1" => "b1");
-  $c = array("A" => $a,
+             "B1" => "b1"];
+  $c = dict["A" => $a,
              "B" => $b,
              "C0" => 0,
-             "C1" => "c1");
+             "C1" => "c1"];
 
   return $c;
 }
 
-function main() {
+function main() :mixed{
   $arr = build();
 
   r(isset($arr["A"]));
@@ -31,6 +29,10 @@ function main() {
   r(isset($arr["X"]["X"]));
   r(isset($arr["X"]["X"]["X"]));
 }
+<<__EntryPoint>> function main_entry(): void {
+print "Test begin\n";
+
 main();
 
 print "Test end\n";
+}

@@ -16,7 +16,7 @@
 
 #include "hphp/util/assertions.h"
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -25,14 +25,9 @@ inline uint32_t Location::localId() const {
   return m_local.locId;
 }
 
-inline FPInvOffset Location::stackIdx() const {
+inline SBInvOffset Location::stackIdx() const {
   assertx(m_tag == LTag::Stack);
   return m_stack.stackIdx;
-}
-
-inline uint32_t Location::clsRefSlot() const {
-  assertx(m_tag == LTag::CSlot);
-  return m_clsref.slot;
 }
 
 inline bool Location::operator==(const Location& other) const {
@@ -45,8 +40,6 @@ inline bool Location::operator==(const Location& other) const {
       return stackIdx() == other.stackIdx();
     case LTag::MBase:
       return true;
-    case LTag::CSlot:
-      return clsRefSlot() == other.clsRefSlot();
   }
   not_reached();
   return false;
@@ -66,8 +59,6 @@ inline bool Location::operator<(const Location& other) const {
       return stackIdx() < other.stackIdx();
     case LTag::MBase:
       return false;
-    case LTag::CSlot:
-      return clsRefSlot() < other.clsRefSlot();
   }
   not_reached();
   return false;
@@ -75,4 +66,4 @@ inline bool Location::operator<(const Location& other) const {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-}}
+}

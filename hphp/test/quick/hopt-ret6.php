@@ -1,21 +1,19 @@
-<?php
+<?hh
 
 class C {
-  function __destruct() {
-    echo "in __destruct\n";
-  }
-  function simpleRet() {
+  function simpleRet() :mixed{
     return 1;
   }
 }
 
-function foo() {
+function foo() :mixed{
   $x = new C;
   $y = $x->simpleRet();
   var_dump($x);
   var_dump($y);
 }
-
+<<__EntryPoint>> function main(): void {
 foo();
 
 echo "End\n";
+}

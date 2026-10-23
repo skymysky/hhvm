@@ -1,4 +1,4 @@
-<?hh // decl /* -*- php -*- */
+<?hh /* -*- php -*- */
 /**
  * Copyright (c) 2014, Facebook, Inc.
  * All rights reserved.
@@ -8,122 +8,163 @@
  *
  */
 
-const PHP_ROUND_HALF_UP = 0;
-const PHP_ROUND_HALF_DOWN = 0;
-const PHP_ROUND_HALF_EVEN = 0;
-const PHP_ROUND_HALF_ODD = 0;
+const int PHP_ROUND_HALF_UP;
+const int PHP_ROUND_HALF_DOWN;
+const int PHP_ROUND_HALF_EVEN;
+const int PHP_ROUND_HALF_ODD;
 
-const M_PI = 0.0;
-const M_E  = 0.0;
-const M_LOG2E = 0.0;
-const M_LOG10E = 0.0;
-const M_LN2 = 0.0;
-const M_LN10 = 0.0;
-const M_PI_2 = 0.0;
-const M_PI_4 = 0.0;
-const M_1_PI = 0.0;
-const M_2_PI = 0.0;
-const M_SQRTPI = 0.0;
-const M_2_SQRTPI = 0.0;
-const M_SQRT2 = 0.0;
-const M_SQRT3 = 0.0;
-const M_SQRT1_2 = 0.0;
-const M_LNPI = 0.0;
-const M_EULER = 0.0;
+const float M_PI;
+const float M_E;
+const float M_LOG2E;
+const float M_LOG10E;
+const float M_LN2;
+const float M_LN10;
+const float M_PI_2;
+const float M_PI_4;
+const float M_1_PI;
+const float M_2_PI;
+const float M_SQRTPI;
+const float M_2_SQRTPI;
+const float M_SQRT2;
+const float M_SQRT3;
+const float M_SQRT1_2;
+const float M_LNPI;
+const float M_EULER;
 
-<<__PHPStdLib, __Rx>>
-function pi();
-<<__PHPStdLib, __Rx>>
-function min($value, ...);
-<<__PHPStdLib, __Rx>>
-function max($value, ...);
-<<__PHPStdLib, __Rx>>
-function abs($number);
-<<__PHPStdLib, __Rx>>
-function is_finite($val);
-<<__PHPStdLib, __Rx>>
-function is_infinite($val);
-<<__PHPStdLib, __Rx>>
-function is_nan(float $val): bool;
-<<__PHPStdLib, __Rx>>
-function ceil($value);
-<<__PHPStdLib, __Rx>>
-function floor($value): float;
-<<__PHPStdLib, __Rx>>
-function round($val, $precision = 0, $mode = 1);
-<<__PHPStdLib, __Rx>>
-function deg2rad($number);
-<<__PHPStdLib, __Rx>>
-function rad2deg($number);
-<<__PHPStdLib, __Rx>>
-function decbin($number);
-<<__PHPStdLib, __Rx>>
-function decoct($number);
-<<__PHPStdLib, __Rx>>
-function bindec($binary_string);
-<<__PHPStdLib, __Rx>>
-function hexdec($hex_string);
-<<__PHPStdLib, __Rx>>
-function octdec($octal_string);
-<<__PHPStdLib, __Rx>>
-function base_convert($number, $frombase, $tobase);
-<<__PHPStdLib, __Rx>>
-function pow($base, $exp);
-<<__PHPStdLib, __Rx>>
-function exp($arg);
-<<__PHPStdLib, __Rx>>
-function expm1($arg);
-<<__PHPStdLib, __Rx>>
-function log10($arg);
-<<__PHPStdLib, __Rx>>
-function log1p($number);
-<<__PHPStdLib, __Rx>>
-function log($arg, $base = 0);
-<<__PHPStdLib, __Rx>>
-function cos($arg);
-<<__PHPStdLib, __Rx>>
-function cosh($arg);
-<<__PHPStdLib, __Rx>>
-function sin($arg);
-<<__PHPStdLib, __Rx>>
-function sinh($arg);
-<<__PHPStdLib, __Rx>>
-function tan($arg);
-<<__PHPStdLib, __Rx>>
-function tanh($arg);
-<<__PHPStdLib, __Rx>>
-function acos($arg);
-<<__PHPStdLib, __Rx>>
-function acosh($arg);
-<<__PHPStdLib, __Rx>>
-function asin($arg);
-<<__PHPStdLib, __Rx>>
-function asinh($arg);
-<<__PHPStdLib, __Rx>>
-function atan($arg);
-<<__PHPStdLib, __Rx>>
-function atanh($arg);
-<<__PHPStdLib, __Rx>>
-function atan2($y, $x);
-<<__PHPStdLib, __Rx>>
-function hypot($x, $y);
-<<__PHPStdLib, __Rx>>
-function fmod($x, $y);
-<<__PHPStdLib, __Rx>>
-function sqrt($arg);
-<<__PHPStdLib, __Rx>>
-function getrandmax();
 <<__PHPStdLib>>
-function srand($seed = null);
+function pi()[]: float;
 <<__PHPStdLib>>
-function rand($min = 0, $max = -1 /* getrandmax */ );
-<<__PHPStdLib, __Rx>>
-function mt_getrandmax();
+function min(
+  HH\FIXME\MISSING_PARAM_TYPE $value,
+  HH\FIXME\MISSING_PARAM_TYPE ...$args
+)[]: HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function mt_srand($seed = null);
+function max(
+  HH\FIXME\MISSING_PARAM_TYPE $value,
+  HH\FIXME\MISSING_PARAM_TYPE ...$args
+)[]: HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function mt_rand($min = 0, $max = -1 /* mt_getrandmax */ );
+function abs(
+  HH\FIXME\MISSING_PARAM_TYPE $number,
+)[]: HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function lcg_value();
-<<__PHPStdLib, __Rx>>
-function intdiv(int $numerator, int $denominator): int;
+function is_finite(float $val)[]: bool;
+<<__PHPStdLib>>
+function is_infinite(float $val)[]: bool;
+<<__PHPStdLib>>
+function is_nan(float $val)[]: bool;
+<<__PHPStdLib>>
+function ceil(
+  HH\FIXME\MISSING_PARAM_TYPE $value,
+)[]: HH\FIXME\MISSING_RETURN_TYPE;
+<<__PHPStdLib>>
+function floor(HH\FIXME\MISSING_PARAM_TYPE $value)[]: float;
+<<__PHPStdLib>>
+function round(
+  HH\FIXME\MISSING_PARAM_TYPE $val,
+  int $precision = 0,
+  int $mode = 1,
+)[]: HH\FIXME\MISSING_RETURN_TYPE;
+<<__PHPStdLib>>
+function deg2rad(float $number)[]: float;
+<<__PHPStdLib>>
+function rad2deg(float $number)[]: float;
+<<__PHPStdLib>>
+function decbin(
+  HH\FIXME\MISSING_PARAM_TYPE $number,
+)[]: string;
+<<__PHPStdLib>>
+function decoct(
+  HH\FIXME\MISSING_PARAM_TYPE $number,
+)[]: string;
+<<__PHPStdLib>>
+function bindec(
+  HH\FIXME\MISSING_PARAM_TYPE $binary_string,
+)[]: HH\FIXME\MISSING_RETURN_TYPE;
+<<__PHPStdLib>>
+function hexdec(
+  HH\FIXME\MISSING_PARAM_TYPE $hex_string,
+)[]: HH\FIXME\MISSING_RETURN_TYPE;
+<<__PHPStdLib>>
+function octdec(
+  HH\FIXME\MISSING_PARAM_TYPE $octal_string,
+)[]: HH\FIXME\MISSING_RETURN_TYPE;
+<<__PHPStdLib>>
+function base_convert(
+  HH\FIXME\MISSING_PARAM_TYPE $number,
+  int $frombase,
+  int $tobase,
+)[]: HH\FIXME\MISSING_RETURN_TYPE;
+<<__PHPStdLib>>
+function pow(
+  num $base,
+  num $exp,
+)[]: dynamic;
+<<__PHPStdLib>>
+function exp(float $arg)[]: float;
+<<__PHPStdLib>>
+function expm1(float $arg)[]: float;
+<<__PHPStdLib>>
+function log10(float $arg)[]: float;
+<<__PHPStdLib>>
+function log1p(float $number)[]: float;
+<<__PHPStdLib>>
+function log(float $arg, float $base = 0.0)[]: float;
+<<__PHPStdLib>>
+function cos(float $arg)[]: float;
+<<__PHPStdLib>>
+function cosh(float $arg)[]: float;
+<<__PHPStdLib>>
+function sin(float $arg)[]: float;
+<<__PHPStdLib>>
+function sinh(float $arg)[]: float;
+<<__PHPStdLib>>
+function tan(float $arg)[]: float;
+<<__PHPStdLib>>
+function tanh(float $arg)[]: float;
+<<__PHPStdLib>>
+function acos(float $arg)[]: float;
+<<__PHPStdLib>>
+function acosh(float $arg)[]: float;
+<<__PHPStdLib>>
+function asin(float $arg)[]: float;
+<<__PHPStdLib>>
+function asinh(float $arg)[]: float;
+<<__PHPStdLib>>
+function atan(float $arg)[]: float;
+<<__PHPStdLib>>
+function atanh(float $arg)[]: float;
+<<__PHPStdLib>>
+function atan2(float $y, float $x)[]: float;
+<<__PHPStdLib>>
+function hypot(float $x, float $y)[]: float;
+<<__PHPStdLib>>
+function fmod(float $x, float $y)[]: float;
+<<__PHPStdLib>>
+function sqrt(float $arg)[]: float;
+<<__PHPStdLib>>
+function getrandmax()[]: int;
+<<__PHPStdLib>>
+function srand(
+  HH\FIXME\MISSING_PARAM_TYPE $seed = null,
+): void;
+<<__PHPStdLib>>
+function rand(
+  int $min = 0,
+  ?int $max = null,
+): int;
+<<__PHPStdLib>>
+function mt_getrandmax()[]: int;
+<<__PHPStdLib>>
+function mt_srand(
+  HH\FIXME\MISSING_PARAM_TYPE $seed = null,
+): void;
+<<__PHPStdLib>>
+function mt_rand(
+  int $min = 0,
+  ?int $max = null,
+)[leak_safe]: int;
+<<__PHPStdLib>>
+function lcg_value(): float;
+<<__PHPStdLib>>
+function intdiv(int $numerator, int $denominator)[]: int;

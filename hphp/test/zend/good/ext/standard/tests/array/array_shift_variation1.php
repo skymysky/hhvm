@@ -1,6 +1,6 @@
-<?php
+<?hh
 /* Prototype  : mixed array_shift(array &$stack)
- * Description: Pops an element off the beginning of the array 
+ * Description: Pops an element off the beginning of the array
  * Source code: ext/standard/array.c
  */
 
@@ -8,19 +8,16 @@
  * Pass different data types as $stack argument to array_shift() to test behaviour
  */
 
-echo "*** Testing array_shift() : usage variations ***\n";
-
-//get an unset variable
-$unset_var = 10;
-unset ($unset_var);
-
 // get a class
 class classA
 {
-  public function __toString() {
+  public function __toString() :mixed{
     return "Class A object";
   }
 }
+<<__EntryPoint>> function main(): void {
+echo "*** Testing array_shift() : usage variations ***\n";
+
 
 // heredoc string
 $heredoc = <<<EOT
@@ -31,7 +28,7 @@ EOT;
 $fp = fopen(__FILE__, "r");
 
 // unexpected values to be passed to $stack argument
-$inputs = array(
+$inputs = vec[
 
        // int data
 /*1*/  0,
@@ -55,7 +52,7 @@ $inputs = array(
        false,
        TRUE,
        FALSE,
-       
+
        // empty data
 /*16*/ "",
        '',
@@ -64,29 +61,25 @@ $inputs = array(
 /*18*/ "string",
        'string',
        $heredoc,
-       
+
        // object data
 /*21*/ new classA(),
 
-       // undefined data
-/*22*/ @$undefined_var,
 
-       // unset data
-/*23*/ @$unset_var,
 
        // resource variable
-/*24*/ $fp
-);
+/*22*/ $fp
+];
 
 // loop through each element of $inputs to check the behavior of array_shift()
 $iterator = 1;
 foreach($inputs as $input) {
   echo "\n-- Iteration $iterator --\n";
-  var_dump( array_shift($input) );
+  var_dump( array_shift(inout $input) );
   $iterator++;
 };
 
 fclose($fp);
 
 echo "Done";
-?>
+}

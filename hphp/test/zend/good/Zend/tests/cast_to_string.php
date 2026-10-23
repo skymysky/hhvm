@@ -1,35 +1,27 @@
-<?php
+<?hh
 
+<<__EntryPoint>> function main(): void {
 $r = fopen(__FILE__, "r");
 
-class test {
-	function  __toString() {
-		return "10";
-	}
-}
-
-$o = new test;
-
-$vars = array(
-	"string",
-	"8754456",
-	"",
-	"\0",
-	9876545,
-	0.10,
-	array(),
-	array(1,2,3),
-	false,
-	true,
-	NULL,
-	$r,
-	$o
-);
+$vars = vec[
+    "string",
+    "8754456",
+    "",
+    "\0",
+    9876545,
+    0.10,
+    vec[],
+    vec[1,2,3],
+    false,
+    true,
+    NULL,
+    $r
+];
 
 foreach ($vars as $var) {
-	$tmp = (string)$var;
-	var_dump($tmp);
+    try { $tmp = (string)$var; } catch (Exception $e) { $tmp = $e->getMessage(); }
+    var_dump($tmp);
 }
 
 echo "Done\n";
-?>
+}

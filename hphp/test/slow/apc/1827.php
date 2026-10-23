@@ -1,20 +1,26 @@
-<?php
+<?hh
 
 class X implements Serializable {
-  public function serialize() {
+  public function serialize() :mixed{
     return 'true';
   }
-  public function unserialize($serialized ) {
+  public function unserialize($serialized ) :mixed{
   }
 }
-function test() {
-  $a[] = $x = new X;
+function test() :mixed{
+  $a = vec[];
+  $x = new X;
+  $a[] = $x;
   $a[] = $x;
   $a[] = $x;
   apc_store('foo', $a);
-  $a = apc_fetch('foo');
+  $a = __hhvm_intrinsics\apc_fetch_no_check('foo');
   var_dump($a);
-  $a = apc_fetch('foo');
+  $a = __hhvm_intrinsics\apc_fetch_no_check('foo');
   var_dump($a);
 }
+
+<<__EntryPoint>>
+function main_1827() :mixed{
 test();
+}

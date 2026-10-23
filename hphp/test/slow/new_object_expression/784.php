@@ -1,10 +1,15 @@
-<?php
+<?hh
 
+<<__DynamicallyConstructible>>
 class X {
 }
 class Y {
 }
-function test($x) {
-  return new $x($x = 'y');
+function test($x) :mixed{
+  $cls = $x; $x = 'Y'; return new $cls($x);
 }
-var_dump(test('x'));
+
+<<__EntryPoint>>
+function main_784() :mixed{
+var_dump(test('X'));
+}

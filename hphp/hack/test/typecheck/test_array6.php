@@ -13,7 +13,7 @@ class A {}
 class B extends A {}
 class C extends A {}
 
-function test($x): array<int, A> {
-  $v = array(0 => new A(), 1 => new B(), 2 => new C());
+function test(): darray<int, A> {
+  $v = dict[0 => new A(), 1 => new B(), 2 => new C()];
   return $v;
 }

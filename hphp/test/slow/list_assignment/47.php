@@ -1,5 +1,10 @@
-<?php
+<?hh
 
+
+<<__EntryPoint>>
+function main_47() :mixed{
 $i = 0;
- list($a[$i++], list($a[$i++], $a[$i++]), $a[$i++]) =     array('x', array('y1', 'y2'), 'z');
+$a = dict[];
+ list($a[$i], list($a[$i+1], $a[$i+2]), $a[$i+3]) =     vec['x', vec['y1', 'y2'], 'z'];
  var_dump($a);
+}

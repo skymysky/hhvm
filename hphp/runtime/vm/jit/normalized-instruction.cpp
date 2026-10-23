@@ -16,11 +16,9 @@
 
 #include "hphp/runtime/vm/jit/normalized-instruction.h"
 
-#include "hphp/runtime/base/repo-auth-type-codec.h"
 #include "hphp/runtime/vm/hhbc-codec.h"
-#include "hphp/runtime/vm/jit/translator.h"
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 ///////////////////////////////////////////////////////////////////////////////
 
 /*
@@ -29,21 +27,13 @@ namespace HPHP { namespace jit {
  * Assumes that inst.source and inst.unit have been properly set.
  */
 static void populateImmediates(NormalizedInstruction& inst) {
-  auto pc = inst.pc();
-  decode_op(pc);
+  if (inst.source.anyFuncEntry()) return;
+
   for (int i = 0; i < numImmediates(inst.op()); ++i) {
-    if (immType(inst.op(), i) == RATA) {
-      inst.imm[i].u_RATA = decodeRAT(inst.unit(), pc);
-    } else {
-      inst.imm[i] = getImm(inst.pc(), i, inst.unit());
-    }
-    pc += immSize(inst.pc(), i);
+    inst.imm[i] = getImm(inst.pc(), i, inst.unit());
   }
   if (hasImmVector(inst.op())) {
     inst.immVec = getImmVector(inst.pc());
-  }
-  if (hasIterTable(inst.op())) {
-    inst.immIters = getIterTable(inst.pc());
   }
 }
 
@@ -51,11 +41,8 @@ static void populateImmediates(NormalizedInstruction& inst) {
 
 NormalizedInstruction::NormalizedInstruction(SrcKey sk, const Unit* u)
   : source(sk)
-  , funcd(nullptr)
   , m_unit(u)
   , immVec()
-  , endsRegion(false)
-  , ignoreInnerType(false)
   , interp(false)
   , forceSurpriseCheck(false)
 {
@@ -75,7 +62,7 @@ Op NormalizedInstruction::op() const {
 }
 
 PC NormalizedInstruction::pc() const {
-  return unit()->at(source.offset());
+  return func()->at(source.offset());
 }
 
 const Unit* NormalizedInstruction::unit() const {
@@ -91,12 +78,12 @@ Offset NormalizedInstruction::offset() const {
 }
 
 std::string NormalizedInstruction::toString() const {
-  return instrToString(pc(), unit());
+  return source.showInst();
 }
 
 SrcKey NormalizedInstruction::nextSk() const {
-  return source.advanced(m_unit);
+  return source.advanced(func());
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-}}
+}

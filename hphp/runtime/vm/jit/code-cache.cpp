@@ -16,274 +16,170 @@
 
 #include "hphp/runtime/vm/jit/code-cache.h"
 
-#include "hphp/runtime/vm/func.h"
-#include "hphp/runtime/vm/jit/mcgen.h"
 #include "hphp/runtime/vm/jit/tc.h"
-#include "hphp/runtime/vm/jit/translator.h"
 
 #include "hphp/runtime/base/program-functions.h"
 
 #include "hphp/util/alloc.h"
 #include "hphp/util/asm-x64.h"
-#include "hphp/util/maphuge.h"
+#include "hphp/util/configs/codecache.h"
+#include "hphp/util/configs/eval.h"
+#include "hphp/util/hugetlb.h"
 #include "hphp/util/numa.h"
 #include "hphp/util/trace.h"
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 
-TRACE_SET_MOD(mcg);
+TRACE_SET_MOD(mcg)
 
-// This value should be enough bytes to emit a REQ_RETRANSLATE: lea (4 or 7
-// bytes), movq (10 bytes), and jmp (5 bytes). We then add some extra slack for
-// safety.
-static constexpr int kMinTranslationBytes = 32;
-static constexpr size_t kRoundUp = 2ull << 20;
+/////////////////////////////////////////////////////////////////////////
 
-/* Initialized by RuntimeOption. */
-uint32_t CodeCache::AHotSize = 0;
-uint32_t CodeCache::ASize = 0;
-uint32_t CodeCache::AProfSize = 0;
-uint32_t CodeCache::AColdSize = 0;
-uint32_t CodeCache::AFrozenSize = 0;
-uint32_t CodeCache::GlobalDataSize = 0;
-uint32_t CodeCache::AMaxUsage = 0;
-uint32_t CodeCache::AColdMaxUsage = 0;
-uint32_t CodeCache::AFrozenMaxUsage = 0;
-bool CodeCache::MapTCHuge = false;
-uint32_t CodeCache::AutoTCShift = 0;
-uint32_t CodeCache::TCNumHugeHotMB = 0;
-uint32_t CodeCache::TCNumHugeColdMB = 0;
+namespace {
 
-static size_t ru(size_t sz) { return sz + (-sz & (kRoundUp - 1)); }
+void enhugen(void* base, unsigned numMB) {
+  if (Cfg::CodeCache::MapTCHuge) {
+    assertx((uintptr_t(base) & (size2m - 1)) == 0);
+    assertx(numMB < (1 << 12));
+    remap_interleaved_2m_pages(base, /* number of 2M pages */ numMB / 2);
+    madvise(base, numMB << 20, MADV_DONTFORK);
+  }
+}
 
-static size_t rd(size_t sz) { return sz & ~(kRoundUp - 1); }
+/*
+ * Adjust the start of TC relative to hot runtime code. What really matters
+ * is a number of 2MB pages in-between. We appear to benefit from odd numbers.
+ */
+uintptr_t shiftTC(uintptr_t base) {
+  if (!Cfg::CodeCache::AutoTCShift || __hot_start == nullptr) return base;
+  // Make sure the offset from hot text is either odd or even number
+  // of huge pages.
+  const auto hugePagesDelta =
+    (ru<size2m>(base) -
+     rd<size2m>(reinterpret_cast<uintptr_t>(__hot_start))) / size2m;
+  const size_t shiftAmount =
+    ((hugePagesDelta & 1) == (Cfg::CodeCache::AutoTCShift & 1)) ? 0 : size2m;
 
-CodeCache::CodeCache()
-  : m_useHot{RuntimeOption::RepoAuthoritative && CodeCache::AHotSize > 0}
-{
+  return base + shiftAmount;
+}
 
-  // We want to ensure that all code blocks are close to each other so that we
-  // can short jump/point between them. Thus we allocate one slab and divide it
-  // between the various blocks.
-  auto const thread_local_size = ru(
-    RuntimeOption::EvalThreadTCMainBufferSize +
-    RuntimeOption::EvalThreadTCColdBufferSize +
-    RuntimeOption::EvalThreadTCFrozenBufferSize +
-    RuntimeOption::EvalThreadTCDataBufferSize
+bool mapTC(uintptr_t usedBase, uintptr_t size) {
+  // Use MAP_FIXED_NOREPLACE instead of MAP_FIXED so we actually get
+  // an error if we overlap with an existing mapping.
+  auto const allocBase =
+    (uintptr_t)mmap(reinterpret_cast<void*>(usedBase), size,
+                    PROT_READ | PROT_WRITE,
+                    MAP_ANONYMOUS | MAP_PRIVATE | MAP_FIXED_NOREPLACE,
+                    -1, 0);
+
+  if (allocBase != usedBase) {
+#ifdef FOLLY_SANITIZE
+    // If we hit an already existing mapping when running sanitizers,
+    // it's almost certainly because of the ASAN shadow region (which
+    // starts just below the 2GB mark). Keep halving the TC size until
+    // we no longer collide. This isn't a big deal because we don't
+    // expect to run the JIT that much when running sanitizers.
+    if (errno == EEXIST) {
+      if (Cfg::Server::Mode) {
+        Logger::FWarning(
+          "Reducing TC sizes from {} to {}, "
+          "due to possible ASAN collision\n",
+          size, size / 2
+          );
+      }
+      return false;
+    }
+#endif
+    always_assert_flog(
+      false,
+      "mmap failed for translation cache (error = {})",
+      errno == EEXIST ? "allocated range overlap" : strerror(errno)
+    );
+  }
+
+  always_assert_flog(allocBase >= tc_start_address(),
+                     "unexpected tc start address movement");
+  return true;
+}
+
+uintptr_t getTCMaxExtent(uintptr_t usedBase) {
+  // Use all the low 2GB space, but do not conflict with static literals.
+  auto constexpr tcMaxAddr =
+    rd<size2m>(std::min(kLowArenaMinAddr, kStaticLiteralsMinAddr));
+
+  if (Cfg::Server::Mode) {
+    Logger::Info("tcMaxAddr: 0x%lx", tcMaxAddr);
+  }
+  always_assert_flog(
+    usedBase + (32u << 20) <= tcMaxAddr,
+    "brk is too big (usedBase = {}, tcMaxAddr = {})",
+    usedBase, tcMaxAddr
   );
 
-  auto const kAHotSize = RuntimeOption::EvalJitAHotSizeRoundUp ?
-    ru(CodeCache::AHotSize) : CodeCache::AHotSize;
-  auto const kASize       = ru(CodeCache::ASize);
-  auto const kAProfSize   = ru(CodeCache::AProfSize);
-  auto const kAColdSize   = ru(CodeCache::AColdSize);
-  auto const kAFrozenSize = ru(CodeCache::AFrozenSize);
+  return tcMaxAddr;
+}
 
-  auto kGDataSize = ru(CodeCache::GlobalDataSize);
-  m_totalSize = ru(kAHotSize + kASize + kAColdSize + kAProfSize +
-                   kAFrozenSize + kGDataSize + thread_local_size);
-  m_codeSize = m_totalSize - kGDataSize;
+}
 
-  if ((kASize < (10 << 20)) ||
-      (kAColdSize < (4 << 20)) ||
-      (kAFrozenSize < (6 << 20)) ||
-      (kGDataSize < (2 << 20))) {
-    fprintf(stderr, "Allocation sizes ASize, AColdSize, AFrozenSize and "
-                    "GlobalDataSize are too small.\n");
-    exit(1);
-  }
+/////////////////////////////////////////////////////////////////////////
 
-  auto const cutTCSizeTo = [] (size_t targetSize) {
-    assertx(targetSize < (2ull << 30));
-    // Make sure the result if size_t to avoid 32-bit overflow
-    auto const total = static_cast<size_t>(AHotSize) + ASize + AProfSize +
-                       AColdSize + AFrozenSize + GlobalDataSize;
-    if (total <= targetSize) return;
-
-    AHotSize = rd(AHotSize * targetSize / total);
-    ASize = rd(ASize * targetSize / total);
-    AProfSize = rd(AProfSize * targetSize / total);
-    AColdSize = rd(AColdSize * targetSize / total);
-    AFrozenSize = rd(AFrozenSize * targetSize / total);
-    GlobalDataSize = rd(GlobalDataSize * targetSize / total);
-
-    AMaxUsage = ASize - ASize / 128;
-    AColdMaxUsage = AColdSize - AColdSize / 128;
-    AFrozenMaxUsage = AFrozenSize - AFrozenSize / 128;
-
-    assertx(static_cast<size_t>(AHotSize) + ASize + AProfSize + AColdSize +
-            AFrozenSize + GlobalDataSize <= targetSize);
-
-    if (RuntimeOption::ServerExecutionMode()) {
-      Logger::FWarning("Adjusted TC sizes to fit in {} bytes: AHotSize = {}, "
-                       "ASize = {}, AProfSize = {}, AColdSize = {}, "
-                       "AFrozenSize = {}, GlobalDataSize = {}",
-                       targetSize, AHotSize, ASize, AProfSize, AColdSize,
-                       AFrozenSize, GlobalDataSize);
-    }
-  };
-
-  auto const currBase = ru(reinterpret_cast<uintptr_t>(sbrk(0)));
-  if (m_totalSize > (2ul << 30)) {
-    fprintf(stderr, "Combined size of ASize, AColdSize, AFrozenSize and "
-                    "GlobalDataSize must be < 2GiB to support 32-bit relative "
-                    "addresses.\n  The sizes will be automatically reduced.\n");
-    cutTCSizeTo((2ul << 30) - kRoundUp - currBase - thread_local_size);
-    new (this) CodeCache;
-    return;
-  }
-
-#if USE_JEMALLOC_EXTENT_HOOKS
-  if (use_lowptr) {
-    // in LOWPTR builds, TC must fit in lower 1G address.  If it doesn't, we
-    // shrink things to make it so.
-    if (currBase + (32u << 20) > kLowArenaMinAddr) {
-      fprintf(stderr, "brk is too big for LOWPTR build\n");
-      exit(1);
-    }
-    auto const endAddr = currBase + m_totalSize;
-    if (endAddr > kLowArenaMinAddr) {
-      cutTCSizeTo(kLowArenaMinAddr - kRoundUp - currBase - thread_local_size);
-      new (this) CodeCache;
-      return;
-    }
-  }
-#endif
-
-  auto enhugen = [&](void* base, unsigned numMB) {
-    if (CodeCache::MapTCHuge) {
-      assertx((uintptr_t(base) & (kRoundUp - 1)) == 0);
-      assertx(numMB < (1 << 12));
-      hintHugeDeleteData((char*)base, numMB << 20,
-                         PROT_READ | PROT_WRITE | PROT_EXEC,
-                         false /* MAP_SHARED */);
-#ifdef __linux__
-      madvise(base, numMB << 20, MADV_DONTFORK);
-#endif
-    }
-  };
-
+CodeCache::CodeCache() {
   // We want to ensure that all code blocks are close to each other so that we
   // can short jump/point between them. Thus we allocate one slab and divide it
   // between the various blocks.
+  auto const thread_local_size = ru<size2m>(
+    Cfg::Eval::ThreadTCMainBufferSize +
+    Cfg::Eval::ThreadTCColdBufferSize +
+    Cfg::Eval::ThreadTCFrozenBufferSize +
+    Cfg::Eval::ThreadTCDataBufferSize
+  );
 
-  // Using sbrk to ensure its in the bottom 2G, so we avoid the need for
-  // trampolines, and get to use shorter instructions for tc addresses.
-  size_t allocationSize = m_totalSize;
-  size_t baseAdjustment = 0;
-  uint8_t* base = (uint8_t*)sbrk(0);
+  auto const usedBase = shiftTC(ru<size2m>(tc_start_address()));
 
-  // Adjust the start of TC relative to hot runtime code. What really matters
-  // is a number of 2MB pages in-between. We appear to benefit from odd numbers.
-  auto const shiftTC = [&]() -> size_t {
-    if (!CodeCache::AutoTCShift || __hot_start == nullptr) return 0;
-    // Make sure the offset from hot text is either odd or even number
-    // of huge pages.
-    const auto hugePagesDelta = (ru(reinterpret_cast<size_t>(base)) -
-                                 rd(reinterpret_cast<size_t>(__hot_start))) /
-                                kRoundUp;
-    return ((hugePagesDelta & 1) == (CodeCache::AutoTCShift & 1))
-      ? 0
-      : kRoundUp;
-  };
+  auto mapSize = getTCMaxExtent(usedBase) - usedBase;
+  while (mapSize > 0 && !mapTC(usedBase, mapSize)) mapSize /= 2;
+  m_codeSize = mapSize - thread_local_size;
 
-  if (base != (uint8_t*)-1) {
-    assertx(!(allocationSize & (kRoundUp - 1)));
-    // Make sure that we have space to round up to the start of a huge page
-    allocationSize += -(uint64_t)base & (kRoundUp - 1);
-    allocationSize += shiftTC();
-    base = (uint8_t*)sbrk(allocationSize);
-    baseAdjustment = allocationSize - m_totalSize;
+  always_assert_flog(
+    m_codeSize >= size2m * 4,
+    "Insufficient low memory available to allocate minimum 2MB per section "
+    "(usedBase = {}, lowArenaStart = {}, m_totalSize = {})",
+    usedBase, getTCMaxExtent(usedBase), mapSize);
+
+  m_base = reinterpret_cast<CodeAddress>(usedBase);
+  m_threadLocalStart = m_base + m_codeSize;
+  numa_interleave(m_base, m_codeSize);
+
+  TRACE(1, "init a @%p\n", m_base);
+  m_all.init(m_base, m_codeSize, "all");
+
+  if (!isJitDeserializing()) {
+    m_main.setHugePageBudget(m_codeSize >> 20);
+  } else {
+    m_main.setHugePageBudget(
+      Cfg::CodeCache::TCNumHugeHotMB + Cfg::CodeCache::TCNumHugeMainMB);
   }
-  if (base == (uint8_t*)-1) {
-    allocationSize = m_totalSize + kRoundUp - 1;
-    if (CodeCache::AutoTCShift) {
-      allocationSize += kRoundUp;
-    }
-    base = (uint8_t*)low_malloc(allocationSize);
-    if (!base) {
-      fprintf(stderr, "could not allocate %zd bytes for translation cache\n",
-              allocationSize);
-      exit(1);
-    }
-    baseAdjustment = -(uint64_t)base & (kRoundUp - 1);
-    baseAdjustment += shiftTC();
-  }
-  assertx(base);
-  base += baseAdjustment;
-
-  m_base = base;
-
-  numa_interleave(base, m_totalSize);
-
-  if (kAHotSize) {
-    FTRACE(1, "init ahot @{}, size = {}\n", base, kAHotSize);
-    m_hot.init(base, kAHotSize, "hot");
-    enhugen(base, kAHotSize >> 20);
-    base += kAHotSize;
-  }
-
-  TRACE(1, "init a @%p\n", base);
-
-  m_main.init(base, kASize, "main");
-  enhugen(base, CodeCache::TCNumHugeHotMB);
-  base += kASize;
-
-  TRACE(1, "init aprof @%p\n", base);
-  m_prof.init(base, kAProfSize, "prof");
-  base += kAProfSize;
-
-  TRACE(1, "init acold @%p\n", base);
-  m_cold.init(base, kAColdSize, "cold");
-  enhugen(base, CodeCache::TCNumHugeColdMB);
-  base += kAColdSize;
-
-  TRACE(1, "init thread_local @%p\n", base);
-  m_threadLocalStart = base;
-  base += thread_local_size;
-
-  TRACE(1, "init afrozen @%p\n", base);
-  m_frozen.init(base, kAFrozenSize, "afrozen");
-  base += kAFrozenSize;
-
-  TRACE(1, "init gdata @%p\n", base);
-  m_data.init(base, kGDataSize, "gdata");
-  base += kGDataSize;
-
-  // The default on linux for the newly allocated memory is read/write/exec
-  // but on some systems its just read/write. Call unprotect to ensure that
-  // the memory is marked executable.
-  unprotect();
-
+  m_cold.setHugePageBudget(Cfg::CodeCache::TCNumHugeColdMB);
   // Assert that no one is actually writing to or reading from the pseudo
   // addresses used to emit thread local translations
   if (thread_local_size) {
     mprotect(m_threadLocalStart, thread_local_size, PROT_NONE);
   }
   m_threadLocalSize = thread_local_size;
-
-  assertx(base - m_base <= allocationSize);
-  assertx(base - m_base + 2 * kRoundUp > allocationSize);
-  assertx(base - m_base <= (2ul << 30));
 }
 
-CodeBlock& CodeCache::blockFor(CodeAddress addr) {
-  return codeBlockChoose(addr, m_main, m_hot, m_prof, m_cold, m_frozen);
+CodeBlock& CodeCache::blockFor(ConstCodeAddress addr) {
+  auto const idx = (addr - base()) >> 21;
+  auto block = m_blocks[idx].load(std::memory_order_relaxed);
+  always_assert(block);
+  return *block;
 }
 
-const CodeBlock& CodeCache::blockFor(CodeAddress addr) const {
+const CodeBlock& CodeCache::blockFor(ConstCodeAddress addr) const {
   return const_cast<CodeCache&>(*this).blockFor(addr);
 }
 
 size_t CodeCache::totalUsed() const {
-  size_t ret = 0;
-  forEachBlock([&ret](const char*, const CodeBlock& b) {
-    // A thread with the write lease may be modifying b.m_frontier while we
-    // call b.used() but it should never modify b.m_base. This means that at
-    // worst b.used() will return a slightly stale value.
-    ret += b.used();
-  });
-  return ret;
+  return m_main.used() + m_cold.used() + m_frozen.used() + m_data.used();
 }
 
 bool CodeCache::isValidCodeAddress(ConstCodeAddress addr) const {
@@ -296,27 +192,172 @@ void CodeCache::protect() {
   mprotect(m_base, m_codeSize, PROT_READ | PROT_EXEC);
 }
 
-void CodeCache::unprotect() {
-  mprotect(m_base, m_codeSize, PROT_READ | PROT_WRITE | PROT_EXEC);
+const bool CodeCache::isAnySectionFull() const {
+  return m_all.available() < CodeCache::MinUnassigned;
 }
 
-CodeCache::View CodeCache::view(TransKind kind) {
-  auto view = [&] {
-    if (isProfiling(kind)) {
-      return View{m_prof, m_frozen, m_frozen, m_data, false};
+// A section spans an unbounded chain of blocks, so these per-block statistics
+// no longer describe it. They stay reported as zero rather than dropped so the
+// TC stats and hhvm_jit log schemas keep their shape.
+size_t CodeCache::Section::numFrees() const {
+  return 0;
+}
+size_t CodeCache::Section::numAllocs() const {
+  return 0;
+}
+size_t CodeCache::Section::bytesFree() const {
+  return 0;
+}
+size_t CodeCache::Section::blocksFree() const {
+  return 0;
+}
+
+size_t CodeCache::Section::capacity() const {
+  return 0;
+}
+
+template<const char* name, bool code, bool overAllocate, bool forwardAllocation, size_t pageSize>
+void CodeCache::SectionImpl<name, code, overAllocate, forwardAllocation, pageSize>::ensure(CodeCache& cc, size_t size) {
+  auto newState = m_state.load(std::memory_order_acquire);
+  if (newState.m_last) {
+    if (newState.m_last->canEmit(size)) return;
+    newState.m_used += newState.m_last->used();
+  }
+
+  auto const largePagSize = static_cast<size_t>(cc.m_all.capacity() * Cfg::Jit::DataBlockSizeRatio);
+  auto const closeToCapacityLimit = Cfg::Eval::MaxConcurrentCodeViews * largePagSize;
+  bool closeToCapacity = cc.m_all.available() < closeToCapacityLimit;
+  auto minBlockSize = overAllocate && !closeToCapacity
+      ? largePagSize
+      : 0;
+  auto block = std::make_unique<DataBlock>(cc.m_all.allocChild(std::max(size, minBlockSize),
+                                           name, forwardAllocation,
+                                           pageSize));
+  if (m_hugePageBudget && block->size() >= size2m &&
+      (uintptr_t(block->frontier()) & (size2m - 1)) == 0) {
+    auto const huge = std::min(m_hugePageBudget, block->size() >> 20);
+    enhugen(block->frontier(), huge);
+    m_hugePageBudget -= huge;
+  }
+
+  if (code) {
+    mprotect(block->frontier(), block->size(),
+             PROT_READ | PROT_WRITE | PROT_EXEC);
+  }
+
+  size_t first = (block->base() - cc.base()) >> 21;
+  size_t past = first + (block->size() >> 21);
+  always_assert(first != past);
+  always_assert(first < cc.m_blocks.size());
+  always_assert(past - 1 < cc.m_blocks.size());
+
+  for (auto i = first; i < past; ++i) {
+    assertx(!cc.m_blocks[i]);
+    cc.m_blocks[i].store(block.get(), std::memory_order_relaxed);
+  }
+
+  newState.m_last = block.release();
+  m_state.store(std::move(newState), std::memory_order_release);
+}
+
+std::string CodeCache::blockMap() const {
+  std::string ret;
+  ret.reserve(m_blocks.size());
+  for (int i = 0; i < m_blocks.size(); ++i) {
+    auto b = m_blocks[i].load(std::memory_order_relaxed);
+    if (!b) ret += '*';
+    else if (b->name() == kMain) ret += 'm';
+    else if (b->name() == kCold) ret += 'c';
+    else if (b->name() == kFrozen) ret += 'f';
+    else if (b->name() == kData) ret += 'd';
+    else ret += '*';
+  }
+  return ret;
+}
+
+CodeCache::SectionSizes CodeCache::sectionSizes(
+    TransKind kind, const tc::TransRange* sizes) {
+  if (!sizes) {
+    if (kind == TransKind::Anchor) {
+      return {0, kDefaultBlockSize, 0, kDefaultBlockSize};
     }
+    return {kDefaultBlockSize, kDefaultBlockSize,
+            kDefaultBlockSize, kDefaultBlockSize};
+  }
+  if (isProfiling(kind)) {
+    return {
+      sizes->main.size() + kPad,
+      sizes->cold.size() + kPad,
+      sizes->cold.size() + sizes->frozen.size() + kPad,
+      sizes->data.size() + kPad
+    };
+  }
+  return {
+    sizes->main.size() + kPad,
+    sizes->cold.size() + kPad,
+    sizes->frozen.size() + kPad,
+    sizes->data.size() + kPad
+  };
+}
 
-    const bool isOpt = kind == TransKind::Optimize ||
-                       kind == TransKind::OptPrologue;
-    if (isOpt && m_useHot && m_hot.available() > kMinTranslationBytes) {
-      return View{m_hot, m_cold, m_frozen, m_data, false};
-    }
+CodeCache::View CodeCache::view(TransKind kind, const tc::TransRange* sizes, bool release) {
+  auto const ss = sectionSizes(kind, sizes);
+  m_main.ensure(*this, ss.main);
+  if (isProfiling(kind)) {
+    m_frozen.ensure(*this, ss.frozen);
+  } else {
+    m_cold.ensure(*this, ss.cold);
+    m_frozen.ensure(*this, ss.frozen);
+  }
+  m_data.ensure(*this, ss.data);
 
-    return View{m_main, m_cold, m_frozen, m_data, false};
-  }();
+  View view{
+    m_main.block(),
+    isProfiling(kind) ? m_frozen.block() : m_cold.block(),
+    m_frozen.block(),
+    m_data.block(),
+    false,
+    release
+  };
 
-  tc::assertOwnsCodeLock(view);
+  if (release) {
+    m_main.releaseBlock();
+    m_cold.releaseBlock();
+    m_frozen.releaseBlock();
+    m_data.releaseBlock();
+  }
+
   return view;
 }
 
-}}
+template<typename S>
+CodeBlock* CodeCache::releaseSection(S& section, size_t size) {
+  section.ensure(*this, size);
+  auto block = &section.block();
+  section.releaseBlock();
+  return block;
+}
+
+CodeBlock* CodeCache::releaseMain(size_t size) {
+  return releaseSection(m_main, size);
+}
+CodeBlock* CodeCache::releaseCold(size_t size) {
+  return releaseSection(m_cold, size);
+}
+CodeBlock* CodeCache::releaseData(size_t size) {
+  return releaseSection(m_data, size);
+}
+CodeBlock* CodeCache::releaseFrozen(size_t size) {
+  return releaseSection(m_frozen, size);
+}
+
+void CodeCache::View::alignForTranslation(bool alignMain) {
+  if (alignMain) main().alignFrontier(tc::Translator::kTranslationAlign);
+  cold().alignFrontier(tc::Translator::kTranslationAlign);
+  data().alignFrontier(tc::Translator::kTranslationAlign);
+  frozen().alignFrontier(tc::Translator::kTranslationAlign);
+}
+
+/////////////////////////////////////////////////////////////////////////
+
+}

@@ -1,13 +1,13 @@
-<?php
+<?hh
 
 class MySoapClient extends SoapClient {
-  public function __doRequest(
+  public function __dorequest(
     $request,
     $location,
     $action,
     $version,
     $one_way = null
-  ) {
+  ) :mixed{
     $dom = new DOMDocument('1.0');
 
     // loads the SOAP request to the Document
@@ -23,20 +23,24 @@ class MySoapClient extends SoapClient {
   }
 }
 
+class BodyType {}
+
+
+<<__EntryPoint>>
+function main_data_type_check() :mixed{
 $client = new MySoapClient(
   __DIR__ . '/data-type-check.wdsl',
-  array(
-    'classmap' => array(
+  dict[
+    'classmap' => dict[
       'BodyType' => 'BodyType',
-    ),
+    ],
     'cache_wsdl' => WSDL_CACHE_NONE,
     'soap_version' => SOAP_1_1,
-  )
+  ]
 );
-
-class BodyType extends stdClass {}
 
 $recipientType = new BodyType();
 $recipientType->_ = '1234567890';
 $recipientType->uid = 4119859;
-$client->test($recipientType);
+$client->__soapcall('test', vec[$recipientType]);
+}

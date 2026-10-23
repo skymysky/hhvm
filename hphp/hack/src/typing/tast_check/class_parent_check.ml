@@ -1,0 +1,212 @@
+(*
+ * Copyright (c) 2018, Facebook, Inc.
+ * All rights reserved.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the "hack" directory of this source tree.
+ *
+ *)
+
+open Aast
+open Base
+module Env = Tast_env
+module Cls = Folded_class
+
+let check_is_class env ~require_constraint_check (p, h) =
+  let (is_req_class_check, is_req_this_as_check) =
+    match require_constraint_check with
+    | Some RequireClass -> (true, false)
+    | Some RequireThisAs -> (false, true)
+    | _ -> (false, false)
+  in
+  match h with
+  | Aast.Happly ((_, name), _) -> begin
+    match Env.get_class env name with
+    | Decl_entry.DoesNotExist
+    | Decl_entry.NotYetAvailable ->
+      ()
+    | Decl_entry.Found cls ->
+      let kind = Cls.kind cls in
+      let name = Cls.name cls in
+      let is_interface = Ast_defs.is_c_interface (Cls.kind cls) in
+      if Ast_defs.is_c_class kind then (
+        if Cls.final cls && not is_req_class_check then
+          Diagnostics.add_diagnostic
+            Nast_check_error.(
+              to_user_diagnostic
+              @@ Requires_final_class { pos = p; name; is_req_this_as_check })
+        else if Cls.final cls && is_req_this_as_check then
+          Diagnostics.add_diagnostic
+            Nast_check_error.(
+              to_user_diagnostic
+              @@ Requires_final_class { pos = p; name; is_req_this_as_check })
+      ) else
+        Diagnostics.add_diagnostic
+          Nast_check_error.(
+            to_user_diagnostic
+            @@ Requires_non_class
+                 {
+                   pos = p;
+                   name;
+                   kind = Ast_defs.string_of_classish_kind kind;
+                   is_interface;
+                   is_req_this_as_check;
+                 })
+  end
+  | Aast.Habstr name ->
+    Diagnostics.add_diagnostic
+      Nast_check_error.(
+        to_user_diagnostic
+        @@ Requires_non_class
+             {
+               pos = p;
+               name;
+               kind = "a generic";
+               is_interface = false;
+               is_req_this_as_check;
+             })
+  | _ ->
+    Diagnostics.add_diagnostic
+      Nast_check_error.(
+        to_user_diagnostic
+        @@ Requires_non_class
+             {
+               pos = p;
+               name = "This";
+               kind = "an invalid type hint";
+               is_interface = false;
+               is_req_this_as_check;
+             })
+
+let check_is_interface (env, error_verb) (p, h) =
+  match h with
+  | Aast.Happly ((_, name), _) -> begin
+    match Env.get_class env name with
+    | Decl_entry.DoesNotExist
+    | Decl_entry.NotYetAvailable ->
+      ()
+    | Decl_entry.Found cls when Ast_defs.is_c_interface (Cls.kind cls) -> ()
+    | Decl_entry.Found cls ->
+      Diagnostics.add_diagnostic
+        Nast_check_error.(
+          to_user_diagnostic
+          @@ Non_interface { pos = p; name = Cls.name cls; verb = error_verb })
+  end
+  | Aast.Habstr _ ->
+    Diagnostics.add_diagnostic
+      Nast_check_error.(
+        to_user_diagnostic
+        @@ Non_interface { pos = p; name = "generic"; verb = error_verb })
+  | _ ->
+    Diagnostics.add_diagnostic
+      Nast_check_error.(
+        to_user_diagnostic
+        @@ Non_interface
+             { pos = p; name = "invalid type hint"; verb = error_verb })
+
+let check_is_trait env (p, h) =
+  match h with
+  | Aast.Happly ((_, name), _) ->
+    let type_info = Env.get_class env name in
+    begin
+      match type_info with
+      | Decl_entry.DoesNotExist
+      | Decl_entry.NotYetAvailable ->
+        ()
+      | Decl_entry.Found cls when Ast_defs.is_c_trait (Cls.kind cls) -> ()
+      | Decl_entry.Found cls ->
+        let name = Cls.name cls in
+        let kind = Cls.kind cls in
+        Diagnostics.add_diagnostic
+          Nast_check_error.(
+            to_user_diagnostic
+            @@ Uses_non_trait
+                 { pos = p; name; kind = Ast_defs.string_of_classish_kind kind })
+    end
+  | _ -> failwith "assertion failure: trait isn't an Happly"
+
+let hint_happly_to_string h =
+  match h with
+  | Aast.Happly ((_, name), _) -> Some name
+  | _ -> None
+
+let duplicated_used_traits env c =
+  let traits = Hashtbl.create (module String) in
+  List.iter
+    ~f:(fun (p, h) ->
+      match hint_happly_to_string h with
+      | Some s -> Hashtbl.add_multi traits ~key:s ~data:p
+      | None -> ())
+    c.c_uses;
+  Hashtbl.iteri
+    ~f:(fun ~key ~data ->
+      if List.length data > 1 then
+        let (pos, class_name) = c.c_name in
+        Typing_error_utils.add_typing_error
+          ~env
+          Typing_error.(
+            primary
+            @@ Primary.Trait_reuse_inside_class
+                 {
+                   class_name;
+                   pos;
+                   trait_name = key;
+                   occurrences = List.rev_map data ~f:Pos_or_decl.of_raw_pos;
+                 }))
+    traits
+
+let check_redundant_require_this_as env c req_this_as =
+  (* Only check for traits *)
+  if not (Ast_defs.is_c_trait c.c_kind) then
+    ()
+  else
+    let (_, trait_name) = c.c_name in
+    List.iter req_this_as ~f:(fun (p, h) ->
+        match h with
+        | Aast.Happly ((_, class_name), _) -> begin
+          match Env.get_class env class_name with
+          | Decl_entry.Found cls ->
+            (* Check if the class uses this trait (directly or transitively) *)
+            if not (Cls.has_ancestor cls trait_name) then
+              (* Class does not use the trait, emit warning *)
+              Env.add_warning
+                env
+                ( p,
+                  Typing_warning.Redundant_require_this_as,
+                  {
+                    Typing_warning.Redundant_require_this_as.trait_name;
+                    class_name;
+                  } )
+          | _ -> ()
+        end
+        | _ -> ())
+
+let handler =
+  object
+    inherit Tast_visitor.handler_base
+
+    method! at_class_ env c =
+      let (req_extends, req_implements, req_class, req_this_as) =
+        split_reqs c.c_reqs
+      in
+      List.iter c.c_uses ~f:(check_is_trait env);
+      let Equal = Tast_env.eq_typing_env in
+      duplicated_used_traits env c;
+      List.iter
+        req_extends
+        ~f:(check_is_class env ~require_constraint_check:None);
+      List.iter
+        c.c_implements
+        ~f:(check_is_interface (env, Nast_check_error.Vimplement));
+      List.iter
+        req_implements
+        ~f:(check_is_interface (env, Nast_check_error.Vreq_implement));
+      List.iter
+        req_class
+        ~f:(check_is_class env ~require_constraint_check:(Some RequireClass));
+      List.iter
+        req_this_as
+        ~f:(check_is_class env ~require_constraint_check:(Some RequireThisAs));
+      (* Check for redundant require this as *)
+      check_redundant_require_this_as env c req_this_as
+  end

@@ -19,15 +19,14 @@
 #include "hphp/runtime/ext/datetime/ext_datetime.h"
 
 #include <unicode/locid.h>
+#include <fmt/core.h>
 
-namespace HPHP { namespace Intl {
+namespace HPHP::Intl {
 /////////////////////////////////////////////////////////////////////////////
 const StaticString s_IntlTimeZone("IntlTimeZone");
 
-Class* IntlTimeZone::c_IntlTimeZone = nullptr;
-
 static bool ustring_from_char(icu::UnicodeString& ret,
-                              const String& str,
+                              const OptString& str,
                               UErrorCode &error) {
   error = U_ZERO_ERROR;
   ret = u16(str, error, U_SENTINEL);
@@ -39,21 +38,21 @@ static bool ustring_from_char(icu::UnicodeString& ret,
 }
 
 icu::TimeZone* IntlTimeZone::ParseArg(const Variant& arg,
-                                      const String& funcname,
+                                      const OptString& funcname,
                                       IntlError* err) {
-  String tzstr;
+  OptString tzstr;
 
   if (arg.isNull()) {
-    tzstr = f_date_default_timezone_get();
+    tzstr = HHVM_FN(date_default_timezone_get)();
   } else if (arg.isObject()) {
     auto objarg = arg.toObject();
     auto cls = objarg->getVMClass();
-    auto IntlTimeZone_Class = Unit::lookupClass(s_IntlTimeZone.get());
+    auto IntlTimeZone_Class = IntlTimeZone::classof();
     if (IntlTimeZone_Class &&
         ((cls == IntlTimeZone_Class) || cls->classof(IntlTimeZone_Class))) {
       return IntlTimeZone::Get(objarg.get())->timezone()->clone();
     }
-    if (objarg.instanceof(DateTimeZoneData::getClass())) {
+    if (objarg.instanceof(DateTimeZoneData::classof())) {
       auto* dtz = Native::data<DateTimeZoneData>(objarg);
       tzstr = dtz->getName();
     } else {
@@ -103,7 +102,7 @@ icu::TimeZone* IntlTimeZone::ParseArg(const Variant& arg,
 // class IntlTimeZone
 
 static Variant HHVM_STATIC_METHOD(IntlTimeZone, countEquivalentIDs,
-                                  const String& zoneId) {
+                                  const OptString& zoneId) {
   UErrorCode error = U_ZERO_ERROR;
   icu::UnicodeString id;
   if (!ustring_from_char(id, zoneId, error)) {
@@ -137,7 +136,7 @@ static Variant HHVM_STATIC_METHOD(IntlTimeZone, createEnumeration,
 }
 
 static Object HHVM_STATIC_METHOD(IntlTimeZone, createTimeZone,
-                                 const String& zoneId) {
+                                 const OptString& zoneId) {
   UErrorCode error = U_ZERO_ERROR;
   icu::UnicodeString id;
   if (!ustring_from_char(id, zoneId, error)) {
@@ -149,8 +148,8 @@ static Object HHVM_STATIC_METHOD(IntlTimeZone, createTimeZone,
 }
 
 static Variant HHVM_STATIC_METHOD(IntlTimeZone, getCanonicalID,
-                                  const String& zoneId,
-                                  VRefParam isSystemID) {
+                                  const OptString& zoneId,
+                                  bool& isSystemID) {
   UErrorCode error = U_ZERO_ERROR;
   icu::UnicodeString id;
   if (!ustring_from_char(id, zoneId, error)) {
@@ -169,9 +168,9 @@ static Variant HHVM_STATIC_METHOD(IntlTimeZone, getCanonicalID,
     return false;
   }
 
-  isSystemID.assignIfRef((bool)system);
+  isSystemID = (bool)system;
   error = U_ZERO_ERROR;
-  String ret(u8(result, error));
+  OptString ret(u8(result, error));
   if (U_FAILURE(error)) {
     s_intl_error->setError(error, "intltz_get_canonical_id: could not convert "
                                   "time zone id to UTF-8");
@@ -182,7 +181,7 @@ static Variant HHVM_STATIC_METHOD(IntlTimeZone, getCanonicalID,
 
 static Variant HHVM_METHOD(IntlTimeZone, getDisplayName,
                            bool isDaylight, int64_t style,
-                           const String& locale) {
+                           const OptString& locale) {
   if (!IntlTimeZone::isValidStyle(style)) {
     s_intl_error->setError(U_ILLEGAL_ARGUMENT_ERROR,
                            "intltz_get_display_name: wrong display type");
@@ -196,7 +195,7 @@ static Variant HHVM_METHOD(IntlTimeZone, getDisplayName,
                                      localeOrDefault(locale).c_str()),
                                    result);
   UErrorCode error = U_ZERO_ERROR;
-  String ret(u8(result, error));
+  OptString ret(u8(result, error));
   TZ_CHECK(data, error, false);
   return ret;
 }
@@ -207,7 +206,7 @@ static int64_t HHVM_METHOD(IntlTimeZone, getDSTSavings) {
 }
 
 static Variant HHVM_STATIC_METHOD(IntlTimeZone, getEquivalentID,
-                                  const String& zoneId, int64_t index) {
+                                  const OptString& zoneId, int64_t index) {
   UErrorCode error = U_ZERO_ERROR;
   icu::UnicodeString id;
   if (!ustring_from_char(id, zoneId, error)) {
@@ -218,7 +217,7 @@ static Variant HHVM_STATIC_METHOD(IntlTimeZone, getEquivalentID,
 
   auto result = icu::TimeZone::getEquivalentID(id, (int32_t)index);
   error = U_ZERO_ERROR;
-  String ret(u8(result, error));
+  OptString ret(u8(result, error));
   if (U_FAILURE(error)) {
     s_intl_error->setError(error, "intltz_get_equivalent_id: "
                                   "could not convert resulting time zone id "
@@ -233,8 +232,8 @@ static int64_t HHVM_METHOD(IntlTimeZone, getErrorCode) {
   return data->getErrorCode();
 }
 
-static String HHVM_METHOD(IntlTimeZone, getErrorMessage) {
-  TZ_GET(data, this_, String());
+static OptString HHVM_METHOD(IntlTimeZone, getErrorMessage) {
+  TZ_GET(data, this_, OptString());
   return data->getErrorMessage();
 }
 
@@ -248,7 +247,7 @@ static Variant HHVM_METHOD(IntlTimeZone, getID) {
   icu::UnicodeString id;
   data->timezone()->getID(id);
   UErrorCode error = U_ZERO_ERROR;
-  String ret(u8(id, error));
+  OptString ret(u8(id, error));
   if (U_FAILURE(error)) {
     s_intl_error->setError(error,
                            "intltz_get_id: Could not convert id to UTF-8");
@@ -259,7 +258,7 @@ static Variant HHVM_METHOD(IntlTimeZone, getID) {
 
 static bool HHVM_METHOD(IntlTimeZone, getOffset,
                         double date, bool local,
-                        VRefParam rawOffset, VRefParam dstOffset) {
+                        int64_t& rawOffset, int64_t& dstOffset) {
   TZ_GET(data, this_, false);
   UErrorCode error = U_ZERO_ERROR;
   int32_t rawOff, dstOff;
@@ -268,8 +267,8 @@ static bool HHVM_METHOD(IntlTimeZone, getOffset,
     data->setError(error, "intltz_get_offset: error obtaining offset");
     return false;
   }
-  rawOffset.assignIfRef(rawOff);
-  dstOffset.assignIfRef(dstOff);
+  rawOffset = rawOff;
+  dstOffset = dstOff;
   return true;
 }
 
@@ -286,10 +285,19 @@ static Variant HHVM_STATIC_METHOD(IntlTimeZone, getTZDataVersion) {
                                   "Error obtaining time zone data version");
     return false;
   }
-  return String(tzdv, CopyString);
+  return OptString(tzdv, CopyString);
 }
 
 static bool HHVM_METHOD(IntlTimeZone, hasSameRules, const Object& otherTimeZone) {
+  if (!otherTimeZone.instanceof(s_IntlTimeZone)) {
+    SystemLib::throwInvalidArgumentExceptionObject(
+      fmt::format(
+        "Invalid argument. Expected {}, received {}",
+        s_IntlTimeZone.c_str(),
+        otherTimeZone->getClassName().c_str()
+      )
+    );
+  }
   TZ_GET(obj1, this_, false);
   TZ_GET(obj2, otherTimeZone.get(), false);
   return obj1->timezone()->hasSameRules(*obj2->timezone());
@@ -306,7 +314,7 @@ static bool HHVM_METHOD(IntlTimeZone, useDaylightTime) {
 #if U_ICU_VERSION_MAJOR_NUM * 10 + U_ICU_VERSION_MINOR_NUM >= 48
 static Variant HHVM_STATIC_METHOD(IntlTimeZone, createTimeZoneIDEnumeration,
                                   int64_t zoneType,
-                                  const String& region,
+                                  const OptString& region,
                                   const Variant& offset) {
   if (zoneType != UCAL_ZONE_TYPE_ANY &&
       zoneType != UCAL_ZONE_TYPE_CANONICAL &&
@@ -319,7 +327,7 @@ static Variant HHVM_STATIC_METHOD(IntlTimeZone, createTimeZoneIDEnumeration,
 
   int32_t *pofs = nullptr;
   int32_t   ofs = 0;
-  if (offset.isInitialized()) {
+  if (!offset.isNull()) {
     ofs = offset.toInt64();
     pofs = &ofs;
   }
@@ -337,7 +345,7 @@ static Variant HHVM_STATIC_METHOD(IntlTimeZone, createTimeZoneIDEnumeration,
 }
 
 static Variant HHVM_STATIC_METHOD(IntlTimeZone, getRegion,
-                                  const String& str) {
+                                  const OptString& str) {
   UErrorCode error = U_ZERO_ERROR;
   icu::UnicodeString id;
   if (!ustring_from_char(id, str, error)) {
@@ -353,7 +361,7 @@ static Variant HHVM_STATIC_METHOD(IntlTimeZone, getRegion,
     s_intl_error->setError(error, "intltz_get_region: Error obtaining region");
     return false;
   }
-  return String(outbuf, len, CopyString);
+  return OptString(outbuf, len, CopyString);
 }
 #endif // ICU 4.8
 
@@ -369,7 +377,7 @@ static Object HHVM_STATIC_METHOD(IntlTimeZone, getUnknown) {
 
 //////////////////////////////////////////////////////////////////////////////
 
-void IntlExtension::initTimeZone() {
+void IntlExtension::registerNativeTimeZone() {
   HHVM_RCC_INT(IntlTimeZone, DISPLAY_SHORT, icu::TimeZone::SHORT);
   HHVM_RCC_INT(IntlTimeZone, DISPLAY_LONG, icu::TimeZone::LONG);
 #if U_ICU_VERSION_MAJOR_NUM * 10 + U_ICU_VERSION_MINOR_NUM >= 44
@@ -415,10 +423,8 @@ void IntlExtension::initTimeZone() {
  HHVM_STATIC_ME(IntlTimeZone, getUnknown);
 #endif // ICU 4.9
 
-  Native::registerNativeDataInfo<IntlTimeZone>(s_IntlTimeZone.get());
-
-  loadSystemlib("icu_timezone");
+  Native::registerNativeDataInfo<IntlTimeZone>();
 }
 
 //////////////////////////////////////////////////////////////////////////////
-}} // namespace HPHP::Intl
+} // namespace HPHP::Intl

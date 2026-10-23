@@ -1,8 +1,8 @@
 <?hh
 
 abstract class Foo<T> {
+  /* HH_FIXME[4110] */
   protected function bar(): T {
-    // UNSAFE
   }
 }
 

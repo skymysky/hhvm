@@ -14,8 +14,7 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_JIT_SERVICE_REQUEST_HANDLERS_H_
-#define incl_HPHP_JIT_SERVICE_REQUEST_HANDLERS_H_
+#pragma once
 
 #include "hphp/runtime/vm/jit/service-requests.h"
 #include "hphp/runtime/vm/jit/types.h"
@@ -25,40 +24,135 @@ namespace HPHP {
 struct ActRec;
 struct SrcKey;
 
-namespace jit {
-
-struct ReqInfo;
-
-namespace svcreq {
+namespace jit::svcreq {
 
 /*
- * Handle a service request.
- *
- * This often involves looking up or creating a translation, smashing a jmp
- * target or other address in the code, and returning the smashed-in value.
- * This address indicates where the caller should resume execution.
+ * A helper that initializes unpassed default arguments to KindOfUninit.
+ * This is needed when coming to C++ from JIT, as the JIT may optimize away
+ * uninit writes for default arguments.
  */
-TCA handleServiceRequest(ReqInfo& info) noexcept;
+void uninitDefaultArgs(ActRec* fp, uint32_t numEntryArgs, uint32_t numNamedParams,
+                       uint32_t numNonVariadicParams) noexcept;
+/*
+ * Handle a request to initially translate the code at the given current
+ * location. Reached from translations at other SrcKeys when these translations
+ * are unable or unwilling to continue due to insufficient type information or
+ * to handle cold branches.
+ *
+ * The smash targets of a translate are stored in SrcRec::m_incomingBranches.
+ */
+TCA handleTranslate(Offset bcOff, SBInvOffset spOff) noexcept;
+TCA handleTranslateFuncEntry(uint32_t numArgs) noexcept;
+TCA handleTranslateNamedParamsFuncEntry(uint32_t numArgs) noexcept;
+/*
+ * Handle a request to translate the main func entry invoked dynamically.
+ * Translates assuming that `numNonVariadicParams' are passed.
+ */
+ TCA handleTranslateMainFuncEntry() noexcept;
+
+/*
+ * Same as `handleTranslateMainFuncEntry', but for when we know no further
+ * translations can be created. Resumes in the interpreter without attempting
+ * to translate.
+ */
+ TCA handleInterpMainFuncEntryNoTranslate() noexcept;
+
+/*
+ * Handle a request to retranslate the code at the given current location.
+ * Reached from the last translation at the same SrcKey when no existing
+ * translations support the incoming types.
+ *
+ * The smash targets of a retranslate are stored in SrcRec::m_tailFallbackJumps.
+ */
+TCA handleRetranslate(Offset bcOff, SBInvOffset spOff) noexcept;
+TCA handleRetranslateFuncEntry(uint32_t numArgs) noexcept;
+TCA handleRetranslateNamedParamsFuncEntry(uint32_t numArgs) noexcept;
+
+/*
+ * Handle a request to retranslate the current function, leveraging profiling
+ * data to produce a set of larger, more optimized translations. Only used when
+ * PGO is enabled. Execution will resume at the func entry for `numArgs'
+ * whether or not retranslation is successful.
+ * For the base variant, numArgs == numNonVariadicParams will jump to the main func
+ * entry, whereas the NamedFE variant will jump to the named params func entry.
+ */
+TCA handleRetranslateOpt(uint32_t numArgs) noexcept;
+TCA handleRetranslateOptNamedFE(uint32_t numArgs) noexcept;
+
+/*
+ * Handle a situation where the translated code in the TC executes a return
+ * for a frame that was pushed by the interpreter, i.e. there is no TCA to
+ * return to.
+ */
+TCA handlePostInterpRet(uint32_t callOffAndFlags) noexcept;
 
 /*
  * Handle a bindcall request---i.e., look up (or create) the appropriate func
- * prologue for `calleeFrame', then smash the call instruction at `toSmash'.
+ * prologue for `func' and `numPosArgs', then smash the call instruction
+ * at `toSmash'.
  *
  * If we can't find or make a translation, may return fcallHelperThunk instead,
  * which uses C++ helpers to act like a prologue.
  */
-TCA handleBindCall(TCA toSmash, ActRec* calleeFrame, bool isImmutable);
+TCA handleBindCall(TCA toSmash, Func* func, int32_t numPosArgs);
 
 /*
- * If we suspend an FCallAwait frame we need to suspend the caller. Returning
- * to the jitted code will automatically take care of that, but if we're
- * returning in the interpreter, we have to handle it separately. If the frame
- * we're returning from was the vmJitCalledFrame(), we have to exit from
- * handleResume (see comments for jitReturnPre and jitReturnPost). After
- * exiting from there, there is no correct bytecode to resume at, so we use
- * this helper to cleanup and continue.
+ * Flags used by handleResume().
  */
-TCA handleFCallAwaitSuspend();
+struct ResumeFlags {
+  ResumeFlags()
+    : m_noTranslate{false}
+    , m_interpFirst{false}
+    , m_funcEntry{false}
+  {}
+
+  /*
+   * If `noTranslate` is true, no attempt to translate code will be made.
+   * Preexisting translations will still be used.  This is used to avoid
+   * repeated checks if we already know the attempt to translate will fail,
+   * e.g. due to full TC.
+   */
+  ResumeFlags noTranslate(bool noTranslate = true) const {
+    auto copy = *this;
+    copy.m_noTranslate = noTranslate;
+    return copy;
+  }
+
+  /*
+   * If `interpFirst' is true, at least one basic block will be interpreted
+   * before attempting to look up a translation.  This is necessary to ensure
+   * forward progress in certain situations, such as hitting the translation
+   * limit for a SrcKey.
+   */
+  ResumeFlags interpFirst(bool interpFirst = true) const {
+    auto copy = *this;
+    copy.m_interpFirst = interpFirst;
+    return copy;
+  }
+
+  /*
+   * If `funcEntry` is true, execution will be resumed at the FuncEntry location
+   * of the current vmpc().
+   */
+  ResumeFlags funcEntry(bool funcEntry = true) const {
+    auto copy = *this;
+    copy.m_funcEntry = funcEntry;
+    return copy;
+  }
+
+  std::string show() const;
+
+  union {
+    uint8_t m_asByte;
+    struct {
+      bool m_noTranslate : 1;
+      bool m_interpFirst : 1;
+      bool m_funcEntry : 1;
+    };
+  };
+};
+
+static_assert(sizeof(ResumeFlags) == 1, "ustubs pass m_asByte to handleResume");
 
 /*
  * Look up (or create) and return the address of a translation for the current
@@ -66,19 +160,7 @@ TCA handleFCallAwaitSuspend();
  *
  * If no translation can be found or created, execute code in the interpreter
  * until we find one, possibly throwing exceptions or reentering the VM.
- *
- * If `interpFirst' is true, at least one basic block will be interpreted
- * before attempting to look up a translation.  This is necessary to ensure
- * forward progress in certain situations, such as hitting the translation
- * limit for a SrcKey.
  */
-TCA handleResume(bool interpFirst);
+JitResumeAddr handleResume(ResumeFlags flags);
 
-/*
- * Look up (or create) the translation for the body of fp.func().
- */
-TCA funcBodyHelper(ActRec* fp);
-
-}}}
-
-#endif
+}}

@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2014 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-present Facebook, Inc. (http://www.facebook.com)  |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -14,10 +14,6 @@
    +----------------------------------------------------------------------+
 */
 #include "hphp/util/boot-stats.h"
-
-#include <cassert>
-
-#include <folly/portability/Unistd.h>
 
 #include "hphp/util/logger.h"
 #include "hphp/util/process.h"
@@ -40,7 +36,7 @@ ResourceUsage ResourceUsage::sinceEpoch() {
 }
 
 std::string ResourceUsage::toString() const {
-  return folly::sformat(
+  return fmt::format(
     "{}ms wall, {}ms cpu, {} MB RSS",
     std::chrono::duration_cast<std::chrono::milliseconds>(wall()).count(),
     std::chrono::duration_cast<std::chrono::milliseconds>(cpu()).count(),
@@ -68,8 +64,7 @@ ResourceUsage ResourceUsage::operator+(const ResourceUsage& rhs) const {
 ///////////////////////////////////////////////////////////////////////////////
 
 struct BootStats::Impl {
-  Impl() : m_last(ResourceUsage::sinceEpoch()) {
-  }
+  Impl() : m_last(ResourceUsage::sinceEpoch()) {}
 
   void add(const std::string& info, ResourceUsage value);
   void dumpMarks();
@@ -83,6 +78,8 @@ private:
   ResourceUsage m_last;
   std::mutex m_marks_guard_;
   std::map<std::string, ResourceUsage> m_marks;
+  std::map<std::string, std::string> m_strs;
+  std::map<std::string, int64_t> m_ints;
 };
 
 void BootStats::Impl::add(const std::string& info, ResourceUsage value) {
@@ -92,8 +89,7 @@ void BootStats::Impl::add(const std::string& info, ResourceUsage value) {
 
 void BootStats::Impl::dumpMarks() {
   for (const auto& it : m_marks) {
-    Logger::Info(
-      folly::sformat("BootStats: {} = {}", it.first, it.second.toString()));
+    Logger::FInfo("BootStats: {} = {}", it.first, it.second.toString());
   }
 }
 
@@ -107,17 +103,24 @@ ResourceUsage BootStats::Impl::computeDeltaFromLast() {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-BootStats::Block::Block(const std::string& name)
-    : m_name(name), m_start(ResourceUsage::sinceEpoch()) {
-  Logger::Info(folly::sformat("BootStats: {}...", name));
+BootStats::Block::Block(const std::string& name, bool enabled, bool publishWallTime) {
+  if (!enabled) return;
+  m_name = name;
+  m_enabled = true;
+  m_publishWallTime = publishWallTime;
+  m_start = ResourceUsage::sinceEpoch();
+  Logger::FInfo("BootStats: {}...", name);
 }
 
 BootStats::Block::~Block() {
+  if (!m_enabled) return;
   auto total = ResourceUsage::sinceEpoch() - m_start;
-  Logger::Info(
-    folly::sformat(
-      "BootStats: {} block done, took {}", m_name, total.toString()));
+  Logger::FInfo("BootStats: {} block done, took {}", m_name, total.toString());
   BootStats::add(m_name, total);
+  if (m_publishWallTime) {
+    auto const counter = ServiceData::createCounter("jit." + m_name + ".time");
+    counter->setValue(std::chrono::duration_cast<std::chrono::milliseconds>(total.wall()).count());     
+  }
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -132,23 +135,24 @@ void BootStats::start() {
   BootStats::s_instance = std::make_unique<BootStats::Impl>();
 }
 
-void BootStats::done() {
+void BootStats::done(bool log) {
   if (!s_started) return;
   s_started = false;
 
-  auto total = ResourceUsage::sinceEpoch() - s_start;
-  Logger::Info(
-    folly::sformat("BootStats: all done, took {} total", total.toString()));
-
-  BootStats::s_instance->add("TOTAL", total);
   BootStats::s_instance->dumpMarks();
 
-  if (StructuredLog::enabled()) {
+  if (log && StructuredLog::enabled()) {
     std::lock_guard<std::mutex> lock(s_instance->m_marks_guard_);
     StructuredLogEntry cols;
-    for (auto sample : s_instance->m_marks) {
+    for (auto const& sample : s_instance->m_marks) {
       cols.setInt(sample.first, sample.second.wall().count());
       cols.setInt(sample.first + " CPU", sample.second.cpu().count());
+    }
+    for (auto const& strCol : s_instance->m_strs) {
+      cols.setStr(strCol.first, strCol.second);
+    }
+    for (auto const& intCol : s_instance->m_ints) {
+      cols.setInt(intCol.first, intCol.second);
     }
     StructuredLog::log("hhvm_boot_timer", cols);
     cols.clear();
@@ -159,17 +163,40 @@ void BootStats::done() {
   }
 }
 
+void BootStats::markStart(const std::string& info) {
+  if (!s_started) return;
+  Logger::FInfo("BootStats: starting {}", info);
+}
+
 void BootStats::mark(const std::string& info) {
   if (!s_started) return;
   auto elapsed = BootStats::s_instance->computeDeltaFromLast();
-  Logger::Info(
-    folly::sformat("BootStats: {} done, took {}", info, elapsed.toString()));
+  Logger::FInfo("BootStats: {} done, took {}", info, elapsed.toString());
   BootStats::s_instance->add(info, elapsed);
+}
+
+void BootStats::markFromStart(const std::string& info) {
+  if (!s_started) return;
+  {
+    std::lock_guard<std::mutex> lock(s_instance->m_last_guard_);
+    s_instance->m_last = s_start;
+  }
+  mark(info);
 }
 
 void BootStats::add(const std::string& info, const ResourceUsage value) {
   if (!s_started) return;
   BootStats::s_instance->add(info, value);
+}
+
+void BootStats::set(const std::string& name, const std::string& value) {
+  if (!s_started) return;
+  BootStats::s_instance->m_strs[name] = value;
+}
+
+void BootStats::set(const std::string& name, int64_t value) {
+  if (!s_started) return;
+  BootStats::s_instance->m_ints[name] = value;
 }
 
 ///////////////////////////////////////////////////////////////////////////////

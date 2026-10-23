@@ -1,11 +1,11 @@
-<?php
+<?hh
 
 class X {
   const Y = 42001;
 }
 
 class A {
-  static function f() {
+  static function f() :mixed{
     return Map {
         'a' => Vector { 1 },
         'b' => Vector { 1 },
@@ -60,7 +60,11 @@ class A {
     }
 }
 
+
+<<__EntryPoint>>
+function main_regalloc() :mixed{
 for ($i = 0; $i < 5; $i++) {
   $m = A::f();
   var_dump($m['b9'][0]);
+}
 }

@@ -1,7 +1,6 @@
-<?php
-
-call_user_func(array('Foo', 'bar'));
-call_user_func(array(NULL, 'bar'));
-call_user_func(array('stdclass', NULL));
-
-?>
+<?hh
+<<__EntryPoint>> function main(): void {
+call_user_func(vec['Foo', 'bar']);
+call_user_func(vec[NULL, 'bar']);
+call_user_func(vec['stdClass', NULL]);
+}

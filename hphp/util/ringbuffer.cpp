@@ -105,7 +105,7 @@ RingBufferEntry* allocEntry(RingBufferType t) {
     newRingPos = (oldRingPos + 1) % kMaxRBEntries;
   } while (!g_ringIdx.compare_exchange_weak(oldRingPos, newRingPos,
                                             std::memory_order_acq_rel));
-  rb->seq = g_seqnum.fetch_add(1, std::memory_order_relaxed);
+  rb->seq = g_seqnum.fetch_add(1, std::memory_order_acq_rel);
   rb->type = t;
   rb->threadId = (uint32_t)((int64_t)pthread_self() & 0xFFFFFFFF);
   return rb;
@@ -131,6 +131,18 @@ void
 ringbufferEntryRip(RingBufferType t, uint64_t sk) {
   auto rip = reinterpret_cast<uint64_t>(__builtin_return_address(0));
   ringbufferEntry(t, sk, rip);
+}
+
+void ringbufferAPCEnqueue(void* handle, void* value) {
+  auto& info = allocEntry(RBTypeAPCHandleEnqueue)->apcHandleInfo;
+  info.handle = handle;
+  info.value = value;
+}
+
+void ringbufferAPCDelete(void* handle, void* value) {
+  auto& info = allocEntry(RBTypeAPCHandleDelete)->apcHandleInfo;
+  info.handle = handle;
+  info.value = value;
 }
 
 void ringbufferGeneric(const char* name, uint64_t data) {

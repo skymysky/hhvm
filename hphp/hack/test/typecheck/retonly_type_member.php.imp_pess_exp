@@ -1,0 +1,60 @@
+error: Naming[2063] You cannot use `HH_FIXME` or `HH_IGNORE_ERROR` comments to suppress error 2063 in declarations [1]
+
+retonly_type_member.php:5:3
+3 | 
+4 | class C {
+5 |   /* HH_FIXME[2063]: this is return-only too */
+  |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ [1]
+6 |   public void $void_member;
+7 |   /* HH_FIXME[4055]: cascading errors */
+
+error: Naming[2063] You can only use the `void` type as the return type of a function or method [1]
+
+retonly_type_member.php:6:10
+4 | class C {
+5 |   /* HH_FIXME[2063]: this is return-only too */
+6 |   public void $void_member;
+  |          ^^^^ [1]
+7 |   /* HH_FIXME[4055]: cascading errors */
+8 |   public static noreturn $noreturn_member;
+
+error: Naming[2063] You can only use the `noreturn` type as the return type of a function or method [1]
+
+retonly_type_member.php:8:17
+6 |   public void $void_member;
+7 |   /* HH_FIXME[4055]: cascading errors */
+8 |   public static noreturn $noreturn_member;
+  |                 ^^^^^^^^ [1]
+9 | }
+
+error: Typing[4055] You cannot use `HH_FIXME` or `HH_IGNORE_ERROR` comments to suppress error 4055 in declarations [1]
+
+retonly_type_member.php:7:3
+5 |   /* HH_FIXME[2063]: this is return-only too */
+6 |   public void $void_member;
+7 |   /* HH_FIXME[4055]: cascading errors */
+  |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ [1]
+8 |   public static noreturn $noreturn_member;
+9 | }
+
+error: Typing[4402] Class `C` cannot support dynamic because property `noreturn_member` does not have an enforceable type [1]
+-> Property `noreturn_member` has type `noreturn` [2]
+
+retonly_type_member.php:8:26
+6 |   public void $void_member;
+7 |   /* HH_FIXME[4055]: cascading errors */
+8 |   public static noreturn $noreturn_member;
+  |                 ^^^^^^^^ [2]
+  |                          ^^^^^^^^^^^^^^^^ [1]
+9 | }
+
+error: Typing[4055] Please assign a value [1]
+
+retonly_type_member.php:8:26
+6 |   public void $void_member;
+7 |   /* HH_FIXME[4055]: cascading errors */
+8 |   public static noreturn $noreturn_member;
+  |                          ^^^^^^^^^^^^^^^^ [1]
+9 | }
+
+6 errors found

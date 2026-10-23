@@ -29,6 +29,13 @@ inline int RequestInjectionData::getCPUTimeout() const {
   return m_cpuTimer.m_timeoutSeconds;
 }
 
+/*
+ * Returns the amount of seconds until user callback is invoked
+ */
+inline int RequestInjectionData::getUserTimeout() const {
+  return m_userTimeoutTimer.m_timeoutSeconds;
+}
+
 inline bool RequestInjectionData::getJit() const {
   return m_jit;
 }
@@ -47,14 +54,15 @@ inline bool RequestInjectionData::getJitFolding() const {
 
 inline void RequestInjectionData::setJitFolding(bool flag) {
   m_jitFolding = flag;
+  updateJit();
 }
 
-inline bool RequestInjectionData::getSuppressHackArrayCompatNotices() const {
-  return m_suppressHackArrayCompatNotices;
+inline bool RequestInjectionData::getSuppressClassConversionNotices() const {
+  return m_suppressClassConversionWarnings;
 }
 
-inline void RequestInjectionData::setSuppressHackArrayCompatNotices(bool flag) {
-  m_suppressHackArrayCompatNotices = flag;
+inline void RequestInjectionData::setSuppressClassConversionNotices(bool flag) {
+  m_suppressClassConversionWarnings = flag;
 }
 
 inline bool RequestInjectionData::getCoverage() const {
@@ -75,6 +83,11 @@ inline void RequestInjectionData::setDebuggerAttached(bool flag) {
   updateJit();
 }
 
+inline void RequestInjectionData::setVSDebugDisablesJit(bool flag) {
+  m_vsdebugDisablesJit = flag;
+  updateJit();
+}
+
 inline size_t RequestInjectionData::getDebuggerStackDepth() const {
   return m_activeLineBreaks.size();
 }
@@ -90,13 +103,12 @@ inline bool RequestInjectionData::getDebuggerForceIntr() const {
     m_debuggerStepOut == StepOutState::Out;
 }
 
-inline bool RequestInjectionData::getDebuggerIntr() const {
-  return m_debuggerIntr;
+inline bool RequestInjectionData::getDebuggerStepIntr() const {
+  return m_debuggerStepIn || m_debuggerStepOut == StepOutState::Out;
 }
 
 inline void RequestInjectionData::setDebuggerIntr(bool flag) {
   m_debuggerIntr = flag;
-  updateJit();
 }
 
 inline bool RequestInjectionData::getDebuggerStepIn() const {
@@ -105,7 +117,6 @@ inline bool RequestInjectionData::getDebuggerStepIn() const {
 
 inline void RequestInjectionData::setDebuggerStepIn(bool flag) {
   m_debuggerStepIn = flag;
-  updateJit();
 }
 
 inline RequestInjectionData::StepOutState
@@ -115,7 +126,6 @@ RequestInjectionData::getDebuggerStepOut() const {
 
 inline void RequestInjectionData::setDebuggerStepOut(StepOutState state) {
   m_debuggerStepOut = state;
-  updateJit();
 }
 
 inline bool RequestInjectionData::getDebuggerNext() const {
@@ -124,7 +134,6 @@ inline bool RequestInjectionData::getDebuggerNext() const {
 
 inline void RequestInjectionData::setDebuggerNext(bool flag) {
   m_debuggerNext = flag;
-  updateJit();
 }
 
 inline int RequestInjectionData::getDebuggerFlowDepth() const {
@@ -135,6 +144,14 @@ inline void RequestInjectionData::setDebuggerFlowDepth(int depth) {
   m_debuggerFlowDepth = depth;
 }
 
+inline void RequestInjectionData::clearPCFilters() {
+  m_breakPointFilter.clear();
+  m_flowFilter.clear();
+  m_lineBreakPointFilter.clear();
+  m_callBreakPointFilter.clear();
+  m_retBreakPointFilter.clear();
+}
+
 inline int RequestInjectionData::getActiveLineBreak() const {
   return m_activeLineBreaks.empty() ? -1 : m_activeLineBreaks.top();
 }
@@ -142,25 +159,21 @@ inline int RequestInjectionData::getActiveLineBreak() const {
 inline void RequestInjectionData::clearActiveLineBreak() {
   if (m_activeLineBreaks.empty()) return;
   m_activeLineBreaks.top() = -1;
-  updateJit();
 }
 
 inline void RequestInjectionData::setActiveLineBreak(int line) {
   assertx(line != -1);
   if (m_activeLineBreaks.empty()) return;
   m_activeLineBreaks.top() = line;
-  updateJit();
 }
 
 inline void RequestInjectionData::popActiveLineBreak() {
   if (m_activeLineBreaks.empty()) return;
   m_activeLineBreaks.pop();
-  updateJit();
 }
 
 inline void RequestInjectionData::pushActiveLineBreak() {
   m_activeLineBreaks.push(-1);
-  updateJit();
 }
 
 inline const std::vector<std::string>&
@@ -184,22 +197,6 @@ inline int64_t RequestInjectionData::getMemoryLimitNumeric() const {
   return m_maxMemoryNumeric;
 }
 
-inline const std::string& RequestInjectionData::getVariablesOrder() const {
-  return m_variablesOrder;
-}
-
-inline void RequestInjectionData::setVariablesOrder(const std::string& order) {
-  m_variablesOrder = order;
-}
-
-inline const std::string& RequestInjectionData::getRequestOrder() const {
-  return m_requestOrder;
-}
-
-inline void RequestInjectionData::setRequestOrder(const std::string& order) {
-  m_requestOrder = order;
-}
-
 inline int64_t RequestInjectionData::getSocketDefaultTimeout() const {
   return m_socketDefaultTimeout;
 }
@@ -212,11 +209,11 @@ inline void RequestInjectionData::setUserAgent(const std::string& agent) {
   m_userAgent = agent;
 }
 
-inline const std::string& RequestInjectionData::getTimeZone() const {
+inline const std::string& RequestInjectionData::getTimezone() const {
   return m_timezone;
 }
 
-inline void RequestInjectionData::setTimeZone(const std::string& tz) {
+inline void RequestInjectionData::setTimezone(const std::string& tz) {
   m_timezone = tz;
 }
 
@@ -226,10 +223,6 @@ inline void RequestInjectionData::setSafeFileAccess(bool b) {
 
 inline bool RequestInjectionData::hasSafeFileAccess() const {
   return m_safeFileAccess;
-}
-
-inline bool RequestInjectionData::hasTrackErrors() const {
-  return m_trackErrors;
 }
 
 inline bool RequestInjectionData::hasHtmlErrors() const {

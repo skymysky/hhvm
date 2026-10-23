@@ -1,12 +1,6 @@
 
-Warning: %s
+Warning: ngettext() expects exactly 3 positional parameters, 0 given in %s/test/zend/good/ext/gettext/tests/gettext_ngettext-wrongparams.php on line 2
 
-Warning: %s
+Warning: ngettext() expects exactly 3 positional parameters, 1 given in %s/test/zend/good/ext/gettext/tests/gettext_ngettext-wrongparams.php on line 3
 
-Warning: %s
-
-Warning: %s
-
-Warning: %s
-
-Warning: %s
+Warning: ngettext() expects exactly 3 positional parameters, 2 given in %s/test/zend/good/ext/gettext/tests/gettext_ngettext-wrongparams.php on line 4

@@ -1,0 +1,14 @@
+error: Typing[4110] Invalid argument [1]
+-> Expected `int` because only `int` can be used to index into a `Vector` or `vec`. [2]
+-> But got `vec<int>` [1]
+
+index_vec_with_self.php:4:6
+1 | <?hh
+2 | function f(): void {
+3 |   $f = ($v ==> $v[$v]);
+  |                ^^ [2]
+4 |   $f(vec[0]);
+  |      ^^^^^^ [1]
+5 | }
+
+1 error found

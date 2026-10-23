@@ -17,7 +17,6 @@
 #include "hphp/runtime/vm/native-data.h"
 
 #include "hphp/runtime/base/exceptions.h"
-#include "hphp/runtime/base/memory-manager-defs.h"
 #include "hphp/runtime/base/memory-manager.h"
 #include "hphp/runtime/base/tv-refcount.h"
 #include "hphp/runtime/base/type-variant.h"
@@ -26,10 +25,10 @@
 #include "hphp/runtime/ext/generator/ext_generator.h"
 #include "hphp/runtime/ext/asio/ext_async-generator.h"
 
-namespace HPHP { namespace Native {
+namespace HPHP::Native {
 //////////////////////////////////////////////////////////////////////////////
 
-typedef std::unordered_map<const StringData*,NativeDataInfo> NativeDataInfoMap;
+using NativeDataInfoMap = std::unordered_map<const StringData*,NativeDataInfo>;
 static NativeDataInfoMap s_nativedatainfo;
 
 namespace {
@@ -52,12 +51,12 @@ size_t ndsize(size_t dataSize, size_t nMemoSlots) {
 
 size_t ndsize(const ObjectData* obj, const NativeDataInfo* ndi) {
   auto cls = obj->getVMClass();
-  if (cls == Generator::getClass()) {
+  if (cls == Generator::classof()) {
     assertx(!cls->hasMemoSlots());
     return Native::data<Generator>(obj)->resumable()->size() -
            sizeof(ObjectData);
   }
-  if (cls == AsyncGenerator::getClass()) {
+  if (cls == AsyncGenerator::classof()) {
     assertx(!cls->hasMemoSlots());
     return Native::data<AsyncGenerator>(obj)->resumable()->size() -
            sizeof(ObjectData);
@@ -74,7 +73,8 @@ void registerNativeDataInfo(const StringData* name,
                             NativeDataInfo::SleepFunc sleep,
                             NativeDataInfo::WakeupFunc wakeup,
                             type_scan::Index tyindex,
-                            uint8_t rt_attrs) {
+                            uint8_t rt_attrs,
+                            bool ctor_throws) {
   assertx(s_nativedatainfo.find(name) == s_nativedatainfo.end());
   assertx((sleep == nullptr && wakeup == nullptr) ||
          (sleep != nullptr && wakeup != nullptr));
@@ -88,6 +88,7 @@ void registerNativeDataInfo(const StringData* name,
   info.sweep = sweep;
   info.sleep = sleep;
   info.wakeup = wakeup;
+  info.ctor_throws = ctor_throws;
   s_nativedatainfo[name] = info;
 }
 
@@ -111,6 +112,7 @@ NativeDataInfo* getNativeDataInfo(const StringData* name) {
  * sizeof(NativeData) (NativeDataInfo.sz) bytes for the custom struct.
  * NativeNode is a link in the NativeData sweep list for this ND block
  */
+template <bool Unlocked>
 ObjectData* nativeDataInstanceCtor(Class* cls) {
   auto const ndi = cls->getNativeDataInfo();
   assertx(ndi);
@@ -124,12 +126,21 @@ ObjectData* nativeDataInstanceCtor(Class* cls) {
   node->obj_offset = nativeDataSize;
   assertx(type_scan::isKnownType(ndi->tyindex));
   node->initHeader_32_16(HeaderKind::NativeData, 0, ndi->tyindex);
+  auto const flags = Unlocked
+    ? ObjectData::IsBeingConstructed
+    : ObjectData::NoAttrs;
   auto obj = new (reinterpret_cast<char*>(node) + nativeDataSize)
-    ObjectData(cls, 0, HeaderKind::NativeObject);
+    ObjectData(cls, flags, HeaderKind::NativeObject);
   assertx(obj->hasExactlyOneRef());
 
   if (UNLIKELY(cls->hasMemoSlots())) {
-    std::memset(node + 1, 0, nativeDataSize - sizeof(NativeNode));
+    auto cur = reinterpret_cast<MemoSlot*>(
+        reinterpret_cast<char*>(node) + sizeof(NativeNode));
+    auto end = reinterpret_cast<MemoSlot*>(
+        reinterpret_cast<char*>(node) + nativeDataSize);
+    while (cur < end) {
+      (cur++)->init();
+    }
   }
 
   if (ndi->init) {
@@ -140,6 +151,9 @@ ObjectData* nativeDataInstanceCtor(Class* cls) {
   }
   return obj;
 }
+
+template ObjectData* nativeDataInstanceCtor<false>(Class*);
+template ObjectData* nativeDataInstanceCtor<true>(Class*);
 
 ObjectData* nativeDataInstanceCopyCtor(ObjectData* src, Class* cls,
                                        size_t nProps) {
@@ -156,12 +170,20 @@ ObjectData* nativeDataInstanceCopyCtor(ObjectData* src, Class* cls,
   assertx(type_scan::isKnownType(ndi->tyindex));
   node->initHeader_32_16(HeaderKind::NativeData, 0, ndi->tyindex);
   auto obj = new (reinterpret_cast<char*>(node) + nativeDataSize)
-    ObjectData(cls, ObjectData::InitRaw{}, cls->getODAttrs(),
-               HeaderKind::NativeObject);
+    ObjectData(cls, ObjectData::InitRaw{}, ObjectData::NoAttrs,
+      HeaderKind::NativeObject);
   assertx(obj->hasExactlyOneRef());
 
+  obj->props()->init(cls->numDeclProperties());
+
   if (UNLIKELY(cls->hasMemoSlots())) {
-    std::memset(node + 1, 0, nativeDataSize - sizeof(NativeNode));
+    auto cur = reinterpret_cast<MemoSlot*>(
+        reinterpret_cast<char*>(node) + sizeof(NativeNode));
+    auto end = reinterpret_cast<MemoSlot*>(
+        reinterpret_cast<char*>(node) + nativeDataSize);
+    while (cur < end) {
+      (cur++)->init();
+    }
   }
 
   if (ndi->init) {
@@ -178,11 +200,9 @@ void nativeDataInstanceDtor(ObjectData* obj, const Class* cls) {
   obj->~ObjectData();
 
   auto const nProps = size_t{cls->numDeclProperties()};
-  auto prop = reinterpret_cast<TypedValue*>(obj + 1);
-  auto const stop = prop + nProps;
-  for (; prop != stop; ++prop) {
-    tvDecRefGen(prop);
-  }
+  obj->props()->foreach(nProps, [&](tv_lval lval) {
+    tvDecRefGen(lval);
+  });
 
   auto ndi = cls->getNativeDataInfo();
 
@@ -225,4 +245,4 @@ void nativeDataWakeup(ObjectData* obj, const Variant& data) {
 }
 
 //////////////////////////////////////////////////////////////////////////////
-}} // namespace HPHP::Native
+} // namespace HPHP::Native

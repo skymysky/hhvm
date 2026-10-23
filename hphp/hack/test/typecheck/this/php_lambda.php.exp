@@ -1,0 +1,21 @@
+error: Parsing[1002] Cannot re-assign `$this` [1]
+
+php_lambda.php:5:19
+3 | class Foo {
+4 |   public function foo(): void {
+5 |     $g = function($this) {
+  |                   ^^^^^ [1]
+6 |       $this->foo();
+7 |     };
+
+error: Naming[2077] Cannot use `$this` as lexical variable [1]
+
+php_lambda.php:5:19
+3 | class Foo {
+4 |   public function foo(): void {
+5 |     $g = function($this) {
+  |                   ^^^^^ [1]
+6 |       $this->foo();
+7 |     };
+
+2 errors found

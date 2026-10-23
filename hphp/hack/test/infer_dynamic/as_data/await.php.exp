@@ -1,0 +1,11 @@
+{ "function": "\\takes_int", "solutions": [] }
+{
+  "function": "\\test_await",
+  "solutions": [
+    {
+      "name": "$d",
+      "pos": "File \"await.php\", line 5, characters 35-36:",
+      "type": "Awaitable<int>"
+    }
+  ]
+}

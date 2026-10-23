@@ -1,5 +1,5 @@
 <?hh
 
-function test(): array<string> {
-  return darray["tingley" => 0];
+function test(): varray<string> {
+  return dict["tingley" => 0];
 }

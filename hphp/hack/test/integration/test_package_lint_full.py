@@ -1,0 +1,125 @@
+# pyre-strict
+from __future__ import absolute_import, unicode_literals
+
+import json
+import os
+
+from hphp.hack.test.integration.common_tests import CommonTestDriver
+from hphp.hack.test.integration.test_case import TestCase
+
+
+class PackageLintFullDriver(CommonTestDriver):
+    repo_dir = "hphp/hack/test/integration/data/packages"
+
+    def write_load_config(self, use_saved_state: bool = False) -> None:
+        with open(os.path.join(self.repo_dir, ".hhconfig"), "w") as f:
+            f.write(
+                """
+packages_config_path = PACKAGES.toml
+"""
+            )
+
+    def expected_file_name(self, file_name: str) -> str:
+        return "{}.full.json.exp".format(file_name)
+
+    def expected_file_path(self, file_name: str) -> str:
+        return os.path.join(self.repo_dir, self.expected_file_name(file_name))
+
+    def expected_json(self, file_name: str) -> str:
+        with open(self.expected_file_path(file_name)) as expected_file:
+            return expected_file.read().strip()
+
+    def get_package_lint_full_info(self, file_name: str) -> str:
+        arg = os.path.join(self.repo_dir, file_name)
+        # Collect all PHP files in the repo as candidates
+        candidates = []
+        for root, _dirs, files in os.walk(self.repo_dir):
+            for f in files:
+                if f.endswith(".php"):
+                    candidates.append(os.path.join(root, f))
+        output, err, retcode = self.run_check(
+            options=[
+                "--package-lint-full",
+                arg,
+                ",".join(candidates),
+            ]
+        )
+        self.assertEqual(
+            0,
+            retcode,
+            "hh --package-lint-full {} returned non-zero code: {}".format(
+                file_name, err
+            ),
+        )
+        return json.dumps(json.loads(output.replace(self.repo_dir, "")), indent=2)
+
+    def assert_json_matches(self, file_name: str) -> None:
+        self.assertMultiLineEqual(
+            self.expected_json(file_name),
+            self.get_package_lint_full_info(file_name),
+            f"JSON does not match for {file_name}",
+        )
+
+    def assert_no_errors(self) -> None:
+        output, err, retcode = self.run_check(
+            options=[
+                "--json",
+            ]
+        )
+        print(output)
+        res = json.loads(output)
+        print(res)
+        self.assertEqual(
+            len(res["errors"]),
+            0,
+            f"Found typing errors in the repo:\n{json.dumps(res['errors'], indent=2)}",
+        )
+
+
+class TestPackageLintFull(TestCase[PackageLintFullDriver]):
+    @classmethod
+    def setUpClass(cls) -> None:
+        super().setUpClass()
+
+    @classmethod
+    def get_template_repo(cls) -> str:
+        return "hphp/hack/test/integration/data/packages"
+
+    @classmethod
+    def get_test_driver(cls) -> PackageLintFullDriver:
+        return PackageLintFullDriver()
+
+    def test_repo(self) -> None:
+        self.test_driver.write_load_config()
+        self.test_driver.assert_no_errors()
+
+    def test_json(self) -> None:
+        self.test_driver.write_load_config()
+
+        cases = [
+            "foo/targets.php",
+            "bar/targets.php",
+            "bar/targets_override.php",
+            "bar/targets_override_used.php",
+            "bar/targets_override_ns.php",
+        ]
+
+        for file_name in cases:
+            with self.subTest(msg=f"{file_name}"):
+                self.test_driver.assert_json_matches(file_name)
+
+    def test_rejects_directory_input(self) -> None:
+        self.test_driver.write_load_config()
+        file_path = os.path.join(self.test_driver.repo_dir, "foo/targets.php")
+
+        for target, candidates in (
+            (self.test_driver.repo_dir, file_path),
+            (file_path, self.test_driver.repo_dir),
+        ):
+            with self.subTest(target=target, candidates=candidates):
+                stdout, stderr, retcode = self.test_driver.run_check(
+                    options=["--package-lint-full", target, candidates]
+                )
+                self.assertEqual("", stdout)
+                self.assertIn("Path is a directory, only files are allowed", stderr)
+                self.assertEqual(10, retcode)

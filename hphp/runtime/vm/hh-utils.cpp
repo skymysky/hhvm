@@ -16,42 +16,36 @@
 #include "hphp/runtime/vm/hh-utils.h"
 
 #include <atomic>
-
-#include <boost/filesystem.hpp>
+#include <filesystem>
 
 #include "hphp/runtime/base/array-data.h"
 #include "hphp/runtime/base/builtin-functions.h"
 #include "hphp/runtime/base/runtime-error.h"
-#include "hphp/runtime/base/runtime-option.h"
 #include "hphp/runtime/vm/debugger-hook.h"
 #include "hphp/runtime/vm/unit.h"
-#include "hphp/system/systemlib.h"
+#include "hphp/util/configs/hacklang.h"
+#include "hphp/util/rds-local.h"
 
 namespace HPHP {
 
 static std::atomic<bool> s_foundHHConfig(false);
 void checkHHConfig(const Unit* unit) {
 
-  if (RuntimeOption::RepoAuthoritative ||
-      !RuntimeOption::LookForTypechecker ||
+  if (Cfg::Repo::Authoritative ||
+      !Cfg::HackLang::LookForTypechecker ||
       s_foundHHConfig ||
-      !unit->isHHFile() ||
       isDebuggerAttached()) {
     return;
   }
 
   const std::string &s = unit->filepath()->toCppString();
-  boost::filesystem::path p(s);
+  std::filesystem::path p(s);
 
   while (p != "/" && p != "") {
-    p.remove_filename();
+    p = p.parent_path();
     p /= ".hhconfig";
-
-    if (boost::filesystem::exists(p)) {
-      break;
-    }
-
-    p.remove_filename();
+    if (std::filesystem::exists(p)) break;
+    p = p.parent_path();
   }
 
   if (p == "/" || p == "") {
@@ -72,7 +66,7 @@ void checkHHConfig(const Unit* unit) {
 /**
  * The default of "true" here is correct -- see autoTypecheckRequestInit().
  */
-static __thread bool tl_doneAutoTypecheck = true;
+static RDS_LOCAL_NO_CHECK(bool, tl_doneAutoTypecheck)(true);
 
 /**
  * autoTypecheckRequestInit() and autoTypecheckRequestExit() work together to
@@ -83,7 +77,7 @@ static __thread bool tl_doneAutoTypecheck = true;
  *
  * More subtle is that we need to block auto-typechecking until the VM is fully
  * initalized, and systemlib is fully merged. In most cases, systemlib is
- * persistent, and we could check SystemLib::s_inited. However, if
+ * persistent, and we could check if the unit is part of systemlib. However, if
  * JitEnableRenameFunction is enabled, then systemlib has to actually be merged
  * every request -- and since much of systemlib is written in Hack, that would
  * trigger auto-typecheck. So we overload the meaning of tl_doneAutoTypecheck to
@@ -91,28 +85,27 @@ static __thread bool tl_doneAutoTypecheck = true;
  * merged.
  */
 void autoTypecheckRequestInit() {
-  tl_doneAutoTypecheck = false;
+  *tl_doneAutoTypecheck = false;
 }
 
 /**
  * See autoTypecheckRequestInit().
  */
 void autoTypecheckRequestExit() {
-  tl_doneAutoTypecheck = true;
+  *tl_doneAutoTypecheck = true;
 }
 
 void autoTypecheck(const Unit* unit) {
-  if (RuntimeOption::RepoAuthoritative ||
-      !RuntimeOption::AutoTypecheck ||
-      tl_doneAutoTypecheck ||
-      !unit->isHHFile() ||
+  if (Cfg::Repo::Authoritative ||
+      !Cfg::HackLang::AutoTypecheck ||
+      *tl_doneAutoTypecheck ||
       isDebuggerAttached()) {
     return;
   }
-  tl_doneAutoTypecheck = true;
+  *tl_doneAutoTypecheck = true;
 
   vm_call_user_func("\\HH\\Client\\typecheck_and_error",
-                    Variant{staticEmptyArray()});
+                    Variant{staticEmptyDictArray()});
 }
 
 }

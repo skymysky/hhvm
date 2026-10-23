@@ -1,8 +1,31 @@
-File "fc_enum_9.php", line 13, characters 10-25:
-Invalid return type (Typing[4110])
-File "fc_enum_9.php", line 12, characters 41-43:
-This is an int
-File "fc_enum_9.php", line 3, characters 6-8:
-It is incompatible with a value of enum Foo
-File "hhi_lib__srcs/BuiltinEnum.hhi", line 34, characters 60-60:
-  via this generic T
+error: Typing[4110] Invalid return type [1]
+-> Expected `int` [2]
+-> But got `arraykey` [3]
+->   via this generic `T` [4]
+->   by the definition of `Foo` arising from an implicit `as arraykey` constraint on this type [3]
+
+fc_enum_9.php:13:10
+ 1 | <?hh
+ 2 | 
+ 3 | enum Foo: int {
+   |      ^^^ [3]
+ 4 |   FOO = 1;
+ 5 |   BAR = 2;
+   :
+10 | }
+11 | // This should fail.
+12 | function getFooValues2(): darray<string, int> {
+   |                                          ^^^ [2]
+13 |   return Foo::getValues();
+   |          ^^^^^^^^^^^^^^^^ [1]
+14 | }
+
+BuiltinEnum.hhi:35:64
+33 |      */
+34 |     <<__NoAutoDynamic>>
+35 |     final public static function getValues()[]: darray<string, T>;
+   |                                                                ^ [4]
+36 | 
+37 |     /**
+
+1 error found

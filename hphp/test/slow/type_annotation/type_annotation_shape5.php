@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 
 class D {
   const int L = 123;
@@ -14,6 +14,10 @@ class C {
   );
 }
 
+
+<<__EntryPoint>>
+function main_type_annotation_shape5() :mixed{
 $x = new ReflectionTypeConstant('C', 'T');
 var_dump($x->getAssignedTypeText());
 var_dump($x->getTypeStructure());
+}

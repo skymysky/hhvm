@@ -147,10 +147,6 @@ bool(true)
 bool(true)
 -- Iteration 74 --
 bool(true)
--- Iteration 75 --
-bool(true)
--- Iteration 76 --
-bool(true)
 
 *** Testing is_numeric() on non numeric types ***
 -- Iteration 1 --
@@ -207,16 +203,10 @@ bool(false)
 bool(false)
 -- Iteration 27 --
 bool(false)
--- Iteration 28 --
-bool(false)
--- Iteration 29 --
-bool(false)
 
 *** Testing error conditions ***
 
-Warning: %s
-NULL
+Warning: is_numeric() expects exactly 1 positional parameter, 0 given in %s/is_numeric.php on line %d
 
-Warning: %s
-NULL
+Warning: is_numeric() expects exactly 1 positional parameter, 2 given in %s/is_numeric.php on line %d
 Done

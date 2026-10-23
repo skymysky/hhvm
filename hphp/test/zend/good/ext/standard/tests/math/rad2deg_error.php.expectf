@@ -1,9 +1,7 @@
-Too many arguments
 
-Warning: %s
-NULL
+Too many arguments
+float(57.295779513082)
 
 Too few arguments
 
-Warning: %s
-NULL
+Warning: rad2deg() expects exactly 1 positional parameter, 0 given in %s/rad2deg_error.php on line 20

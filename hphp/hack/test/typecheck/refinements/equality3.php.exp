@@ -1,0 +1,58 @@
+error: Typing[4110] Invalid argument [1]
+-> Expected `string` [2]
+-> But got `I` [3]
+
+equality3.php:11:18
+ 4 | interface J {}
+ 5 | 
+ 6 | function takes_string(string $_): void {}
+   |                       ^^^^^^ [2]
+ 7 | 
+ 8 | function main(I $i, J $j): void {
+   |               ^ [3]
+ 9 |   if ($i === $j) {
+10 |     // Points to the equality as reason for type of $i
+11 |     takes_string($i);
+   |                  ^^ [1]
+12 |   }
+13 | }
+
+error: Typing[4110] Invalid argument [1]
+-> Expected `string` [2]
+-> But got `J` [3]
+
+equality3.php:11:18
+ 4 | interface J {}
+ 5 | 
+ 6 | function takes_string(string $_): void {}
+   |                       ^^^^^^ [2]
+ 7 | 
+ 8 | function main(I $i, J $j): void {
+   |                     ^ [3]
+ 9 |   if ($i === $j) {
+10 |     // Points to the equality as reason for type of $i
+11 |     takes_string($i);
+   |                  ^^ [1]
+12 |   }
+13 | }
+
+error: Typing[4110] Invalid argument [1]
+-> Expected `string` [2]
+-> But got `(<expr#2> as I & <expr#2> as J)` from this equality test [3]
+
+equality3.php:11:18
+ 4 | interface J {}
+ 5 | 
+ 6 | function takes_string(string $_): void {}
+   |                       ^^^^^^ [2]
+ 7 | 
+ 8 | function main(I $i, J $j): void {
+ 9 |   if ($i === $j) {
+   |       ^^^^^^^^^ [3]
+10 |     // Points to the equality as reason for type of $i
+11 |     takes_string($i);
+   |                  ^^ [1]
+12 |   }
+13 | }
+
+3 errors found

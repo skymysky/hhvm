@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 /**
  * Copyright (c) 2014, Facebook, Inc.
  * All rights reserved.
@@ -20,7 +20,7 @@ class A<T> extends Exception implements B {
 }
 
 function test1(mixed $x): A<bool> {
-  if($x instanceOf A) {
+  if($x is A<_>) {
     return (A<bool>)$x;
   }
   throw new A();

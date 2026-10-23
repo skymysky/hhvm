@@ -1,13 +1,5 @@
-<?hh // strict
-<<__PHPStdLib>>
-class Ignored {
-  public function foo() : void {}
-
-}
-
+<?hh
 
 function test() : void {
-
-  $x = (new Ignored());
-  $x->foo();
+  $x = new MCRouter();
 }

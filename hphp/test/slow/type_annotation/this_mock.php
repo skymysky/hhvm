@@ -15,7 +15,11 @@ final class A {
 final class MockA extends A {
 }
 
+
+<<__EntryPoint>>
+function main_this_mock() :mixed{
 $m = new MockA();
 
 A::setSingleton($m);
 var_dump(A::getMeAnA());
+}

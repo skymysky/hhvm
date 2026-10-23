@@ -1,74 +1,130 @@
 module Test = Integration_test_base
 
 let foo_name = "\\Foo"
+
 let bar_name = "\\Bar"
+
 let foo_file_name = "foo.php"
+
 let bar_file_name = "bar.php"
 
-let foo_contents = "<?hh //strict
+let foo_contents =
+  {|<?hh //strict
 
-const string GLOBAL_X = 3;
+const string GLOBAL_X = "X";
 
 class Foo {
   // this is an error (lack of typehint) revealed during declaration only
   const X = GLOBAL_X;
 }
-"
+|}
 
-let bar_contents = "<?hh //strict
+let bar_contents =
+  {|<?hh //strict
 class Bar {
   public function test(Foo $x) : void {}
 }
-"
+|}
 
-let expected_errors = {|
-File "/foo.php", line 7, characters 9-9:
+let expected_errors =
+  {|
+ERROR: File "/foo.php", line 7, characters 9-9:
 Please add a type hint (Naming[2035])
 |}
 
-let () =
-  let env = Test.setup_server () in
-  let env = Test.setup_disk env [
-    foo_file_name, foo_contents;
-    bar_file_name, bar_contents;
-  ] in
-
-  let classes = [ foo_name; bar_name ] in
-  let foo_path = Relative_path.from_root foo_file_name in
-  let bar_path = Relative_path.from_root bar_file_name in
-
-  let foo_names = FileInfo.({empty_names with
-    n_classes = SSet.of_list [foo_name]
-  }) in
-  let bar_names = FileInfo.({empty_names with
-    n_classes = SSet.of_list [bar_name]
-  }) in
-
-  let foo_fast = Relative_path.Map.singleton foo_path foo_names in
-  let bar_fast = Relative_path.Map.singleton bar_path bar_names in
-  let tcopt = TypecheckerOptions.default in
-
+let test () =
+  let env =
+    Test.setup_server
+      ~hhi_files:(Hhi.get_raw_hhi_contents () |> Array.to_list)
+      ()
+  in
+  let env =
+    Test.setup_disk
+      env
+      [(foo_file_name, foo_contents); (bar_file_name, bar_contents)]
+  in
+  let ctx = Provider_utils.ctx_from_server_env env in
+  let classes = [foo_name; bar_name] in
+  let foo_path = Relative_path.from_root ~suffix:foo_file_name in
+  let bar_path = Relative_path.from_root ~suffix:bar_file_name in
   (* Remove things from shared memory (that were put there by Test.setup_disk)
    * to simulate lazy saved state init. *)
-  let defs = { FileInfo.empty_names with
-    FileInfo.n_classes = SSet.of_list classes
-  } in
-
+  let defs =
+    { File_info.empty_names with File_info.n_classes = S_set.of_list classes }
+  in
   let elems = Decl_class_elements.get_for_classes ~old:false classes in
-  Decl_redecl_service.remove_defs ~collect_garbage:false defs elems;
-  SharedMem.invalidate_caches();
+  Decl_redecl_service.remove_defs ~collect_garbage:false defs ~elems;
+  Shared_mem.invalidate_local_caches ();
+
   (* Local caches need to be invalidated whenever things are removed from shared
    * memory (to avoid getting cached old versions of declarations) *)
-  let empty = Relative_path.Set.empty in
-  let errors = Typing_check_service.go None tcopt empty bar_fast in
-  Test.assert_errors errors "";
-  let errors = Typing_check_service.go None tcopt empty bar_fast in
-  Test.assert_errors errors "";
+  let check_info =
+    {
+      Typing_service_types.init_id = "";
+      check_reason = "test";
+      log_errors = false;
+      discard_warnings = false;
+      recheck_id = Some "";
+      per_file_profiling = Hack_event_logger.PerFileProfilingConfig.default;
+      memtrace_dir = None;
+      heartbeat_interval = None;
+      prefetch_decls_enabled = false;
+      prefetch_decls_threshold = 0;
+    }
+  in
+  let { Typing_check_service.diagnostics; telemetry; _ } =
+    Typing_check_service.go
+      ctx
+      None
+      (Telemetry.create ())
+      [bar_path]
+      ~root:None
+      ~longlived_workers:false
+      ~hh_distc_config:None
+      ~check_info
+      ~warnings_saved_state:None
+  in
+  Test.assert_diagnostics diagnostics "";
+  let { Typing_check_service.diagnostics; telemetry; _ } =
+    Typing_check_service.go
+      ctx
+      None
+      telemetry
+      [bar_path]
+      ~root:None
+      ~longlived_workers:false
+      ~hh_distc_config:None
+      ~check_info
+      ~warnings_saved_state:None
+  in
+  Test.assert_diagnostics diagnostics "";
 
-  let errors = Typing_check_service.go None tcopt empty foo_fast in
-  Test.assert_errors errors expected_errors;
-  let errors = Typing_check_service.go None tcopt empty foo_fast in
-  Test.assert_errors errors expected_errors;
+  let { Typing_check_service.diagnostics; telemetry; _ } =
+    Typing_check_service.go
+      ctx
+      None
+      telemetry
+      [foo_path]
+      ~root:None
+      ~longlived_workers:false
+      ~hh_distc_config:None
+      ~check_info
+      ~warnings_saved_state:None
+  in
+  Test.assert_diagnostics diagnostics expected_errors;
+  let { Typing_check_service.diagnostics; _ } =
+    Typing_check_service.go
+      ctx
+      None
+      telemetry
+      [foo_path]
+      ~root:None
+      ~longlived_workers:false
+      ~hh_distc_config:None
+      ~check_info
+      ~warnings_saved_state:None
+  in
+  Test.assert_diagnostics diagnostics expected_errors;
 
   ignore env;
   ()

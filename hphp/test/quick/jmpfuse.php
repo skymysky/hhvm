@@ -1,22 +1,26 @@
 <?hh
 
 
-function jmpfuse($str) {
+function jmpfuse(string $str) :mixed{
   $pos = 0;
-  while (strlen($str) > $pos + 2 &&
-         $str[$pos] == '/' &&
-         $str[$pos + 1] == '*' &&
-         ($pos = strpos($str, '*/', $pos + 2)) !== false) {
+  while (true) {
+    if (!(strlen($str) > $pos + 2 &&
+          $str[$pos] == '/' &&
+          $str[$pos + 1] == '*')) {
+      break;
+    }
+    $pos = strpos($str, '*/', $pos + 2);
+    if ($pos === false) {
+      break;
+    }
     $pos += 2;
   }
   return true;
 }
 
-function main() {
+<<__EntryPoint>> function main(): void {
   foreach (range(1, 100) as $i) {
     jmpfuse("blah blah\n");
   }
   var_dump("jumps fused?");
 }
-
-main();

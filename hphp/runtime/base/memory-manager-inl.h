@@ -14,14 +14,17 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_MEMORY_MANAGER_INL_H
-#define incl_HPHP_MEMORY_MANAGER_INL_H
+#ifndef incl_HPHP_MEMORY_MANAGER_INL_H_
+#error "memory-manager-inl.h should only be included by memory-manager.h"
+#endif
 
 #include <limits>
 #include <utility>
 
+#include "hphp/util/assertions.h"
 #include "hphp/util/bitops.h"
 #include "hphp/util/compilation-flags.h"
+#include "hphp/util/trace.h"
 
 namespace HPHP {
 
@@ -43,8 +46,8 @@ inline bool SparseHeap::empty() const {
 struct MemoryManager::MaskAlloc {
   explicit MaskAlloc(MemoryManager& mm)
     : m_mm(mm)
-    , startAlloc(s_statsEnabled ? *mm.m_allocated : 0)
-    , startDealloc(s_statsEnabled ? *mm.m_deallocated : 0)
+    , startAlloc(*mm.m_allocated)
+    , startDealloc(*mm.m_deallocated)
   {
     // capture all mallocs prior to construction
     FTRACE(1, "MaskAlloc()\n");
@@ -54,16 +57,14 @@ struct MemoryManager::MaskAlloc {
   ~MaskAlloc() {
     FTRACE(1, "~MaskAlloc()\n");
     // exclude mallocs and frees since construction
-    if (s_statsEnabled) {
-      FTRACE(1, "old: reset alloc: {} reset dealloc: {}\n",
-        m_mm.m_resetAllocated, m_mm.m_resetDeallocated);
+    FTRACE(1, "old: reset alloc: {} reset dealloc: {}\n",
+           m_mm.m_resetAllocated, m_mm.m_resetDeallocated);
 
-      m_mm.m_resetAllocated += *m_mm.m_allocated - startAlloc;
-      m_mm.m_resetDeallocated += *m_mm.m_deallocated - startDealloc;
+    m_mm.m_resetAllocated += *m_mm.m_allocated - startAlloc;
+    m_mm.m_resetDeallocated += *m_mm.m_deallocated - startDealloc;
 
-      FTRACE(1, "new: reset alloc: {} prev dealloc: {}\n\n",
-        m_mm.m_resetAllocated, m_mm.m_resetDeallocated);
-    }
+    FTRACE(1, "new: reset alloc: {} prev dealloc: {}\n\n",
+           m_mm.m_resetAllocated, m_mm.m_resetDeallocated);
   }
 
   MaskAlloc(const MaskAlloc&) = delete;
@@ -74,6 +75,31 @@ private:
   const uint64_t startAlloc;
   const uint64_t startDealloc;
 };
+
+struct MemoryManager::CountMalloc {
+  explicit CountMalloc(MemoryManager& mm, uint64_t& allocated)
+    : m_mm(mm)
+    , m_allocated(allocated)
+    , startAlloc(*mm.m_allocated)
+  {}
+
+  ~CountMalloc() {
+    assertx(*m_mm.m_allocated >= startAlloc);
+    m_allocated = *m_mm.m_allocated - startAlloc;
+  }
+
+  CountMalloc(const CountMalloc&) = delete;
+  CountMalloc& operator=(const CountMalloc&) = delete;
+
+private:
+  MemoryManager& m_mm;
+  uint64_t& m_allocated;
+  const uint64_t startAlloc;
+};
+
+inline void MemoryManager::takeCreditForFreeOnOtherThread(uint64_t size) {
+  m_freedOnOtherThread += size;
+}
 
 struct MemoryManager::SuppressOOM {
   explicit SuppressOOM(MemoryManager& mm)
@@ -192,7 +218,7 @@ inline size_t MemoryManager::size2Index(size_t size) {
   return computeSize2Index(size);
 }
 
-inline size_t MemoryManager::sizeIndex2Size(size_t index) {
+inline constexpr size_t MemoryManager::sizeIndex2Size(size_t index) {
   return kSizeIndex2Size[index];
 }
 
@@ -215,50 +241,42 @@ inline void* MemoryManager::mallocSmallIndex(size_t index) {
 }
 
 inline void* MemoryManager::mallocSmallIndexSize(size_t index, size_t bytes) {
-  assertx(index < kNumSmallSizes);
   if (debug) requestEagerGC();
 
   m_stats.mm_udebt -= bytes;
-  if (UNLIKELY(m_stats.mm_udebt > std::numeric_limits<int64_t>::max())) {
-    return mallocSmallIndexSlow(bytes, index);
+  if (LIKELY(m_stats.mm_udebt <= std::numeric_limits<int64_t>::max())) {
+    auto clamped = std::min(index, kNumSmallSizes);
+    if (auto p = m_freelists[clamped].likelyPop()) {
+      assertx((reinterpret_cast<uintptr_t>(p) & kSmallSizeAlignMask) == 0);
+      FTRACE(3, "mallocSmallIndex: {} -> {}\n", bytes, p);
+      return p;
+    }
   }
-
-  return mallocSmallIndexTail(bytes, index);
-}
-
-ALWAYS_INLINE
-void* MemoryManager::mallocSmallIndexTail(size_t bytes, size_t index) {
-  auto p = m_freelists[index].likelyPop();
-  if (!p) {
-    p = mallocSmallSizeSlow(bytes, index);
-  }
-  assertx((reinterpret_cast<uintptr_t>(p) & kSmallSizeAlignMask) == 0);
-  FTRACE(3, "mallocSmallIndex: {} -> {}\n", bytes, p);
-  return p;
+  return mallocSmallSizeSlow(bytes, index);
 }
 
 inline void* MemoryManager::mallocSmallSize(size_t bytes) {
   assertx(bytes > 0);
-  assertx(bytes <= kMaxSmallSize);
   // mallocSmallIndex() converts the size index back to a size to track the
   // size class's actual size, rather than the requested size.
   return mallocSmallIndex(size2Index(bytes));
 }
 
 inline void MemoryManager::freeSmallIndex(void* ptr, size_t index) {
-  assertx(index < kNumSmallSizes);
   assertx((reinterpret_cast<uintptr_t>(ptr) & kSmallSizeAlignMask) == 0);
-
-  if (UNLIKELY(m_bypassSlabAlloc)) {
-    --currentSmallAllocs[index];
-    return freeBigSize(ptr);
-  }
 
   size_t bytes = sizeIndex2Size(index);
   FTRACE(3, "freeSmallIndex({}, {}), freelist {}\n", ptr, bytes, index);
 
-  m_freelists[index].push(ptr);
-  m_stats.mm_freed += bytes;
+  if (debug) debugFreeFill(ptr, bytes);
+
+  auto clamped = std::min(index, kNumSmallSizes);
+  if (LIKELY(m_freelists[clamped].head != nullptr)) {
+    m_freelists[clamped].push(ptr);
+    m_stats.mm_freed += bytes;
+  } else {
+    freeSmallIndexSlow(ptr, index, bytes);
+  }
 }
 
 inline void MemoryManager::freeSmallSize(void* ptr, size_t bytes) {
@@ -269,45 +287,34 @@ inline void MemoryManager::freeSmallSize(void* ptr, size_t bytes) {
 
 ALWAYS_INLINE
 void* MemoryManager::objMalloc(size_t size) {
-  if (LIKELY(size <= kMaxSmallSize)) return mallocSmallSize(size);
-  return mallocBigSize(size);
+  return mallocSmallSize(size);
 }
 
 ALWAYS_INLINE
 void MemoryManager::objFree(void* vp, size_t size) {
-  if (LIKELY(size <= kMaxSmallSize)) return freeSmallSize(vp, size);
-  freeBigSize(vp);
+  freeSmallSize(vp, size);
 }
 
 ALWAYS_INLINE
 void* MemoryManager::objMallocIndex(size_t index) {
-  if (LIKELY(index < kNumSmallSizes)) return mallocSmallIndex(index);
-  return mallocBigSize(sizeIndex2Size(index));
+  return mallocSmallIndex(index);
 }
 
 ALWAYS_INLINE
 void MemoryManager::objFreeIndex(void* ptr, size_t index) {
-  if (LIKELY(index < kNumSmallSizes)) return freeSmallIndex(ptr, index);
-  return freeBigSize(ptr);
+  freeSmallIndex(ptr, index);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 
 inline int64_t MemoryManager::getAllocated() const {
-  if (use_jemalloc) {
-    assertx(m_allocated);
-    return *m_allocated;
-  }
-  return 0;
+  assertx(m_allocated);
+  return *m_allocated;
 }
 
 inline int64_t MemoryManager::getDeallocated() const {
-  if (use_jemalloc) {
-    assertx(m_deallocated);
-    return *m_deallocated;
-  } else {
-    return 0;
-  }
+  assertx(m_deallocated);
+  return *m_deallocated;
 }
 
 inline int64_t MemoryManager::currentUsage() const {
@@ -357,7 +364,7 @@ inline int64_t MemoryManager::getMemoryLimit() const {
 inline bool MemoryManager::preAllocOOM(int64_t size) {
   if (m_couldOOM) {
     auto stats = getStatsCopy();
-    if (stats.usage() + size > m_usageLimit) {
+    if (stats.usage() + size - Cfg::GC::GraceBytes > m_usageLimit) {
       refreshStatsHelperExceeded();
       return true;
     }
@@ -395,10 +402,6 @@ inline void MemoryManager::setExiting() {
   if (tl_heap) tl_heap->m_exiting = true;
 }
 
-inline StringDataNode& MemoryManager::getStringList() {
-  return m_strings;
-}
-
 ///////////////////////////////////////////////////////////////////////////////
 
 namespace req {
@@ -426,4 +429,3 @@ template<class T> void destroy_raw(T* t) {
 }
 
 }
-#endif

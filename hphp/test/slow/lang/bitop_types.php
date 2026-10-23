@@ -1,55 +1,89 @@
-<?php
-
-$format = '
-  function %s($a, $b) {
-    if (false) {} // force translation
-    $x = $a %s $b;
-    printf("%%s($a) %s %%s($b) = %%s($x)\n",
-           gettype($a), gettype($b), gettype($x));
-  }
-  %s(%s, %s);';
+<?hh
 
 class c {
-  public function __toString() {
+  public function __toString()[] :mixed{
     return 'c';
   }
 }
 
-$ops = array(
-  '&',
-  '^',
-  '|',
-);
+function test_uninit() :mixed{
+  $a = 'string';
+  try {
+    $x = $a & $b;
+    var_dump($x);
+  } catch (UndefinedVariableException $e) {
+    var_dump($e->getMessage());
+  }
 
-$values = array(
-  'true',
-  '42',
-  '24.1987',
-  '"str"',
-  'array(1, 2, 3)',
-  'new c()',
-  'null',
-);
-
-for ($o = 0; $o < count($ops); ++$o) {
-  for ($i = 0; $i < count($values); ++$i) {
-    for ($j = 0; $j < count($values); ++$j) {
-      $f_name = sprintf("f%d%d%d", $o, $i, $j);
-      eval(sprintf($format, $f_name, $ops[$o], $ops[$o],
-                   $f_name, $values[$i], $values[$j]));
-    }
+  try {
+    $x = $a ^ $b;
+    var_dump($x);
+    var_dump($x);
+  } catch (UndefinedVariableException $e) {
+    var_dump($e->getMessage());
   }
 }
 
-function test_uninit() {
-  if (false) {}
-  $a = 'string';
-  $x = $a & $b;
-  var_dump($x);
-
-  $a = 'string';
-  $x = $a ^ $b;
-  var_dump($x);
+function dump($a, $b, $bitop_str, $bitop) :mixed{
+  $res = $bitop($a, $b);
+  printf(
+    "%s(%s) %s %s(%s) = %s(%s)\n",
+    gettype($a),
+    HH\is_any_array($a) ? 'Array' : $a,
+    $bitop_str,
+    gettype($b),
+    HH\is_any_array($b) ? 'Array' : $b,
+    gettype($res),
+    $res,
+  );
 }
 
-@test_uninit();
+function cast(inout $a, inout $b) :mixed{
+  if ($a is string && $b is string) return;
+  $a = (int)$a;
+  $b = (int)$b;
+}
+
+function and($a, $b) :mixed{
+  cast(inout $a, inout $b);
+  return $a & $b;
+}
+
+function xor($a, $b) :mixed{
+  cast(inout $a, inout $b);
+  return $a ^ $b;
+}
+
+function or($a, $b) :mixed{
+  cast(inout $a, inout $b);
+  return $a | $b;
+}
+
+<<__EntryPoint>>
+function main_bitop_types() :mixed{
+  $ops = vec[tuple('&', and<>), tuple('^', xor<>), tuple('|', or<>)];
+
+  $values = vec[
+    true,
+    42,
+    24.1987,
+    "str",
+    vec[1, 2, 3],
+    new c(),
+    null,
+  ];
+
+  foreach ($ops as list($op_str, $op_lambda)) {
+    foreach ($values as $i) {
+      foreach ($values as $j) {
+        try {
+          dump($i, $j, $op_str, $op_lambda);
+        } catch (TypecastException $e) {
+          var_dump($e->getMessage());
+        }
+      }
+    }
+  }
+
+  test_uninit();
+}

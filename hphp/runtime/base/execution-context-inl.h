@@ -14,8 +14,7 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_EXECUTION_CONTEXT_INL_H_
-#define incl_HPHP_EXECUTION_CONTEXT_INL_H_
+#pragma once
 
 #include "hphp/runtime/vm/act-rec.h"
 
@@ -42,15 +41,37 @@ inline Transport* ExecutionContext::getTransport() {
   return m_transport;
 }
 
-inline void ExecutionContext::setTransport(Transport* transport) {
-  m_transport = transport;
+// This method may return different implementations of StreamTransport
+// based on runtime options.
+inline std::shared_ptr<stream_transport::StreamTransport>
+ExecutionContext::getServerStreamTransport() const {
+  if (m_transport) {
+    return m_transport->getStreamTransport();
+  } else {
+    return nullptr;
+  }
 }
 
-inline String ExecutionContext::getCwd() const {
+inline rqtrace::Trace* ExecutionContext::getRequestTrace() {
+  return m_requestTrace;
+}
+
+inline void ExecutionContext::setTransport(Transport* transport) {
+  m_transport = transport;
+  if (transport && !m_requestTrace) {
+    if (auto trace = m_transport->getRequestTrace()) m_requestTrace = trace;
+  }
+}
+
+inline void ExecutionContext::setRequestTrace(rqtrace::Trace* trace) {
+  m_requestTrace = trace;
+}
+
+inline OptString ExecutionContext::getCwd() const {
   return m_cwd;
 }
 
-inline void ExecutionContext::setCwd(const String& cwd) {
+inline void ExecutionContext::setCwd(const OptString& cwd) {
   m_cwd = cwd;
 }
 
@@ -74,11 +95,11 @@ inline StringBuffer* ExecutionContext::swapOutputBuffer(StringBuffer* sb) {
   return current;
 }
 
-inline String ExecutionContext::getRawPostData() const {
+inline OptString ExecutionContext::getRawPostData() const {
   return m_rawPostData;
 }
 
-inline void ExecutionContext::setRawPostData(const String& pd) {
+inline void ExecutionContext::setRawPostData(const OptString& pd) {
   m_rawPostData = pd;
 }
 
@@ -92,7 +113,7 @@ inline void ExecutionContext::setErrorState(
   m_errorState = state;
 }
 
-inline String ExecutionContext::getLastError() const {
+inline OptString ExecutionContext::getLastError() const {
   return m_lastError;
 }
 
@@ -100,15 +121,15 @@ inline int ExecutionContext::getLastErrorNumber() const {
   return m_lastErrorNum;
 }
 
-inline String ExecutionContext::getErrorPage() const {
+inline OptString ExecutionContext::getErrorPage() const {
   return m_errorPage;
 }
 
-inline void ExecutionContext::setErrorPage(const String& page) {
+inline void ExecutionContext::setErrorPage(const OptString& page) {
   m_errorPage = page;
 }
 
-inline String ExecutionContext::getLastErrorPath() const {
+inline OptString ExecutionContext::getLastErrorPath() const {
   return m_lastErrorPath;
 }
 
@@ -126,11 +147,11 @@ inline Array ExecutionContext::getEnvs() const {
   return m_envs;
 }
 
-inline String ExecutionContext::getTimeZone() const {
+inline OptString ExecutionContext::getTimezone() const {
   return m_timezone;
 }
 
-inline void ExecutionContext::setTimeZone(const String& timezone) {
+inline void ExecutionContext::setTimezone(const OptString& timezone) {
   m_timezone = timezone;
 }
 
@@ -167,6 +188,14 @@ inline void ExecutionContext::incrPageletTasksStarted() {
   ++m_pageletTasksStarted;
 }
 
+inline int ExecutionContext::getXboxTasksStarted() const {
+  return m_xboxTasksStarted;
+}
+
+inline void ExecutionContext::incrXboxTasksStarted() {
+  ++m_xboxTasksStarted;
+}
+
 inline const VirtualHost* ExecutionContext::getVirtualHost() const {
   return m_vhost;
 }
@@ -175,16 +204,44 @@ inline void ExecutionContext::setVirtualHost(const VirtualHost* vhost) {
   m_vhost = vhost;
 }
 
-inline const String& ExecutionContext::getSandboxId() const {
+inline const OptString& ExecutionContext::getSandboxId() const {
   return m_sandboxId;
 }
 
-inline void ExecutionContext::setSandboxId(const String& sandboxId) {
+inline void ExecutionContext::setSandboxId(const OptString& sandboxId) {
   m_sandboxId = sandboxId;
+}
+
+inline void ExecutionContext::markTimedOut() {
+  m_timedOut = true;
+}
+
+inline bool ExecutionContext::isTimedOut() const {
+  return m_timedOut;
+}
+
+inline void ExecutionContext::markOOMKilled() {
+  m_killed = true;
+}
+
+inline bool ExecutionContext::isOOMKilled() const {
+  return m_killed;
 }
 
 inline bool ExecutionContext::hasRequestEventHandlers() const {
   return !m_requestEventHandlers.empty();
+}
+
+inline const RepoOptions* ExecutionContext::getRepoOptionsForRequest() const {
+  return m_requestOptions.get_pointer();
+}
+
+inline const PackageInfo& ExecutionContext::getPackageInfo() const {
+  if (Cfg::Repo::Authoritative) return RepoFile::packageInfo();
+  if (auto const opts = getRepoOptionsForRequest()) {
+    return opts->packageInfo();
+  }
+  raise_error("Unable to retrieve package information");
 }
 
 inline const Func* ExecutionContext::getPrevFunc(const ActRec* fp) {
@@ -195,37 +252,41 @@ inline const Func* ExecutionContext::getPrevFunc(const ActRec* fp) {
 inline TypedValue ExecutionContext::invokeFunc(
   const CallCtx& ctx,
   const Variant& args_,
-  VarEnv* varEnv
+  const ArrayData* namedArgNames,
+  RuntimeCoeffects providedCoeffects
 ) {
-  return invokeFunc(ctx.func, args_, ctx.this_, ctx.cls, varEnv,
-                    ctx.invName, InvokeNormal, ctx.dynamic);
+  return invokeFunc(ctx.func, args_, namedArgNames, ctx.this_, ctx.cls,
+                    providedCoeffects, ctx.dynamic);
 }
 
 inline TypedValue ExecutionContext::invokeFuncFew(
   const Func* f,
-  void* thisOrCls,
-  StringData* invName
+  ExecutionContext::ThisOrClass thisOrCls,
+  RuntimeCoeffects providedCoeffects
 ) {
-  return invokeFuncFew(f, thisOrCls, invName, 0, nullptr);
+  return invokeFuncFew(f, thisOrCls, 0, nullptr, nullptr, providedCoeffects);
 }
 
 inline TypedValue ExecutionContext::invokeFuncFew(
   const CallCtx& ctx,
-  int argc,
-  const TypedValue* argv
+  uint32_t numArgs,
+  const ArrayData* namedArgNames,
+  const TypedValue* argv,
+  RuntimeCoeffects providedCoeffects
 ) {
-  auto const thisOrCls = [&] () -> void* {
-    if (ctx.this_) return (void*)(ctx.this_);
-    if (ctx.cls) return (void*)((char*)(ctx.cls) + 1);
+  auto const thisOrCls = [&] () -> ExecutionContext::ThisOrClass {
+    if (ctx.this_) return ctx.this_;
+    if (ctx.cls) return ctx.cls;
     return nullptr;
   }();
 
   return invokeFuncFew(
     ctx.func,
     thisOrCls,
-    ctx.invName,
-    argc,
+    numArgs,
+    namedArgNames,
     argv,
+    providedCoeffects,
     ctx.dynamic
   );
 }
@@ -234,15 +295,18 @@ inline TypedValue ExecutionContext::invokeMethod(
   ObjectData* obj,
   const Func* meth,
   InvokeArgs args,
-  bool dynamic
+  const ArrayData* namedArgNames,
+  RuntimeCoeffects providedCoeffects
 ) {
   return invokeFuncFew(
     meth,
-    ActRec::encodeThis(obj),
-    nullptr /* invName */,
+    obj,
     args.size(),
+    namedArgNames,
     args.start(),
-    dynamic
+    providedCoeffects,
+    false,
+    false
   );
 }
 
@@ -250,10 +314,11 @@ inline Variant ExecutionContext::invokeMethodV(
   ObjectData* obj,
   const Func* meth,
   InvokeArgs args,
-  bool dynamic
+  const ArrayData* namedArgNames,
+  RuntimeCoeffects providedCoeffects
 ) {
   // Construct variant without triggering incref.
-  return Variant::attach(invokeMethod(obj, meth, args, dynamic));
+  return Variant::attach(invokeMethod(obj, meth, args, namedArgNames, providedCoeffects));
 }
 
 inline ActRec* ExecutionContext::getOuterVMFrame(const ActRec* ar) {
@@ -262,17 +327,9 @@ inline ActRec* ExecutionContext::getOuterVMFrame(const ActRec* ar) {
   return LIKELY(!m_nestedVMs.empty()) ? m_nestedVMs.back().fp : nullptr;
 }
 
-inline Cell ExecutionContext::lookupClsCns(const StringData* cls,
+inline TypedValue ExecutionContext::lookupClsCns(const StringData* cls,
                                       const StringData* cns) {
-  return lookupClsCns(NamedEntity::get(cls), cls, cns);
-}
-
-inline VarEnv* ExecutionContext::hasVarEnv(int frame) {
-  auto const fp = getFrameAtDepth(frame);
-  if (fp && (fp->func()->attrs() & AttrMayUseVV)) {
-    if (fp->hasVarEnv()) return fp->getVarEnv();
-  }
-  return nullptr;
+  return lookupClsCns(NamedType::getOrCreate(cls), cls, cns);
 }
 
 inline ActRec*
@@ -301,5 +358,3 @@ template<class Fn> void ExecutionContext::sweepDynPropTable(Fn fn) {
 ///////////////////////////////////////////////////////////////////////////////
 
 }
-
-#endif

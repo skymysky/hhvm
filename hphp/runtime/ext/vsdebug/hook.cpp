@@ -18,6 +18,8 @@
 
 #include "hphp/runtime/ext/vsdebug/ext_vsdebug.h"
 #include "hphp/runtime/ext/vsdebug/debugger.h"
+#include "hphp/runtime/ext/vsdebug/debugger-request-info.h"
+#include "hphp/util/configs/jit.h"
 
 namespace HPHP {
 namespace VSDEBUG {
@@ -36,7 +38,7 @@ struct BreakContext {
   }
 
   Debugger* m_debugger;
-  RequestInfo* m_requestInfo;
+  DebuggerRequestInfo* m_requestInfo;
 
   // If true, tryEnterDebugger should try to break only when a step operation
   // is not in progress, otherwise it should always ask the debugger if we
@@ -46,13 +48,15 @@ struct BreakContext {
 
 void VSDebugHook::onRequestInit() {
   BreakContext breakContext(false);
-}
-
-void VSDebugHook::onRequestShutdown() {
+  auto const disableJit = breakContext.m_debugger ?
+    breakContext.m_debugger->getDebuggerOptions().disableJit :
+    Cfg::Jit::DisabledByVSDebug;
+  RID().setVSDebugDisablesJit(disableJit);
 }
 
 void VSDebugHook::onOpcode(PC /*pc*/) {
   RID().setDebuggerIntr(false);
+  RID().clearFlag(DebuggerSignalFlag);
   BreakContext breakContext(true);
 }
 
@@ -61,6 +65,10 @@ void VSDebugHook::onFuncEntryBreak(const Func* func) {
 
   if (breakContext.m_debugger != nullptr &&
       breakContext.m_requestInfo != nullptr) {
+
+    if (breakContext.m_requestInfo->m_flags.doNotBreak) {
+      return;
+    }
 
     breakContext.m_debugger->onFuncBreakpointHit(
       breakContext.m_requestInfo,
@@ -79,6 +87,10 @@ void VSDebugHook::onLineBreak(const Unit* unit, int line) {
   if (breakContext.m_debugger != nullptr &&
       breakContext.m_requestInfo != nullptr) {
 
+    if (breakContext.m_requestInfo->m_flags.doNotBreak) {
+      return;
+    }
+
     breakContext.m_debugger->onLineBreakpointHit(
       breakContext.m_requestInfo,
       unit,
@@ -91,11 +103,16 @@ void VSDebugHook::onExceptionThrown(ObjectData* exception) {
   BreakContext breakContext(true);
 
   const StringData* name = exception->getVMClass()->name();
-  const Variant msg = exception->o_invoke(s_getMsg, init_null(), false);
-  const HPHP::String msg_str = msg.isNull() ? empty_string() : msg.toString();
+  const Variant msg = exception->o_invoke_few_args(
+    s_getMsg, RuntimeCoeffects::fixme(), 0);
+  const HPHP::OptString msg_str = msg.isNull() ? String::Empty() : msg.toString();
 
   if (breakContext.m_debugger != nullptr &&
       breakContext.m_requestInfo != nullptr) {
+
+    if (breakContext.m_requestInfo->m_flags.doNotBreak) {
+      return;
+    }
 
     breakContext.m_debugger->onExceptionBreakpointHit(
       breakContext.m_requestInfo,
@@ -116,6 +133,10 @@ void VSDebugHook::onError(
 
   if (breakContext.m_debugger != nullptr &&
       breakContext.m_requestInfo != nullptr) {
+
+    if (breakContext.m_requestInfo->m_flags.doNotBreak) {
+      return;
+    }
 
     breakContext.m_debugger->onError(
       breakContext.m_requestInfo,
@@ -186,28 +207,65 @@ void VSDebugHook::onNextBreak(const Unit* /*unit*/, int /*line*/) {
 }
 
 void VSDebugHook::onFileLoad(Unit* efile) {
-  BreakContext breakContext(true);
+  Debugger* debugger = VSDebugExtension::getDebugger();
+  if (debugger == nullptr) {
+    return;
+  }
+
+  DebuggerRequestInfo* requestInfo = debugger->getRequestInfo();
+  if (requestInfo == nullptr) {
+    return;
+  }
+
+  std::filesystem::path p{efile->filepath()->toCppString()};
+  auto const& unitFilename = p.filename().string();
+  auto const& filenamesWithBp =
+    requestInfo->m_breakpointInfo->m_filenamesWithBp;
+  if (filenamesWithBp.find(unitFilename) == filenamesWithBp.end()) {
+    return;
+  }
 
   // Resolve any unresolved breakpoints that may be in this compilation unit.
-  if (breakContext.m_debugger != nullptr &&
-      breakContext.m_requestInfo != nullptr) {
+  debugger->onCompilationUnitLoaded(
+    requestInfo,
+    efile
+  );
+}
 
-    breakContext.m_debugger->onCompilationUnitLoaded(
-      breakContext.m_requestInfo,
-      efile
-    );
+void VSDebugHook::onDefClass(const Class* cls) {
+  Debugger* debugger = VSDebugExtension::getDebugger();
+  if (debugger == nullptr) {
+    return;
+  }
 
-    tryEnterDebugger(
-      breakContext.m_debugger,
-      breakContext.m_requestInfo,
-      true
-    );
+  DebuggerRequestInfo* requestInfo = debugger->getRequestInfo();
+  if (requestInfo == nullptr) {
+    return;
+  }
+
+  if (!requestInfo->m_breakpointInfo->m_hasFuncBp) {
+    return;
+  }
+
+  // Resolve any breakpoints that are set on functions in this class.
+  // Acquire semantics around reading requestInfo->m_flags lock-free.
+  std::atomic_thread_fence(std::memory_order_acquire);
+
+  if (requestInfo->m_flags.unresolvedBps) {
+    size_t methodCount = cls->numMethods();
+    for (unsigned int i = 0; i < methodCount; i++) {
+      auto func = cls->getMethod(i);
+      const std::string functionName(func->fullName()->data());
+      debugger->onFunctionDefined(
+        requestInfo,
+        func,
+        functionName
+      );
+    }
   }
 }
 
-void VSDebugHook::onDefClass(const Class* /*cls*/) {}
-
-void VSDebugHook::onRegisterFuncIntercept(const String& name) {
+void VSDebugHook::onRegisterFuncIntercept(const OptString& name) {
   BreakContext breakContext(true);
 
   // This callback is invoked when a function is intercepted in HHVM.
@@ -224,33 +282,38 @@ void VSDebugHook::onRegisterFuncIntercept(const String& name) {
 }
 
 void VSDebugHook::onDefFunc(const Func* func) {
-  BreakContext breakContext(true);
+  Debugger* debugger = VSDebugExtension::getDebugger();
+  if (debugger == nullptr) {
+    return;
+  }
+
+  DebuggerRequestInfo* requestInfo = debugger->getRequestInfo();
+  if (requestInfo == nullptr) {
+    return;
+  }
+
+  if (!requestInfo->m_breakpointInfo->m_hasFuncBp) {
+    return;
+  }
 
   // Resolve any breakpoints that are set on entry of this function.
-  if (breakContext.m_debugger != nullptr &&
-      breakContext.m_requestInfo != nullptr) {
 
-    // Acquire semantics around reading requestInfo->m_flags lock-free.
-    std::atomic_thread_fence(std::memory_order_acquire);
+  // Acquire semantics around reading requestInfo->m_flags lock-free.
+  std::atomic_thread_fence(std::memory_order_acquire);
 
-    if (breakContext.m_requestInfo->m_flags.unresolvedBps) {
-      breakContext.m_debugger->onFunctionDefined(
-        breakContext.m_requestInfo,
-        func
-      );
-
-      tryEnterDebugger(
-        breakContext.m_debugger,
-        breakContext.m_requestInfo,
-        true
-      );
-    }
+  if (requestInfo->m_flags.unresolvedBps) {
+    std::string funcName(func->fullName()->data());
+    debugger->onFunctionDefined(
+      requestInfo,
+      func,
+      funcName
+    );
   }
 }
 
 void VSDebugHook::tryEnterDebugger(
   Debugger* debugger,
-  RequestInfo* requestInfo,
+  DebuggerRequestInfo* requestInfo,
   bool breakNoStepOnly
 ) {
   // Acquire semantics around reading requestInfo->m_flags lock-free.
@@ -300,19 +363,23 @@ void VSDebugHook::tryEnterDebugger(
     // the wrapper has the actual stdout and stderr pipes to use directly,
     // except for the case where we attached to an already-running script,
     // which behaves like server mode.
-    bool scriptAttachMode = RuntimeOption::VSDebuggerListenPort > 0;
+    bool scriptAttachMode =
+      Cfg::Debugger::VSDebuggerListenPort > 0 ||
+      (!Cfg::Server::Mode &&
+       !Cfg::Debugger::VSDebuggerDomainSocketPath.empty());
     if (!Debugger::hasSameTty()) {
-      if (!g_context.isNull()) {
-        g_context->addStdoutHook(debugger->getStdoutHook());
-      }
-
-      if (scriptAttachMode || debugger->isDummyRequest()) {
-        // Attach to stderr in server mode only for the dummy thread (to show
-        // any error spew from evals, etc) or in script attach mode.
-        // Attaching to all requests in server mode produces way too much error
-        // spew for the client. Users see stderr output for the webserver via
-        // web server logs.
-        Logger::SetThreadHook(debugger->getStderrHook());
+      if (debugger->getDebuggerOptions().disableStdoutRedirection == false) {
+        if (scriptAttachMode || debugger->isDummyRequest()) {
+          if (!g_context.isNull()) {
+            g_context->addDebuggerStdoutHook(debugger->getStdoutHook());
+          }
+          // Attach to stderr in server mode only for the dummy thread (to show
+          // any error spew from evals, etc) or in script attach mode.
+          // Attaching to all requests in server mode produces way too much error
+          // spew for the client. Users see stderr output for the webserver via
+          // web server logs.
+          Logger::SetThreadHook(debugger->getStderrHook());
+        }
       }
     }
   }

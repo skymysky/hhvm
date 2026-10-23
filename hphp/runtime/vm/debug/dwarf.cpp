@@ -16,19 +16,9 @@
 #include "hphp/runtime/vm/debug/dwarf.h"
 
 #include <stdio.h>
-#include "debug.h"
+#include "hphp/runtime/vm/debug/debug.h"
 #include "hphp/runtime/vm/debug/gdb-jit.h"
-
-#include "hphp/runtime/base/execution-context.h"
-#include "hphp/runtime/vm/jit/translator.h"
-#include "hphp/runtime/vm/jit/translator-inline.h"
-
-#if !defined(__APPLE__) && !defined(__FreeBSD__) && !defined(_MSC_VER)
 #include "hphp/runtime/vm/debug/elfwriter.h"
-#define USE_ELF_WRITER 1
-#endif
-
-using namespace HPHP::jit;
 
 namespace HPHP {
 namespace Debug {
@@ -38,12 +28,8 @@ int g_dwarfCallback(LIBDWARF_CALLBACK_NAME_TYPE name, int size,
                     Dwarf_Unsigned link, Dwarf_Unsigned info,
                     Dwarf_Unsigned* /*sect_name_index*/, Dwarf_Ptr handle,
                     int* /*error*/) {
-#ifdef USE_ELF_WRITER
   ElfWriter *e = reinterpret_cast<ElfWriter *>(handle);
   return e->dwarfCallback(name, size, type, flags, link, info);
-#else
-  return 0;
-#endif
 }
 
 void DwarfBuf::byte(uint8_t c) {
@@ -88,8 +74,8 @@ void DwarfBuf::dwarf_cfa_offset_extended_sf(uint8_t reg, int8_t offset) {
 
 const char *DwarfInfo::lookupFile(const Unit *unit) {
   const char *file = nullptr;
-  if (unit && unit->filepath()) {
-    file = unit->filepath()->data();
+  if (unit && unit->origFilepath()) {
+    file = unit->origFilepath()->data();
   }
   if (file == nullptr || strlen(file) == 0) {
     return "anonFile";
@@ -97,21 +83,10 @@ const char *DwarfInfo::lookupFile(const Unit *unit) {
   return file;
 }
 
-void DwarfInfo::addLineEntries(TCRange range,
-                               const Unit *unit,
-                               PC instr,
-                               FunctionInfo* f) {
-  if (unit == nullptr || instr == nullptr) {
-    // For stubs, just add line 0
-    f->m_lineTable.push_back(LineEntry(range, 0));
-    return;
-  }
-  Offset offset = unit->offsetOf(instr);
-
-  int lineNum = unit->getLineNumber(offset);
-  if (lineNum >= 0) {
-    f->m_lineTable.push_back(LineEntry(range, lineNum));
-  }
+void DwarfInfo::addLineEntries(TCRange range, int lineNumber, FunctionInfo* f) {
+  // For stubs and missing line numbers, just add line 0
+  lineNumber = std::max(0, lineNumber);
+  f->m_lineTable.push_back(LineEntry(range, lineNumber));
 }
 
 void DwarfInfo::transferFuncs(DwarfChunk* from, DwarfChunk* to) {
@@ -142,30 +117,28 @@ void DwarfInfo::compactChunks() {
     m_dwarfChunks[j] = nullptr;
   }
   m_dwarfChunks[i] = chunk;
-#ifdef USE_ELF_WRITER
   // register compacted chunk with gdb
   ElfWriter e = ElfWriter(chunk);
-#endif
 }
 
 static Mutex s_lock(RankLeaf);
 
 DwarfChunk* DwarfInfo::addTracelet(TCRange range,
-                                   folly::Optional<std::string> name,
+                                   Optional<std::string> name,
                                    const Func *func,
-                                   PC instr,
-                                   bool exit,
+                                   int lineNumber,
                                    bool inPrologue) {
   DwarfChunk* chunk = nullptr;
-  FunctionInfo* f = new FunctionInfo(range, exit);
+  FunctionInfo* f = new FunctionInfo(range, false);
   const Unit* unit = func ? func->unit(): nullptr;
   if (name) {
     f->name = *name;
   } else {
     assertx(func != nullptr);
-    f->name = lookupFunction(func, exit, inPrologue, true);
+    f->name = lookupFunction(func, inPrologue, true);
     auto names = func->localNames();
     for (int i = 0; i < func->numNamedLocals(); i++) {
+      if (!names[i]) continue;
       f->m_namedLocals.push_back(names[i]->toCppString());
     }
   }
@@ -195,7 +168,7 @@ DwarfChunk* DwarfInfo::addTracelet(TCRange range,
     m_functions[end] = f;
   }
 
-  addLineEntries(TCRange(start, end, range.isAcold()), unit, instr, f);
+  addLineEntries(TCRange(start, end, range.isAcold()), lineNumber, f);
 
   if (f->m_chunk == nullptr) {
     if (m_dwarfChunks.size() == 0 || m_dwarfChunks[0] == nullptr) {
@@ -203,7 +176,7 @@ DwarfChunk* DwarfInfo::addTracelet(TCRange range,
       chunk = new DwarfChunk();
       m_dwarfChunks.push_back(chunk);
     } else if (m_dwarfChunks[0]->m_functions.size()
-                 < RuntimeOption::EvalGdbSyncChunks) {
+                 < Cfg::Eval::GdbSyncChunks) {
       // reuse first chunk
       chunk = m_dwarfChunks[0];
       chunk->clearSynced();
@@ -216,11 +189,9 @@ DwarfChunk* DwarfInfo::addTracelet(TCRange range,
     f->m_chunk = chunk;
   }
 
-#ifdef USE_ELF_WRITER
-  if (f->m_chunk->m_functions.size() >= RuntimeOption::EvalGdbSyncChunks) {
+  if (f->m_chunk->m_functions.size() >= Cfg::Eval::GdbSyncChunks) {
     ElfWriter e = ElfWriter(f->m_chunk);
   }
-#endif
 
   return f->m_chunk;
 }
@@ -231,9 +202,7 @@ void DwarfInfo::syncChunks() {
   for (i = 0; i < m_dwarfChunks.size(); i++) {
     if (m_dwarfChunks[i] && !m_dwarfChunks[i]->isSynced()) {
       unregister_gdb_chunk(m_dwarfChunks[i]);
-#ifdef USE_ELF_WRITER
       ElfWriter e = ElfWriter(m_dwarfChunks[i]);
-#endif
     }
   }
 }

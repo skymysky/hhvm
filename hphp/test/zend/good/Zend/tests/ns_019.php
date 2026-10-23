@@ -1,7 +1,9 @@
-<?php
-function foo() {
-	return __FUNCTION__;
+<?hh
+<<__DynamicallyCallable>>
+function foo() :mixed{
+    return __FUNCTION__;
 }
-
-$x = __NAMESPACE__ . "\\foo"; 
-echo $x(),"\n";
+<<__EntryPoint>> function main(): void {
+$x = __NAMESPACE__ . "\\foo";
+echo HH\dynamic_fun($x)(),"\n";
+}

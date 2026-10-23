@@ -1,4 +1,4 @@
-<?php
+<?hh
 
 class foo {
   private $prop;
@@ -7,8 +7,12 @@ class foo {
   }
 }
 
-function main() {
+function main() :mixed{
   new foo('hi');
 }
+
+<<__EntryPoint>>
+function main_constructor() :mixed{
 main();
 echo "done\n";
+}

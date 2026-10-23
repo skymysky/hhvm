@@ -1,0 +1,10 @@
+error: Parsing[1002] Dynamic calls to static methods are banned. [1]
+
+dynamic_static_method2.php:18:3
+16 |     echo "in lambda\n";
+17 |   };
+18 |   Foo::$x(10); // boom
+   |   ^^^^^^^ [1]
+19 | }
+
+1 error found

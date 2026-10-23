@@ -1,6 +1,6 @@
-<?php
+<?hh
 
-function main() {
+function main() :mixed{
   ob_start(function($str) {
     bar();
     return $str.'!!!';
@@ -13,4 +13,8 @@ function main() {
   echo "DON'T PRINT ME!";
 }
 
+
+<<__EntryPoint>>
+function main_handler_fatal() :mixed{
 main();
+}

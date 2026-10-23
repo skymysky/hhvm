@@ -1,6 +1,6 @@
 <?hh
 
-function get($d, $k) {
+function get($d, $k) :mixed{
   try {
     var_dump($d[$k]);
   } catch (InvalidArgumentException $ex) {
@@ -9,7 +9,7 @@ function get($d, $k) {
   return $d;
 }
 
-function add($d, $v) {
+function add($d, $v) :mixed{
   try {
     $d[] = $v;
   } catch (InvalidArgumentException $ex) {
@@ -18,18 +18,13 @@ function add($d, $v) {
   return $d;
 }
 
-function main() {
-  $foo = 12;
-  $ref =& $foo;
-  $bar = array();
-  $badref =& $bar;
-
+function run(inout $ref, inout $badref) :mixed{
   $dyn = 42;
   add(keyset[$dyn], 1)
     |> add($$, "1")
     |> add($$, null)
-    |> add($$, array())
-    |> add($$, new stdclass)
+    |> add($$, dict[])
+    |> add($$, new stdClass)
     |> add($$, 1.2)
     |> add($$, $ref)
     |> add($$, $badref)
@@ -37,8 +32,8 @@ function main() {
     |> get($$, 1)
     |> get($$, "1")
     |> get($$, null)
-    |> get($$, array())
-    |> get($$, new stdclass)
+    |> get($$, dict[])
+    |> get($$, new stdClass)
     |> get($$, 1.2)
     |> get($$, $ref)
     |> get($$, $badref)
@@ -46,4 +41,9 @@ function main() {
     |> var_dump($$);
 }
 
-main();
+<<__EntryPoint>>
+function main() :mixed{
+  $foo = 12;
+  $bar = dict[];
+  run(inout $foo, inout $bar);
+}

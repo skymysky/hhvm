@@ -1,4 +1,4 @@
-<?php
+<?hh <<__EntryPoint>> function main(): void {
 $hex_shm_id = 0xff3;
 $write_d1 = "test #1 of the shmop() extension";
 $write_d2 = "test #2 append data to shared memory segment";
@@ -6,12 +6,13 @@ $write_d2 = "test #2 append data to shared memory segment";
 echo "shm open for create: ";
 $shm_id = shmop_open($hex_shm_id, "n", 0644, 1024);
 if (!$shm_id) {
-  die("failed\n");
+  exit("failed\n");
 } else {
   echo "ok\n";
 }
 
-echo "shm size is: " . ($shm_size = shmop_size($shm_id)) . "\n";
+$shm_size = shmop_size($shm_id);
+echo "shm size is: " . $shm_size . "\n";
 
 echo "shm write test #1: ";
 $written = shmop_write($shm_id, $write_d1, 0);
@@ -36,8 +37,7 @@ if (!$shm_id) {
 echo "data in memory is: " . shmop_read($shm_id, 0, $written) . "\n";
 
 /* try to append data to the shared memory segment, this should fail */
-@shmop_write($shm_id, $write_d1, $written);
-echo $php_errormsg . "\n";
+shmop_write($shm_id, $write_d1, $written);
 
 shmop_close($shm_id);
 
@@ -52,7 +52,7 @@ if (!$shm_id) {
 echo "shm write test #1: ";
 $written = shmop_write($shm_id, $write_d2, $written);
 if ($written != strlen($write_d2)) {
-  die("failed\n");
+  exit("failed\n");
 } else {
   echo "ok\n";
 }
@@ -67,4 +67,4 @@ if (!shmop_delete($shm_id)) {
 }
 
 shmop_close($shm_id);
-?>
+}

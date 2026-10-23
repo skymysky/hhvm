@@ -1,0 +1,10 @@
+error: Parsing[1002] XHP children declarations are no longer supported. [1]
+
+has_decl.php:6:12
+4 | 
+5 | class :foo {
+6 |   children (bar);
+  |            ^ [1]
+7 | }
+
+1 error found

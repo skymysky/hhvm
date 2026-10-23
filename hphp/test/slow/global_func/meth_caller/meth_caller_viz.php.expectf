@@ -1,0 +1,9 @@
+string(11) "Q\X\C::f(2)"
+string(9) "Q\B::f(2)"
+string(9) "Q\B::f(2)"
+string(7) "A::f(2)"
+string(11) "Q\X\C::g(2)"
+string(9) "Q\B::g(2)"
+string(9) "Q\B::g(2)"
+
+Fatal error: Call to private method A::g() from context '__SystemLib\MethCallerHelper' in %s/meth_caller_viz.php on line 24

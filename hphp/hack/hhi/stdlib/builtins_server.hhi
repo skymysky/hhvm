@@ -1,4 +1,4 @@
-<?hh // decl /* -*- mode: php -*- */
+<?hh /* -*- mode: php -*- */
 /**
  * Copyright (c) 2014, Facebook, Inc.
  * All rights reserved.
@@ -8,39 +8,68 @@
  *
  */
 
-const int PAGELET_NOT_READY = 0;
-const int PAGELET_READY = 0;
-const int PAGELET_DONE = 0;
+namespace {
 
-<<__PHPStdLib>>
-function dangling_server_proxy_old_request();
-<<__PHPStdLib>>
-function pagelet_server_is_enabled();
-<<__PHPStdLib>>
-function pagelet_server_task_start($url, $headers = null, $post_data = null, $files = null, int $timeout_seconds = 0);
-<<__PHPStdLib>>
-function pagelet_server_task_status($task);
-<<__PHPStdLib>>
-function pagelet_server_task_result($task, &$headers, &$code, $timeout_ms = 0): string;
-<<__PHPStdLib>>
-function pagelet_server_flush();
-<<__PHPStdLib>>
-function xbox_send_message($msg, &$ret, $timeout_ms, $host = "localhost");
-<<__PHPStdLib>>
-function xbox_post_message($msg, $host = "localhost");
-<<__PHPStdLib>>
-function xbox_task_start($message);
-<<__PHPStdLib>>
-function xbox_task_status($task);
-<<__PHPStdLib>>
-function xbox_task_result($task, $timeout_ms, &$ret);
-<<__PHPStdLib>>
-function xbox_process_call_message($msg);
-<<__PHPStdLib>>
-function xbox_get_thread_timeout();
-<<__PHPStdLib>>
-function xbox_set_thread_timeout($timeout);
-<<__PHPStdLib>>
-function xbox_schedule_thread_reset();
-<<__PHPStdLib>>
-function xbox_get_thread_time();
+  const int PAGELET_NOT_READY;
+  const int PAGELET_READY;
+  const int PAGELET_DONE;
+
+  <<__PHPStdLib>>
+  function hphp_thread_type(): int;
+
+  <<__PHPStdLib>>
+  function pagelet_server_flush(): void;
+  <<__PHPStdLib>>
+  function pagelet_server_is_enabled(): bool;
+  <<__PHPStdLib>>
+  function pagelet_server_task_start(
+    string $url,
+    darray<arraykey, mixed> $headers = dict[],
+    string $post_data = "",
+    darray<arraykey, mixed> $files = dict[],
+    int $timeout_seconds = 0,
+  ): resource;
+  <<__PHPStdLib>>
+  function pagelet_server_task_status(resource $task): int;
+  <<__PHPStdLib>>
+  function pagelet_server_task_result(
+    resource $task,
+    inout HH\FIXME\MISSING_PARAM_TYPE $headers,
+    inout HH\FIXME\MISSING_PARAM_TYPE $code,
+    int $timeout_ms = 0,
+  ): string;
+  <<__PHPStdLib>>
+  function pagelet_server_tasks_started(): int;
+
+  <<__PHPStdLib>>
+  function xbox_task_start(string $message): resource;
+  <<__PHPStdLib>>
+  function xbox_task_status(resource $task): bool;
+  <<__PHPStdLib>>
+  function xbox_task_result(
+    resource $task,
+    int $timeout_ms,
+    inout HH\FIXME\MISSING_PARAM_TYPE $ret,
+  ): int;
+  <<__PHPStdLib>>
+  function xbox_process_call_message(string $msg): mixed;
+  <<__PHPStdLib>>
+  function xbox_tasks_started(): int;
+}
+
+namespace HH {
+  function server_is_prepared_to_stop(): bool;
+  function server_is_stopping(): bool;
+  function server_health_level(): int;
+  function server_process_start_time(): int;
+  function server_uptime(): int;
+  function jit_jumpstarted()[read_globals]: bool;
+  function jumpstart_source_host()[read_globals]: string;
+  function jumpstart_prof_tag()[read_globals]: string;
+  function mark_server_health(bool $healthy): void;
+}
+
+namespace HH\Experimental {
+  function enable_thread_hint(int $hint = 0): void;
+  function disable_thread_hint(int $hint = 0): void;
+}

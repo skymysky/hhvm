@@ -1,29 +1,26 @@
-<?php
+<?hh
 /* Prototype  : array array_flip(array $input)
- * Description: Return array with key <-> value flipped 
+ * Description: Return array with key <-> value flipped
  * Source code: ext/standard/array.c
 */
-
-echo "*** Testing array_flip() : usage variations - unexpected values for 'input' ***\n";
-
-//get an unset variable
-$unset_var = 10;
-unset ($unset_var);
 
 //class definition for object variable
 class MyClass
 {
   public function __toString()
-  {
+:mixed  {
      return 'object';
   }
 }
+<<__EntryPoint>> function main(): void {
+echo "*** Testing array_flip() : usage variations - unexpected values for 'input' ***\n";
+
 
 //resource variable
 $fp = fopen(__FILE__,'r');
-    
+
 //array of values for 'input' argument
-$values = array(
+$values = vec[
           // int data
   /*1*/   0,
           1,
@@ -58,15 +55,11 @@ $values = array(
           // object data
   /*20*/  new MyClass(),
 
-          // undefined data
-          @$undefined_var,
 
-          // unset data
-          @$unset_var,
 
           //resource data
-  /*23*/  $fp
-);
+  /*21*/  $fp
+];
 
 // loop through each element of $values for 'input' argument
 for($count = 0; $count < count($values); $count++) {
@@ -77,5 +70,5 @@ for($count = 0; $count < count($values); $count++) {
 //closing resource
 fclose($fp);
 
-echo "Done"
-?>
+echo "Done";
+}

@@ -1,34 +1,31 @@
-<?php
+<?hh
 /* Prototype  : array array_uintersect(array arr1, array arr2 [, array ...], callback data_compare_func)
- * Description: Returns the entries of arr1 that have values which are present in all the other arguments. Data is compared by using an user-supplied callback. 
+ * Description: Returns the entries of arr1 that have values which are present in all the other arguments. Data is compared by using an user-supplied callback.
  * Source code: ext/standard/array.c
- * Alias to functions: 
+ * Alias to functions:
  */
-
-echo "*** Testing array_uintersect() : usage variation ***\n";
-
-// Initialise function arguments not being substituted (if any)
-$arr1 = array(1, 2);
-$arr2 = array(1, 2);
-
-include('compare_function.inc');
-$data_compare_function = 'compare_function';
-
-//get an unset variable
-$unset_var = 10;
-unset ($unset_var);
 
 // define some classes
 class classWithToString
 {
-	public function __toString() {
-		return "Class A object";
-	}
+    public function __toString() :mixed{
+        return "Class A object";
+    }
 }
 
 class classWithoutToString
 {
 }
+<<__EntryPoint>> function main(): void {
+include('compare_function.inc');
+echo "*** Testing array_uintersect() : usage variation ***\n";
+
+// Initialise function arguments not being substituted (if any)
+$arr1 = vec[1, 2];
+$arr2 = vec[1, 2];
+
+$data_compare_function = compare_function<>;
+
 
 // heredoc string
 $heredoc = <<<EOT
@@ -36,11 +33,11 @@ hello world
 EOT;
 
 // add arrays
-$index_array = array (1, 2, 3);
-$assoc_array = array ('one' => 1, 'two' => 2);
+$index_array = vec[1, 2, 3];
+$assoc_array = dict['one' => 1, 'two' => 2];
 
 //array of values to iterate over
-$inputs = array(
+$inputs = dict[
 
       // int data
       'int 0' => 0,
@@ -79,12 +76,8 @@ $inputs = array(
       'instance of classWithToString' => new classWithToString(),
       'instance of classWithoutToString' => new classWithoutToString(),
 
-      // undefined data
-      'undefined var' => @$undefined_var,
 
-      // unset data
-      'unset var' => @$unset_var,
-);
+];
 
 // loop through each element of the array for ...
 
@@ -93,5 +86,5 @@ foreach($inputs as $key =>$value) {
       var_dump( array_uintersect($arr1, $arr2, $value, $data_compare_function) );
 };
 
-?>
-===DONE===
+echo "===DONE===\n";
+}

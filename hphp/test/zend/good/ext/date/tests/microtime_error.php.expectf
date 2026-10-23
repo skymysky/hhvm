@@ -1,38 +1,4 @@
 -- Too many arguments --
 
-Warning: %s
-NULL
-
--- Bad Arg types --
-
---> bad arg: NULL
-string(%d) "%s %s"
-
---> bad arg: float(1.5)
-float(%s)
-
---> bad arg: string(5) "hello"
-float(%s)
-
---> bad arg: array(2) {
-  ["k"]=>
-  string(1) "v"
-  [0]=>
-  array(1) {
-    [0]=>
-    int(0)
-  }
-}
-
-Warning: %s
-NULL
-
---> bad arg: object(stdClass)#%d (0) {
-}
-
-Warning: %s
-NULL
-
---> bad arg: int(1)
-float(%s)
+Warning: microtime() expects at most 1 positional parameter, 2 given in %s/test/zend/good/ext/date/tests/microtime_error.php on line 11
 ===DONE===

@@ -14,34 +14,45 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_ARCH_H
-#define incl_HPHP_ARCH_H
-
-#include "hphp/util/assertions.h"
+#pragma once
 
 namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
 
-enum class Arch { X64, ARM, PPC64, };
+namespace arch {
 
-constexpr Arch arch() {
-#if defined(__powerpc64__)
-  return Arch::PPC64;
-#elif defined(__aarch64__)
-  return Arch::ARM;
+struct X64 {};
+struct ARM {};
+
+template <typename T>
+constexpr bool any() {
+  return false;
+}
+
+template <>
+constexpr bool any<X64>() {
+#if defined(__aarch64__)
+  return false;
 #else
-  return Arch::X64;
+  return true;
 #endif
 }
 
-constexpr bool arch_any() { return false; }
+template <>
+constexpr bool any<ARM>() {
+#if defined(__aarch64__)
+  return true;
+#else
+  return false;
+#endif
+}
 
-/*
- * Convenience helper for guarding on a set of architectures.
- */
-template<class... Tail>
-bool arch_any(Arch a, Tail&&... archs) {
-  return arch() == a || arch_any(archs...);
+template <typename T, typename T2, typename... Tail>
+constexpr bool any() {
+  if constexpr (any<T>()) return true;
+  return any<T2, Tail...>();
+}
+
 }
 
 /*
@@ -56,21 +67,30 @@ bool arch_any(Arch a, Tail&&... archs) {
  *
  * We need to specify the return type explicitly, or else we may drop refs.
  */
-#define ARCH_SWITCH_CALL(func, ...)                                   \
-  ([&]() -> decltype(x64::func(__VA_ARGS__)) {                        \
-    switch (arch()) {                                                 \
-      case Arch::X64:                                                 \
-        return x64::MSVC_GLUE(func, (__VA_ARGS__));                   \
-      case Arch::ARM:                                                 \
-        return arm::MSVC_GLUE(func, (__VA_ARGS__));                   \
-      case Arch::PPC64:                                               \
-        return ppc64::MSVC_GLUE(func, (__VA_ARGS__));                 \
-    }                                                                 \
-    not_reached();                                                    \
+#ifdef __aarch64__
+#define ARCH_SWITCH_CALL(func, ...)             \
+  ([&]() -> decltype(auto) {                    \
+    return arm::MSVC_GLUE(func, (__VA_ARGS__)); \
   }())
+#else
+#define ARCH_SWITCH_CALL(func, ...)             \
+  ([&]() -> decltype(auto) {                    \
+    return x64::MSVC_GLUE(func, (__VA_ARGS__)); \
+  }())
+#endif
+
+#ifdef __aarch64__
+#define ARCH_MATCH(x64_lambda, arm_lambda)      \
+  ([&]() -> decltype(auto) {                    \
+    return (arm_lambda)(arch::ARM{});           \
+  }())
+#else
+#define ARCH_MATCH(x64_lambda, arm_lambda)      \
+  ([&]() -> decltype(auto) {                    \
+    return (x64_lambda)(arch::X64{});           \
+  }())
+#endif
 
 ///////////////////////////////////////////////////////////////////////////////
 
 }
-
-#endif

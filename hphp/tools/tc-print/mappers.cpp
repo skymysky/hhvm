@@ -17,11 +17,7 @@
 
 #include <cstdio>
 #include <string>
-#include <assert.h>
 #include <algorithm>
-#include <iomanip>
-
-#include "hphp/runtime/vm/jit/translator.h"
 
 #include "hphp/tools/tc-print/offline-code.h"
 #include "hphp/tools/tc-print/tc-print.h"
@@ -30,7 +26,8 @@ namespace HPHP { namespace jit {
 
 #define EXT_OPCODES \
   EXT_OP(TraceletGuard) \
-  EXT_OP(FuncPrologue)
+  EXT_OP(FuncPrologue) \
+  EXT_OP(FuncEntry)
 
 enum ExtOp {
   ExtOpStart = Op_count + 1,
@@ -126,9 +123,10 @@ ExtOpcodeResult getExtOpcode(TCA addr, const TransRec* trec) {
     if ((bcMap[i].aStart       <= addr && bcMap[i+1].aStart       > addr) ||
         (bcMap[i].acoldStart   <= addr && bcMap[i+1].acoldStart   > addr) ||
         (bcMap[i].afrozenStart <= addr && bcMap[i+1].afrozenStart > addr)) {
-      auto* unit = g_repo->getUnit(bcMap[i].md5);
-      always_assert(unit);
-      return {true, (ExtOpcode)unit->getOp(bcMap[i].bcStart)};
+      if (bcMap[i].sk.funcEntry()) return {true, ExtOpFuncEntry};
+      auto const func = bcMap[i].sk.func();
+      always_assert(func);
+      return {true, (ExtOpcode)func->getOp(bcMap[i].sk.offset())};
     }
   }
 
@@ -137,18 +135,18 @@ ExtOpcodeResult getExtOpcode(TCA addr, const TransRec* trec) {
   return {false};
 }
 
-folly::Optional<ExtOpcode>
+Optional<ExtOpcode>
 AddrToBcMapper::operator()(const TCA& addr) {
   TransID tid = transData->getTransContaining(addr);
-  if (tid == INVALID_ID) return folly::none;
+  if (tid == INVALID_ID) return std::nullopt;
 
   const TransRec* trec = transData->getTransRec(tid);
-  Unit* unit = g_repo->getUnit(trec->md5);
-  if (!unit) return folly::none;
+  Unit* unit = g_repo->getUnit(trec->sn);
+  if (!unit) return std::nullopt;
 
   auto r = getExtOpcode(addr, trec);
   always_assert(r.valid);
-  return folly::make_optional(r.opcode);
+  return make_optional(r.opcode);
 }
 
 /* AddrToTransFragmentMapper */
@@ -189,6 +187,7 @@ AddrToTransFragmentMapper::extractTransFragment(TCA addr, ExtOpcode opcode) {
       tfragment.afrozenLen   = trec->afrozenLen;
       break;
 
+    case ExtOpFuncEntry:
     default:
       bool found  = false;
       size_t nele = trec->bcMapping.size() - 1;
@@ -221,11 +220,11 @@ AddrToTransFragmentMapper::extractTransFragment(TCA addr, ExtOpcode opcode) {
   return tfragment;
 }
 
-folly::Optional<TransFragment>
+Optional<TransFragment>
 AddrToTransFragmentMapper::operator()(const TCA& addr) {
   AddrToBcMapper bcMapper(tdata);
-  folly::Optional<ExtOpcode> opcode = bcMapper(addr);
-  if (!opcode || (*opcode) != filterBy) return folly::none;
+  Optional<ExtOpcode> opcode = bcMapper(addr);
+  if (!opcode || (*opcode) != filterBy) return std::nullopt;
   return extractTransFragment(addr, *opcode);
 }
 

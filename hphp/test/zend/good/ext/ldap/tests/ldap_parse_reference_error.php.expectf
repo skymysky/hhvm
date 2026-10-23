@@ -1,11 +1,8 @@
 
-Warning: %s
+Warning: ldap_parse_reference() expects exactly 3 positional parameters, 2 given in %s/ldap_parse_reference_error.php on line 7
 
-Warning: %s
-
-Warning: %s
-NULL
+Warning: Not a valid ldap result entry resource in %s/ldap_parse_reference_error.php on line 8
 bool(false)
-NULL
-NULL
+
+Warning: ldap_parse_reference() expects exactly 3 positional parameters, 4 given in %s/ldap_parse_reference_error.php on line 9
 ===DONE===

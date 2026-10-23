@@ -1,17 +1,21 @@
 <?hh
 
-function foo(&$a) {
+function foo(inout $a) :mixed{
   var_dump('foo');
-  $a = 1;
+  $a[0] = 1;
 }
-function bar(&$a) {
+function bar(inout $a) :mixed{
   var_dump('bar');
-  $a = 2;
+  $a[0] = 2;
 }
-function goo($name, $obj, $params, $data, &$done) {
-  return $data(&$params[0]);
+<<__DynamicallyCallable>> function goo($name, $obj, inout $params) :mixed{
+  return shape('value' => bar(inout $params));
 }
-fb_intercept('foo', 'goo', 'bar');
+
+<<__EntryPoint>>
+function main_1198() :mixed{
+fb_intercept2('foo', HH\dynamic_fun('goo'));
 $a = 0;
-foo(&$a);
+foo(inout $a);
 var_dump($a);
+}

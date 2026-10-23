@@ -21,9 +21,7 @@
 #include "hphp/runtime/vm/jit/vasm-gen.h"
 #include "hphp/runtime/vm/jit/vasm-instr.h"
 
-#include "hphp/util/arch.h"
-
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -75,7 +73,7 @@ PhysRegSaver::~PhysRegSaver() {
   }
 }
 
-size_t PhysRegSaver::dwordsPushed() const {
+size_t PhysRegSaver::qwordsPushed() const {
   auto const gpr = m_regs & abi().gp();
   auto const xmm = m_regs & abi().simd();
   return 2 * xmm.size() + gpr.size() + (gpr.size() & 0x1);
@@ -83,4 +81,4 @@ size_t PhysRegSaver::dwordsPushed() const {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-}}
+}

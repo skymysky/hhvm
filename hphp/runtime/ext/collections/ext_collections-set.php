@@ -1,773 +1,865 @@
 <?hh
+<<file:__EnableUnstableFeatures('readonly')>>
 
 namespace {
 
-/* An iterator implementation for iterating over a Set.
+/** An iterator implementation for iterating over a Set.
  */
-<<__NativeData("SetIterator")>>
-final class SetIterator implements HH\Rx\Iterator {
+<<__NativeData>>
+final class SetIterator<T as arraykey> implements HH\Iterator<T> {
 
-  <<__Rx>>
-  public function __construct(): void {}
+  public function __construct()[]: void {}
 
-  /* Returns the current value that the iterator points to.
+  /** Returns the current value that the iterator points to.
    * @return mixed
    */
-  <<__Native, __Rx, __MaybeMutable>>
-  public function current(): mixed;
+  <<__Native>>
+  public function current()[]: T;
 
-  /* @return mixed
+  /** @return mixed
    */
-  <<__Native, __Rx, __MaybeMutable>>
-  public function key(): mixed;
+  <<__Native>>
+  public function key()[]: T;
 
-  /* Returns true if the iterator points to a valid value, returns false
+  /** Returns true if the iterator points to a valid value, returns false
    * otherwise.
    * @return bool
    */
-  <<__Native, __Rx, __MaybeMutable>>
-  public function valid(): bool;
+  <<__Native>>
+  public function valid()[]: bool;
 
-  /* Advance this iterator forward one position.
+  /** Advance this iterator forward one position.
    */
-  <<__Native, __Rx, __Mutable>>
-  public function next(): void;
+  <<__Native>>
+  public function next()[write_props]: void;
 
-  /* Move this iterator back to the first position.
+  /** Move this iterator back to the first position.
    */
-  <<__Native, __Rx, __Mutable>>
-  public function rewind(): void;
+  <<__Native>>
+  public function rewind()[write_props]: void;
 }
 
 } // empty namespace
 namespace HH {
 
-/* An ordered set-style collection.
+/** An ordered set-style collection.
  */
-final class Set implements \MutableSet {
+final class Set<T as arraykey> implements \MutableSet<T> {
 
-  /* Returns a Set built from the values produced by the specified Iterable.
+  /** Returns a Set built from the values produced by the specified Iterable.
    * @param mixed $iterable
    */
-  <<__Native, __Rx, __OnlyRxIfArgs>>
-  public function __construct(<<__MaybeMutable, __OnlyRxIfImpl(HH\Rx\Traversable::class)>> mixed $iterable = null): void;
+  <<__Native>>
+  public function __construct(mixed $iterable = null)[]: void;
 
-  /* Returns true if the Set is empty, false otherwise.
+  /** Returns true if the Set is empty, false otherwise.
    * @return bool
    */
-  <<__Rx, __MaybeMutable>>
-  public function isEmpty(): bool { return !$this->count(); }
+  public readonly function isEmpty()[]: bool { return $this->count() === 0; }
 
-  /* Returns the number of values in the Set.
+  /** Returns the number of values in the Set.
    * @return int
    */
-  <<__Native, __Rx, __MaybeMutable>>
-  public function count(): int;
+  <<__Native>>
+  public readonly function count()[]: int;
 
-  /* Returns an Iterable that produces the values from this Set.
+  /** Returns an Iterable that produces the values from this Set.
    * @return object
    */
-  <<__Rx, __MutableReturn, __MaybeMutable>>
-  public function items(): \LazyIterableView {
+  /* HH_FIXME[2049] */
+  public function items()[]: \LazyIterableView {
+    /* HH_FIXME[2049] */
     return new \LazyIterableView($this);
   }
 
 
-  /* Returns a Vector built from the keys of this Set.
+  /** Returns a Vector built from the keys of this Set.
    * @return object
    */
-  <<__Rx, __MutableReturn, __MaybeMutable>>
-  public function keys() { return $this->values(); }
+  public function keys()[]: Vector<T> { return $this->values(); }
 
-  /* Returns a Vector built from the values of this Set.
+  /** Returns a Vector built from the values of this Set.
    * @return object
    */
-  <<__Native, __Rx, __MutableReturn, __MaybeMutable>>
-  public function values(): object;
+  <<__Native>>
+  public function values()[]: Vector<T>;
 
-  /* Returns a lazy iterable view of this Set.
+  /** Returns a lazy iterable view of this Set.
    * @return object
    */
-  <<__Rx, __MutableReturn, __MaybeMutable>>
-  public function lazy(): \LazyKeyedIterableView {
+  /* HH_FIXME[2049] */
+  public function lazy()[]: \LazyKeyedIterableView {
+    /* HH_FIXME[2049] */
     return new \LazyKeyedIterableView($this);
   }
 
-  /* Removes all values from the Set.
+  <<__Native>>
+  private function clearNative()[write_props]: void;
+
+  /** Removes all values from the Set.
    * @return object
    */
-  <<__Native, __Rx, __Mutable, __ReturnsVoidToRx>>
-  public function clear(): object;
+  public function clear()[write_props]: this {
+    $this->clearNative();
+    return $this;
+  }
 
-  /* Returns true if the specified value is present in the Set, returns false
+  /** Returns true if the specified value is present in the Set, returns false
    * otherwise.
    * @param mixed $val
    * @return bool
    */
-  <<__Native, __Rx, __MaybeMutable>>
-  public function contains(mixed $val): bool;
+  <<__Native>>
+  public readonly function contains(mixed $val)[]: bool;
 
-  /* Removes the specified value from this Set.
+  <<__Native>>
+  private function removeNative(mixed $val)[write_props]: void;
+
+  /** Removes the specified value from this Set.
    * @param mixed $val
    * @return object
    */
-  <<__Native, __Rx, __Mutable, __ReturnsVoidToRx>>
-  public function remove(mixed $val): object;
+  public function remove(mixed $val)[write_props]: this {
+    $this->removeNative($val);
+    return $this;
+  }
 
-  /* Adds the specified value to this Set.
+  <<__Native>>
+  // TODO(T125046752) Should be `T`
+  private function addNative(mixed $val)[write_props]: void;
+  /** Adds the specified value to this Set.
    * @param mixed $val
    * @return object
    */
-  <<__Native, __Rx, __Mutable, __ReturnsVoidToRx>>
-  public function add(mixed $val): object;
+  // TODO(T125046752) Should be `T`
+  public function add(mixed $val)[write_props]: this {
+    $this->addNative($val);
+    return $this;
+  }
 
-  /* Adds the values produced by the specified Iterable to this Set.
+  <<__Native>>
+  private function addAllNative(mixed $iterable)[write_props]: void;
+
+  /** Adds the values produced by the specified Iterable to this Set.
    * @param mixed $iterable
    * @return object
    */
-  <<__Native, __Rx, __Mutable, __OnlyRxIfArgs, __ReturnsVoidToRx>>
-  public function addAll(<<__MaybeMutable, __OnlyRxIfImpl(HH\Rx\Traversable::class)>> mixed $iterable): object;
+  public function addAll(mixed $iterable)[write_props]: this {
+    $this->addAllNative($iterable);
+    return $this;
+  }
 
-  /* Adds the keys of the specified KeyedContainer to this Set.
+  <<__Native>>
+  public function addAllKeysOfNative(mixed $container)[write_props]: void;
+
+  /** Adds the keys of the specified KeyedContainer to this Set.
    * @param mixed $container
    * @return object
    */
-  <<__Native, __Rx, __Mutable, __ReturnsVoidToRx>>
-  public function addAllKeysOf(mixed $container): object;
+  public function addAllKeysOf(mixed $container)[write_props]: this {
+    $this->addAllKeysOfNative($container);
+    return $this;
+  }
 
-  /* Instructs this Set to grow its capacity to accommodate the given number of
+  /** Instructs this Set to grow its capacity to accommodate the given number of
    * elements. The caller is expected to make the appropriate add/addAll calls
    * to fill that reserved capacity.
    * @param mixed $sz
    */
-  <<__Native, __Rx, __Mutable>>
-  public function reserve(int $sz): void;
+  <<__Native>>
+  public function reserve(int $sz)[]: void;
 
-  /* Returns an array built from the values from this Set, array(val1 => val1,
-   * val2 => val2, ...). This maintains set-like semantics in array() land: O(1)
-   * membership test with `array_has_key($a['key'])` and iteration with
-   * `foreach($a as $member)`. Int-like strings end up with numerical array
-   * keys.
-   * @return array
-   */
-  <<__Native, __Rx, __MaybeMutable>>
-  public function toArray(): array;
-
-  <<__Native, __Rx, __MaybeMutable>>
-  public function toVArray(): varray;
-
-  <<__Native, __Rx, __MaybeMutable>>
-  public function toDArray(): darray;
-
-  /* Returns a Vector built from the values of this Set.
-   * @return object
-   */
-  <<__Native, __Rx, __MutableReturn, __MaybeMutable>>
-  public function toVector(): object;
-
-  /* Returns a ImmVector built from the values of this Set.
-   * @return object
-   */
-  <<__Native, __Rx, __MaybeMutable>>
-  public function toImmVector(): object;
-
-  /* Returns a Map built from the keys and values of this Set.
-   * @return object
-   */
-  <<__Native, __Rx, __MutableReturn, __MaybeMutable>>
-  public function toMap(): object;
-
-  /* Returns a ImmMap built from the keys and values of this Set.
-   * @return object
-   */
-  <<__Native, __Rx, __MaybeMutable>>
-  public function toImmMap(): object;
-
-  /* Returns a copy of this Set.
-   * @return object
-   */
-  <<__Rx, __MutableReturn, __MaybeMutable>>
-  public function toSet(): this {
-    return clone $this;
+  public function toVArray()[]: varray<T> {
+    return HH\FIXME\UNSAFE_CAST<vec<mixed>, vec<T>>(vec($this));
   }
 
-  /* Returns a ImmSet built from the values of this Set.
+  /** Returns a darray built from the values from this Set, dict[val1 => val1,
+   * val2 => val2, ...]. This maintains set-like semantics in dict[] land:
+   * O(1) membership test with `array_has_key($a['key'])` and iteration with
+   *  `foreach($a as $member)`.
+   * @return darray
+   */
+  public function toDArray()[]: darray<T, T> {
+    return HH\FIXME\UNSAFE_CAST<dict<arraykey, mixed>, dict<T, T>>(dict($this));
+  }
+
+  /** Returns a Vector built from the values of this Set.
    * @return object
    */
-  <<__Native, __Rx, __MaybeMutable>>
-  public function toImmSet(): object;
+  <<__Native>>
+  public function toVector()[]: Vector<T>;
 
-  /* Returns an immutable version of this collection.
+  /** Returns a ImmVector built from the values of this Set.
    * @return object
    */
-  <<__Rx, __MaybeMutable>>
-  public function immutable() { return $this->toImmSet(); }
+  <<__Native>>
+  public function toImmVector()[]: ImmVector<T>;
 
-  /* Returns an array built from the values from this Set.
-   * @return array
-   */
-  <<__Native, __Rx, __MaybeMutable>>
-  public function toKeysArray(): varray;
-
-  /* Returns an array built from the values from this Set.
-   * @return array
-   */
-  <<__Native, __Rx, __MaybeMutable>>
-  public function toValuesArray(): varray;
-
-  /* Returns an iterator that points to beginning of this Set.
+  /** Returns a Map built from the keys and values of this Set.
    * @return object
    */
-  <<__Native, __Rx, __MutableReturn, __MaybeMutable>>
-  public function getIterator(): object;
+  <<__Native>>
+  /* HH_FIXME[2049] */
+  public function toMap()[]: Map<T, T>;
 
-  /* Returns a Set of the values produced by applying the specified callback on
+  /** Returns a ImmMap built from the keys and values of this Set.
+   * @return object
+   */
+  <<__Native>>
+  /* HH_FIXME[2049] */
+  public function toImmMap()[]: ImmMap<T, T>;
+
+  /** Returns a copy of this Set.
+   * @return object
+   */
+  public function toSet()[]: this {
+    return new self($this);
+  }
+
+  /** Returns a ImmSet built from the values of this Set.
+   * @return object
+   */
+  <<__Native>>
+  public function toImmSet()[]: ImmSet<T>;
+
+  /** Returns an immutable version of this collection.
+   * @return object
+   */
+  public function immutable()[]: ImmSet<T> { return $this->toImmSet(); }
+
+  /** Returns a varray built from the values from this Set.
+   * @return varray
+   */
+  <<__Native>>
+  public function toKeysArray()[]: varray<T>;
+
+  /** Returns a varray built from the values from this Set.
+   * @return varray
+   */
+  <<__Native>>
+  public function toValuesArray()[]: varray<T>;
+
+  /** Returns an iterator that points to beginning of this Set.
+   * @return object
+   */
+  <<__Native>>
+  public function getIterator()[]: Iterator<T>;
+
+  /** Returns a Set of the values produced by applying the specified callback on
    * each value from this Set.
    * @param mixed $callback
    * @return object
    */
-  <<__Native, __Rx, __OnlyRxIfArgs, __MutableReturn, __MaybeMutable>>
-  public function map(<<__OnlyRxIfRxFunc>> mixed $callback): object;
+  public function map<To as arraykey>(
+    (function(T)[_]: To) $callback,
+  )[ctx $callback]: Set<To> {
+    $ret = keyset[];
+    foreach ($this as $v) {
+      $ret[] = $callback($v);
+    }
+    return new self($ret);
+  }
 
-  /* Returns a Set of the values produced by applying the specified callback on
+  /** Returns a Set of the values produced by applying the specified callback on
    * each key and value from this Set.
    * @param mixed $callback
    * @return object
    */
-  <<__Native, __Rx, __OnlyRxIfArgs, __MutableReturn, __MaybeMutable>>
-  public function mapWithKey(<<__OnlyRxIfRxFunc>> mixed $callback): object;
+  public function mapWithKey<To as arraykey>(
+    (function(T, T)[_]: To) $callback,
+  )[ctx $callback]: Set<To> {
+    $ret = keyset[];
+    foreach ($this as $k => $v) {
+      $ret[] = $callback($k, $v);
+    }
+    return new self($ret);
+  }
 
-  /* Returns a Set of all the values from this Set for which the specified
+  /** Returns a Set of all the values from this Set for which the specified
    * callback returns true.
    * @param mixed $callback
    * @return object
    */
-  <<__Native, __Rx, __OnlyRxIfArgs, __MutableReturn, __MaybeMutable>>
-  public function filter(<<__OnlyRxIfRxFunc>> mixed $callback): object;
+  public function filter(
+    (function(T)[_]: bool) $callback,
+  )[ctx $callback]: Set<T> {
+    $ret = keyset[];
+    foreach ($this as $v) {
+      if ($callback($v)) {
+        $ret[] = $v;
+      }
+    }
+    return new self($ret);
+  }
 
-  /* Returns a Set of all the values from this Set for which the specified
+  /** Returns a Set of all the values from this Set for which the specified
    * callback returns true.
    * @param mixed $callback
    * @return object
    */
-  <<__Native, __Rx, __OnlyRxIfArgs, __MutableReturn, __MaybeMutable>>
-  public function filterWithKey(<<__OnlyRxIfRxFunc>> mixed $callback): object;
+  public function filterWithKey(
+    (function(T, T)[_]: bool) $callback,
+  )[ctx $callback]: Set<T> {
+    $ret = keyset[];
+    foreach ($this as $k => $v) {
+      if ($callback($k, $v)) {
+        $ret[] = $v;
+      }
+    }
+    return new self($ret);
+  }
 
-  /* Ensures that this Set contains only values for which the specified callback
+  /** Ensures that this Set contains only values for which the specified callback
    * returns true.
    * @param mixed $callback
    * @return object
    */
-  <<__Native, __Rx, __Mutable, __OnlyRxIfArgs, __ReturnsVoidToRx>>
-  public function retain(<<__OnlyRxIfRxFunc>> mixed $callback): object;
+  public function retain(
+    (function(T)[_]: bool) $callback,
+  )[ctx $callback]: this {
+    foreach ($this as $k => $v) {
+      if (!$callback($v)) {
+        /* HH_FIXME[4390] This function should be `write_props` */
+        $this->remove($k);
+      }
+    }
+    return $this;
+  }
 
-  /* Ensures that this Set contains only keys/values for which the specified
+  /** Ensures that this Set contains only keys/values for which the specified
    * callback returns true when passed the key and the value.
    * @param mixed $callback
    * @return object
    */
-  <<__Native, __Rx, __Mutable, __OnlyRxIfArgs, __ReturnsVoidToRx>>
-  public function retainWithKey(<<__OnlyRxIfRxFunc>> mixed $callback): object;
+  public function retainWithKey(
+    (function(T, T)[_]: bool) $callback,
+  )[ctx $callback]: this {
+    foreach ($this as $k => $v) {
+      if (!$callback($k, $v)) {
+        /* HH_FIXME[4390] This function should be `write_props` */
+        $this->remove($k);
+      }
+    }
+    return $this;
+  }
 
-  /* Returns a Iterable produced by combined the specified Iterables pair-wise.
+  /** Returns a Iterable produced by combined the specified Iterables pair-wise.
    * @param mixed $iterable
    * @return object
    */
-  <<__Native, __Rx, __OnlyRxIfArgs, __MutableReturn, __MaybeMutable>>
-  public function zip(<<__MaybeMutable, __OnlyRxIfImpl(HH\Rx\Traversable::class)>> mixed $iterable): object;
+  <<__Native>>
+  public function zip(mixed $iterable)[]: Set<nothing>;
 
-  /* Returns a Set containing the first n values of this Set.
+  /** Returns a Set containing the first n values of this Set.
    * @param mixed $n
    * @return object
    */
-  <<__Native, __Rx, __MutableReturn, __MaybeMutable>>
-  public function take(mixed $n): object;
+  <<__Native>>
+  public function take(mixed $n)[]: Set<T>;
 
-  /* Returns a Set containing the values of this Set up to but not including the
+  /** Returns a Set containing the values of this Set up to but not including the
    * first value that produces false when passed to the specified callback.
    * @param mixed $callback
    * @return object
    */
-  <<__Native, __Rx, __OnlyRxIfArgs, __MutableReturn, __MaybeMutable>>
-  public function takeWhile(<<__OnlyRxIfRxFunc>> mixed $callback): object;
+  public function takeWhile(
+    (function(T)[_]: bool) $callback,
+  )[ctx $callback]: Set<T> {
+    $ret = keyset[];
+    foreach ($this as $v) {
+      if (!$callback($v)) {
+        break;
+      }
+      $ret[] = $v;
+    }
+    return new self($ret);
+  }
 
-  /* Returns a Set containing all values except the first n of this Set.
+  /** Returns a Set containing all values except the first n of this Set.
    * @param mixed $n
    * @return object
    */
-  <<__Native, __Rx, __MutableReturn, __MaybeMutable>>
-  public function skip(mixed $n): object;
+  <<__Native>>
+  public function skip(mixed $n)[]: Set<T>;
 
-  /* Returns a Set containing all the values of this Set excluding the first
+  /** Returns a Set containing all the values of this Set excluding the first
    * values that produces true when passed to the specified callback.
    * @param mixed $fn
    * @return object
    */
-  <<__Native, __Rx, __OnlyRxIfArgs, __MutableReturn, __MaybeMutable>>
-  public function skipWhile(<<__OnlyRxIfRxFunc>> mixed $fn): object;
+  public function skipWhile(
+    (function(T)[_]: bool) $fn,
+  )[ctx $fn]: Set<T> {
+    $ret = keyset[];
+    $skipping = true;
+    foreach ($this as $v) {
+      if ($skipping) {
+        if ($fn($v)) {
+          continue;
+        }
+        $skipping = false;
+      }
+      $ret[] = $v;
+    }
+    return new self($ret);
+  }
 
-  /* Returns a Set containing the specified range of values from this Set. The
+  /** Returns a Set containing the specified range of values from this Set. The
    * range is specified by two non-negative integers: a starting position and a
    * length.
    * @param mixed $start
    * @param mixed $len
    * @return object
    */
-  <<__Native, __Rx, __MutableReturn, __MaybeMutable>>
+  <<__Native>>
   public function slice(mixed $start,
-                        mixed $len): object;
+                        mixed $len)[]: Set<T>;
 
-  /* Builds a new Vector by concatenating the elements of this Set with the
+  /** Builds a new Vector by concatenating the elements of this Set with the
    * elements of the specified Iterable.
    * @param mixed $iterable
    * @return object
    */
-  <<__Native, __Rx, __OnlyRxIfArgs, __MutableReturn, __MaybeMutable>>
-  public function concat(<<__MaybeMutable, __OnlyRxIfImpl(HH\Rx\Traversable::class)>> mixed $iterable): object;
+  <<__Native>>
+  public function concat(mixed $iterable)[]: Vector<mixed>;
 
-  /* Returns the first value from this Set, or null if this Set is empty.
+  /** Returns the first value from this Set, or null if this Set is empty.
    * @return mixed
    */
-  <<__Native, __Rx, __MaybeMutable>>
-  public function firstValue(): mixed;
+  <<__Native>>
+  public readonly function firstValue()[]: ?T;
 
-  /* Returns the first key from this Set, or null if this Vector is empty.
+  /** Returns the first key from this Set, or null if this Vector is empty.
    * @return mixed
    */
-  <<__Rx, __MaybeMutable>>
-  public function firstKey() {
+  public readonly function firstKey()[]: ?T {
     return $this->firstValue();
   }
 
-  /* Returns the last value from this Set, or null if this Set is empty.
+  /** Returns the last value from this Set, or null if this Set is empty.
    * @return mixed
    */
-  <<__Native, __Rx, __MaybeMutable>>
-  public function lastValue(): mixed;
+  <<__Native>>
+  public readonly function lastValue()[]: ?T;
 
-  /* Returns the last key from this Set, or null if this Set is empty.
+  /** Returns the last key from this Set, or null if this Set is empty.
    * @return mixed
    */
-  <<__Rx, __MaybeMutable>>
-  public function lastKey() {
+  public readonly function lastKey()[]: ?T {
     return $this->lastValue();
   }
 
-  /* @param mixed $iterable
-   * @return object
-   */
-  <<__Native, __Rx, __Mutable, __OnlyRxIfArgs, __ReturnsVoidToRx>>
-  public function removeAll(<<__MaybeMutable, __OnlyRxIfImpl(HH\Rx\Traversable::class)>> mixed $iterable): object;
+  <<__Native>>
+  private function removeAllNative(mixed $iterable)[write_props]: void;
 
-  /* @param mixed $iterable
+  /** @param mixed $iterable
    * @return object
    */
-  public function difference(mixed $iterable) {
+  public function removeAll(mixed $iterable)[write_props]: this {
+    $this->removeAllNative($iterable);
+    return $this;
+  }
+
+  /** @param mixed $iterable
+   * @return object
+   */
+  public function difference(mixed $iterable): this {
     // This isn't really a difference method, it lies
-    return $this->removeAll($iterable);
+    $this->removeAllNative($iterable);
+    return $this;
   }
 
-  /* @return string
+  /** @return string
    */
-  <<__Rx, __MaybeMutable>>
-  public function __toString(): string { return "Set"; }
+  public function __toString()[]: string { return "Set"; }
 
-  /* @param mixed $name
-   * @return mixed
-   */
-  public function __get(mixed $name): mixed {
-    throw new \InvalidOperationException(
-      "Cannot access a property on a collection"
-    );
-  }
-
-  /* @param mixed $name
-   * @param mixed $value
-   * @return mixed
-   */
-  public function __set(mixed $name,
-                        mixed $value): mixed {
-    throw new \InvalidOperationException(
-      "Cannot access a property on a collection"
-    );
-  }
-
-  /* @param mixed $name
-   * @return bool
-   */
-  public function __isset(mixed $name): bool { return false; }
-
-  /* @param mixed $name
-   * @return mixed
-   */
-  public function __unset(mixed $name): mixed {
-    throw new \InvalidOperationException(
-      "Cannot access a property on a collection"
-    );
-  }
-
-  /* Returns a Set built from the values produced by the specified Iterable.
+  /** Returns a Set built from the values produced by the specified Iterable.
    * @param mixed $iterable
    * @return object
    */
-  <<__Native, __Rx, __OnlyRxIfArgs, __MutableReturn, __MaybeMutable>>
-  public static function fromItems(<<__MaybeMutable, __OnlyRxIfImpl(HH\Rx\Traversable::class)>> mixed $iterable): object;
+  <<__Native>>
+  public static function fromItems(mixed $iterable)[]: Set<arraykey>;
 
-  /* Returns a Set built from the keys of the specified container.
+  /** Returns a Set built from the keys of the specified container.
    * @param mixed $container
    * @return object
    */
-  <<__Native, __Rx, __MutableReturn, __MaybeMutable>>
-  public static function fromKeysOf(mixed $container): object;
+  <<__Native>>
+  public static function fromKeysOf(mixed $container)[]: Set<arraykey>;
 
-  /* Returns a Set built from the values from the specified array.
+  /** Returns a Set built from the values from the specified array.
    * @param mixed $arr
    * @return object
    */
   <<__Native>>
-  public static function fromArray(mixed $arr): object;
+  public static function fromArray(mixed $arr): Set<arraykey>;
 
-  /* Returns a Set built from the values from the specified arrays.
+  /** Returns a Set built from the values from the specified arrays.
    * @return object
    */
-  <<__Rx, __MutableReturn, __MaybeMutable>>
-  public static function fromArrays(...$argv) {
-    if (!$argv) return \HH\Set {};
-    $ret = \HH\Set {};
+  public static function fromArrays<T_ as arraykey>(
+    AnyArray<arraykey, T_>... $argv
+  )[]: Set<T_> {
+    $ret = keyset[];
     foreach ($argv as $arr) {
-      if (!\is_array($arr)) {
-        throw new \InvalidArgumentException("Parameters must be arrays");
+      if (!\HH\is_any_array($arr)) {
+        throw new \InvalidArgumentException("Parameters must be array-likes");
       }
-      $ret->addAll($arr);
+      foreach ($arr as $value) {
+        $ret[] = $value;
+      }
     }
-    return $ret;
+    return new Set($ret);
   }
 }
 
-/* An immutable ordered set-style collection.
+/** An immutable ordered set-style collection.
  */
-final class ImmSet implements \ConstSet {
+final class ImmSet<T as arraykey> implements \ConstSet<T> {
 
-  /* Returns a ImmSet built from the values produced by the specified Iterable.
+  /** Returns a ImmSet built from the values produced by the specified Iterable.
    * @param mixed $iterable
    */
-  <<__Native, __Rx, __OnlyRxIfArgs>>
-  public function __construct(<<__MaybeMutable, __OnlyRxIfImpl(HH\Rx\Traversable::class)>> mixed $iterable = null): void;
+  <<__Native>>
+  public function __construct(mixed $iterable = null)[]: void;
 
-  /* Returns true if the ImmSet is empty, false otherwise.
+  /** Returns true if the ImmSet is empty, false otherwise.
    * @return bool
    */
-  <<__Rx, __MaybeMutable>>
-  public function isEmpty(): bool { return !$this->count(); }
+  public readonly function isEmpty()[]: bool { return $this->count() === 0; }
 
-  /* Returns the number of values in the ImmSet.
+  /** Returns the number of values in the ImmSet.
    * @return int
    */
-  <<__Native, __Rx, __MaybeMutable>>
-  public function count(): int;
+  <<__Native>>
+  public readonly function count()[]: int;
 
-  /* Returns an Iterable that produces the values from this ImmSet.
+  /** Returns an Iterable that produces the values from this ImmSet.
    * @return object
    */
-  <<__Rx, __MutableReturn, __MaybeMutable>>
-  public function items(): \LazyIterableView {
+  /* HH_FIXME[2049] */
+  public function items()[]: \LazyIterableView {
+    /* HH_FIXME[2049] */
     return new \LazyIterableView($this);
   }
 
 
-  /* Returns a Vector built from the keys of this ImmSet.
+  /** Returns a ImmVector built from the keys of this ImmSet.
    * @return object
    */
-  <<__Rx, __MutableReturn, __MaybeMutable>>
-  public function keys() { return $this->values(); }
+  public function keys()[]: ImmVector<T> { return $this->values(); }
 
-  /* Returns a ImmVector built from the values of this ImmSet.
+  /** Returns an ImmVector built from the values of this ImmSet.
    * @return object
    */
-  <<__Native, __Rx, __MutableReturn, __MaybeMutable>>
-  public function values(): object;
+  <<__Native>>
+  public function values()[]: ImmVector<T>;
 
-  /* Returns a lazy iterable view of this ImmSet.
+  /** Returns a lazy iterable view of this ImmSet.
    * @return object
    */
-  <<__Rx, __MutableReturn, __MaybeMutable>>
-  public function lazy(): \LazyKeyedIterableView {
+  /* HH_FIXME[2049] */
+  public function lazy()[]: \LazyKeyedIterableView {
+    /* HH_FIXME[2049] */
     return new \LazyKeyedIterableView($this);
   }
 
-  /* Returns true if the specified value is present in the ImmSet, returns false
+  /** Returns true if the specified value is present in the ImmSet, returns false
    * otherwise.
    * @param mixed $val
    * @return bool
    */
-  <<__Native, __Rx, __MaybeMutable>>
-  public function contains(mixed $val): bool;
+  <<__Native>>
+  public function contains(mixed $val)[]: bool;
 
-  /* Returns an array built from the values from this ImmSet, array(val1 =>
-   * val1, val2 => val2, ...). This maintains set-like semantics in array()
+  public function toVArray()[]: varray<T> {
+    return vec($this);
+  }
+
+  /** Returns a darray built from the values from this ImmSet, dict[val1 =>
+   * val1, val2 => val2, ...]. This maintains set-like semantics in dict[]
    * land: O(1) membership test with `array_has_key($a['key'])` and iteration
-   * with `foreach($a as $member)`. Int-like strings end up with numerical array
-   * keys.
-   * @return array
+   * with `foreach($a as $member)`.
+   * @return darray
    */
-  <<__Native, __Rx, __MaybeMutable>>
-  public function toArray(): array;
+  public function toDArray()[]: darray<T, T> {
+    return dict($this);
+  }
 
-  <<__Native, __Rx, __MaybeMutable>>
-  public function toVArray(): varray;
-
-  <<__Native, __Rx, __MaybeMutable>>
-  public function toDArray(): darray;
-
-  /* Returns a Vector built from the values of this ImmSet.
+  /** Returns a Vector built from the values of this ImmSet.
    * @return object
    */
-  <<__Native, __Rx, __MutableReturn, __MaybeMutable>>
-  public function toVector(): object;
+  <<__Native>>
+  public function toVector()[]: Vector<T>;
 
-  /* Returns a ImmVector built from the values of this ImmSet.
+  /** Returns a ImmVector built from the values of this ImmSet.
    * @return object
    */
-  <<__Native, __Rx, __MaybeMutable>>
-  public function toImmVector(): object;
+  <<__Native>>
+  public function toImmVector()[]: ImmVector<T>;
 
-  /* Returns a Map built from the keys and values of this ImmSet.
+  /** Returns a Map built from the keys and values of this ImmSet.
    * @return object
    */
-  <<__Native, __Rx, __MutableReturn, __MaybeMutable>>
-  public function toMap(): object;
+  <<__Native>>
+  /* HH_FIXME[2049] */
+  public function toMap()[]: Map<T, T>;
 
-  /* Returns a ImmMap built from the keys and values of this ImmSet.
+  /** Returns a ImmMap built from the keys and values of this ImmSet.
    * @return object
    */
-  <<__Native, __Rx, __MaybeMutable>>
-  public function toImmMap(): object;
+  <<__Native>>
+  /* HH_FIXME[2049] */
+  public function toImmMap()[]: ImmMap<T, T>;
 
-  /* Returns a Set built from the values of this ImmSet.
+  /** Returns a Set built from the values of this ImmSet.
    * @return object
    */
-  <<__Native, __Rx, __MutableReturn, __MaybeMutable>>
-  public function toSet(): object;
+  <<__Native>>
+  public function toSet()[]: Set<T>;
 
-  /* Returns an immutable version of this collection.
+  /** Returns an immutable version of this collection.
    * @return object
    */
-  <<__Rx, __MaybeMutable>>
-  public function toImmSet(): this {
+  public function toImmSet()[]: this {
     return $this;
   }
 
-  /* Returns an immutable version of this collection.
+  /** Returns an immutable version of this collection.
    * @return object
    */
-  <<__Rx, __MaybeMutable>>
-  public function immutable(): this {
+  public function immutable()[]: this {
     return $this;
   }
 
-  /* Returns an array built from the values from this ImmSet.
-   * @return array
+  /** Returns a varray built from the values from this ImmSet.
+   * @return varray
    */
-  <<__Native, __Rx, __MaybeMutable>>
-  public function toKeysArray(): varray;
+  <<__Native>>
+  public function toKeysArray()[]: varray<T>;
 
-  /* Returns an array built from the values from this ImmSet.
-   * @return array
+  /** Returns a varray built from the values from this ImmSet.
+   * @return varray
    */
-  <<__Native, __Rx, __MaybeMutable>>
-  public function toValuesArray(): varray;
+  <<__Native>>
+  public function toValuesArray()[]: varray<T>;
 
-  /* Returns an iterator that points to beginning of this ImmSet.
+  /** Returns an iterator that points to beginning of this ImmSet.
    * @return object
    */
-  <<__Native, __Rx, __MutableReturn, __MaybeMutable>>
-  public function getIterator(): object;
+  <<__Native>>
+  public function getIterator()[]: Iterator<T>;
 
-  /* Returns a ImmSet of the values produced by applying the specified callback
+  /** Returns a ImmSet of the values produced by applying the specified callback
    * on each value from this ImmSet.
    * @param mixed $callback
    * @return object
    */
-  <<__Native, __Rx, __OnlyRxIfArgs, __MutableReturn, __MaybeMutable>>
-  public function map(<<__OnlyRxIfRxFunc>> mixed $callback): object;
+  public function map<To as arraykey>(
+    (function(T)[_]: To) $callback,
+  )[ctx $callback]: ImmSet<To> {
+    $ret = keyset[];
+    foreach ($this as $v) {
+      $ret[] = $callback($v);
+    }
+    return new self($ret);
+  }
 
-  /* Returns a ImmSet of the values produced by applying the specified callback
+  /** Returns a ImmSet of the values produced by applying the specified callback
    * on each key and value from this ImmSet.
    * @param mixed $callback
    * @return object
    */
-  <<__Native, __Rx, __OnlyRxIfArgs, __MutableReturn, __MaybeMutable>>
-  public function mapWithKey(<<__OnlyRxIfRxFunc>> mixed $callback): object;
+  public function mapWithKey<To as arraykey>(
+    (function(T, T)[_]: To) $callback,
+  )[ctx $callback]: ImmSet<To> {
+    $ret = keyset[];
+    foreach ($this as $k => $v) {
+      $ret[] = $callback($k, $v);
+    }
+    return new self($ret);
+  }
 
-  /* Returns a ImmSet of all the values from this ImmSet for which the specified
+  /** Returns a ImmSet of all the values from this ImmSet for which the specified
    * callback returns true.
    * @param mixed $callback
    * @return object
    */
-  <<__Native, __Rx, __OnlyRxIfArgs, __MutableReturn, __MaybeMutable>>
-  public function filter(<<__OnlyRxIfRxFunc>> mixed $callback): object;
+  public function filter(
+    (function(T)[_]: bool) $callback,
+  )[ctx $callback]: ImmSet<T> {
+    $ret = keyset[];
+    foreach ($this as $v) {
+      if ($callback($v)) {
+        $ret[] = $v;
+      }
+    }
+    return new self($ret);
+  }
 
-  /* Returns a ImmSet of all the values from this ImmSet for which the specified
+  /** Returns a ImmSet of all the values from this ImmSet for which the specified
    * callback returns true.
    * @param mixed $callback
    * @return object
    */
-  <<__Native, __Rx, __OnlyRxIfArgs, __MutableReturn, __MaybeMutable>>
-  public function filterWithKey(<<__OnlyRxIfRxFunc>> mixed $callback): object;
+  public function filterWithKey(
+    (function(T, T)[_]: bool) $callback,
+  )[ctx $callback]: ImmSet<T> {
+    $ret = keyset[];
+    foreach ($this as $k => $v) {
+      if ($callback($k, $v)) {
+        $ret[] = $v;
+      }
+    }
+    return new self($ret);
+  }
 
-  /* Returns an Iterable produced by combining the specified Iterables
+  /** Returns an Iterable produced by combining the specified Iterables
    * pair-wise.
    * @param mixed $iterable
    * @return object
    */
-  <<__Native, __Rx, __OnlyRxIfArgs, __MutableReturn, __MaybeMutable>>
-  public function zip(<<__MaybeMutable, __OnlyRxIfImpl(HH\Rx\Traversable::class)>> mixed $iterable): object;
+  <<__Native>>
+  public function zip(mixed $iterable)[]: ImmSet<nothing>;
 
-  /* Returns a ImmSet containing the first n values of this ImmSet.
+  /** Returns a ImmSet containing the first n values of this ImmSet.
    * @param mixed $n
    * @return object
    */
-  <<__Native, __Rx, __MutableReturn, __MaybeMutable>>
-  public function take(mixed $n): object;
+  <<__Native>>
+  public function take(mixed $n)[]: ImmSet<T>;
 
-  /* Returns a ImmSet containing the values of this ImmSet up to but not
+  /** Returns a ImmSet containing the values of this ImmSet up to but not
    * including the first value that produces false when passed to the specified
    * callback.
    * @param mixed $callback
    * @return object
    */
-  <<__Native, __Rx, __OnlyRxIfArgs, __MutableReturn, __MaybeMutable>>
-  public function takeWhile(<<__OnlyRxIfRxFunc>> mixed $callback): object;
+  public function takeWhile(
+    (function(T)[_]: bool) $callback,
+  )[ctx $callback]: ImmSet<T> {
+    $ret = keyset[];
+    foreach ($this as $v) {
+      if (!$callback($v)) {
+        break;
+      }
+      $ret[] = $v;
+    }
+    return new self($ret);
+  }
 
-  /* Returns a ImmSet containing all values except the first n of this ImmSet.
+  /** Returns a ImmSet containing all values except the first n of this ImmSet.
    * @param mixed $n
    * @return object
    */
-  <<__Native, __Rx, __MutableReturn, __MaybeMutable>>
-  public function skip(mixed $n): object;
+  <<__Native>>
+  public function skip(mixed $n)[]: ImmSet<T>;
 
-  /* Returns a ImmSet containing all the values of this ImmSet excluding the
+  /** Returns a ImmSet containing all the values of this ImmSet excluding the
    * first values that produces true when passed to the specified callback.
    * @param mixed $fn
    * @return object
    */
-  <<__Native, __Rx, __OnlyRxIfArgs, __MutableReturn, __MaybeMutable>>
-  public function skipWhile(<<__OnlyRxIfRxFunc>> mixed $fn): object;
+  public function skipWhile((function(T)[_]: bool) $fn)[ctx $fn]: ImmSet<T> {
+    $ret = keyset[];
+    $skipping = true;
+    foreach ($this as $v) {
+      if ($skipping) {
+        if ($fn($v)) {
+          continue;
+        }
+        $skipping = false;
+      }
+      $ret[] = $v;
+    }
+    return new self($ret);
+  }
 
-  /* Returns a ImmSet containing the specified range of values from this ImmSet.
+  /** Returns a ImmSet containing the specified range of values from this ImmSet.
    * The range is specified by two non-negative integers: a starting position
    * and a length.
    * @param mixed $start
    * @param mixed $len
    * @return object
    */
-  <<__Native, __Rx, __MutableReturn, __MaybeMutable>>
-  public function slice(mixed $start,
-                        mixed $len): object;
+  <<__Native>>
+  public function slice(mixed $start, mixed $len)[]: ImmSet<T>;
 
-  /* Builds a new ImmVector by concatenating the elements of this ImmSet with
+  /** Builds a new ImmVector by concatenating the elements of this ImmSet with
    * the elements of the specified Iterable.
    * @param mixed $iterable
    * @return object
    */
-  <<__Native, __Rx, __OnlyRxIfArgs, __MutableReturn, __MaybeMutable>>
-  public function concat(<<__MaybeMutable, __OnlyRxIfImpl(HH\Rx\Traversable::class)>> mixed $iterable): object;
+  <<__Native>>
+  public function concat(mixed $iterable)[]: ImmVector<T>;
 
-  /* Returns the first value from this ImmSet, or null if this ImmSet is empty.
+  /** Returns the first value from this ImmSet, or null if this ImmSet is empty.
    * @return mixed
    */
-  <<__Native, __Rx, __MaybeMutable>>
-  public function firstValue(): mixed;
+  <<__Native>>
+  public readonly function firstValue()[]: ?T;
 
-  /* Returns the first key from this ImmSet, or null if this ImmSet is empty.
+  /** Returns the first key from this ImmSet, or null if this ImmSet is empty.
    * @return mixed
    */
-  <<__Rx, __MaybeMutable>>
-  public function firstKey() {
+  public readonly function firstKey()[]: ?T {
     return $this->firstValue();
   }
 
-  /* Returns the last value from this ImmSet, or null if this ImmSet is empty.
+  /** Returns the last value from this ImmSet, or null if this ImmSet is empty.
    * @return mixed
    */
-  <<__Native, __Rx, __MaybeMutable>>
-  public function lastValue(): mixed;
+  <<__Native>>
+  public readonly function lastValue()[]: ?T;
 
-  /* Returns the last key from this ImmSet, or null if this ImmSet is empty.
+  /** Returns the last key from this ImmSet, or null if this ImmSet is empty.
    * @return mixed
    */
-  <<__Rx, __MaybeMutable>>
-  public function lastKey() {
+  public readonly function lastKey()[]: ?T {
     return $this->lastValue();
   }
 
-  /* @return string
+  /** @return string
    */
-  <<__Rx, __MaybeMutable>>
-  public function __toString(): string { return "ImmSet"; }
+  public function __toString()[]: string { return "ImmSet"; }
 
-  /* @param mixed $name
-   * @return mixed
-   */
-  public function __get(mixed $name): mixed {
-    throw new \InvalidOperationException(
-      "Cannot access a property on a collection"
-    );
-  }
-
-  /* @param mixed $name
-   * @param mixed $value
-   * @return mixed
-   */
-  public function __set(mixed $name,
-                        mixed $value): mixed {
-    throw new \InvalidOperationException(
-      "Cannot access a property on a collection"
-    );
-  }
-
-  /* @param mixed $name
-   * @return bool
-   */
-  public function __isset(mixed $name): bool { return false; }
-
-  /* @param mixed $name
-   * @return mixed
-   */
-  public function __unset(mixed $name): mixed {
-    throw new \InvalidOperationException(
-      "Cannot access a property on a collection"
-    );
-  }
-
-  /* Returns a ImmSet built from the values produced by the specified Iterable.
+  /** Returns a ImmSet built from the values produced by the specified Iterable.
    * @param mixed $iterable
    * @return object
    */
-  <<__Native, __Rx, __OnlyRxIfArgs, __MaybeMutable>>
-  public static function fromItems(<<__MaybeMutable, __OnlyRxIfImpl(HH\Rx\Traversable::class)>> mixed $iterable): object;
+  <<__Native>>
+  public static function fromItems(mixed $iterable)[]: ImmSet<T>;
 
-  /* Returns a ImmSet built from the keys of the specified container.
+  /** Returns a ImmSet built from the keys of the specified container.
    * @param mixed $container
    * @return object
    */
-  <<__Native, __Rx, __MaybeMutable>>
-  public static function fromKeysOf(mixed $container): object;
+  <<__Native>>
+  public static function fromKeysOf(mixed $container)[]: ImmSet<T>;
 
-  /* Returns a ImmSet built from the values from the specified arrays.
+  /** Returns a ImmSet built from the values from the specified array.
+   * @param mixed $arr
    * @return object
    */
-  <<__Rx, __MaybeMutable>>
-  public static function fromArrays(...$argv) {
-    if (!$argv) return \HH\ImmSet {};
-    $ret = \HH\Set {};
+  <<__Native>>
+  public static function fromArray(mixed $arr): ImmSet<arraykey>;
+
+  /** Returns a ImmSet built from the values from the specified arrays.
+   * @return object
+   */
+  public static function fromArrays<T_ as arraykey>(
+    AnyArray<arraykey, T_>... $argv
+  )[]: ImmSet<T_> {
+    $ret = keyset[];
     foreach ($argv as $arr) {
-      if (!\is_array($arr)) {
-        throw new \InvalidArgumentException("Parameters must be arrays");
+      if (!\HH\is_any_array($arr)) {
+        throw new \InvalidArgumentException("Parameters must be array-likes");
       }
-      $ret->addAll($arr);
+      foreach ($arr as $value) {
+        $ret[] = $value;
+      }
     }
-    return $ret->toImmSet();
+    return new ImmSet($ret);
   }
 }
 

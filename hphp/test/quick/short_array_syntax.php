@@ -1,10 +1,12 @@
 <?hh
-function f($x = [1]) {
+function f(vec<int> $x = vec[1]) :mixed{
   return $x;
 }
 class C {
-  public static $y = [2, 3];
+  public static vec<int> $y = vec[2, 3];
 }
-var_dump([]);
+<<__EntryPoint>> function main(): void {
+var_dump(vec[]);
 var_dump(f());
 var_dump(C::$y);
+}

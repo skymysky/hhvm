@@ -1,6 +1,31 @@
-File "lambda_hof_bad.php", line 15, characters 21-26:
-Typing error (Typing[4110])
-File "lambda_hof_bad.php", line 15, characters 21-22:
-This is a num (int/float) because this is used in an arithmetic operation
-File "lambda_hof_bad.php", line 14, characters 18-23:
-It is incompatible with a string
+error: Typing[4429] Typing error [1]
+-> Expected `num` because this is used in an arithmetic operation [2]
+-> But got `string` [3]
+
+lambda_hof_bad.php:16:21
+13 | }
+14 | 
+15 | function f(varray<string> $a): void {
+   |                   ^^^^^^ [3]
+16 |   array_mapp($x ==> $x + 1, $a);
+   |                     ^^ [1]
+   |                     ^^^^^^ [2]
+17 |   rev_array_mapp($a, $x ==> $x + 1);
+18 | }
+
+error: Typing[4429] Typing error [1]
+-> Expected `num` because this is used in an arithmetic operation [2]
+-> But got `string` [3]
+
+lambda_hof_bad.php:17:29
+13 | }
+14 | 
+15 | function f(varray<string> $a): void {
+   |                   ^^^^^^ [3]
+16 |   array_mapp($x ==> $x + 1, $a);
+17 |   rev_array_mapp($a, $x ==> $x + 1);
+   |                             ^^ [1]
+   |                             ^^^^^^ [2]
+18 | }
+
+2 errors found

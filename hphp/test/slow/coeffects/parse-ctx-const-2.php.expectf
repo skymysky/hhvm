@@ -1,0 +1,1 @@
+Fatal error: Context constants cannot alias polymorphic contexts in %s on line 4

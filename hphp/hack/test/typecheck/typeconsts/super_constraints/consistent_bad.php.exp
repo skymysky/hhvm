@@ -1,0 +1,18 @@
+error: Typing[4110] The constraint on this type constant is inconsistent with its parent [1]
+-> Expected `Two` [2]
+-> But got `One` [3]
+
+consistent_bad.php:11:23
+ 9 | 
+10 | abstract class Foo extends Bar {
+11 |   abstract const type Ta as AAA super Two;
+   |                       ^^ [1]
+   |                                       ^^^ [2]
+12 | }
+13 | 
+14 | abstract class Bar {
+15 |   abstract const type Ta as AAA super One;
+   |                                       ^^^ [3]
+16 | }
+
+1 error found

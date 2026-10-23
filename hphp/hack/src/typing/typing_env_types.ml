@@ -1,4 +1,4 @@
-(**
+(*
  * Copyright (c) 2015, Facebook, Inc.
  * All rights reserved.
  *
@@ -8,156 +8,195 @@
  *)
 
 (* cf: typing_env_types_sig.mli - These files should be the same *)
-
+open Hh_prelude
 open Typing_defs
-open Type_parameter_env
-module TySet = Typing_set
 
-let show_locl_ty _ = "<locl_ty>"
-let pp_locl_ty _ _ = Printf.printf "%s\n" "<locl_ty>"
-type locl_ty = locl ty
+type locl_ty = Typing_defs.locl_ty
 
-type fake_members = {
-  last_call : Pos.t option;
-  invalid   : SSet.t;
-  valid     : SSet.t;
-} [@@deriving show]
-(* Along with a type, each local variable has a expression id associated with
- * it. This is used when generating expression dependent types for the 'this'
- * type. The idea is that if two local variables have the same expression_id
- * then they refer to the same late bound type, and thus have compatible
- * 'this' types.
- *)
-type expression_id = Ident.t [@@deriving show]
-type local = locl_ty * expression_id [@@deriving show]
-type local_history = locl_ty list [@@deriving show]
-type old_local = locl_ty list * locl_ty * expression_id [@@deriving show]
-
-let show_local_id_map _ = "<local_id_map>"
-let pp_local_id_map _ _ = Printf.printf "%s\n" "<local_id_map>"
-type local_id_map = local Local_id.Map.t
-
-let show_local_types _ = "<local_types>"
-let pp_local_types _ _ = Printf.printf "%s\n" "<local_types>"
-type local_types = local_id_map Typing_continuations.Map.t
-
-let show_local_id_set_t _ = "<local_id_set_t>"
-let pp_local_id_set_t _ _ = Printf.printf "%s\n" "<local_id_set_t>"
 type local_id_set_t = Local_id.Set.t
 
-let show_local_env _ = "<local_env>"
-let pp_local_env _ _ = Printf.printf "%s\n" "<local_env>"
-
-(* Local environment includes types of locals and bounds on type parameters. *)
 type local_env = {
-  (* Fake members are used when we want member variables to be treated like
-   * locals. We want to handle the following:
-   * if($this->x) {
-   *   ... $this->x ...
-   * }
-   * The trick consists in replacing $this->x with a "fake" local. So that
-   * all the logic that normally applies to locals is applied in cases like
-   * this. Hence the name: FakeMembers.
-   * All the fake members are thrown away at the first call.
-   * We keep the invalidated fake members for better error messages.
-   *)
-  fake_members       : fake_members;
-  (* Local types per continuation. For example, the local types of the
-   * break continuation correspond to the local types that there were at the
-   * last encountered break in the current scope. These are kept to be merged
-   * at the appropriate merge points. *)
-  local_types        : local_types;
-  local_mutability   : Typing_mutability_env.mutability_env;
-
-  (* Whether current environment is reactive *)
-  local_reactive : reactivity;
-  (* Local variables that were assigned in a `using` clause *)
-  local_using_vars   : local_id_set_t;
-  (* Type parameter environment
-   * Lower and upper bounds on generic type parameters and abstract types
-   * For constraints of the form Tu <: Tv where both Tu and Tv are type
-   * parameters, we store an upper bound for Tu and a lower bound for Tv.
-   * Contrasting with tenv and subst, bounds are *assumptions* for type
-   * inference, not conclusions.
-   *)
-  tpenv              : tpenv;
+  per_cont_env: Typing_per_cont_env.t;
+  local_using_vars: local_id_set_t;
 }
 
-let show_env _ = "<env>"
-let pp_env _ _ = Printf.printf "%s\n" "<env>"
+type expr_tree_env = {
+  dsl: Aast.class_name;
+  outer_locals: Typing_local_types.t;
+}
 
-let show_genv _ = "<genv>"
-let pp_genv _ _ = Printf.printf "%s\n" "<genv>"
-
-let show_anon _ = "<anon>"
-let pp_anon _ _ = Printf.printf "%s\n" "<anon>"
-
-let show_tfun _ = "<tfun>"
-let pp_tfun _ _ = Printf.printf "%s\n" "<tfun>"
-
+(** See the .mli file for the documentation of fields. *)
 type env = {
-  (* position of the function/method being checked *)
-  function_pos: Pos.t;
-  pos     : Pos.t      ;
-  (* Position and reason information on entry to a subtype or unification check *)
-  outer_pos : Pos.t;
-  outer_reason : Typing_reason.ureason;
-  tenv    : locl_ty IMap.t ;
-  subst   : int IMap.t ;
-  lenv    : local_env  ;
-  genv    : genv       ;
+  expression_id_provider: Expression_id.provider;
+  tvar_id_provider: Tvid.provider;
+  fresh_typarams: S_set.t;
+  lenv: local_env;
+  genv: genv;
   decl_env: Decl_env.env;
-  todo    : tfun list  ;
-  checking_todos : bool;
-  in_loop : bool       ;
-  in_try  : bool       ;
-  in_case : bool       ;
-  inside_constructor: bool;
-  inside_ppl_class: bool;
-  (* A set of constraints that are global to a given method *)
-  global_tpenv : tpenv ;
+  in_loop: bool;
+  in_try: bool;
+  in_lambda: bool;
+  in_expr_tree: expr_tree_env option;
+  in_macro_splice: Typing_local_types.t option;
+  checked: Tast.check_status;
+  tracing_info: Decl_counters.tracing_info option;
+  tpenv: Type_parameter_env.t;
+  log_levels: int S_map.t;
+  inference_env: Typing_inference_env.t;
+  rank: int;
+  check_rank: bool;
+  allow_wildcards: bool;
+  big_envs: (Pos.t * env) list ref;
+  fun_tast_info: Tast.fun_tast_info option;
+  emit_string_coercion_error: bool;
 }
+
+(** See the .mli file for the documentation of fields. *)
 and genv = {
-  tcopt   : TypecheckerOptions.t;
-  return  : Typing_env_return_info.t;
-  (* For each function parameter, its type and calling convention. *)
-  params  : (locl_ty * param_mode) Local_id.Map.t;
-  (* condition types associated with parameters.
-     For every mayberx parameter that has condition type we create
-     fresh type parameter (see: make_local_param_ty) and store mapping
-     fresh type name -> condition type in env so it can be retrieved later *)
-  condition_types: decl ty SMap.t;
-  parent_id : string;
-  parent  : decl ty;
-  (* Identifier of the enclosing class *)
-  self_id : string;
-  (* Type of the enclosing class, instantiated at its generic parameters *)
-  self    : locl_ty;
-  static  : bool;
-  fun_kind : Ast.fun_kind;
-  fun_mutable : bool;
-  anons   : anon IMap.t;
-  file    : Relative_path.t;
+  tcopt: Typechecker_options.t;
+  callable_pos: Pos.t;
+  function_pos: Pos.t;
+  readonly: bool;
+  return: Typing_env_return_info.t;
+  params: (locl_ty * Pos.t * locl_ty option) Local_id.Map.t;
+  parent: (string * decl_ty) option;
+  self: (string * locl_ty) option;
+  static: bool;
+  fun_kind: Ast_defs.fun_kind;
+  val_kind: Typing_defs.val_kind;
+  fun_is_ctor: bool;
+  file: Relative_path.t;
+  current_module: Ast_defs.id option;
+  current_package: Aast_defs.package_membership option;
+  soft_package_requirement: Ast_defs.id option;
+  this_internal: bool;
+  this_support_dynamic_type: bool;
+  no_auto_likes: bool;
+  needs_concrete: bool;
 }
 
-(* A type-checker for an anonymous function
- * Parameters are
- * - the environment
- * - types of the parameters under which the body should be checked
- * - the arity of the function
- * - the expected return type of the body (optional)
- *)
-and anon =
-  reactivity *
-  Nast.is_coroutine *
-  int ref *
-  Pos.t *
-  (?el:Nast.expr list ->
-  ?ret_ty: locl_ty ->
-  env ->
-  locl fun_params ->
-  locl fun_arity ->
-  env * Tast.expr * locl_ty)
+let initial_local tpenv =
+  {
+    per_cont_env =
+      Typing_per_cont_env.(initial_locals { empty_entry with tpenv });
+    local_using_vars = Local_id.Set.empty;
+  }
 
-(* A deferred check; return true if the check should now be removed from the list *)
-and tfun = env -> env * bool
+let empty ?origin ?(mode = File_info.Mstrict) ctx file ~droot =
+  {
+    expression_id_provider = Expression_id.make_provider ();
+    tvar_id_provider = Tvid.make_provider ();
+    fresh_typarams = S_set.empty;
+    lenv = initial_local Type_parameter_env.empty;
+    in_loop = false;
+    in_try = false;
+    in_lambda = false;
+    in_expr_tree = None;
+    in_macro_splice = None;
+    checked = Tast.COnce;
+    decl_env = { Decl_env.mode; droot; droot_member = None; ctx };
+    tracing_info =
+      Option.map origin ~f:(fun origin -> { Decl_counters.origin; file });
+    genv =
+      {
+        tcopt = Provider_context.get_tcopt ctx;
+        callable_pos = Pos.none;
+        function_pos = Pos.none;
+        readonly = false;
+        return =
+          {
+            (* Actually should get set straight away anyway *)
+            Typing_env_return_info.return_type = mk (Reason.none, Tunion []);
+            return_disposable = false;
+            return_ignore_readonly = false;
+          };
+        params = Local_id.Map.empty;
+        self = None;
+        static = false;
+        val_kind = Other;
+        parent = None;
+        fun_kind = Ast_defs.FSync;
+        fun_is_ctor = false;
+        file;
+        current_module = None;
+        current_package = None;
+        soft_package_requirement = None;
+        this_internal = false;
+        this_support_dynamic_type = false;
+        no_auto_likes = false;
+        needs_concrete = false;
+      };
+    tpenv = Type_parameter_env.empty;
+    log_levels = Typechecker_options.log_levels (Provider_context.get_tcopt ctx);
+    inference_env = Typing_inference_env.empty_inference_env;
+    rank = 0;
+    check_rank = false;
+    allow_wildcards = false;
+    big_envs = ref [];
+    fun_tast_info = None;
+    emit_string_coercion_error = true;
+  }
+
+let get_log_level env key =
+  Option.value (S_map.find_opt key env.log_levels) ~default:0
+
+let next_cont_opt env =
+  Typing_per_cont_env.get_cont_option
+    Typing_continuations.Next
+    env.lenv.per_cont_env
+
+let get_tpenv env =
+  match next_cont_opt env with
+  | None -> Type_parameter_env.empty
+  | Some entry -> entry.Typing_per_cont_env.tpenv
+
+let get_pos_and_kind_of_generic env name =
+  match Type_parameter_env.get_with_pos name (get_tpenv env) with
+  | Some r -> Some r
+  | None -> Type_parameter_env.get_with_pos name env.tpenv
+
+let get_lower_bounds env name =
+  let tpenv = get_tpenv env in
+  let local = Type_parameter_env.get_lower_bounds tpenv name in
+  let global = Type_parameter_env.get_lower_bounds env.tpenv name in
+  Typing_set.union local global
+
+let get_upper_bounds env name =
+  let tpenv = get_tpenv env in
+  let local = Type_parameter_env.get_upper_bounds tpenv name in
+  let global = Type_parameter_env.get_upper_bounds env.tpenv name in
+  Typing_set.union local global
+
+(* Get bounds that are both an upper and lower of a given generic *)
+let get_equal_bounds env name =
+  let lower = get_lower_bounds env name in
+  let upper = get_upper_bounds env name in
+  Typing_set.inter lower upper
+
+let get_tparams_in_ty_and_acc env acc ty =
+  let tparams_visitor env =
+    object (this)
+      inherit [S_set.t] Type_visitor.locl_type_visitor
+
+      method! on_tgeneric acc _ s =
+        (* Not traversing args, although they may contain Tgenerics (higher kinds only) *)
+        S_set.add s acc
+
+      method! on_tvar acc r ix =
+        let (_env, ty) =
+          Typing_inference_env.expand_var env.inference_env r ix
+        in
+        match get_node ty with
+        | Tvar _ -> acc
+        | _ -> this#on_type acc ty
+    end
+  in
+  (tparams_visitor env)#on_type acc ty
+
+let get_rank { rank; _ } = rank
+
+let increment_rank env = { env with rank = env.rank + 1; check_rank = true }
+
+let decrement_rank env = { env with rank = env.rank - 1 }
+
+let should_check_rank { check_rank; _ } = check_rank

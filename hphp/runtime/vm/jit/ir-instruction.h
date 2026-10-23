@@ -14,8 +14,7 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_IR_INSTRUCTION_H_
-#define incl_HPHP_IR_INSTRUCTION_H_
+#pragma once
 
 #include "hphp/runtime/vm/jit/bc-marker.h"
 #include "hphp/runtime/vm/jit/extra-data.h"
@@ -31,7 +30,7 @@
 #include <limits>
 #include <string>
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 ///////////////////////////////////////////////////////////////////////////////
 
 struct Block;
@@ -126,18 +125,72 @@ struct IRInstruction {
   bool hasDst() const;
   bool naryDst() const;
   bool consumesReferences() const;
-  bool mayRaiseError() const;
   bool isTerminal() const;
   bool hasEdges() const;
   bool isPassthrough() const;
+  bool isLayoutAgnostic() const;
+  bool isLayoutPreserving() const;
 
   /*
-   * Whether the src numbered srcNo consumes a reference, or the dest produces
-   * a reference.
+   * Returns false if this instruction cannot raise an error under any
+   * circumstances (and thus does not require a catch block). True
+   * otherwise. This only consults the HHIR op of the instruction, so
+   * will not change.
+   */
+  bool mayRaiseError() const;
+
+  /*
+   * Returns false if this instruction cannot raise an error, taking
+   * into account its current sources. True otherwise. Since this can
+   * consult the types of the current sources, the result can change
+   * as types are reflowed.
+   */
+  bool mayRaiseErrorWithSources() const;
+
+  /*
+   * Returns true if the instruction may perform a sync of the VMRegs. This
+   * implies that the instruction can load AVMRegState. Further, it can store
+   * to AVMRegAny if the VMRegState is DIRTY, and load from AVMRegAny if the
+   * VMRegState is CLEAN. mayRaise implies maySync.
+   */
+  bool maySyncVMRegsWithSources() const;
+
+  /*
+   * consumesReference covers two similar conditions. Either it decRefs
+   * the input, or it transfers ownership of the input to a new location.
    */
   bool consumesReference(int srcNo) const;
+
+  /*
+   * mayMoveReference implies consumesReference. When
+   * consumesReference is true, and mayMoveReference is false, this
+   * instruction will definitely decRef its input. This is used by dce
+   * to determine where it needs to insert DecRefs after killing a
+   * consumesReference instruction.
+   */
+  bool mayMoveReference(int srcNo) const;
+
+  /*
+   * movesReference implies mayMoveReference, and guarantees that there
+   * is no change to the refCount as a result of this instruction. Since
+   * the new owner of the location is not specified, you can only assume
+   * it lives until the next thing that might modify refcounts in an
+   * unknown way. This is used by refcount opts to preserve the lower
+   * bound of an aset across such an instruction (using an
+   * unsupportedRef, which will be killed at the next instruction that
+   * modifies refcounts in an untracked way).
+   */
   bool movesReference(int srcNo) const;
+
+  /*
+   * Whether the dest produces a reference.
+   */
   bool producesReference() const;
+  
+  /*
+   * Whether the dest produces a completely new value with refcount 1
+   */
+  bool producesNewReference() const;
 
   /*
    * Get the src that is passed through.
@@ -256,10 +309,17 @@ struct IRInstruction {
   SSATmp* dst(uint32_t i) const;
 
   /*
+   * Returns the index where the given tmp lies in this instruction's
+   * dst list, or numDsts() if it is not present.
+   */
+  uint32_t findDst(SSATmp* dst) const;
+
+  /*
    * Get the srcs/dsts as a folly::Range.
    */
   folly::Range<SSATmp**> srcs() const;
   folly::Range<SSATmp**> dsts();
+  folly::Range<SSATmp* const *> dsts() const;
 
   /*
    * Set a single src or all srcs.
@@ -273,6 +333,7 @@ struct IRInstruction {
    * instruction has NaryDst).
    */
   void setDst(SSATmp* newDst);
+  void setDst(SSATmp* newDst, uint32_t i);
   void setDsts(uint32_t numDsts, SSATmp** newDsts);
   void deleteDst(uint32_t i);
 
@@ -303,12 +364,18 @@ struct IRInstruction {
    * to be able to handle multiple opcode types that share the same kind of
    * extra data.
    */
-  template<class T> const T* extra() const;
+  template<typename T> const T* extra() const;
+  template<typename T> T* extra();
 
   /*
    * Return the raw ExtraData pointer, for pretty-printing.
    */
   const IRExtraData* rawExtra() const;
+
+  /*
+   * Adjust IRExtraData's stack offsets by delta.
+   */
+  void updateStackOffsetsExtra(int32_t delta);
 
   /*
    * Set the ExtraData for this instruction.
@@ -362,12 +429,16 @@ struct IRInstruction {
    */
   bool isControlFlow() const;
   bool isBlockEnd() const;
-  bool isRawLoad() const;
 
   /*
    * Clear any outgoing edges this instruction has, if any.
    */
   void clearEdges();
+
+  /*
+   * Whether the next() edge is unreachable based on type information.
+   */
+  bool isNextEdgeUnreachable() const;
 
 private:
   /*
@@ -432,10 +503,16 @@ Type outputType(const IRInstruction*, int dstId = 0);
  */
 Type thisTypeFromFunc(const Func* func);
 
+/*
+ * Return a type of $this/static::class context at the time of function call
+ * (prologue and func entry).
+ */
+Type callCtxType(const Func* func);
+
 ///////////////////////////////////////////////////////////////////////////////
 
-}}
+}
 
+#define incl_HPHP_VM_JIT_INSTRUCTION_INL_H_
 #include "hphp/runtime/vm/jit/ir-instruction-inl.h"
-
-#endif
+#undef incl_HPHP_VM_JIT_INSTRUCTION_INL_H_

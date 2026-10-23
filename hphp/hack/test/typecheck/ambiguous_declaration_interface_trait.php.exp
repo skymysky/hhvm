@@ -1,0 +1,18 @@
+error: Typing[4047] This class must be declared `abstract`, or provide an implementation for the abstract method `foo` [1]
+-> `C` uses `T` [2]
+-> The method is defined here [3]
+
+ambiguous_declaration_interface_trait.php:9:7
+ 4 | }
+ 5 | trait T {
+ 6 |   abstract public function foo(): int;
+   |                            ^^^ [3]
+ 7 | }
+ 8 | 
+ 9 | class C implements I1 {
+   |       ^ [1]
+10 |   use T;
+   |       ^ [2]
+11 | }
+
+1 error found

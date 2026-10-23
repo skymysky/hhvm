@@ -1,22 +1,18 @@
-Class \Bar -> Class \Bar
-Class \Bar -> Class \FooParent
-Class \Bar -> Class \G
-Class \Bar -> Cstr \FooParent
-Class \Bar -> Extends \FooParent
-Class \Foo -> Class \Bar
-Class \Foo -> Class \Foo
-Class \Foo -> Class \FooParent
-Class \Foo -> Class \G
-Class \Foo -> Class \IFoo
-Class \Foo -> Cstr \Bar
-Class \Foo -> Cstr \FooParent
-Class \Foo -> Extends \Bar
-Class \Foo -> Extends \FooParent
-Class \Foo -> Extends \IFoo
-Class \FooParent -> Class \FooParent
-Class \G -> Class \G
-Class \IFoo -> Class \FooParent
-Class \IFoo -> Class \G
-Class \IFoo -> Class \IFoo
-Class \IFoo -> Cstr \FooParent
-Class \IFoo -> Extends \FooParent
+Const Bar::TInner -> Type Bar
+Const Foo::TInner -> Type Foo
+Const FooParent::TInner -> Type FooParent
+Const G::TInner -> Type G
+Const IFoo::TInner -> Type IFoo
+Constructor Bar -> Type Bar, Type Foo
+Constructor Foo -> Type Foo
+Constructor FooParent -> Type Bar, Type Foo, Type FooParent, Type IFoo
+Constructor G -> Type G
+Constructor IFoo -> Type IFoo
+Extends Bar -> Type Foo
+Extends FooParent -> Type Bar, Type Foo, Type IFoo
+Extends IFoo -> Type Foo
+Type Bar -> Type Foo
+Type FooParent -> Type Bar, Type Foo, Type IFoo
+Type G -> Type Bar, Type Foo, Type IFoo
+Type HH\supportdyn -> Type Bar, Type Foo, Type FooParent, Type IFoo
+Type IFoo -> Type Foo

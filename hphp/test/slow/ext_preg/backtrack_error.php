@@ -1,5 +1,8 @@
-<?php
+<?hh
 
+
+<<__EntryPoint>>
+function main_backtrack_error() :mixed{
 $re = '{^(\s*\{\s*(?:"(?:\\\\["bfnrt/\\\\]|\\\\u[a-fA-F0-9]{4}|[^\0-\x09\x0a-\x1f\\\\"])*"\s*:\s*(?:[0-9.]+|null|true|false|"(?:\\\\["bfnrt/\\\\]|\\\\u[a-fA-F0-9]{4}|[^\0-\x09\x0a-\x1f\\\\"])*"|\[[^\]]*\]|\{(?:[^{}]*|\{(?:[^{}]*|\{(?:[^{}]*|\{(?:[^{}]*|\{[^{}]*\})*\})*\})*\})*\})\s*,\s*)*?)("require-dev"\s*:\s*(?:[0-9.]+|null|true|false|"(?:\\\\["bfnrt/\\\\]|\\\\u[a-fA-F0-9]{4}|[^\0-\x09\x0a-\x1f\\\\"])*"|\[[^\]]*\]|\{(?:[^{}]*|\{(?:[^{}]*|\{(?:[^{}]*|\{(?:[^{}]*|\{[^{}]*\})*\})*\})*\})*\}))(.*)}s';
 
 $pass = '{
@@ -17,20 +20,28 @@ $fail = '{
     }
 }';
 
-$count = preg_match($re, $pass, $match);
-var_dump($count, preg_last_error() === PREG_BACKTRACK_LIMIT_ERROR);
+  $match = null;
+  $error = null;
+  $count = preg_match_with_matches_and_error($re, $pass, inout $match, inout $error);
+  var_dump($count, $error === PREG_BACKTRACK_LIMIT_ERROR);
 
-$count = preg_match($re, $fail, $match);
-var_dump($count, preg_last_error() === PREG_BACKTRACK_LIMIT_ERROR);
+  $error = null;
+  $count = preg_match_with_matches_and_error($re, $fail, inout $match, inout $error);
+  var_dump($count, $error === PREG_BACKTRACK_LIMIT_ERROR);
 
-$count = preg_replace($re, '', $fail);
-var_dump($count, preg_last_error() === PREG_BACKTRACK_LIMIT_ERROR);
+  $error = null;
+  $count = preg_replace_with_error($re, '', $fail, inout $error);
+  var_dump($count, $error === PREG_BACKTRACK_LIMIT_ERROR);
 
-$count = preg_replace($re, '', $pass);
-var_dump($count, preg_last_error() === PREG_BACKTRACK_LIMIT_ERROR);
+  $error = null;
+  $count = preg_replace_with_error($re, '', $pass, inout $error);
+  var_dump($count, $error === PREG_BACKTRACK_LIMIT_ERROR);
 
-$count = preg_split($re, $fail);
-var_dump($count, preg_last_error() === PREG_BACKTRACK_LIMIT_ERROR);
+  $error = null;
+  $count = preg_split_with_error($re, $fail, inout $error);
+  var_dump($count, $error === PREG_BACKTRACK_LIMIT_ERROR);
 
-$count = preg_split($re, $pass);
-var_dump($count, preg_last_error() === PREG_BACKTRACK_LIMIT_ERROR);
+  $error = null;
+  $count = preg_split_with_error($re, $pass, inout $error);
+  var_dump($count, $error === PREG_BACKTRACK_LIMIT_ERROR);
+}

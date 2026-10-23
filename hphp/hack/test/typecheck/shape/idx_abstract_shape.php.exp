@@ -1,0 +1,16 @@
+error: Typing[4251] You are calling `Shapes::idx()` on a field known to not exist [1]
+-> The field `c` is not defined in this shape [2]
+
+idx_abstract_shape.php:7:21
+2 | 
+3 | abstract class AC {
+4 |   abstract const type TC as shape('a' => int, 'b' => string);
+  |                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ [2]
+5 | 
+6 |   public function foo(this::TC $s): void {
+7 |     Shapes::idx($s, 'c'); // 'c' does not exist in TC
+  |                     ^^^ [1]
+8 |   }
+9 | }
+
+1 error found

@@ -1,0 +1,29 @@
+warning: Warn[12008] Duplicated property `x` in `C` (defined in `T1` and `T2`): all instances will be aliased at runtime [1]
+
+03-using-a-trait-03.hack:20:7
+18 | }
+19 | 
+20 | class C {
+   |       ^ [1]
+21 |   use T1;
+22 |   use T2;
+
+warning: Warn[12021] Static property is overridden: `$x` [1]
+-> Overriding static property is here [2]
+
+03-using-a-trait-03.hack:21:7
+11 | 
+12 | trait T2 {
+13 |   public static int $x = 0;
+   |                 ^^^ [2]
+14 | 
+15 |   public static function inc() : void {
+   :
+19 | 
+20 | class C {
+21 |   use T1;
+   |       ^^ [1]
+22 |   use T2;
+23 | 
+
+2 errors found

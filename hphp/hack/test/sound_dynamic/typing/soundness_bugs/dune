@@ -1,0 +1,36 @@
+(rule
+ (alias sound_dynamic_typing_soundness_bugs_good)
+ (deps
+  %{exe:../../../../src/hh_single_type_check.exe}
+  %{project_root}/hack/test/verify.py
+  %{project_root}/hack/test/review.sh
+  (glob_files %{project_root}/hack/test/sound_dynamic/typing/soundness_bugs/HH_FLAGS)
+  (glob_files %{project_root}/hack/test/sound_dynamic/typing/soundness_bugs/*.good.php)
+  (glob_files %{project_root}/hack/test/sound_dynamic/typing/soundness_bugs/*.good.php.exp)
+  (glob_files
+   %{project_root}/hack/test/sound_dynamic/typing/soundness_bugs/*.good.php.legacy_decl.exp))
+ (action
+  (run
+   %{project_root}/hack/test/verify.py
+   %{project_root}/hack/test/sound_dynamic/typing/soundness_bugs
+   --program
+   %{exe:../../../../src/hh_single_type_check.exe}
+   --batch
+   --in-extension
+   .good.php
+   --out-extension
+   .legacy_decl.out
+   --expect-extension
+   .legacy_decl.exp
+   --fallback-expect-extension
+   .exp
+   --flags
+   --out-extension
+   .legacy_decl.out
+   --error-format
+   plain)))
+
+(alias
+ (name runtest)
+ (deps
+  (alias sound_dynamic_typing_soundness_bugs_good)))

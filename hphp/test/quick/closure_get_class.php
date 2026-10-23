@@ -1,13 +1,9 @@
 <?hh
 
 trait Too {
-  function bar() {
+  function bar() :mixed{
     $a = function () {
       var_dump(__CLASS__);
-    };
-    $a();
-    $a = function () {
-      var_dump(get_class());
     };
     $a();
     if (isset($this)) {
@@ -19,11 +15,8 @@ trait Too {
   }
 }
 class Foo { use Too; }
-
+<<__EntryPoint>> function main(): void {
 $f = new Foo;
 echo "Between\n";
 $f->bar();
-echo "Between\n";
-$f::bar();
-echo "Between\n";
-Foo::bar();
+}

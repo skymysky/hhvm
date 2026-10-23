@@ -27,15 +27,13 @@ class D {
     $this->x = Map{};
   }
 
-  public function foo() {
+  public function foo(): void {
     $y = CNull::A;
     if (true) {
       $y = new B();
     } else {
       $y = new C();
     }
-    if($y) {
-      $this->x['meh'] = $y;
-    }
+    $this->x['meh'] = $y;
   }
 }

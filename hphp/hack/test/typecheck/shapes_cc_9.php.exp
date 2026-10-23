@@ -1,1 +1,17 @@
-No errors
+error: Typing[4052] A shape field name must be an `int` or `string` [1]
+-> Not a value of type foo [2]
+
+shapes_cc_9.php--use.php:4:22
+2 | 
+3 | // Reject: type of keys is opaque
+4 | type myshape = shape(C2::FOO => int);
+  |                      ^^^^^^^ [1]
+
+shapes_cc_9.php--def.php:5:9
+3 | newtype foo = bar;
+4 | class C2 {
+5 |   const foo FOO = C1::FOO;
+  |         ^^^ [2]
+6 | }
+
+1 error found

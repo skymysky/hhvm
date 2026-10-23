@@ -1,9 +1,10 @@
-<?php
-
-$x = new splfileinfo(__FILE__);
+<?hh
+<<__EntryPoint>> function main(): void {
+$x = new SplFileInfo(__FILE__);
 
 try {
 $x->openFile(NULL, NULL, NULL);
 } catch (Exception $e) { }
 
-var_dump($x->getPathName());
+var_dump($x->getPathname());
+}

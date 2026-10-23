@@ -1,52 +1,49 @@
-<?php
+<?hh
 
-function VS($x, $y) {
+function VS($x, $y) :mixed{
   var_dump($x === $y);
   if ($x !== $y) { echo "Failed: $y\n"; echo "Got: $x\n";
                    var_dump(debug_backtrace()); }
 }
-function VERIFY($x) { VS($x != false, true); }
+function VERIFY($x) :mixed{ VS($x != false, true); }
 
 //////////////////////////////////////////////////////////////////////
 
-// TODO(#2512714): set this to true and you'll SEGV :)
-$want_to_segv = false;
-if ($want_to_segv != true) {
-  function hello() {
-    return 'Hello World';
-  }
+// TODO(#2512714): if you comment out the function hello and you'll SEGV :)
+<<__DynamicallyCallable>> function hello() :mixed{
+  return 'Hello World';
 }
 
-function add($a, $b) {
+<<__DynamicallyCallable>> function add($a, $b) :mixed{
   return (int)$a + (int)$b;
 }
-function sub($a, $b) {
+function sub($a, $b) :mixed{
   return (int)$a - (int)$b;
 }
-function sum($a) {
+<<__DynamicallyCallable>> function sum($a) :mixed{
   $sum = 0;
   foreach ($a as $v) {
     $sum += (int)$v;
   }
   return $sum;
 }
-function fault() {
+function fault() :mixed{
  return new SoapFault('MyFault', 'My fault string');
 }
 
 //////////////////////////////////////////////////////////////////////
 
-function verify_response($req, $expected) {
-  global $server;
+function verify_response($req, $expected) :mixed{
+
 
   ob_start();
-  $server->handle($req);
+  ExtSoapExtSoapPhp::$server->handle($req);
   $res = ob_get_contents();
   ob_end_clean();
   VS($res, $expected);
 }
 
-function VSOAPEX($request, $response) {
+function VSOAPEX($request, $response) :mixed{
   verify_response
       ("<?xml version=\"1.0\" encoding=\"ISO-8859-1\"?>".
        "<SOAP-ENV:Envelope SOAP-ENV:encodingStyle=".
@@ -64,7 +61,7 @@ function VSOAPEX($request, $response) {
   ;
 }
 
-function VSOAPNS($request, $expected, $ns) {
+function VSOAPNS($request, $expected, $ns) :mixed{
   VSOAPEX($request,
           "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n".
           "<SOAP-ENV:Envelope xmlns:SOAP-ENV=".
@@ -82,74 +79,81 @@ function VSOAPNS($request, $expected, $ns) {
           );
 }
 
-function VSOAP($request, $expected) {
+function VSOAP($request, $expected) :mixed{
   VSOAPNS($request, $expected, "http://testuri.org");
 }
 
-//////////////////////////////////////////////////////////////////////
+abstract final class ExtSoapExtSoapPhp {
+  public static $server;
+}
+<<__EntryPoint>>
+function entrypoint_ext_soap(): void {
 
-for ($n = 1; $n <= 2; $n++) {
-  switch ($n) {
-    case 1:
-      $server = new SoapServer(null, array("uri" => "http://testuri.org"));
-      break;
-    case 2:
-      $server = new SoapServer(null, array("uri" => "http://testuri.org",
-                    "ssl_method" => SOAP_SSL_METHOD_TLS));
-      break;
-  }
+  //////////////////////////////////////////////////////////////////////
 
- $server->addfunction("hello");
+  for ($n = 1; $n <= 2; $n++) {
+    switch ($n) {
+      case 1:
+        ExtSoapExtSoapPhp::$server = new SoapServer(null, dict["uri" => "http://testuri.org"]);
+        break;
+      case 2:
+        ExtSoapExtSoapPhp::$server = new SoapServer(null, dict["uri" => "http://testuri.org",
+                      "ssl_method" => SOAP_SSL_METHOD_TLS]);
+        break;
+    }
 
-  VSOAP("<ns1:hello xmlns:ns1=\"http://testuri.org\" />",
-	"<ns1:helloResponse><return xsi:type=\"xsd:string\">Hello World".
-	"</return></ns1:helloResponse>");
+   ExtSoapExtSoapPhp::$server->addFunction("hello");
 
-  $server->addfunction(SOAP_FUNCTIONS_ALL);
+    VSOAP("<ns1:hello xmlns:ns1=\"http://testuri.org\" />",
+    "<ns1:helloResponse><return xsi:type=\"xsd:string\">Hello World".
+    "</return></ns1:helloResponse>");
 
-  VSOAP("<ns1:strlen xmlns:ns1=\"http://testuri.org\">".
-	"<x xsi:type=\"xsd:string\">Hello World</x>".
-	"</ns1:strlen>",
-	"<ns1:strlenResponse><return xsi:type=\"xsd:int\">11".
-	"</return></ns1:strlenResponse>");
+    ExtSoapExtSoapPhp::$server->addFunction(SOAP_FUNCTIONS_ALL);
 
-  $funcs = array("Sub", "Add");
-  $server->addfunction($funcs);
+    VSOAP("<ns1:strlen xmlns:ns1=\"http://testuri.org\">".
+    "<x xsi:type=\"xsd:string\">Hello World</x>".
+    "</ns1:strlen>",
+    "<ns1:strlenResponse><return xsi:type=\"xsd:int\">11".
+    "</return></ns1:strlenResponse>");
 
-  VSOAP("<ns1:Add xmlns:ns1=\"http://testuri.org\">".
-	"<x xsi:type=\"xsd:int\">22</x>".
-	"<y xsi:type=\"xsd:int\">33</y>".
-	"</ns1:Add>",
-	"<ns1:AddResponse><return xsi:type=\"xsd:int\">55".
-	"</return></ns1:AddResponse>");
+    $funcs = vec["sub", "add"];
+    ExtSoapExtSoapPhp::$server->addFunction($funcs);
 
-  $server->addfunction("Sum");
+    VSOAP("<ns1:add xmlns:ns1=\"http://testuri.org\">".
+    "<x xsi:type=\"xsd:int\">22</x>".
+    "<y xsi:type=\"xsd:int\">33</y>".
+    "</ns1:add>",
+    "<ns1:addResponse><return xsi:type=\"xsd:int\">55".
+    "</return></ns1:addResponse>");
 
-  VSOAP("<ns1:sum xmlns:ns1=\"http://testuri.org\">".
-	"<param0 SOAP-ENC:arrayType=\"xsd:int[2]\"".
-	" xmlns:SOAP-ENC=".
-	"\"http://schemas.xmlsoap.org/soap/encoding/\"".
-	" xsi:type=\"SOAP-ENC:Array\">".
-	"  <val xsi:type=\"xsd:int\">3</val>".
-	"  <val xsi:type=\"xsd:int\">5</val>".
-	"</param0>".
-	"</ns1:sum>",
-	"<ns1:sumResponse><return xsi:type=\"xsd:int\">8".
-	"</return></ns1:sumResponse>");
+    ExtSoapExtSoapPhp::$server->addFunction("sum");
 
-  $server = new SoapServer(__DIR__."/1809.wsdl",
-			  array("uri" => "http://testuri.org"));
+    VSOAP("<ns1:sum xmlns:ns1=\"http://testuri.org\">".
+    "<param0 SOAP-ENC:arrayType=\"xsd:int[2]\"".
+    " xmlns:SOAP-ENC=".
+    "\"http://schemas.xmlsoap.org/soap/encoding/\"".
+    " xsi:type=\"SOAP-ENC:Array\">".
+    "  <val xsi:type=\"xsd:int\">3</val>".
+    "  <val xsi:type=\"xsd:int\">5</val>".
+    "</param0>".
+    "</ns1:sum>",
+    "<ns1:sumResponse><return xsi:type=\"xsd:int\">8".
+    "</return></ns1:sumResponse>");
 
-  $server->addfunction("Fault");
+    ExtSoapExtSoapPhp::$server = new SoapServer(__DIR__."/1809.wsdl",
+          dict["uri" => "http://testuri.org"]);
 
-  // TODO(#2512715): this doesn't work.
-  if (false) {
-    VSOAPEX("<ns1:fault xmlns:ns1=\"http://testuri.org\"/>",
-	    "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n".
-	    "<SOAP-ENV:Envelope xmlns:SOAP-ENV=".
-	    "\"http://schemas.xmlsoap.org/soap/envelope/\"".
-	    "><SOAP-ENV:Body><SOAP-ENV:Fault><faultcode>MyFault</faultcode>".
-	    "<faultstring>My fault string</faultstring></SOAP-ENV:Fault>".
-	    "</SOAP-ENV:Body></SOAP-ENV:Envelope>\n");
+    ExtSoapExtSoapPhp::$server->addFunction("fault");
+
+    // TODO(#2512715): this doesn't work.
+    if (false) {
+      VSOAPEX("<ns1:fault xmlns:ns1=\"http://testuri.org\"/>",
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n".
+        "<SOAP-ENV:Envelope xmlns:SOAP-ENV=".
+        "\"http://schemas.xmlsoap.org/soap/envelope/\"".
+        "><SOAP-ENV:Body><SOAP-ENV:fault><faultcode>MyFault</faultcode>".
+        "<faultstring>My fault string</faultstring></SOAP-ENV:Fault>".
+        "</SOAP-ENV:Body></SOAP-ENV:Envelope>\n");
+    }
   }
 }

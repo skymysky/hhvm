@@ -24,7 +24,7 @@
 #include "hphp/util/logger.h"
 #include "hphp/util/trace.h"
 
-#ifdef FACEBOOK
+#ifdef HHVM_FACEBOOK
 #include "common/time/ClockGettimeNS.h" // nolint
 #endif
 
@@ -131,9 +131,8 @@ const char *Timer::getName() const {
   case SystemCPU: return "system cpu";
   case UserCPU:   return "user cpu";
   case TotalCPU:  return "total cpu";
-  default: assert(false);
   }
-  return nullptr;
+  always_assert(false);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -165,7 +164,7 @@ int gettime(clockid_t clock, timespec* ts) {
 
   constexpr uint64_t sec_to_ns = 1000000000;
 
-#ifdef FACEBOOK
+#ifdef HHVM_FACEBOOK
   uint64_t time;
   if (!fb_perf_get_thread_cputime_ns(&time)) {
     time += s_extra_request_nanoseconds;
@@ -194,7 +193,7 @@ int64_t gettime_ns(clockid_t clock) {
     return folly::chrono::clock_gettime_ns(clock);
   }
 
-#ifdef FACEBOOK
+#ifdef HHVM_FACEBOOK
   uint64_t time;
   if (!fb_perf_get_thread_cputime_ns(&time)) {
     return time + s_extra_request_nanoseconds;

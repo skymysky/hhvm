@@ -14,15 +14,14 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_OPTION_H_
-#define incl_HPHP_OPTION_H_
+#pragma once
 
 #include <map>
-#include <set>
+#include <string>
 #include <vector>
-#include "hphp/runtime/base/runtime-option.h"
-#include "hphp/util/functional.h"
-#include "hphp/util/string-bag.h"
+
+#include "hphp/util/hash-map.h"
+#include "hphp/util/hash-set.h"
 
 namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
@@ -36,116 +35,107 @@ struct Option {
    * Load options from different sources.
    */
   static void Load(const IniSettingMap& ini, Hdf &config);
-  static void Load(); // load default options
-
-  /**
-   * Directories to add to a package.
-   */
-  static std::string RootDirectory;
-  static std::set<std::string> PackageDirectories;
-
-  /**
-   * Files to add to a package.
-   */
-  static std::set<std::string> PackageFiles;
 
   /**
    * File path patterns for excluding files from a package scan of programs.
    */
-  static std::set<std::string> PackageExcludeDirs;
-  static std::set<std::string> PackageExcludeFiles;
-  static std::set<std::string> PackageExcludePatterns;
-  static std::set<std::string> PackageExcludeStaticFiles;
-  static std::set<std::string> PackageExcludeStaticDirs;
-  static std::set<std::string> PackageExcludeStaticPatterns;
+  static hphp_fast_string_set PackageExcludeDirs;
+  static hphp_fast_string_set PackageExcludeFiles;
+  static hphp_fast_string_set PackageExcludePatterns;
+  static hphp_fast_string_set PackageExcludeStaticFiles;
+  static hphp_fast_string_set PackageExcludeStaticDirs;
+  static hphp_fast_string_set PackageExcludeStaticPatterns;
 
-  static bool IsFileExcluded(const std::string &file,
-                             const std::set<std::string> &patterns);
-  static void FilterFiles(std::vector<std::string> &files,
-                          const std::set<std::string> &patterns);
-
-  /**
-   * Directories in which files are parsed on-demand, when parse-on-demand
-   * is off.
-   */
-  static std::vector<std::string> ParseOnDemandDirs;
+  static bool IsFileExcluded(const std::string& file,
+                             const hphp_fast_string_set& patterns);
+  static void FilterFiles(std::vector<std::string>& files,
+                          const hphp_fast_string_set& patterns);
 
   /**
    * Whether to store PHP source files in static file cache.
    */
   static bool CachePHPFile;
 
-  static std::vector<std::string> IncludeSearchPaths;
-
-  /**
-   * PHP functions that can be assumed to always return a certain constant
-   * value.
+  /*
+   * If true, HHBBC will const fold File and Dir bytecodes to static
+   * strings (using SourceRoot).
    */
-  static hphp_string_imap<std::string> ConstantFunctions;
+  static bool ConstFoldFileBC;
 
-  static std::set<std::string> VolatileClasses;
-  static std::map<std::string,std::string, stdltistr> AutoloadClassMap;
-  static std::map<std::string,std::string, stdltistr> AutoloadFuncMap;
-  static std::map<std::string,std::string> AutoloadConstMap;
-  static std::string AutoloadRoot;
-
-  /**
-   * CodeGenerator options for HHBC.
+  /*
+   * Whether to generate HHBC, HHAS, a textual dump of HHBC, or none.
    */
   static bool GenerateTextHHBC;
   static bool GenerateHhasHHBC;
   static bool GenerateBinaryHHBC;
-  static std::string RepoCentralPath;
+  static bool NoOutputHHBC;
 
-  static std::vector<std::string> APCProfile;
-
-  /**
-   * A somewhat unique prefix for system identifiers.
+  /*
+   * Number of threads to use for parsing
    */
-  static std::string IdPrefix;
-  static std::string LambdaPrefix;
-  static std::string Tab;
-
-  /**
-   * Name resolution helpers.
-   */
-  static const char *UserFilePrefix;
-
-  /**
-   * Turn it off for cleaner unit tests.
-   */
-  static bool KeepStatementsWithNoEffect;
-
-  /**
-   * Turning a file name into an identifier. When id is false, preserve
-   * "/" in file paths.
-   */
-  static std::string MangleFilename(const std::string &name, bool id);
-
-  static std::string ProgramName;
-
-  static bool ParseTimeOpts;
-  static bool EnableHipHopExperimentalSyntax;
-  static bool EnableShortTags;
-  static bool EnableAspTags;
   static int ParserThreadCount;
 
-  static int GetScannerType();
-
-  /**
-   * "Volatile" means a class or a function can be declared dynamically.
+  /*
+   * The number of files (on average) we'll group together for a
+   * worker during parsing. Files in directories (including sub-dirs)
+   * with more than ParserDirGroupSizeLimit files won't be grouped
+   * with files outside of those directories.
    */
-  static bool AllVolatile;
+  static int ParserGroupSize;
+  static int ParserDirGroupSizeLimit;
 
-  /**
-   * Output options
+  /*
+   * If true, we'll free async state (which can take a while) in
+   * another thread asynchronously. If false, it will be done
+   * synchronously.
    */
-  static bool DumpAst;
-  static bool WholeProgram;
-  static bool RecordErrors;
+  static bool ParserAsyncCleanup;
+
+  /*
+   * If true, as an optimization, we'll assume the files have already
+   * been stored with extern_worker previously and proceed as if they
+   * had. If not (so execution fails), we'll then store them and try
+   * again. This avoids doing a lot of redundant stores in the common
+   * case.
+   */
+  static bool ParserOptimisticStore;
+
+  /*
+   * When an ActiveDeployment is specified, we disable SymbolRefs
+   * logic and only compile the requested files. This option will
+   * be used to force include SymbolRefs even when ActiveDeployment
+   * is specified.
+   */
+  static bool ForceEnableSymbolRefs;
+
+  static bool UseExternWorkerForFullAnalysis;
+  static bool UseLocalHHBBC;
+
+  /* Config passed to extern_worker::Client */
+  static std::string ExternWorkerUseCase;
+  static std::string ExternWorkerPlatform;
+  static std::string ExternWorkerFeaturesFile;
+  static std::string ExternWorkerPath;
+  static int ExternWorkerTimeoutSecs;
+  static bool ExternWorkerUseExecCache;
+  static bool ExternWorkerCleanup;
+  static bool ExternWorkerUseRichClient;
+  static bool ExternWorkerUseP2P;
+  static bool ExternWorkerUseSubprocessScheduler;
+  static int ExternWorkerCasConnectionCount;
+  static int ExternWorkerEngineConnectionCount;
+  static int ExternWorkerExecutionConcurrencyLimit;
+  static int ExternWorkerAcConnectionCount;
+  static bool ExternWorkerVerboseLogging;
+  static int ExternWorkerThrottleRetries;
+  static int ExternWorkerThrottleBaseWaitMSecs;
+  static std::string ExternWorkerWorkingDir;
+  static size_t ExternWorkerMaxSubprocessMemory;
+  static std::string ExternWorkerZstdDictionaryPath;
 
 private:
-  static StringBag OptionStrings;
+  static const int kDefaultParserGroupSize;
+  static const int kDefaultParserDirGroupSizeLimit;
 
   static void LoadRootHdf(const IniSettingMap& ini, const Hdf &roots,
                           const std::string& name,
@@ -154,4 +144,3 @@ private:
 
 ///////////////////////////////////////////////////////////////////////////////
 }
-#endif // incl_HPHP_OPTION_H_

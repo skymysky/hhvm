@@ -1,0 +1,19 @@
+error: Typing[4110] Invalid argument [1]
+-> Expected `int` [2]
+-> But got `string` [1]
+
+attribute_usage.php:17:5
+ 6 | 
+ 7 | class B implements HH\FunctionAttribute {
+ 8 |   public function __construct(public int $i) {}
+   |                                      ^^^ [2]
+ 9 | }
+10 | 
+   :
+15 | function g(): void {}
+16 | 
+17 | <<B("wrong")>>
+   |     ^^^^^^^ [1]
+18 | function h(): void {}
+
+1 error found

@@ -1,12 +1,12 @@
-<?php
+<?hh
 
 class MyClass {
-  private function getKeyPrefix() {
+  private function getKeyPrefix() :mixed{
     return 'foo:';
   }
 
-  public function makeArray() {
-    $data = array();
+  public function makeArray() :mixed{
+    $data = dict[];
     $p = $this->getKeyPrefix();
 
     $data[$p.'a'] = 2;
@@ -18,4 +18,8 @@ class MyClass {
   }
 }
 
+
+<<__EntryPoint>>
+function main_array_058() :mixed{
 var_dump((new MyClass)->makeArray());
+}

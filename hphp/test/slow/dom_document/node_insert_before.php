@@ -1,5 +1,5 @@
-<?php
-function test_procedural() {
+<?hh
+function test_procedural() :mixed{
   $doc = new DOMDocument();
 
   $root = $doc->createElement('html');
@@ -15,7 +15,7 @@ function test_procedural() {
   var_dump($doc->saveHTML());
 }
 
-function test_objects() {
+function test_objects() :mixed{
   $doc = new DOMDocument();
 
   $root = $doc->createElement('html');
@@ -30,5 +30,9 @@ function test_objects() {
   var_dump($doc->saveHTML());
 }
 
+
+<<__EntryPoint>>
+function main_node_insert_before() :mixed{
 test_procedural();
 test_objects();
+}

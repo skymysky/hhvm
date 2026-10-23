@@ -1,4 +1,4 @@
-(**
+(*
  * Copyright (c) 2015, Facebook, Inc.
  * All rights reserved.
  *
@@ -6,7 +6,6 @@
  * LICENSE file in the "hack" directory of this source tree.
  *
  *)
-
 
 (*****************************************************************************)
 (* Module dealing with inheritance.
@@ -19,15 +18,28 @@ open Decl_defs
 open Typing_defs
 
 type inherited = {
-  ih_substs   : subst_context SMap.t;
-  ih_cstr     : element option * bool;
-  ih_consts   : class_const SMap.t ;
-  ih_typeconsts : typeconst_type SMap.t ;
-  ih_props    : element SMap.t ;
-  ih_sprops   : element SMap.t ;
-  ih_methods  : element SMap.t ;
-  ih_smethods : element SMap.t ;
+  ih_substs: subst_context S_map.t;
+  ih_cstr: (element * fun_elt option) option * consistent_kind;
+  ih_consts: class_const S_map.t;
+  ih_typeconsts: typeconst_type S_map.t;
+  ih_props: (element * decl_ty option) S_map.t;
+  ih_sprops: (element * decl_ty option) S_map.t;
+  ih_methods: (element * fun_elt option) S_map.t;
+  ih_smethods: (element * fun_elt option) S_map.t;
+  ih_support_dynamic_type: bool;
 }
 
-(* Builds the inherited type *)
-val make: Decl_env.env -> Nast.class_ -> inherited
+(** Builds the [inherited] type by fetching any ancestor from the heap.
+    The [cache] parameter is a map of heap entries we might already have at hand
+    which acts as a cache for the shared heap. *)
+val make :
+  Shallow_decl_defs.shallow_class ->
+  cache:Decl_store.class_entries S_map.t ->
+  inherited
+
+(** [find_overridden_method cls ~get_method] finds in the parents and
+  used traits of [cls] a method overridden by [cls]. *)
+val find_overridden_method :
+  Shallow_decl_defs.shallow_class ->
+  get_method:(decl_ty -> class_elt option) ->
+  class_elt option

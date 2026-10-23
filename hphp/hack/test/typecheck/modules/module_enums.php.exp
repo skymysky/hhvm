@@ -1,0 +1,93 @@
+error: Typing[4446] You cannot use this type in a public declaration. [1]
+-> It is declared as `internal` here [2]
+
+module_enums.php--X.php:14:13
+ 4 | module X;
+ 5 | 
+ 6 | internal enum X: int {
+   |               ^ [2]
+ 7 |   A = 0;
+ 8 |   B = 1;
+   :
+12 | internal function f1(X $x): void {} // ok
+13 | 
+14 | function f2(X $x): void {} // error
+   |             ^ [1]
+15 | 
+16 | internal function f5(): void {
+
+error: Typing[4444] Cannot access an internal element from module `X` in module `Y` [1]
+-> This is from module `X` [2]
+
+module_enums.php--Y.php:6:13
+4 | module Y;
+5 | 
+6 | function f3(X $x): void {} // error
+  |             ^ [1]
+7 | 
+8 | function f7(): void {
+
+module_enums.php--X.php:6:15
+4 | module X;
+5 | 
+6 | internal enum X: int {
+  |               ^ [2]
+7 |   A = 0;
+8 |   B = 1;
+
+error: Typing[4444] Cannot access an internal element from module `X` in module `Y` [1]
+-> This is from module `X` [2]
+
+module_enums.php--Y.php:9:8
+ 7 | 
+ 8 | function f7(): void {
+ 9 |   $x = X::A; // error
+   |        ^ [1]
+10 | }
+
+module_enums.php--X.php:6:15
+ 4 | module X;
+ 5 | 
+ 6 | internal enum X: int {
+   |               ^ [2]
+ 7 |   A = 0;
+ 8 |   B = 1;
+
+error: Typing[4444] Cannot access an internal element from module `X` in the default module [1]
+-> This is from module `X` [2]
+
+module_enums.php--no-module.php:4:13
+2 | // Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved.
+3 | 
+4 | function f4(X $x): void {} // error
+  |             ^ [1]
+5 | 
+6 | function f8(): void {
+
+module_enums.php--X.php:6:15
+4 | module X;
+5 | 
+6 | internal enum X: int {
+  |               ^ [2]
+7 |   A = 0;
+8 |   B = 1;
+
+error: Typing[4444] Cannot access an internal element from module `X` in the default module [1]
+-> This is from module `X` [2]
+
+module_enums.php--no-module.php:7:8
+5 | 
+6 | function f8(): void {
+7 |   $x = X::A; // error
+  |        ^ [1]
+8 | }
+
+module_enums.php--X.php:6:15
+4 | module X;
+5 | 
+6 | internal enum X: int {
+  |               ^ [2]
+7 |   A = 0;
+8 |   B = 1;
+
+5 errors found

@@ -1,32 +1,24 @@
-<?php
+<?hh
 /* Prototype: array glob ( string $pattern [, int $flags] );
    Description: Find pathnames matching a pattern
 */
-
-$file_path = dirname(__FILE__);
+<<__EntryPoint>> function main(): void {
+$dirname = sys_get_temp_dir().'/'.'glob_error';
 
 // temp dir created
-mkdir("$file_path/glob_error");
+mkdir($dirname);
 // temp file created
-$fp = fopen("$file_path/glob_error/wonder12345", "w");
+$fp = fopen("$dirname/wonder12345", "w");
 fclose($fp);
 
 echo "*** Testing glob() : error conditions ***\n";
 
 echo "-- Testing glob() with unexpected no. of arguments --\n";
-var_dump( glob() );  // args < expected
-var_dump( glob(dirname(__FILE__)."/glob_error/wonder12345", GLOB_ERR, 3) );  // args > expected
-
-echo "\n-- Testing glob() with invalid arguments --\n";
-var_dump( glob(dirname(__FILE__)."/glob_error/wonder12345", '') );
-var_dump( glob(dirname(__FILE__)."/glob_error/wonder12345", "string") );
+try { var_dump( glob() ); } catch (Exception $e) { echo "\n".'Warning: '.$e->getMessage().' in '.__FILE__.' on line '.__LINE__."\n"; } // args < expected
+try { var_dump( glob("$dirname/wonder12345", GLOB_ERR, 3) ); } catch (Exception $e) { echo "\n".'Warning: '.$e->getMessage().' in '.__FILE__.' on line '.__LINE__."\n"; } // args > expected
 
 echo "Done\n";
-?>
-<?php error_reporting(0); ?>
-<?php
-// temp file deleted
-unlink(dirname(__FILE__)."/glob_error/wonder12345");
-// temp dir deleted
-rmdir(dirname(__FILE__)."/glob_error");
-?>
+
+unlink("$dirname/wonder12345");
+rmdir($dirname);
+}

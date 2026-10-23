@@ -19,13 +19,17 @@
 #include "hphp/runtime/base/builtin-functions.h"
 #include "hphp/runtime/base/req-tiny-vector.h"
 
+#include <folly/Singleton.h>
+
 #include <algorithm>
 
 namespace HPHP {
 
+static_assert(sizeof(int32_t) == 4, "int32_t is not 4 bytes");
+
 #define INC_OUTPUTPOS(a,b)                                              \
   if ((a) < 0 || ((INT_MAX - outputpos)/((int)b)) < (a)) {              \
-    throw_invalid_argument                                              \
+    raise_invalid_argument_warning                                      \
       ("Type %c: integer overflow in format string", code);             \
     return false;                                                       \
   }                                                                     \
@@ -33,131 +37,27 @@ namespace HPHP {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-ZendPack::ZendPack() {
-  int machine_endian_check = 1;
-  int64_t i;
-
-  machine_little_endian = ((char *)&machine_endian_check)[0];
-
-  if (machine_little_endian) {
-    /* Where to get lo to hi bytes from */
-    byte_map[0] = 0;
-
-    for (i = 0; i < (int)sizeof(int); i++) {
-      int_map[i] = i;
-    }
-
-    machine_endian_short_map[0] = 0;
-    machine_endian_short_map[1] = 1;
-    big_endian_short_map[0] = 1;
-    big_endian_short_map[1] = 0;
-    little_endian_short_map[0] = 0;
-    little_endian_short_map[1] = 1;
-
-    machine_endian_int32_map[0] = 0;
-    machine_endian_int32_map[1] = 1;
-    machine_endian_int32_map[2] = 2;
-    machine_endian_int32_map[3] = 3;
-    big_endian_int32_map[0] = 3;
-    big_endian_int32_map[1] = 2;
-    big_endian_int32_map[2] = 1;
-    big_endian_int32_map[3] = 0;
-    little_endian_int32_map[0] = 0;
-    little_endian_int32_map[1] = 1;
-    little_endian_int32_map[2] = 2;
-    little_endian_int32_map[3] = 3;
-
-    machine_endian_int64_map[0] = 0;
-    machine_endian_int64_map[1] = 1;
-    machine_endian_int64_map[2] = 2;
-    machine_endian_int64_map[3] = 3;
-    machine_endian_int64_map[4] = 4;
-    machine_endian_int64_map[5] = 5;
-    machine_endian_int64_map[6] = 6;
-    machine_endian_int64_map[7] = 7;
-    big_endian_int64_map[0] = 7;
-    big_endian_int64_map[1] = 6;
-    big_endian_int64_map[2] = 5;
-    big_endian_int64_map[3] = 4;
-    big_endian_int64_map[4] = 3;
-    big_endian_int64_map[5] = 2;
-    big_endian_int64_map[6] = 1;
-    big_endian_int64_map[7] = 0;
-    little_endian_int64_map[0] = 0;
-    little_endian_int64_map[1] = 1;
-    little_endian_int64_map[2] = 2;
-    little_endian_int64_map[3] = 3;
-    little_endian_int64_map[4] = 4;
-    little_endian_int64_map[5] = 5;
-    little_endian_int64_map[6] = 6;
-    little_endian_int64_map[7] = 7;
-  } else {
-    int64_t size = sizeof(int64_t);
-
-    /* Where to get hi to lo bytes from */
-    byte_map[0] = size - 1;
-
-    for (i = 0; i < (int)sizeof(int); i++) {
-      int_map[i] = size - (sizeof(int64_t) - i);
-    }
-
-    machine_endian_short_map[0] = size - 2;
-    machine_endian_short_map[1] = size - 1;
-    big_endian_short_map[0] = size - 2;
-    big_endian_short_map[1] = size - 1;
-    little_endian_short_map[0] = size - 1;
-    little_endian_short_map[1] = size - 2;
-
-    machine_endian_int32_map[0] = size - 4;
-    machine_endian_int32_map[1] = size - 3;
-    machine_endian_int32_map[2] = size - 2;
-    machine_endian_int32_map[3] = size - 1;
-    big_endian_int32_map[0] = size - 4;
-    big_endian_int32_map[1] = size - 3;
-    big_endian_int32_map[2] = size - 2;
-    big_endian_int32_map[3] = size - 1;
-    little_endian_int32_map[0] = size - 1;
-    little_endian_int32_map[1] = size - 2;
-    little_endian_int32_map[2] = size - 3;
-    little_endian_int32_map[3] = size - 4;
-
-    machine_endian_int64_map[0] = size - 8;
-    machine_endian_int64_map[1] = size - 7;
-    machine_endian_int64_map[2] = size - 6;
-    machine_endian_int64_map[3] = size - 5;
-    machine_endian_int64_map[4] = size - 4;
-    machine_endian_int64_map[5] = size - 3;
-    machine_endian_int64_map[6] = size - 2;
-    machine_endian_int64_map[7] = size - 1;
-    big_endian_int64_map[0] = size - 8;
-    big_endian_int64_map[1] = size - 7;
-    big_endian_int64_map[2] = size - 6;
-    big_endian_int64_map[3] = size - 5;
-    big_endian_int64_map[4] = size - 4;
-    big_endian_int64_map[5] = size - 3;
-    big_endian_int64_map[6] = size - 2;
-    big_endian_int64_map[7] = size - 1;
-    little_endian_int64_map[0] = size - 1;
-    little_endian_int64_map[1] = size - 2;
-    little_endian_int64_map[2] = size - 3;
-    little_endian_int64_map[3] = size - 4;
-    little_endian_int64_map[4] = size - 5;
-    little_endian_int64_map[5] = size - 6;
-    little_endian_int64_map[6] = size - 7;
-    little_endian_int64_map[7] = size - 8;
+template <typename T>
+void packInt(const Variant& val, std::endian endian, char *output) {
+  auto i = val.toInt64();
+  if (endian != std::endian::native) {
+    T* n = (T*)(&i);
+    *n = folly::Endian::swap(*n);
   }
+  memcpy(output, &i, sizeof(T));
 }
 
-void ZendPack::pack(const Variant& val, int64_t size, int64_t *map,
-                    char *output) {
-  int64_t n = val.toInt64();
-  char *v = (char*)&n;
-  for (int64_t i = 0; i < size; i++) {
-    *output++ = v[map[i]];
+template <typename T>
+void packFloat(const Variant& val, std::endian endian, char *output) {
+  T f = (T)val.toDouble();
+  if (endian != std::endian::native) {
+    f = folly::Endian::swap(f);
   }
+
+  memcpy(output, &f, sizeof(T));
 }
 
-Variant ZendPack::pack(const String& fmt, const Array& argv) {
+Variant ZendPack::pack(const OptString& fmt, const Array& argv) {
   /* Preprocess format into formatcodes and formatargs */
   req::TinyVector<char, 64> formatcodes; // up to 64 codes on the stack
   req::TinyVector<int, 64> formatargs;
@@ -194,7 +94,7 @@ Variant ZendPack::pack(const String& fmt, const Array& argv) {
     case 'X':
     case '@':
       if (arg < 0) {
-        throw_invalid_argument("Type %c: '*' ignored", code);
+        raise_invalid_argument_warning("Type %c: '*' ignored", code);
         arg = 1;
       }
       break;
@@ -206,7 +106,7 @@ Variant ZendPack::pack(const String& fmt, const Array& argv) {
     case 'H':
     case 'Z':
       if (currentarg >= argc) {
-        throw_invalid_argument("Type %c: not enough arguments", code);
+        raise_invalid_argument_warning("Type %c: not enough arguments", code);
         return false;
       }
 
@@ -238,8 +138,12 @@ Variant ZendPack::pack(const String& fmt, const Array& argv) {
     case 'N':
     case 'v':
     case 'V':
-    case 'f':
-    case 'd':
+    case 'f': /* float */
+    case 'g': /* little endian float */
+    case 'G': /* big endian float */
+    case 'd': /* double */
+    case 'e': /* little endian double */
+    case 'E': /* big endian double */
       if (arg < 0) {
         arg = argc - currentarg;
       }
@@ -247,13 +151,13 @@ Variant ZendPack::pack(const String& fmt, const Array& argv) {
       currentarg += arg;
 
       if (currentarg > argc) {
-        throw_invalid_argument("Type %c: too few arguments", code);
+        raise_invalid_argument_warning("Type %c: too few arguments", code);
         return false;
       }
       break;
 
     default:
-      throw_invalid_argument("Type %c: unknown format code", code);
+      raise_invalid_argument_warning("Type %c: unknown format code", code);
       return false;
     }
 
@@ -262,7 +166,7 @@ Variant ZendPack::pack(const String& fmt, const Array& argv) {
   }
 
   if (currentarg < argc) {
-    throw_invalid_argument("%d arguments unused", (argc - currentarg));
+    raise_invalid_argument_warning("%d arguments unused", (argc - currentarg));
   }
 
   int outputpos = 0, outputsize = 0;
@@ -311,11 +215,15 @@ Variant ZendPack::pack(const String& fmt, const Array& argv) {
       INC_OUTPUTPOS(arg,8);    /* 64 bit per arg */
       break;
 
-    case 'f':
+    case 'f': /* float */
+    case 'g': /* little endian float */
+    case 'G': /* big endian float */
       INC_OUTPUTPOS(arg,sizeof(float));
       break;
 
-    case 'd':
+    case 'd': /* double */
+    case 'e': /* little endian double */
+    case 'E': /* big endian double */
       INC_OUTPUTPOS(arg,sizeof(double));
       break;
 
@@ -323,7 +231,7 @@ Variant ZendPack::pack(const String& fmt, const Array& argv) {
       outputpos -= arg;
 
       if (outputpos < 0) {
-        throw_invalid_argument("Type %c: outside of string", code);
+        raise_invalid_argument_warning("Type %c: outside of string", code);
         outputpos = 0;
       }
       break;
@@ -338,7 +246,7 @@ Variant ZendPack::pack(const String& fmt, const Array& argv) {
     }
   }
 
-  String str = String(outputsize, ReserveString);
+  OptString str = OptString(outputsize, ReserveString);
   char *output = str.mutableData();
   outputpos = 0;
   currentarg = 0;
@@ -347,7 +255,7 @@ Variant ZendPack::pack(const String& fmt, const Array& argv) {
   for (int i = 0; i < (int)formatcodes.size(); i++) {
     int code = (int) formatcodes[i];
     int arg = formatargs[i];
-    String val;
+    OptString val;
     const char *s;
     int slen;
 
@@ -376,7 +284,7 @@ Variant ZendPack::pack(const String& fmt, const Array& argv) {
       slen = val.size();
       outputpos--;
       if (arg > slen) {
-        throw_invalid_argument
+        raise_invalid_argument_warning
           ("Type %c: not enough characters in string", code);
         arg = slen;
       }
@@ -391,7 +299,7 @@ Variant ZendPack::pack(const String& fmt, const Array& argv) {
         } else if (n >= 'a' && n <= 'f') {
           n -= ('a' - 10);
         } else {
-          throw_invalid_argument("Type %c: illegal hex digit %c", code, n);
+          raise_invalid_argument_warning("Type %c: illegal hex digit %c", code, n);
           n = 0;
         }
 
@@ -412,7 +320,7 @@ Variant ZendPack::pack(const String& fmt, const Array& argv) {
     case 'c':
     case 'C':
       while (arg-- > 0) {
-        pack(argv[currentarg++], 1, byte_map, &output[outputpos]);
+        packInt<uint8_t>(argv[currentarg++], std::endian::native, &output[outputpos]);
         outputpos++;
       }
       break;
@@ -421,16 +329,15 @@ Variant ZendPack::pack(const String& fmt, const Array& argv) {
     case 'S':
     case 'n':
     case 'v': {
-      int64_t *map = machine_endian_short_map;
-
+      auto endian = std::endian::native;
       if (code == 'n') {
-        map = big_endian_short_map;
+        endian = std::endian::big;
       } else if (code == 'v') {
-        map = little_endian_short_map;
+        endian = std::endian::little;
       }
 
       while (arg-- > 0) {
-        pack(argv[currentarg++], 2, map, &output[outputpos]);
+        packInt<uint16_t>(argv[currentarg++], endian, &output[outputpos]);
         outputpos += 2;
       }
       break;
@@ -439,7 +346,7 @@ Variant ZendPack::pack(const String& fmt, const Array& argv) {
     case 'i':
     case 'I':
       while (arg-- > 0) {
-        pack(argv[currentarg++], sizeof(int), int_map, &output[outputpos]);
+        packInt<int>(argv[currentarg++], std::endian::native, &output[outputpos]);
         outputpos += sizeof(int);
       }
       break;
@@ -448,16 +355,15 @@ Variant ZendPack::pack(const String& fmt, const Array& argv) {
     case 'L':
     case 'N':
     case 'V': {
-      int64_t *map = machine_endian_int32_map;
-
+      auto endian = std::endian::native;
       if (code == 'N') {
-        map = big_endian_int32_map;
+        endian = std::endian::big;
       } else if (code == 'V') {
-        map = little_endian_int32_map;
+        endian = std::endian::little;
       }
 
       while (arg-- > 0) {
-        pack(argv[currentarg++], 4, map, &output[outputpos]);
+        packInt<uint32_t>(argv[currentarg++], endian, &output[outputpos]);
         outputpos += 4;
       }
       break;
@@ -467,38 +373,48 @@ Variant ZendPack::pack(const String& fmt, const Array& argv) {
     case 'Q':
     case 'J':
     case 'P': {
-      int64_t *map = machine_endian_int64_map;
+      auto endian = std::endian::native;
       if (code == 'J') {
-        map = big_endian_int64_map;
+        endian = std::endian::big;
       } else if (code == 'P') {
-        map = little_endian_int64_map;
+        endian = std::endian::little;
       }
 
       while (arg-- > 0) {
-        pack(argv[currentarg++], 8, map, &output[outputpos]);
+        packInt<uint64_t>(argv[currentarg++], endian, &output[outputpos]);
         outputpos += 8;
       }
       break;
     }
 
-    case 'f': {
-      float v;
-
+    case 'f':
+    case 'g':
+    case 'G': {
+      auto endian = std::endian::native;
+      if (code == 'G') {
+        endian = std::endian::big;
+      } else if (code == 'g') {
+        endian = std::endian::little;
+      }
       while (arg-- > 0) {
-        v = argv[currentarg++].toDouble();
-        memcpy(&output[outputpos], &v, sizeof(v));
-        outputpos += sizeof(v);
+        packFloat<float>(argv[currentarg++], endian, &output[outputpos]);
+        outputpos += 4;
       }
       break;
     }
 
-    case 'd': {
-      double v;
-
+    case 'd':
+    case 'e':
+    case 'E': {
+      auto endian = std::endian::native;
+      if (code == 'E') {
+        endian = std::endian::big;
+      } else if (code == 'e') {
+        endian = std::endian::little;
+      }
       while (arg-- > 0) {
-        v = argv[currentarg++].toDouble();
-        memcpy(&output[outputpos], &v, sizeof(v));
-        outputpos += sizeof(v);
+        packFloat<double>(argv[currentarg++], endian, &output[outputpos]);
+        outputpos += 8;
       }
       break;
     }
@@ -529,29 +445,38 @@ Variant ZendPack::pack(const String& fmt, const Array& argv) {
   return str;
 }
 
-int64_t ZendPack::unpack(const char *data, int64_t size, int issigned,
-                         int64_t *map) {
-  int64_t result;
-  char *cresult = (char *) &result;
-  int i;
+template <typename T>
+int64_t unpackInt(const char *data, std::endian endian, bool checkSignedBit) {
+  int64_t result = checkSignedBit && (data[endian == std::endian::little ? sizeof(T) - 1 : 0] & 0x80) != 0 ? -1 : 0;
+  memcpy(&result, data, sizeof(T));
 
-  result = issigned ? -1 : 0;
-
-  for (i = 0; i < size; i++) {
-    cresult[map[i]] = *data++;
+  if (endian != std::endian::native) {
+    T* n = (T*)(&result);
+    *n = folly::Endian::swap(*n);
   }
 
   return result;
 }
 
-Variant ZendPack::unpack(const String& fmt, const String& data) {
+
+template <typename T>
+double unpackFloat(const char *data, std::endian endian) {
+  T result;
+  memcpy(&result, data, sizeof(T));
+  if (endian != std::endian::native) {
+    result = folly::Endian::swap(result);
+  }
+  return (double)result;
+}
+
+Variant ZendPack::unpack(const OptString& fmt, const OptString& data) {
   const char *format = fmt.c_str();
   int formatlen = fmt.size();
   const char *input = data.c_str();
   int inputlen = data.size();
   int inputpos = 0;
 
-  Array ret = Array::Create();
+  Array ret = Array::CreateDict();
   while (formatlen-- > 0) {
     char type = *(format++);
     int arg = 1, argb;
@@ -596,7 +521,7 @@ Variant ZendPack::unpack(const String& fmt, const String& data) {
     case 'X':
       size = -1;
       if (arg < 0) {
-        throw_invalid_argument("Type %c: '*' ignored", type);
+        raise_invalid_argument_warning("Type %c: '*' ignored", type);
         arg = 1;
       }
       break;
@@ -656,34 +581,46 @@ Variant ZendPack::unpack(const String& fmt, const String& data) {
       break;
       /* Use sizeof(float) bytes of input */
     case 'f':
+    case 'g':
+    case 'G':
       size = sizeof(float);
       break;
 
       /* Use sizeof(double) bytes of input */
     case 'd':
+    case 'e':
+    case 'E':
       size = sizeof(double);
       break;
 
     default:
-      throw_invalid_argument("Invalid format type %c", type);
+      raise_invalid_argument_warning("Invalid format type %c", type);
       return false;
     }
 
     /* Do actual unpacking */
     for (int i = 0; i != arg; i++ ) {
       /* Space for name + number, safe as namelen is ensured <= 200 */
-      char n[256];
+      OptString n_str;
 
-      if (arg != 1 || namelen == 0) {
+      if (namelen == 0) {
+        n_str = OptString::FromInt64(i + 1);
+      } else if (arg != 1) {
         /* Need to add element number to name */
-        snprintf(n, sizeof(n), "%.*s%d", namelen, name, i + 1);
+        n_str = OptString(name, namelen, CopyString);
+        n_str += OptString::FromInt64(i + 1);
       } else {
         /* Truncate name to next format code or end of string */
-        snprintf(n, sizeof(n), "%.*s", namelen, name);
+        n_str = OptString(name, namelen, CopyString);
       }
 
+      int64_t n_int;
+      const auto n_key = n_str.get()->isStrictlyInteger(n_int)
+        ? Variant(n_int)
+        : Variant(n_str);
+
       if (size != 0 && size != -1 && INT_MAX - size + 1 < inputpos) {
-        throw_invalid_argument("Type %c: integer overflow", type);
+        raise_invalid_argument_warning("Type %c: integer overflow", type);
         inputpos = 0;
       }
 
@@ -730,8 +667,7 @@ Variant ZendPack::unpack(const String& fmt, const String& data) {
           if (type=='A')
             len++;
 
-          ret.set(String(n, CopyString),
-                  String(input + inputpos, len, CopyString));
+          ret.set(n_key, OptString(input + inputpos, len, CopyString));
           break;
         }
 
@@ -752,7 +688,7 @@ Variant ZendPack::unpack(const String& fmt, const String& data) {
             len -= argb % 2;
           }
 
-          String s = String(len, ReserveString);
+          OptString s = OptString(len, ReserveString);
           buf = s.mutableData();
 
           for (ipos = opos = 0; opos < len; opos++) {
@@ -774,138 +710,105 @@ Variant ZendPack::unpack(const String& fmt, const String& data) {
           }
 
           s.setSize(len);
-          ret.set(String(n, CopyString), s);
+          ret.set(n_key, s);
           break;
         }
 
-        case 'c':
-        case 'C': {
-          int issigned = (type == 'c') ? (input[inputpos] & 0x80) : 0;
-          ret.set(String(n, CopyString),
-                  unpack(&input[inputpos], 1, issigned, byte_map));
+        case 'c': { /* int8 */
+          ret.set(n_key, unpackInt<uint8_t>(&input[inputpos], std::endian::native, true));
           break;
         }
 
-        case 's':
-        case 'S':
-        case 'n':
-        case 'v': {
-          int issigned = 0;
-          int64_t *map = machine_endian_short_map;
-
-          if (type == 's') {
-            issigned = input[inputpos + (machine_little_endian ? 1 : 0)] &
-              0x80;
-          } else if (type == 'n') {
-            map = big_endian_short_map;
-          } else if (type == 'v') {
-            map = little_endian_short_map;
-          }
-
-          ret.set(String(n, CopyString),
-                  unpack(&input[inputpos], 2, issigned, map));
+        case 'C': { /* uint8 */
+          ret.set(n_key, unpackInt<uint8_t>(&input[inputpos], std::endian::native, false));
           break;
         }
 
-        case 'i':
-        case 'I': {
-          int32_t v = 0;
-          int issigned = 0;
-
-          if (type == 'i') {
-            issigned = input[inputpos + (machine_little_endian ?
-                                         (sizeof(int) - 1) : 0)] & 0x80;
-          } else if (sizeof(int32_t) > 4 &&
-                     (input[inputpos + machine_endian_int32_map[3]]
-                      & 0x80) == 0x80) {
-            v = ~INT_MAX;
-          }
-
-          v |= unpack(&input[inputpos], sizeof(int), issigned, int_map);
-          if (type == 'i') {
-            ret.set(String(n, CopyString), v);
-          } else {
-            uint64_t u64 = uint32_t(v);
-            ret.set(String(n, CopyString), u64);
-          }
+        case 's': { /* int16 */
+          ret.set(n_key, unpackInt<uint16_t>(&input[inputpos], std::endian::native, true));
           break;
         }
 
-        case 'l':
-        case 'L':
-        case 'N':
-        case 'V': {
-          int issigned = 0;
-          int64_t *map = machine_endian_int32_map;
-          int64_t v = 0;
-
-          if (type == 'l' || type == 'L') {
-            issigned = input[inputpos + (machine_little_endian ? 3 : 0)]
-              & 0x80;
-          } else if (type == 'N') {
-            issigned = input[inputpos] & 0x80;
-            map = big_endian_int32_map;
-          } else if (type == 'V') {
-            issigned = input[inputpos + 3] & 0x80;
-            map = little_endian_int32_map;
-          }
-
-          if (sizeof(int32_t) > 4 && issigned) {
-            v = ~INT_MAX;
-          }
-
-          v |= unpack(&input[inputpos], 4, issigned, map);
-          if (type == 'l') {
-            ret.set(String(n, CopyString), v);
-          } else {
-            uint64_t u64 = uint32_t(v);
-            ret.set(String(n, CopyString), u64);
-          }
+        case 'S': { /* uint16 */
+          ret.set(n_key, unpackInt<uint16_t>(&input[inputpos], std::endian::native, false));
           break;
         }
 
-        case 'q':
-        case 'Q':
-        case 'J':
-        case 'P': {
-          int issigned = 0;
-          int64_t *map = machine_endian_int64_map;
-          int64_t v = 0;
-          if (type == 'q' || type == 'Q') {
-            issigned = input[inputpos + (machine_little_endian ? 7 : 0)] & 0x80;
-          } else if (type == 'J') {
-            issigned = input[inputpos] & 0x80;
-            map = big_endian_int64_map;
-          } else if (type == 'P') {
-            issigned = input[inputpos + 7] & 0x80;
-            map = little_endian_int64_map;
-          }
-
-          v = unpack(&input[inputpos], 8, issigned, map);
-
-          if (type == 'q') {
-            ret.set(String(n, CopyString), v);
-          } else {
-            uint64_t u64 = uint64_t(v);
-            ret.set(String(n, CopyString), u64);
-          }
-
+        case 'n': { /* big endian uint16 */
+          ret.set(n_key, unpackInt<uint16_t>(&input[inputpos], std::endian::big, false));
           break;
         }
 
-        case 'f': {
-          float v;
-
-          memcpy(&v, &input[inputpos], sizeof(float));
-          ret.set(String(n, CopyString), (double)v);
+        case 'v': { /* little endian uint16 */
+          ret.set(n_key, unpackInt<uint16_t>(&input[inputpos], std::endian::little, false));
           break;
         }
 
-        case 'd': {
-          double v;
+        case 'i':   /* int */
+        case 'l': { /* int32 */
+          ret.set(n_key, unpackInt<uint32_t>(&input[inputpos], std::endian::native, true));
+          break;
+        }
 
-          memcpy(&v, &input[inputpos], sizeof(double));
-          ret.set(String(n, CopyString), v);
+        case 'I':   /* uint */
+        case 'L': { /* uint32 */
+          ret.set(n_key, unpackInt<uint32_t>(&input[inputpos], std::endian::native, false));
+          break;
+        }
+
+        case 'N': { /* big endian uint32 */
+          ret.set(n_key, unpackInt<uint32_t>(&input[inputpos], std::endian::big, false));
+          break;
+        }
+
+        case 'V': { /* little endian uint32 */
+          ret.set(n_key, unpackInt<uint32_t>(&input[inputpos], std::endian::little, false));
+          break;
+        }
+
+        case 'q':   /* int64 */
+        case 'Q': { /* uint64 */
+          ret.set(n_key, unpackInt<uint64_t>(&input[inputpos], std::endian::native, false));
+          break;
+        }
+
+        case 'J': { /* big endian uint64 */
+          ret.set(n_key, unpackInt<uint64_t>(&input[inputpos], std::endian::big, false));
+          break;
+        }
+
+        case 'P': { /* little endian uint64 */
+          ret.set(n_key, unpackInt<uint64_t>(&input[inputpos], std::endian::little, false));
+          break;
+        }
+
+        case 'f': {/* float */
+          ret.set(n_key, unpackFloat<float>(&input[inputpos], std::endian::native));
+          break;
+        }
+
+        case 'g': {/* little endian float */
+          ret.set(n_key, unpackFloat<float>(&input[inputpos], std::endian::little));
+          break;
+        }
+
+        case 'G': { /* big endian float */
+          ret.set(n_key, unpackFloat<float>(&input[inputpos], std::endian::big));
+          break;
+        }
+
+        case 'd': { /* double */
+          ret.set(n_key, unpackFloat<double>(&input[inputpos], std::endian::native));
+          break;
+        }
+
+        case 'e': {/* little endian double */
+          ret.set(n_key, unpackFloat<double>(&input[inputpos], std::endian::little));
+          break;
+        }
+
+        case 'E': {/* big endian double */ 
+          ret.set(n_key, unpackFloat<double>(&input[inputpos], std::endian::big));
           break;
         }
 
@@ -919,7 +822,7 @@ Variant ZendPack::unpack(const String& fmt, const String& data) {
             i = arg - 1;    /* Break out of for loop */
 
             if (arg >= 0) {
-              throw_invalid_argument("Type %c: outside of string", type);
+              raise_invalid_argument_warning("Type %c: outside of string", type);
             }
           }
           break;
@@ -928,7 +831,7 @@ Variant ZendPack::unpack(const String& fmt, const String& data) {
           if (arg <= inputlen) {
             inputpos = arg;
           } else {
-            throw_invalid_argument("Type %c: outside of string", type);
+            raise_invalid_argument_warning("Type %c: outside of string", type);
           }
 
           i = arg - 1;  /* Done, break out of for loop */
@@ -938,7 +841,7 @@ Variant ZendPack::unpack(const String& fmt, const String& data) {
         inputpos += size;
         if (inputpos < 0) {
           if (size != -1) { /* only print warning if not working with * */
-            throw_invalid_argument("Type %c: outside of string", type);
+            raise_invalid_argument_warning("Type %c: outside of string", type);
           }
           inputpos = 0;
         }
@@ -946,7 +849,7 @@ Variant ZendPack::unpack(const String& fmt, const String& data) {
         /* Reached end of input for '*' repeater */
         break;
       } else {
-        throw_invalid_argument
+        raise_invalid_argument_warning
           ("Type %c: not enough input, need %d, have %d",
            type, size, inputlen - inputpos);
         return false;

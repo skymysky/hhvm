@@ -1,10 +1,8 @@
 <?hh
 
-function g(int $x) {}
+function g(int $x): void {}
 
-function f(mixed $x) {
-  if ($x as int) {
-    g($x);
-  }
+function f(mixed $x): void {
+  $x as int;
   g($x);
 }

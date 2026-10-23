@@ -1,5 +1,9 @@
-<?php
+<?hh
 
-$a = array('test');
- $a[1] = 'test';
+
+<<__EntryPoint>>
+function main_300() :mixed{
+$a = vec['test'];
+ $a[] = 'test';
         var_dump($a);
+}

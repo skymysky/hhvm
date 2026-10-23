@@ -18,8 +18,11 @@
 
 #include "hphp/runtime/base/datatype.h"
 #include "hphp/runtime/base/typed-value.h"
+#include "hphp/runtime/base/unaligned-typed-value.h"
 
 #include "hphp/util/compact-tagged-ptrs.h"
+#include "hphp/util/compilation-flags.h"
+#include "hphp/util/functional.h"
 
 #include <cstddef>
 #include <type_traits>
@@ -27,28 +30,15 @@
 namespace HPHP {
 
 namespace tv_val_detail {
-/*
- * These structs are used to add dummy() and is_dummy() functions to tv_rval
- * only.
- */
-struct empty {};
-
 template<typename T>
-struct with_dummy {
-  /*
-   * The canonical non-null "missing" rval. Only valid for tv_rval (is_const ==
-   * true). These are actually defined in tv_val_detail::with_dummy; see above.
-   *
-   * Some users of tv_rval prefer to use a dummy rval-to-Uninit to represent a
-   * missing element, instead of a nullptr rval, so that tv() is always valid.
-   * These functions provide and test for such a value.
-   *
-   * static tv_val dummy();
-   * bool is_dummy() const;
-   */
-  static T dummy() { return T { &immutable_uninit_base }; }
-  bool is_dummy() const { return static_cast<const T&>(*this) == dummy(); }
-};
+INLINE_FLATTEN T* get_ptr(T* ptr) {
+  return ptr;
+}
+
+template<typename T, typename Tag>
+INLINE_FLATTEN T* get_ptr(CompactTaggedPtr<T, Tag> ptr) {
+  return ptr.ptr();
+}
 }
 
 /*
@@ -70,9 +60,7 @@ struct with_dummy {
  * tag. This has no space overhead, but has a slight penalty at runtime.
  */
 template<bool is_const, typename tag_t = void>
-struct tv_val : std::conditional<is_const,
-                                 tv_val_detail::with_dummy<tv_val<true>>,
-                                 tv_val_detail::empty>::type {
+struct tv_val {
 private:
   template<typename T> using maybe_const_t =
     typename std::conditional<is_const, const T, T>::type;
@@ -84,86 +72,152 @@ public:
   using type_t = maybe_const_t<DataType>;
   using tv_t = maybe_const_t<TypedValue>;
 
-  tv_val();
-  /* implicit */ tv_val(tv_t* lval);
+  /*
+   * These values expose details about the internal representation of a tv_val,
+   * and should only be inspected while generating code that works with
+   * tv_vals.
+   *
+   * If you do change these, you must also update the return registers used in
+   * runtime/base/hash-table-*.S.
+   */
+  static constexpr int type_idx = 0;
+  static constexpr int val_idx = 1;
+
+  INLINE_FLATTEN tv_val();
+  /* implicit */ INLINE_FLATTEN tv_val(std::nullptr_t);
+  /* implicit */ INLINE_FLATTEN tv_val(tv_t* lval);
+  INLINE_FLATTEN tv_val(type_t* type, value_t* val);
 
   /*
    * Construct from a tv_val without a tag and a tag.
    */
   template<typename Tag = tag_t>
-  tv_val(tv_val<is_const> lval, with_tag_t<Tag> t);
+  INLINE_FLATTEN tv_val(tv_val<is_const> lval, with_tag_t<Tag> t);
 
-  bool operator==(tv_val other) const;
+  INLINE_FLATTEN bool operator==(tv_val other) const;
+  INLINE_FLATTEN bool operator!=(tv_val other) const;
+
+  INLINE_FLATTEN size_t hash() const;
 
   /*
    * Whether this tv_val is set.
    */
-  bool is_set() const;
-  explicit operator bool() const;
-  bool operator==(std::nullptr_t) const;
-  bool operator!=(std::nullptr_t) const;
+  INLINE_FLATTEN bool is_set() const;
+  INLINE_FLATTEN explicit operator bool() const;
+  INLINE_FLATTEN bool operator==(std::nullptr_t) const;
+  INLINE_FLATTEN bool operator!=(std::nullptr_t) const;
 
   /*
    * Implicit cast to tv_rval.
    */
-  /* implicit */ operator tv_val<true>() const;
-
-  /*
-   * Explicit cast to tv_lval.
-   *
-   * This is the moral equivalent of:
-   *   const_cast<TypedValue*>(const TypedValue*)
-   */
-  tv_val<false> as_lval() const;
+  /* implicit */ INLINE_FLATTEN operator tv_val<true>() const;
 
   /*
    * References to the value and type.
    *
    * @requires: is_set()
    */
-  value_t& val() const;
-  type_t& type() const;
+  INLINE_FLATTEN value_t& val() const;
+  INLINE_FLATTEN type_t& type() const;
 
   /*
    * Get a copy of the referenced value and type as a TypedValue.
    *
    * @requires: is_set()
    */
-  TypedValue tv() const;
-  TypedValue operator*() const;
-
-
-  /*
-   * Return `this' if the referenced value is already unboxed, else a tv_val to
-   * the inner value.
-   */
-  tv_val unboxed() const;
+  INLINE_FLATTEN TypedValue tv() const;
+  INLINE_FLATTEN TypedValue operator*() const;
 
   template<typename Tag = tag_t>
-  with_tag_t<Tag> tag() const;
+  INLINE_FLATTEN with_tag_t<Tag> tag() const;
 
   template<typename Tag = tag_t>
-  with_tag_t<Tag, tv_val<is_const>> drop_tag() const;
+  INLINE_FLATTEN with_tag_t<Tag, tv_val<is_const>> drop_tag() const;
+
+  TYPE_SCAN_CUSTOM() {
+    if (isRefcountedType(type())) scanner.scan(val().pcnt);
+  }
+
+  /* implicit */ tv_val(UnalignedTypedValue* utv)
+    : tv_val{&utv->m_type, &utv->m_data}
+  {}
+
+  /* implicit */ tv_val(const UnalignedTypedValue* utv)
+    : tv_val{&utv->m_type, &utv->m_data}
+  {}
 
 private:
   template<bool, typename> friend struct tv_val;
 
-  using storage_t = typename std::conditional<
-    std::is_same<tag_t, void>::value, tv_t*, CompactTaggedPtr<tv_t, tag_t>
-  >::type;
+  template<typename T>
+  using maybe_tagged_t = std::conditional_t<
+    std::is_same<tag_t, void>::value, T*, CompactTaggedPtr<T, tag_t>
+  >;
 
-  storage_t m_tv;
+  /*
+   * Wide storage type: separate pointers for the type and the value. m_type is
+   * only meaningful is m_val != nullptr.
+   */
+  struct wide_storage {
+    INLINE_FLATTEN wide_storage()
+        : m_type{}, m_val{} {}
+
+    INLINE_FLATTEN wide_storage(type_t* type, value_t* val)
+      : m_type{type}
+      , m_val{val}
+    {
+      assertx((type && val) || val == nullptr);
+    }
+
+    template<typename Tag = tag_t>
+    INLINE_FLATTEN wide_storage(type_t* type, value_t* val, with_tag_t<Tag> tag)
+      : m_type{tag, type}
+      , m_val{val}
+    {
+      assertx((type && val) || val == nullptr);
+    }
+
+    INLINE_FLATTEN bool operator==(const wide_storage& o) const {
+      return m_val == o.m_val && (m_type == o.m_type || m_val == nullptr);
+    }
+
+    INLINE_FLATTEN bool operator!=(const wide_storage& o) const {
+      return !operator==(o);
+    }
+
+    INLINE_FLATTEN size_t hash() const {
+      return pointer_hash<Value>()(m_val);
+    }
+
+    INLINE_FLATTEN type_t* type() const {
+      return tv_val_detail::get_ptr(m_type);
+    }
+    INLINE_FLATTEN value_t* val() const { return m_val; }
+    INLINE_FLATTEN bool is_set() const { return m_val; }
+
+    template<typename Tag = tag_t>
+    INLINE_FLATTEN with_tag_t<Tag> tag() const { return m_type.tag(); }
+
+   private:
+    maybe_tagged_t<type_t> m_type;
+    value_t* m_val;
+  };
+
+  using storage_t = wide_storage;
+  storage_t m_s;
 };
 
 /*
  * TV-lval API for tv_val.
  */
 template<bool is_const>
-auto& type(const tv_val<is_const>& val) { return val.type(); }
+INLINE_FLATTEN auto& type(const tv_val<is_const>& val) { return val.type(); }
 template<bool is_const>
-auto& val(const tv_val<is_const>& val) { return val.val(); }
+INLINE_FLATTEN auto& val(const tv_val<is_const>& val) { return val.val(); }
 template<bool is_const>
-TypedValue as_tv(const tv_val<is_const>& val) { return val.tv(); }
+INLINE_FLATTEN TypedValue as_tv(const tv_val<is_const>& val) {
+  return val.tv();
+}
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -171,6 +225,50 @@ using tv_lval = tv_val<false>;
 using tv_rval = tv_val<true>;
 
 ///////////////////////////////////////////////////////////////////////////////
+
+namespace detail {
+
+/* representation of a tv_val_offset when wide mode is on */
+struct tv_val_offset_wide {
+  tv_val_offset_wide(ptrdiff_t tv_offset)
+    : type_offset(tv_offset + offsetof(TypedValue, m_type))
+    , data_offset(tv_offset + offsetof(TypedValue, m_data)) {}
+  tv_val_offset_wide(ptrdiff_t type_offset, ptrdiff_t data_offset)
+    : type_offset(type_offset)
+    , data_offset(data_offset) {}
+
+  ptrdiff_t typeOffset() const { return type_offset; }
+  ptrdiff_t dataOffset() const { return data_offset; }
+
+  tv_val_offset_wide shift(ptrdiff_t off) const {
+    return {
+      type_offset + off,
+      data_offset + off
+    };
+  }
+
+  /* extract a tv_val from a given base address */
+  tv_lval apply(char* base) const {
+    return tv_lval {
+      reinterpret_cast<DataType*>(base + typeOffset()),
+      reinterpret_cast<Value*>(base + dataOffset())
+    };
+  }
+
+  tv_rval apply(const char* base) const {
+    return tv_rval {
+      reinterpret_cast<const DataType*>(base + typeOffset()),
+      reinterpret_cast<const Value*>(base + dataOffset())
+     };
+  }
+
+  ptrdiff_t type_offset;
+  ptrdiff_t data_offset;
+};
+
+} // namespace detail
+
+using tv_val_offset = detail::tv_val_offset_wide;
 
 }
 

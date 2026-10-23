@@ -1,9 +1,9 @@
-<?php
+<?hh
 
 /** I's doc comment */
 interface I {
   /** @idx herp derp */
-  public function meth($idx);
+  public function meth($idx):mixed;
 }
 
 /** C's doc comment */
@@ -14,15 +14,18 @@ class C {
   private $p2;
 
   /** more doc comment */
-  public function okay() { }
+  public function okay() :mixed{ }
 }
 
-$meths = array(
-  array('ArrayAccess', 'offsetExists'),
-  array('ReflectionMethod', 'getDocComment'),
-  array('I', 'meth'),
-  array('C', 'okay')
-);
+
+<<__EntryPoint>>
+function main_get_doc_comment_builtins() :mixed{
+$meths = vec[
+  vec['ArrayAccess', 'offsetExists'],
+  vec['ReflectionMethod', 'getDocComment'],
+  vec['I', 'meth'],
+  vec['C', 'okay']
+];
 
 foreach ($meths as list($class, $meth)) {
   $refl = new ReflectionMethod($class, $meth);
@@ -32,8 +35,9 @@ foreach ($meths as list($class, $meth)) {
   var_dump($s);
 }
 
-foreach (array('p1', 'p2') as $prop) {
+foreach (vec['p1', 'p2'] as $prop) {
   $refl = new ReflectionProperty('C', $prop);
   $s = $refl->getDocComment();
   var_dump($s);
+}
 }

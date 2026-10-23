@@ -1,4 +1,4 @@
-(**
+(*
  * Copyright (c) 2015, Facebook, Inc.
  * All rights reserved.
  *
@@ -7,141 +7,546 @@
  *
  *)
 
-open Hh_core
+open Hh_prelude
 open Typing_defs
+open Typing_defs_constraints
 module Reason = Typing_reason
 
-class type ['a] type_visitor_type = object
-  method on_tany : 'a -> Reason.t -> 'a
-  method on_terr : 'a -> Reason.t -> 'a
-  method on_tmixed : 'a -> Reason.t -> 'a
-  method on_tnonnull : 'a -> Reason.t -> 'a
-  method on_tdynamic : 'a -> Reason.t -> 'a
-  method on_tthis : 'a -> Reason.t -> 'a
-  method on_tarray : 'a -> Reason.t -> 'b ty option -> 'b ty option -> 'a
-  method on_tvarray_or_darray : 'a -> Reason.t -> decl ty -> 'a
-  method on_tgeneric : 'a -> Reason.t -> string -> 'a
-  method on_toption : 'a -> Reason.t -> 'b ty -> 'a
-  method on_tprim : 'a -> Reason.t -> Nast.tprim -> 'a
-  method on_tvar : 'a -> Reason.t -> Ident.t -> 'a
-  method on_type : 'a -> 'b ty -> 'a
-  method on_tfun : 'a -> Reason.t -> 'b fun_type -> 'a
-  method on_tabstract : 'a -> Reason.t -> abstract_kind -> locl ty option -> 'a
-  method on_tapply : 'a -> Reason.t -> Nast.sid -> decl ty list -> 'a
-  method on_ttuple : 'a -> Reason.t -> 'b ty list -> 'a
-  method on_tanon : 'a -> Reason.t -> locl fun_arity -> Ident.t -> 'a
-  method on_tunresolved : 'a -> Reason.t -> locl ty list -> 'a
-  method on_tobject : 'a -> Reason.t -> 'a
-  method on_tshape :
-    'a
-      -> Reason.t
-      -> shape_fields_known
-      -> 'b shape_field_type Nast.ShapeMap.t
-      -> 'a
-  method on_taccess : 'a -> Reason.t -> taccess_type -> 'a
-  method on_tclass : 'a -> Reason.t -> Nast.sid -> locl ty list -> 'a
-  method on_tarraykind : 'a -> Reason.t -> array_kind -> 'a
-end
+class type ['a] decl_type_visitor_type =
+  object
+    method on_tany : 'a -> decl_phase Reason.t_ -> 'a
 
-class virtual ['a] type_visitor : ['a] type_visitor_type = object(this)
-  method on_tany acc _ = acc
-  method on_terr acc _ = acc
-  method on_tmixed acc _ = acc
-  method on_tnonnull acc _ = acc
-  method on_tdynamic acc _ = acc
-  method on_tthis acc _ = acc
-  method on_tarray: type a. _ -> Reason.t -> a ty option -> a ty option -> _ =
-    fun acc _ ty1_opt ty2_opt ->
-    let acc = Option.fold ~f:this#on_type ~init:acc ty1_opt in
-    let acc = Option.fold ~f:this#on_type ~init:acc ty2_opt in
-    acc
-  method on_tvarray_or_darray acc _ ty =
-    this#on_type acc ty
-  method on_tgeneric acc _ _ = acc
-  method on_toption: type a. _ -> Reason.t -> a ty -> _ =
-    fun acc _ ty -> this#on_type acc ty
-  method on_tprim acc _ _ = acc
-  method on_tvar acc _ _ = acc
-  method on_tfun: type a. _ -> Reason.t -> a fun_type -> _ =
-    fun acc _ {ft_params; ft_tparams; ft_ret; _} ->
-    let acc = List.fold_left ~f:this#on_type ~init:acc
-      (List.map ft_params (fun x -> x.fp_type)) in
-    let tparams = List.map ft_tparams (fun (_, _, x, _) -> List.map x snd) in
-    let acc = List.fold_left tparams ~f:(fun acc tp ->
-      List.fold ~f:this#on_type ~init:acc tp) ~init:acc in
-    this#on_type acc ft_ret
-  method on_tabstract acc _ ak ty_opt =
-    let acc =
-      match ak with
-      | AKnewtype (_, tyl) -> List.fold_left tyl ~f:this#on_type ~init:acc
-      | AKenum _name -> acc
-      | AKgeneric _ -> acc
-      | AKdependent (_, _) -> acc in
-    let acc = Option.fold ~f:this#on_type ~init:acc ty_opt in
-    acc
-  method on_tapply acc _ _ tyl = List.fold_left tyl ~f:this#on_type ~init:acc
-  method on_taccess acc _ (root, _ids) = this#on_type acc root
-  method on_ttuple: type a. _ -> Reason.t -> a ty list -> _ =
-    fun acc _ tyl -> List.fold_left tyl ~f:this#on_type ~init:acc
-  method on_tanon acc _ _ _ = acc
-  method on_tunresolved acc _ tyl = List.fold_left tyl ~f:this#on_type ~init:acc
-  method on_tobject acc _ = acc
-  method on_tshape: type a. _ -> Reason.t -> shape_fields_known
-    -> a shape_field_type Nast.ShapeMap.t -> _ =
-    fun acc _ _ fdm ->
-    let f _ { sft_ty; _ } acc = this#on_type acc sft_ty in
-    Nast.ShapeMap.fold f fdm acc
-  method on_tclass acc _ _ tyl =
-    List.fold_left tyl ~f:this#on_type ~init:acc
-  method on_tarraykind acc _ array_kind =
-    match array_kind with
-    | AKany -> acc
-    | AKempty -> acc
-    | AKvarray_or_darray ty
-    | AKvarray ty
-    | AKvec ty -> this#on_type acc ty
-    | AKdarray (tk, tv)
-    | AKmap (tk, tv) ->
-      let acc = this#on_type acc tk in
-      this#on_type acc tv
-    | AKshape fdm ->
-      let f _ (tk, tv) acc = begin
-        let acc = this#on_type acc tk in
-        this#on_type acc tv
-      end in
-      Nast.ShapeMap.fold f fdm acc
-    | AKtuple fields ->
-      let f _ ty acc = this#on_type acc ty in
-      IMap.fold f fields acc
-  method on_type: type a. _ -> a ty -> _ = fun acc (r, x) ->
-    match x with
-    | Tany -> this#on_tany acc r
-    | Terr -> this#on_terr acc r
-    | Tmixed -> this#on_tmixed acc r
-    | Tnonnull -> this#on_tnonnull acc r
-    | Tdynamic -> this#on_tdynamic acc r
-    | Tthis -> this#on_tthis acc r
-    | Tarray (ty1_opt, ty2_opt) ->
-      this#on_tarray acc r ty1_opt ty2_opt
-    | Tdarray (ty1, ty2) ->
-      this#on_type acc (r, Tarray (Some ty1, Some ty2))
-    | Tvarray ty ->
-      this#on_type acc (r, Tarray (Some ty, None))
-    | Tvarray_or_darray ty ->
-      this#on_tvarray_or_darray acc r ty
-    | Tgeneric s -> this#on_tgeneric acc r s
-    | Toption ty -> this#on_toption acc r ty
-    | Tprim prim -> this#on_tprim acc r prim
-    | Tvar id -> this#on_tvar acc r id
-    | Tfun fty -> this#on_tfun acc r fty
-    | Tabstract (ak, ty_opt) -> this#on_tabstract acc r ak ty_opt
-    | Tapply (s, tyl) -> this#on_tapply acc r s tyl
-    | Taccess aty -> this#on_taccess acc r aty
-    | Ttuple tyl -> this#on_ttuple acc r tyl
-    | Tanon (arity, id) -> this#on_tanon acc r arity id
-    | Tunresolved tyl -> this#on_tunresolved acc r tyl
-    | Tobject -> this#on_tobject acc r
-    | Tshape (fields_known, fdm) -> this#on_tshape acc r fields_known fdm
-    | Tclass (cls, tyl) -> this#on_tclass acc r cls tyl
-    | Tarraykind akind -> this#on_tarraykind acc r akind
-end
+    method on_tmixed : 'a -> decl_phase Reason.t_ -> 'a
+
+    method on_twildcard : 'a -> decl_phase Reason.t_ -> 'a
+
+    method on_tnonnull : 'a -> decl_phase Reason.t_ -> 'a
+
+    method on_tdynamic : 'a -> decl_phase Reason.t_ -> 'a
+
+    method on_tthis : 'a -> decl_phase Reason.t_ -> 'a
+
+    method on_tvec_or_dict :
+      'a -> decl_phase Reason.t_ -> decl_ty -> decl_ty -> 'a
+
+    method on_tgeneric : 'a -> decl_phase Reason.t_ -> string -> 'a
+
+    method on_toption : 'a -> decl_phase Reason.t_ -> decl_ty -> 'a
+
+    method on_tlike : 'a -> decl_phase Reason.t_ -> decl_ty -> 'a
+
+    method on_tprim : 'a -> decl_phase Reason.t_ -> Aast.tprim -> 'a
+
+    method on_tvar : 'a -> decl_phase Reason.t_ -> Tvid.t -> 'a
+
+    method on_type : 'a -> decl_ty -> 'a
+
+    method on_tfun : 'a -> decl_phase Reason.t_ -> decl_fun_type -> 'a
+
+    method on_tapply :
+      'a -> decl_phase Reason.t_ -> pos_id -> decl_ty list -> 'a
+
+    method on_tuple_extra : 'a -> decl_phase tuple_extra -> 'a
+
+    method on_ttuple : 'a -> decl_phase Reason.t_ -> decl_phase tuple_type -> 'a
+
+    method on_tunion : 'a -> decl_phase Reason.t_ -> decl_ty list -> 'a
+
+    method on_tintersection : 'a -> decl_phase Reason.t_ -> decl_ty list -> 'a
+
+    method on_tshape : 'a -> decl_phase Reason.t_ -> decl_phase shape_type -> 'a
+
+    method on_taccess :
+      'a -> decl_phase Reason.t_ -> decl_phase taccess_type -> 'a
+
+    method on_trefinement :
+      'a -> decl_phase Reason.t_ -> decl_ty -> decl_class_refinement -> 'a
+
+    method on_tclass_ptr : 'a -> decl_phase Reason.t_ -> decl_ty -> 'a
+  end
+
+class virtual ['a] decl_type_visitor : ['a] decl_type_visitor_type =
+  object (this)
+    method on_tany acc _ = acc
+
+    method on_tmixed acc _ = acc
+
+    method on_twildcard acc _ = acc
+
+    method on_tnonnull acc _ = acc
+
+    method on_tdynamic acc _ = acc
+
+    method on_tthis acc _ = acc
+
+    method on_tvec_or_dict acc _ ty1 ty2 =
+      let acc = this#on_type acc ty1 in
+      this#on_type acc ty2
+
+    method on_tgeneric acc _ _ = acc
+
+    method on_toption acc _ ty = this#on_type acc ty
+
+    method on_tlike acc _ ty = this#on_type acc ty
+
+    method on_tprim acc _ _ = acc
+
+    method on_tvar acc _ _ = acc
+
+    method on_tfun
+        acc
+        _
+        {
+          ft_params;
+          ft_tparams;
+          ft_ret;
+          ft_flags = _;
+          ft_instantiated = _;
+          ft_implicit_params;
+          ft_where_constraints;
+        } =
+      let acc =
+        List.fold_left
+          ~f:this#on_type
+          ~init:acc
+          (List.map ft_params ~f:(fun x -> x.fp_type))
+      in
+      let tparams =
+        List.map ft_tparams ~f:(fun t -> List.map t.tp_constraints ~f:snd)
+      in
+      let acc =
+        List.fold_left
+          tparams
+          ~f:(fun acc tp -> List.fold ~f:this#on_type ~init:acc tp)
+          ~init:acc
+      in
+      let acc =
+        match ft_implicit_params.capability with
+        | CapDefaults _ -> acc
+        | CapTy ty -> this#on_type acc ty
+      in
+      let acc =
+        List.fold_left
+          ft_where_constraints
+          ~f:(fun acc (ty1, _ck, ty2) ->
+            let acc = this#on_type acc ty1 in
+            let acc = this#on_type acc ty2 in
+            acc)
+          ~init:acc
+      in
+      this#on_type acc ft_ret
+
+    method on_tapply acc _ _ tyl = List.fold_left tyl ~f:this#on_type ~init:acc
+
+    method on_trefinement acc _ ty rs =
+      let acc = this#on_type acc ty in
+      Class_refinement.fold rs ~init:acc ~f:this#on_type
+
+    method on_taccess acc _ (root, _ids) = this#on_type acc root
+
+    method on_ttuple acc _ { t_required; t_optional; t_extra } =
+      let acc = this#on_tuple_extra acc t_extra in
+      let acc = List.fold_left t_optional ~f:this#on_type ~init:acc in
+      List.fold_left t_required ~f:this#on_type ~init:acc
+
+    method on_tuple_extra acc e =
+      match e with
+      | Tsplat t_splat -> this#on_type acc t_splat
+      | Tvariadic t_variadic -> this#on_type acc t_variadic
+
+    method on_tunion acc _ tyl = List.fold_left tyl ~f:this#on_type ~init:acc
+
+    method on_tintersection acc _ tyl =
+      List.fold_left tyl ~f:this#on_type ~init:acc
+
+    method on_tshape acc _ shape_ty =
+      match shape_ty with
+      | Shape_simple { s_origin = _; s_unknown_value = kind; s_fields = fdm } ->
+        let acc = this#on_type acc kind in
+        let f _ { sft_ty; _ } acc = this#on_type acc sft_ty in
+        TShapeMap.fold f fdm acc
+      | Shape_splat { ss_elems } ->
+        List.fold_left ss_elems ~f:this#on_type ~init:acc
+
+    method on_tclass_ptr acc _ ty = this#on_type acc ty
+
+    method on_type acc ty =
+      let (r, x) = deref ty in
+      match x with
+      | Tany _ -> this#on_tany acc r
+      | Tmixed -> this#on_tmixed acc r
+      | Twildcard -> this#on_twildcard acc r
+      | Tnonnull -> this#on_tnonnull acc r
+      | Tdynamic _ -> this#on_tdynamic acc r
+      | Tthis -> this#on_tthis acc r
+      | Tvec_or_dict (ty1, ty2) -> this#on_tvec_or_dict acc r ty1 ty2
+      | Tgeneric s -> this#on_tgeneric acc r s
+      | Toption ty -> this#on_toption acc r ty
+      | Tlike ty -> this#on_tlike acc r ty
+      | Tprim prim -> this#on_tprim acc r prim
+      | Tfun fty -> this#on_tfun acc r fty
+      | Tapply (s, tyl) -> this#on_tapply acc r s tyl
+      | Trefinement (ty, rs) -> this#on_trefinement acc r ty rs
+      | Taccess aty -> this#on_taccess acc r aty
+      | Ttuple t -> this#on_ttuple acc r t
+      | Tunion tyl -> this#on_tunion acc r tyl
+      | Tintersection tyl -> this#on_tintersection acc r tyl
+      | Tshape s -> this#on_tshape acc r s
+      | Tclass_ptr ty -> this#on_tclass_ptr acc r ty
+  end
+
+class type ['a] locl_type_visitor_type =
+  object
+    method on_type : 'a -> locl_ty -> 'a
+
+    method on_tany : 'a -> Reason.t -> 'a
+
+    method on_tnonnull : 'a -> Reason.t -> 'a
+
+    method on_tdynamic : 'a -> Reason.t -> 'a
+
+    method on_toption : 'a -> Reason.t -> locl_ty -> 'a
+
+    method on_tprim : 'a -> Reason.t -> Aast.tprim -> 'a
+
+    method on_tvar : 'a -> Reason.t -> Tvid.t -> 'a
+
+    method on_tfun : 'a -> Reason.t -> locl_fun_type -> 'a
+
+    method on_tgeneric : 'a -> Reason.t -> string -> 'a
+
+    method on_tnewtype :
+      'a -> Reason.t -> string -> locl_ty list -> locl_ty -> 'a
+
+    method on_tdependent : 'a -> Reason.t -> dependent_type -> locl_ty -> 'a
+
+    method on_tuple_extra : 'a -> locl_phase tuple_extra -> 'a
+
+    method on_ttuple : 'a -> Reason.t -> locl_phase tuple_type -> 'a
+
+    method on_tunion : 'a -> Reason.t -> locl_ty list -> 'a
+
+    method on_tintersection : 'a -> Reason.t -> locl_ty list -> 'a
+
+    method on_tunion : 'a -> Reason.t -> locl_ty list -> 'a
+
+    method on_tintersection : 'a -> Reason.t -> locl_ty list -> 'a
+
+    method on_tvec_or_dict : 'a -> Reason.t -> locl_ty -> locl_ty -> 'a
+
+    method on_tshape : 'a -> Reason.t -> locl_phase shape_type -> 'a
+
+    method on_tclass : 'a -> Reason.t -> pos_id -> exact -> locl_ty list -> 'a
+
+    method on_class_refinement : 'a -> locl_class_refinement -> 'a
+
+    method on_tlist : 'a -> Reason.t -> locl_ty list -> 'a
+
+    method on_tunapplied_alias : 'a -> Reason.t -> string -> 'a
+
+    method on_taccess : 'a -> Reason.t -> locl_phase taccess_type -> 'a
+
+    method on_neg_type : 'a -> Reason.t -> type_predicate -> 'a
+
+    method on_tlabel : 'a -> Reason.t -> string -> 'a
+
+    method on_tclass_ptr : 'a -> Reason.t -> locl_ty -> 'a
+  end
+
+class virtual ['a] locl_type_visitor : ['a] locl_type_visitor_type =
+  object (this)
+    method on_tany acc _ = acc
+
+    method on_tnonnull acc _ = acc
+
+    method on_tdynamic acc _ = acc
+
+    method on_toption acc _ ty = this#on_type acc ty
+
+    method on_tprim acc _ _ = acc
+
+    method on_tvar acc _ _ = acc
+
+    method on_tfun acc _ { ft_params; ft_tparams; ft_ret; _ } =
+      let acc =
+        List.fold_left
+          ~f:this#on_type
+          ~init:acc
+          (List.map ft_params ~f:(fun x -> x.fp_type))
+      in
+      let tparams =
+        List.map ft_tparams ~f:(fun t -> List.map t.tp_constraints ~f:snd)
+      in
+      let acc =
+        List.fold_left
+          tparams
+          ~f:(fun acc tp -> List.fold ~f:this#on_type ~init:acc tp)
+          ~init:acc
+      in
+      this#on_type acc ft_ret
+
+    method on_tgeneric acc _ _ = acc
+
+    method on_tnewtype acc _ _ tyl ty =
+      let acc = List.fold_left tyl ~f:this#on_type ~init:acc in
+      let acc = this#on_type acc ty in
+      acc
+
+    method on_tdependent acc _ _ ty =
+      let acc = this#on_type acc ty in
+      acc
+
+    method on_ttuple acc _ { t_required; t_optional; t_extra } =
+      let acc = this#on_tuple_extra acc t_extra in
+      let acc = List.fold_left t_optional ~f:this#on_type ~init:acc in
+      List.fold_left t_required ~f:this#on_type ~init:acc
+
+    method on_tuple_extra acc e =
+      match e with
+      | Tsplat t_splat -> this#on_type acc t_splat
+      | Tvariadic t_variadic -> this#on_type acc t_variadic
+
+    method on_tunion acc _ tyl = List.fold_left tyl ~f:this#on_type ~init:acc
+
+    method on_tintersection acc _ tyl =
+      List.fold_left tyl ~f:this#on_type ~init:acc
+
+    method on_tshape acc _ shape_ty =
+      match shape_ty with
+      | Shape_simple { s_origin = _; s_unknown_value = kind; s_fields = fdm } ->
+        let acc = this#on_type acc kind in
+        let f _ { sft_ty; _ } acc = this#on_type acc sft_ty in
+        TShapeMap.fold f fdm acc
+      | Shape_splat { ss_elems } ->
+        List.fold_left ss_elems ~f:this#on_type ~init:acc
+
+    method on_tclass acc _ _ exact tyl =
+      let acc =
+        match exact with
+        | Exact -> acc
+        | Nonexact cr -> this#on_class_refinement acc cr
+      in
+      List.fold_left tyl ~f:this#on_type ~init:acc
+
+    method on_class_refinement acc { cr_consts } =
+      S_map.fold
+        (fun _const_name { rc_bound; rc_is_ctx = _ } acc ->
+          match rc_bound with
+          | TRexact ty -> this#on_type acc ty
+          | TRloose { tr_lower = l; tr_upper = u } ->
+            let on_tlist acc = List.fold_left ~f:this#on_type ~init:acc in
+            on_tlist (on_tlist acc u) l)
+        cr_consts
+        acc
+
+    method on_tlist acc _ tyl = List.fold_left tyl ~f:this#on_type ~init:acc
+
+    method on_tvec_or_dict acc _ ty1 ty2 =
+      let acc = this#on_type acc ty1 in
+      this#on_type acc ty2
+
+    method on_neg_type acc r neg_ty =
+      let on_tag acc tag =
+        match tag with
+        | ClassTag (c, args) ->
+          let acc = this#on_tclass acc r (Reason.to_pos r, c) nonexact [] in
+          let tyl =
+            List.filter_map args ~f:(fun g ->
+                match g with
+                | Filled ty -> Some ty
+                | Wildcard _ -> None)
+          in
+          this#on_tlist acc r tyl
+        | ArraykeyTag
+        | BoolTag
+        | IntTag
+        | FloatTag
+        | NumTag
+        | ResourceTag
+        | NullTag
+        | EnumTag _
+        | GenericTag _ ->
+          acc
+      in
+      match snd neg_ty with
+      | IsTag tag -> on_tag acc tag
+      | IsTupleOf _
+      | IsShapeOf _
+      | IsUnionOf _
+      | IsNot _ ->
+        acc
+
+    method on_tunapplied_alias acc _ _ = acc
+
+    method on_taccess acc _ (ty, _ids) = this#on_type acc ty
+
+    method on_tlabel acc _r _name = acc
+
+    method on_tclass_ptr acc _r ty = this#on_type acc ty
+
+    method on_type acc ty =
+      let (r, x) = deref ty in
+      match x with
+      | Tany _ -> this#on_tany acc r
+      | Tnonnull -> this#on_tnonnull acc r
+      | Tdynamic _ -> this#on_tdynamic acc r
+      | Toption ty -> this#on_toption acc r ty
+      | Tprim prim -> this#on_tprim acc r prim
+      | Tvar id -> this#on_tvar acc r id
+      | Tfun fty -> this#on_tfun acc r fty
+      | Tgeneric x -> this#on_tgeneric acc r x
+      | Tnewtype (x, tyl, ty) -> this#on_tnewtype acc r x tyl ty
+      | Tdependent (x, ty) -> this#on_tdependent acc r x ty
+      | Ttuple t -> this#on_ttuple acc r t
+      | Tunion tyl -> this#on_tunion acc r tyl
+      | Tintersection tyl -> this#on_tintersection acc r tyl
+      | Tshape s -> this#on_tshape acc r s
+      | Tclass (cls, exact, tyl) -> this#on_tclass acc r cls exact tyl
+      | Tvec_or_dict (ty1, ty2) -> this#on_tvec_or_dict acc r ty1 ty2
+      | Taccess (ty, ids) -> this#on_taccess acc r (ty, ids)
+      | Tneg tneg -> this#on_neg_type acc r tneg
+      | Tlabel name -> this#on_tlabel acc r name
+      | Tclass_ptr ty -> this#on_tclass_ptr acc r ty
+  end
+
+class type ['a] internal_type_visitor_type =
+  object
+    inherit ['a] locl_type_visitor_type
+
+    method on_internal_type : 'a -> internal_type -> 'a
+
+    method on_constraint_type : 'a -> constraint_type -> 'a
+
+    method on_locl_type : 'a -> locl_ty -> 'a
+
+    method on_locl_type_list : 'a -> locl_ty list -> 'a
+
+    method on_locl_type_option : 'a -> locl_ty option -> 'a
+
+    method on_thas_member : 'a -> Reason.t -> has_member -> 'a
+
+    method on_has_member : 'a -> Reason.t -> has_member -> 'a
+
+    method on_thas_type_member : 'a -> Reason.t -> has_type_member -> 'a
+
+    method on_has_type_member : 'a -> Reason.t -> has_type_member -> 'a
+
+    method on_tcan_index : 'a -> Reason.t -> can_index -> 'a
+
+    method on_tcan_index_assign : 'a -> Reason.t -> can_index_assign -> 'a
+
+    method on_tcan_traverse : 'a -> Reason.t -> can_traverse -> 'a
+
+    method on_can_index : 'a -> Reason.t -> can_index -> 'a
+
+    method on_can_index_assign : 'a -> Reason.t -> can_index_assign -> 'a
+
+    method on_can_traverse : 'a -> Reason.t -> can_traverse -> 'a
+
+    method on_tdestructure : 'a -> Reason.t -> destructure -> 'a
+
+    method on_destructure : 'a -> Reason.t -> destructure -> 'a
+
+    method on_tcunion : 'a -> Reason.t -> locl_ty -> constraint_type -> 'a
+
+    method on_tcintersection :
+      'a -> Reason.t -> locl_ty -> constraint_type -> 'a
+
+    method on_ttype_switch :
+      'a -> Reason.t -> type_predicate -> locl_ty -> locl_ty -> 'a
+
+    method on_thas_const : 'a -> Reason.t -> string -> locl_ty -> 'a
+  end
+
+class ['a] internal_type_visitor : ['a] internal_type_visitor_type =
+  object (this)
+    method on_internal_type acc ty =
+      match ty with
+      | LoclType ty -> this#on_locl_type acc ty
+      | ConstraintType ty -> this#on_constraint_type acc ty
+
+    method on_constraint_type acc ty =
+      let (r, ty) = deref_constraint_type ty in
+      match ty with
+      | Thas_member hm -> this#on_thas_member acc r hm
+      | Thas_type_member htm -> this#on_thas_type_member acc r htm
+      | Tcan_index ci -> this#on_tcan_index acc r ci
+      | Tcan_index_assign cia -> this#on_tcan_index_assign acc r cia
+      | Tcan_traverse ct -> this#on_tcan_traverse acc r ct
+      | Tdestructure des -> this#on_tdestructure acc r des
+      | Ttype_switch { predicate; ty_true; ty_false } ->
+        this#on_ttype_switch acc r predicate ty_true ty_false
+      | Thas_const { name; ty } -> this#on_thas_const acc r name ty
+
+    method on_locl_type acc ty = this#on_type acc ty
+
+    method on_locl_type_list acc tyl =
+      List.fold tyl ~init:acc ~f:this#on_locl_type
+
+    method on_locl_type_option acc ty =
+      Option.fold ty ~init:acc ~f:this#on_locl_type
+
+    method on_thas_member acc r hm = this#on_has_member acc r hm
+
+    method on_has_member acc _r hm =
+      let { hm_name = _; hm_type; hm_class_id = _; hm_method = _ } = hm in
+      this#on_locl_type acc hm_type
+
+    method on_thas_type_member acc r htm = this#on_has_type_member acc r htm
+
+    method on_has_type_member acc _r htm =
+      let { htm_id = _; htm_lower; htm_upper } = htm in
+      let acc = this#on_locl_type acc htm_lower in
+      let acc = this#on_locl_type acc htm_upper in
+      acc
+
+    method on_tcan_index acc r hm = this#on_can_index acc r hm
+
+    method on_tcan_index_assign acc r hm = this#on_can_index_assign acc r hm
+
+    method on_tcan_traverse acc r hm = this#on_can_traverse acc r hm
+
+    method on_can_index acc _r ci =
+      let acc = this#on_locl_type acc ci.ci_key in
+      this#on_locl_type acc ci.ci_val
+
+    method on_can_index_assign acc _r cia =
+      let acc = this#on_locl_type acc cia.cia_key in
+      let acc = this#on_locl_type acc cia.cia_write in
+      this#on_locl_type acc cia.cia_val
+
+    method on_can_traverse acc _r ct =
+      let acc = this#on_locl_type_option acc ct.ct_key in
+      let acc = this#on_locl_type acc ct.ct_val in
+      acc
+
+    method on_tdestructure acc r des = this#on_destructure acc r des
+
+    method on_destructure acc _r des =
+      let { d_required; d_optional; d_variadic; d_kind = _ } = des in
+      let acc = this#on_locl_type_list acc d_required in
+      let acc = this#on_locl_type_list acc d_optional in
+      let acc = this#on_locl_type_option acc d_variadic in
+      acc
+
+    method on_tcunion acc _r lty cty =
+      let acc = this#on_locl_type acc lty in
+      let acc = this#on_constraint_type acc cty in
+      acc
+
+    method on_tcintersection acc _r lty cty =
+      let acc = this#on_locl_type acc lty in
+      let acc = this#on_constraint_type acc cty in
+      acc
+
+    method on_ttype_switch acc _r _predicate ty_true ty_false =
+      let acc = this#on_locl_type acc ty_true in
+      let acc = this#on_locl_type acc ty_false in
+      acc
+
+    method on_thas_const acc _r _name ty =
+      let acc = this#on_locl_type acc ty in
+      acc
+
+    inherit ['a] locl_type_visitor
+  end

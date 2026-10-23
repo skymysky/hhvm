@@ -1,0 +1,18 @@
+error: Typing[4374] Some members in class `A` are incompatible with those declared in type `I` [1]
+-> Non-abstract constants defined in an interface cannot be overridden when implementing or extending that interface. [2]
+-> You could make `X` abstract in `I`. [3]
+
+interface_class_1.bad.php:8:26
+ 3 | 
+ 4 | interface I {
+ 5 |   const int X = 0;
+   |             ^ [3]
+ 6 | }
+ 7 | 
+ 8 | final class A implements I {
+   |                          ^ [1]
+ 9 |   const int X = 1;
+   |             ^ [2]
+10 | }
+
+1 error found

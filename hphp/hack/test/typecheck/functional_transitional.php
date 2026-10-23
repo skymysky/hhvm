@@ -9,7 +9,7 @@
  *
  */
 
-function f($x) {
+function f((int, int) $x): void {
   $x = tuple(1, 2);
-  return $x->f();
+  $x->f();
 }

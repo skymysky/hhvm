@@ -65,23 +65,13 @@ void c_ExternalThreadEventWaitHandle::sweep() {
   }
 }
 
-req::ptr<c_ExternalThreadEventWaitHandle>
-c_ExternalThreadEventWaitHandle::Create(
-  AsioExternalThreadEvent* event,
-  ObjectData* priv_data
-) {
-  auto wh = req::make<c_ExternalThreadEventWaitHandle>();
-  wh->initialize(event, priv_data);
-  return wh;
-}
-
 void c_ExternalThreadEventWaitHandle::initialize(
   AsioExternalThreadEvent* event,
   ObjectData* priv_data
 ) {
   auto const session = AsioSession::Get();
   setState(STATE_WAITING);
-  setContextIdx(session->getCurrentContextIdx());
+  setContextStateIndex(session->getCurrentContextStateIndex());
   m_event = event;
   m_privData.reset(priv_data);
 
@@ -90,7 +80,35 @@ void c_ExternalThreadEventWaitHandle::initialize(
   }
 
   if (UNLIKELY(session->hasOnExternalThreadEventCreate())) {
-    session->onExternalThreadEventCreate(this);
+    try {
+      session->onExternalThreadEventCreate(this);
+    } catch (...) {
+      // Fatal in the profiler hook.
+      //
+      // The extension did not yet have a chance to schedule the external thread
+      // event, as we are still in the AsioExternalThreadEvent constructor.
+      // However, the profiler may have grabbed the Awaitable and a userland
+      // code may try to await it later. Undo all the registration and mark
+      // the Awaitable as failed. The m_event will be freed while unwinding its
+      // constructor.
+
+      assertx(getState() == STATE_WAITING);
+
+      if (isInContext()) {
+        unregisterFromContext();
+      }
+
+      auto parentChain = getParentChain();
+      setState(STATE_FAILED);
+      tvWriteObject(AsioSession::Get()->getAbruptInterruptException(),
+                    &m_resultOrException);
+      parentChain.unblock();
+
+      m_sweepable.unregister();
+      m_privData.reset();
+      decRefObj(this);
+      throw;
+    }
   }
 }
 
@@ -123,7 +141,7 @@ void c_ExternalThreadEventWaitHandle::abandon(bool sweeping) {
 
 bool c_ExternalThreadEventWaitHandle::cancel(const Object& exception) {
   if (getState() != STATE_WAITING) {
-    return false;               // already finished
+    return false; // already finished or currently being processed
   }
 
   if (!m_event->cancel()) {
@@ -160,6 +178,7 @@ bool c_ExternalThreadEventWaitHandle::cancel(const Object& exception) {
 
 void c_ExternalThreadEventWaitHandle::process() {
   assertx(getState() == STATE_WAITING);
+  setState(STATE_PROCESSING);
 
   if (isInContext()) {
     unregisterFromContext();
@@ -169,9 +188,9 @@ void c_ExternalThreadEventWaitHandle::process() {
   // So we can pass it in the finish callbacks
 
   // clean up once event is processed
-  auto exit_guard = folly::makeGuard([&] { destroyEvent(); });
+  auto exitGuard = folly::makeGuard([&] { destroyEvent(); });
 
-  Cell result;
+  TypedValue result;
   try {
     try {
       m_event->unserialize(result);
@@ -180,7 +199,8 @@ void c_ExternalThreadEventWaitHandle::process() {
       throw exception;
     }
   } catch (const Object& exception) {
-    assertx(exception->instanceof(SystemLib::s_ThrowableClass));
+    assertx(exception->instanceof(SystemLib::getThrowableClass()));
+    throwable_recompute_backtrace_from_wh(exception.get(), this);
     auto parentChain = getParentChain();
     setState(STATE_FAILED);
     tvWriteObject(exception.get(), &m_resultOrException);
@@ -206,10 +226,10 @@ void c_ExternalThreadEventWaitHandle::process() {
     throw;
   }
 
-  assertx(cellIsPlausible(result));
+  assertx(tvIsPlausible(result));
   auto parentChain = getParentChain();
   setState(STATE_SUCCEEDED);
-  cellCopy(result, m_resultOrException);
+  tvCopy(result, m_resultOrException);
   parentChain.unblock();
 
   auto session = AsioSession::Get();
@@ -224,17 +244,17 @@ void c_ExternalThreadEventWaitHandle::process() {
   }
 }
 
-String c_ExternalThreadEventWaitHandle::getName() {
+OptString c_ExternalThreadEventWaitHandle::getName() {
   return s_externalThreadEvent;
 }
 
-void c_ExternalThreadEventWaitHandle::exitContext(context_idx_t ctx_idx) {
-  assertx(AsioSession::Get()->getContext(ctx_idx));
+void c_ExternalThreadEventWaitHandle::exitContext(ContextIndex contextIdx) {
+  assertx(AsioSession::Get()->getContext(contextIdx));
   assertx(getState() == STATE_WAITING);
-  assertx(getContextIdx() == ctx_idx);
+  assertx(getContextIndex() == contextIdx);
 
   // Move us to the parent context.
-  setContextIdx(getContextIdx() - 1);
+  setContextStateIndex(contextIdx.parent().toRegular());
 
   // Re-register if still in a context.
   if (isInContext()) {
@@ -242,22 +262,22 @@ void c_ExternalThreadEventWaitHandle::exitContext(context_idx_t ctx_idx) {
   }
 
   // Recursively move all wait handles blocked by us.
-  getParentChain().exitContext(ctx_idx);
+  getParentChain().exitContext(contextIdx);
 }
 
 void c_ExternalThreadEventWaitHandle::registerToContext() {
-  AsioContext *ctx = getContext();
+  AsioContext* ctx = getContext();
   m_ctxVecIndex = ctx->registerTo(ctx->getExternalThreadEvents(), this);
 }
 
 void c_ExternalThreadEventWaitHandle::unregisterFromContext() {
-  AsioContext *ctx = getContext();
+  AsioContext* ctx = getContext();
   ctx->unregisterFrom(ctx->getExternalThreadEvents(), m_ctxVecIndex);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 
-void AsioExtension::initExternalThreadEventWaitHandle() {
+void AsioExtension::registerNativeExternalThreadEventWaitHandle() {
 #define ETEWH_SME(meth) \
   HHVM_STATIC_MALIAS(HH\\ExternalThreadEventWaitHandle, meth, \
                      ExternalThreadEventWaitHandle, meth)
@@ -265,6 +285,10 @@ void AsioExtension::initExternalThreadEventWaitHandle() {
   ETEWH_SME(setOnSuccessCallback);
   ETEWH_SME(setOnFailCallback);
 #undef ETEWH_SME
+
+  Native::registerClassExtraDataHandler(
+    c_ExternalThreadEventWaitHandle::className(),
+    finish_class<c_ExternalThreadEventWaitHandle>);
 }
 
 ///////////////////////////////////////////////////////////////////////////////

@@ -1,15 +1,15 @@
-<?php
+<?hh
 class Base
 {
-	private function test()
-	{}
+    private function test()
+:mixed    {}
 }
 
 class Extension extends Base
 {
-	private function test($arg)
-	{}
+    private function test($arg)
+:mixed    {}
 }
-
-?>
-==DONE==
+<<__EntryPoint>> function main(): void {
+echo "==DONE==";
+}

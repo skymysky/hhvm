@@ -170,33 +170,29 @@ function f(
   // ...
 }
 
-function getArray(
-): array<
-  string, // strings
-  string // strings
-> {
-  return array("foo" => "bar");
-}
-
-function getArray(
-): array<
-  string // strings
-  ,
-  string // strings
-> {
-  return array("foo" => "bar");
-}
-
-function getDict(
-): dict<
+function getArray(): array<
   string, // strings
   string, // strings
 > {
   return dict["foo" => "bar"];
 }
 
-function getDict(
-): dict<
+function getArray(): array<
+  string // strings
+  ,
+  string, // strings
+> {
+  return dict["foo" => "bar"];
+}
+
+function getDict(): dict<
+  string, // strings
+  string, // strings
+> {
+  return dict["foo" => "bar"];
+}
+
+function getDict(): dict<
   string // strings
   ,
   string, // strings
@@ -214,7 +210,7 @@ function swap<
   Vector<U>, // U
   Vector<T>, // T
 > {
-  return Pair { $b, $a };
+  return Pair {$b, $a};
 }
 
 function swap<
@@ -230,5 +226,5 @@ function swap<
   ,
   Vector<T>, // T
 > {
-  return Pair { $b, $a };
+  return Pair {$b, $a};
 }

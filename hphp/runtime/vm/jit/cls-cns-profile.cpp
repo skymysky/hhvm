@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2013 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-present Facebook, Inc. (http://www.facebook.com)  |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -22,11 +22,12 @@
 
 #include "hphp/util/assertions.h"
 
+#include <fmt/format.h>
 #include <folly/Format.h>
 
 #include <string>
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -41,20 +42,14 @@ Slot updateSlot(Slot curSlot, Slot newSlot) {
 
 }
 
-const TypedValue* ClsCnsProfile::reportClsCns(const Class* cls,
-                                              const StringData* cns) {
-  Slot cnsSlot;
-  auto const tv = cls->cnsNameToTV(cns, cnsSlot, true);
-  if (cnsSlot == kInvalidSlot ||
-      (tv &&
-       (static_cast<const TypedValueAux*>(tv)->constModifiers().isType ||
-        isRefcountedType(tv->m_type) || tv->m_type == KindOfUninit))) {
-    // The constant we found isn't suitable - so we ignore it. This is
-    // fine, because we'll be guarding the actual uses anyway.
-    return uninit_variant.asTypedValue();
-  }
-  m_curSlot = updateSlot(m_curSlot, cnsSlot);
-  return tv ? tv : uninit_variant.asTypedValue();
+TypedValue ClsCnsProfile::reportClsCns(const Class* cls,
+                                       const StringData* cnsName) {
+  Slot slot;
+  auto const tv = cls->cnsNameToTV(cnsName, slot);
+  if (slot == kInvalidSlot) return make_tv<KindOfUninit>();
+  m_curSlot = updateSlot(m_curSlot, slot);
+  if (!tv) return make_tv<KindOfUninit>();
+  return tv->m_type != KindOfUninit ? *tv : cls->clsCnsGet(cnsName);
 }
 
 void ClsCnsProfile::reduce(ClsCnsProfile& a, const ClsCnsProfile& b) {
@@ -76,9 +71,17 @@ void ClsCnsProfile::reduce(ClsCnsProfile& a, const ClsCnsProfile& b) {
 std::string ClsCnsProfile::toString() const {
   if (!m_curSlot) return "empty";
   if (m_curSlot == kInvalidSlot) return "InvalidSlot";
-  return folly::sformat("Slot {}", getSlot());
+  return fmt::format("Slot {}", getSlot());
+}
+
+folly::dynamic ClsCnsProfile::toDynamic() const {
+  if (!m_curSlot) return folly::dynamic();
+  return folly::dynamic::object("slot", m_curSlot == kInvalidSlot ?
+                                        folly::dynamic() :
+                                        getSlot())
+                               ("profileType", "ClsCnsProfile");
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 
-}}
+}

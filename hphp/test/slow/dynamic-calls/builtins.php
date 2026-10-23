@@ -1,42 +1,38 @@
 <?hh
 
 class A extends DateTime {
-  public function test() {
+  public function test() :mixed{
     $x = 'createFromFormat';
-    self::$x('j-M-Y', '05-Nov-2017');
-    static::$x('j-M-Y', '05-Nov-2017');
-    parent::$x('j-M-Y', '05-Nov-2017');
+    HH\dynamic_class_meth(self::class, $x)('j-M-Y', '05-Nov-2017');
+    HH\dynamic_class_meth(static::class, $x)('j-M-Y', '05-Nov-2017');
+    HH\dynamic_class_meth(parent::class, $x)('j-M-Y', '05-Nov-2017');
     $x = 'getTimezone'; $this->$x();
   }
 }
 
-function test() {
-  $x = 'count'; $x([]);
+function test() :mixed{
+  $x = 'count'; $x(vec[]);
 
-  $x = 'HH\Vector::fromItems'; $x([]);
-  $x = ['HH\Vector', 'fromItems']; $x([]);
-  $x = [new Vector, 'fromItems']; $x([]);
-  $x = [new Vector, 'toArray']; $x();
-  $x = 'HH\Vector'; $x::fromItems([]);
-  $x = 'fromItems'; Vector::$x([]);
-  $x = 'fromItems'; $obj = new Vector; $obj->$x([]);
-  $x = 'toArray'; $obj = new Vector; $obj->$x();
+  $x = 'HH\Vector::fromItems'; $x(vec[]);
+  $x = vec['HH\Vector', 'fromItems']; $x(vec[]);
+  $x = vec[new Vector, 'fromItems']; $x(vec[]);
+  $x = vec[new Vector, 'toVArray']; $x();
+  $x = 'HH\Vector'; $x::fromItems(vec[]);
+  $x = 'fromItems'; HH\dynamic_class_meth(Vector::class, $x)(vec[]);
+
+  $x = 'toVArray'; $obj = new Vector; $obj->$x();
   $x = 'HH\Vector'; new $x();
 
   $obj = new A; $obj->test();
 
-  $x = 'SplFixedArray::fromArray'; $x([1, 2, 3]);
-  $x = ['SplFixedArray', 'fromArray']; $x([1, 2, 3]);
-  $x = [new SplFixedArray, 'fromArray']; $x([1, 2, 3]);
-  $x = [new SplFixedArray, 'toArray']; $x();
-  $x = 'SplFixedArray'; $x::fromArray([1, 2, 3]);
-  $x = 'fromArray'; SplFixedArray::$x([1, 2, 3]);
-  $x = 'fromArray'; $obj = new SplFixedArray; $obj->$x([1, 2, 3]);
-  $x = 'toArray'; $obj = new SplFixedArray; $obj->$x();
-  $x = 'SplFixedArray'; new $x();
+  $x = 'array_map'; $x($a ==> $a, vec[]);
 
-  $x = 'array_map'; $x($a ==> $a, []);
+  $x = null; $x?->foo();
 }
-test();
-echo "======================================================\n";
-test();
+
+<<__EntryPoint, __DynamicallyCallable>>
+function main_builtins() :mixed{
+  test();
+  echo "======================================================\n";
+  test();
+}

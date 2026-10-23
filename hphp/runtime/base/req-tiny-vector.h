@@ -13,32 +13,33 @@
    | license@php.net so we can mail you a copy immediately.               |
    +----------------------------------------------------------------------+
 */
-#ifndef incl_HPHP_RUNTIME_BASE_REQ_TINY_VECTOR_H_
-#define incl_HPHP_RUNTIME_BASE_REQ_TINY_VECTOR_H_
+#pragma once
 
 #include "hphp/runtime/base/req-malloc.h"
 #include "hphp/util/tiny-vector.h"
 #include "hphp/util/type-scan.h"
 
-namespace HPHP { namespace req {
+namespace HPHP::req {
 
 // Special allocator for TinyVector using request heap allocation.
 template <typename T, typename Element = T> struct TinyVectorReqAllocator {
+  using value_type = T;
+  using pointer = T*;
+  using size_type = std::size_t;
+
   template <typename U> struct rebind {
-    using type = TinyVectorReqAllocator<U, Element>;
+    using other = TinyVectorReqAllocator<U, Element>;
   };
 
-  void* allocate(std::size_t size) const {
-    return req::malloc(
-      size,
-      type_scan::getIndexForMalloc<
-        T, type_scan::Action::Conservative<Element>
-      >()
+  pointer allocate(size_type size) {
+    return reinterpret_cast<pointer>(
+        req::malloc(size,
+                    type_scan::getIndexForMalloc<
+                    T, type_scan::Action::Conservative<Element>>())
     );
   }
-  void deallocate(void* ptr) const { req::free(ptr); }
-  std::size_t usable_size(void* /*ptr*/, std::size_t size) const {
-    return size;
+  void deallocate(pointer ptr, size_type /* size */) {
+    req::free(ptr);
   }
 };
 
@@ -57,6 +58,5 @@ struct TinyVector final : HPHP::TinyVector<T,
   }
 };
 
-}}
+}
 
-#endif

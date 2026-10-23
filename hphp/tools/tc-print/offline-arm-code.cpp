@@ -13,54 +13,40 @@
    | license@php.net so we can mail you a copy immediately.               |
    +----------------------------------------------------------------------+
 */
-#include "hphp/tools/tc-print/offline-code.h"
 
-#include <stdio.h>
-#include <cxxabi.h>
-#include <vector>
-#include <assert.h>
 #include <iomanip>
-#include <sys/stat.h>
+#include <fmt/core.h>
 
+#include "hphp/tools/tc-print/offline-code.h"
 #include "hphp/tools/tc-print/tc-print.h"
-#include "hphp/tools/tc-print/offline-trans-data.h"
 
-#include "hphp/util/disasm.h"
-#include "hphp/vixl/a64/disasm-a64.h"
-#include "hphp/vixl/a64/instructions-a64.h"
+#include "hphp/vixl/aarch64/macro-assembler-aarch64.h"
+#include "hphp/vixl/aarch64/disasm-aarch64.h"
+#include "hphp/vixl/aarch64/instructions-aarch64.h"
 
 #define MAX_INSTR_ASM_LEN 128
 
-using std::string;
-using std::vector;
-
 namespace HPHP { namespace jit {
 
-#if defined(__aarch64__)
+using namespace vixl::aarch64;
 
-using namespace vixl;
-
-const char* OfflineCode::getArchName() { return "A64"; }
+const char* OfflineCode::getArchNameArm() { return "A64"; }
 
 
-TCA OfflineCode::collectJmpTargets(FILE *file,
-                                   TCA fileStartAddr,
-                                   TCA codeStartAddr,
-                                   uint64_t codeLen,
-                                   vector<TCA> *jmpTargets) {
+TCA OfflineCode::collectJmpTargetsArm(const TCRegionRec& region,
+                                      TCA codeStartAddr,
+                                      uint64_t codeLen,
+                                      vector<TCA> *jmpTargets) {
 
   if (codeLen == 0) return 0;
 
-  Instruction* code = (Instruction*) alloca(codeLen);
+  std::vector<uint8_t> codeVec(codeLen);
+  Instruction* code = (Instruction*) codeVec.data();
   Instruction* frontier;
   TCA ip;
 
-  if (fseek(file, codeStartAddr - fileStartAddr, SEEK_SET)) {
-    error("collectJmpTargets error: seeking file");
-  }
-
-  size_t readLen = fread(code, codeLen, 1, file);
-  if (readLen != 1) error("collectJmpTargets error: reading file");
+  auto const offset = codeStartAddr - region.baseAddr;
+  readFromRegion(region, offset, codeLen, code);
 
   for (frontier = code, ip = codeStartAddr; frontier < code + codeLen; ) {
     TCA addr = 0;
@@ -90,34 +76,29 @@ TCA OfflineCode::collectJmpTargets(FILE *file,
   return 0;
 }
 
+TCRegionInfo OfflineCode::getRegionInfoArm(const TCRegionRec& region,
+                                            TCA codeStartAddr,
+                                            uint64_t codeLen,
+                                            const PerfEventsMap<TCA>& perfEvents,
+                                            BCMappingInfo bcMappingInfo) {
+  if (codeLen == 0) return TCRegionInfo{bcMappingInfo.tcRegion};
 
-void OfflineCode::disasm(FILE* file,
-                         TCA fileStartAddr,
-                         TCA codeStartAddr,
-                         uint64_t codeLen,
-                         const PerfEventsMap<TCA>& perfEvents,
-                         BCMappingInfo bcMappingInfo,
-                         bool printAddr,
-                         bool printBinary) {
-
-  if (codeLen == 0) return;
+  auto const codeEndAddr = codeStartAddr + codeLen;
+  TCRegionInfo regionInfo{bcMappingInfo.tcRegion,
+                           getRanges(bcMappingInfo,
+                                     codeStartAddr,
+                                     codeEndAddr)};
+  auto& ranges = regionInfo.ranges;
 
   char codeStr[MAX_INSTR_ASM_LEN];
-  Instruction* code = (Instruction*) alloca(codeLen);
+  std::vector<uint8_t> codeVec(codeLen);
+  Instruction* code = (Instruction*) codeVec.data();
   Instruction* frontier;
   TCA ip;
   size_t  currBC = 0;
 
-  auto const offset = codeStartAddr - fileStartAddr;
-  if (fseek(file, offset, SEEK_SET)) {
-    error("disasm error: seeking file");
-  }
-
-  size_t readLen = fread(code, codeLen, 1, file);
-  if (readLen != 1) {
-    error("Failed to read {} bytes at offset {} from code file due to {}",
-          codeLen, offset, feof(file) ? "EOF" : "read error");
-  }
+  auto const offset = codeStartAddr - region.baseAddr;
+  readFromRegion(region, offset, codeLen, code);
 
   Decoder dec;
   Disassembler dis(codeStr, MAX_INSTR_ASM_LEN);
@@ -136,12 +117,27 @@ void OfflineCode::disasm(FILE* file,
   for (frontier = code, ip = codeStartAddr; frontier < code + codeLen; ) {
     dec.Decode(frontier);
 
-    currBC = printBCMapping(bcMappingInfo, currBC, (TCA)ip);
-    if (printAddr) g_logger->printMetaData("%14p: ", ip);
+    uint64_t literal = 0;
+    std::string literalStr;
+    if (frontier->IsLoadLiteral()) {
+      auto const literalWidth = frontier->Mask(LoadLiteralMask);
+      size_t literalSize = sizeof(uint32_t);
+      if (literalWidth == LDR_x_lit || literalWidth == LDR_d_lit) {
+        literalSize = sizeof(uint64_t);
+      }
 
-    if (printBinary) {
-      g_Logger->printAsm("%08" PRIx32, *reinterpret_cast<int32_t*>(frontier));
-      g_Logger->printAsm("%10s", "");
+      auto const literalAddr = frontier->GetLiteralAddress<const uint8_t*>();
+      auto const codeBegin = reinterpret_cast<uint8_t*>(code);
+      auto const codeEnd = codeBegin + codeLen;
+      if (literalAddr >= codeBegin && literalAddr + literalSize < codeEnd) {
+        memcpy(&literal, literalAddr, literalSize);
+        if (literalSize == sizeof(uint64_t)) {
+          literalStr = fmt::format(" [value 0x{:016x}]", literal);
+        } else {
+          literalStr = fmt::format(" [value 0x{:08x}]",
+                                      static_cast<uint32_t>(literal));
+        }
+      }
     }
 
     // Shadow potential call destinations based on fixed sequence.
@@ -151,39 +147,48 @@ void OfflineCode::disasm(FILE* file,
     //   movk x18, #...        blr x18
     //   blr x18
 
-    insn = frontier->InstructionBits();
+    auto ExtractMovWideImm = [&] (const Instr& insn) {
+      return ((static_cast<int64_t>(insn) & ImmMoveWide_mask) >> ImmMoveWide_offset) <<
+        (16 * ((insn & ShiftMoveWide_mask) >> ShiftMoveWide_offset));
+    };
+    insn = frontier->GetInstructionBits();
     if ((insn & MoveWideImmX18Mask) == MOVZ_x18) {
-      callAddr = static_cast<uint32_t>((insn & 0x1fffd0) >> ImmMoveWide_offset);
+      callAddr = ExtractMovWideImm(insn);
 
     } else if ((insn & MoveWideImmX18Mask) == MOVK_x18) {
-      callAddr |= ((insn & 0x1fffe0) >> 5) << (16 * ((insn & 0x600000) >> ShiftMoveWide_offset));
+      callAddr |= ExtractMovWideImm(insn);
 
     } else if (insn == LDR_x_litx18) {
-      callAddr = static_cast<int64_t>((frontier-4)->InstructionBits()) << 32;
-      callAddr |= (frontier-8)->InstructionBits();
-      callAddr = callAddr + (int64_t)ip;
-      callAddr = callAddr + (int64_t)kInstructionSize;
+      callAddr = literal;
+
+    } else if (frontier->Mask(UnconditionalBranchMask) == BL) {
+      callAddr = int64_t(frontier->GetImmPCOffsetTarget((const Instruction*)ip));
     }
 
-    string callDest="";
-    if ((insn & BLR_x18) == BLR_x18) {
+    std::string callDest="";
+    if ((insn & BLR_x18) == BLR_x18 || frontier->Mask(UnconditionalBranchMask) == BL) {
       callDest = getSymbolName((TCA)callAddr);
       callAddr = 0;
     }
 
-    if (! perfEvents.empty()) {
-      printEventStats((TCA)ip, kInstructionSize, perfEvents);
-    } else {
-      g_Logger->printAsm("%48s", "");
-    }
+    auto const binaryStr = [&] {
+      std::ostringstream binary_os;
+      binary_os << fmt::format("{:08" PRIx32 "}",
+                                 *reinterpret_cast<int32_t*>(frontier));
+      binary_os << std::string(10, ' ');
+      return binary_os.str();
+    }();
 
-    g_logger->printAsm("%s%s\n", codeStr, callDest.c_str());
+    while (currBC < ranges.size() - 1 && ip >= ranges[currBC].end) currBC++;
+
+    auto const disasmInfo = getDisasmInfo(ip, kInstructionSize, perfEvents,
+                                          binaryStr, callDest, codeStr + literalStr);
+    ranges[currBC].disasm.push_back(disasmInfo);
 
     frontier += kInstructionSize;
     ip += kInstructionSize;
   }
+  return regionInfo;
 }
-
-#endif
 
 } } // HPHP::jit

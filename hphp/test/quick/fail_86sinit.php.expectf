@@ -1,37 +1,36 @@
-
-Fatal error: Class undefined: Z in %s on line 5
-array(6) {
-  [0]=>
+Fatal error: Class undefined: Z in %s/test/quick/fail_86sinit.php on line 4
+vec(7) {
   int(16777217)
-  [1]=>
   string(18) "Class undefined: Z"
-  [2]=>
-  string(%d) "%s"
-  [3]=>
-  int(5)
-  [4]=>
-  array(0) {
+  string(%d) "%s/test/quick/fail_86sinit.php"
+  int(4)
+  dict(0) {
   }
-  [5]=>
-  array(2) {
-    [0]=>
-    array(2) {
+  vec(3) {
+    dict(2) {
       ["file"]=>
-      string(%d) "%s"
+      string(%d) "%s/test/quick/fail_86sinit.php"
       ["line"]=>
-      int(5)
+      int(4)
     }
-    [1]=>
-    array(4) {
+    dict(4) {
       ["file"]=>
-      string(%d) "%s"
+      string(%d) "%s/test/quick/fail_86sinit.php"
       ["line"]=>
-      int(10)
+      int(12)
       ["function"]=>
       string(4) "test"
       ["args"]=>
-      array(0) {
+      vec(0) {
+      }
+    }
+    dict(2) {
+      ["function"]=>
+      string(23) "entrypoint_fail_86sinit"
+      ["args"]=>
+      vec(0) {
       }
     }
   }
+  NULL
 }

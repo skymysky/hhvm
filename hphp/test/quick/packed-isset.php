@@ -1,22 +1,20 @@
 <?hh
 
-function foo() {
-  $arr = array();
+function foo() :void{
+  $arr = dict[];
   for ($i = 0; $i < 4; $i++) {
     $arr[$i] = $i;
   }
   for ($i = 0; $i < 5; $i++) {
-    print(isset($arr[2])."\n");
+    print((string)(isset($arr[2]))."\n");
   }
   for ($i = 0; $i < 5; $i++) {
-    print(isset($arr[$i])."\n");
+    print((string)(isset($arr[$i]))."\n");
   }
 }
 
-foo();
-
-function foo2() {
-  $arr = array();
+function foo2() :void{
+  $arr = dict[];
   for ($i = 0; $i < 4; $i++) {
     $arr[$i] = null;
   }
@@ -27,5 +25,10 @@ function foo2() {
     var_dump(isset($arr[$i]));
   }
 }
+<<__EntryPoint>>
+function main_entry(): void {
 
-foo2();
+  foo();
+
+  foo2();
+}

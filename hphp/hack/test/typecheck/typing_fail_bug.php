@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 /**
  * Copyright (c) 2014, Facebook, Inc.
  * All rights reserved.
@@ -10,7 +10,7 @@
  */
 
 function f(mixed $arg): void {
-  if (is_int($arg)) {
+  if ($arg is int) {
     $tmp = 0;
   } else {
     throw new Exception('');

@@ -1,5 +1,4 @@
 <?hh
-
 namespace A;
-function main() { \b(); }
-main();
+<<__EntryPoint>>
+function main() :mixed{ \b(); }

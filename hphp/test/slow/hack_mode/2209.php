@@ -1,5 +1,9 @@
 <?hh
-function foo(@int $x){
+function foo(<<__Soft>> int $x):mixed{
  echo 1;
  }
- foo('hi');
+
+ <<__EntryPoint>>
+function main_2209() :mixed{
+foo('hi');
+}

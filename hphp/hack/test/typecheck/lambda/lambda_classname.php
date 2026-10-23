@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 // Copyright 2004-present Facebook. All Rights Reserved.
 
 function mymap<Tv1, Tv2>(
@@ -25,7 +25,7 @@ function mymap_switched<Tv1, Tv2>(
 
 final class Foo {}
 
-function getFooClasses(): vec<classname<Foo>> {
+function getFooClasses(): vec<class<Foo>> {
   return vec[Foo::class];
 }
 

@@ -1,0 +1,14 @@
+warning: Warn[12023] This null coalesce will always evaluate to its left-hand side. [1]
+-> The expression on the left has type `float` which can never be `null`. [2]
+
+intersection_and_nullable.php:11:40
+ 9 | function test(): void {
+10 |   apply(
+11 |     ($x) ==> $x is null ? null : $x + ($x ?? 0.0),
+   |                                        ^^^^^^^^^ [1]
+12 |     0.0,
+   |     ^^^ [2]
+13 |   );
+14 | }
+
+1 error found

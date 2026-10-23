@@ -14,23 +14,29 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_TV_TYPE_H_
-#define incl_HPHP_TV_TYPE_H_
+#pragma once
 
 #include "hphp/runtime/base/datatype.h"
-#include "hphp/runtime/base/ref-data.h"
 #include "hphp/runtime/base/typed-value.h"
 
 namespace HPHP {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-ALWAYS_INLINE bool cellIsNull(Cell tv) {
-  assertx(cellIsPlausible(tv));
+ALWAYS_INLINE bool tvIsNull(TypedValue tv) {
+  assertx(tvIsPlausible(tv));
   return isNullType(tv.m_type);
 }
-ALWAYS_INLINE bool cellIsNull(const Cell* tv) {
-  return cellIsNull(*tv);
+ALWAYS_INLINE bool tvIsNull(const TypedValue* tv) {
+  return tvIsNull(*tv);
+}
+
+ALWAYS_INLINE bool tvIsStringLike(TypedValue tv) {
+  assertx(tvIsPlausible(tv));
+  return isStringType(tv.m_type) || isLazyClassType(tv.m_type);
+}
+ALWAYS_INLINE bool tvIsStringLike(const TypedValue* tv) {
+  return tvIsStringLike(*tv);
 }
 
 #define CASE(ty)                                                        \
@@ -44,25 +50,41 @@ CASE(Bool)
 CASE(Int)
 CASE(Double)
 CASE(String)
-CASE(Array)
 CASE(ArrayLike)
-CASE(HackArray)
 CASE(Vec)
 CASE(Dict)
 CASE(Keyset)
 CASE(Object)
 CASE(Resource)
-CASE(Ref)
+CASE(Func)
+CASE(RFunc)
+CASE(Class)
+CASE(LazyClass)
+CASE(ClsMeth)
+CASE(RClsMeth)
+CASE(EnumClassLabel)
 
 #undef CASE
 
-ALWAYS_INLINE bool tvIsReferenced(TypedValue tv) {
-  return isRefType(tv.m_type) &&
-         tv.m_data.pref->isReferenced();
+template<typename T>
+ALWAYS_INLINE int64_t tvAssertInt(T&& tv) {
+  assertx(isIntType(type(tv)));
+  return val(tv).num;
+}
+
+template<typename T>
+ALWAYS_INLINE double tvAssertDouble(T&& tv) {
+  assertx(isDoubleType(type(tv)));
+  return val(tv).dbl;
+}
+
+template<typename T>
+ALWAYS_INLINE const StringData* tvAssertStringLike(T&& tv) {
+  if (isStringType(type(tv)))    return val(tv).pstr;
+  if (isLazyClassType(type(tv))) return val(tv).plazyclass.name();
+  not_reached();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 
 }
-
-#endif

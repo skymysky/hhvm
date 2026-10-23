@@ -58,6 +58,3 @@ class MyDoubleList<T1, T2> extends MyList<(T1, T2)> {
     $this->l[] = tuple($x, $y);
   }
 }
-
-$x = new MyNewList();
-dump_var($x->get_head());

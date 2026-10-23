@@ -2,23 +2,8 @@
 
 -- Testing php_uname() function with more than expected no. of arguments --
 
-Warning: %s
-NULL
+Warning: php_uname() expects at most 1 positional parameter, 2 given in %s/test/zend/good/ext/standard/tests/general_functions/php_uname_error.php on line 9
 
 -- Testing php_uname() function with invalid mode --
 bool(true)
-
--- Testing php_uname() function with invalid argument types --
-
-Warning: %s
-NULL
-
-Warning: %s
-NULL
-
-Warning: %s
-NULL
-
-Warning: %s
-NULL
 ===DONE===

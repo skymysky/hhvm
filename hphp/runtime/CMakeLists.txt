@@ -6,11 +6,21 @@ foreach (dir ${RECURSIVE_SOURCE_SUBDIRS})
 endforeach(dir ${RECURSIVE_SOURCE_SUBDIRS})
 list(APPEND HEADER_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/version.h")
 
+# Exclude Meta-internal code
+HHVM_REMOVE_MATCHES_FROM_LISTS(CXX_SOURCES HEADER_SOURCES
+  MATCHES "/facebook/")
+
 if(NOT LINUX)
   list(REMOVE_ITEM CXX_SOURCES
        ${CMAKE_CURRENT_SOURCE_DIR}/vm/debug/elfwriter.cpp)
   list(REMOVE_ITEM HEADER_SOURCES
        ${CMAKE_CURRENT_SOURCE_DIR}/vm/debug/elfwriter.h)
+endif()
+
+# Exclude ARM JIT files on non-ARM architectures
+if(NOT IS_AARCH64)
+  HHVM_REMOVE_MATCHES_FROM_LISTS(CXX_SOURCES HEADER_SOURCES
+    MATCHES "-arm\\.")
 endif()
 
 if(NOT ENABLE_FASTCGI)
@@ -29,37 +39,36 @@ if(NOT HAVE_CUSTOM_LIBEVENT)
 endif()
 
 add_custom_command(
-  OUTPUT "${CMAKE_CURRENT_SOURCE_DIR}/ir-opcode-generated.h"
-  COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/../doc/generate-ir-opcodes.sh"
-  DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/../doc/ir.specification"
-          "${CMAKE_CURRENT_SOURCE_DIR}/../doc/generate-ir-opcodes.pl"
-          "${CMAKE_CURRENT_SOURCE_DIR}/../doc/generate-ir-opcodes.sh"
-  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+  OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/ir-opcode-generated.h"
+  COMMAND
+          "INSTALL_DIR=${CMAKE_CURRENT_BINARY_DIR}"
+          "./generate-ir-opcodes.sh"
+  DEPENDS "${HPHP_HOME}/hphp/doc/ir.specification"
+          "${HPHP_HOME}/hphp/doc/generate-ir-opcodes.pl"
+          "${HPHP_HOME}/hphp/doc/generate-ir-opcodes.sh"
+  WORKING_DIRECTORY "${HPHP_HOME}/hphp/doc"
   COMMENT "Generating HHIR opcode table"
   VERBATIM)
 
-add_precompiled_header(
-  "${HPHP_HOME}/hphp/pch/hphp_runtime_static.h"
-  "${HPHP_HOME}/hphp/pch/hphp_runtime_static.cpp"
-  CXX_SOURCES
-)
-
 add_object_library(hphp_runtime_static
             ${CXX_SOURCES} ${C_SOURCES} ${ASM_SOURCES} ${HEADER_SOURCES}
-            "ir-opcode-generated.h")
+            "${CMAKE_CURRENT_BINARY_DIR}/ir-opcode-generated.h")
 auto_source_group("hphp_runtime_static" "${CMAKE_CURRENT_SOURCE_DIR}"
   ${ASM_SOURCES} ${C_SOURCES} ${CXX_SOURCES} ${HEADER_SOURCES})
+add_dependencies(hphp_runtime_static hack_rust_ffi_bridge hhbc_ast_header)
+
+include(HHVMRenderConfigSpecification)
+HHVM_RENDER_CONFIG_SPECIFICATION(
+  hphp_runtime_static
+  TYPE loader
+  OUTPUT_PATH ${CMAKE_CURRENT_BINARY_DIR}/base/configs
+)
+
 SET_TARGET_PROPERTIES(hphp_runtime_static PROPERTIES OUTPUT_NAME "hphp_runtime")
 SET_TARGET_PROPERTIES(hphp_runtime_static PROPERTIES PREFIX "lib")
 SET_TARGET_PROPERTIES(hphp_runtime_static PROPERTIES CLEAN_DIRECT_OUTPUT 1)
 object_library_hphp_link(hphp_runtime_static)
-object_library_ld_link_libraries(hphp_runtime_static hphp_util hphp_proxygen vixl ppc64-asm hphp_zend hphp_system jit_sort)
+object_library_ld_link_libraries(hphp_runtime_static hphp_util proxygen::proxygen mvfst::mvfst_transport mvfst::mvfst_client mvfst::mvfst_server mvfst::mvfst_codec_types vixl hphp_zend hphp_system jit_sort hphp_system)
 HHVM_CONFIGURE_TARGET_FOR_EXTENSION_DEPENDENCIES(hphp_runtime_static)
 
-SET(CMAKE_CXX_ARCHIVE_APPEND "<CMAKE_AR> q <TARGET> <LINK_FLAGS> <OBJECTS>")
-
 HHVM_PUBLIC_HEADERS(runtime ${HEADER_SOURCES})
-
-if (ENABLE_COTIRE)
-  cotire(hphp_runtime_static)
-endif()

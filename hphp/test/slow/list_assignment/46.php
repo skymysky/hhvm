@@ -1,7 +1,11 @@
-<?php
+<?hh
 
-function test($a, $b, $i) {
-  list($a[$i++], $a[$i++], $a[$i++]) = $b;
+function test($a, $b, $i) :mixed{
+  list($a[$i], $a[$i+1], $a[$i+2]) = $b;
   var_dump($a);
   }
-test(array(), array('x', 'y', 'z'), 0);
+
+<<__EntryPoint>>
+function main_46() :mixed{
+test(dict[], vec['x', 'y', 'z'], 0);
+}

@@ -1,12 +1,11 @@
-
-<?php 
+<?hh
 
 /* pretty nifty object oriented code! */
 
 class user {
   public $first_name,$family_name,$address,$phone_num;
   function display()
-  {
+:mixed  {
     echo "User information\n";
     echo "----------------\n\n";
     echo "First name:\t  ".$this->first_name."\n";
@@ -16,23 +15,23 @@ class user {
     echo "\n\n";
   }
   function initialize($first_name,$family_name,$address,$phone_num)
-  {
+:mixed  {
     $this->first_name = $first_name;
     $this->family_name = $family_name;
     $this->address = $address;
     $this->phone_num = $phone_num;
   }
-};
+}
 
-
-function test($u)
-{  /* one can pass classes as arguments */
+function test($u) :mixed{
+  /* one can pass classes as arguments */
   $u->display();
   $t = $u;
   $t->address = "New address...";
   return $t;  /* and also return them as return values */
 }
 
+<<__EntryPoint>> function main(): void {
 $user1 = new user;
 $user2 = new user;
 
@@ -43,5 +42,4 @@ $user2->display();
 
 $tmp = test($user2);
 $tmp->display();
-
-?>
+}

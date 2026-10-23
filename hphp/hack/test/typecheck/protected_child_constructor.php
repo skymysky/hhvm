@@ -10,7 +10,7 @@
  */
 
 abstract class Daddy {
-  public static function makeBaby() {
+  public static function makeBaby(): Baby {
     return new Baby();
   }
 }

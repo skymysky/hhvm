@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 /**
  * Copyright (c) 2014, Facebook, Inc.
  * All rights reserved.
@@ -9,10 +9,10 @@
  *
  */
 
-interface FormatString<T> { }
+
 interface X { }
 
-function f(FormatString<X> $fs, mixed...$args) : void {
+function f(\HH\FormatString<X> $fs, mixed...$args) : void {
 }
 
 function _(string $s) {

@@ -1,22 +1,19 @@
-<?php
+<?hh
 
 class foo {
-	static public function a() {
-		print "ok\n";
-	}
+  <<__DynamicallyCallable>> static public function a() :mixed{
+    print "ok\n";
+  }
 }
-
+<<__EntryPoint>> function main(): void {
 $a = 'a';
 $b = 'a';
 
 $class = 'foo';
 
 foo::a();
-foo::$a();
-foo::$$b();
+HH\dynamic_class_meth(foo::class, $a)();
 
 $class::a();
-$class::$a();
-$class::$$b();
-
-?>
+HH\dynamic_class_meth($class, $a)();
+}

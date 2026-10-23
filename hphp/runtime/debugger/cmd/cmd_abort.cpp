@@ -18,10 +18,10 @@
 
 #include "hphp/runtime/debugger/debugger_client.h"
 
-namespace HPHP { namespace Eval {
+namespace HPHP::Eval {
 ///////////////////////////////////////////////////////////////////////////////
 
-TRACE_SET_MOD(debugger);
+TRACE_SET_MOD(debugger)
 
 void CmdAbort::help(DebuggerClient &client) {
   client.helpTitle("Abort Command");
@@ -51,4 +51,4 @@ void CmdAbort::onClient(DebuggerClient &client) {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-}}
+}

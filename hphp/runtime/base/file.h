@@ -14,17 +14,18 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_FILE_H_
-#define incl_HPHP_FILE_H_
+#pragma once
 
+#include "hphp/runtime/base/execution-context.h"
 #include "hphp/runtime/base/req-list.h"
 #include "hphp/runtime/base/request-event-handler.h"
-#include "hphp/runtime/base/request-local.h"
 #include "hphp/runtime/base/req-ptr.h"
 #include "hphp/runtime/base/type-array.h"
 #include "hphp/runtime/base/type-resource.h"
 #include "hphp/runtime/base/type-string.h"
 #include "hphp/runtime/base/type-variant.h"
+
+#include "hphp/util/rds-local.h"
 
 struct stat;
 
@@ -32,9 +33,6 @@ namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
 
 struct StreamContext;
-struct StreamFilter;
-
-extern int __thread s_pcloseRet;
 
 // This structure holds the request allocated data members of File.  The
 // purpose of the class is to allow File (and subclasses) to be managed by
@@ -93,33 +91,33 @@ struct FileData {
  * so they can share some minimal functionalities.
  */
 struct File : SweepableResourceData {
-  static String TranslatePath(const String& filename);
+  static OptString TranslatePath(const OptString& filename);
   // Same as TranslatePath except doesn't make paths absolute
-  static String TranslatePathKeepRelative(const char* fn, uint32_t len);
-  static String TranslatePathKeepRelative(const String& filename) {
+  static OptString TranslatePathKeepRelative(const char* fn, uint32_t len);
+  static OptString TranslatePathKeepRelative(const OptString& filename) {
     return TranslatePathKeepRelative(filename.c_str(), filename.size());
   }
-  static String TranslatePathKeepRelative(const std::string& filename) {
+  static OptString TranslatePathKeepRelative(const std::string& filename) {
     return TranslatePathKeepRelative(filename.c_str(), filename.size());
   }
   // Same as TranslatePath except checks the file cache on miss
-  static String TranslatePathWithFileCache(const String& filename);
-  static String TranslateCommand(const String& cmd);
+  static OptString TranslatePathWithFileCache(const OptString& filename);
+  static OptString TranslateCommand(const OptString& cmd);
   static req::ptr<File> Open(
-    const String& filename, const String& mode,
+    const OptString& filename, const OptString& mode,
     int options = 0, const req::ptr<StreamContext>& context = nullptr);
 
-  static bool IsVirtualDirectory(const String& filename);
-  static bool IsVirtualFile(const String& filename);
-  static bool IsPlainFilePath(const String& filename) {
-    return filename.find("://") == String::npos;
+  static bool IsVirtualDirectory(const OptString& filename);
+  static bool IsVirtualFile(const OptString& filename);
+  static bool IsPlainFilePath(const OptString& filename) {
+    return filename.find("://") == OptString::npos;
   }
 
   static const int USE_INCLUDE_PATH;
 
   explicit File(bool nonblocking = true,
-                const String& wrapper_type = null_string,
-                const String& stream_type = empty_string_ref);
+                const OptString& wrapper_type = null_string,
+                const OptString& stream_type = empty_string_ref);
   ~File() override;
 
   static StaticString& classnameof() {
@@ -129,8 +127,8 @@ struct File : SweepableResourceData {
   static StaticString s_resource_name;
 
   // overriding ResourceData
-  const String& o_getClassNameHook() const override { return classnameof(); }
-  const String& o_getResourceName() const override;
+  const OptString& o_getClassNameHook() const override { return classnameof(); }
+  const OptString& o_getResourceName() const override;
   bool isInvalid() const override { return m_data->m_closed; }
 
   virtual int fd() const { return m_data->m_fd;}
@@ -143,29 +141,17 @@ struct File : SweepableResourceData {
   /**
    * How to open this type of file.
    */
-  virtual bool open(const String& filename, const String& mode) = 0;
+  virtual bool open(const OptString& filename, const OptString& mode) = 0;
 
-  /**
-   * How to close this type of file.
-   *
-   * Your implementaitn should call invokeFiltersOnClose() before anything else
-   * to make sure that any user-provided php_user_filter instances get to flush
-   * and clean up.
-   */
-  virtual bool close() = 0;
+  /* The optional out param is only used by Pipe */
+  virtual bool close(int* unused = nullptr);
   virtual bool isClosed() const { return !m_data || m_data->m_closed; }
 
   /* Use:
    * - read() when fetching data to return to PHP
    * - readImpl() when you want raw unbuffered data; for example, if you use
    *   the Socket class to implement a network-based extension, use readImpl
-   *   to avoid the internal buffer, stream filters, and so on
-   * - filteredRead() (wrapper around readImpl()) to call user-supplied stream
-   *   filters if you reimplement read()
-   *
-   * Stream filters are only supported for read() - the fgetc() and seek()
-   * behavior in Zend is undocumented, surprising, and not supported
-   * in HHVM.
+   *   to avoid the internal buffer, and so on
    */
 
   /**
@@ -173,27 +159,21 @@ struct File : SweepableResourceData {
    */
   virtual int64_t readImpl(char *buffer, int64_t length) = 0;
   virtual int getc();
-  virtual String read(int64_t length);
-  virtual String read();
+  virtual OptString read(int64_t length);
+  virtual OptString read();
 
   /* Use:
    * - write() in response to a PHP code that is documented as writing to a
    *   stream
    * - writeImpl() if you want C-like behavior, instead of PHP-like behavior;
    *   for example, if you write a network-based extension using Socket
-   * - filteredWrite() if you re-implement write() to provide support for PHP
-   *   user filters
-   *
-   * Stream filters are only supported for write() - the fputc() and seek()
-   * behavior in Zend is undocumented, surprising, and not supported
-   * in HHVM.
    */
 
   /**
    * Write one chunk of output. Returns bytes written.
    */
   virtual int64_t writeImpl(const char *buffer, int64_t length) = 0;
-  virtual int64_t write(const String& str, int64_t length = 0);
+  virtual int64_t write(const OptString& str, int64_t length = 0);
   int putc(char c);
 
   /**
@@ -214,18 +194,12 @@ struct File : SweepableResourceData {
 
   virtual Array getMetaData();
   virtual Variant getWrapperMetaData() { return Variant(); }
-  String getWrapperType() const;
-  String getStreamType() const { return String{m_streamType}; }
+  OptString getWrapperType() const;
+  OptString getStreamType() const { return OptString{m_streamType}; }
   const req::ptr<StreamContext>& getStreamContext() { return m_streamContext; }
   void setStreamContext(const req::ptr<StreamContext>& context) {
     m_streamContext = context;
   }
-  void appendReadFilter(const req::ptr<StreamFilter>& filter);
-  void appendWriteFilter(const req::ptr<StreamFilter>& filter);
-  void prependReadFilter(const req::ptr<StreamFilter>& filter);
-  void prependWriteFilter(const req::ptr<StreamFilter>& filter);
-  bool removeFilter(const req::ptr<StreamFilter>& filter);
-
   int64_t bufferedLen() { return m_data->m_writepos - m_data->m_readpos; }
 
   std::string getMode() { return m_data->m_mode; }
@@ -233,12 +207,12 @@ struct File : SweepableResourceData {
   /**
    * Read one line a time. Returns a null string on failure or eof.
    */
-  String readLine(int64_t maxlen = 0);
+  OptString readLine(int64_t maxlen = 0);
 
   /**
    * Read one record a time. Returns a false on failure or eof.
    */
-  Variant readRecord(const String& delimiter, int64_t maxlen = 0);
+  Variant readRecord(const OptString& delimiter, int64_t maxlen = 0);
 
   /**
    * Read entire file and print it out.
@@ -248,7 +222,7 @@ struct File : SweepableResourceData {
   /**
    * Write to file with specified format and arguments.
    */
-  int64_t printf(const String& format, const Array& args);
+  int64_t printf(const OptString& format, const Array& args);
 
   /**
    * Get the Chunk Size.
@@ -270,20 +244,18 @@ struct File : SweepableResourceData {
    * Read one line of csv record.
    */
   Array readCSV(int64_t length = 0, char delimiter = ',', char enclosure = '"',
-                char escape = '\\', const String* initial = nullptr);
+                char escape = '\\', const OptString* initial = nullptr);
 
   /**
    * Return the last error we know about
    */
-  String getLastError();
+  OptString getLastError();
 
   bool isLocal() const { return m_data->m_isLocal; }
 
   std::shared_ptr<FileData> getData() const { return m_data; }
 
 protected:
-  void invokeFiltersOnClose();
-  bool closeImpl();
   void sweep() override;
 
   void setIsLocal(bool isLocal) { m_data->m_isLocal = isLocal; }
@@ -310,39 +282,21 @@ protected:
     m_streamType = streamType.get();
   }
 
-  /**
-   * call readImpl(m_buffer, CHUNK_SIZE), passing through stream filters if any.
-   */
-  int64_t filteredReadToBuffer();
-
-  /**
-   * call writeImpl, passing through stream filters if any.
-   */
-  int64_t filteredWrite(const char* buffer, int64_t length);
-
   FileData* getFileData() { return m_data.get(); }
   const FileData* getFileData() const { return m_data.get(); }
 
 protected:
   explicit File(std::shared_ptr<FileData> data,
-                const String& wrapper_type = null_string,
-                const String& stream_type = empty_string_ref);
+                const OptString& wrapper_type = null_string,
+                const OptString& stream_type = empty_string_ref);
 
 private:
-  template<class ResourceList>
-  String applyFilters(const String& buffer,
-                      ResourceList& filters,
-                      bool closing);
-
   std::shared_ptr<FileData> m_data;
   StringData* m_wrapperType;
   StringData* m_streamType;
   req::ptr<StreamContext> m_streamContext;
-  req::list<req::ptr<StreamFilter>> m_readFilters;
-  req::list<req::ptr<StreamFilter>> m_writeFilters;
 };
 
 ///////////////////////////////////////////////////////////////////////////////
 }
 
-#endif // incl_HPHP_FILE_H_

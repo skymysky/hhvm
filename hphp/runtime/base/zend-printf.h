@@ -15,31 +15,21 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_ZEND_PRINTF_H_
-#define incl_HPHP_ZEND_PRINTF_H_
+#pragma once
 
-#include <sys/types.h>
-#include <stdarg.h>
+// NOTE: See also "hphp/zend/zend-printf.*".
+
+#include "hphp/zend/zend-printf.h"
 
 namespace HPHP {
-///////////////////////////////////////////////////////////////////////////////
 
-struct String;
+struct OptString;
 struct Array;
 
 /**
  * How PHP formats a string. Called by ext/ext_string.cpp.
  */
-String string_printf(const char *format, int len, const Array& args);
+OptString string_printf(const char *format, int len, const Array& args);
 
-// XXX: vspprintf and spprintf have slightly different semantics and flags than
-// C99 printf (because PHP) so we can't annotate them with ATTRIBUTE_PRINTF
-
-int vspprintf(char **pbuf, size_t max_len, const char *format, ...);
-int vspprintf_ap(char **pbuf, size_t max_len, const char *format, va_list ap);
-int spprintf(char **pbuf, size_t max_len, const char *format, ...);
-
-///////////////////////////////////////////////////////////////////////////////
 }
 
-#endif // incl_HPHP_ZEND_PRINTF_H_

@@ -1,4 +1,4 @@
-(**
+(*
  * Copyright (c) 2016, Facebook, Inc.
  * All rights reserved.
  *
@@ -9,96 +9,144 @@
 
 open Typing_defs
 open Decl_defs
+
+(* All the following heaps will have a local cache of size 1000 *)
+
+module Capacity = struct
+  let capacity = 1000
+end
+
 (* The following classes are used to make sure we make no typing
  * mistake when interacting with the database. The database knows
  * how to associate a string to a string. We need to deserialize
  * the string and make sure the type is correct. By using these
  * modules, the places where there could be a typing mistake are
  * very well isolated.
-*)
+ *)
 
 (* Module used to represent serialized classes *)
 module Class = struct
   type t = decl_class_type
-  let prefix = Prefix.make()
-  let description = "Class"
-  let use_sqlite_fallback () = false
+
+  let description = "Decl_Class"
 end
 
 (* a function type *)
 module Fun = struct
-  type t = decl Typing_defs.fun_type
-  let prefix = Prefix.make()
-  let description = "Fun"
-  let use_sqlite_fallback () = false
+  type t = fun_elt
+
+  let description = "Decl_Fun"
 end
 
 module Typedef = struct
   type t = Typing_defs.typedef_type
-  let prefix = Prefix.make()
-  let description = "Typedef"
-  let use_sqlite_fallback () = false
+
+  let description = "Decl_Typedef"
 end
 
 module GConst = struct
-  type t = decl ty * Errors.t
-  let prefix = Prefix.make()
-  let description = "GConst"
-  let use_sqlite_fallback () = false
+  type t = const_decl
+
+  let description = "Decl_GConst"
 end
 
-module Funs = SharedMem.WithCache (StringKey) (Fun)
-module Classes = SharedMem.WithCache (StringKey) (Class)
-module Typedefs = SharedMem.WithCache (StringKey) (Typedef)
-module GConsts = SharedMem.WithCache (StringKey) (GConst)
+module Module = struct
+  type t = Typing_defs.module_def_type
+
+  let description = "Decl_Module"
+end
+
+module Funs =
+  Shared_mem.HeapWithLocalCache
+    (Shared_mem.ImmediateBackend (Shared_mem.Evictable)) (String_key)
+    (Fun)
+    (Capacity)
+module Classes =
+  Shared_mem.HeapWithLocalCache
+    (Shared_mem.ImmediateBackend (Shared_mem.Evictable)) (String_key)
+    (Class)
+    (Capacity)
+module Typedefs =
+  Shared_mem.HeapWithLocalCache
+    (Shared_mem.ImmediateBackend (Shared_mem.Evictable)) (String_key)
+    (Typedef)
+    (Capacity)
+module GConsts =
+  Shared_mem.HeapWithLocalCache
+    (Shared_mem.ImmediateBackend (Shared_mem.Evictable)) (String_key)
+    (GConst)
+    (Capacity)
+module Modules =
+  Shared_mem.HeapWithLocalCache
+    (Shared_mem.ImmediateBackend (Shared_mem.Evictable)) (String_key)
+    (Module)
+    (Capacity)
 
 module Property = struct
-  type t = decl ty
-  let prefix = Prefix.make()
-  let description = "Property"
-  let use_sqlite_fallback () = false
+  type t = decl_ty
+
+  let description = "Decl_Property"
 end
 
 module StaticProperty = struct
-  type t = decl ty
-  let prefix = Prefix.make()
-  let description = "StaticProperty"
-  let use_sqlite_fallback () = false
+  type t = decl_ty
+
+  let description = "Decl_StaticProperty"
 end
 
 module Method = struct
-  type t = decl fun_type
-  let prefix = Prefix.make()
-  let description = "Method"
-  let use_sqlite_fallback () = false
+  type t = fun_elt
+
+  let description = "Decl_Method"
 end
 
 module StaticMethod = struct
-  type t = decl fun_type
-  let prefix = Prefix.make()
-  let description = "StaticMethod"
-  let use_sqlite_fallback () = false
+  type t = fun_elt
+
+  let description = "Decl_StaticMethod"
 end
 
 module Constructor = struct
-  type t = decl fun_type
-  let prefix = Prefix.make()
-  let description = "Constructor"
-  let use_sqlite_fallback () = false
+  type t = fun_elt
+
+  let description = "Decl_Constructor"
 end
 
 module ClassEltKey = struct
   type t = string * string
+
   let compare (cls1, elt1) (cls2, elt2) =
     let r = String.compare cls1 cls2 in
-    if r <> 0 then r
-    else String.compare elt1 elt2
+    if not (Core.Int.equal r 0) then
+      r
+    else
+      String.compare elt1 elt2
 
   let to_string (cls, elt) = cls ^ "::" ^ elt
 end
 
-module Props = SharedMem.WithCache (ClassEltKey) (Property)
-module StaticProps = SharedMem.WithCache (ClassEltKey) (StaticProperty)
-module Methods = SharedMem.WithCache (ClassEltKey) (Method)
-module StaticMethods = SharedMem.WithCache (ClassEltKey) (StaticMethod)
-module Constructors = SharedMem.WithCache (StringKey) (Constructor)
+module Props =
+  Shared_mem.HeapWithLocalCache
+    (Shared_mem.ImmediateBackend (Shared_mem.Evictable)) (ClassEltKey)
+    (Property)
+    (Capacity)
+module StaticProps =
+  Shared_mem.HeapWithLocalCache
+    (Shared_mem.ImmediateBackend (Shared_mem.Evictable)) (ClassEltKey)
+    (StaticProperty)
+    (Capacity)
+module Methods =
+  Shared_mem.HeapWithLocalCache
+    (Shared_mem.ImmediateBackend (Shared_mem.Evictable)) (ClassEltKey)
+    (Method)
+    (Capacity)
+module StaticMethods =
+  Shared_mem.HeapWithLocalCache
+    (Shared_mem.ImmediateBackend (Shared_mem.Evictable)) (ClassEltKey)
+    (StaticMethod)
+    (Capacity)
+module Constructors =
+  Shared_mem.HeapWithLocalCache
+    (Shared_mem.ImmediateBackend (Shared_mem.Evictable)) (String_key)
+    (Constructor)
+    (Capacity)

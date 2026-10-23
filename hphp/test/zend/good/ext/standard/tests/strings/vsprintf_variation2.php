@@ -1,6 +1,6 @@
-<?php
+<?hh
 /* Prototype  : string vsprintf(string format, array args)
- * Description: Return a formatted string 
+ * Description: Return a formatted string
  * Source code: ext/standard/formatted_print.c
 */
 
@@ -9,29 +9,26 @@
  * the '$args' arguments of the function
 */
 
+// declaring a class
+class sample
+{
+  public function __toString() :mixed{
+  return "object";
+  }
+}
+<<__EntryPoint>> function main(): void {
 echo "*** Testing vsprintf() : with unexpected values for args argument ***\n";
 
 // initialising the required variables
 $format = '%s';
 
-//get an unset variable
-$unset_var = 10;
-unset ($unset_var);
-
-// declaring a class
-class sample
-{
-  public function __toString() {
-  return "object";
-  }
-}
 
 // Defining resource
 $file_handle = fopen(__FILE__, 'r');
 
 
 //array of values to iterate over
-$values = array(
+$values = vec[
 
   // int data
   0,
@@ -67,15 +64,11 @@ $values = array(
   // object data
   new sample(),
 
-  // undefined data
-  @$undefined_var,
 
-  // unset data
-  @$unset_var,
 
   // resource data
   $file_handle
-);
+];
 
 // loop through each element of the array for args
 $counter = 1;
@@ -89,4 +82,4 @@ foreach($values as $value) {
 fclose($file_handle);
 
 echo "Done";
-?>
+}

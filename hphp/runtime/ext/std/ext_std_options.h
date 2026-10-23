@@ -15,26 +15,18 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_EXT_OPTIONS_H_
-#define incl_HPHP_EXT_OPTIONS_H_
+#pragma once
 
 #include "hphp/runtime/ext/std/ext_std.h"
 
 namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
 
-Variant HHVM_FUNCTION(ini_get, const String& varname);
-Variant HHVM_FUNCTION(ini_set,
-                      const String& varname, const Variant& newvalue);
-String HHVM_FUNCTION(php_sapi_name);
-Variant HHVM_FUNCTION(php_uname, const String& mode = empty_string_ref);
-String HHVM_FUNCTION(sys_get_temp_dir);
-Variant HHVM_FUNCTION(version_compare,
-                      const String& version1,
-                      const String& version2,
-                      const String& sop = empty_string_ref);
+Variant HHVM_FUNCTION(ini_get, const OptString& varname);
+OptString HHVM_FUNCTION(php_sapi_name);
+Variant HHVM_FUNCTION(php_uname, const OptString& mode = empty_string_ref);
+OptString HHVM_FUNCTION(sys_get_temp_dir);
 
 ///////////////////////////////////////////////////////////////////////////////
 }
 
-#endif // incl_HPHP_EXT_OPTIONS_H_

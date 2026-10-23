@@ -1,4 +1,4 @@
-<?hh //strict
+<?hh
 
 class C {}
 class D extends C {}
@@ -10,7 +10,7 @@ class Test {
   }
 }
 function test(Test $t): void {
-  if ($t->c instanceof D) {
+  if ($t->c is D) {
     take_string($t->c);
   }
 }

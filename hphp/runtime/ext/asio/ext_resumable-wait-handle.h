@@ -24,6 +24,7 @@
 namespace HPHP {
 
 struct ActRec;
+struct ObjectData;
 
 ///////////////////////////////////////////////////////////////////////////////
 // class ResumableWaitHandle
@@ -33,9 +34,12 @@ struct ActRec;
  * execution of PHP code that can be resumed once the result of awaited
  * WaitHandle becomes available.
  */
-struct c_ResumableWaitHandle : c_WaitableWaitHandle {
-  WAITHANDLE_CLASSOF(ResumableWaitHandle);
-  WAITHANDLE_DTOR(ResumableWaitHandle);
+struct c_ResumableWaitHandle :
+    c_WaitableWaitHandle,
+    SystemLib::ClassLoader<"HH\\ResumableWaitHandle"> {
+  using SystemLib::ClassLoader<"HH\\ResumableWaitHandle">::classof;
+  using SystemLib::ClassLoader<"HH\\ResumableWaitHandle">::className;
+  WAITHANDLE_DTOR(ResumableWaitHandle)
 
   explicit c_ResumableWaitHandle(Class* cls, HeaderKind kind,
                                  type_scan::Index tyindex) noexcept
@@ -48,11 +52,17 @@ struct c_ResumableWaitHandle : c_WaitableWaitHandle {
  public:
   static c_ResumableWaitHandle* getRunning(ActRec* fp);
   void resume();
-  void exitContext(context_idx_t ctx_idx);
+  void exitContext(ContextIndex contextIdx);
 
   static const int8_t STATE_BLOCKED   = 2; // waiting on dependencies.
   static const int8_t STATE_READY     = 3; // ready to run
   static const int8_t STATE_RUNNING   = 4; // currently running
+
+  ObjectData* m_implicitContext;
+
+  static constexpr ptrdiff_t implicitContextOff() {
+    return offsetof(c_ResumableWaitHandle, m_implicitContext);
+  }
 };
 
 inline c_ResumableWaitHandle* c_Awaitable::asResumable() {
@@ -60,15 +70,6 @@ inline c_ResumableWaitHandle* c_Awaitable::asResumable() {
           getKind() == Kind::AsyncGenerator);
   return static_cast<c_ResumableWaitHandle*>(this);
 }
-
-void HHVM_STATIC_METHOD(ResumableWaitHandle, setOnCreateCallback,
-                        const Variant& callback);
-void HHVM_STATIC_METHOD(ResumableWaitHandle, setOnAwaitCallback,
-                        const Variant& callback);
-void HHVM_STATIC_METHOD(ResumableWaitHandle, setOnSuccessCallback,
-                        const Variant& callback);
-void HHVM_STATIC_METHOD(ResumableWaitHandle, setOnFailCallback,
-                        const Variant& callback);
 
 ///////////////////////////////////////////////////////////////////////////////
 }

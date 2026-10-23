@@ -1,4 +1,4 @@
-<?php
+<?hh <<__EntryPoint>> function main(): void {
 $str = "try this";
 $repl = "bala ";
 $start = 2;
@@ -28,191 +28,114 @@ echo "\n";
 
 
 $str = "try this";
-$repl = array("bala ");
+$repl = vec["bala "];
 $start = 4;
 $len = 3;
-echo str_replace("\n","","substr_replace(".var_export($str,1).", ".var_export($repl,1).", ".var_export($start,1)."")."\n";
-var_dump(substr_replace($str, $repl, $start))."\n";
+echo str_replace("\n","","substr_replace(".var_export($str,true).", ".var_export($repl,true).", ".var_export($start,true)."")."\n";
+(string)(var_dump(substr_replace($str, $repl, $start)))."\n";
 echo "\n";
-echo str_replace("\n","","substr_replace(".var_export($str,1).", ".var_export($repl,1).", ".var_export($start,1)."")."\n";
-var_dump(substr_replace($str, $repl, $start, $len))."\n";
-echo "\n";
-
-echo "\n";
-echo "\n";
+echo str_replace("\n","","substr_replace(".var_export($str,true).", ".var_export($repl,true).", ".var_export($start,true)."")."\n";
+(string)(var_dump(substr_replace($str, $repl, $start, $len)))."\n";
 echo "\n";
 
-
-
-$str = array("ala portokala");
-$repl = array("bala ");
-$start = array(4);
-$len = array(3);
-echo str_replace("\n","","substr_replace(".var_export($str,1).", ".var_export($repl,1).", ".var_export($start,1)."")."\n";
-var_dump(substr_replace($str, $repl, $start))."\n";
-echo "\n";
-
-$len = array(3);
-echo str_replace("\n","","substr_replace(".var_export($str,1).", ".var_export($repl,1).", ".var_export($start,1).", ".var_export($len,1).")")."\n";
-var_dump(substr_replace($str, $repl, $start, $len))."\n";
-echo "\n";
-
-$len = array(0);
-echo str_replace("\n","","substr_replace(".var_export($str,1).", ".var_export($repl,1).", ".var_export($start,1).", ".var_export($len,1).")")."\n";
-var_dump(substr_replace($str, $repl, $start, $len))."\n";
-echo "\n";
-
-$len = array(-2);
-echo str_replace("\n","","substr_replace(".var_export($str,1).", ".var_export($repl,1).", ".var_export($start,1).", ".var_export($len,1).")")."\n";
-var_dump(substr_replace($str, $repl, $start, $len))."\n";
 echo "\n";
 echo "\n";
 echo "\n";
 
 
 
+$str = vec["ala portokala"];
+$repl = vec["bala "];
+$start = vec[4];
+$len = vec[3];
+echo str_replace("\n","","substr_replace(".var_export($str,true).", ".var_export($repl,true).", ".var_export($start,true)."")."\n";
+(string)(var_dump(substr_replace($str, $repl, $start)))."\n";
+echo "\n";
 
-$str = array("ala portokala");
+$len = vec[3];
+echo str_replace("\n","","substr_replace(".var_export($str,true).", ".var_export($repl,true).", ".var_export($start,true).", ".var_export($len,true).")")."\n";
+(string)(var_dump(substr_replace($str, $repl, $start, $len)))."\n";
+echo "\n";
+
+$len = vec[0];
+echo str_replace("\n","","substr_replace(".var_export($str,true).", ".var_export($repl,true).", ".var_export($start,true).", ".var_export($len,true).")")."\n";
+(string)(var_dump(substr_replace($str, $repl, $start, $len)))."\n";
+echo "\n";
+
+$len = vec[-2];
+echo str_replace("\n","","substr_replace(".var_export($str,true).", ".var_export($repl,true).", ".var_export($start,true).", ".var_export($len,true).")")."\n";
+(string)(var_dump(substr_replace($str, $repl, $start, $len)))."\n";
+echo "\n";
+echo "\n";
+echo "\n";
+
+
+
+
+$str = vec["ala portokala"];
 $repl = "bala ";
 $start = 4;
 $len = 3;
-echo str_replace("\n","","substr_replace(".var_export($str,1).", ".var_export($repl,1).",".var_export($start,1).")")."\n";
-var_dump(substr_replace($str, $repl, $start))."\n";
+echo str_replace("\n","","substr_replace(".var_export($str,true).", ".var_export($repl,true).",".var_export($start,true).")")."\n";
+(string)(var_dump(substr_replace($str, $repl, $start)))."\n";
 echo "\n";
 echo "\n";
 
 
 
-$str = array("ala portokala", "try this");
-$repl = array("bala ");
+$str = vec["ala portokala", "try this"];
+$repl = vec["bala "];
 $start = 4;
 $len = 3;
-echo str_replace("\n","","substr_replace(".var_export($str,1).", ".var_export($repl,1).",".var_export($start,1).", ".var_export($len,1).")")."\n";
-var_dump(substr_replace($str, $repl, $start, $len))."\n";
+echo str_replace("\n","","substr_replace(".var_export($str,true).", ".var_export($repl,true).",".var_export($start,true).", ".var_export($len,true).")")."\n";
+(string)(var_dump(substr_replace($str, $repl, $start, $len)))."\n";
 echo "\n";
 echo "\n";
 
 
-$str = array("ala portokala", "try this");
+$str = vec["ala portokala", "try this"];
 $repl = "bala ";
 $start = 4;
 $len = 3;
-echo str_replace("\n","","substr_replace(".var_export($str,1).", ".var_export($repl,1).",".var_export($start,1).", ".var_export($len,1).")")."\n";
-var_dump(substr_replace($str, $repl, $start, $len))."\n";
+echo str_replace("\n","","substr_replace(".var_export($str,true).", ".var_export($repl,true).",".var_export($start,true).", ".var_export($len,true).")")."\n";
+(string)(var_dump(substr_replace($str, $repl, $start, $len)))."\n";
 echo "\n";
 
 
-$str = array("ala portokala", "try this");
-$repl = array("bala ");
-$start = 4;
-$len = 0;
-echo str_replace("\n","","substr_replace(".var_export($str,1).", ".var_export($repl,1).",".var_export($start,1).", ".var_export($len,1).")")."\n";
-var_dump(substr_replace($str, $repl, $start, $len))."\n";
-echo "\n";
-echo "\n";
-
-
-$str = array("ala portokala", "try this");
-$repl = "bala ";
+$str = vec["ala portokala", "try this"];
+$repl = vec["bala "];
 $start = 4;
 $len = 0;
-echo str_replace("\n","","substr_replace(".var_export($str,1).", ".var_export($repl,1).",".var_export($start,1).", ".var_export($len,1).")")."\n";
-var_dump(substr_replace($str, $repl, $start, $len))."\n";
-echo "\n";
-
-$str = array("ala portokala", "try this");
-$repl = array("bala ");
-$start = 4;
-$len = -2;
-echo str_replace("\n","","substr_replace(".var_export($str,1).", ".var_export($repl,1).",".var_export($start,1).", ".var_export($len,1).")")."\n";
-var_dump(substr_replace($str, $repl, $start, $len))."\n";
+echo str_replace("\n","","substr_replace(".var_export($str,true).", ".var_export($repl,true).",".var_export($start,true).", ".var_export($len,true).")")."\n";
+(string)(var_dump(substr_replace($str, $repl, $start, $len)))."\n";
 echo "\n";
 echo "\n";
 
 
-$str = array("ala portokala", "try this");
+$str = vec["ala portokala", "try this"];
 $repl = "bala ";
 $start = 4;
-$len = -2;
-echo str_replace("\n","","substr_replace(".var_export($str,1).", ".var_export($repl,1).",".var_export($start,1).", ".var_export($len,1).")")."\n";
-var_dump(substr_replace($str, $repl, $start, $len))."\n";
-echo "\n";
-echo "\n";
-echo "\n";
-echo "\n";
-echo "\n";
-echo "\n";
-
-
-
-
-$str = array("ala portokala");
-$repl = "bala ";
-$start = array(4);
-$len = 3;
-echo str_replace("\n","","substr_replace(".var_export($str,1).", ".var_export($repl,1).",".var_export($start,1).")")."\n";
-var_dump(substr_replace($str, $repl, $start))."\n";
-echo "\n";
-echo "\n";
-
-
-
-$str = array("ala portokala", "try this");
-$repl = array("bala ");
-$start = array(4);
-$len = 3;
-echo str_replace("\n","","substr_replace(".var_export($str,1).", ".var_export($repl,1).",".var_export($start,1).", ".var_export($len,1).")")."\n";
-var_dump(substr_replace($str, $repl, $start, $len))."\n";
-echo "\n";
-echo "\n";
-
-
-$str = array("ala portokala", "try this");
-$repl = "bala ";
-$start = array(4);
-$len = 3;
-echo str_replace("\n","","substr_replace(".var_export($str,1).", ".var_export($repl,1).",".var_export($start,1).", ".var_export($len,1).")")."\n";
-var_dump(substr_replace($str, $repl, $start, $len))."\n";
-echo "\n";
-
-
-$str = array("ala portokala", "try this");
-$repl = array("bala ");
-$start = array(4);
 $len = 0;
-echo str_replace("\n","","substr_replace(".var_export($str,1).", ".var_export($repl,1).",".var_export($start,1).", ".var_export($len,1).")")."\n";
-var_dump(substr_replace($str, $repl, $start, $len))."\n";
-echo "\n";
-echo "\n";
-
-
-$str = array("ala portokala", "try this");
-$repl = "bala ";
-$start = array(4);
-$len = 0;
-echo str_replace("\n","","substr_replace(".var_export($str,1).", ".var_export($repl,1).",".var_export($start,1).", ".var_export($len,1).")")."\n";
-var_dump(substr_replace($str, $repl, $start, $len))."\n";
+echo str_replace("\n","","substr_replace(".var_export($str,true).", ".var_export($repl,true).",".var_export($start,true).", ".var_export($len,true).")")."\n";
+(string)(var_dump(substr_replace($str, $repl, $start, $len)))."\n";
 echo "\n";
 
-$str = array("ala portokala", "try this");
-$repl = array("bala ");
-$start = array(4);
+$str = vec["ala portokala", "try this"];
+$repl = vec["bala "];
+$start = 4;
 $len = -2;
-echo str_replace("\n","","substr_replace(".var_export($str,1).", ".var_export($repl,1).",".var_export($start,1).", ".var_export($len,1).")")."\n";
-var_dump(substr_replace($str, $repl, $start, $len))."\n";
+echo str_replace("\n","","substr_replace(".var_export($str,true).", ".var_export($repl,true).",".var_export($start,true).", ".var_export($len,true).")")."\n";
+(string)(var_dump(substr_replace($str, $repl, $start, $len)))."\n";
 echo "\n";
 echo "\n";
 
 
-$str = array("ala portokala", "try this");
+$str = vec["ala portokala", "try this"];
 $repl = "bala ";
-$start = array(4);
+$start = 4;
 $len = -2;
-echo str_replace("\n","","substr_replace(".var_export($str,1).", ".var_export($repl,1).",".var_export($start,1).", ".var_export($len,1).")")."\n";
-var_dump(substr_replace($str, $repl, $start, $len))."\n";
-echo "\n";
-
-
+echo str_replace("\n","","substr_replace(".var_export($str,true).", ".var_export($repl,true).",".var_export($start,true).", ".var_export($len,true).")")."\n";
+(string)(var_dump(substr_replace($str, $repl, $start, $len)))."\n";
 echo "\n";
 echo "\n";
 echo "\n";
@@ -221,74 +144,75 @@ echo "\n";
 echo "\n";
 
 
-$str = array("ala portokala");
+
+
+$str = vec["ala portokala"];
 $repl = "bala ";
-$start = array(4,2);
+$start = vec[4];
 $len = 3;
-echo str_replace("\n","","substr_replace(".var_export($str,1).", ".var_export($repl,1).",".var_export($start,1).")")."\n";
-var_dump(substr_replace($str, $repl, $start))."\n";
+echo str_replace("\n","","substr_replace(".var_export($str,true).", ".var_export($repl,true).",".var_export($start,true).")")."\n";
+(string)(var_dump(substr_replace($str, $repl, $start)))."\n";
 echo "\n";
 echo "\n";
 
 
 
-$str = array("ala portokala", "try this");
-$repl = array("bala ");
-$start = array(4,2);
+$str = vec["ala portokala", "try this"];
+$repl = vec["bala "];
+$start = vec[4];
 $len = 3;
-echo str_replace("\n","","substr_replace(".var_export($str,1).", ".var_export($repl,1).",".var_export($start,1).", ".var_export($len,1).")")."\n";
-var_dump(substr_replace($str, $repl, $start, $len))."\n";
+echo str_replace("\n","","substr_replace(".var_export($str,true).", ".var_export($repl,true).",".var_export($start,true).", ".var_export($len,true).")")."\n";
+(string)(var_dump(substr_replace($str, $repl, $start, $len)))."\n";
 echo "\n";
 echo "\n";
 
 
-$str = array("ala portokala", "try this");
+$str = vec["ala portokala", "try this"];
 $repl = "bala ";
-$start = array(4,2);
+$start = vec[4];
 $len = 3;
-echo str_replace("\n","","substr_replace(".var_export($str,1).", ".var_export($repl,1).",".var_export($start,1).", ".var_export($len,1).")")."\n";
-var_dump(substr_replace($str, $repl, $start, $len))."\n";
+echo str_replace("\n","","substr_replace(".var_export($str,true).", ".var_export($repl,true).",".var_export($start,true).", ".var_export($len,true).")")."\n";
+(string)(var_dump(substr_replace($str, $repl, $start, $len)))."\n";
 echo "\n";
 
 
-$str = array("ala portokala", "try this");
-$repl = array("bala ");
-$start = array(4,2);
+$str = vec["ala portokala", "try this"];
+$repl = vec["bala "];
+$start = vec[4];
 $len = 0;
-echo str_replace("\n","","substr_replace(".var_export($str,1).", ".var_export($repl,1).",".var_export($start,1).", ".var_export($len,1).")")."\n";
-var_dump(substr_replace($str, $repl, $start, $len))."\n";
+echo str_replace("\n","","substr_replace(".var_export($str,true).", ".var_export($repl,true).",".var_export($start,true).", ".var_export($len,true).")")."\n";
+(string)(var_dump(substr_replace($str, $repl, $start, $len)))."\n";
 echo "\n";
 echo "\n";
 
 
-$str = array("ala portokala", "try this");
+$str = vec["ala portokala", "try this"];
 $repl = "bala ";
-$start = array(4,2);
+$start = vec[4];
 $len = 0;
-echo str_replace("\n","","substr_replace(".var_export($str,1).", ".var_export($repl,1).",".var_export($start,1).", ".var_export($len,1).")")."\n";
-var_dump(substr_replace($str, $repl, $start, $len))."\n";
+echo str_replace("\n","","substr_replace(".var_export($str,true).", ".var_export($repl,true).",".var_export($start,true).", ".var_export($len,true).")")."\n";
+(string)(var_dump(substr_replace($str, $repl, $start, $len)))."\n";
 echo "\n";
 
-$str = array("ala portokala", "try this");
-$repl = array("bala ");
-$start = array(4,2);
+$str = vec["ala portokala", "try this"];
+$repl = vec["bala "];
+$start = vec[4];
 $len = -2;
-echo str_replace("\n","","substr_replace(".var_export($str,1).", ".var_export($repl,1).",".var_export($start,1).", ".var_export($len,1).")")."\n";
-var_dump(substr_replace($str, $repl, $start, $len))."\n";
+echo str_replace("\n","","substr_replace(".var_export($str,true).", ".var_export($repl,true).",".var_export($start,true).", ".var_export($len,true).")")."\n";
+(string)(var_dump(substr_replace($str, $repl, $start, $len)))."\n";
 echo "\n";
 echo "\n";
 
 
-$str = array("ala portokala", "try this");
+$str = vec["ala portokala", "try this"];
 $repl = "bala ";
-$start = array(4,2);
+$start = vec[4];
 $len = -2;
-echo str_replace("\n","","substr_replace(".var_export($str,1).", ".var_export($repl,1).",".var_export($start,1).", ".var_export($len,1).")")."\n";
-var_dump(substr_replace($str, $repl, $start, $len))."\n";
+echo str_replace("\n","","substr_replace(".var_export($str,true).", ".var_export($repl,true).",".var_export($start,true).", ".var_export($len,true).")")."\n";
+(string)(var_dump(substr_replace($str, $repl, $start, $len)))."\n";
 echo "\n";
 
 
-
 echo "\n";
 echo "\n";
 echo "\n";
@@ -297,73 +221,74 @@ echo "\n";
 echo "\n";
 
 
-$str = array("ala portokala");
+$str = vec["ala portokala"];
 $repl = "bala ";
-$start = array(4,2);
-$len = array(3);
-echo str_replace("\n","","substr_replace(".var_export($str,1).", ".var_export($repl,1).",".var_export($start,1).")")."\n";
-var_dump(substr_replace($str, $repl, $start))."\n";
+$start = vec[4,2];
+$len = 3;
+echo str_replace("\n","","substr_replace(".var_export($str,true).", ".var_export($repl,true).",".var_export($start,true).")")."\n";
+(string)(var_dump(substr_replace($str, $repl, $start)))."\n";
 echo "\n";
 echo "\n";
 
 
 
-$str = array("ala portokala", "try this");
-$repl = array("bala ");
-$start = array(4,2);
-$len = array(3);
-echo str_replace("\n","","substr_replace(".var_export($str,1).", ".var_export($repl,1).",".var_export($start,1).", ".var_export($len,1).")")."\n";
-var_dump(substr_replace($str, $repl, $start, $len))."\n";
+$str = vec["ala portokala", "try this"];
+$repl = vec["bala "];
+$start = vec[4,2];
+$len = 3;
+echo str_replace("\n","","substr_replace(".var_export($str,true).", ".var_export($repl,true).",".var_export($start,true).", ".var_export($len,true).")")."\n";
+(string)(var_dump(substr_replace($str, $repl, $start, $len)))."\n";
 echo "\n";
 echo "\n";
 
 
-$str = array("ala portokala", "try this");
+$str = vec["ala portokala", "try this"];
 $repl = "bala ";
-$start = array(4,2);
-$len = array(3);
-echo str_replace("\n","","substr_replace(".var_export($str,1).", ".var_export($repl,1).",".var_export($start,1).", ".var_export($len,1).")")."\n";
-var_dump(substr_replace($str, $repl, $start, $len))."\n";
+$start = vec[4,2];
+$len = 3;
+echo str_replace("\n","","substr_replace(".var_export($str,true).", ".var_export($repl,true).",".var_export($start,true).", ".var_export($len,true).")")."\n";
+(string)(var_dump(substr_replace($str, $repl, $start, $len)))."\n";
 echo "\n";
 
 
-$str = array("ala portokala", "try this");
-$repl = array("bala ");
-$start = array(4,2);
-$len = array(0);
-echo str_replace("\n","","substr_replace(".var_export($str,1).", ".var_export($repl,1).",".var_export($start,1).", ".var_export($len,1).")")."\n";
-var_dump(substr_replace($str, $repl, $start, $len))."\n";
+$str = vec["ala portokala", "try this"];
+$repl = vec["bala "];
+$start = vec[4,2];
+$len = 0;
+echo str_replace("\n","","substr_replace(".var_export($str,true).", ".var_export($repl,true).",".var_export($start,true).", ".var_export($len,true).")")."\n";
+(string)(var_dump(substr_replace($str, $repl, $start, $len)))."\n";
 echo "\n";
 echo "\n";
 
 
-$str = array("ala portokala", "try this");
+$str = vec["ala portokala", "try this"];
 $repl = "bala ";
-$start = array(4,2);
-$len = array(0);
-echo str_replace("\n","","substr_replace(".var_export($str,1).", ".var_export($repl,1).",".var_export($start,1).", ".var_export($len,1).")")."\n";
-var_dump(substr_replace($str, $repl, $start, $len))."\n";
+$start = vec[4,2];
+$len = 0;
+echo str_replace("\n","","substr_replace(".var_export($str,true).", ".var_export($repl,true).",".var_export($start,true).", ".var_export($len,true).")")."\n";
+(string)(var_dump(substr_replace($str, $repl, $start, $len)))."\n";
 echo "\n";
 
-$str = array("ala portokala", "try this");
-$repl = array("bala ");
-$start = array(4,2);
-$len = array(-2);
-echo str_replace("\n","","substr_replace(".var_export($str,1).", ".var_export($repl,1).",".var_export($start,1).", ".var_export($len,1).")")."\n";
-var_dump(substr_replace($str, $repl, $start, $len))."\n";
+$str = vec["ala portokala", "try this"];
+$repl = vec["bala "];
+$start = vec[4,2];
+$len = -2;
+echo str_replace("\n","","substr_replace(".var_export($str,true).", ".var_export($repl,true).",".var_export($start,true).", ".var_export($len,true).")")."\n";
+(string)(var_dump(substr_replace($str, $repl, $start, $len)))."\n";
 echo "\n";
 echo "\n";
 
 
-$str = array("ala portokala", "try this");
+$str = vec["ala portokala", "try this"];
 $repl = "bala ";
-$start = array(4,2);
-$len = array(-2);
-echo str_replace("\n","","substr_replace(".var_export($str,1).", ".var_export($repl,1).",".var_export($start,1).", ".var_export($len,1).")")."\n";
-var_dump(substr_replace($str, $repl, $start, $len))."\n";
+$start = vec[4,2];
+$len = -2;
+echo str_replace("\n","","substr_replace(".var_export($str,true).", ".var_export($repl,true).",".var_export($start,true).", ".var_export($len,true).")")."\n";
+(string)(var_dump(substr_replace($str, $repl, $start, $len)))."\n";
 echo "\n";
 
 
+
 echo "\n";
 echo "\n";
 echo "\n";
@@ -372,73 +297,144 @@ echo "\n";
 echo "\n";
 
 
-$str = array("ala portokala");
+$str = vec["ala portokala"];
 $repl = "bala ";
-$start = array(4,2);
-$len = array(3,2);
-echo str_replace("\n","","substr_replace(".var_export($str,1).", ".var_export($repl,1).",".var_export($start,1).")")."\n";
-var_dump(substr_replace($str, $repl, $start))."\n";
+$start = vec[4,2];
+$len = vec[3];
+echo str_replace("\n","","substr_replace(".var_export($str,true).", ".var_export($repl,true).",".var_export($start,true).")")."\n";
+(string)(var_dump(substr_replace($str, $repl, $start)))."\n";
 echo "\n";
 echo "\n";
 
 
 
-$str = array("ala portokala", "try this");
-$repl = array("bala ");
-$start = array(4,2);
-$len = array(3,2);
-echo str_replace("\n","","substr_replace(".var_export($str,1).", ".var_export($repl,1).",".var_export($start,1).", ".var_export($len,1).")")."\n";
-var_dump(substr_replace($str, $repl, $start, $len))."\n";
+$str = vec["ala portokala", "try this"];
+$repl = vec["bala "];
+$start = vec[4,2];
+$len = vec[3];
+echo str_replace("\n","","substr_replace(".var_export($str,true).", ".var_export($repl,true).",".var_export($start,true).", ".var_export($len,true).")")."\n";
+(string)(var_dump(substr_replace($str, $repl, $start, $len)))."\n";
 echo "\n";
 echo "\n";
 
 
-$str = array("ala portokala", "try this");
+$str = vec["ala portokala", "try this"];
 $repl = "bala ";
-$start = array(4,2);
-$len = array(3,2);
-echo str_replace("\n","","substr_replace(".var_export($str,1).", ".var_export($repl,1).",".var_export($start,1).", ".var_export($len,1).")")."\n";
-var_dump(substr_replace($str, $repl, $start, $len))."\n";
+$start = vec[4,2];
+$len = vec[3];
+echo str_replace("\n","","substr_replace(".var_export($str,true).", ".var_export($repl,true).",".var_export($start,true).", ".var_export($len,true).")")."\n";
+(string)(var_dump(substr_replace($str, $repl, $start, $len)))."\n";
 echo "\n";
 
 
-$str = array("ala portokala", "try this");
-$repl = array("bala ");
-$start = array(4,2);
-$len = array(0,0);
-echo str_replace("\n","","substr_replace(".var_export($str,1).", ".var_export($repl,1).",".var_export($start,1).", ".var_export($len,1).")")."\n";
-var_dump(substr_replace($str, $repl, $start, $len))."\n";
+$str = vec["ala portokala", "try this"];
+$repl = vec["bala "];
+$start = vec[4,2];
+$len = vec[0];
+echo str_replace("\n","","substr_replace(".var_export($str,true).", ".var_export($repl,true).",".var_export($start,true).", ".var_export($len,true).")")."\n";
+(string)(var_dump(substr_replace($str, $repl, $start, $len)))."\n";
 echo "\n";
 echo "\n";
 
 
-$str = array("ala portokala", "try this");
+$str = vec["ala portokala", "try this"];
 $repl = "bala ";
-$start = array(4,2);
-$len = array(0,0);
-echo str_replace("\n","","substr_replace(".var_export($str,1).", ".var_export($repl,1).",".var_export($start,1).", ".var_export($len,1).")")."\n";
-var_dump(substr_replace($str, $repl, $start, $len))."\n";
+$start = vec[4,2];
+$len = vec[0];
+echo str_replace("\n","","substr_replace(".var_export($str,true).", ".var_export($repl,true).",".var_export($start,true).", ".var_export($len,true).")")."\n";
+(string)(var_dump(substr_replace($str, $repl, $start, $len)))."\n";
 echo "\n";
 
-$str = array("ala portokala", "try this");
-$repl = array("bala ");
-$start = array(4,2);
-$len = array(-2,-3);
-echo str_replace("\n","","substr_replace(".var_export($str,1).", ".var_export($repl,1).",".var_export($start,1).", ".var_export($len,1).")")."\n";
-var_dump(substr_replace($str, $repl, $start, $len))."\n";
+$str = vec["ala portokala", "try this"];
+$repl = vec["bala "];
+$start = vec[4,2];
+$len = vec[-2];
+echo str_replace("\n","","substr_replace(".var_export($str,true).", ".var_export($repl,true).",".var_export($start,true).", ".var_export($len,true).")")."\n";
+(string)(var_dump(substr_replace($str, $repl, $start, $len)))."\n";
 echo "\n";
 echo "\n";
 
 
-$str = array("ala portokala", "try this");
+$str = vec["ala portokala", "try this"];
 $repl = "bala ";
-$start = array(4,2);
-$len = array(-2,-3);
-echo str_replace("\n","","substr_replace(".var_export($str,1).", ".var_export($repl,1).",".var_export($start,1).", ".var_export($len,1).")")."\n";
-var_dump(substr_replace($str, $repl, $start, $len))."\n";
+$start = vec[4,2];
+$len = vec[-2];
+echo str_replace("\n","","substr_replace(".var_export($str,true).", ".var_export($repl,true).",".var_export($start,true).", ".var_export($len,true).")")."\n";
+(string)(var_dump(substr_replace($str, $repl, $start, $len)))."\n";
+echo "\n";
+
+
+echo "\n";
+echo "\n";
+echo "\n";
+echo "\n";
+echo "\n";
+echo "\n";
+
+
+$str = vec["ala portokala"];
+$repl = "bala ";
+$start = vec[4,2];
+$len = vec[3,2];
+echo str_replace("\n","","substr_replace(".var_export($str,true).", ".var_export($repl,true).",".var_export($start,true).")")."\n";
+(string)(var_dump(substr_replace($str, $repl, $start)))."\n";
+echo "\n";
 echo "\n";
 
 
 
+$str = vec["ala portokala", "try this"];
+$repl = vec["bala "];
+$start = vec[4,2];
+$len = vec[3,2];
+echo str_replace("\n","","substr_replace(".var_export($str,true).", ".var_export($repl,true).",".var_export($start,true).", ".var_export($len,true).")")."\n";
+(string)(var_dump(substr_replace($str, $repl, $start, $len)))."\n";
+echo "\n";
+echo "\n";
 
-?>
+
+$str = vec["ala portokala", "try this"];
+$repl = "bala ";
+$start = vec[4,2];
+$len = vec[3,2];
+echo str_replace("\n","","substr_replace(".var_export($str,true).", ".var_export($repl,true).",".var_export($start,true).", ".var_export($len,true).")")."\n";
+(string)(var_dump(substr_replace($str, $repl, $start, $len)))."\n";
+echo "\n";
+
+
+$str = vec["ala portokala", "try this"];
+$repl = vec["bala "];
+$start = vec[4,2];
+$len = vec[0,0];
+echo str_replace("\n","","substr_replace(".var_export($str,true).", ".var_export($repl,true).",".var_export($start,true).", ".var_export($len,true).")")."\n";
+(string)(var_dump(substr_replace($str, $repl, $start, $len)))."\n";
+echo "\n";
+echo "\n";
+
+
+$str = vec["ala portokala", "try this"];
+$repl = "bala ";
+$start = vec[4,2];
+$len = vec[0,0];
+echo str_replace("\n","","substr_replace(".var_export($str,true).", ".var_export($repl,true).",".var_export($start,true).", ".var_export($len,true).")")."\n";
+(string)(var_dump(substr_replace($str, $repl, $start, $len)))."\n";
+echo "\n";
+
+$str = vec["ala portokala", "try this"];
+$repl = vec["bala "];
+$start = vec[4,2];
+$len = vec[-2,-3];
+echo str_replace("\n","","substr_replace(".var_export($str,true).", ".var_export($repl,true).",".var_export($start,true).", ".var_export($len,true).")")."\n";
+(string)(var_dump(substr_replace($str, $repl, $start, $len)))."\n";
+echo "\n";
+echo "\n";
+
+
+$str = vec["ala portokala", "try this"];
+$repl = "bala ";
+$start = vec[4,2];
+$len = vec[-2,-3];
+echo str_replace("\n","","substr_replace(".var_export($str,true).", ".var_export($repl,true).",".var_export($start,true).", ".var_export($len,true).")")."\n";
+(string)(var_dump(substr_replace($str, $repl, $start, $len)))."\n";
+echo "\n";
+}

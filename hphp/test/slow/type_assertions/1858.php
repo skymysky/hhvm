@@ -1,16 +1,20 @@
-<?php
+<?hh
 
-function block() {
+function block() :mixed{
 }
-function f($x) {
+function f($x) :mixed{
   if (is_int($x) || is_array($x)) {
     var_dump($x[0]);
   }
 }
-function g($x) {
-  $x = (array) $x;
+function g($x) :mixed{
+  $x = darray($x);
   block();
   var_dump($x[0]);
 }
-f(array(10));
-g(array(10));
+
+<<__EntryPoint>>
+function main_1858() :mixed{
+f(vec[10]);
+g(vec[10]);
+}

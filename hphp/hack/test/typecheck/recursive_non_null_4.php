@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 // Copyright 2004-present Facebook. All Rights Reserved.
 
 function genData(bool $b): Map<string, mixed> {
@@ -14,10 +14,9 @@ function genData(bool $b): Map<string, mixed> {
     // $data has type Map<string,?var_3>
     // If we UNIFY ?var_3 with mixed then we will get var_3:=mixed
     return $data;
-    hh_show($data);
   }
-
   hh_show($data);
+
   if ($b) {
     $data['a'] = 'hey';
   }

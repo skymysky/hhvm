@@ -1,0 +1,52 @@
+error: Typing[4391] Cannot create a function pointer to `Foo::bar`; it is abstract [1]
+-> Declaration is here [2]
+
+class_meth_interface.php:8:8
+ 2 | 
+ 3 | interface Foo {
+ 4 |   public static function bar(): void;
+   |                          ^^^ [2]
+ 5 | }
+ 6 | 
+ 7 | function test(): void {
+ 8 |   Foo::bar<>;
+   |        ^^^ [1]
+ 9 | 
+10 |   Foo::bar<>;
+
+error: Typing[4391] Cannot create a function pointer to `Foo::bar`; it is abstract [1]
+-> Declaration is here [2]
+
+class_meth_interface.php:10:8
+ 2 | 
+ 3 | interface Foo {
+ 4 |   public static function bar(): void;
+   |                          ^^^ [2]
+ 5 | }
+ 6 | 
+ 7 | function test(): void {
+ 8 |   Foo::bar<>;
+ 9 | 
+10 |   Foo::bar<>;
+   |        ^^^ [1]
+11 | 
+12 |   Foo::bar<>;
+
+error: Typing[4391] Cannot create a function pointer to `Foo::bar`; it is abstract [1]
+-> Declaration is here [2]
+
+class_meth_interface.php:12:8
+ 2 | 
+ 3 | interface Foo {
+ 4 |   public static function bar(): void;
+   |                          ^^^ [2]
+ 5 | }
+ 6 | 
+   :
+10 |   Foo::bar<>;
+11 | 
+12 |   Foo::bar<>;
+   |        ^^^ [1]
+13 | }
+
+3 errors found

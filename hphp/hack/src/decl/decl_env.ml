@@ -1,4 +1,4 @@
-(**
+(*
  * Copyright (c) 2015, Facebook, Inc.
  * All rights reserved.
  *
@@ -7,38 +7,40 @@
  *
  *)
 
-open Decl_defs
-
-module Dep = Typing_deps.Dep
+open Hh_prelude
 
 type env = {
-  mode : FileInfo.mode;
-  droot : Typing_deps.Dep.variant option;
-  decl_tcopt : TypecheckerOptions.t;
+  mode: File_info.mode;
+  droot: Typing_deps.Dep.dependent Typing_deps.Dep.variant option;
+  droot_member: Typing_pessimisation_deps.dependent_member option;
+  ctx: Provider_context.t;
 }
 
-let mode env = env.mode
+let root_decl_reference env =
+  env.droot |> Option.map ~f:Typing_deps.Dep.to_decl_reference
 
-let add_wclass env x =
-  let dep = Dep.Class x in
-  Option.iter env.droot (fun root -> Typing_deps.add_idep root dep);
-  ()
+let make_decl_pos env pos =
+  (* TODO: fail if root_decl_reference returns None *)
+  Pos_or_decl.make_decl_pos_of_option pos (root_decl_reference env)
 
-let add_extends_dependency env x =
-  Option.iter env.droot begin fun root ->
-    let dep = Dep.Class x in
-    Typing_deps.add_idep root (Dep.Extends x);
-    Typing_deps.add_idep root dep;
-  end;
-  ()
+let make_decl_posed env posed =
+  (* TODO: fail if root_decl_reference returns None *)
+  Positioned.make_for_decl_of_option posed (root_decl_reference env)
 
-let get_class_dep env x =
-  add_wclass env x;
-  add_extends_dependency env x;
-  Decl_heap.Classes.get x
+let tcopt env = Provider_context.get_tcopt env.ctx
 
-let get_construct env class_ =
-  add_wclass env class_.dc_name;
-  let dep = Dep.Cstr (class_.dc_name) in
-  Option.iter env.droot (fun root -> Typing_deps.add_idep root dep);
-  class_.dc_construct
+type class_cache = Decl_store.class_entries S_map.t
+
+let no_fallback (_ : env) (_ : string) : Decl_defs.decl_class_type option = None
+
+let get_class_and_add_dep
+    ~(cache : class_cache) ~(shmem_fallback : bool) ~fallback env x =
+  let res =
+    match S_map.find_opt x cache with
+    | Some c -> Some (fst c)
+    | None when shmem_fallback -> Decl_store.((get ()).get_class x)
+    | None -> None
+  in
+  match res with
+  | Some c -> Some c
+  | None -> fallback env x

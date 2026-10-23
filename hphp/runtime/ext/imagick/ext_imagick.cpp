@@ -19,6 +19,7 @@
 
 #include <vector>
 
+#include "hphp/runtime/base/array-iterator.h"
 #include "hphp/runtime/base/file.h"
 #include "hphp/runtime/ext/std/ext_std_file.h"
 
@@ -29,20 +30,8 @@ using std::vector;
 namespace HPHP {
 
 //////////////////////////////////////////////////////////////////////////////
-// PHP Exceptions and Classes
-HPHP::Class* ImagickException::cls = nullptr;
-HPHP::Class* ImagickDrawException::cls = nullptr;
-HPHP::Class* ImagickPixelException::cls = nullptr;
-HPHP::Class* ImagickPixelIteratorException::cls = nullptr;
-
-HPHP::Class* Imagick::cls = nullptr;
-HPHP::Class* ImagickDraw::cls = nullptr;
-HPHP::Class* ImagickPixel::cls = nullptr;
-HPHP::Class* ImagickPixelIterator::cls = nullptr;
-
-//////////////////////////////////////////////////////////////////////////////
 // IO
-bool isMagickPseudoFormat(const String& path, char mode /* = '*' */) {
+bool isMagickPseudoFormat(const OptString& path, char mode /* = '*' */) {
   static const vector<pair<string, string>> pseudoFormats = {
     // Pseudo-image Formats
     {"CANVAS:",          "R"},
@@ -92,14 +81,14 @@ bool isMagickPseudoFormat(const String& path, char mode /* = '*' */) {
 #define IMAGICK_THROW imagickThrow<ImagickException>
 
 void imagickReadOp(MagickWand* wand,
-                   const String& path,
+                   const OptString& path,
                    const ImagickFileOp& op) {
-  String realpath;
+  OptString realpath;
   if (isMagickPseudoFormat(path, 'R')) {
     realpath = path;
   } else {
     auto var = HHVM_FN(realpath)(path);
-    realpath = var.isString() ? var.toString() : String();
+    realpath = var.isString() ? var.toString() : OptString();
     if (realpath.empty() ||
         !HHVM_FN(is_file)(realpath) ||
         !HHVM_FN(is_readable)(realpath)) {
@@ -119,9 +108,9 @@ void imagickReadOp(MagickWand* wand,
 }
 
 void imagickWriteOp(MagickWand* wand,
-                    const String& path_,
+                    const OptString& path_,
                     const ImagickFileOp& op) {
-  String path = path_;
+  OptString path = path_;
   if (path.empty()) {
     path = convertMagickString(MagickGetImageFilename(wand));
   }
@@ -129,12 +118,12 @@ void imagickWriteOp(MagickWand* wand,
     IMAGICK_THROW("No image filename specified");
   }
 
-  String realpath;
+  OptString realpath;
   if (isMagickPseudoFormat(path, 'W')) {
     realpath = path;
   } else {
     static const int PHP_PATHINFO_DIRNAME = 1;
-    String dirname = HHVM_FN(pathinfo)(path, PHP_PATHINFO_DIRNAME).toString();
+    OptString dirname = HHVM_FN(pathinfo)(path, PHP_PATHINFO_DIRNAME).toString();
     if (!HHVM_FN(is_dir)(dirname)) {
       // nothing to do here
     } else if (!HHVM_FN(is_file)(path)) {
@@ -158,7 +147,7 @@ void imagickWriteOp(MagickWand* wand,
 }
 
 ALWAYS_INLINE
-FILE* getFILE(const Resource& res, bool isWrite) {
+FILE* getFILE(const OptResource& res, bool isWrite) {
   auto f = dyn_cast_or_null<File>(res);
   if (f == nullptr || f->isClosed()) {
     IMAGICK_THROW("Invalid stream resource");
@@ -182,7 +171,7 @@ FILE* getFILE(const Resource& res, bool isWrite) {
 }
 
 void imagickReadOp(MagickWand* wand,
-                   const Resource& res,
+                   const OptResource& res,
                    const ImagickHandleOp& op) {
   auto fp = getFILE(res, false);
   auto status = op(wand, fp);
@@ -193,13 +182,13 @@ void imagickReadOp(MagickWand* wand,
 }
 
 void imagickWriteOp(MagickWand* wand,
-                    const Resource& res,
-                    const String& format,
+                    const OptResource& res,
+                    const OptString& format,
                     const ImagickHandleOp& op) {
   auto fp = getFILE(res, true);
 
   // Get the current name
-  String filename = convertMagickString(MagickGetImageFilename(wand));
+  OptString filename = convertMagickString(MagickGetImageFilename(wand));
   if (!format.empty()) {
     MagickSetImageFilename(wand, (format + ":").c_str());
   }
@@ -234,21 +223,21 @@ void raiseDeprecated(const char* className,
                    className, methodName, newClass, newMethod);
 }
 
-String convertMagickString(char* &&str) {
+OptString convertMagickString(char* &&str) {
   if (str == nullptr) {
-    return String();
+    return OptString();
   } else {
-    String ret(str);
+    OptString ret(str);
     freeMagickMemory(str);
     return ret;
   }
 }
 
-String convertMagickData(size_t size, unsigned char* &data) {
+OptString convertMagickData(size_t size, unsigned char* &data) {
   if (data == nullptr) {
-    return String();
+    return OptString();
   } else {
-    String ret((char*)data, size, CopyString);
+    OptString ret((char*)data, size, CopyString);
     freeMagickMemory(data);
     return ret;
   }
@@ -277,9 +266,10 @@ MagickBooleanType withMagickLocaleFix(
 
 std::vector<double> toDoubleArray(const Array& array) {
   std::vector<double> ret;
-  for (ArrayIter it(array); it; ++it) {
-    ret.push_back(tvCastToDouble(it.secondValPlus()));
-  }
+  ret.reserve(array.size());
+  IterateV(array.get(), [&](TypedValue v) {
+    ret.push_back(tvCastToDouble(v));
+  });
   return ret;
 }
 
@@ -288,18 +278,18 @@ std::vector<PointInfo> toPointInfoArray(const Array& coordinates) {
   int idx = 0;
 
   for (ArrayIter it(coordinates); it; ++it) {
-    auto const element = it.secondRvalPlus().unboxed();
-    if (!isArrayLikeType(element.type())) {
+    auto const element = it.secondValPlus();
+    if (!isArrayLikeType(type(element))) {
       return {};
     }
 
-    auto const coordinate = element.val().parr;
+    auto const coordinate = val(element).parr;
     if (coordinate->size() != 2) {
       return {};
     }
 
     for (ArrayIter jt(coordinate); jt; ++jt) {
-      const String& key = jt.first().toString();
+      const OptString& key = jt.first().toString();
       double value = tvCastToDouble(jt.secondValPlus());
       if (key == s_x) {
         ret[idx].x = value;
@@ -318,16 +308,18 @@ std::vector<PointInfo> toPointInfoArray(const Array& coordinates) {
 //////////////////////////////////////////////////////////////////////////////
 // ImagickExtension
 ImagickExtension::ImagickExtension() :
-  Extension("imagick", "3.2.0b2") {
+  Extension("imagick", "3.2.0b2", "hphp_hphpi") {
+}
+
+void ImagickExtension::moduleRegisterNative() {
+  registerNativeImagickConstants();
+  registerNativeImagickClass();
+  registerNativeImagickDrawClass();
+  registerNativeImagickPixelClass();
+  registerNativeImagickPixelIteratorClass();
 }
 
 void ImagickExtension::moduleInit() {
-  loadImagickConstants();
-  loadImagickClass();
-  loadImagickDrawClass();
-  loadImagickPixelClass();
-  loadImagickPixelIteratorClass();
-  loadSystemlib();
   MagickWandGenesis();
 }
 
@@ -336,10 +328,10 @@ void ImagickExtension::moduleShutdown() {
 }
 
 void ImagickExtension::threadInit() {
-  IniSetting::Bind(this, IniSetting::PHP_INI_ALL,
+  IniSetting::Bind(this, IniSetting::Mode::Request,
                    "imagick.locale_fix", "0",
                    &s_ini_setting->m_locale_fix);
-  IniSetting::Bind(this, IniSetting::PHP_INI_ALL,
+  IniSetting::Bind(this, IniSetting::Mode::Request,
                    "imagick.progress_monitor", "0",
                    &s_ini_setting->m_progress_monitor);
 }
@@ -352,7 +344,7 @@ bool ImagickExtension::hasProgressMonitor() {
   return s_ini_setting->m_progress_monitor;
 }
 
-THREAD_LOCAL(ImagickExtension::ImagickIniSetting,
+RDS_LOCAL(ImagickExtension::ImagickIniSetting,
                        ImagickExtension::s_ini_setting);
 
 ImagickExtension s_imagick_extension;

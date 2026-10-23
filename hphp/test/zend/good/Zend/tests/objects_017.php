@@ -1,13 +1,12 @@
-<?php
+<?hh
 
 class foo {
-	private $test = 1;
+    private $test = 1;
 }
 
-function test() {
-	return new foo;
+function test() :mixed{
+    return new foo;
 }
-
+<<__EntryPoint>> function main(): void {
 test()->test = 2;
-
-?>
+}

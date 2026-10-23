@@ -14,8 +14,7 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_HTTP_CLIENT_H_
-#define incl_HPHP_HTTP_CLIENT_H_
+#pragma once
 
 #include "hphp/runtime/server/transport.h"
 #include "hphp/runtime/base/string-buffer.h"
@@ -41,6 +40,13 @@ struct HttpClient {
   void proxy(const std::string &host, int port,
              const std::string &username = "",
              const std::string &password = "");
+
+  /**
+   * Configure options to connect using TLS to the proxy.
+   */
+  void setHttpsProxy(const std::string &proxyCaBundle,
+      const std::string &proxySSLCertPath = "",
+      const std::string &proxySSLKeyPath = "");
 
   /**
    * StreamContext settings for this connection
@@ -72,7 +78,7 @@ struct HttpClient {
    */
   int get(const char *url, StringBuffer &response,
           const HeaderMap *requestHeaders = nullptr,
-          req::vector<String> *responseHeaders = nullptr);
+          req::vector<OptString> *responseHeaders = nullptr);
 
   /**
    * POST data to an URL and returns its response code.
@@ -80,12 +86,12 @@ struct HttpClient {
   int post(const char *url, const char *data, size_t size,
            StringBuffer &response,
            const HeaderMap *requestHeaders = nullptr,
-           req::vector<String> *responseHeaders = nullptr);
+           req::vector<OptString> *responseHeaders = nullptr);
 
   int request(const char* method,
               const char *url, const char *data, size_t size,
               StringBuffer &response, const HeaderMap *requestHeaders,
-              req::vector<String> *responseHeaders);
+              req::vector<OptString> *responseHeaders);
 
   const std::string& getLastError() const {
     return m_error;
@@ -100,7 +106,7 @@ private:
   bool m_decompress;
 
   StringBuffer *m_response;
-  req::vector<String> *m_responseHeaders;
+  req::vector<OptString> *m_responseHeaders;
   std::string m_error;
 
   bool m_basic;
@@ -111,6 +117,10 @@ private:
   int         m_proxyPort;
   std::string m_proxyUsername;
   std::string m_proxyPassword;
+
+  std::string m_proxyCaBundle;
+  std::string m_proxySSLCertPath;
+  std::string m_proxySSLKeyPath;
 
   long m_use_ssl = CURLUSESSL_NONE;
   long m_sslversion = CURL_SSLVERSION_DEFAULT;  //try to match remote SSL
@@ -127,4 +137,3 @@ private:
 ///////////////////////////////////////////////////////////////////////////////
 }
 
-#endif // incl_HPHP_HTTP_CLIENT_H_

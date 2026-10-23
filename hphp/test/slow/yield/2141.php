@@ -1,10 +1,14 @@
-<?php
+<?hh
 
-function fruit() {
+function fruit() :AsyncGenerator<mixed,mixed,void>{
  yield 'apple';
  yield 'banana';
 }
- foreach (fruit() as $fruit) {
+
+
+ <<__EntryPoint>>
+function main_2141() :mixed{
+foreach (fruit() as $fruit) {
  var_dump($fruit);
 }
-
+}

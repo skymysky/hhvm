@@ -1,0 +1,93 @@
+FoldedClass {
+    name: "\\A",
+    kind: Cclass(
+        Concrete,
+    ),
+    consts: {
+        "class": ClassConst {
+            is_synthesized: true,
+            kind: CCConcrete,
+            pos: NPos,
+            ty: class<this>,
+            origin: "\\A",
+            refs: [],
+            is_shape_key: false,
+            value: CVAbsent,
+        },
+    },
+}
+FoldedClass {
+    name: "\\B",
+    kind: Cclass(
+        Concrete,
+    ),
+    substs: {
+        "\\A": SubstContext {
+            subst: Subst(
+                {},
+            ),
+            class_context: "\\B",
+            from_req_extends: false,
+        },
+    },
+    ancestors: {
+        "\\A": A,
+    },
+    consts: {
+        "class": ClassConst {
+            is_synthesized: true,
+            kind: CCConcrete,
+            pos: NPos,
+            ty: class<this>,
+            origin: "\\B",
+            refs: [],
+            is_shape_key: false,
+            value: CVAbsent,
+        },
+    },
+    extends: {
+        "\\A",
+    },
+}
+FoldedClass {
+    name: "\\C",
+    kind: Cclass(
+        Concrete,
+    ),
+    substs: {
+        "\\A": SubstContext {
+            subst: Subst(
+                {},
+            ),
+            class_context: "\\B",
+            from_req_extends: false,
+        },
+        "\\B": SubstContext {
+            subst: Subst(
+                {},
+            ),
+            class_context: "\\C",
+            from_req_extends: false,
+        },
+    },
+    ancestors: {
+        "\\A": A,
+        "\\B": B,
+    },
+    consts: {
+        "class": ClassConst {
+            is_synthesized: true,
+            kind: CCConcrete,
+            pos: NPos,
+            ty: class<this>,
+            origin: "\\C",
+            refs: [],
+            is_shape_key: false,
+            value: CVAbsent,
+        },
+    },
+    extends: {
+        "\\B",
+        "\\A",
+    },
+}

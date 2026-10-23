@@ -1,0 +1,26 @@
+error: Parsing[1002] XHP: mismatched tag: `` not the same as `a` [1]
+
+decl_unclosed_xhp.php:13:3
+11 | 
+12 | function f(): void {
+13 |   <a>
+   |   ^^^ [1]
+14 | }
+   | ^ [1]
+
+error: Parsing[1002] A closing XHP tag is expected here. [1]
+
+decl_unclosed_xhp.php:15:1
+13 |   <a>
+14 | }
+
+error: Naming[2049] Unbound name: `:a` (an object type) [1]
+
+decl_unclosed_xhp.php:13:4
+11 | 
+12 | function f(): void {
+13 |   <a>
+   |    ^ [1]
+14 | }
+
+3 errors found

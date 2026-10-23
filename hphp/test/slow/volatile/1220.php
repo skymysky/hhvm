@@ -1,14 +1,13 @@
-<?php
+<?hh
 
-function foo() {
+function foo() :mixed{
   if (class_exists('bar')) {
     echo "yes\n";
   }
  else {
     echo "no\n";
   }
-  class bar {
-  }
+  include '1220.inc';
   if (class_exists('bar')) {
     echo "yes\n";
   }
@@ -16,4 +15,8 @@ function foo() {
     echo "no\n";
   }
 }
+
+<<__EntryPoint>>
+function main_1220() :mixed{
 foo();
+}

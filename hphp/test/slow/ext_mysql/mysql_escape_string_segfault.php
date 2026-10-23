@@ -1,6 +1,10 @@
-<?php
+<?hh
+
 // Tests for segfault if no connection available
 
-@mysql_real_escape_string("");
+<<__EntryPoint>>
+function main_mysql_escape_string_segfault() :mixed{
+mysql_real_escape_string("");
 
 echo "ok";
+}

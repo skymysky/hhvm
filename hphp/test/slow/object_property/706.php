@@ -1,6 +1,10 @@
-<?php
+<?hh
 
-function test($x, $v) {
- var_dump($x->$v = 1);
+function test($x, $v) :mixed{
+ $r = is_object($x) ? 1 : null; $x->$v = 1; var_dump($r);
  }
-test(new stdclass, "\0foo");
+
+<<__EntryPoint>>
+function main_706() :mixed{
+test(new stdClass, "\0foo");
+}

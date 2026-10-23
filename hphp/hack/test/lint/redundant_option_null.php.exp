@@ -1,0 +1,6 @@
+warning: Lint[5009] `?null` is a redundant typehint - just use `null`
+   --> redundant_option_null.php
+  4 | function redundant_option_null(): ?null {
+    |                                   ^^^^^
+
+

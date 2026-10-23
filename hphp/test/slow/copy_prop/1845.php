@@ -1,10 +1,10 @@
-<?php
+<?hh
 
-function test($tr_data) {
+function test($tr_data) :mixed{
   $temp_tr = null;
   foreach ($tr_data as $tr_id => $tr_row) {
     if ($tr_row == 45) $temp_tr = $tr_id;
-    if ($tr_id == 0) {
+    if ((int)$tr_id == 0) {
       continue;
     }
  else {
@@ -16,4 +16,8 @@ function test($tr_data) {
   }
   return null;
 }
-var_dump(test(array('a' => 1, 'b' => 45)));
+
+<<__EntryPoint>>
+function main_1845() :mixed{
+var_dump(test(dict['a' => 1, 'b' => 45]));
+}

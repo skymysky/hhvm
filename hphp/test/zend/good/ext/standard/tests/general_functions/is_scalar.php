@@ -1,16 +1,16 @@
-<?php
+<?hh
 /* Prototype: bool is_scalar ( mixed $var );
  * Description: Finds whether a variable is a scalar (i.e integer, float, string or boolean)
  */
-
+<<__EntryPoint>> function main(): void {
 echo "*** Testing basic operations ***\n";
-$scalar_variables = array(
+$scalar_variables = vec[
   0,  // integers
   1,
   -45678,
   0x5FF,  // hexadecimal as integer
   0X566,
-  -0xAAF, 
+  -0xAAF,
   -0XCCF,
   01234,  // octal as integer
   -0126,
@@ -30,8 +30,8 @@ $scalar_variables = array(
   " ",
   ' ',
   "string",
-  'string', 
-  "0",  // numeric as string  
+  'string',
+  "0",  // numeric as string
   "40",
   "50.696",
   "0x534",
@@ -41,8 +41,8 @@ $scalar_variables = array(
   FALSE,
   true,
   false
-);
-/* loop through each valid scalar variables in $scalar_variables 
+];
+/* loop through each valid scalar variables in $scalar_variables
    and see the working of is_scalar(), expected output: bool(true)
 */
 $loop_counter = 1;
@@ -52,48 +52,28 @@ foreach($scalar_variables as $scalar) {
 }
 
 echo "\n*** Testing possible variations ***\n";
-// different scalar variables which are unset
-$int_var = 10;
-$float_var = 1e5;
-$string_var = "string";
-$boolean_var = true;
-$object = new stdclass;
-$array = array(10);
-$resource = opendir('.');
-unset($int_var, $float_var, $string_var, $boolean_var, $object, $array, $resource);
 
-// resources 
+// resources
 $fp = fopen(__FILE__, "r");
 $dfp = opendir(".");
 
-$variation_array = array(
+$variation_array = vec[
   NULL,
   null,
 
-  array(),  // arrays 
-  array(NULL),
-  array(true),
-  array(0),
-  array(1,2,3,4),
+  vec[],  // arrays
+  vec[NULL],
+  vec[true],
+  vec[0],
+  vec[1,2,3,4],
 
   $fp,  // resources
   $dfp,
 
-  new stdclass, // object
+  new stdClass, // object
+];
 
-  @$int_var,  // scalars that are unset
-  @$float_var,
-  @$string_var,
-  @$boolean_var,
-
-  @$array,   // non scalars that are unset
-  @$object,
-  @$resource,
-
-  @$undefined_var  // undefined variable
-);  
-
-/* loop through each element of $variation_array to see the 
+/* loop through each element of $variation_array to see the
    working of is_scalar on non-scalar values, expected output: bool(false)
 */
 $loop_counter = 1;
@@ -104,16 +84,15 @@ foreach( $variation_array as $value ) {
 
 echo "\n*** Testing error conditions ***\n";
 // Zero arguments
-var_dump( is_scalar() );
+try { var_dump( is_scalar() ); } catch (Exception $e) { echo "\n".'Warning: '.$e->getMessage().' in '.__FILE__.' on line '.__LINE__."\n"; }
 
 // Arguments more than expected
-var_dump( is_scalar( $scalar_variables[2], $scalar_variables[2]) );
-var_dump( is_scalar( new stdclass, new stdclass) );
+try { var_dump( is_scalar( $scalar_variables[2], $scalar_variables[2]) ); } catch (Exception $e) { echo "\n".'Warning: '.$e->getMessage().' in '.__FILE__.' on line '.__LINE__."\n"; }
+try { var_dump( is_scalar( new stdClass, new stdClass) ); } catch (Exception $e) { echo "\n".'Warning: '.$e->getMessage().' in '.__FILE__.' on line '.__LINE__."\n"; }
 
-echo "Done\n";  
+echo "Done\n";
 
 // close the resources used
 fclose($fp);
 closedir($dfp);
-
-?>
+}

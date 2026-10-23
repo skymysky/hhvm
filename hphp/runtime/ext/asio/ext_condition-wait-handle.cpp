@@ -56,7 +56,7 @@ void HHVM_STATIC_METHOD(ConditionWaitHandle, setOnCreateCallback,
 Object HHVM_STATIC_METHOD(ConditionWaitHandle, create,
                           const Variant& child) {
   // Child not an Awaitable?
-  auto const child_wh = c_Awaitable::fromCell(*child.asCell());
+  auto const child_wh = c_Awaitable::fromTV(*child.asTypedValue());
   if (UNLIKELY(!child_wh)) {
     SystemLib::throwInvalidArgumentExceptionObject(
       "Expected child to be an instance of Awaitable");
@@ -84,12 +84,12 @@ void HHVM_METHOD(ConditionWaitHandle, succeed, const Variant& result) {
   assertx(obj->getState() == c_ConditionWaitHandle::STATE_BLOCKED);
   auto parentChain = obj->getParentChain();
   obj->setState(c_ConditionWaitHandle::STATE_SUCCEEDED);
-  cellDup(*result.asCell(), obj->m_resultOrException);
+  tvDup(*result.asTypedValue(), obj->m_resultOrException);
   parentChain.unblock();
 }
 
 void HHVM_METHOD(ConditionWaitHandle, fail, const Object& exception) {
-  if (!exception->instanceof(SystemLib::s_ThrowableClass)) {
+  if (!exception->instanceof(SystemLib::getThrowableClass())) {
     SystemLib::throwInvalidArgumentExceptionObject(
       "Expected exception to be an instance of Throwable");
   }
@@ -102,7 +102,7 @@ void HHVM_METHOD(ConditionWaitHandle, fail, const Object& exception) {
   assertx(obj->getState() == c_ConditionWaitHandle::STATE_BLOCKED);
   auto parentChain = obj->getParentChain();
   obj->setState(c_ConditionWaitHandle::STATE_FAILED);
-  cellDup(make_tv<KindOfObject>(exception.get()), obj->m_resultOrException);
+  tvDup(make_tv<KindOfObject>(exception.get()), obj->m_resultOrException);
   parentChain.unblock();
 }
 
@@ -110,7 +110,10 @@ void c_ConditionWaitHandle::initialize(c_WaitableWaitHandle* child) {
   assertx(!child->isFinished());
 
   setState(STATE_BLOCKED);
-  setContextIdx(child->getContextIdx());
+  setContextStateIndex(std::min(
+    AsioSession::Get()->getCurrentContextStateIndex(),
+    child->getContextStateIndex())
+  );
   m_child = child;
   m_child->incRefCount();
   m_child->getParentChain()
@@ -143,7 +146,7 @@ void c_ConditionWaitHandle::onUnblocked() {
   decRefObj(this);
 }
 
-String c_ConditionWaitHandle::getName() {
+OptString c_ConditionWaitHandle::getName() {
   return s_condition;
 }
 
@@ -154,13 +157,16 @@ c_WaitableWaitHandle* c_ConditionWaitHandle::getChild() {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-void AsioExtension::initConditionWaitHandle() {
+void AsioExtension::registerNativeConditionWaitHandle() {
   HHVM_STATIC_MALIAS(HH\\ConditionWaitHandle, create,
                      ConditionWaitHandle, create);
   HHVM_STATIC_MALIAS(HH\\ConditionWaitHandle, setOnCreateCallback,
                      ConditionWaitHandle, setOnCreateCallback);
   HHVM_MALIAS(HH\\ConditionWaitHandle, succeed, ConditionWaitHandle, succeed);
   HHVM_MALIAS(HH\\ConditionWaitHandle, fail, ConditionWaitHandle, fail);
+
+  Native::registerClassExtraDataHandler(
+    c_ConditionWaitHandle::className(), finish_class<c_ConditionWaitHandle>);
 }
 
 ///////////////////////////////////////////////////////////////////////////////

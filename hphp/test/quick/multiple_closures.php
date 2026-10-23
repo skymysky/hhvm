@@ -1,7 +1,7 @@
 <?hh
 
 class foo {
-  public function bar() {
+  public function bar() :mixed{
     $z = function() {};
     $zz = function() {};
     $zzz = function() {};
@@ -10,8 +10,7 @@ class foo {
     $zzzzzz = function() {};
   }
 }
-function main() {
+<<__EntryPoint>> function main(): void {
   $l = new foo;
   $l->bar();
 }
-main();

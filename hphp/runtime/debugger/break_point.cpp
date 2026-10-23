@@ -30,10 +30,10 @@
 #include "hphp/runtime/base/comparisons.h"
 #include "hphp/runtime/ext/generator/ext_generator.h"
 
-namespace HPHP { namespace Eval {
+namespace HPHP::Eval {
 ///////////////////////////////////////////////////////////////////////////////
 
-TRACE_SET_MOD(debugger);
+TRACE_SET_MOD(debugger)
 
 int InterruptSite::getFileLen() const {
   TRACE(2, "InterruptSite::getFileLen\n");
@@ -85,7 +85,7 @@ InterruptSite::InterruptSite(bool hardBreakPoint, const Variant& error)
       m_callingSite(nullptr), m_class(nullptr),
       m_file((StringData*)nullptr),
       m_line0(0), m_char0(0), m_line1(0), m_char1(0),
-      m_offset(InvalidAbsoluteOffset), m_unit(nullptr), m_valid(false),
+      m_offset(kInvalidOffset), m_func(nullptr), m_valid(false),
       m_funcEntry(false) {
   TRACE(2, "InterruptSite::InterruptSite\n");
 #define bail_on(c) if (c) { return; }
@@ -95,17 +95,18 @@ InterruptSite::InterruptSite(bool hardBreakPoint, const Variant& error)
   if (hardBreakPoint && fp->skipFrame()) {
     // for hard breakpoint, the fp is for an extension function,
     // so we need to construct the site on the caller
-    fp = context->getPrevVMStateSkipFrame(fp, &m_offset);
+    Offset offset;
+    fp = context->getPrevVMStateSkipFrame(fp, &offset);
+    m_func = fp->func();
+    m_offset = m_func->offsetOf(skipCall(m_func->at(offset)));
   } else {
     auto const *pc = vmpc();
-    auto f = fp->m_func;
-    bail_on(!f);
-    m_unit = f->unit();
-    bail_on(!m_unit);
-    m_offset = m_unit->offsetOf(pc);
-    auto base = f->isGenerator()
-      ? BaseGenerator::userBase(f)
-      : f->base();
+    m_func = fp->func();
+    bail_on(!m_func);
+    m_offset = m_func->offsetOf(pc);
+    auto base = m_func->isGenerator()
+      ? BaseGenerator::userBase(m_func)
+      : 0;
     if (m_offset == base) {
       m_funcEntry = true;
     }
@@ -121,7 +122,7 @@ InterruptSite::InterruptSite(ActRec *fp, Offset offset, const Variant& error)
     m_callingSite(nullptr), m_class(nullptr),
     m_file((StringData*)nullptr),
     m_line0(0), m_char0(0), m_line1(0), m_char1(0),
-    m_offset(offset), m_unit(nullptr), m_valid(false),
+    m_offset(offset), m_func(nullptr), m_valid(false),
     m_funcEntry(false), m_builtin(false) {
   TRACE(2, "InterruptSite::InterruptSite(fp)\n");
   this->Initialize(fp);
@@ -133,23 +134,24 @@ void InterruptSite::Initialize(ActRec *fp) {
 #define bail_on(c) if (c) { return; }
   assertx(fp);
   m_activationRecord = fp;
-  bail_on(!fp->m_func);
-  m_unit = fp->m_func->unit();
-  bail_on(!m_unit);
-  m_file = String(StrNR{m_unit->filepath()});
-  if (m_unit->getSourceLoc(m_offset, m_sourceLoc)) {
+  m_func = fp->func();
+  bail_on(!m_func);
+  auto const unit = m_func->unit();
+  bail_on(!unit);
+  m_file = OptString(StrNR{unit->filepath()});
+  if (m_func->getSourceLoc(m_offset, m_sourceLoc)) {
     m_line0 = m_sourceLoc.line0;
     m_char0 = m_sourceLoc.char0;
     m_line1 = m_sourceLoc.line1;
     m_char1 = m_sourceLoc.char1;
   }
-  m_function = fp->m_func->name()->data();
-  if (fp->m_func->preClass()) {
-    m_class = fp->m_func->preClass()->name()->data();
+  m_function = m_func->name()->data();
+  if (m_func->preClass()) {
+    m_class = m_func->preClass()->name()->data();
   } else {
     m_class = "";
   }
-  m_builtin = fp->m_func->isBuiltin();
+  m_builtin = m_func->isBuiltin();
 #undef bail_on
   m_valid = true;
 }
@@ -923,7 +925,7 @@ bool BreakPointInfo::MatchFile(const char *haystack, int haystack_len,
       strcasecmp(haystack + pos, needle.c_str()) == 0) {
     return true;
   }
-  if (strcasecmp(StatCache::realpath(needle.c_str()).c_str(), haystack)
+  if (strcasecmp(realpathLibc(needle.c_str()).c_str(), haystack)
       == 0) {
     return true;
   }
@@ -948,8 +950,8 @@ bool BreakPointInfo::MatchFile(const std::string& file,
     return true;
   }
   // Perhaps file or fullPath is a symlink.
-  auto realFile = StatCache::realpath(file.c_str());
-  auto realFullPath = StatCache::realpath(fullPath.c_str());
+  auto realFile = realpathLibc(file.c_str());
+  auto realFullPath = realpathLibc(fullPath.c_str());
   if (realFile != file || realFullPath != fullPath) {
     return MatchFile(realFile, realFullPath);
   }
@@ -965,13 +967,13 @@ bool BreakPointInfo::MatchClass(const char *fcls, const std::string &bcls,
     return Match(fcls, 0, bcls, true, true);
   }
 
-  String sdBClsName(bcls);
-  Class* clsB = Unit::lookupClass(sdBClsName.get());
+  OptString sdBClsName(bcls);
+  Class* clsB = Class::lookup(sdBClsName.get());
   if (!clsB) return false;
-  String sdFClsName(fcls, CopyString);
-  Class* clsF = Unit::lookupClass(sdFClsName.get());
+  OptString sdFClsName(fcls, CopyString);
+  Class* clsF = Class::lookup(sdFClsName.get());
   if (clsB == clsF) return true;
-  String sdFuncName(func, CopyString);
+  OptString sdFuncName(func, CopyString);
   Func* f = clsB->lookupMethod(sdFuncName.get());
   return f && f->baseCls() == clsF;
 }
@@ -994,11 +996,11 @@ bool BreakPointInfo::Match(const char *haystack, int haystack_len,
   }
 
   Variant matches;
-  Variant r = preg_match(String(needle.c_str(), needle.size(),
-                                CopyString),
-                         String(haystack, haystack_len, CopyString),
+  Variant r = preg_match(OptString(needle.c_str(), needle.size(),
+                                   CopyString),
+                         OptString(haystack, haystack_len, CopyString),
                          &matches);
-  return HPHP::same(r, 1);
+  return HPHP::same(r, static_cast<int64_t>(1));
 }
 
 bool BreakPointInfo::checkExceptionOrError(const Variant& e) {
@@ -1072,7 +1074,7 @@ bool BreakPointInfo::checkClause(DebuggerProxy &proxy) {
         m_php = DebuggerProxy::MakePHP(m_clause);
       }
     }
-    String output;
+    OptString output;
     {
       // Don't hit more breakpoints while attempting to decide if we should stop
       // at this breakpoint.
@@ -1117,4 +1119,4 @@ void BreakPointInfo::RecvImpl(int version,
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-}}
+}

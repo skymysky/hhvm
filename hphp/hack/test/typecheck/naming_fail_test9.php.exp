@@ -1,4 +1,14 @@
-File "naming_fail_test9.php", line 9, characters 10-11:
-The variable $e is defined (Naming[2007])
-File "naming_fail_test9.php", line 7, characters 25-26:
-But in a different scope
+error: Naming[2050] Variable `$e` is undefined, or not always defined. [1]
+-> Did you mean `$_` instead? [2]
+
+naming_fail_test9.php:10:10
+ 7 |     might_throw();
+ 8 |   } catch (FooException $e) {
+ 9 |   } catch (Exception $_) {
+   |                      ^^ [2]
+10 |     echo $e;
+   |          ^^ [1]
+11 |   }
+12 | }
+
+1 error found

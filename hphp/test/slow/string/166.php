@@ -1,41 +1,45 @@
-<?php
+<?hh
 
-function f() {
+function f() :mixed{
  return 'x';
  }
-function g() {
+function g() :mixed{
 }
-function test1($a) {
+function test1($a) :mixed{
   $buf = '';
   foreach ($a as $s) {
-     $buf .= f() . g() . 'h' . f() . 'h' . g();
+     $buf .= (string)(f()) . (string)(g()) . 'h' . (string)(f()) . 'h' . (string)(g());
   }
   foreach ($a as $s) {
     $buf .= ($s . 'h' . $s);
   }
   return $buf;
 }
-var_dump(test1(array(1)));
-function test2() {
-  return f() . g() . f() . g();
+function test2() :mixed{
+  return (string)(f()) . (string)(g()) . (string)(f()) . (string)(g());
 }
-var_dump(test2());
-function test3() {
-  return f() . g() . f() . g() . f() . g() . f() . g() . f();
+function test3() :mixed{
+  return (string)(f()) . (string)(g()) . (string)(f()) . (string)(g()) . (string)(f()) . (string)(g()) . (string)(f()) . (string)(g()) . (string)(f());
 }
-var_dump(test3());
-function test4() {
+function test4() :mixed{
   $s = f();
   $s .=    ('foo'.    'bar'.    f().    'foo'.    'baz'.    f().    'fuz'.    'boo'.    f().    'fiz'.     'faz');
   $s .= f();
   return $s;
 }
+function test5() :mixed{
+  return (string)(g()).(string)(g()).(string)(g()).(string)(g());
+}
+function test6() :mixed{
+  return (string)(g()).(string)(f()).(string)(g());
+}
+
+<<__EntryPoint>>
+function main_166() :mixed{
+var_dump(test1(vec[1]));
+var_dump(test2());
+var_dump(test3());
 var_dump(test4());
-function test5() {
-  return g().g().g().g();
-}
 var_dump(test5());
-function test6() {
-  return g().f().g();
-}
 var_dump(test6());
+}

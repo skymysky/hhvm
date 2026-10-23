@@ -1,3 +1,0 @@
-<?hh
-
-const X = foo();

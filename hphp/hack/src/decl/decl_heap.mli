@@ -1,4 +1,4 @@
-(**
+(*
  * Copyright (c) 2016, Facebook, Inc.
  * All rights reserved.
  *
@@ -10,77 +10,98 @@
 open Typing_defs
 open Decl_defs
 
-module Class : sig
-  type t = decl_class_type
-  val prefix : Prefix.t
-  val description : string
-  val use_sqlite_fallback : unit -> bool
-end
-module Fun : sig
-  type t = decl fun_type
-  val prefix : Prefix.t
-  val description : string
-  val use_sqlite_fallback : unit -> bool
-end
-module Typedef :
-  sig
-    type t = typedef_type
-    val prefix : Prefix.t
-    val description : string
-    val use_sqlite_fallback : unit -> bool
-  end
-module GConst : sig
-  type t = decl ty * Errors.t
-  val prefix : Prefix.t
-  val description : string
-  val use_sqlite_fallback : unit -> bool
-end
-module Property : sig
-  type t = decl ty
-  val prefix : Prefix.t
-  val description : string
-  val use_sqlite_fallback : unit -> bool
-end
-module StaticProperty : sig
-  type t = decl ty
-  val prefix : Prefix.t
-  val description : string
-  val use_sqlite_fallback : unit -> bool
-end
-module Method : sig
-  type t = decl fun_type
-  val prefix : Prefix.t
-  val description : string
-  val use_sqlite_fallback : unit -> bool
-end
-module StaticMethod : sig
-  type t = decl fun_type
-  val prefix : Prefix.t
-  val description : string
-  val use_sqlite_fallback : unit -> bool
-end
-module Constructor : sig
-  type t = decl fun_type
-  val prefix : Prefix.t
-  val description : string
-  val use_sqlite_fallback : unit -> bool
+module Capacity : sig
+  val capacity : int
 end
 
-module ClassEltKey : SharedMem.UserKeyType
-  with type t = string * string
+module Class : Shared_mem.Value with type t = decl_class_type
 
-module Funs : module type of SharedMem.WithCache (StringKey) (Fun)
-module Classes : module type of SharedMem.WithCache (StringKey) (Class)
-module Typedefs : module type of SharedMem.WithCache (StringKey) (Typedef)
-module GConsts : module type of SharedMem.WithCache (StringKey) (GConst)
+module Fun : Shared_mem.Value with type t = fun_elt
+
+module Typedef : Shared_mem.Value with type t = typedef_type
+
+module GConst : Shared_mem.Value with type t = const_decl
+
+module Module : Shared_mem.Value with type t = module_def_type
+
+module Property : Shared_mem.Value with type t = decl_ty
+
+module StaticProperty : Shared_mem.Value with type t = decl_ty
+
+module Method : Shared_mem.Value with type t = fun_elt
+
+module StaticMethod : Shared_mem.Value with type t = fun_elt
+
+module Constructor : Shared_mem.Value with type t = fun_elt
+
+module ClassEltKey : Shared_mem.Key with type t = string * string
+
+module Funs :
+    module type of
+      Shared_mem.HeapWithLocalCache
+        (Shared_mem.ImmediateBackend (Shared_mem.Evictable)) (String_key)
+        (Fun)
+        (Capacity)
+
+module Classes :
+    module type of
+      Shared_mem.HeapWithLocalCache
+        (Shared_mem.ImmediateBackend (Shared_mem.Evictable)) (String_key)
+        (Class)
+        (Capacity)
+
+module Typedefs :
+    module type of
+      Shared_mem.HeapWithLocalCache
+        (Shared_mem.ImmediateBackend (Shared_mem.Evictable)) (String_key)
+        (Typedef)
+        (Capacity)
+
+module GConsts :
+    module type of
+      Shared_mem.HeapWithLocalCache
+        (Shared_mem.ImmediateBackend (Shared_mem.Evictable)) (String_key)
+        (GConst)
+        (Capacity)
+
+module Modules :
+    module type of
+      Shared_mem.HeapWithLocalCache
+        (Shared_mem.ImmediateBackend (Shared_mem.Evictable)) (String_key)
+        (Module)
+        (Capacity)
 
 module Props :
-  module type of SharedMem.WithCache (ClassEltKey) (Property)
+    module type of
+      Shared_mem.HeapWithLocalCache
+        (Shared_mem.ImmediateBackend (Shared_mem.Evictable)) (ClassEltKey)
+        (Property)
+        (Capacity)
+
 module StaticProps :
-  module type of SharedMem.WithCache (ClassEltKey) (StaticProperty)
+    module type of
+      Shared_mem.HeapWithLocalCache
+        (Shared_mem.ImmediateBackend (Shared_mem.Evictable)) (ClassEltKey)
+        (StaticProperty)
+        (Capacity)
+
 module Methods :
-  module type of SharedMem.WithCache (ClassEltKey) (Method)
+    module type of
+      Shared_mem.HeapWithLocalCache
+        (Shared_mem.ImmediateBackend (Shared_mem.Evictable)) (ClassEltKey)
+        (Method)
+        (Capacity)
+
 module StaticMethods :
-  module type of SharedMem.WithCache (ClassEltKey) (StaticMethod)
+    module type of
+      Shared_mem.HeapWithLocalCache
+        (Shared_mem.ImmediateBackend (Shared_mem.Evictable)) (ClassEltKey)
+        (StaticMethod)
+        (Capacity)
+
 module Constructors :
-  module type of SharedMem.WithCache (StringKey) (Constructor)
+    module type of
+      Shared_mem.HeapWithLocalCache
+        (Shared_mem.ImmediateBackend (Shared_mem.Evictable)) (String_key)
+        (Constructor)
+        (Capacity)

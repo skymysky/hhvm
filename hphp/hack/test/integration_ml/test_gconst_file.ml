@@ -1,4 +1,4 @@
-(**
+(*
  * Copyright (c) 2016, Facebook, Inc.
  * All rights reserved.
  *
@@ -9,8 +9,7 @@
  *)
 
 open Integration_test_base_types
-open ServerEnv
-
+open Server_env
 module Test = Integration_test_base
 
 let foo_contents = "<?hh // strict
@@ -25,38 +24,52 @@ let foo_new_contents = "<?hh // strict
   const string A = '';
 "
 
-let () =
-  let env = Test.setup_server () in
-  let env, loop_output = Test.(run_loop_once env { default_loop_input with
-    disk_changes = [
-      "foo.php", foo_contents;
-    ]
-  }) in
-
+let test () =
+  let env =
+    Test.setup_server
+      ~hhi_files:(Hhi.get_raw_hhi_contents () |> Array.to_list)
+      ()
+  in
+  let (env, loop_output) =
+    Test.(
+      run_loop_once
+        env
+        { default_loop_input with disk_changes = [("foo.php", foo_contents)] })
+  in
   if not loop_output.did_read_disk_changes then
     Test.fail "Expected the server to process disk updates";
-  Test.assert_no_errors env;
+  Test.assert_no_diagnostics env;
 
-  let env, loop_output = Test.(run_loop_once env { default_loop_input with
-    disk_changes = [
-      "bar.php", bar_contents;
-    ]
-  }) in
-
+  let (env, loop_output) =
+    Test.(
+      run_loop_once
+        env
+        { default_loop_input with disk_changes = [("bar.php", bar_contents)] })
+  in
   if not loop_output.did_read_disk_changes then
     Test.fail "Expected the server to process disk updates";
-  Test.assert_no_errors env;
+  Test.assert_no_diagnostics env;
 
-  let env, loop_output = Test.(run_loop_once env { default_loop_input with
-    disk_changes = [
-      "foo.php", foo_new_contents;
-    ]
-  }) in
+  let (env, loop_output) =
+    Test.(
+      run_loop_once
+        env
+        {
+          default_loop_input with
+          disk_changes = [("foo.php", foo_new_contents)];
+        })
+  in
   if not loop_output.did_read_disk_changes then
     Test.fail "Expected the server to process disk updates";
 
-  let expected_error = "File \"/bar.php\", line 2, characters 9-11:\n"
-                      ^"This is an int (Typing[4110])\n"
-                      ^"File \"/foo.php\", line 2, characters 9-14:\n"
-                      ^"It is incompatible with a string" in
-  Test.assertSingleError expected_error (Errors.get_error_list env.errorl);
+  let expected_error =
+    "ERROR: File \"/bar.php\", line 2, characters 9-11:\n"
+    ^ "Wrong type hint (Typing[4110])\n"
+    ^ "  File \"/bar.php\", line 2, characters 9-11:\n"
+    ^ "  Expected `int`\n"
+    ^ "  File \"/foo.php\", line 2, characters 9-14:\n"
+    ^ "  But got `string`"
+  in
+  Test.assertSingleDiagnostic
+    expected_error
+    (Diagnostics.get_diagnostic_list env.diagnostics)

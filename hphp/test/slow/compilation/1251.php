@@ -1,3 +1,7 @@
-<?php
+<?hh
 
-$a = date('d') % 10;
+
+<<__EntryPoint>>
+function main_1251() :mixed{
+$a = (int)(date('d')) % 10;
+}

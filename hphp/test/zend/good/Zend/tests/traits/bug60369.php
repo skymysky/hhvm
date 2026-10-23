@@ -1,7 +1,7 @@
-<?php
+<?hh
 
 trait PropertiesTrait {
-   static $same = true;
+   public static $same = true;
 }
 
 class Properties {
@@ -9,4 +9,7 @@ class Properties {
    public $same = true;
 }
 
-?>
+<<__EntryPoint>>
+function main(): void {
+  echo "Done.\n";
+}

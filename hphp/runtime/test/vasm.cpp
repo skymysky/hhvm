@@ -14,7 +14,10 @@
    +----------------------------------------------------------------------+
 */
 
+#include "hphp/runtime/vm/jit/cg-meta.h"
+#include "hphp/runtime/vm/jit/abi.h"
 #include "hphp/runtime/vm/jit/phys-reg.h"
+#include "hphp/runtime/vm/jit/relocation.h"
 #include "hphp/runtime/vm/jit/vasm.h"
 #include "hphp/runtime/vm/jit/vasm-emit.h"
 #include "hphp/runtime/vm/jit/vasm-gen.h"
@@ -23,55 +26,147 @@
 #include "hphp/runtime/vm/jit/vasm-text.h"
 #include "hphp/runtime/vm/jit/vasm-unit.h"
 
+#ifdef __aarch64__
+#include "hphp/runtime/vm/jit/vasm-util-arm.h"
+#endif
+
+#include "hphp/util/arch.h"
+#include "hphp/util/configs/jit.h"
+#include "hphp/util/data-block.h"
+#include "hphp/vixl/hphp-compat.h"
+
 #if defined(__x86_64__)
 #include <xmmintrin.h>
 #endif
+
+#include <optional>
 
 #include <gtest/gtest.h>
 
 namespace HPHP { namespace jit {
 
 namespace {
-template<typename T, typename Lcodegen, typename Ltest>
-void test_function(Lcodegen lcodegen, Ltest ltest) {
-  constexpr auto blockSize = 4096;
-  auto code = static_cast<uint8_t*>(mmap(nullptr, blockSize,
+constexpr size_t kDefaultBlockSize = 4096;
+constexpr size_t kDataSize = 100;
+
+template<typename Lcodegen, typename Ltest>
+void test_vasm_areas(size_t mainSize,
+                     size_t coldSize,
+                     Lcodegen lcodegen,
+                     Ltest ltest,
+                     bool forceFarLiteral,
+                     TCA logicalBase) {
+  auto const mappingSize = mainSize + coldSize + kDataSize;
+  auto code = static_cast<uint8_t*>(mmap(nullptr, mappingSize,
                                          PROT_READ | PROT_WRITE | PROT_EXEC,
                                          MAP_PRIVATE | MAP_ANONYMOUS, -1, 0));
-  SCOPE_EXIT { munmap(code, blockSize); };
+  SCOPE_EXIT { munmap(code, mappingSize); };
 
-  constexpr auto dataSize = 100;
-  constexpr auto codeSize = blockSize - dataSize;
-  // None of these tests should use much data.
-  auto data_buffer = code + codeSize;
+  auto const coldBuffer = code + mainSize;
+  auto const dataBuffer = coldBuffer + coldSize;
 
   CodeBlock main;
-  main.init(code, codeSize, "test");
+  CodeBlock cold;
   DataBlock data;
-  data.init(data_buffer, dataSize, "data");
+  if (logicalBase) {
+    main.init(logicalBase, code, mainSize, "test");
+    if (coldSize) {
+      cold.init(
+        logicalBase + mainSize,
+        coldBuffer,
+        coldSize,
+        "cold"
+      );
+    }
+    data.init(
+      logicalBase + mainSize + coldSize,
+      dataBuffer,
+      kDataSize,
+      "data"
+    );
+  } else {
+    main.init(code, mainSize, "test");
+    if (coldSize) cold.init(coldBuffer, coldSize, "cold");
+    data.init(dataBuffer, kDataSize, "data");
+  }
 
   Vunit unit;
+  if (forceFarLiteral) unit.enableFarLiteral();
   Vasm vasm{unit};
-  Vtext text { main, data };
 
   auto& v = vasm.main();
   unit.entry = v;
 
-  lcodegen(v);
+  lcodegen(unit, v);
 
   CGMeta meta;
-  if (arch() == Arch::ARM) {
-    emitARM(unit, text, meta, nullptr);
-  } else if (arch() == Arch::X64) {
-    emitX64(unit, text, meta, nullptr);
+  std::optional<Vtext> text;
+  if (coldSize) {
+    text.emplace(main, cold, data);
+  } else {
+    text.emplace(main, data);
   }
+  emit(unit, *text, meta, nullptr);
 
-  ltest((T)code);
+  ltest(code, main, meta);
+}
+
+template<typename Lcodegen, typename Ltest>
+void test_vasm(size_t blockSize,
+               Lcodegen lcodegen,
+               Ltest ltest,
+               bool forceFarLiteral = false,
+               TCA logicalBase = nullptr) {
+  test_vasm_areas(
+    blockSize - kDataSize,
+    0,
+    [&] (Vunit&, Vout& v) { lcodegen(v); },
+    ltest,
+    forceFarLiteral,
+    logicalBase
+  );
+}
+
+template<typename Lcodegen, typename Ltest>
+void test_cross_area_emission(Lcodegen lcodegen,
+                              Ltest ltest,
+                              size_t mainSize = kDefaultBlockSize) {
+  test_vasm_areas(
+    mainSize,
+    kDefaultBlockSize,
+    lcodegen,
+    [&] (uint8_t*, CodeBlock& main, CGMeta& meta) {
+      ltest(main, meta);
+    },
+    false,
+    reinterpret_cast<TCA>(0x10000000)
+  );
+}
+
+template<typename T, typename Lcodegen, typename Ltest>
+void test_function(Lcodegen lcodegen, Ltest ltest) {
+  test_vasm(kDefaultBlockSize, lcodegen, [&] (uint8_t* code,
+                                              CodeBlock&,
+                                              const CGMeta&) {
+    ltest((T)code);
+  });
+}
+
+template<typename Lcodegen, typename Ltest>
+void test_emission(size_t blockSize,
+                   Lcodegen lcodegen,
+                   Ltest ltest,
+                   bool forceFarLiteral = false,
+                   TCA logicalBase = nullptr) {
+  test_vasm(blockSize, lcodegen, [&] (uint8_t*,
+                                      CodeBlock& main,
+                                      const CGMeta& meta) {
+    ltest(main, meta);
+  }, forceFarLiteral, logicalBase);
 }
 }
 
 TEST(Vasm, Move128ARM) {
-#if !defined(__powerpc64__)
   // A long double will use simd 128 bit registers for arguments and return
   // types on ARM.  __m128 will do the same on x86.
   // This code checks that we actually copy a full 128 bit value when copying
@@ -101,7 +196,6 @@ TEST(Vasm, Move128ARM) {
     EXPECT_EQ(r.t, 0x256b36bd8ef79236);
     EXPECT_EQ(r.v, 0x63f4b85d224d9dfb);
   });
-#endif
 }
 
 TEST(Vasm, PrintVptr) {
@@ -118,10 +212,219 @@ TEST(Vasm, PrintVptr) {
   p.disp = -16;
   p.index = Vreg{};
   EXPECT_EQ("[%128 - 0x10]", show(p));
-  p.seg = Vptr::FS;
+  p.seg = Segment::FS;
   EXPECT_EQ("[%fs + %128 - 0x10]", show(p));
   p.base = Vreg{};
   EXPECT_EQ("[%fs - 0x10]", show(p));
 }
+
+#ifdef __aarch64__
+
+TEST(Vasm, ArmNearLiteralLoadStaysLiteralLdr) {
+  test_emission(4096, [] (Vout& v) {
+    v << leap{reg::rip[(intptr_t)0x12340000], rarg(0)};
+    v << ret{RegSet{}};
+  }, [] (CodeBlock& main, const CGMeta&) {
+    auto const start = vixl::Instruction::Cast(main.base());
+    auto const load = jit::arm::LoadLiteral::at(start);
+
+    ASSERT_TRUE(load);
+    EXPECT_FALSE(load.isFar());
+
+    EXPECT_EQ(start->Mask(vixl::LoadLiteralMask), vixl::LDR_w_lit);
+  });
+}
+
+TEST(Vasm, ArmFarLiteralLoadPatchesToAdrpLdr) {
+  constexpr size_t kBlockSize = 2 * 1024 * 1024;
+  constexpr size_t kFillerNops = (1024 * 1024) / vixl::kInstructionSize + 1024;
+
+  test_emission(kBlockSize, [] (Vout& v) {
+    v << leap{reg::rip[(intptr_t)0x12340000], rarg(0)};
+    for (size_t i = 0; i < kFillerNops; ++i) {
+      v << nop{};
+    }
+    v << ret{RegSet{}};
+  }, [] (CodeBlock& main, const CGMeta&) {
+    auto const start = vixl::Instruction::Cast(main.base());
+    auto const load = jit::arm::LoadLiteral::at(start);
+
+    ASSERT_TRUE(load && load.isFar());
+    auto const ldr = load.ldr();
+    EXPECT_EQ(ldr->Mask(vixl::LoadStoreUnsignedOffsetMask), vixl::LDR_w_unsigned);
+    EXPECT_EQ(start->Rd(), ldr->Rn());
+    EXPECT_EQ(start->Rd(), ldr->Rt());
+  },
+  // Direct code emission no longer retries on far literals. Force the
+  // ADRP form explicitly so this test still exercises the far-literal rewrite.
+  true);
+}
+
+TEST(Vasm, ArmMcprepSeedsTaggedMovqLiteral) {
+  test_emission(4096, [] (Vout& v) {
+    v << mcprep{rarg(0)};
+    v << ret{RegSet{}};
+  }, [] (CodeBlock& main, const CGMeta&) {
+    auto const start = vixl::Instruction::Cast(main.base());
+    auto const load = jit::arm::LoadLiteral::at(start);
+    ASSERT_TRUE(load);
+    auto const literal =
+      *reinterpret_cast<uint64_t*>(load.literalAddress());
+    EXPECT_EQ(literal, (reinterpret_cast<uint64_t>(main.base()) << 1) | 1);
+  });
+}
+
+TEST(Vasm, ArmTestBranchEmissionMarksRecognizableTst) {
+  test_emission(4096, [] (Vout& v) {
+    auto taken = v.makeBlock();
+    auto next = v.makeBlock();
+    v << tbzq{Immed{63}, Vreg64{Reg64{0}}, {taken, next}};
+    taken << ret{};
+    next << ret{};
+  }, [] (CodeBlock& main, const CGMeta& meta) {
+    auto const start = vixl::Instruction::Cast(
+      main.toDestAddress(main.base())
+    );
+    EXPECT_TRUE(meta.testBranches.contains(main.base()));
+
+    arm::BitTestDetails details;
+    ASSERT_TRUE(arm::getBitTestDetails(start, details));
+    EXPECT_EQ(details.reg.code(), vixl::x0.code());
+    EXPECT_EQ(details.reg.size(), vixl::x0.size());
+    EXPECT_EQ(details.bit, 63);
+
+    EXPECT_TRUE(start->GetNextInstruction()->IsCondBranchImm());
+  }, false, reinterpret_cast<TCA>(0x10000000));
+}
+
+TEST(Vasm, ArmTestBranchIdenticalTargetsOmitsTest) {
+  test_emission(4096, [] (Vout& v) {
+    auto target = v.makeBlock();
+    v << tbzq{Immed{42}, Vreg64{Reg64{0}}, {target, target}};
+    target << ret{};
+  }, [] (CodeBlock& main, const CGMeta& meta) {
+    EXPECT_TRUE(meta.testBranches.empty());
+
+    arm::BitTestDetails details;
+    EXPECT_FALSE(arm::getBitTestDetails(
+      vixl::Instruction::Cast(main.toDestAddress(main.base())), details
+    ));
+  });
+}
+
+TEST(Vasm, ArmCrossAreaTestBranchRelocatesToVeneer) {
+  test_cross_area_emission([] (Vunit& unit, Vout& v) {
+    auto next = v.makeBlock();
+    auto const takenLabel = unit.makeBlock(AreaIndex::Cold, 1);
+    Vout taken{unit, takenLabel};
+    v << tbzq{Immed{63}, Vreg64{Reg64{0}}, {next, takenLabel}};
+    next << ret{};
+    taken << ret{};
+  }, [] (CodeBlock& main, CGMeta& meta) {
+    auto const start = main.base();
+    auto const end = main.frontier();
+
+    auto const emitted = vixl::Instruction::Cast(main.toDestAddress(start));
+    arm::BitTestDetails test;
+    ASSERT_TRUE(arm::getBitTestDetails(emitted, test));
+    auto const branch = emitted->GetNextInstruction();
+    ASSERT_TRUE(branch->IsCondBranchImm());
+    auto const branchFrom = vixl::Instruction::Cast(
+      start + vixl::kInstructionSize
+    );
+    auto const veneer = reinterpret_cast<TCA>(
+      branch->GetImmPCOffsetTarget(branchFrom)
+    );
+    ASSERT_TRUE(main.contains(veneer));
+    EXPECT_TRUE(meta.veneerAddrs.contains(veneer));
+
+    RelocationInfo rel;
+    auto area = AreaIndex::Main;
+    relocate(rel, main, start, end, main, meta, area);
+
+    auto const relocatedAddr = rel.adjustedAddressAfter(start);
+    auto const relocatedVeneer = rel.adjustedAddressAfter(veneer);
+    ASSERT_NE(relocatedAddr, nullptr);
+    ASSERT_NE(relocatedVeneer, nullptr);
+    auto const relocated = vixl::Instruction::Cast(
+      main.toDestAddress(relocatedAddr)
+    );
+    ASSERT_TRUE(relocated->IsTestBranch());
+    auto const details = arm::getTestAndBranchDetails(relocated);
+    EXPECT_FALSE(details.isTbnz);
+    EXPECT_EQ(
+      relocated->ImmPCOffsetTarget(),
+      vixl::Instruction::CastConst(main.toDestAddress(relocatedVeneer))
+    );
+  });
+}
+
+TEST(Vasm, ArmFarCrossAreaConditionalVeneersPreserveSourceBranches) {
+  constexpr size_t kMainSize = 2 * 1024 * 1024;
+  constexpr size_t kFillerNops =
+    1024 * 1024 / vixl::kInstructionSize + 1024;
+
+  test_cross_area_emission([] (Vunit& unit, Vout& v) {
+    auto compareBranch = v.makeBlock();
+    auto filler = compareBranch.makeBlock();
+    auto const takenLabel = unit.makeBlock(AreaIndex::Cold, 1);
+    Vout taken{unit, takenLabel};
+
+    v << jcc{
+      CC_E,
+      VregSF{RegSF{0}},
+      {compareBranch, takenLabel},
+      StringTag{}
+    };
+    compareBranch << cbzq{
+      Vreg64{Reg64{0}},
+      {filler, takenLabel}
+    };
+    for (size_t i = 0; i < kFillerNops; ++i) filler << nop{};
+    filler << ret{};
+    taken << ret{};
+  }, [] (CodeBlock& main, CGMeta& meta) {
+    ASSERT_EQ(meta.veneerAddrs.size(), 2);
+
+    auto source = vixl::Instruction::Cast(
+      main.toDestAddress(main.base())
+    );
+    auto veneerIt = meta.veneerAddrs.begin();
+    auto const checkAppendix = [&] (bool compareBranch) {
+      ASSERT_EQ(source->Mask(vixl::UnconditionalBranchMask), vixl::B);
+
+      auto veneer = vixl::Instruction::Cast(
+        main.toDestAddress(*veneerIt++)
+      );
+      auto appendix = veneer;
+      for (size_t i = 0; i < 3; ++i) {
+        appendix = appendix->GetNextInstruction();
+      }
+      EXPECT_EQ(source->ImmPCOffsetTarget(), appendix);
+
+      if (compareBranch) {
+        ASSERT_TRUE(appendix->IsCompareBranch());
+        auto const details = arm::getCompareAndBranchDetails(appendix);
+        EXPECT_FALSE(details.isCbnz);
+        EXPECT_EQ(details.reg.code(), vixl::x0.code());
+        EXPECT_EQ(details.reg.size(), vixl::x0.size());
+      } else {
+        ASSERT_TRUE(appendix->IsCondBranchImm());
+        EXPECT_EQ(appendix->ConditionBranch(), vixl::eq);
+      }
+      EXPECT_EQ(appendix->ImmPCOffsetTarget(), veneer);
+
+      auto const next = appendix->GetNextInstruction();
+      ASSERT_EQ(next->Mask(vixl::UnconditionalBranchMask), vixl::B);
+      EXPECT_EQ(next->ImmPCOffsetTarget(), source->GetNextInstruction());
+      source = source->GetNextInstruction();
+    };
+
+    checkAppendix(false);
+    checkAppendix(true);
+  }, kMainSize);
+}
+
+#endif
 
 } }

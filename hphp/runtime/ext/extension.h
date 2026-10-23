@@ -15,19 +15,23 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_EXTENSION_H_
-#define incl_HPHP_EXTENSION_H_
+#pragma once
 
-#include "hphp/runtime/base/debuggable.h"
 #include "hphp/runtime/base/ini-setting.h"
 #include "hphp/runtime/vm/native.h"
+#include "hphp/runtime/vm/native-func-table.h"
 #include "hphp/runtime/version.h"
 #include "hphp/util/hdf.h"
 
 #include <set>
 #include <string>
+#include <string_view>
+#include <vector>
 
 namespace HPHP {
+
+struct ArrayData;
+
 ///////////////////////////////////////////////////////////////////////////////
 
 /**
@@ -45,73 +49,121 @@ namespace HPHP {
  */
 
 #define NO_EXTENSION_VERSION_YET "\0"
+#define NO_ONCALL_YET "\0"
 
-#define IMPLEMENT_DEFAULT_EXTENSION_VERSION(name, v)    \
-  static class name ## Extension final : public Extension {   \
-  public:                                               \
-    name ## Extension() : Extension(#name, #v) {}       \
+#define IMPLEMENT_DEFAULT_EXTENSION_VERSION(name, v)                      \
+  static class name ## Extension final : public Extension {               \
+  public:                                                                 \
+    name ## Extension() : Extension(#name, #v, NO_ONCALL_YET) {}          \
+    std::vector<std::string> hackFiles() const override { return {}; }    \
   } s_ ## name ## _extension
 
 ///////////////////////////////////////////////////////////////////////////////
 
-struct Extension : IDebuggable {
+struct Extension {
   static bool IsSystemlibPath(const std::string& path);
 
   // Look for "ext.{namehash}" in the binary and compile/merge it
-  void loadSystemlib(const std::string& name = "");
+private:
+  void loadSystemlib() { loadSystemlib(m_name); }
+  void loadSystemlib(const char* name) {
+    loadSystemlib(std::string(name));
+  }
+  void loadSystemlib(const std::string& name);
 
-  // Compile and merge an systemlib fragment
-  static void CompileSystemlib(const std::string &slib,
-                               const std::string &name);
 public:
-  explicit Extension(const char* name, const char* version = "");
-  ~Extension() override {}
+  explicit Extension(const char name[],
+                     const char version[],
+                     const char oncall[]);
+  virtual ~Extension() {
+    if (m_warmupData != nullptr) {
+      DecRefSharedArray(m_warmupData);
+      m_warmupData = nullptr;
+    }
+  }
 
-  const char* getVersion() const { return m_version.c_str();}
+  const char* getName() const { return m_name; }
+  const char* getVersion() const { return m_version; }
+  const char* getOncall() const { return m_oncall; }
 
   // override these functions to implement module specific init/shutdown
   // sequences and information display.
-  virtual void moduleLoad(const IniSetting::Map& /*ini*/, Hdf /*hdf*/) {}
-  virtual void moduleInfo(Array &info) { info.set(String(m_name), true);}
-  virtual void moduleInit() {}
-  virtual void moduleShutdown() {}
-  virtual void threadInit() {}
-  virtual void threadShutdown() {}
-  virtual void requestInit() {}
-  virtual void requestShutdown() {}
+  virtual void moduleLoad(const IniSetting::Map& /*ini*/, Hdf /*hdf*/);
+  virtual void moduleInfo(Array &info);
+  virtual void moduleInit();
+  virtual void moduleRegisterNative();
+  virtual void cliClientInit();
+  virtual void moduleShutdown();
+  virtual void threadInit();
+  virtual void threadShutdown();
+  virtual void requestInit();
+  virtual void requestShutdown();
 
-  // override this to control extension_loaded() return value
-  virtual bool moduleEnabled() const { return true; }
+  virtual std::vector<std::string> hackFiles() const;
 
-  typedef std::set<std::string> DependencySet;
-  typedef std::map<Extension*, DependencySet> DependencySetMap;
-  virtual const DependencySet getDeps() const {
-    // No dependencies by default
-    return DependencySet();
-  }
+  void loadEmitters();
 
-  void setDSOName(const std::string &name) {
-    m_dsoName = name;
-  }
-
-  const std::string& getName() const {
-    return m_name;
-  }
-
-  void registerExtensionFunction(const String& name) {
-    assertx(name.get()->isStatic());
-    m_functions.push_back(name.get());
-  }
-
-  const std::vector<StringData*>& getExtensionFunctions() const {
-    return m_functions;
-  }
+  // Override this function when your extension calls anything other than:
+  //
+  //  loadSystemlib();
+  //
+  // ... in `moduleInit`. This will load the decls for any symbols declared in
+  // the PHP file for this module. Examples of when overriding this function is
+  // required:
+  // - ext_asio, which calls `loadSystemlib` twice with different arguments
+  // - ext_collections*, which calls `loadSystemlib` for each collection kind
+  // - ext_datetime, which happens to use a different name for the extension
+  //   versus the binary section
+  void loadDecls();
+  // Load the source contained in the binary section corresponding to [name],
+  // parse it's decls, then store them in `s_builtin_symbols`. This is generally
+  // going to be given the same string as whatever `loadSystemlib` takes, and
+  // by default will be passed *just* the extension name.
 
 private:
-  std::string m_name;
-  std::string m_version;
-  std::string m_dsoName;
+  void loadDeclsFrom(const std::string& name);
+
+public:
+  // override this to control extension_loaded() return value
+  virtual bool moduleEnabled() const;
+
+  // override these functions to perform extension-specific jumpstart,
+  // leveraging the JIT profile data serialization mechanisms.
+  virtual void serialize(BlobEncoder& sd) {}
+
+  virtual void deserialize(BlobDecoder& sd);
+
+  using DependencySet = std::set<std::string>;
+  using DependencySetMap = std::map<Extension*, DependencySet>;
+
+  virtual const DependencySet getDeps() const;
+
+  void registerNativeFunc(const StringData* name,
+                          const Native::NativeFunctionInfo&);
+
+  // access the list of functions (excluding methods);
+  // helper for get_extension_funcs()
+  const std::vector<StringData*>& getExtensionFunctions() const;
+  void registerExtensionFunction(const OptString& name);
+
+  Native::FuncTable& nativeFuncs() {
+    return m_nativeFuncs;
+  }
+
+  const Native::FuncTable& nativeFuncs() const {
+    return m_nativeFuncs;
+  }
+
+  ArrayData* getWarmupData() const { return m_warmupData; }
+  void setWarmupData(ArrayData* warmupData) { m_warmupData = warmupData; }
+
+private:
+  const char* m_name;
+  const char* m_version;
+  const char* m_oncall;
   std::vector<StringData*> m_functions;
+  Native::FuncTable m_nativeFuncs;
+  ArrayData* m_warmupData = nullptr;
 };
 
 struct ExtensionBuildInfo {
@@ -141,4 +193,3 @@ extern "C" Extension* getModule() { \
 
 /////////////////////////////////////////////////////////////////////////////
 } // namespace HPHP
-#endif // incl_HPHP_EXTENSION_H_

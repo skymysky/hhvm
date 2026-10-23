@@ -1,13 +1,13 @@
-<?hh //strict
+<?hh
 
 /**
- * Test if the inner value type of AKvec is correctly inferred
+ * Test if the inner value type of AKvarray is correctly inferred
  */
 function test(): void {
-  $a = array();
+  $a = vec[];
   $a[] = 'aaa';
   // should error, because it's an array (used like a vector) containing strings
   f($a);
 }
 
-function f(array<int> $_): void {}
+function f(varray<int> $_): void {}

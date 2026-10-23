@@ -15,26 +15,25 @@
 */
 
 #include "hphp/runtime/vm/jit/irlower-internal.h"
+#include "hphp/runtime/vm/jit/irlower-minstr-internal.h"
 
 #include "hphp/runtime/base/array-data.h"
+#include "hphp/runtime/base/array-init.h"
+#include "hphp/runtime/base/array-provenance.h"
 #include "hphp/runtime/base/collections.h"
-#include "hphp/runtime/base/mixed-array.h"
 #include "hphp/runtime/base/object-data.h"
-#include "hphp/runtime/base/packed-array.h"
-#include "hphp/runtime/base/set-array.h"
 #include "hphp/runtime/base/string-data.h"
 #include "hphp/runtime/base/type-array.h"
 #include "hphp/runtime/base/type-variant.h"
 #include "hphp/runtime/base/typed-value.h"
+#include "hphp/runtime/base/vanilla-dict.h"
+#include "hphp/runtime/base/vanilla-keyset.h"
+#include "hphp/runtime/base/vanilla-vec.h"
 
-#include "hphp/runtime/vm/jit/types.h"
-#include "hphp/runtime/vm/jit/abi.h"
 #include "hphp/runtime/vm/jit/arg-group.h"
-#include "hphp/runtime/vm/jit/array-kind-profile.h"
 #include "hphp/runtime/vm/jit/call-spec.h"
 #include "hphp/runtime/vm/jit/code-gen-cf.h"
 #include "hphp/runtime/vm/jit/code-gen-helpers.h"
-#include "hphp/runtime/vm/jit/code-gen-internal.h"
 #include "hphp/runtime/vm/jit/ir-instruction.h"
 #include "hphp/runtime/vm/jit/ir-opcode.h"
 #include "hphp/runtime/vm/jit/ssa-tmp.h"
@@ -44,35 +43,20 @@
 #include "hphp/runtime/vm/jit/vasm-instr.h"
 #include "hphp/runtime/vm/jit/vasm-reg.h"
 
+#include "hphp/runtime/ext/core/ext_core_closure.h"
+
 #include "hphp/util/asm-x64.h"
 #include "hphp/util/trace.h"
 
-namespace HPHP { namespace jit { namespace irlower {
+namespace HPHP::jit::irlower {
 
-TRACE_SET_MOD(irlower);
+TRACE_SET_MOD(irlower)
 
 ///////////////////////////////////////////////////////////////////////////////
 
-void profileArrayKindHelper(ArrayKindProfile* profile, ArrayData* arr) {
-  profile->report(arr->kind());
-}
-
-void cgProfileArrayKind(IRLS& env, const IRInstruction* inst) {
-  auto const extra = inst->extra<RDSHandleData>();
-  assertx(!rds::isPersistentHandle(extra->handle));
-  auto& v = vmain(env);
-
-  auto const profile = v.makeReg();
-  v << lea{rvmtl()[extra->handle], profile};
-  cgCallHelper(v, env, CallSpec::direct(profileArrayKindHelper), kVoidDest,
-               SyncOptions::None, argGroup(env, inst).reg(profile).ssa(0));
-}
-
-void cgCheckPackedArrayDataBounds(IRLS& env, const IRInstruction* inst) {
+void cgCheckVecBounds(IRLS& env, const IRInstruction* inst) {
   static_assert(ArrayData::sizeofSize() == 4, "");
 
-  // We may check packed array bounds on profiled arrays that we do not
-  // statically know have kPackedKind.
   assertx(inst->taken());
   auto arr = srcLoc(env, inst, 0).reg();
   auto idx = srcLoc(env, inst, 1).reg();
@@ -80,11 +64,10 @@ void cgCheckPackedArrayDataBounds(IRLS& env, const IRInstruction* inst) {
 
   auto const size = [&]{
     auto const arrTmp = inst->src(0);
-    if (arrTmp->hasConstVal(TArr)) return v.cns(arrTmp->arrVal()->size());
-    if (arrTmp->hasConstVal(TVec)) return v.cns(arrTmp->vecVal()->size());
+    if (arrTmp->hasConstVal()) return v.cns(arrTmp->arrLikeVal()->size());
     auto const at = arrTmp->type().arrSpec().type();
     using A = RepoAuthType::Array;
-    if (at && at->tag() == A::Tag::Packed && at->emptiness() == A::Empty::No) {
+    if (at && at->tag() == A::Tag::Tuple && at->emptiness() == A::Empty::No) {
       return v.cns(at->size());
     }
     // ArrayData::m_size is a uint32_t but we need to do a 64-bit comparison
@@ -99,7 +82,67 @@ void cgCheckPackedArrayDataBounds(IRLS& env, const IRInstruction* inst) {
   v << jcc{CC_BE, sf, {label(env, inst->next()), label(env, inst->taken())}};
 }
 
-IMPL_OPCODE_CALL(ArrayAdd);
+////////////////////////////////////////////////////////////////////////////////
+
+namespace {
+
+static ArrayData* markLegacyShallowHelper(ArrayData* ad, bool legacy) {
+  auto const tv = make_array_like_tv(ad);
+  auto const result = arrprov::markTvShallow(tv, legacy);
+  decRefArr(ad);
+  assertx(tvIsArrayLike(result));
+  return val(result).parr;
+}
+
+static ArrayData* markLegacyRecursiveHelper(ArrayData* ad, bool legacy) {
+  auto const tv = make_array_like_tv(ad);
+  auto const result = arrprov::markTvRecursively(tv, legacy);
+  decRefArr(ad);
+  assertx(tvIsArrayLike(result));
+  return val(result).parr;
+}
+
+void markLegacyShallow(IRLS& env, const IRInstruction* inst, bool legacy) {
+  auto const args = argGroup(env, inst).ssa(0).imm(legacy);
+  auto const target = CallSpec::direct(markLegacyShallowHelper);
+  cgCallHelper(vmain(env), env, target, callDest(env, inst),
+               SyncOptions::Sync, args);
+}
+
+void markLegacyRecursive(IRLS& env, const IRInstruction* inst, bool legacy) {
+  auto const args = argGroup(env, inst).ssa(0).imm(legacy);
+  auto const target = CallSpec::direct(markLegacyRecursiveHelper);
+  cgCallHelper(vmain(env), env, target, callDest(env, inst),
+               SyncOptions::Sync, args);
+}
+
+}
+
+void cgArrayMarkLegacyShallow(IRLS& env, const IRInstruction* inst) {
+  markLegacyShallow(env, inst, true);
+}
+
+void cgArrayMarkLegacyRecursive(IRLS& env, const IRInstruction* inst) {
+  markLegacyRecursive(env, inst, true);
+}
+
+void cgArrayUnmarkLegacyShallow(IRLS& env, const IRInstruction* inst) {
+  markLegacyShallow(env, inst, false);
+}
+
+void cgArrayUnmarkLegacyRecursive(IRLS& env, const IRInstruction* inst) {
+  markLegacyRecursive(env, inst, false);
+}
+
+void cgIsLegacyArrLike(IRLS& env, const IRInstruction* inst) {
+  auto const arr = srcLoc(env, inst, 0).reg();
+  auto const dst = dstLoc(env, inst, 0).reg();
+  auto& v = vmain(env);
+
+  auto const sf = v.makeReg();
+  v << testbim{ArrayData::kLegacyArray, arr[HeaderAuxOffset], sf};
+  v << cmovb{CC_E, sf, v.cns(1), v.cns(0), dst};
+}
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -116,32 +159,6 @@ void implCountArrayLike(IRLS& env, const IRInstruction* inst) {
 
 IMPL_OPCODE_CALL(Count)
 
-void cgCountArray(IRLS& env, const IRInstruction* inst) {
-  auto const src = srcLoc(env, inst, 0).reg();
-  auto const dst = dstLoc(env, inst, 0).reg();
-  auto& v = vmain(env);
-
-  auto const d = v.makeReg();
-  auto const sf = v.makeReg();
-  v << loadl{src[ArrayData::offsetofSize()], d};
-  v << testl{d, d, sf};
-
-  unlikelyCond(
-    v, vcold(env), CC_S, sf, dst,
-    [&](Vout& v) {
-      auto const d = v.makeReg();
-      cgCallHelper(v, env, CallSpec::array(&g_array_funcs.vsize),
-                   callDest(d), SyncOptions::None,
-                   argGroup(env, inst).ssa(0));
-      return d;
-    },
-    [&](Vout& /*v*/) { return d; });
-}
-
-void cgCountArrayFast(IRLS& env, const IRInstruction* inst) {
-  implCountArrayLike(env, inst);
-}
-
 void cgCountVec(IRLS& env, const IRInstruction* inst) {
   implCountArrayLike(env, inst);
 }
@@ -157,69 +174,24 @@ void cgCountKeyset(IRLS& env, const IRInstruction* inst) {
 ///////////////////////////////////////////////////////////////////////////////
 // AKExists.
 
-namespace {
-
-template <bool intishWarn>
-ALWAYS_INLINE
-bool ak_exist_string_impl(const ArrayData* arr, const StringData* key) {
-  int64_t n;
-  if (arr->convertKey(key, n, intishWarn)) {
-    return arr->exists(n);
-  }
-  return arr->exists(key);
-}
-
-}
-
-template <bool intishWarn>
-bool ak_exist_string(const ArrayData* arr, const StringData* key) {
-  return ak_exist_string_impl<intishWarn>(arr, key);
-}
-
 bool ak_exist_int_obj(ObjectData* obj, int64_t key) {
   if (obj->isCollection()) {
     return collections::contains(obj, key);
+  } else if (obj->instanceof(c_Closure::classof())) {
+    return false;
   }
-  auto const arr = obj->toArray();
+  auto const arr = obj->toArray(false, true);
   return arr.get()->exists(key);
 }
 
 bool ak_exist_string_obj(ObjectData* obj, StringData* key) {
   if (obj->isCollection()) {
     return collections::contains(obj, Variant{key});
+  } else if (obj->instanceof(c_Closure::classof())) {
+    return false;
   }
-  auto const arr = obj->toArray();
-  return ak_exist_string_impl<false>(arr.get(), key);
-}
-
-void cgAKExistsArr(IRLS& env, const IRInstruction* inst) {
-  auto const arrTy = inst->src(0)->type();
-  auto const keyTy = inst->src(1)->type();
-  auto& v = vmain(env);
-
-  auto const keyInfo = checkStrictlyInteger(arrTy, keyTy);
-  auto const target =
-    keyInfo.checkForInt
-      ? (checkHACIntishCast()
-         ? CallSpec::direct(ak_exist_string<true>)
-         : CallSpec::direct(ak_exist_string<false>))
-      : (keyInfo.type == KeyType::Int
-         ? CallSpec::array(&g_array_funcs.existsInt)
-         : CallSpec::array(&g_array_funcs.existsStr));
-
-  auto args = argGroup(env, inst).ssa(0);
-  if (keyInfo.converted) {
-    args.imm(keyInfo.convertedInt);
-  } else {
-    args.ssa(1);
-  }
-
-  cgCallHelper(
-    v, env, target, callDest(env, inst),
-    RuntimeOption::EvalHackArrCompatNotices
-      ? SyncOptions::Sync : SyncOptions::None,
-    args
-  );
+  auto const arr = obj->toArray(false, true);
+  return arr.get()->exists(key);
 }
 
 void cgAKExistsDict(IRLS& env, const IRInstruction* inst) {
@@ -227,8 +199,8 @@ void cgAKExistsDict(IRLS& env, const IRInstruction* inst) {
   auto& v = vmain(env);
 
   auto const target = (keyTy <= TInt)
-    ? CallSpec::direct(MixedArray::ExistsIntDict)
-    : CallSpec::direct(MixedArray::ExistsStrDict);
+    ? CallSpec::direct(VanillaDict::ExistsInt)
+    : CallSpec::direct(VanillaDict::ExistsStr);
 
   cgCallHelper(v, env, target, callDest(env, inst), SyncOptions::None,
                argGroup(env, inst).ssa(0).ssa(1));
@@ -239,8 +211,8 @@ void cgAKExistsKeyset(IRLS& env, const IRInstruction* inst) {
   auto& v = vmain(env);
 
   auto const target = (keyTy <= TInt)
-    ? CallSpec::direct(SetArray::ExistsInt)
-    : CallSpec::direct(SetArray::ExistsStr);
+    ? CallSpec::direct(VanillaKeyset::ExistsInt)
+    : CallSpec::direct(VanillaKeyset::ExistsStr);
 
   cgCallHelper(v, env, target, callDest(env, inst), SyncOptions::None,
                argGroup(env, inst).ssa(0).ssa(1));
@@ -261,44 +233,20 @@ void cgAKExistsObj(IRLS& env, const IRInstruction* inst) {
 ///////////////////////////////////////////////////////////////////////////////
 // Array creation.
 
-IMPL_OPCODE_CALL(NewArray)
-IMPL_OPCODE_CALL(NewMixedArray)
-IMPL_OPCODE_CALL(NewLikeArray)
-IMPL_OPCODE_CALL(NewDictArray)
-IMPL_OPCODE_CALL(AllocPackedArray)
-IMPL_OPCODE_CALL(AllocVecArray)
-
-void cgNewDArray(IRLS& env, const IRInstruction* inst) {
-  cgCallHelper(
-    vmain(env),
-    env,
-    CallSpec::direct(MixedArray::MakeReserveDArray),
-    callDest(env, inst),
-    SyncOptions::None,
-    argGroup(env, inst).ssa(0)
-  );
+void cgNewDictArray(IRLS& env, const IRInstruction* inst) {
+  auto const target = CallSpec::direct(VanillaDict::MakeReserveDict);
+  cgCallHelper(vmain(env), env, target, callDest(env, inst),
+               SyncOptions::None, argGroup(env, inst).ssa(0));
 }
 
-void cgAllocVArray(IRLS& env, const IRInstruction* inst) {
-  auto const extra = inst->extra<PackedArrayData>();
-  cgCallHelper(
-    vmain(env),
-    env,
-    CallSpec::direct(PackedArray::MakeUninitializedVArray),
-    callDest(env, inst),
-    SyncOptions::None,
-    argGroup(env, inst).imm(extra->size)
-  );
+void cgAllocVec(IRLS& env, const IRInstruction* inst) {
+  auto const extra = inst->extra<VanillaVecData>();
+  auto const target = CallSpec::direct(VanillaVec::MakeUninitializedVec);
+  cgCallHelper(vmain(env), env, target, callDest(env, inst),
+               SyncOptions::None, argGroup(env, inst).imm(extra->size));
 }
 
-namespace {
-
-void newStructImpl(IRLS& env,
-                   const IRInstruction* inst,
-                   MixedArray* (*f)(uint32_t,
-                                    const StringData* const*,
-                                    const TypedValue*)
-                  ) {
+void cgNewStructDict(IRLS& env, const IRInstruction* inst) {
   auto const sp = srcLoc(env, inst, 0).reg();
   auto const extra = inst->extra<NewStructData>();
   auto& v = vmain(env);
@@ -306,27 +254,13 @@ void newStructImpl(IRLS& env,
   auto table = v.allocData<const StringData*>(extra->numKeys);
   memcpy(table, extra->keys, extra->numKeys * sizeof(*extra->keys));
 
+  auto const target = CallSpec::direct(VanillaDict::MakeStructDict);
   auto const args = argGroup(env, inst)
     .imm(extra->numKeys)
     .dataPtr(table)
     .addr(sp, cellsToBytes(extra->offset.offset));
 
-  cgCallHelper(v, env, CallSpec::direct(f), callDest(env, inst),
-               SyncOptions::None, args);
-}
-
-}
-
-void cgNewStructArray(IRLS& env, const IRInstruction* inst) {
-  newStructImpl(env, inst, MixedArray::MakeStruct);
-}
-
-void cgNewStructDArray(IRLS& env, const IRInstruction* inst) {
-  newStructImpl(env, inst, MixedArray::MakeStructDArray);
-}
-
-void cgNewStructDict(IRLS& env, const IRInstruction* inst) {
-  newStructImpl(env, inst, MixedArray::MakeStructDict);
+  cgCallHelper(v, env, target, callDest(env, inst), SyncOptions::None, args);
 }
 
 void cgNewKeysetArray(IRLS& env, const IRInstruction* inst) {
@@ -338,23 +272,63 @@ void cgNewKeysetArray(IRLS& env, const IRInstruction* inst) {
     .imm(extra->size)
     .addr(sp, cellsToBytes(extra->offset.offset));
 
-  cgCallHelper(v, env, CallSpec::direct(SetArray::MakeSet),
+  cgCallHelper(v, env, CallSpec::direct(VanillaKeyset::MakeSet),
                callDest(env, inst), SyncOptions::Sync, args);
 }
 
-void cgInitPackedLayoutArray(IRLS& env, const IRInstruction* inst) {
-  auto const arr = srcLoc(env, inst, 0).reg();
-  auto const index = inst->extra<InitPackedLayoutArray>()->index;
+void cgAllocStructDict(IRLS& env, const IRInstruction* inst) {
+  auto const extra = inst->extra<NewStructData>();
+  auto init = DictInit{extra->numKeys};
+  for (auto i = 0; i < extra->numKeys; ++i) {
+    init.set(extra->keys[i], make_tv<KindOfNull>());
+  }
+  auto const array = init.toArray();
+  auto const ad = VanillaDict::as(array.get());
 
-  auto const slot_off = PackedArray::entriesOffset() +
-                        index * sizeof(TypedValue);
-  storeTV(vmain(env), arr[slot_off], srcLoc(env, inst, 1), inst->src(1));
+  auto const scale = VanillaDict::computeScaleFromSize(extra->numKeys);
+  always_assert(VanillaDict::HashSize(scale) == ad->hashSize());
+
+  using HashTableEntry = std::remove_pointer_t<decltype(ad->hashTab())>;
+
+  auto& v = vmain(env);
+  auto table = v.allocData<HashTableEntry>(ad->hashSize());
+  memcpy(table, ad->hashTab(), ad->hashSize() * sizeof(HashTableEntry));
+
+  auto const target = CallSpec::direct(VanillaDict::AllocStructDict);
+  auto const args = argGroup(env, inst).imm(extra->numKeys).dataPtr(table);
+
+  cgCallHelper(v, env, target, callDest(env, inst), SyncOptions::None, args);
 }
 
-void cgInitPackedLayoutArrayLoop(IRLS& env, const IRInstruction* inst) {
+void cgInitDictElem(IRLS& env, const IRInstruction* inst) {
+  auto const arr = srcLoc(env, inst, 0).reg();
+  auto const key = inst->extra<InitDictElem>()->key;
+  auto const idx = inst->extra<InitDictElem>()->index;
+
+  auto const elm_off  = VanillaDict::elmOff(idx);
+  auto const key_ptr  = arr[elm_off + VanillaDictElm::keyOff()];
+  auto const data_ptr = arr[elm_off + VanillaDictElm::dataOff()];
+  auto const hash_ptr = arr[elm_off + VanillaDictElm::hashOff()];
+
+  auto& v = vmain(env);
+  storeTV(v, data_ptr, srcLoc(env, inst, 1), inst->src(1));
+  v << storeli { key->hash(), hash_ptr };
+  v << store { v.cns(key), key_ptr };
+}
+
+void cgInitVecElem(IRLS& env, const IRInstruction* inst) {
+  auto const arr = srcLoc(env, inst, 0).reg();
+  auto const index = inst->extra<InitVecElem>()->index;
+  auto const type = inst->src(1)->type();
+  auto const offset = VanillaVec::entryOffset(index);
+  storeTV(vmain(env), type, srcLoc(env, inst, 1),
+          arr[offset.type_offset], arr[offset.data_offset]);
+}
+
+void cgInitVecElemLoop(IRLS& env, const IRInstruction* inst) {
   auto const arr = srcLoc(env, inst, 0).reg();
   auto const spIn = srcLoc(env, inst, 1).reg();
-  auto const extra = inst->extra<InitPackedLayoutArrayLoop>();
+  auto const extra = inst->extra<InitVecElemLoop>();
   auto const count = safe_cast<int>(extra->size);
   auto& v = vmain(env);
 
@@ -362,7 +336,7 @@ void cgInitPackedLayoutArrayLoop(IRLS& env, const IRInstruction* inst) {
   v << lea{spIn[cellsToBytes(extra->offset.offset)], sp};
 
   auto const i = v.cns(0);
-  auto const j = v.cns((count - 1) * 2);
+  auto const j = v.cns((count - 1) * 16);
 
   // We know that we have at least one element in the array so we don't have to
   // do an initial bounds check.
@@ -373,21 +347,23 @@ void cgInitPackedLayoutArrayLoop(IRLS& env, const IRInstruction* inst) {
       auto const i1 = in[0],  j1 = in[1];
       auto const i2 = out[0], j2 = out[1];
       auto const sf = v.makeReg();
-      auto const value = v.makeReg();
+      auto const data = v.makeReg();
+      auto const type = v.makeReg();
+      auto const addr = implVecElemLval(env, arr, i1);
 
-      // Load the value from the stack and store into the array.  It's safe to
-      // copy all 16 bytes of the TV because packed arrays don't use m_aux.
-      v << loadups{sp[j1 * 8], value};
-      v << storeups{value, arr[i1 * 8] + PackedArray::entriesOffset()};
+      v << load {sp[j1], data};
+      v << loadb{sp[j1] + 8, type};
+      v << store {data, addr.val};
+      v << storeb{type, addr.type};
 
-      // Add 2 to the loop variable because we can only scale by at most 8.
-      v << lea{i1[2], i2};
-      v << subqi{2, j1, j2, sf};
+      v << lea{i1[1], i2};
+      v << subqi{16, j1, j2, sf};
       return sf;
-    }
+    },
+    count
   );
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 
-}}}
+}

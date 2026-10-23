@@ -1,0 +1,1 @@
+--config disallow_discarded_nullable_awaitables=true

@@ -14,14 +14,13 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_FIXUP_H_
-#define incl_HPHP_FIXUP_H_
+#pragma once
 
 #include <vector>
-#include "hphp/runtime/vm/jit/types.h"
 #include "hphp/runtime/base/execution-context.h"
-#include "hphp/runtime/vm/tread-hash-map.h"
 #include "hphp/runtime/vm/vm-regs.h"
+#include "hphp/runtime/vm/jit/stack-offsets.h"
+#include "hphp/runtime/vm/jit/types.h"
 #include "hphp/util/atomic.h"
 #include "hphp/util/data-block.h"
 
@@ -29,9 +28,11 @@ namespace HPHP {
 struct ExecutionContext;
 }
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 
 //////////////////////////////////////////////////////////////////////
+
+ActRec* findVMFrameForDebug(uintptr_t start = 0);
 
 /*
  * The Fixup map allows us to reconstruct the state of the VM registers (fp,
@@ -47,27 +48,29 @@ namespace HPHP { namespace jit {
  * the translation cache)---if so, it finds the fixup information in one of two
  * ways:
  *
- *   - Fixup: the normal case.
+ *   - a direct Fixup: the normal case.
  *
  *     The Fixup record just stores an offset relative to the ActRec* for vmsp,
  *     and an offset from the start of the func for pc.  In the case of
  *     resumable frames the sp offset is relative to Stack::resumableStackBase.
  *
- *   - IndirectFixup:
+ *   - an indirect Fixup:
  *
- *     This can be used for some shared stubs in the TC, to avoid
- *     setting up a full frame, on architectures where the calee's
- *     frame is stored immediately under the caller's sp (currently
- *     true of x64 but not arm or ppc).
+ *     This is used when invoking C++ methods in stublogue mode, i.e. a TC code
+ *     that was called, but did not set up a full frame, as it is operating on
+ *     behalf of the caller. This mode is used in prologues and some shared
+ *     stubs on architectures, where the callee's frame is stored immediately
+ *     under the caller's sp. On AArch64 builds where the compiler does not
+ *     force that layout, the call site saves the native sp in RDS.
  *
  *     In this case, some JIT'd code associated with the ActRec* we found made
- *     a call to a shared stub, and then that stub called C++.  The
- *     IndirectFixup record stores an offset to the saved frame pointer *two*
+ *     a call to a shared stub or prologue, and then that code called C++. The
+ *     indirect Fixup record stores an offset to the saved frame pointer *two*
  *     levels deeper in C++, that says where the return IP for the call to the
  *     shared stub can be found.  I.e., we're trying to chase back two return
  *     ips into the TC.
  *
- *     Note that this means IndirectFixups will not work for C++ code
+ *     Note that this means indirect Fixups will not work for C++ code
  *     paths that need to do a fixup without making at least one other
  *     C++ call (because of -momit-leaf-frame-pointers), but for the
  *     current use case this is fine.
@@ -104,36 +107,99 @@ namespace HPHP { namespace jit {
  *        |..............................|
  *        |..............................|
  *
- *     The offset in IndirectFixup is how to get to the "RetIP to caller of
+ *     The offset in indirect Fixup is how to get to the "RetIP to caller of
  *     dtor stub", relative to the value in the starred stack slot shown.  We
  *     then look that IP up in the fixup map again to find a normal
  *     (non-indirect) Fixup record.
  *
+ *     On AArch64, native frame walking uses the CFA recorded immediately
+ *     before the indirect call instead of the walked saved frame pointer.
+ *     Exception unwinding obtains the CFA directly from the unwind context.
+ *
+ *   - an asio stub Fixup:
+ *
+ *     This is used when invoking C++ helpers from asio stubs, where the current
+ *     resumable frame is being suspended or freed and the helper should operate
+ *     in the context of the scheduler frame (HH\Asio\join).
  */
 
 //////////////////////////////////////////////////////////////////////
 
 struct Fixup {
-  Fixup(int32_t pcOff, int32_t spOff) : pcOffset{pcOff}, spOffset{spOff} {
+  static Fixup direct(int32_t pcOffset, SBInvOffset spOffset) {
     assertx(pcOffset >= 0);
-    assertx(spOffset >= 0);
+    assertx(spOffset.offset >= 0);
+    return Fixup{pcOffset, spOffset};
   }
 
-  Fixup() {}
+  static Fixup indirect(uint32_t qwordsPushed, SBInvOffset extraSpOffset) {
+    auto const ripOffset =
+      kNativeFrameSize + AROFF(m_savedRip) + qwordsPushed * sizeof(uintptr_t);
+    assertx(ripOffset > 0);
+    assertx(extraSpOffset.offset >= 0);
+    return Fixup{-safe_cast<int32_t>(ripOffset), extraSpOffset};
+  }
 
-  bool isValid() const { return pcOffset >= 0 && spOffset >= 0; }
+  static Fixup asioStub(SBInvOffset spOffset) {
+    assertx(spOffset.offset >= 0);
+    return Fixup{kAsioStub, spOffset};
+  }
 
-  int32_t pcOffset{-1};
-  int32_t spOffset{-1};
+  static Fixup none() {
+    return Fixup{0, SBInvOffset::invalid()};
+  }
+
+  bool isValid() const { return m_spOffset.isValid(); }
+  bool isIndirect() const { assertx(isValid()); return m_pcOrRipOffset < 0; }
+  bool isAsioStub() const {
+    assertx(isValid());
+    return m_pcOrRipOffset == kAsioStub;
+  }
+  uint32_t pcOffset() const {
+    assertx(!isIndirect());
+    assertx(!isAsioStub());
+    return m_pcOrRipOffset;
+  }
+  uint32_t ripOffset() const { assertx(isIndirect()); return -m_pcOrRipOffset; }
+  SBInvOffset spOffset() const { assertx(isValid()); return m_spOffset; }
+  std::string show() const;
+
+  void adjustRipOffset(int off) {
+    assertx(isValid() && isIndirect());
+    m_pcOrRipOffset -= off;
+  }
+
+  bool operator==(const Fixup& o) const {
+    return m_pcOrRipOffset == o.m_pcOrRipOffset && m_spOffset == o.m_spOffset;
+  }
+  bool operator!=(const Fixup& o) const {
+    return m_pcOrRipOffset != o.m_pcOrRipOffset || m_spOffset != o.m_spOffset;
+  }
+
+private:
+  Fixup(int32_t pcOrRipOffset, SBInvOffset spOffset)
+    : m_pcOrRipOffset{pcOrRipOffset}
+    , m_spOffset{spOffset}
+  {}
+
+  static constexpr int32_t kAsioStub = std::numeric_limits<int32_t>::max();
+
+  int32_t m_pcOrRipOffset;
+  SBInvOffset m_spOffset;
 };
 
-inline Fixup makeIndirectFixup(int dwordsPushed) {
-  Fixup fix;
-  fix.spOffset = kNativeFrameSize +
-                 AROFF(m_savedRip) +
-                 dwordsPushed * sizeof(uintptr_t);
-  return fix;
-}
+/*
+ * A record of a VMFrame used in unwinding. It captures a conceptual suspended
+ * frame, including the ActRec/rbp, the rip of the next instruction, and the
+ * CFA of the child frame. Note that m_actRec and m_rip are stored separately
+ * (instead of simply storing the child ActRec), as C++ frames need not lay out
+ * their frames with these fields adjacent.
+ */
+struct VMFrame {
+  ActRec* m_actRec;
+  TCA m_rip;
+  uintptr_t m_prevCfa;
+};
 
 namespace FixupMap {
 /*
@@ -152,31 +218,52 @@ const Fixup* findFixup(CTCA tca);
 size_t size();
 
 /*
- * Perform a fixup of the VM registers of ec for a stack whose first frame is
- * rbp.
+ * Perform a fixup of the VM registers for a leaf VM frame `frame`.
+ *
+ * Returns whether we successfully performed the fixup.
  */
-void fixupWork(ExecutionContext* ec, ActRec* rbp);
+bool processFixupForVMFrame(VMFrame frame);
 
 /*
- * Returns true if calls to func should use an EagerVMRegAnchor.
+ * Perform a fixup of the VM registers for a stack whose first frame is `rbp`.
+ *
+ * Returns whether we successfully performed the fixup.  (We assert on failure
+ * if `soft` is not set).
  */
-bool eagerRecord(const Func* func);
+bool fixupWork(ActRec* rbp, bool soft = false);
 }
 
 namespace detail {
-void syncVMRegsWork(); // internal sync work for a dirty vm state
+void syncVMRegsWork(bool soft); // internal sync work for a dirty vm state
 }
 
 /*
  * Sync VM registers for the first TC frame in the callstack.
  */
-inline void syncVMRegs() {
-  if (tl_regState == VMRegState::CLEAN) return;
-  detail::syncVMRegsWork();
+inline void syncVMRegs(bool soft = false) {
+  if (regState() == VMRegState::CLEAN) return;
+#ifndef NDEBUG
+  if (regState() == VMRegState::CLEAN_VERIFY) {
+    auto& regs = vmRegsUnsafe();
+    DEBUG_ONLY auto const fp = regs.fp;
+    DEBUG_ONLY auto const sp = regs.stack.top();
+    DEBUG_ONLY auto const pc = regs.pc;
+    detail::syncVMRegsWork(soft);
+    assertx(regs.fp == fp);
+    assertx(regs.stack.top() == sp);
+    assertx(regs.pc == pc);
+    regState() = VMRegState::CLEAN;
+    return;
+  }
+#endif
+  detail::syncVMRegsWork(soft);
 }
+
+/*
+ * Gets the next fake JIT return address for eager syncs.
+ */
+int32_t getNextFakeReturnAddress();
 
 //////////////////////////////////////////////////////////////////////
 
-}}
-
-#endif
+}

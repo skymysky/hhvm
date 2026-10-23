@@ -1,15 +1,19 @@
-<?php
+<?hh
 
 class X {
-  static $y = array(1,2,3);
+  public static $y = dict['a' => 17, 'b' => 34];
 
-  static function go() {
-    unset(self::$y[0]);
+  static function go() :mixed{
+    unset(self::$y['a']);
   }
-  static function y() {
+  static function y() :mixed{
     return self::$y;
   }
 }
 
+
+<<__EntryPoint>>
+function main_public_static_props_017() :mixed{
 X::go();
 var_dump(X::y());
+}

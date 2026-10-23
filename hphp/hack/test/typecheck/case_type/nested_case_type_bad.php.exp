@@ -1,0 +1,23 @@
+error: Typing[4475] Invalid case type declaration. More than one variant of `Bad` could contain values with the same runtime tag [1]
+-> This is the type `Scalars`, which includes **ints** [2]
+->   via this variant of the case type `Scalars` [3]
+-> It overlaps with `E`, which also includes **ints** because enums are approximated as `arraykey` for case type variant disjointness — an `is` test on an enum cannot rule out other ints or strings [4]
+->   via the constraint on the enum `E` [5]
+
+nested_case_type_bad.php:6:11
+ 2 | <<file:__EnableUnstableFeatures('case_types')>>
+ 3 | 
+ 4 | case type Scalars = int | bool | string | float | null;
+   |                     ^^^ [3]
+ 5 | 
+ 6 | case type Bad = Scalars | E;
+   |           ^^^ [1]
+   |                 ^^^^^^^ [2]
+   |                           ^ [4]
+ 7 | 
+ 8 | enum E : F as F {
+   |      ^ [5]
+ 9 |     A = F::A;
+10 | }
+
+1 error found

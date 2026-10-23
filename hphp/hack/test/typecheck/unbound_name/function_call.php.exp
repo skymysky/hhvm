@@ -1,0 +1,39 @@
+error: Naming[2049] Unbound name: `not_found` (a global function) [1]
+
+function_call.php:9:3
+ 7 | 
+ 8 |   // Unbound name
+ 9 |   not_found();
+   |   ^^^^^^^^^ [1]
+10 | 
+11 |   // The inner foo should be an unbound global constant
+
+error: Naming[2049] Unbound name: `foo` (a global constant) [1]
+
+function_call.php:12:7
+10 | 
+11 |   // The inner foo should be an unbound global constant
+12 |   foo(foo);
+   |       ^^^ [1]
+13 | }
+
+error: Typing[4107] Unbound name (typing): `not_found` [1]
+
+function_call.php:9:3
+ 7 | 
+ 8 |   // Unbound name
+ 9 |   not_found();
+   |   ^^^^^^^^^ [1]
+10 | 
+11 |   // The inner foo should be an unbound global constant
+
+error: Typing[4106] Unbound global constant (Typing) [1]
+
+function_call.php:12:7
+10 | 
+11 |   // The inner foo should be an unbound global constant
+12 |   foo(foo);
+   |       ^^^ [1]
+13 | }
+
+4 errors found

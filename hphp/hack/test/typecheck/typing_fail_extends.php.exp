@@ -1,6 +1,25 @@
-File "typing_fail_extends.php", line 31, characters 5-29:
-Typing error (Typing[4110])
-File "typing_fail_extends.php", line 28, characters 22-30:
-This is an object of type Option
-File "typing_fail_extends.php", line 31, characters 25-28:
-It is incompatible with a nullable type
+error: Typing[4110] Invalid argument [1]
+-> Expected `Option<T>` [2]
+->   via this generic `T` [3]
+-> But got `null` [1]
+
+typing_fail_extends.php:31:25
+16 |   private T $x;
+17 | 
+18 |   public function __construct(T $x) {
+   |                               ^ [3]
+19 |     $this->x = $x;
+20 |   }
+   :
+26 | }
+27 | 
+28 | class Y<T> extends X<Option<T>> {
+   |                      ^^^^^^^^^ [2]
+29 | 
+30 |   public function __construct() {
+31 |     parent::__construct(null);
+   |                         ^^^^ [1]
+32 |   }
+33 | 
+
+1 error found

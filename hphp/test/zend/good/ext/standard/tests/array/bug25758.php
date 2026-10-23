@@ -1,4 +1,4 @@
-<?php
-	$a = array ("quote'" => array("quote'"));
-	echo var_export($a, true);
-?>
+<?hh <<__EntryPoint>> function main(): void {
+$a = dict["quote'" => vec["quote'"]];
+echo var_export($a, true);
+}

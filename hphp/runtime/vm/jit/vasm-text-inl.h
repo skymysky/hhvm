@@ -16,7 +16,7 @@
 
 #include <utility>
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -30,6 +30,13 @@ inline Varea& Vtext::area(AreaIndex i) {
   return m_areas[static_cast<unsigned>(i)];
 }
 
+inline CodeAddress Vtext::toDestAddress(CodeAddress a) {
+  for (auto const& area : m_areas) {
+    if (area.code.contains(a)) return area.code.toDestAddress(a);
+  }
+  return a;
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 
-}}
+}

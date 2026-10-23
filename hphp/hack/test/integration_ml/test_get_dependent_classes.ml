@@ -1,4 +1,4 @@
-(**
+(*
  * Copyright (c) 2016, Facebook, Inc.
  * All rights reserved.
  *
@@ -8,51 +8,74 @@
  *
  *)
 
-open Hh_core
-
+open Hh_prelude
 module Test = Integration_test_base
 
-let files = [
-  "C", "class C {}";
-  "D", "class D extends C {}";
-  "E", "class E extends D {}";
-  "F", "trait F { require extends E; }";
-  "G", "trait G { use F; }";
+let files =
+  [
+    ("C", "class C {}");
+    ("D", "class D extends C {}");
+    ("E", "class E extends D {}");
+    ("F", "trait F { require extends E; }");
+    ("G", "trait G { use F; }");
+    ("H", "trait H {}");
+    ("I", "class I { use H; }");
+    ("J", "interface J {}");
+    ("K", "interface K extends J {}");
+    ("L", "trait L { require implements K; }");
+    ("M", "class :M {}");
+    ("N", "class :N { attribute :M; }");
+    ("Unrelated", "class Unrelated {}");
+  ]
+  |> List.map ~f:(fun (name, contents) -> (name ^ ".php", "<?hh\n" ^ contents))
 
-  "H", "trait H {}";
-  "I", "class I { use H; }";
-
-  "J", "interface J {}";
-  "K", "interface K extends J {}";
-  "L", "trait L { require implements K; }";
-
-  "M", "class :M {}";
-  "N", "class :N { attribute :M; }";
-
-  "Unrelated", "class Unrelated {}";
-] |> List.map ~f:begin fun (name, contents) ->
-  (name ^ ".php", "<?hh\n" ^ contents)
-end
-
-let () =
+let test () =
   let env = Test.setup_server () in
   let env = Test.setup_disk env files in
+  Test.assert_no_diagnostics env;
+  let ctx = Provider_utils.ctx_from_server_env env in
 
-  Test.assert_no_errors env;
-
-  let dependent_classes = Decl_redecl_service.get_dependent_classes
-    None
-    ~bucket_size:1
-    env.ServerEnv.files_info
-    (SSet.of_list ["\\C"; "\\H"; "\\J"; "\\:M";])
+  let get_classes path =
+    match Naming_table.get_file_info env.Server_env.naming_table path with
+    | None -> S_set.empty
+    | Some info ->
+      S_set.of_list
+      @@ List.map info.File_info.ids.File_info.classes ~f:(fun id ->
+             id.File_info.name)
   in
-
-  let expected_dependent_classes = List.sort String.compare
-    ["\\C"; "\\D"; "\\E"; "\\F"; "\\G"; "\\H";
-      "\\I"; "\\J"; "\\K"; "\\L"; "\\:M"; "\\:N";]
+  let dependent_classes =
+    Decl_redecl_service.get_descendant_classes
+      ctx
+      None
+      ~bucket_size:1
+      get_classes
+      (S_set.of_list ["\\C"; "\\H"; "\\J"; "\\:M"])
   in
+  let expected_dependent_classes =
+    List.sort
+      ~compare:String.compare
+      [
+        "\\C";
+        "\\D";
+        "\\E";
+        "\\F";
+        "\\G";
+        "\\H";
+        "\\I";
+        "\\J";
+        "\\K";
+        "\\L";
+        "\\:M";
+        "\\:N";
+      ]
+  in
+  List.iter (S_set.elements dependent_classes) ~f:print_endline;
 
-  List.iter (SSet.elements dependent_classes) ~f:print_endline;
-
-  if SSet.elements dependent_classes <> expected_dependent_classes then
+  if
+    not
+      (List.equal
+         String.equal
+         (S_set.elements dependent_classes)
+         expected_dependent_classes)
+  then
     Test.fail "Missing dependent classes"

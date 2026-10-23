@@ -1,4 +1,4 @@
-array(1) {
+dict(1) {
   ["foo"]=>
   string(10) "Some Value"
 }

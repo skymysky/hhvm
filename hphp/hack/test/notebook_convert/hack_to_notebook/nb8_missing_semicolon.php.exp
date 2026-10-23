@@ -1,0 +1,33 @@
+{
+  "cells": [
+    {
+      "cell_type": "code",
+      "source": [ "  echo \"look, the semicolon is missing: \"" ],
+      "outputs": [],
+      "execution_count": null,
+      "metadata": {
+        "output": { "id": 1247934846418027, "loadingStatus": "loaded" },
+        "collapsed": true
+      }
+    }
+  ],
+  "metadata": {
+    "kernelspec": {
+      "name": "bento_kernel_hack",
+      "display_name": "hack",
+      "language": "hack",
+      "metadata": {
+        "kernel_name": "bento_kernel_hack",
+        "nightly_builds": true,
+        "fbpkg_supported": true,
+        "cinder_runtime": false,
+        "is_prebuilt": true,
+        "default_tagged_version": "2093",
+        "kernel_version": "2093",
+        "download_status": "downloaded"
+      }
+    },
+    "orig_nbformat": 4
+  },
+  "nbformat": 4
+}

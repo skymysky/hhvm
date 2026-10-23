@@ -17,16 +17,11 @@
 
 #include <algorithm>
 
-#include <sys/types.h>
-#include <sys/stat.h>
-
 #include <folly/Conv.h>
 #include <folly/portability/Fcntl.h>
 
 #include "hphp/runtime/base/file.h"
-#include "hphp/runtime/base/zend-functions.h"
 
-#include "hphp/util/alloc.h"
 #include "hphp/util/conv-10.h"
 
 namespace HPHP {
@@ -58,21 +53,21 @@ const char* StringBuffer::data() const {
   return nullptr;
 }
 
-String StringBuffer::detach() {
+OptString StringBuffer::detach() {
   if (m_str && m_len) {
     assertx(m_str->hasExactlyOneRef());
-    auto str = String::attach(m_str);
+    auto str = OptString::attach(m_str);
     str.setSize(m_len);
     m_str = nullptr;
     m_len = 0;
     m_cap = 0;
     return str;
   }
-  return empty_string();
+  return String::Empty();
 }
 
-String StringBuffer::copy() const {
-  return String(data(), size(), CopyString);
+OptString StringBuffer::copy() const {
+  return OptString(data(), size(), CopyString);
 }
 
 void StringBuffer::absorb(StringBuffer& buf) {
@@ -140,7 +135,7 @@ char* StringBuffer::appendCursor(int size) {
 void StringBuffer::append(int n) {
   char buf[12];
   int len;
-  auto const sd = String::GetIntegerStringData(n);
+  auto const sd = OptString::GetIntegerStringData(n);
   char *p;
   if (!sd) {
     auto sl = conv_10(n, buf + 12);
@@ -156,7 +151,7 @@ void StringBuffer::append(int n) {
 void StringBuffer::append(int64_t n) {
   char buf[21];
   int len;
-  auto const sd = String::GetIntegerStringData(n);
+  auto const sd = OptString::GetIntegerStringData(n);
   char *p;
   if (!sd) {
     auto sl = conv_10(n, buf + 21);
@@ -170,7 +165,7 @@ void StringBuffer::append(int64_t n) {
 }
 
 void StringBuffer::append(const Variant& v) {
-  auto const cell = v.asCell();
+  auto const cell = v.asTypedValue();
   switch (cell->m_type) {
     case KindOfInt64:
       append(cell->m_data.num);
@@ -189,12 +184,15 @@ void StringBuffer::append(const Variant& v) {
     case KindOfDict:
     case KindOfPersistentKeyset:
     case KindOfKeyset:
-    case KindOfPersistentArray:
-    case KindOfArray:
     case KindOfObject:
     case KindOfResource:
-    case KindOfRef:
+    case KindOfRFunc:
     case KindOfFunc:
+    case KindOfClass:
+    case KindOfLazyClass:
+    case KindOfClsMeth:
+    case KindOfRClsMeth:
+    case KindOfEnumClassLabel:
       append(v.toString());
   }
 }

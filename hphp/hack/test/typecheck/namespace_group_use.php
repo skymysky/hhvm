@@ -1,6 +1,4 @@
-<?hh // strict
-
-// TODO(T30806984): this test is broken
+<?hh
 
 namespace Foo\Bar\Baz {
   function f1(): void {}

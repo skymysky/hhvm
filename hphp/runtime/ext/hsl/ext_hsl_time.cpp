@@ -15,13 +15,12 @@
 */
 
 #include "hphp/runtime/ext/extension.h"
-#include "hphp/system/systemlib.h"
 #include "hphp/util/timer.h"
 
 namespace HPHP {
 namespace {
 
-  THREAD_LOCAL(int64_t, request_time_ns);
+  RDS_LOCAL(int64_t, request_time_ns);
 
   int64_t HHVM_FUNCTION(HH_request_time_ns) {
     return *request_time_ns.get();
@@ -29,14 +28,14 @@ namespace {
 
   struct TimeExtension final : Extension {
 
-    TimeExtension() : Extension("hsl_time", "1.0") {}
+    TimeExtension() : Extension("hsl_time", "1.0", "hphp_hphpi") {}
 
-    void moduleInit() override {
-      HHVM_FALIAS(
-        HH\\Lib\\_Private\\Native\\request_time_ns,
+    void moduleRegisterNative() override {
+      // Clang 15 doesn't like the HHVM_FALIAS macro with \\N
+      HHVM_FALIAS_FE_STR(
+        "HH\\Lib\\_Private\\Native\\request_time_ns",
         HH_request_time_ns
       );
-      loadSystemlib();
     }
 
     void requestInit() override {

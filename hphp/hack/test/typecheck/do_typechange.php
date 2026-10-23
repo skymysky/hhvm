@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 /**
  * Copyright (c) 2014, Facebook, Inc.
  * All rights reserved.
@@ -9,10 +9,10 @@
  *
  */
 
-function foo(): int {
+function foo(bool $b): int {
   $x = 10;
   do {
     $x = null;
-  } while(true);
+  } while($b);
   return $x;
 }

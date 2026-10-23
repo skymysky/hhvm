@@ -16,13 +16,13 @@
 */
 
 #include "hphp/runtime/ext/ldap/ext_ldap.h"
-#include "hphp/runtime/ext/std/ext_std_function.h"
 #include "hphp/runtime/base/array-init.h"
+#include "hphp/runtime/base/array-iterator.h"
 #include "hphp/runtime/base/builtin-functions.h"
-#include "hphp/runtime/base/request-local.h"
 #include "hphp/runtime/base/root-map.h"
 #include <folly/String.h>
 #include <lber.h>
+#include "hphp/util/rds-local.h"
 #include "hphp/util/text-util.h"
 
 #define LDAP_DEPRECATED 1
@@ -52,104 +52,11 @@ static const StaticString
   s_LDAP_MODIFY_BATCH_VALUES(LDAP_MODIFY_BATCH_VALUES);
 
 static struct LdapExtension final : Extension {
-  LdapExtension() : Extension("ldap", NO_EXTENSION_VERSION_YET) {}
+  LdapExtension() : Extension("ldap", NO_EXTENSION_VERSION_YET, "hphp_hphpi") {}
   void requestInit() override;
   void requestShutdown() override;
-  void moduleInit() override {
-    HHVM_RC_INT(LDAP_ESCAPE_FILTER, k_LDAP_ESCAPE_FILTER);
-    HHVM_RC_INT(LDAP_ESCAPE_DN, k_LDAP_ESCAPE_DN);
-
-    HHVM_FE(ldap_connect);
-    HHVM_FE(ldap_explode_dn);
-    HHVM_FE(ldap_dn2ufn);
-    HHVM_FE(ldap_err2str);
-    HHVM_FE(ldap_add);
-    HHVM_FE(ldap_mod_add);
-    HHVM_FE(ldap_mod_del);
-    HHVM_FE(ldap_mod_replace);
-    HHVM_FE(ldap_modify);
-    HHVM_FE(ldap_modify_batch);
-    HHVM_FE(ldap_bind);
-    HHVM_FE(ldap_set_rebind_proc);
-    HHVM_FE(ldap_sort);
-    HHVM_FE(ldap_start_tls);
-    HHVM_FE(ldap_unbind);
-    HHVM_FE(ldap_get_option);
-    HHVM_FE(ldap_set_option);
-    HHVM_FE(ldap_close);
-    HHVM_FE(ldap_list);
-    HHVM_FE(ldap_read);
-    HHVM_FE(ldap_search);
-    HHVM_FE(ldap_rename);
-    HHVM_FE(ldap_delete);
-    HHVM_FE(ldap_compare);
-    HHVM_FE(ldap_errno);
-    HHVM_FE(ldap_error);
-    HHVM_FE(ldap_get_dn);
-    HHVM_FE(ldap_count_entries);
-    HHVM_FE(ldap_get_entries);
-    HHVM_FE(ldap_first_entry);
-    HHVM_FE(ldap_next_entry);
-    HHVM_FE(ldap_get_attributes);
-    HHVM_FE(ldap_first_attribute);
-    HHVM_FE(ldap_next_attribute);
-    HHVM_FE(ldap_first_reference);
-    HHVM_FE(ldap_next_reference);
-    HHVM_FE(ldap_parse_reference);
-    HHVM_FE(ldap_parse_result);
-    HHVM_FE(ldap_free_result);
-    HHVM_FE(ldap_get_values_len);
-    HHVM_FE(ldap_get_values);
-    HHVM_FE(ldap_control_paged_result);
-    HHVM_FE(ldap_control_paged_result_response);
-    HHVM_FE(ldap_escape);
-
-    HHVM_RC_INT_SAME(LDAP_DEREF_ALWAYS);
-    HHVM_RC_INT_SAME(LDAP_DEREF_FINDING);
-    HHVM_RC_INT_SAME(LDAP_DEREF_NEVER);
-    HHVM_RC_INT_SAME(LDAP_DEREF_SEARCHING);
-
-    HHVM_RC_INT_SAME(LDAP_MODIFY_BATCH_ADD);
-    HHVM_RC_INT_SAME(LDAP_MODIFY_BATCH_REMOVE);
-    HHVM_RC_INT_SAME(LDAP_MODIFY_BATCH_REMOVE_ALL);
-    HHVM_RC_INT_SAME(LDAP_MODIFY_BATCH_REPLACE);
-    HHVM_RC_STR_SAME(LDAP_MODIFY_BATCH_ATTRIB);
-    HHVM_RC_STR_SAME(LDAP_MODIFY_BATCH_MODTYPE);
-    HHVM_RC_STR_SAME(LDAP_MODIFY_BATCH_VALUES);
-
-    HHVM_RC_INT_SAME(LDAP_OPT_DEREF);
-    HHVM_RC_INT_SAME(LDAP_OPT_SIZELIMIT);
-    HHVM_RC_INT_SAME(LDAP_OPT_TIMELIMIT);
-    HHVM_RC_INT_SAME(LDAP_OPT_PROTOCOL_VERSION);
-    HHVM_RC_INT_SAME(LDAP_OPT_ERROR_NUMBER);
-    HHVM_RC_INT_SAME(LDAP_OPT_REFERRALS);
-    HHVM_RC_INT_SAME(LDAP_OPT_ERROR_STRING);
-    HHVM_RC_INT_SAME(LDAP_OPT_SERVER_CONTROLS);
-    HHVM_RC_INT_SAME(LDAP_OPT_CLIENT_CONTROLS);
-
-#ifdef LDAP_OPT_NETWORK_TIMEOUT
-    HHVM_RC_INT_SAME(LDAP_OPT_NETWORK_TIMEOUT);
-#elif defined(LDAP_X_OPT_NETWORK_TIMEOUT)
-    HHVM_RC_INT(LDAP_OPT_NETWORK_TIMEOUT, LDAP_X_OPT_NETWORK_TIMEOUT);
-#endif
-#ifdef LDAP_OPT_TIMEOUT
-    HHVM_RC_INT_SAME(LDAP_OPT_TIMEOUT);
-#endif
-#ifdef LDAP_OPT_RESTART
-    HHVM_RC_INT_SAME(LDAP_OPT_RESTART);
-#endif
-#ifdef LDAP_OPT_HOST_NAME
-    HHVM_RC_INT_SAME(LDAP_OPT_HOST_NAME);
-#endif
-#ifdef LDAP_OPT_MATCHED_DN
-    HHVM_RC_INT_SAME(LDAP_OPT_MATCHED_DN);
-#endif
-#ifdef LDAP_OPT_DEBUG_LEVEL
-    HHVM_RC_INT_SAME(LDAP_OPT_DEBUG_LEVEL);
-#endif
-
-    loadSystemlib();
-  }
+  void moduleInit() override;
+  void moduleRegisterNative() override;
 } s_ldap_extension;
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -158,10 +65,10 @@ struct LdapLink : SweepableResourceData {
   DECLARE_RESOURCE_ALLOCATION(LdapLink)
 
   LdapLink() {}
-  ~LdapLink() { closeImpl(); }
+  ~LdapLink() override { closeImpl(false); }
 
   void close() {
-    closeImpl();
+    closeImpl(false);
     rebindproc.unset();
   }
 
@@ -170,12 +77,12 @@ struct LdapLink : SweepableResourceData {
   }
 
 private:
-  void closeImpl();
+  void closeImpl(bool forSweep);
 
 public:
-  CLASSNAME_IS("ldap link");
+  CLASSNAME_IS("ldap link")
   // overriding ResourceData
-  const String& o_getClassNameHook() const override { return classnameof(); }
+  const OptString& o_getClassNameHook() const override { return classnameof(); }
 
   LDAP *link{nullptr};
   Variant rebindproc;
@@ -190,7 +97,7 @@ struct LdapRequestData {
 
   RootMap<LdapLink> m_links;
 };
-static THREAD_LOCAL(LdapRequestData, s_ldap_data);
+static RDS_LOCAL(LdapRequestData, s_ldap_data);
 #define LDAPG(name) s_ldap_data->m_ ## name
 
 void LdapExtension::requestInit() {
@@ -229,16 +136,18 @@ void clearLdapLink(const LdapLink* link) {
 }
 
 void LdapLink::sweep() {
-  closeImpl();
+  closeImpl(true);
   rebindproc.releaseForSweep();
 }
 
-void LdapLink::closeImpl() {
+void LdapLink::closeImpl(bool forSweep) {
   if (link) {
     ldap_unbind_s(link);
     link = nullptr;
     LDAPG(num_links)--;
-    clearLdapLink(this);
+    if (!forSweep) {
+      clearLdapLink(this);
+    }
   }
 }
 
@@ -246,12 +155,12 @@ struct LdapResult : SweepableResourceData {
   DECLARE_RESOURCE_ALLOCATION(LdapResult)
 
   LdapResult(LDAPMessage *res) : data(res) {}
-  ~LdapResult() { close();}
+  ~LdapResult() override { close();}
 
   void close() {
     if (data) {
       ldap_msgfree(data);
-      data = NULL;
+      data = nullptr;
     }
   }
 
@@ -259,9 +168,9 @@ struct LdapResult : SweepableResourceData {
     return data == nullptr;
   }
 
-  CLASSNAME_IS("ldap result");
+  CLASSNAME_IS("ldap result")
   // overriding ResourceData
-  const String& o_getClassNameHook() const override { return classnameof();}
+  const OptString& o_getClassNameHook() const override { return classnameof();}
 
   LDAPMessage *data;
 };
@@ -272,23 +181,23 @@ struct LdapResultEntry : SweepableResourceData {
 
   LdapResultEntry(LDAPMessage *entry, req::ptr<LdapResult> res)
     : data(entry), ber(nullptr), result(std::move(res)) {}
-  ~LdapResultEntry() { close();}
+  ~LdapResultEntry() override { close();}
 
   void close() {
-    if (ber != NULL) {
+    if (ber != nullptr) {
       ber_free(ber, 0);
-      ber = NULL;
+      ber = nullptr;
     }
-    data = NULL;
+    data = nullptr;
   }
 
   bool isInvalid() const override {
-    return data == nullptr;
+    return data == nullptr || result->isInvalid();
   }
 
-  CLASSNAME_IS("ldap result entry");
+  CLASSNAME_IS("ldap result entry")
   // overriding ResourceData
-  const String& o_getClassNameHook() const override { return classnameof(); }
+  const OptString& o_getClassNameHook() const override { return classnameof(); }
 
   LDAPMessage *data;
   BerElement *ber;
@@ -311,7 +220,7 @@ static req::ptr<LdapLink> get_valid_ldap_link_resource(const T& link) {
   return ld;
 }
 
-static req::ptr<LdapResult> get_valid_ldap_result_resource(const Resource& result) {
+static req::ptr<LdapResult> get_valid_ldap_result_resource(const OptResource& result) {
   auto res = dyn_cast_or_null<LdapResult>(result);
   if (res == nullptr || res->isInvalid()) {
     raise_warning("Not a valid ldap result resource");
@@ -320,7 +229,7 @@ static req::ptr<LdapResult> get_valid_ldap_result_resource(const Resource& resul
   return res;
 }
 
-static req::ptr<LdapResultEntry> get_valid_ldap_result_entry_resource(const Resource& result_entry) {
+static req::ptr<LdapResultEntry> get_valid_ldap_result_entry_resource(const OptResource& result_entry) {
   auto entry = dyn_cast_or_null<LdapResultEntry>(result_entry);
   if (entry == nullptr || entry->isInvalid()) {
     raise_warning("Not a valid ldap result entry resource");
@@ -337,7 +246,7 @@ static int _get_lderrno(LDAP *ldap) {
   return lderr;
 }
 
-static bool php_ldap_do_modify(const Resource& link, const String& dn, const Array& entry,
+static bool php_ldap_do_modify(const OptResource& link, const OptString& dn, const Array& entry,
                                int oper) {
   bool is_full_add = false; /* flag for full add operation so ldap_mod_add
                                can be put back into oper, gerrit THomson */
@@ -363,11 +272,11 @@ static bool php_ldap_do_modify(const Resource& link, const String& dn, const Arr
   /* end additional , gerrit thomson */
 
   bool ret = false;
-  Array stringHolder;
+  Array stringHolder = Array::CreateVec();
   for (int i = 0; i < num_attribs; i++) {
     ldap_mods[i] = (LDAPMod*)malloc(sizeof(LDAPMod));
     ldap_mods[i]->mod_op = oper | LDAP_MOD_BVALUES;
-    ldap_mods[i]->mod_type = NULL;
+    ldap_mods[i]->mod_type = nullptr;
 
     Variant key = iter.first();
     Variant value = iter.second();
@@ -401,7 +310,7 @@ static bool php_ldap_do_modify(const Resource& link, const String& dn, const Arr
     /* allow for arrays with one element, no allowance for arrays with
        none but probably not required, gerrit thomson. */
     if (num_values == 1 && !value.isArray()) {
-      String svalue = value.toString();
+      OptString svalue = value.toString();
       stringHolder.append(svalue);
       ldap_mods[i]->mod_bvalues[0] = (berval *)malloc(sizeof(struct berval));
       ldap_mods[i]->mod_bvalues[0]->bv_len = svalue.size();
@@ -415,16 +324,16 @@ static bool php_ldap_do_modify(const Resource& link, const String& dn, const Arr
           num_attribs = i + 1;
           goto errexit;
         }
-        String ivalue = arr[j].toString();
+        OptString ivalue = arr[j].toString();
         ldap_mods[i]->mod_bvalues[j] = (berval *)malloc(sizeof(struct berval));
         ldap_mods[i]->mod_bvalues[j]->bv_len = ivalue.size();
         ldap_mods[i]->mod_bvalues[j]->bv_val = (char*)ivalue.data();
       }
     }
-    ldap_mods[i]->mod_bvalues[num_values] = NULL;
+    ldap_mods[i]->mod_bvalues[num_values] = nullptr;
     ++iter;
   }
-  ldap_mods[num_attribs] = NULL;
+  ldap_mods[num_attribs] = nullptr;
 
   /* check flag to see if do_mod was called to perform full add,
      gerrit thomson */
@@ -465,19 +374,25 @@ static void php_set_opts(LDAP *ldap, int sizelimit, int timelimit, int deref,
                          int *old_deref) {
   /* sizelimit */
   if (sizelimit > -1) {
-    ldap_get_option(ldap, LDAP_OPT_SIZELIMIT, old_sizelimit);
+    if (old_sizelimit) {
+      ldap_get_option(ldap, LDAP_OPT_SIZELIMIT, old_sizelimit);
+    }
     ldap_set_option(ldap, LDAP_OPT_SIZELIMIT, &sizelimit);
   }
 
   /* timelimit */
   if (timelimit > -1) {
-    ldap_get_option(ldap, LDAP_OPT_SIZELIMIT, old_timelimit);
+    if (old_timelimit) {
+      ldap_get_option(ldap, LDAP_OPT_TIMELIMIT, old_timelimit);
+    }
     ldap_set_option(ldap, LDAP_OPT_TIMELIMIT, &timelimit);
   }
 
   /* deref */
   if (deref > -1) {
-    ldap_get_option(ldap, LDAP_OPT_SIZELIMIT, old_deref);
+    if (old_deref) {
+      ldap_get_option(ldap, LDAP_OPT_DEREF, old_deref);
+    }
     ldap_set_option(ldap, LDAP_OPT_DEREF, &deref);
   }
 }
@@ -492,34 +407,28 @@ static Variant php_ldap_do_search(const Variant& link, const Variant& base_dn,
                               : attributes.toArray();
   int num_attribs = arr_attributes.size();
   int old_sizelimit = -1, old_timelimit = -1, old_deref = -1;
-  int ldap_err = 1, parallel_search = 1;
-  char **ldap_attrs = (char**)malloc((num_attribs+1) * sizeof(char *));
-  Array stringHolder;
-  Array ret = Array::Create();
-
-  char *ldap_base_dn = NULL;
-  char *ldap_filter = NULL;
-  req::ptr<LdapLink> ld;
+  auto ldap_attrs = std::unique_ptr<char*[]>{new char*[num_attribs+1]};
+  Array stringHolder = Array::CreateVec();
+  char *ldap_base_dn = nullptr;
+  char *ldap_filter = nullptr;
 
   for (int i = 0; i < num_attribs; i++) {
     if (!arr_attributes.exists(i)) {
       raise_warning("Array initialization wrong");
-      ldap_err = 0;
-      goto cleanup;
+      return false;
     }
-    String attr = arr_attributes[i].toString();
+    OptString attr = arr_attributes[i].toString();
     stringHolder.append(attr);
     ldap_attrs[i] = (char*)attr.data();
   }
-  ldap_attrs[num_attribs] = NULL;
+  ldap_attrs[num_attribs] = nullptr;
 
   /* parallel search? */
   if (link.isArray()) {
     int nlinks = link.toArray().size();
     if (nlinks == 0) {
       raise_warning("No links in link array");
-      ldap_err = 0;
-      goto cleanup;
+      return false;
     }
 
     int nbases;
@@ -528,16 +437,15 @@ static Variant php_ldap_do_search(const Variant& link, const Variant& base_dn,
       if (nbases != nlinks) {
         raise_warning("Base must either be a string, or an array with the "
                       "same number of elements as the links array");
-        ldap_err = 0;
-        goto cleanup;
+        return false;
       }
     } else {
       nbases = 0; /* this means string, not array */
-      /* If anything else than string is passed, ldap_base_dn = NULL */
+      /* If anything else than string is passed, ldap_base_dn = nullptr */
       if (base_dn.isString()) {
         ldap_base_dn = (char*)base_dn.toString().data();
       } else {
-        ldap_base_dn = NULL;
+        ldap_base_dn = nullptr;
       }
     }
 
@@ -547,12 +455,11 @@ static Variant php_ldap_do_search(const Variant& link, const Variant& base_dn,
       if (nfilters != nlinks) {
         raise_warning("Filter must either be a string, or an array with the "
                       "same number of elements as the links array");
-        ldap_err = 0;
-        goto cleanup;
+        return false;
       }
     } else {
       nfilters = 0; /* this means string, not array */
-      String sfilter = filter.toString();
+      OptString sfilter = filter.toString();
       stringHolder.append(sfilter);
       ldap_filter = (char*)sfilter.data();
     }
@@ -563,40 +470,46 @@ static Variant php_ldap_do_search(const Variant& link, const Variant& base_dn,
     req::vector<int> rcs;
     rcs.resize(nlinks);
 
+    Array ret = Array::CreateVec();
     ArrayIter iter(link.toArray());
     ArrayIter iterdn(base_dn.toArray());
     ArrayIter iterfilter(filter.toArray());
     for (int i = 0; i < nlinks; i++) {
-      ld = get_valid_ldap_link_resource(iter.second());
+      auto ld = get_valid_ldap_link_resource(iter.second());
       if (!ld) {
-        ldap_err = 0;
-        goto cleanup;
+        return false;
       }
       if (nbases != 0) { /* base_dn an array? */
         Variant entry = iterdn.second();
         ++iterdn;
 
-        /* If anything else than string is passed, ldap_base_dn = NULL */
+        /* If anything else than string is passed, ldap_base_dn = nullptr */
         if (entry.isString()) {
           ldap_base_dn = (char*)entry.toString().data();
         } else {
-          ldap_base_dn = NULL;
+          ldap_base_dn = nullptr;
         }
       }
       if (nfilters != 0) { /* filter an array? */
         Variant entry = iterfilter.second();
         ++iterfilter;
-        String sentry = entry.toString();
+        OptString sentry = entry.toString();
         stringHolder.append(sentry);
         ldap_filter = (char*)sentry.data();
       }
 
-      php_set_opts(ld->link, sizelimit, timelimit, deref, &old_sizelimit,
-                   &old_timelimit, &old_deref);
+      php_set_opts(ld->link,
+                   sizelimit, timelimit, deref,
+                   &old_sizelimit, &old_timelimit, &old_deref);
 
       /* Run the actual search */
       rcs[i] = ldap_search(ld->link, ldap_base_dn, scope, ldap_filter,
-                           ldap_attrs, attrsonly);
+                           ldap_attrs.get(), attrsonly);
+
+      php_set_opts(ld->link,
+                   old_sizelimit, old_timelimit, old_deref,
+                   nullptr, nullptr, nullptr);
+
       lds[i] = ld;
       ++iter;
     }
@@ -605,8 +518,8 @@ static Variant php_ldap_do_search(const Variant& link, const Variant& base_dn,
     for (int i = 0; i < nlinks; i++) {
       LDAPMessage *ldap_res;
       if (rcs[i] != -1) {
-        rcs[i] = ldap_result(lds[i]->link, LDAP_RES_ANY, 1 /* LDAP_MSG_ALL */,
-                             NULL, &ldap_res);
+        rcs[i] = ldap_result(lds[i]->link, rcs[i], LDAP_MSG_ALL,
+                             nullptr, &ldap_res);
       }
       if (rcs[i] != -1) {
         ret.append(Variant(req::make<LdapResult>(ldap_res)));
@@ -614,72 +527,58 @@ static Variant php_ldap_do_search(const Variant& link, const Variant& base_dn,
         ret.append(false);
       }
     }
-  } else {
-    /* parallel search? */
-    String sfilter = filter.toString();
-    ldap_filter = (char*)sfilter.data();
 
-    /* If anything else than string is passed, ldap_base_dn = NULL */
-    if (base_dn.isString()) {
-      ldap_base_dn = (char*)base_dn.toString().data();
-    }
-
-    ld = get_valid_ldap_link_resource(link);
-    if (!ld) {
-      ldap_err = 0;
-      goto cleanup;
-    }
-
-    php_set_opts(ld->link, sizelimit, timelimit, deref, &old_sizelimit,
-                 &old_timelimit, &old_deref);
-
-    /* Run the actual search */
-    LDAPMessage *ldap_res;
-    int rc = ldap_search_s(ld->link, ldap_base_dn, scope, ldap_filter,
-                           ldap_attrs, attrsonly, &ldap_res);
-
-    if (rc != LDAP_SUCCESS && rc != LDAP_SIZELIMIT_EXCEEDED
-  #ifdef LDAP_ADMINLIMIT_EXCEEDED
-        && rc != LDAP_ADMINLIMIT_EXCEEDED
-  #endif
-  #ifdef LDAP_REFERRAL
-        && rc != LDAP_REFERRAL
-  #endif
-    ) {
-      raise_warning("Search: %s", ldap_err2string(rc));
-      ldap_err = 0;
-    } else {
-      if (rc == LDAP_SIZELIMIT_EXCEEDED) {
-        raise_warning("Partial search results returned: Sizelimit exceeded");
-      }
-#ifdef LDAP_ADMINLIMIT_EXCEEDED
-      else if (rc == LDAP_ADMINLIMIT_EXCEEDED) {
-        raise_warning("Partial search results returned: Adminlimit exceeded");
-      }
-#endif
-      parallel_search = 0;
-      ret.append(Variant(req::make<LdapResult>(ldap_res)));
-    }
-  }
-cleanup:
-  if (ld) {
-    /* Restoring previous options */
-    php_set_opts(ld->link, old_sizelimit, old_timelimit, old_deref, &sizelimit,
-                 &timelimit, &deref);
-  }
-  if (ldap_attrs != NULL) {
-    free(ldap_attrs);
+    return ret;
   }
 
-  if (!ldap_err) {
+  /* not parallel search */
+  OptString sfilter = filter.toString();
+  ldap_filter = (char*)sfilter.data();
+
+  /* If anything else than string is passed, ldap_base_dn = nullptr */
+  if (base_dn.isString()) {
+    ldap_base_dn = (char*)base_dn.toString().data();
+  }
+
+  auto ld = get_valid_ldap_link_resource(link);
+  if (!ld) {
     return false;
   }
 
-  if (!parallel_search) {
-    return ret.dequeue();
-  } else {
-    return ret;
+  php_set_opts(ld->link, sizelimit, timelimit, deref, &old_sizelimit,
+               &old_timelimit, &old_deref);
+
+  /* Run the actual search */
+  LDAPMessage *ldap_res;
+  int rc = ldap_search_s(ld->link, ldap_base_dn, scope, ldap_filter,
+                         ldap_attrs.get(), attrsonly, &ldap_res);
+
+  auto result = req::make<LdapResult>(ldap_res);
+  php_set_opts(ld->link,
+               old_sizelimit, old_timelimit, old_deref,
+               nullptr, nullptr, nullptr);
+
+  if (rc != LDAP_SUCCESS && rc != LDAP_SIZELIMIT_EXCEEDED
+#ifdef LDAP_ADMINLIMIT_EXCEEDED
+      && rc != LDAP_ADMINLIMIT_EXCEEDED
+#endif
+#ifdef LDAP_REFERRAL
+      && rc != LDAP_REFERRAL
+#endif
+     ) {
+    raise_warning("Search: %s", ldap_err2string(rc));
+    return false;
   }
+
+  if (rc == LDAP_SIZELIMIT_EXCEEDED) {
+    raise_warning("Partial search results returned: Sizelimit exceeded");
+  }
+#ifdef LDAP_ADMINLIMIT_EXCEEDED
+  else if (rc == LDAP_ADMINLIMIT_EXCEEDED) {
+    raise_warning("Partial search results returned: Adminlimit exceeded");
+  }
+#endif
+  return Variant{std::move(result)};
 }
 
 static int _ldap_rebind_proc(LDAP* /*ldap*/, const char* url, ber_tag_t /*req*/,
@@ -694,7 +593,7 @@ static int _ldap_rebind_proc(LDAP* /*ldap*/, const char* url, ber_tag_t /*req*/,
 
   /* callback */
   Variant ret = vm_call_user_func
-    (ld->rebindproc, make_packed_array(Variant(ld), String(url, CopyString)));
+    (ld->rebindproc, make_vec_array(Variant(ld), OptString(url, CopyString)));
   return ret.toInt64();
 }
 
@@ -708,7 +607,7 @@ static void get_attributes(Array &ret, LDAP *ldap,
   BerElement *ber;
   char *attribute = ldap_first_attribute(ldap, ldap_result_entry, &ber);
 
-  while (attribute != NULL) {
+  while (attribute != nullptr) {
     struct berval **ldap_value =
       ldap_get_values_len(ldap, ldap_result_entry, attribute);
     int num_values = ldap_count_values_len(ldap_value);
@@ -716,13 +615,13 @@ static void get_attributes(Array &ret, LDAP *ldap,
     Array tmp;
     tmp.set(s_count, num_values);
     for (int i = 0; i < num_values; i++) {
-      tmp.append(String(ldap_value[i]->bv_val, ldap_value[i]->bv_len,
-                        CopyString));
+      auto const val = ldap_value[i];
+      tmp.set(i, OptString(val->bv_val, val->bv_len, CopyString));
     }
     ldap_value_free_len(ldap_value);
 
-    String sAttribute = to_lower ? String(toLower(attribute))
-                                 : String(attribute, CopyString);
+    OptString sAttribute = to_lower ? OptString(toLower(attribute))
+                                 : OptString(attribute, CopyString);
     ret.set(sAttribute, tmp);
     ret.set(num_attrib, sAttribute);
 
@@ -731,7 +630,7 @@ static void get_attributes(Array &ret, LDAP *ldap,
     attribute = ldap_next_attribute(ldap, ldap_result_entry, ber);
   }
 
-  if (ber != NULL) {
+  if (ber != nullptr) {
     ber_free(ber, 0);
   }
 
@@ -742,8 +641,8 @@ static void get_attributes(Array &ret, LDAP *ldap,
 
 Variant HHVM_FUNCTION(ldap_connect,
                       const Variant& hostname /* = uninit_variant */,
-                      int port /* = 389 */) {
-  const String& str_hostname = hostname.isNull()
+                      int64_t port /* = 389 */) {
+  const OptString& str_hostname = hostname.isNull()
                              ? null_string
                              : hostname.toString();
   if (LDAPG(max_links) != -1 && LDAPG(num_links) >= LDAPG(max_links)) {
@@ -753,7 +652,7 @@ Variant HHVM_FUNCTION(ldap_connect,
 
   auto ld = req::make<LdapLink>();
 
-  LDAP *ldap = NULL;
+  LDAP *ldap = nullptr;
   if (!str_hostname.empty() && str_hostname.find('/') >= 0) {
     int rc = ldap_initialize(&ldap, str_hostname.data());
     if (rc != LDAP_SUCCESS) {
@@ -776,8 +675,8 @@ Variant HHVM_FUNCTION(ldap_connect,
 }
 
 Variant HHVM_FUNCTION(ldap_explode_dn,
-                      const String& dn,
-                      int with_attrib) {
+                      const OptString& dn,
+                      int64_t with_attrib) {
   char **ldap_value;
   if (!(ldap_value = ldap_explode_dn((char*)dn.data(), with_attrib))) {
     /* Invalid parameters were passed to ldap_explode_dn */
@@ -785,13 +684,13 @@ Variant HHVM_FUNCTION(ldap_explode_dn,
   }
 
   int i = 0;
-  while (ldap_value[i] != NULL) i++;
+  while (ldap_value[i] != nullptr) i++;
   int count = i;
 
   Array ret;
   ret.set(s_count, count);
   for (i = 0; i < count; i++) {
-    ret.append(String(ldap_value[i], CopyString));
+    ret.set(i, OptString(ldap_value[i], CopyString));
   }
 
   ldap_value_free(ldap_value);
@@ -799,59 +698,59 @@ Variant HHVM_FUNCTION(ldap_explode_dn,
 }
 
 Variant HHVM_FUNCTION(ldap_dn2ufn,
-                      const String& db) {
+                      const OptString& db) {
   char *ufn = ldap_dn2ufn((char*)db.data());
   if (ufn) {
-    String ret(ufn, CopyString);
+    OptString ret(ufn, CopyString);
     ldap_memfree(ufn);
     return ret;
   }
   return false;
 }
 
-String HHVM_FUNCTION(ldap_err2str,
-                     int errnum) {
-  return String(ldap_err2string(errnum), CopyString);
+OptString HHVM_FUNCTION(ldap_err2str,
+                        int64_t errnum) {
+  return OptString(ldap_err2string(errnum), CopyString);
 }
 
 bool HHVM_FUNCTION(ldap_add,
-                   const Resource& link,
-                   const String& dn,
+                   const OptResource& link,
+                   const OptString& dn,
                    const Array& entry) {
   return php_ldap_do_modify(link, dn, entry, PHP_LD_FULL_ADD);
 }
 
 bool HHVM_FUNCTION(ldap_mod_add,
-                   const Resource& link,
-                   const String& dn,
+                   const OptResource& link,
+                   const OptString& dn,
                    const Array& entry) {
   return php_ldap_do_modify(link, dn, entry, LDAP_MOD_ADD);
 }
 
 bool HHVM_FUNCTION(ldap_mod_del,
-                   const Resource& link,
-                   const String& dn,
+                   const OptResource& link,
+                   const OptString& dn,
                    const Array& entry) {
   return php_ldap_do_modify(link, dn, entry, LDAP_MOD_DELETE);
 }
 
 bool HHVM_FUNCTION(ldap_mod_replace,
-                   const Resource& link,
-                   const String& dn,
+                   const OptResource& link,
+                   const OptString& dn,
                    const Array& entry) {
   return php_ldap_do_modify(link, dn, entry, LDAP_MOD_REPLACE);
 }
 
 bool HHVM_FUNCTION(ldap_modify,
-                   const Resource& link,
-                   const String& dn,
+                   const OptResource& link,
+                   const OptString& dn,
                    const Array& entry) {
   return php_ldap_do_modify(link, dn, entry, LDAP_MOD_REPLACE);
 }
 
 bool HHVM_FUNCTION(ldap_modify_batch,
-                   const Resource& link,
-                   const String& dn,
+                   const OptResource& link,
+                   const OptString& dn,
                    const Array& modifs) {
   /*
   $modifs = [
@@ -888,7 +787,7 @@ bool HHVM_FUNCTION(ldap_modify_batch,
   /* perform validation */
   {
     /* make sure the DN contains no NUL bytes */
-    if (dn.find('\0') != String::npos) {
+    if (dn.find('\0') != OptString::npos) {
       raise_warning("DN must not contain NUL bytes");
       return false;
     }
@@ -924,7 +823,7 @@ bool HHVM_FUNCTION(ldap_modify_batch,
         }
 
         /* is this a valid entry? */
-        const String& modkey = modprops_iter.first().asCStrRef();
+        const OptString& modkey = modprops_iter.first().asCStrRef();
         if (modkey != s_LDAP_MODIFY_BATCH_ATTRIB
             && modkey != s_LDAP_MODIFY_BATCH_MODTYPE
             && modkey != s_LDAP_MODIFY_BATCH_VALUES) {
@@ -942,7 +841,7 @@ bool HHVM_FUNCTION(ldap_modify_batch,
                           "a string");
             return false;
           }
-          if (modprops_iter.second().asCStrRef().find('\0') != String::npos) {
+          if (modprops_iter.second().asCStrRef().find('\0') != OptString::npos) {
             raise_warning("A '" LDAP_MODIFY_BATCH_ATTRIB "' value must not "
                           "contain NUL bytes");
             return false;
@@ -1038,7 +937,7 @@ bool HHVM_FUNCTION(ldap_modify_batch,
 
       /* fetch the relevant data */
       const Array& mod = modifs[i].asCArrRef();
-      const String& attrib = mod[s_LDAP_MODIFY_BATCH_ATTRIB].asCStrRef();
+      const OptString& attrib = mod[s_LDAP_MODIFY_BATCH_ATTRIB].asCStrRef();
       int64_t modtype = mod[s_LDAP_MODIFY_BATCH_MODTYPE].asInt64Val();
       const Array& vals = mod[s_LDAP_MODIFY_BATCH_VALUES].asCArrRef();
 
@@ -1077,7 +976,7 @@ bool HHVM_FUNCTION(ldap_modify_batch,
         /* for each value */
         for (int64_t j = 0; j < num_modvals; ++j) {
           /* fetch it */
-          const String& modval = vals[j].asCStrRef();
+          const OptString& modval = vals[j].asCStrRef();
 
           /* allocate the data struct */
           ldap_mods[i]->mod_bvalues[j] = req::make_raw<struct berval>();
@@ -1090,12 +989,12 @@ bool HHVM_FUNCTION(ldap_modify_batch,
                  modval.size());
         }
 
-        /* NULL-terminate values */
+        /* nullptr-terminate values */
         ldap_mods[i]->mod_bvalues[num_modvals] = nullptr;
       }
     }
 
-    /* NULL-terminate modifications */
+    /* nullptr-terminate modifications */
     ldap_mods[num_mods] = nullptr;
   }
 
@@ -1136,7 +1035,7 @@ bool HHVM_FUNCTION(ldap_modify_batch,
 }
 
 bool HHVM_FUNCTION(ldap_bind,
-                   const Resource& link,
+                   const OptResource& link,
                    const Variant& bind_rdn /* = uninit_variant */,
                    const Variant& bind_password /* = uninit_variant */) {
 
@@ -1145,10 +1044,10 @@ bool HHVM_FUNCTION(ldap_bind,
     return false;
   }
 
-  const String& str_bind_rdn = bind_rdn.isNull()
+  const OptString& str_bind_rdn = bind_rdn.isNull()
                              ? null_string
                              : bind_rdn.toString();
-  const String& str_bind_password = bind_password.isNull()
+  const OptString& str_bind_password = bind_password.isNull()
                                   ? null_string
                                   : bind_password.toString();
 
@@ -1173,7 +1072,7 @@ bool HHVM_FUNCTION(ldap_bind,
 }
 
 bool HHVM_FUNCTION(ldap_set_rebind_proc,
-                   const Resource& link,
+                   const OptResource& link,
                    const Variant& callback) {
   auto ld = get_valid_ldap_link_resource(link);
   if (!ld) {
@@ -1184,7 +1083,7 @@ bool HHVM_FUNCTION(ldap_set_rebind_proc,
     /* unregister rebind procedure */
     if (!ld->rebindproc.isNull()) {
       ld->rebindproc.unset();
-      ldap_set_rebind_proc(ld->link, NULL, NULL);
+      ldap_set_rebind_proc(ld->link, nullptr, nullptr);
     }
     return true;
   }
@@ -1209,9 +1108,9 @@ bool HHVM_FUNCTION(ldap_set_rebind_proc,
 }
 
 bool HHVM_FUNCTION(ldap_sort,
-                   const Resource& link,
-                   const Resource& result,
-                   const String& sortfilter) {
+                   const OptResource& link,
+                   const OptResource& result,
+                   const OptString& sortfilter) {
   auto ld = get_valid_ldap_link_resource(link);
   if (!ld) {
     return false;
@@ -1221,9 +1120,10 @@ bool HHVM_FUNCTION(ldap_sort,
     return false;
   }
 
-  if (ldap_sort_entries(ld->link, &res->data,
-                        !sortfilter.empty() ? (char*)sortfilter.data() : NULL,
-                        strcmp) != LDAP_SUCCESS) {
+  if (ldap_sort_entries(
+        ld->link, &res->data,
+        !sortfilter.empty() ? (char*)sortfilter.data() : nullptr,
+        strcmp) != LDAP_SUCCESS) {
     raise_warning("%s", ldap_err2string(_get_lderrno(ld->link)));
     return false;
   }
@@ -1231,7 +1131,7 @@ bool HHVM_FUNCTION(ldap_sort,
 }
 
 bool HHVM_FUNCTION(ldap_start_tls,
-                   const Resource& link) {
+                   const OptResource& link) {
   auto ld = get_valid_ldap_link_resource(link);
   if (!ld) {
     return false;
@@ -1239,14 +1139,14 @@ bool HHVM_FUNCTION(ldap_start_tls,
   int rc, protocol = LDAP_VERSION3;
   if (((rc = ldap_set_option(ld->link, LDAP_OPT_PROTOCOL_VERSION, &protocol))
        != LDAP_SUCCESS) ||
-      ((rc = ldap_start_tls_s(ld->link, NULL, NULL)) != LDAP_SUCCESS)) {
+      ((rc = ldap_start_tls_s(ld->link, nullptr, nullptr)) != LDAP_SUCCESS)) {
     raise_warning("Unable to start TLS: %s", ldap_err2string(rc));
     return false;
   }
   return true;
 }
 
-bool HHVM_FUNCTION(ldap_unbind, const Resource& link) {
+bool HHVM_FUNCTION(ldap_unbind, const OptResource& link) {
   auto ld = get_valid_ldap_link_resource(link);
   if (!ld) {
     return false;
@@ -1256,9 +1156,9 @@ bool HHVM_FUNCTION(ldap_unbind, const Resource& link) {
 }
 
 bool HHVM_FUNCTION(ldap_get_option,
-                   const Resource& link,
-                   int option,
-                   VRefParam retval) {
+                   const OptResource& link,
+                   int64_t option,
+                   Variant& retval) {
   auto ld = get_valid_ldap_link_resource(link);
   if (!ld) {
     return false;
@@ -1280,7 +1180,7 @@ bool HHVM_FUNCTION(ldap_get_option,
       if (ldap_get_option(ld->link, option, &val)) {
         return false;
       }
-      retval.assignIfRef((int64_t)val);
+      retval = (int64_t)val;
     } break;
 #ifdef LDAP_OPT_NETWORK_TIMEOUT
   case LDAP_OPT_NETWORK_TIMEOUT:
@@ -1293,7 +1193,7 @@ bool HHVM_FUNCTION(ldap_get_option,
         }
         return false;
       }
-      retval.assignIfRef((int64_t)timeout->tv_sec);
+      retval = (int64_t)timeout->tv_sec;
       ldap_memfree(timeout);
     } break;
 #elif defined(LDAP_X_OPT_CONNECT_TIMEOUT)
@@ -1303,7 +1203,7 @@ bool HHVM_FUNCTION(ldap_get_option,
       if (ldap_get_option(ld->link, LDAP_X_OPT_CONNECT_TIMEOUT, &timeout)) {
         return false;
       }
-      retval.assignIfRef((int64_t)(timeout / 1000));
+      retval = (int64_t)(timeout / 1000);
     } break;
 #endif
   /* options with string value */
@@ -1321,15 +1221,15 @@ bool HHVM_FUNCTION(ldap_get_option,
   case LDAP_OPT_MATCHED_DN:
 #endif
     {
-      char *val = NULL;
-      if (ldap_get_option(ld->link, option, &val) || val == NULL ||
+      char *val = nullptr;
+      if (ldap_get_option(ld->link, option, &val) || val == nullptr ||
           *val == '\0') {
         if (val) {
           ldap_memfree(val);
         }
         return false;
       }
-      retval.assignIfRef(String(val, CopyString));
+      retval = OptString(val, CopyString);
       ldap_memfree(val);
     } break;
 /* options not implemented
@@ -1351,9 +1251,9 @@ const StaticString
 
 bool HHVM_FUNCTION(ldap_set_option,
                    const Variant& link,
-                   int option,
+                   int64_t option,
                    const Variant& newval) {
-  LDAP *ldap = NULL;
+  LDAP *ldap = nullptr;
   if (!link.isNull()) {
     auto ld = get_valid_ldap_link_resource(link);
     if (!ld) {
@@ -1412,7 +1312,7 @@ bool HHVM_FUNCTION(ldap_set_option,
   case LDAP_OPT_MATCHED_DN:
 #endif
     {
-      String snewval = newval.toString();
+      OptString snewval = newval.toString();
       char *val = (char*)snewval.data();
       if (ldap_set_option(ldap, option, val)) {
         return false;
@@ -1442,9 +1342,9 @@ bool HHVM_FUNCTION(ldap_set_option,
         return false;
       }
       ctrls = (LDAPControl**)malloc((1 + ncontrols) * sizeof(*ctrls));
-      *ctrls = NULL;
+      *ctrls = nullptr;
       ctrlp = ctrls;
-      Array stringHolder;
+      Array stringHolder = Array::CreateVec();
       for (ArrayIter iter(newval.toArray()); iter; ++iter) {
         Variant vctrlval = iter.second();
         if (!vctrlval.isArray()) {
@@ -1459,7 +1359,7 @@ bool HHVM_FUNCTION(ldap_set_option,
           error = 1;
           break;
         }
-        String val = ctrlval[s_oid].toString();
+        OptString val = ctrlval[s_oid].toString();
         stringHolder.append(val);
         ctrl = *ctrlp = (LDAPControl*)malloc(sizeof(**ctrlp));
         ctrl->ldctl_oid = (char*)val.data();
@@ -1469,7 +1369,7 @@ bool HHVM_FUNCTION(ldap_set_option,
           ctrl->ldctl_value.bv_val = (char*)val.data();
           ctrl->ldctl_value.bv_len = val.size();
         } else {
-          ctrl->ldctl_value.bv_val = NULL;
+          ctrl->ldctl_value.bv_val = nullptr;
           ctrl->ldctl_value.bv_len = 0;
         }
         if (ctrlval.exists(s_iscritical)) {
@@ -1479,7 +1379,7 @@ bool HHVM_FUNCTION(ldap_set_option,
         }
 
         ++ctrlp;
-        *ctrlp = NULL;
+        *ctrlp = nullptr;
       }
       if (!error) {
         error = ldap_set_option(ldap, option, ctrls);
@@ -1501,8 +1401,8 @@ bool HHVM_FUNCTION(ldap_set_option,
 }
 
 bool HHVM_FUNCTION(ldap_close,
-                   const Resource& link) {
-  return f_ldap_unbind(link);
+                   const OptResource& link) {
+  return HHVM_FN(ldap_unbind)(link);
 }
 
 Variant HHVM_FUNCTION(ldap_list,
@@ -1510,10 +1410,10 @@ Variant HHVM_FUNCTION(ldap_list,
                       const Variant& base_dn,
                       const Variant& filter,
                       const Variant& attributes /* = uninit_variant */,
-                      int attrsonly /* = 0 */,
-                      int sizelimit /* = -1 */,
-                      int timelimit /* = -1 */,
-                      int deref /* = -1 */) {
+                      int64_t attrsonly /* = 0 */,
+                      int64_t sizelimit /* = -1 */,
+                      int64_t timelimit /* = -1 */,
+                      int64_t deref /* = -1 */) {
   return php_ldap_do_search(link, base_dn, filter, attributes, attrsonly,
                             sizelimit, timelimit, deref, LDAP_SCOPE_ONELEVEL);
 }
@@ -1523,10 +1423,10 @@ Variant HHVM_FUNCTION(ldap_read,
                       const Variant& base_dn,
                       const Variant& filter,
                       const Variant& attributes /* = uninit_variant */,
-                      int attrsonly /* = 0 */,
-                      int sizelimit /* = -1 */,
-                      int timelimit /* = -1 */,
-                      int deref /* = -1 */) {
+                      int64_t attrsonly /* = 0 */,
+                      int64_t sizelimit /* = -1 */,
+                      int64_t timelimit /* = -1 */,
+                      int64_t deref /* = -1 */) {
   return php_ldap_do_search(link, base_dn, filter, attributes, attrsonly,
                             sizelimit, timelimit, deref, LDAP_SCOPE_BASE);
 }
@@ -1536,19 +1436,19 @@ Variant HHVM_FUNCTION(ldap_search,
                       const Variant& base_dn,
                       const Variant& filter,
                       const Variant& attributes /* = uninit_variant */,
-                      int attrsonly /* = 0 */,
-                      int sizelimit /* = -1 */,
-                      int timelimit /* = -1 */,
-                      int deref /* = -1 */) {
+                      int64_t attrsonly /* = 0 */,
+                      int64_t sizelimit /* = -1 */,
+                      int64_t timelimit /* = -1 */,
+                      int64_t deref /* = -1 */) {
   return php_ldap_do_search(link, base_dn, filter, attributes, attrsonly,
                             sizelimit, timelimit, deref, LDAP_SCOPE_SUBTREE);
 }
 
 bool HHVM_FUNCTION(ldap_rename,
-                   const Resource& link,
-                   const String& dn,
-                   const String& newrdn,
-                   const String& newparent,
+                   const OptResource& link,
+                   const OptString& dn,
+                   const OptString& newrdn,
+                   const OptString& newparent,
                    bool deleteoldrdn) {
   auto ld = get_valid_ldap_link_resource(link);
   if (!ld) {
@@ -1556,14 +1456,14 @@ bool HHVM_FUNCTION(ldap_rename,
   }
 
   int rc = ldap_rename_s(ld->link, (char*)dn.data(), (char*)newrdn.data(),
-                         !newparent.empty() ? (char*)newparent.data() : NULL,
-                         deleteoldrdn, NULL, NULL);
+                         !newparent.empty() ? (char*)newparent.data() : nullptr,
+                         deleteoldrdn, nullptr, nullptr);
   return rc == LDAP_SUCCESS;
 }
 
 bool HHVM_FUNCTION(ldap_delete,
-                   const Resource& link,
-                   const String& dn) {
+                   const OptResource& link,
+                   const OptString& dn) {
   auto ld = get_valid_ldap_link_resource(link);
   if (!ld) {
     return false;
@@ -1578,10 +1478,10 @@ bool HHVM_FUNCTION(ldap_delete,
 }
 
 Variant HHVM_FUNCTION(ldap_compare,
-                      const Resource& link,
-                      const String& dn,
-                      const String& attribute,
-                      const String& value) {
+                      const OptResource& link,
+                      const OptString& dn,
+                      const OptString& attribute,
+                      const OptString& value) {
   auto ld = get_valid_ldap_link_resource(link);
   if (!ld) {
     return -1LL;
@@ -1598,7 +1498,7 @@ Variant HHVM_FUNCTION(ldap_compare,
 }
 
 Variant HHVM_FUNCTION(ldap_errno,
-                      const Resource& link) {
+                      const OptResource& link) {
   auto ld = get_valid_ldap_link_resource(link);
   if (!ld) {
     return false;
@@ -1608,19 +1508,19 @@ Variant HHVM_FUNCTION(ldap_errno,
 }
 
 Variant HHVM_FUNCTION(ldap_error,
-                     const Resource& link) {
+                     const OptResource& link) {
   auto ld = get_valid_ldap_link_resource(link);
   if (!ld) {
     return false;
   }
 
   int ld_errno = _get_lderrno(ld->link);
-  return String(ldap_err2string(ld_errno), CopyString);
+  return OptString(ldap_err2string(ld_errno), CopyString);
 }
 
 Variant HHVM_FUNCTION(ldap_get_dn,
-                      const Resource& link,
-                      const Resource& result_entry) {
+                      const OptResource& link,
+                      const OptResource& result_entry) {
   auto ld = get_valid_ldap_link_resource(link);
   if (!ld) {
     return false;
@@ -1632,7 +1532,7 @@ Variant HHVM_FUNCTION(ldap_get_dn,
 
   char *text = ldap_get_dn(ld->link, entry->data);
   if (text) {
-    String ret(text, CopyString);
+    OptString ret(text, CopyString);
     ldap_memfree(text);
     return ret;
   }
@@ -1640,8 +1540,8 @@ Variant HHVM_FUNCTION(ldap_get_dn,
 }
 
 Variant HHVM_FUNCTION(ldap_count_entries,
-                      const Resource& link,
-                      const Resource& result) {
+                      const OptResource& link,
+                      const OptResource& result) {
   auto ld = get_valid_ldap_link_resource(link);
   if (!ld) {
     return false;
@@ -1655,8 +1555,8 @@ Variant HHVM_FUNCTION(ldap_count_entries,
 }
 
 Variant HHVM_FUNCTION(ldap_get_entries,
-                      const Resource& link,
-                      const Resource& result) {
+                      const OptResource& link,
+                      const OptResource& result) {
   auto ld = get_valid_ldap_link_resource(link);
   if (!ld) {
     return false;
@@ -1676,17 +1576,17 @@ Variant HHVM_FUNCTION(ldap_get_entries,
   }
 
   LDAPMessage *ldap_result_entry = ldap_first_entry(ldap, res->data);
-  if (ldap_result_entry == NULL) {
+  if (ldap_result_entry == nullptr) {
     return false;
   }
 
   num_entries = 0;
-  while (ldap_result_entry != NULL) {
-    Array tmp1 = Array::Create();
+  while (ldap_result_entry != nullptr) {
+    Array tmp1 = Array::CreateDict();
     get_attributes(tmp1, ldap, ldap_result_entry, true);
 
     char *dn = ldap_get_dn(ldap, ldap_result_entry);
-    tmp1.set(s_dn, String(dn, CopyString));
+    tmp1.set(s_dn, OptString(dn, CopyString));
     ldap_memfree(dn);
 
     ret.set(num_entries, tmp1);
@@ -1700,8 +1600,8 @@ Variant HHVM_FUNCTION(ldap_get_entries,
 }
 
 Variant HHVM_FUNCTION(ldap_first_entry,
-                      const Resource& link,
-                      const Resource& result) {
+                      const OptResource& link,
+                      const OptResource& result) {
   auto ld = get_valid_ldap_link_resource(link);
   if (!ld) {
     return false;
@@ -1712,7 +1612,7 @@ Variant HHVM_FUNCTION(ldap_first_entry,
   }
 
   LDAPMessage *entry;
-  if ((entry = ldap_first_entry(ld->link, res->data)) == NULL) {
+  if ((entry = ldap_first_entry(ld->link, res->data)) == nullptr) {
     return false;
   }
 
@@ -1720,8 +1620,8 @@ Variant HHVM_FUNCTION(ldap_first_entry,
 }
 
 Variant HHVM_FUNCTION(ldap_next_entry,
-                      const Resource& link,
-                      const Resource& result_entry) {
+                      const OptResource& link,
+                      const OptResource& result_entry) {
   auto ld = get_valid_ldap_link_resource(link);
   if (!ld) {
     return false;
@@ -1732,7 +1632,7 @@ Variant HHVM_FUNCTION(ldap_next_entry,
   }
 
   LDAPMessage *msg;
-  if ((msg = ldap_next_entry(ld->link, entry->data)) == NULL) {
+  if ((msg = ldap_next_entry(ld->link, entry->data)) == nullptr) {
     return false;
   }
 
@@ -1740,8 +1640,8 @@ Variant HHVM_FUNCTION(ldap_next_entry,
 }
 
 Variant HHVM_FUNCTION(ldap_get_attributes,
-                    const Resource& link,
-                    const Resource& result_entry) {
+                    const OptResource& link,
+                    const OptResource& result_entry) {
   auto ld = get_valid_ldap_link_resource(link);
   if (!ld) {
     return false;
@@ -1751,14 +1651,14 @@ Variant HHVM_FUNCTION(ldap_get_attributes,
     return false;
   }
 
-  Array ret = Array::Create();
+  Array ret = Array::CreateDict();
   get_attributes(ret, ld->link, entry->data, false);
   return ret;
 }
 
 Variant HHVM_FUNCTION(ldap_first_attribute,
-                      const Resource& link,
-                      const Resource& result_entry) {
+                      const OptResource& link,
+                      const OptResource& result_entry) {
   auto ld = get_valid_ldap_link_resource(link);
   if (!ld) {
     return false;
@@ -1768,19 +1668,26 @@ Variant HHVM_FUNCTION(ldap_first_attribute,
     return false;
   }
 
+  if (entry->ber) {
+    // we are already iterating the attributes
+    ber_free(entry->ber, 0);
+    entry->ber = nullptr;
+  }
+
   char *attribute;
   if ((attribute =
-       ldap_first_attribute(ld->link, entry->data, &entry->ber)) == NULL) {
+       ldap_first_attribute(ld->link, entry->data, &entry->ber)) == nullptr) {
+    entry->ber = nullptr;
     return false;
   }
-  String ret(attribute, CopyString);
+  OptString ret(attribute, CopyString);
   ldap_memfree(attribute);
   return ret;
 }
 
 Variant HHVM_FUNCTION(ldap_next_attribute,
-                      const Resource& link,
-                      const Resource& result_entry) {
+                      const OptResource& link,
+                      const OptResource& result_entry) {
   auto ld = get_valid_ldap_link_resource(link);
   if (!ld) {
     return false;
@@ -1790,7 +1697,7 @@ Variant HHVM_FUNCTION(ldap_next_attribute,
     return false;
   }
 
-  if (entry->ber == NULL) {
+  if (entry->ber == nullptr) {
     raise_warning("called before calling ldap_first_attribute() or "
                   "no attributes found in result entry");
     return false;
@@ -1798,21 +1705,20 @@ Variant HHVM_FUNCTION(ldap_next_attribute,
 
   char *attribute;
   if ((attribute =
-       ldap_next_attribute(ld->link, entry->data, entry->ber)) == NULL) {
-    if (entry->ber != NULL) {
-      ber_free(entry->ber, 0);
-      entry->ber = NULL;
-    }
+       ldap_next_attribute(ld->link, entry->data, entry->ber)) == nullptr) {
+    assertx(entry->ber != nullptr);
+    ber_free(entry->ber, 0);
+    entry->ber = nullptr;
     return false;
   }
-  String ret(attribute, CopyString);
+  OptString ret(attribute, CopyString);
   ldap_memfree(attribute);
   return ret;
 }
 
 Variant HHVM_FUNCTION(ldap_first_reference,
-                      const Resource& link,
-                      const Resource& result) {
+                      const OptResource& link,
+                      const OptResource& result) {
   auto ld = get_valid_ldap_link_resource(link);
   if (!ld) {
     return false;
@@ -1823,7 +1729,7 @@ Variant HHVM_FUNCTION(ldap_first_reference,
   }
 
   LDAPMessage *entry;
-  if ((entry = ldap_first_reference(ld->link, res->data)) == NULL) {
+  if ((entry = ldap_first_reference(ld->link, res->data)) == nullptr) {
     return false;
   }
 
@@ -1831,8 +1737,8 @@ Variant HHVM_FUNCTION(ldap_first_reference,
 }
 
 Variant HHVM_FUNCTION(ldap_next_reference,
-                      const Resource& link,
-                      const Resource& result_entry) {
+                      const OptResource& link,
+                      const OptResource& result_entry) {
   auto ld = get_valid_ldap_link_resource(link);
   if (!ld) {
     return false;
@@ -1843,7 +1749,7 @@ Variant HHVM_FUNCTION(ldap_next_reference,
   }
 
   LDAPMessage *entry_next;
-  if ((entry_next = ldap_next_reference(ld->link, entry->data)) == NULL) {
+  if ((entry_next = ldap_next_reference(ld->link, entry->data)) == nullptr) {
     return false;
   }
 
@@ -1851,9 +1757,9 @@ Variant HHVM_FUNCTION(ldap_next_reference,
 }
 
 bool HHVM_FUNCTION(ldap_parse_reference,
-                   const Resource& link,
-                   const Resource& result_entry,
-                   VRefParam referrals) {
+                   const OptResource& link,
+                   const OptResource& result_entry,
+                   Array& referrals) {
   auto ld = get_valid_ldap_link_resource(link);
   if (!ld) {
     return false;
@@ -1865,30 +1771,29 @@ bool HHVM_FUNCTION(ldap_parse_reference,
 
   char **lreferrals, **refp;
   if (ldap_parse_reference(ld->link, entry->data, &lreferrals,
-                           NULL /* &serverctrls */, 0) != LDAP_SUCCESS) {
+                           nullptr /* &serverctrls */, 0) != LDAP_SUCCESS) {
     return false;
   }
 
-  Array arr = Array::Create();
-  if (lreferrals != NULL) {
+  referrals = Array::CreateVec();
+  if (lreferrals != nullptr) {
     refp = lreferrals;
     while (*refp) {
-      arr.append(String(*refp, CopyString));
+      referrals.append(OptString(*refp, CopyString));
       refp++;
     }
     ldap_value_free(lreferrals);
   }
-  referrals.assignIfRef(arr);
   return true;
 }
 
 bool HHVM_FUNCTION(ldap_parse_result,
-                   const Resource& link,
-                   const Resource& result,
-                   VRefParam errcode,
-                   VRefParam matcheddn /* = null */,
-                   VRefParam errmsg /* = null */,
-                   VRefParam referrals /* = null */) {
+                   const OptResource& link,
+                   const OptResource& result,
+                   int64_t& errcode,
+                   OptString& matcheddn,
+                   OptString& errmsg,
+                   Array& referrals) {
   auto ld = get_valid_ldap_link_resource(link);
   if (!ld) {
     return false;
@@ -1903,44 +1808,43 @@ bool HHVM_FUNCTION(ldap_parse_result,
   char *lmatcheddn, *lerrmsg;
   int rc = ldap_parse_result(ld->link, res->data, &lerrcode,
                              &lmatcheddn, &lerrmsg, &lreferrals,
-                             NULL /* &serverctrls */, 0);
+                             nullptr /* &serverctrls */, 0);
   if (rc != LDAP_SUCCESS) {
     raise_warning("Unable to parse result: %s", ldap_err2string(rc));
     return false;
   }
 
-  errcode.assignIfRef(lerrcode);
+  errcode = lerrcode;
 
   /* Reverse -> fall through */
-  Array arr = Array::Create();
-  if (lreferrals != NULL) {
+  referrals = Array::CreateVec();
+  if (lreferrals != nullptr) {
     refp = lreferrals;
     while (*refp) {
-      arr.append(String(*refp, CopyString));
+      referrals.append(OptString(*refp, CopyString));
       refp++;
     }
     ldap_value_free(lreferrals);
   }
-  referrals.assignIfRef(arr);
 
-  if (lerrmsg == NULL) {
-    errmsg.assignIfRef(empty_string_variant());
+  if (lerrmsg == nullptr) {
+    errmsg = staticEmptyString();
   } else {
-    errmsg.assignIfRef(String(lerrmsg, CopyString));
+    errmsg = OptString(lerrmsg, CopyString);
     ldap_memfree(lerrmsg);
   }
 
-  if (lmatcheddn == NULL) {
-    matcheddn.assignIfRef(empty_string_variant());
+  if (lmatcheddn == nullptr) {
+    matcheddn = staticEmptyString();
   } else {
-    matcheddn.assignIfRef(String(lmatcheddn, CopyString));
+    matcheddn = OptString(lmatcheddn, CopyString);
     ldap_memfree(lmatcheddn);
   }
   return true;
 }
 
 bool HHVM_FUNCTION(ldap_free_result,
-                   const Resource& result) {
+                   const OptResource& result) {
   auto res = get_valid_ldap_result_resource(result);
   if (!res) {
     return false;
@@ -1950,9 +1854,9 @@ bool HHVM_FUNCTION(ldap_free_result,
 }
 
 Variant HHVM_FUNCTION(ldap_get_values_len,
-                      const Resource& link,
-                      const Resource& result_entry,
-                      const String& attribute) {
+                      const OptResource& link,
+                      const OptResource& result_entry,
+                      const OptString& attribute) {
   auto ld = get_valid_ldap_link_resource(link);
   if (!ld) {
     return false;
@@ -1965,7 +1869,7 @@ Variant HHVM_FUNCTION(ldap_get_values_len,
   struct berval **ldap_value_len;
   if ((ldap_value_len =
        ldap_get_values_len(ld->link, entry->data,
-                           (char*)attribute.data())) == NULL) {
+                           (char*)attribute.data())) == nullptr) {
     raise_warning("Cannot get the value(s) of attribute %s",
                   ldap_err2string(_get_lderrno(ld->link)));
     return false;
@@ -1974,8 +1878,8 @@ Variant HHVM_FUNCTION(ldap_get_values_len,
   int num_values = ldap_count_values_len(ldap_value_len);
   Array ret;
   for (int i = 0; i < num_values; i++) {
-    ret.append(String(ldap_value_len[i]->bv_val, ldap_value_len[i]->bv_len,
-                      CopyString));
+    auto const val = ldap_value_len[i];
+    ret.set(i, OptString(val->bv_val, val->bv_len, CopyString));
   }
   ret.set(s_count, num_values);
   ldap_value_free_len(ldap_value_len);
@@ -1983,17 +1887,17 @@ Variant HHVM_FUNCTION(ldap_get_values_len,
 }
 
 Variant HHVM_FUNCTION(ldap_get_values,
-                      const Resource& link,
-                      const Resource& result_entry,
-                      const String& attribute) {
-  return f_ldap_get_values_len(link, result_entry, attribute);
+                      const OptResource& link,
+                      const OptResource& result_entry,
+                      const OptString& attribute) {
+  return HHVM_FN(ldap_get_values_len)(link, result_entry, attribute);
 }
 
 bool HHVM_FUNCTION(ldap_control_paged_result,
-                   const Resource& link,
-                   int pagesize,
+                   const OptResource& link,
+                   int64_t pagesize,
                    bool iscritical,
-                   const String& cookie) {
+                   const OptString& cookie) {
   auto ld = get_valid_ldap_link_resource(link);
   if (!ld) {
     return false;
@@ -2037,10 +1941,10 @@ bool HHVM_FUNCTION(ldap_control_paged_result,
 }
 
 bool HHVM_FUNCTION(ldap_control_paged_result_response,
-                   const Resource& link,
-                   const Resource& result,
-                   VRefParam cookie,
-                   VRefParam estimated) {
+                   const OptResource& link,
+                   const OptResource& result,
+                   OptString& cookie,
+                   int64_t& estimated) {
   auto ld = get_valid_ldap_link_resource(link);
   if (!ld) {
     return false;
@@ -2109,17 +2013,17 @@ bool HHVM_FUNCTION(ldap_control_paged_result_response,
     return false;
   }
 
-  cookie.assignIfRef(String(lcookie.bv_val, lcookie.bv_len, CopyString));
-  estimated.assignIfRef(lestimated);
+  cookie = OptString(lcookie.bv_val, lcookie.bv_len, CopyString);
+  estimated = lestimated;
 
   ber_memfree(lcookie.bv_val);
   return true;
 }
 
-String HHVM_FUNCTION(ldap_escape,
-                     const String& value,
-                     const String& ignores /* = "" */,
-                     int flags /* = 0 */) {
+OptString HHVM_FUNCTION(ldap_escape,
+                        const OptString& value,
+                        const OptString& ignores /* = "" */,
+                        int64_t flags /* = 0 */) {
   char esc[256] = {};
 
   if (flags & k_LDAP_ESCAPE_FILTER) { // llvm.org/bugs/show_bug.cgi?id=18389
@@ -2141,7 +2045,7 @@ String HHVM_FUNCTION(ldap_escape,
 
   char hex[] = "0123456789abcdef";
 
-  String result(3 * value.size(), ReserveString);
+  OptString result(3UL * value.size(), ReserveString);
   char *rdata = result.get()->mutableData(), *r = rdata;
 
   for (int i = 0; i < value.size(); i++) {
@@ -2157,6 +2061,107 @@ String HHVM_FUNCTION(ldap_escape,
 
   result.setSize(r - rdata);
   return result;
+}
+
+void LdapExtension::moduleRegisterNative() {
+  HHVM_RC_INT(LDAP_ESCAPE_FILTER, k_LDAP_ESCAPE_FILTER);
+  HHVM_RC_INT(LDAP_ESCAPE_DN, k_LDAP_ESCAPE_DN);
+
+  HHVM_FE(ldap_connect);
+  HHVM_FE(ldap_explode_dn);
+  HHVM_FE(ldap_dn2ufn);
+  HHVM_FE(ldap_err2str);
+  HHVM_FE(ldap_add);
+  HHVM_FE(ldap_mod_add);
+  HHVM_FE(ldap_mod_del);
+  HHVM_FE(ldap_mod_replace);
+  HHVM_FE(ldap_modify);
+  HHVM_FE(ldap_modify_batch);
+  HHVM_FE(ldap_bind);
+  HHVM_FE(ldap_set_rebind_proc);
+  HHVM_FE(ldap_sort);
+  HHVM_FE(ldap_start_tls);
+  HHVM_FE(ldap_unbind);
+  HHVM_FE(ldap_get_option);
+  HHVM_FE(ldap_set_option);
+  HHVM_FE(ldap_close);
+  HHVM_FE(ldap_list);
+  HHVM_FE(ldap_read);
+  HHVM_FE(ldap_search);
+  HHVM_FE(ldap_rename);
+  HHVM_FE(ldap_delete);
+  HHVM_FE(ldap_compare);
+  HHVM_FE(ldap_errno);
+  HHVM_FE(ldap_error);
+  HHVM_FE(ldap_get_dn);
+  HHVM_FE(ldap_count_entries);
+  HHVM_FE(ldap_get_entries);
+  HHVM_FE(ldap_first_entry);
+  HHVM_FE(ldap_next_entry);
+  HHVM_FE(ldap_get_attributes);
+  HHVM_FE(ldap_first_attribute);
+  HHVM_FE(ldap_next_attribute);
+  HHVM_FE(ldap_first_reference);
+  HHVM_FE(ldap_next_reference);
+  HHVM_FE(ldap_parse_reference);
+  HHVM_FE(ldap_parse_result);
+  HHVM_FE(ldap_free_result);
+  HHVM_FE(ldap_get_values_len);
+  HHVM_FE(ldap_get_values);
+  HHVM_FE(ldap_control_paged_result);
+  HHVM_FE(ldap_control_paged_result_response);
+  HHVM_FE(ldap_escape);
+
+  HHVM_RC_INT_SAME(LDAP_DEREF_ALWAYS);
+  HHVM_RC_INT_SAME(LDAP_DEREF_FINDING);
+  HHVM_RC_INT_SAME(LDAP_DEREF_NEVER);
+  HHVM_RC_INT_SAME(LDAP_DEREF_SEARCHING);
+
+  HHVM_RC_INT_SAME(LDAP_MODIFY_BATCH_ADD);
+  HHVM_RC_INT_SAME(LDAP_MODIFY_BATCH_REMOVE);
+  HHVM_RC_INT_SAME(LDAP_MODIFY_BATCH_REMOVE_ALL);
+  HHVM_RC_INT_SAME(LDAP_MODIFY_BATCH_REPLACE);
+  HHVM_RC_STR_SAME(LDAP_MODIFY_BATCH_ATTRIB);
+  HHVM_RC_STR_SAME(LDAP_MODIFY_BATCH_MODTYPE);
+  HHVM_RC_STR_SAME(LDAP_MODIFY_BATCH_VALUES);
+
+  HHVM_RC_INT_SAME(LDAP_OPT_DEREF);
+  HHVM_RC_INT_SAME(LDAP_OPT_SIZELIMIT);
+  HHVM_RC_INT_SAME(LDAP_OPT_TIMELIMIT);
+  HHVM_RC_INT_SAME(LDAP_OPT_PROTOCOL_VERSION);
+  HHVM_RC_INT_SAME(LDAP_OPT_ERROR_NUMBER);
+  HHVM_RC_INT_SAME(LDAP_OPT_REFERRALS);
+  HHVM_RC_INT_SAME(LDAP_OPT_ERROR_STRING);
+  HHVM_RC_INT_SAME(LDAP_OPT_SERVER_CONTROLS);
+  HHVM_RC_INT_SAME(LDAP_OPT_CLIENT_CONTROLS);
+
+#ifdef LDAP_OPT_NETWORK_TIMEOUT
+  HHVM_RC_INT_SAME(LDAP_OPT_NETWORK_TIMEOUT);
+#elif defined(LDAP_X_OPT_NETWORK_TIMEOUT)
+  HHVM_RC_INT(LDAP_OPT_NETWORK_TIMEOUT, LDAP_X_OPT_NETWORK_TIMEOUT);
+#endif
+#ifdef LDAP_OPT_TIMEOUT
+  HHVM_RC_INT_SAME(LDAP_OPT_TIMEOUT);
+#endif
+#ifdef LDAP_OPT_RESTART
+  HHVM_RC_INT_SAME(LDAP_OPT_RESTART);
+#endif
+#ifdef LDAP_OPT_HOST_NAME
+  HHVM_RC_INT_SAME(LDAP_OPT_HOST_NAME);
+#endif
+#ifdef LDAP_OPT_MATCHED_DN
+  HHVM_RC_INT_SAME(LDAP_OPT_MATCHED_DN);
+#endif
+#ifdef LDAP_OPT_DEBUG_LEVEL
+  HHVM_RC_INT_SAME(LDAP_OPT_DEBUG_LEVEL);
+#endif
+}
+
+void LdapExtension::moduleInit() {
+  LDAP* link = nullptr;
+  if (ldap_create(&link) == LDAP_SUCCESS) {
+    ldap_unbind(link);
+  }
 }
 
 ///////////////////////////////////////////////////////////////////////////////

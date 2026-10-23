@@ -1,6 +1,6 @@
 <?hh
 
-function report($msg, $obj1, $obj2) {
+function report($msg, $obj1, $obj2) :mixed{
   echo "$msg\nShould be\n";
   var_dump($obj1);
   echo "But found\n";
@@ -10,12 +10,22 @@ function report($msg, $obj1, $obj2) {
 
 // Works only when objects consist of
 // hack collections and primitive types.
-function is_equal($obj1, $obj2) {
+function is_equal($obj1, $obj2) :mixed{
   if ($obj1 === null && $obj2 === null) {
     return true;
   }
-  $type1 = get_class($obj1);
-  $type2 = get_class($obj2);
+  try {
+    $type1 = get_class($obj1);
+  } catch (Exception $ex) {
+    echo $ex->getMessage();
+    return false;
+  }
+  try {
+    $type2 = get_class($obj2);
+  } catch (Exception $ex) {
+    echo $ex->getMessage();
+    return false;
+  }
   if ($type1 !== $type2) {
     report("Incorrect type", $type1, $type2);
     return false;
@@ -40,8 +50,8 @@ function is_equal($obj1, $obj2) {
     $keys1 = $obj1->toKeysArray();
     $keys2 = $obj2->toKeysArray();
     if ($type1 === "HH\Map") {
-      sort(&$keys1);
-      sort(&$keys2);
+      sort(inout $keys1);
+      sort(inout $keys2);
     }
     if ($keys1 !== $keys2) {
       report("Incorrect keys", $keys1, $keys2);
@@ -57,130 +67,130 @@ function is_equal($obj1, $obj2) {
   return true;
 }
 
-function main() {
-  $tests = array(
+function main() :mixed{
+  $tests = vec[
     // Scalar types tests from HHJsonDecodeTest.php
-    array(
+    dict[
       'input' => 'null',
       'options' => 0,
       'expected' => null,
-    ),
-    array(
+    ],
+    dict[
       'input' => '0',
       'options' => JSON_FB_LOOSE,
       'expected' => 0,
-    ),
-    array(
+    ],
+    dict[
       'input' => '"0"',
       'options' => JSON_FB_COLLECTIONS,
       'expected' => '0',
-    ),
-    array(
+    ],
+    dict[
       'input' => 'true',
       'options' => JSON_FB_LOOSE,
       'expected' => true,
-    ),
+    ],
     // Parse Errors tests from HHJsonDecodeTest.php
-    array(
+    dict[
       'input' => '',
       'options' => JSON_FB_LOOSE,
       'expected' => null,
-    ),
-    array(
+    ],
+    dict[
       'input' => '{[}',
       'options' => JSON_FB_LOOSE,
       'expected' => null,
-    ),
-    array(
+    ],
+    dict[
       'input' => '[:(]',
       'options' => JSON_FB_LOOSE,
       'expected' => null,
-    ),
-    array(
+    ],
+    dict[
       'input' => 'xxx',
       'options' => JSON_FB_LOOSE,
       'expected' => null,
-    ),
-    array(
+    ],
+    dict[
       'input' => 'a {',
       'options' => JSON_FB_LOOSE,
       'expected' => null,
-    ),
+    ],
     // Maps checks from HHJsonDecodeTest.php
-    array(
+    dict[
       'input' => '{"0": 1, "a": "b"}',
       'options' => JSON_FB_COLLECTIONS,
       'expected' => Map {'0' => 1, 'a' => 'b'},
-    ),
+    ],
     // Vectors/Maps - some basic tests
-    array(
+    dict[
       'input' => '[1,2]',
       'options' => JSON_FB_COLLECTIONS,
       'expected' => Vector {1, 2},
-    ),
-    array(
+    ],
+    dict[
       'input' => '{}',
       'options' => JSON_FB_COLLECTIONS,
       'expected' => Map {},
-    ),
-    array(
+    ],
+    dict[
       'input' => '{"{" : "}"}',
       'options' => JSON_FB_COLLECTIONS,
       'expected' => Map {'{' => '}'},
-    ),
-    array(
+    ],
+    dict[
       'input' => '{"0": 1, "a": "b", "[]": null, "#": false}',
       'options' => JSON_FB_COLLECTIONS,
       'expected' => Map {'a' => 'b', '0' => 1, '[]' => null, '#' => false},
-    ),
+    ],
     // Collections tests from HHJsonDecodeTest.php
-    array(
+    dict[
       'input' => '[]',
       'options' => JSON_FB_COLLECTIONS,
       'expected' => Vector {},
-    ),
-    array(
+    ],
+    dict[
       'input' => '[null, 0, "0", true]',
       'options' => JSON_FB_COLLECTIONS,
       'expected' => Vector {null, 0, '0', true},
-    ),
+    ],
     // LooseModeCollections from HHJsonDecodeTest.phpi
     // Single-quoted strings
-    array(
+    dict[
       'input' => '[\'value\']',
       'options' => JSON_FB_LOOSE | JSON_FB_COLLECTIONS,
       'expected' => Vector {'value'},
-    ),
+    ],
     // Unquoted keys
-    array(
+    dict[
       'input' => '{key: "value"}',
       'options' => JSON_FB_LOOSE | JSON_FB_COLLECTIONS,
       'expected' => Map {'key' => 'value'},
-    ),
+    ],
     // Boolean keys
-    array(
+    dict[
       'input' => '{true: "value"}',
       'options' => JSON_FB_LOOSE | JSON_FB_COLLECTIONS,
       'expected' => Map {'true' => 'value'},
-    ),
+    ],
     // Null keys
-    array(
+    dict[
       'input' => '{null: "value"}',
       'options' => JSON_FB_LOOSE | JSON_FB_COLLECTIONS,
       'expected' => Map {'null' => 'value'},
-    ),
+    ],
     // Nested collections
-    array(
+    dict[
       'input' =>  '[2,"4",{0:[]}]',
       'options' => JSON_FB_LOOSE | JSON_FB_COLLECTIONS,
       'expected' => Vector {2, '4', Map {'0' => Vector {}}},
-    ),
-    array(
+    ],
+    dict[
       'input' => '{"vec": [], "map": {}}',
       'options' => JSON_FB_COLLECTIONS,
       'expected' => Map {'vec' => Vector {}, 'map' => Map {}},
-    ),
-    array(
+    ],
+    dict[
       'input' => '{"vec" : [{"z" : []}], "map" : {"a" : {"]" : "["}}}',
       'options' => JSON_FB_COLLECTIONS,
       'expected' => Map {
@@ -196,8 +206,8 @@ function main() {
           },
         },
       },
-    ),
-  );
+    ],
+  ];
   foreach ($tests as $test) {
     $output = json_decode($test['input'], true, 512, $test['options']);
     if (!is_equal($output, $test['expected'])) {
@@ -208,5 +218,12 @@ function main() {
   echo "Done\n";
 }
 
-main();
 
+
+<<__EntryPoint>>
+function main_json_decode_collections() :mixed{
+  set_error_handler(($errno, $errstr, ...$_rest) ==> {
+    throw new Exception($errstr);
+  });
+  main();
+}

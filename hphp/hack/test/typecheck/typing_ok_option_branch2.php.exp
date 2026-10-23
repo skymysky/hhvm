@@ -1,1 +1,11 @@
-No errors
+warning: Warn[12009] This `is` check is always `true`. The expression on the left has type `int` which is a subtype of `int`. [1]
+
+typing_ok_option_branch2.php:30:9
+28 |     return;
+29 |   }
+30 |   if (!($y is int)) {
+   |         ^^^^^^^^^ [1]
+31 |     return;
+32 |   }
+
+1 error found

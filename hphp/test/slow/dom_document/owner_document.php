@@ -1,6 +1,6 @@
-<?php
+<?hh
 
-function main() {
+function main() :mixed{
   $doc = new DOMDocument();
   $root = $doc->createElement('root');
   var_dump($doc);
@@ -8,4 +8,8 @@ function main() {
   var_dump($root->ownerDocument === $doc);
 }
 
+
+<<__EntryPoint>>
+function main_owner_document() :mixed{
 main();
+}

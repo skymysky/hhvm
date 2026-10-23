@@ -1,32 +1,19 @@
-<?php
-function g($obj) {
-  echo "g\n";
-  $obj->yar(123);
-}
-class D {
-  public function yar($y) {
-    $x = $y;
-  }
-  // C++ exceptions, like stack overflow, now prevent further php code from
-  // running. So this destructor should not run.
-  public function __destruct() {
-    g($this);
-  }
-}
+<?hh
 class C {
-  public function baz($z) {
-    return $z = call_user_func(array($this,'foo'), $z);
+  public function baz($z) :mixed{
+    $z = call_user_func(vec[$this,'foo'], $z);
+    return $z;
   }
-  public function bar($z) {
-    return $z = call_user_func(array($this,'baz'), $z);
+  public function bar($z) :mixed{
+    $z = call_user_func(vec[$this,'baz'], $z);
+    return $z;
   }
-  public function foo($z) {
-    $guard = new D;
-    return $z = call_user_func(array($this,'bar'), $z);
+  public function foo($z) :mixed{
+    $z = call_user_func(vec[$this,'bar'], $z);
+    return $z;
   }
 }
-function bar() {
+<<__EntryPoint>> function bar() :mixed{
   $obj = new C;
   $obj->foo(123);
 }
-bar();

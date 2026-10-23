@@ -14,19 +14,16 @@
 | license@php.net so we can mail you a copy immediately.               |
 +----------------------------------------------------------------------+
 */
-#ifndef incl_HPHP_EXT_GETTEXT_H_
-#define incl_HPHP_EXT_GETTEXT_H_
+#pragma once
 
 #include "hphp/runtime/ext/extension.h"
 
 namespace HPHP {
 
 struct GettextExtension final : Extension {
-  GettextExtension() : Extension("gettext") {}
-  void moduleInit() override;
+  GettextExtension() : Extension("gettext", NO_EXTENSION_VERSION_YET, "hphp_hphpi") {}
+  void moduleRegisterNative() override;
   void moduleInfo(Array &info) override;
 };
 
 }
-
-#endif

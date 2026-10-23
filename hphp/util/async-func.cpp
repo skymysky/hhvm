@@ -33,7 +33,7 @@
 namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
 
-typedef void PFN_THREAD_FUNC(void *);
+using PFN_THREAD_FUNC = void(void *);
 
 PFN_THREAD_FUNC* AsyncFuncImpl::s_initFunc = nullptr;
 void* AsyncFuncImpl::s_initFuncArg = nullptr;
@@ -45,12 +45,14 @@ std::atomic<uint32_t> AsyncFuncImpl::s_count { 0 };
 
 AsyncFuncImpl::AsyncFuncImpl(void *obj, PFN_THREAD_FUNC *func,
                              int numaNode, unsigned hugeStackKb,
-                             unsigned tlExtraKb)
+                             unsigned tlExtraKb,
+                             const std::string& threadGroupSuffix)
   : m_obj(obj)
   , m_func(func)
   , m_node(numaNode)
   , m_hugeStackKb(hugeStackKb / 4 * 4)  // align to 4K page boundary
-  , m_tlExtraKb((tlExtraKb + 3) / 4 * 4) {
+  , m_tlExtraKb((tlExtraKb + 3) / 4 * 4)
+  , m_threadGroupSuffix(threadGroupSuffix) {
   if (m_tlExtraKb > (128 * 1024)) {
     // Don't include a big additional per-thread storage to avoid running out of
     // virtual memory.
@@ -68,6 +70,9 @@ void *AsyncFuncImpl::ThreadFunc(void *obj) {
   init_stack_limits(self->getThreadAttr());
   s_tlSpace = MemBlock{self->m_tlExtraBase, self->m_tlExtraKb * 1024};
   assertx(!s_tlSpace.ptr || s_tlSpace.size);
+  s_hugeRange = self->m_hugePages;
+  assertx(!s_hugeRange.ptr || s_hugeRange.size);
+
   set_numa_binding(self->m_node);
   self->setThreadName();
   self->threadFuncImpl();
@@ -91,7 +96,7 @@ static char* mmap_offset_aligned(size_t size, size_t alignOffset,
   auto const allocSize = size + (alignment > 16) * alignment;
   char* start = (char*)mmap(nullptr, allocSize,
                             PROT_READ | PROT_WRITE,
-                            MAP_PRIVATE | MAP_ANON,
+                            MAP_PRIVATE | MAP_ANONYMOUS,
                             -1, 0);
   // Check if `mmap()` returned -1, and throw an exception in that case.
   folly::checkUnixError(reinterpret_cast<intptr_t>(start),
@@ -177,12 +182,9 @@ void AsyncFuncImpl::start() {
       auto const hugeStart = m_threadStack + hugeStartOffset;
       assertx(reinterpret_cast<uintptr_t>(hugeStart) % size2m == 0);
       for (size_t i = 0; i < nHugePages; i++) {
-        if (!mmap_2m(hugeStart + i * size2m, PROT_READ | PROT_WRITE, m_node,
-                     /* MAP_SHARED */ false, /* MAP_FIXED */ true)) {
-          // Try transparent huge pages if we are unable to get reserved ones.
-          hintHuge(hugeStart + i * size2m, size2m);
-        }
+        remap_2m(hugeStart + i * size2m, m_node);
       }
+      m_hugePages = MemBlock { hugeStart, nHugePages * size2m };
     }
     if (m_tlExtraKb) {
       m_tlExtraBase = m_threadStack + rlim.rlim_cur;
@@ -265,15 +267,24 @@ bool AsyncFuncImpl::waitForEnd(int seconds /* = 0 */) {
 
 void AsyncFuncImpl::setThreadName() {
 #ifdef HAVE_NUMA
-  if (use_numa) {
-    static constexpr size_t kMaxCommNameLen = 16; // TASK_COMM_LEN in kernel
-    char name[kMaxCommNameLen];
-    snprintf(name, sizeof(name), "hhvmworker.ND%d", m_node);
-    prctl(PR_SET_NAME, name);
+  static constexpr size_t kMaxCommNameLen = 16;
+  char name[kMaxCommNameLen];
+
+  if (!m_threadGroupSuffix.empty()) {
+    if (use_numa) {
+      snprintf(name, sizeof(name), "hhvmworker%s.ND%d",
+               m_threadGroupSuffix.c_str(), m_node);
+    } else {
+      snprintf(name, sizeof(name), "hhvmworker%s", m_threadGroupSuffix.c_str());
+    }
   } else {
-    // On single-socket servers
-    prctl(PR_SET_NAME, "hhvmworker");
+    if (use_numa) {
+      snprintf(name, sizeof(name), "hhvmworker.ND%d", m_node);
+    } else {
+      snprintf(name, sizeof(name), "hhvmworker");
+    }
   }
+  prctl(PR_SET_NAME, name);
 #endif
 }
 

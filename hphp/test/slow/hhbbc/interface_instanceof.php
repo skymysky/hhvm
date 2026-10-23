@@ -1,4 +1,4 @@
-<?php
+<?hh
 
 abstract class Base {}
 abstract class Derived extends Base {}
@@ -10,17 +10,21 @@ class D1 extends Base implements Heh, Heh2 {}
 class D2 extends Derived implements Heh2 {}
 
 class Factory {
-  static function create($t) {
+  static function create($t) :mixed{
     if (!$t) return new D1;
     return new D2;
   }
 }
 
-function main($k) {
+function main($k) :mixed{
   $x = Factory::create($k);
-  if ($x instanceof Derived) {
+  if ($x is Derived) {
     echo "derived\n";
   }
 }
 
+
+<<__EntryPoint>>
+function main_interface_instanceof() :mixed{
 main(2);
+}

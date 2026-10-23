@@ -1,4 +1,4 @@
-<?php
+<?hh
 
 class JsonTest1 {
     public $test;
@@ -14,15 +14,15 @@ class JsonTest2 implements JsonSerializable {
     public function __construct() {
         $this->test = '123';
     }
-    public function jsonSerialize() {
-        return array(
+    public function jsonSerialize() :mixed{
+        return dict[
             'test' => $this->test,
             'me'   => $this
-        );
+        ];
     }
 }
 
-
+<<__EntryPoint>> function main(): void {
 $obj1 = new JsonTest1();
 var_dump(json_encode($obj1, JSON_PARTIAL_OUTPUT_ON_ERROR));
 
@@ -30,5 +30,4 @@ echo "==\n";
 
 $obj2 = new JsonTest2();
 var_dump(json_encode($obj2, JSON_PARTIAL_OUTPUT_ON_ERROR));
-
-?>
+}

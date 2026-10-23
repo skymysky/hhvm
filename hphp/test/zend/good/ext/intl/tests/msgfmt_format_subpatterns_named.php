@@ -1,12 +1,11 @@
-<?php
+<?hh
 
 /*
  * Format a number using misc locales/patterns.
  */
 
-
 function ut_main()
-{
+:mixed{
 
 $pattern=<<<_MSG_
 {gender_of_host, select,
@@ -28,12 +27,12 @@ $pattern=<<<_MSG_
 _MSG_;
 
 
-$args = array(
-      array('gender_of_host' => 'female', 'num_guests' => 0, 'host' => 'Alice', 'guest' => 'Bob'),
-      array('gender_of_host' => 'male', 'num_guests' => 1, 'host' => 'Alice', 'guest' => 'Bob'),
-      array('gender_of_host' => 'none', 'num_guests' => 2, 'host' => 'Alice', 'guest' => 'Bob'),
-      array('gender_of_host' => 'female', 'num_guests' => 27, 'host' => 'Alice', 'guest' => 'Bob'),
-);
+$args = vec[
+      dict['gender_of_host' => 'female', 'num_guests' => 0, 'host' => 'Alice', 'guest' => 'Bob'],
+      dict['gender_of_host' => 'male', 'num_guests' => 1, 'host' => 'Alice', 'guest' => 'Bob'],
+      dict['gender_of_host' => 'none', 'num_guests' => 2, 'host' => 'Alice', 'guest' => 'Bob'],
+      dict['gender_of_host' => 'female', 'num_guests' => 27, 'host' => 'Alice', 'guest' => 'Bob'],
+];
 
 $str_res = '';
 
@@ -49,9 +48,9 @@ $str_res = '';
     return $str_res;
 }
 
-include_once( 'ut_common.inc' );
-
-// Run the test
-ut_run();
-
-?>
+<<__EntryPoint>>
+function main_entry(): void {
+    include_once( 'ut_common.inc' );
+    // Run the test
+    ut_run();
+}

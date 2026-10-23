@@ -15,25 +15,28 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_EXT_HH_H_
-#define incl_HPHP_EXT_HH_H_
+#pragma once
 
 #include "hphp/runtime/ext/extension.h"
+#include "hphp/runtime/base/string-buffer.h"
 
 namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
-bool HHVM_FUNCTION(autoload_set_paths,
-                   const Variant& map,
-                   const String& root);
-bool HHVM_FUNCTION(could_include, const String& file);
 TypedValue HHVM_FUNCTION(serialize_memoize_param, TypedValue param);
-void HHVM_FUNCTION(set_frame_metadata, const Variant& metadata);
 
+TypedValue serialize_memoize_param_set(ArrayData*);
 TypedValue serialize_memoize_param_arr(ArrayData*);
 TypedValue serialize_memoize_param_obj(ObjectData*);
 TypedValue serialize_memoize_param_col(ObjectData*);
 TypedValue serialize_memoize_param_str(StringData*);
+TypedValue serialize_memoize_param_lazycls(LazyClassData);
+TypedValue serialize_memoize_param_cls(Class*);
 TypedValue serialize_memoize_param_dbl(double);
+
+// Temporarily to be used in ext_implicit_context
+void serialize_memoize_string_data(StringBuffer&, const StringData*);
+void serialize_memoize_tv(StringBuffer&, int, const TypedValue*);
+void serialize_memoize_tv(StringBuffer&, int, TypedValue);
 
 extern const StaticString
   s_nullMemoKey,
@@ -44,5 +47,3 @@ extern const StaticString
 
 ///////////////////////////////////////////////////////////////////////////////
 }
-
-#endif // incl_HPHP_EXT_HH_H_

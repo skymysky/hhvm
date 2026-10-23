@@ -1,0 +1,163 @@
+error: Typing[4323] Some type arguments violate their constraints [1]
+-> Expected `(mixed...)` [2]
+-> But got `T` [1]
+
+type_splat_non_tuple_bad.php:4:22
+2 | 
+3 | 
+4 | function test1<T>(...T $x):void { }
+  |                      ^ [1]
+  |                        ^^ [2]
+5 | function test2(...int $x):void { }
+6 | function test3(...vec<int> $x):void { }
+
+error: Typing[4323] Some type arguments violate their constraints [1]
+-> Expected `(mixed...)` [2]
+-> But got `mixed` [1]
+->   by the definition of `T` [3]
+
+type_splat_non_tuple_bad.php:4:22
+2 | 
+3 | 
+4 | function test1<T>(...T $x):void { }
+  |                ^ [3]
+  |                      ^ [1]
+  |                        ^^ [2]
+5 | function test2(...int $x):void { }
+6 | function test3(...vec<int> $x):void { }
+
+error: Typing[4323] Some type arguments violate their constraints [1]
+-> Expected `(mixed...)` [2]
+-> But got `int` [1]
+
+type_splat_non_tuple_bad.php:5:19
+3 | 
+4 | function test1<T>(...T $x):void { }
+5 | function test2(...int $x):void { }
+  |                   ^^^ [1]
+  |                       ^^ [2]
+6 | function test3(...vec<int> $x):void { }
+7 | 
+
+error: Typing[4323] Some type arguments violate their constraints [1]
+-> Expected `(mixed...)` [2]
+-> But got `vec<int>` [1]
+
+type_splat_non_tuple_bad.php:6:19
+4 | function test1<T>(...T $x):void { }
+5 | function test2(...int $x):void { }
+6 | function test3(...vec<int> $x):void { }
+  |                   ^^^^^^^^ [1]
+  |                            ^^ [2]
+7 | 
+8 | class C {
+
+error: Typing[4323] Some type arguments violate their constraints [1]
+-> Expected `(mixed...)` [2]
+-> But got `T` [1]
+
+type_splat_non_tuple_bad.php:9:38
+ 7 | 
+ 8 | class C {
+ 9 |   public static function test1<T>(...T $x):void { }
+   |                                      ^ [1]
+   |                                        ^^ [2]
+10 |   public static function test2(...int $x):void { }
+11 |   public static function test3(...vec<int> $x):void { }
+
+error: Typing[4323] Some type arguments violate their constraints [1]
+-> Expected `(mixed...)` [2]
+-> But got `mixed` [1]
+->   by the definition of `T` [3]
+
+type_splat_non_tuple_bad.php:9:38
+ 7 | 
+ 8 | class C {
+ 9 |   public static function test1<T>(...T $x):void { }
+   |                                ^ [3]
+   |                                      ^ [1]
+   |                                        ^^ [2]
+10 |   public static function test2(...int $x):void { }
+11 |   public static function test3(...vec<int> $x):void { }
+
+error: Typing[4323] Some type arguments violate their constraints [1]
+-> Expected `(mixed...)` [2]
+-> But got `int` [1]
+
+type_splat_non_tuple_bad.php:10:35
+ 8 | class C {
+ 9 |   public static function test1<T>(...T $x):void { }
+10 |   public static function test2(...int $x):void { }
+   |                                   ^^^ [1]
+   |                                       ^^ [2]
+11 |   public static function test3(...vec<int> $x):void { }
+12 | 
+
+error: Typing[4323] Some type arguments violate their constraints [1]
+-> Expected `(mixed...)` [2]
+-> But got `vec<int>` [1]
+
+type_splat_non_tuple_bad.php:11:35
+ 9 |   public static function test1<T>(...T $x):void { }
+10 |   public static function test2(...int $x):void { }
+11 |   public static function test3(...vec<int> $x):void { }
+   |                                   ^^^^^^^^ [1]
+   |                                            ^^ [2]
+12 | 
+13 |   public static function inst1<T>(...T $x):void { }
+
+error: Typing[4323] Some type arguments violate their constraints [1]
+-> Expected `(mixed...)` [2]
+-> But got `T` [1]
+
+type_splat_non_tuple_bad.php:13:38
+11 |   public static function test3(...vec<int> $x):void { }
+12 | 
+13 |   public static function inst1<T>(...T $x):void { }
+   |                                      ^ [1]
+   |                                        ^^ [2]
+14 |   public static function inst2(...int $x):void { }
+15 |   public static function inst3(...vec<int> $x):void { }
+
+error: Typing[4323] Some type arguments violate their constraints [1]
+-> Expected `(mixed...)` [2]
+-> But got `mixed` [1]
+->   by the definition of `T` [3]
+
+type_splat_non_tuple_bad.php:13:38
+11 |   public static function test3(...vec<int> $x):void { }
+12 | 
+13 |   public static function inst1<T>(...T $x):void { }
+   |                                ^ [3]
+   |                                      ^ [1]
+   |                                        ^^ [2]
+14 |   public static function inst2(...int $x):void { }
+15 |   public static function inst3(...vec<int> $x):void { }
+
+error: Typing[4323] Some type arguments violate their constraints [1]
+-> Expected `(mixed...)` [2]
+-> But got `int` [1]
+
+type_splat_non_tuple_bad.php:14:35
+12 | 
+13 |   public static function inst1<T>(...T $x):void { }
+14 |   public static function inst2(...int $x):void { }
+   |                                   ^^^ [1]
+   |                                       ^^ [2]
+15 |   public static function inst3(...vec<int> $x):void { }
+16 | 
+
+error: Typing[4323] Some type arguments violate their constraints [1]
+-> Expected `(mixed...)` [2]
+-> But got `vec<int>` [1]
+
+type_splat_non_tuple_bad.php:15:35
+13 |   public static function inst1<T>(...T $x):void { }
+14 |   public static function inst2(...int $x):void { }
+15 |   public static function inst3(...vec<int> $x):void { }
+   |                                   ^^^^^^^^ [1]
+   |                                            ^^ [2]
+16 | 
+17 | }
+
+12 errors found

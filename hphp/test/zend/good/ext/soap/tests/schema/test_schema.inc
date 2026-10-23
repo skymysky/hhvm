@@ -1,13 +1,29 @@
-<?php
-$val = null;
+<?hh
 
-function test($input) {
-	global $val;
-	$val = $input;
+class LocalSoapClient extends SoapClient {
+  public static $input = null;
+
+  function __construct($wsdl) {
+    parent::__construct($wsdl);
+    $this->server = new SoapServer($wsdl);
+    $this->server->addFunction('test');
+  }
+
+  function __dorequest($request, $location, $action, $version, $one_way = 0) {
+    ob_start();
+    $this->server->handle($request);
+    $response = ob_get_contents();
+    ob_end_clean();
+    return $response;
+  }
 }
 
-function test_schema($schema,$type,$param,$style="rpc",$use="encoded", $attributeFormDefault='',$features=0) {
-  global $HTTP_RAW_POST_DATA, $val;
+<<__DynamicallyCallable>> function test($input) {
+  LocalSoapClient::$input = $input;
+}
+
+function test_schema($schema, $type, $param) {
+
 $wsdl  = <<<EOF
 <definitions name="InteropTest"
     xmlns:xsd="http://www.w3.org/2001/XMLSchema"
@@ -19,14 +35,14 @@ $wsdl  = <<<EOF
     targetNamespace="http://test-uri/"
     >
   <types>
-  <schema xmlns="http://www.w3.org/2001/XMLSchema" targetNamespace="http://test-uri/" $attributeFormDefault>
-   <xsd:import namespace="http://schemas.xmlsoap.org/soap/encoding/" />
-   <xsd:import namespace="http://schemas.xmlsoap.org/wsdl/" />
-  	$schema
+  <schema xmlns="http://www.w3.org/2001/XMLSchema" targetNamespace="http://test-uri/">
+    <xsd:import namespace="http://schemas.xmlsoap.org/soap/encoding/" />
+    <xsd:import namespace="http://schemas.xmlsoap.org/wsdl/" />
+    $schema
   </schema>
   </types>
   <message name="testMessage">
-  	<part name="testParam" $type/>
+  	<part name="testParam" type="tns:$type"/>
   </message>
 	<portType name="testPortType">
 		<operation name="test">
@@ -36,42 +52,28 @@ $wsdl  = <<<EOF
 	<binding name="testBinding" type="testPortType">
 		<soap:binding style="rpc" transport="http://schemas.xmlsoap.org/soap/http"/>
 		<operation name="test">
-			<soap:operation soapAction="#test" style="$style"/>
+			<soap:operation soapAction="#test" style="rpc"/>
 			<input>
-				<soap:body use="$use" namespace="http://test-uri/" encodingStyle="http://schemas.xmlsoap.org/soap/encoding/"/>
+				<soap:body use="encoding" namespace="http://test-uri/" encodingStyle="http://schemas.xmlsoap.org/soap/encoding/"/>
 			</input>
 		</operation>
 	</binding>
 	<service name="testService">
    <port name="testPort" binding="tns:testBinding">
-     <soap:address location="test://" /> 
+     <soap:address location="test://" />
    </port>
  </service>
 </definitions>
 EOF;
 
-  $fname = tempnam ("./", "wsdl");
-  $f = fopen($fname,"w");
-  fwrite($f,$wsdl);
+  $filename = sys_get_temp_dir().'/'.'wsdl';
+  $f = fopen($filename, 'w');
+  fwrite($f, $wsdl);
   fclose($f);
-  ini_set("soap.wsdl_cache_enabled",0);
-  $x = new SoapClient($fname, array("trace"=>1,"exceptions"=>0,"features"=>$features));
-  $y = new SoapServer($fname, array("features"=>$features));
-	$y->addfunction("test");
-  unlink($fname);
+  ini_set('soap.wsdl_cache_enabled', 0);
+  $client = new LocalSoapClient($filename);
+  unlink($filename);
 
-  $x->test($param);
-  $xml = xml_parser_create();
-  $req = $x->__getlastrequest();
-  if ($style == "rpc") {
-    $HTTP_RAW_POST_DATA = $req;
-    ob_start();
-    $y->handle($HTTP_RAW_POST_DATA);
-    ob_end_clean();
-    echo $req;
-    var_dump($val);
-  } else {
-    echo $req;
-  }
+  $client->__soapcall('test', vec[$param]);
+  var_dump(LocalSoapClient::$input);
 }
-?>

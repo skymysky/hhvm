@@ -18,7 +18,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 
-#include "hphp/runtime/base/request-local.h"
+#include "hphp/util/rds-local.h"
 
 #include <folly/portability/Fcntl.h>
 #include <folly/portability/Stdio.h>
@@ -28,37 +28,41 @@ namespace HPHP {
 
 const StaticString s_plainfile("plainfile");
 const StaticString s_stdio("STDIO");
+const StaticString s_stdin("STDIN");
+const StaticString s_stdout("STDOUT");
+const StaticString s_stderr("STDERR");
+
+struct StdFiles {
+  FILE* stdin{nullptr};
+  FILE* stdout{nullptr};
+  FILE* stderr{nullptr};
+};
 
 namespace {
-
-__thread FILE* tl_stdin{nullptr};
-__thread FILE* tl_stdout{nullptr};
-__thread FILE* tl_stderr{nullptr};
-
+RDS_LOCAL(StdFiles, rl_stdfiles);
 }
 
 void setThreadLocalIO(FILE* in, FILE* out, FILE* err) {
   // Before setting new thread local IO structures the previous ones must be
   // cleared to ensure that they are closed appropriately.
-  always_assert(!tl_stdin && !tl_stdout && !tl_stderr);
+  always_assert(!rl_stdfiles->stdin &&
+                !rl_stdfiles->stdout &&
+                !rl_stdfiles->stderr);
 
-  tl_stdin = in;
-  tl_stdout = out;
-  tl_stderr = err;
+  rl_stdfiles->stdin = in;
+  rl_stdfiles->stdout = out;
+  rl_stdfiles->stderr = err;
 }
 
 void clearThreadLocalIO() {
-  if (tl_stdin)  fclose(tl_stdin);
-  if (tl_stdout) fclose(tl_stdout);
-  if (tl_stderr) fclose(tl_stderr);
-  tl_stdin = tl_stdout = tl_stderr = nullptr;
+  rl_stdfiles->stdin = rl_stdfiles->stdout = rl_stdfiles->stderr = nullptr;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 // constructor and destructor
 
 PlainFile::PlainFile(FILE *stream, bool nonblocking,
-                     const String& wrapper_type, const String& stream_type)
+                     const OptString& wrapper_type, const OptString& stream_type)
   : File(nonblocking,
          wrapper_type.isNull() ? s_plainfile : wrapper_type,
          stream_type.isNull() ? s_stdio : stream_type),
@@ -73,7 +77,7 @@ PlainFile::PlainFile(FILE *stream, bool nonblocking,
 }
 
 PlainFile::PlainFile(int fd, bool nonblocking,
-                     const String& wrapper_type, const String& stream_type)
+                     const OptString& wrapper_type, const OptString& stream_type)
   : File(nonblocking,
          wrapper_type.isNull() ? s_plainfile : wrapper_type,
          stream_type.isNull() ? s_stdio : stream_type),
@@ -82,21 +86,21 @@ PlainFile::PlainFile(int fd, bool nonblocking,
 }
 
 PlainFile::~PlainFile() {
-  closeImpl();
+  PlainFile::close();
 }
 
 void PlainFile::sweep() {
-  closeImpl();
+  PlainFile::close();
   File::sweep();
 }
 
-bool PlainFile::open(const String& filename, const String& mode) {
+bool PlainFile::open(const OptString& filename, const OptString& mode) {
   int fd;
   FILE *f;
   assertx(m_stream == nullptr);
   assertx(getFd() == -1);
 
-  // For these definded in php fopen but C stream have different modes
+  // For these defined in php fopen but C stream have different modes
   switch (mode[0]) {
     case 'x':
       if (mode.find('+') == -1) {
@@ -135,30 +139,23 @@ bool PlainFile::open(const String& filename, const String& mode) {
   return true;
 }
 
-bool PlainFile::close() {
-  invokeFiltersOnClose();
-  return closeImpl();
-}
-
-bool PlainFile::closeImpl() {
+bool PlainFile::close(int*) {
   bool ret = true;
-  s_pcloseRet = 0;
   if (!isClosed()) {
     if (m_stream) {
-      s_pcloseRet = fclose(m_stream);
+      ret = (fclose(m_stream) == 0);
       m_stream = nullptr;
     } else if (getFd() >= 0) {
-      s_pcloseRet = ::close(getFd());
+      ret = (::close(getFd()) == 0);
     }
     if (m_buffer) {
       free(m_buffer);
       m_buffer = nullptr;
     }
-    ret = (s_pcloseRet == 0);
     setIsClosed(true);
     setFd(-1);
   }
-  File::closeImpl();
+  File::close();
   return ret;
 }
 
@@ -186,11 +183,11 @@ int PlainFile::getc() {
 // This definition is needed to avoid triggering a gcc compiler error about
 // an overloaded virtual when only overriding the one parameter version from
 // File.
-String PlainFile::read() {
+OptString PlainFile::read() {
   return File::read();
 }
 
-String PlainFile::read(int64_t length) {
+OptString PlainFile::read(int64_t length) {
   if (length) setEof(false);
   return File::read(length);
 }
@@ -290,21 +287,20 @@ BuiltinFile::~BuiltinFile() {
   setFd(-1);
 }
 
-bool BuiltinFile::close() {
-  invokeFiltersOnClose();
-  if (m_stream == tl_stdin)  tl_stdin = nullptr;
-  if (m_stream == tl_stdout) tl_stdout = nullptr;
-  if (m_stream == tl_stderr) tl_stderr = nullptr;
-  auto status = ::fclose(m_stream);
+bool BuiltinFile::close(int*) {
+  int status = 0;
+       if (m_stream == rl_stdfiles->stdin)  rl_stdfiles->stdin = nullptr;
+  else if (m_stream == rl_stdfiles->stdout) rl_stdfiles->stdout = nullptr;
+  else if (m_stream == rl_stdfiles->stderr) rl_stdfiles->stderr = nullptr;
+  else                                      status = ::fclose(m_stream);
   setIsClosed(true);
   m_stream = nullptr;
   setFd(-1);
-  File::closeImpl();
+  File::close();
   return status == 0;
 }
 
 void BuiltinFile::sweep() {
-  invokeFiltersOnClose();
   // This object was just a wrapper around a FILE* or fd owned by someone else,
   // so don't close it except in explicit calls to close(). Beware this doesn't
   // call PlainFile::sweep().
@@ -317,9 +313,9 @@ void BuiltinFile::sweep() {
 IMPLEMENT_REQUEST_LOCAL(BuiltinFiles, g_builtin_files);
 
 void BuiltinFiles::requestInit() {
-  GetSTDIN();
-  GetSTDOUT();
-  GetSTDERR();
+  getSTDIN();
+  getSTDOUT();
+  getSTDERR();
 }
 
 void BuiltinFiles::requestShutdown() {
@@ -328,34 +324,42 @@ void BuiltinFiles::requestShutdown() {
   m_stderr.releaseForSweep();
 }
 
-const Variant& BuiltinFiles::GetSTDIN() {
-  if (g_builtin_files->m_stdin.isNull()) {
-    auto f = req::make<BuiltinFile>(tl_stdin ? tl_stdin : stdin);
-    g_builtin_files->m_stdin = f;
-    f->setId(1);
-    assertx(f->getId() == 1);
+static const Variant& getHelper(Variant& global_fd, FILE* rds_fd, FILE* fd,
+                         int fd_num) {
+  if (global_fd.isNull()) {
+    auto f = req::make<BuiltinFile>(rds_fd ? rds_fd : fd);
+    global_fd = f;
+    f->setId(fd_num);
+    assertx(f->getId() == fd_num);
   }
-  return g_builtin_files->m_stdin;
+  return global_fd;
 }
 
-const Variant& BuiltinFiles::GetSTDOUT() {
-  if (g_builtin_files->m_stdout.isNull()) {
-    auto f = req::make<BuiltinFile>(tl_stdout ? tl_stdout : stdout);
-    g_builtin_files->m_stdout = f;
-    f->setId(2);
-    assertx(f->getId() == 2);
-  }
-  return g_builtin_files->m_stdout;
+Variant BuiltinFiles::getSTDIN(const StringData* name) {
+  assertx(s_stdin.same(name));
+  return getSTDIN();
 }
 
-const Variant& BuiltinFiles::GetSTDERR() {
-  if (g_builtin_files->m_stderr.isNull()) {
-    auto f = req::make<BuiltinFile>(tl_stderr ? tl_stderr : stderr);
-    g_builtin_files->m_stderr = f;
-    f->setId(3);
-    assertx(f->getId() == 3);
-  }
-  return g_builtin_files->m_stderr;
+Variant BuiltinFiles::getSTDOUT(const StringData* name) {
+  assertx(s_stdout.same(name));
+  return getSTDOUT();
+}
+
+Variant BuiltinFiles::getSTDERR(const StringData* name) {
+  assertx(s_stderr.same(name));
+  return getSTDERR();
+}
+
+const Variant& BuiltinFiles::getSTDIN() {
+  return getHelper(g_builtin_files->m_stdin, rl_stdfiles->stdin, stdin, 1);
+}
+
+const Variant& BuiltinFiles::getSTDOUT() {
+  return getHelper(g_builtin_files->m_stdout, rl_stdfiles->stdout, stdout, 2);
+}
+
+const Variant& BuiltinFiles::getSTDERR() {
+  return getHelper(g_builtin_files->m_stderr, rl_stdfiles->stderr, stderr, 3);
 }
 
 ///////////////////////////////////////////////////////////////////////////////

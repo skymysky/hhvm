@@ -1,4 +1,4 @@
-<?php
+<?hh
 
 /*
  * Retreive error message.
@@ -6,7 +6,7 @@
 
 
 function ut_main()
-{
+:mixed{
     $res = '';
     $coll = ut_coll_create( 'ru_RU' );
 
@@ -23,6 +23,7 @@ function ut_main()
     return $res;
 }
 
-include_once( 'ut_common.inc' );
-ut_run();
-?>
+<<__EntryPoint>> function main_entry(): void {
+    include_once( 'ut_common.inc' );
+    ut_run();
+}

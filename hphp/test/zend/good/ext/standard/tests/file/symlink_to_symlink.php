@@ -1,5 +1,6 @@
-<?php
-$prefix = __FILE__;
+<?hh
+<<__EntryPoint>> function main(): void {
+$prefix = sys_get_temp_dir().'/'.'symlink_to_symlink.php';
 
 touch($prefix . "_file");
 
@@ -10,7 +11,7 @@ symlink(basename($prefix . "_file"), $prefix . "_link1");
 symlink(basename($prefix . "_link1"), $prefix . "_link2");
 
 // symlink to a non-existent path
-@unlink($prefix . "_nonexistent");
+unlink($prefix . "_nonexistent");
 symlink(basename($prefix . "_nonexistent"), $prefix . "_link3");
 
 // symlink to a regular file using an absolute path
@@ -31,5 +32,4 @@ unlink($prefix . "_link3");
 unlink($prefix . "_link2");
 unlink($prefix . "_link1");
 unlink($prefix . "_file");
-
-?>
+}

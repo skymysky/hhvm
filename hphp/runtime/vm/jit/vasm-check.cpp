@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2013 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-present Facebook, Inc. (http://www.facebook.com)  |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -27,11 +27,9 @@
 #include "hphp/util/assertions.h"
 #include "hphp/util/dataflow-worklist.h"
 
-#include <boost/dynamic_bitset.hpp>
+TRACE_SET_MOD(vasm)
 
-TRACE_SET_MOD(vasm);
-
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 ///////////////////////////////////////////////////////////////////////////////
 
 namespace {
@@ -86,7 +84,7 @@ checkSSA(const Vunit& unit, const jit::vector<Vlabel>& blocks) {
 
     auto const& block = unit.blocks[b];
     auto const lastOp = block.code.back().op;
-    if (lastOp == Vinstr::phijmp || lastOp == Vinstr::phijcc) {
+    if (lastOp == Vinstr::phijmp) {
       for (DEBUG_ONLY auto s : succs(block)) {
         assert_flog(
           !unit.blocks[s].code.empty() &&
@@ -124,9 +122,13 @@ checkCalls(const Vunit& unit, const jit::vector<Vlabel>& blocks) {
         case Vinstr::callm:
         case Vinstr::callr:
         case Vinstr::calls:
+        case Vinstr::callphp:
+        case Vinstr::callphpfe:
+        case Vinstr::callphpr:
+        case Vinstr::callphps:
         case Vinstr::callstub:
-        case Vinstr::callunpack:
         case Vinstr::contenter:
+        case Vinstr::inlinesideexit:
           sync_valid = unwind_valid = nothrow_valid = true;
           break;
         case Vinstr::syncpoint:
@@ -145,6 +147,56 @@ checkCalls(const Vunit& unit, const jit::vector<Vlabel>& blocks) {
           unwind_valid = nothrow_valid = sync_valid = false;
           break;
       }
+    }
+  }
+  return true;
+}
+
+/* Check for any Vtuples are used by more than one Vinstr */
+
+struct VtupleVisitor {
+  explicit VtupleVisitor(const Vunit& unit)
+    : unit{unit} { uses.resize(unit.tuples.size()); }
+
+  const Vunit& unit;
+
+  struct Pos { Vlabel block; size_t instr; };
+  Pos pos;
+  jit::vector<Pos> uses;
+
+  template <typename T> void imm(const T&) const {}
+  template <typename T> void use(const T&) const {}
+  template <typename T> void def(const T&) const {}
+  template <typename T> void across(const T& t) { use(t); }
+  template <typename T, typename U>
+  void useHint(const T& t, const U&) { use(t); }
+  template <typename T, typename U>
+  void defHint(const T& t, const U&) { def(t); }
+  void use(Vtuple t) { check(t); }
+  void def(Vtuple t) { check(t); }
+  void check(Vtuple t) {
+    auto const usePos = uses[t];
+    always_assert_flog(
+      !usePos.block.isValid(),
+      "Instruction '{}' in {} uses a Vtuple already used by '{}' in {}\n{}\n",
+      show(unit, unit.blocks[pos.block].code[pos.instr]),
+      pos.block,
+      show(unit, unit.blocks[usePos.block].code[usePos.instr]),
+      usePos.block,
+      show(unit)
+    );
+    uses[t] = pos;
+  }
+};
+
+DEBUG_ONLY bool
+checkVtuples(const Vunit& unit, const jit::vector<Vlabel>& blocks) {
+  VtupleVisitor visitor{unit};
+  for (auto const b : blocks) {
+    auto const& code = unit.blocks[b].code;
+    for (size_t i = 0; i < code.size(); ++i) {
+      visitor.pos = VtupleVisitor::Pos{b, i};
+      visitOperands(code[i], visitor);
     }
   }
   return true;
@@ -231,8 +283,7 @@ checkSF(const Vunit& unit, const jit::vector<Vlabel>& blocks) {
     for (auto i = block.code.end(); i != block.code.begin();) {
       auto& inst = *--i;
       RegSet implicit_uses, implicit_across, implicit_defs;
-      if (inst.op == Vinstr::vcall || inst.op == Vinstr::vinvoke ||
-          inst.op == Vinstr::vcallunpack) {
+      if (inst.op == Vinstr::vcall || inst.op == Vinstr::vinvoke) {
         // getEffects would assert since these haven't been lowered yet.
         implicit_defs |= RegSF{0};
       } else {
@@ -249,6 +300,85 @@ checkSF(const Vunit& unit, const jit::vector<Vlabel>& blocks) {
     if (cur_sf != livein[b]) {
       livein[b] = cur_sf;
       for (auto p : preds[b]) wl.push(blockPO[p]);
+    }
+  }
+  return true;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
+/*
+ * Extract the ConditionCode tested by an instruction, if it has one.
+ */
+struct CCFinder {
+  template<class T> void imm(T) {}
+  void imm(ConditionCode c) { cc = c; }
+  template<class T> void across(T) {}
+  template<class T> void use(T) {}
+  template<class T> void def(T) {}
+  template<class T, class H> void useHint(T, H) {}
+  template<class T, class H> void defHint(T, H) {}
+  ConditionCode cc{CC_None};
+};
+
+// testb*/testw* compute the sign flag from a different bit on x64 (bit 7/15 of
+// the tested byte/word) than on arm64, where the operands are widened to 32-bit
+// W-registers before the tst, so the sign reflects bit 31. A condition code
+// that depends on the sign flag would therefore evaluate differently per
+// architecture, so verify that no such consumer reads the flags of a byte/word
+// test. If this trips, the two lowerings must be reconciled.
+DEBUG_ONLY bool
+checkNarrowTestSignFlag(const Vunit& unit, const jit::vector<Vlabel>& blocks) {
+  auto const dependsOnSignFlag = [] (ConditionCode cc) {
+    switch (cc) {
+      case CC_S:  case CC_NS:   // sign set / clear
+      case CC_L:  case CC_GE:   // signed <, >=
+      case CC_LE: case CC_G:    // signed <=, >
+        return true;
+      default:
+        return false;
+    }
+  };
+  auto const isByteOrWordTest = [] (Vinstr::Opcode op) {
+    switch (op) {
+      case Vinstr::testb:   case Vinstr::testbi:
+      case Vinstr::testbim: case Vinstr::testbm:
+      case Vinstr::testw:   case Vinstr::testwi:
+      case Vinstr::testwim: case Vinstr::testwm:
+        return true;
+      default:
+        return false;
+    }
+  };
+
+  // Mark which virtual VregSFs are defined by a byte/word test. Physical SFs
+  // (post-regalloc) are skipped: register allocation preserves which test feeds
+  // which branch, so verifying the earlier SSA form is sufficient.
+  jit::vector<bool> fromNarrowTest(unit.next_vr, false);
+  for (auto const b : blocks) {
+    for (auto const& inst : unit.blocks[b].code) {
+      if (!isByteOrWordTest(inst.op)) continue;
+      visitDefs(unit, inst, [&] (Vreg r, Width w) {
+        if (w == Width::Flags && !r.isPhys()) fromNarrowTest[r] = true;
+      });
+    }
+  }
+
+  for (auto const b : blocks) {
+    for (auto const& inst : unit.blocks[b].code) {
+      CCFinder cf;
+      visitOperands(inst, cf);
+      if (!dependsOnSignFlag(cf.cc)) continue;
+      visitUses(unit, inst, [&] (Vreg r, Width w) {
+        if (w != Width::Flags || r.isPhys()) return;
+        always_assert_flog(
+          !fromNarrowTest[r],
+          "{} consumes the sign flag from a byte/word test; testb*/testw* set "
+          "SF from a different bit on x64 (bit 7/15) than arm64 (bit 31), so "
+          "the result is not portable\n{}",
+          show(unit, inst), show(unit)
+        );
+      });
     }
   }
   return true;
@@ -315,15 +445,6 @@ checkWidths(const Vunit& unit, const jit::vector<Vlabel>& blocks) {
         if (!i.s.isPhys() && !i.d.isPhys()) {
           widths[i.d] = widths[i.s];
         }
-      } else if (inst.op == Vinstr::copy2) {
-        auto const& i = inst.copy2_;
-
-        if (!i.s0.isPhys() && !i.d0.isPhys()) {
-          widths[i.d0] = widths[i.s0];
-        }
-        if (!i.s1.isPhys() && !i.d1.isPhys()) {
-          widths[i.d1] = widths[i.s1];
-        }
       } else if (inst.op == Vinstr::copyargs) {
         auto const& i = inst.copyargs_;
 
@@ -358,7 +479,7 @@ checkWidths(const Vunit& unit, const jit::vector<Vlabel>& blocks) {
               static_assert(
                   std::is_same<decltype(inst.loadzbl_.d),Vreg32>::value,
                   "loadzbl should write a long\n");
-                  break;
+              break;
             case Vinstr::loadzbq:
               static_assert(
                   std::is_same<decltype(inst.loadzbq_.s),Vptr8>::value,
@@ -366,7 +487,15 @@ checkWidths(const Vunit& unit, const jit::vector<Vlabel>& blocks) {
               static_assert(
                   std::is_same<decltype(inst.loadzbq_.d),Vreg64>::value,
                   "loadzbq should write a quad\n");
-                  break;
+              break;
+            case Vinstr::loadzwq:
+              static_assert(
+                  std::is_same<decltype(inst.loadzwq_.s),Vptr16>::value,
+                  "loadzwq should load a word\n");
+              static_assert(
+                  std::is_same<decltype(inst.loadzwq_.d),Vreg64>::value,
+                  "loadzwq should write a quad\n");
+              break;
             case Vinstr::loadzlq:
               static_assert(
                   std::is_same<decltype(inst.loadzlq_.s),Vptr32>::value,
@@ -374,6 +503,7 @@ checkWidths(const Vunit& unit, const jit::vector<Vlabel>& blocks) {
               static_assert(
                   std::is_same<decltype(inst.loadzlq_.d),Vreg64>::value,
                   "loadzlq should write a quad\n");
+              break;
             case Vinstr::loadtqb:
               static_assert(
                   std::is_same<decltype(inst.loadtqb_.s),Vptr64>::value,
@@ -381,7 +511,7 @@ checkWidths(const Vunit& unit, const jit::vector<Vlabel>& blocks) {
               static_assert(
                   std::is_same<decltype(inst.loadtqb_.d),Vreg8>::value,
                   "loadtqb should write a byte\n");
-                  break;
+              break;
             case Vinstr::loadtql:
               static_assert(
                   std::is_same<decltype(inst.loadtql_.s),Vptr64>::value,
@@ -389,7 +519,7 @@ checkWidths(const Vunit& unit, const jit::vector<Vlabel>& blocks) {
               static_assert(
                   std::is_same<decltype(inst.loadtql_.d),Vreg32>::value,
                   "loadtql should write a long\n");
-                  break;
+              break;
             default:
               VisitOp vo;
               visitOperands(inst, vo);
@@ -418,6 +548,8 @@ bool check(Vunit& unit) {
   assertx(checkSSA(unit, blocks));
   assertx(checkCalls(unit, blocks));
   assertx(checkSF(unit, blocks));
+  assertx(checkNarrowTestSignFlag(unit, blocks));
+  assertx(checkVtuples(unit, blocks));
   return true;
 }
 
@@ -439,4 +571,52 @@ bool checkBlockEnd(const Vunit& unit, Vlabel b) {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-}}
+
+bool checkNoSideExits(const Vunit& unit) {
+  auto const DEBUG_ONLY isSideExit = [] (const Vinstr& inst) {
+    return
+      inst.op == Vinstr::jcci ||
+      inst.op == Vinstr::fallbackcc ||
+      inst.op == Vinstr::bindjcc;
+  };
+
+  auto const blocks = sortBlocks(unit);
+  for (auto const b : blocks) {
+    for (DEBUG_ONLY auto const& inst : unit.blocks[b].code) {
+      assert_flog(
+        !isSideExit(inst),
+        "Disallowed side-exiting instruction {} in {}\n{}",
+        show(unit, inst),
+        b,
+        show(unit)
+      );
+    }
+  }
+
+  return true;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
+bool checkNoCriticalEdges(const Vunit& unit) {
+  auto const blocks = sortBlocks(unit);
+  auto const DEBUG_ONLY preds = computePreds(unit);
+  for (auto const b : blocks) {
+    auto const& block = unit.blocks[b];
+    auto const successors = succs(block);
+    if (successors.size() < 2) continue;
+    for (auto const DEBUG_ONLY succ : successors) {
+      assert_flog(
+        preds[succ].size() <= 1,
+        "Disallowed critical edge from {} to {}\n{}",
+        b, succ,
+        show(unit)
+      );
+    }
+  }
+  return true;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
+}

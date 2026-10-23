@@ -1,2 +1,2 @@
 
-Fatal error: %s
+Fatal error: The splat operator `...` for unpacking variadic arguments may not appear before other positional arguments. in %s/positional_arg_after_unpack_error.php on line 3

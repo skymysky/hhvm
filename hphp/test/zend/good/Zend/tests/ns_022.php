@@ -1,13 +1,13 @@
-<?php
+<?hh
 namespace a\b\c;
 
-use a\b\c as test;
+use a\b\c as Test;
 
-require "ns_022.inc";
-
-function foo() {
-	echo __FUNCTION__,"\n";
+function foo() :mixed{
+    echo __FUNCTION__,"\n";
 }
-
-test\foo();
-\test::foo();
+<<__EntryPoint>> function main(): void {
+require "ns_022.inc";
+Test\foo();
+\Test::foo();
+}

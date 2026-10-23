@@ -1,0 +1,28 @@
+error: Typing[4053] No instance method `missing_method` in `MyClass` [1]
+-> Did you mean `hello` instead? [2]
+-> This is why I think it is an object of type MyClass [3]
+-> This type argument to `MyClosureRunner` only allows supertypes (it is contravariant) [3]
+-> Declaration of `MyClass` is here [4]
+
+lambda_bad_as_result.php:29:13
+ 2 | // Copyright 2004-present Facebook. All Rights Reserved.
+ 3 | 
+ 4 | class MyClass {
+   |       ^^^^^^^ [4]
+ 5 |   public function hello(): string {
+   |                   ^^^^^ [2]
+ 6 |     return 'world';
+ 7 |   }
+   :
+24 |   return $x;
+25 | }
+26 | function getThing1(): MyClosureRunner<MyClass> {
+   |                                       ^^^^^^^ [3]
+27 |   return new MyClosureRunner(
+28 |     function($arg) {
+29 |       $arg->missing_method();
+   |             ^^^^^^^^^^^^^^ [1]
+30 |       return "ok";
+31 |     },
+
+1 error found

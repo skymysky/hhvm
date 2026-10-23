@@ -1,4 +1,4 @@
-<?php
+<?hh
 
 class string {
 }
@@ -26,7 +26,7 @@ class Foo {
 
 
 function test($prefix) {
-  $hints = array(
+  $hints = vec[
     // Primitives without HH namespace
     "bool",
     "int",
@@ -52,12 +52,11 @@ function test($prefix) {
     "HH\\KeyedTraversable",
     "HH\\Container",
     "HH\\KeyedContainer",
-    "Indexish",
     "XHPChild",
     "Stringish"
-  );
+  ];
 
-  $default_values = array(
+  $default_values = dict[
     "b" => "false",
     "i" => "1337",
     "f" => "3.1415926",
@@ -65,7 +64,7 @@ function test($prefix) {
     "a" => "array()",
     "n" => "null",
     "r" => "STDIN"
-  );
+  ];
 
   set_error_handler(
     function(
@@ -79,9 +78,9 @@ function test($prefix) {
   );
 
   $i = 0;
-  $tldr_table = array();
+  $tldr_table = dict[];
   foreach ($hints as $h) {
-    $tldr_row = array();
+    $tldr_row = vec[];
     echo "##### Parameter type: $h #####\n";
     foreach ($default_values as $dv) {
       echo "== Default value: $dv ==\n";

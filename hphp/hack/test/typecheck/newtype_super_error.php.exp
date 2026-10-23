@@ -1,0 +1,15 @@
+error: Typing[4110] Invalid return type [1]
+-> Expected `X` [2]
+-> But got `float` [3]
+
+newtype_super_error.php--file2.php:4:10
+1 | <?hh
+2 | 
+3 | function test(float $f): X {
+  |               ^^^^^ [3]
+  |                          ^ [2]
+4 |   return $f;
+  |          ^^ [1]
+5 | }
+
+1 error found

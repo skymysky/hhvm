@@ -19,11 +19,8 @@
 #include "hphp/util/bitops.h"
 
 #include <folly/Bits.h>
-#include <folly/Format.h>
 
-#include <utility>
-
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 ///////////////////////////////////////////////////////////////////////////
 
 /* implicit */ AliasIdSet::AliasIdSet(uint32_t id) {
@@ -247,4 +244,4 @@ std::string AliasIdSet::toString() const {
 }
 
 ///////////////////////////////////////////////////////////////////////////
-}}
+}

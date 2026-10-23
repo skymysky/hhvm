@@ -1,17 +1,8 @@
 #include "hphp/runtime/ext/collections/ext_collections.h"
-#include "hphp/runtime/ext/collections/ext_collections-map.h"
-#include "hphp/runtime/ext/collections/ext_collections-set.h"
-#include "hphp/runtime/ext/collections/ext_collections-pair.h"
-#include "hphp/runtime/ext/collections/ext_collections-vector.h"
-#include "hphp/runtime/base/collections.h"
-#include "hphp/runtime/base/memory-manager.h"
+#include "hphp/runtime/base/array-iterator.h"
 
 namespace HPHP {
 /////////////////////////////////////////////////////////////////////////////
-
-void triggerCow(c_Vector* vec) {
-  vec->mutateImpl();
-}
 
 ArrayIter getArrayIterHelper(const Variant& v, size_t& sz) {
   if (v.isArray()) {
@@ -39,10 +30,14 @@ ArrayIter getArrayIterHelper(const Variant& v, size_t& sz) {
 namespace collections {
 /////////////////////////////////////////////////////////////////////////////
 
+const StaticString s_isset{"isset"};
+
+/////////////////////////////////////////////////////////////////////////////
+
 template<bool oob>
 [[noreturn]] ALWAYS_INLINE
 void throwInt(int64_t key) {
-  String msg(50, ReserveString);
+  OptString msg(50, ReserveString);
   auto buf = msg.bufferSlice();
   auto sz = snprintf(
     buf.data(), buf.size() + 1,
@@ -65,7 +60,7 @@ void throwUndef(const StringData* key) {
   folly::StringPiece part3 = keyIsLarge ? "\" (truncated) is not defined" :
                                    "\" is not defined";
   folly::StringPiece part2(key->data(), keyIsLarge ? maxDisplaySize : keySize);
-  String msg(part1.size() + part2.size() + part2.size(), ReserveString);
+  OptString msg(part1.size() + part2.size() + part2.size(), ReserveString);
   msg += part1;
   msg += part2;
   msg += part3;

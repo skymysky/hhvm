@@ -9,11 +9,11 @@
  *
  */
 
-function f() {
-  $arr = array();
-  foreach (array() as $x) {
+function f(): Generator<int, int, void> {
+  $arr = dict[];
+  foreach (vec[] as $x) {
     if (true) {
-      foreach (array() as $y) {
+      foreach (vec[] as $y) {
       }
 
       continue;
@@ -22,3 +22,5 @@ function f() {
 
   yield wait_forvar($arr);
 }
+
+function wait_forvar(darray<int, int> $arr): int { return $arr[0]; }

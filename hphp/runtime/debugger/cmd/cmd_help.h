@@ -14,12 +14,11 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_EVAL_DEBUGGER_CMD_HELP_H_
-#define incl_HPHP_EVAL_DEBUGGER_CMD_HELP_H_
+#pragma once
 
 #include "hphp/runtime/debugger/debugger_command.h"
 
-namespace HPHP { namespace Eval {
+namespace HPHP::Eval {
 ///////////////////////////////////////////////////////////////////////////////
 
 struct CmdHelp : DebuggerCommand {
@@ -32,11 +31,12 @@ struct CmdHelp : DebuggerCommand {
   void help(DebuggerClient&) override;
   void onClient(DebuggerClient&) override;
 
+  std::string name() const override { return "help"; }
+
 private:
   bool processTutorial(DebuggerClient&);
 };
 
 ///////////////////////////////////////////////////////////////////////////////
-}}
+}
 
-#endif // incl_HPHP_EVAL_DEBUGGER_CMD_HELP_H_

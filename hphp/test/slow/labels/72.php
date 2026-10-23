@@ -1,22 +1,7 @@
-<?php
+<?hh
 
-$modalité = 'extended ASCII';
- var_dump($modalité);
-${
-"a-b"}
- = 'dash';
- var_dump(${
-"a-b"}
-);
-${
-'a"b'}
- = 'quote';
- var_dump(${
-'a"b'}
-);
-${
-'a$b'}
- = 'dollar';
- var_dump(${
-'a$b'}
-);
+<<__EntryPoint>>
+function main_72() :mixed{
+$modalitâ‚¬ = 'extended ASCII';
+ var_dump($modalitâ‚¬);
+}

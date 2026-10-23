@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2013 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-present Facebook, Inc. (http://www.facebook.com)  |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -22,22 +22,42 @@
 #include "hphp/runtime/vm/jit/vasm-unit.h"
 #include "hphp/runtime/vm/jit/vasm-visit.h"
 
-TRACE_SET_MOD(vasm);
+#include "hphp/util/arch.h"
 
-namespace HPHP { namespace jit {
+TRACE_SET_MOD(vasm)
+
+namespace HPHP::jit {
 
 namespace {
 
 // if inst is testb{r,r,d}, return true,d
-bool match_testb(Vinstr& inst, Vreg r) {
+bool match_testb(const Vinstr& inst, const VregSet& rs) {
   return inst.op == Vinstr::testb &&
-         inst.testb_.s0 == r &&
-         inst.testb_.s1 == r;
+         rs[inst.testb_.s0] &&
+         rs[inst.testb_.s1];
 }
 
-bool match_jcc(Vinstr& inst, Vreg flags) {
+bool match_jcc(const Vinstr& inst, Vreg flags) {
   return inst.op == Vinstr::jcc && inst.jcc_.sf == flags &&
          (inst.jcc_.cc == CC_E || inst.jcc_.cc == CC_NE);
+}
+
+Vreg match_copy(const Vunit& unit, const Vinstr& inst, const VregSet& rs) {
+  switch (inst.op) {
+    case Vinstr::copy:
+      return rs[inst.copy_.s] ? inst.copy_.d : Vreg{};
+    case Vinstr::copyargs: {
+      auto const& s = unit.tuples[inst.copyargs_.s];
+      auto const& d = unit.tuples[inst.copyargs_.d];
+      assertx(s.size() == d.size());
+      for (size_t i = 0; i < s.size(); ++i) {
+        if (rs[s[i]]) return d[i];
+      }
+      return Vreg{};
+    }
+    default:
+      return Vreg{};
+  }
 }
 
 #define CMOV_MATCH(type)                                                \
@@ -63,9 +83,20 @@ bool sets_flags(const Vunit& unit, const Vinstr& inst) {
   case Vinstr::callstub:
   case Vinstr::callfaststub:
   case Vinstr::callphp:
-  case Vinstr::callunpack:
+  case Vinstr::callphpfe:
+  case Vinstr::callphpr:
+  case Vinstr::callphps:
   case Vinstr::contenter:
+  case Vinstr::inlinesideexit:
     return true;
+  case Vinstr::divint:
+  case Vinstr::srem:
+    // Neither declares a flag result, but fuseBranches runs once before
+    // lowerForX64, so it sees them before they are lowered. On x64 both
+    // lower to idiv (vasm-emit-x64.cpp), which leaves the flags undefined,
+    // so a setcc's flags must not be extended across one. arm64 divides
+    // with sdiv, which leaves the flags alone, so only x64 needs this.
+    return arch::any<arch::X64>();
   default:
     break;
   }
@@ -116,22 +147,32 @@ void fuseBranches(Vunit& unit) {
   for (auto b : blocks) {
     auto& code = unit.blocks[b].code;
     ConditionCode cc;
-    Vreg setcc_flags, setcc_dest, testb_flags;
+    Vreg setcc_flags, testb_flags;
+    VregSet setcc_dest;
     unsigned testb_index;
     for (unsigned i = 0, n = code.size(); i < n; ++i) {
-      if (code[i].op == Vinstr::setcc) {
+      if (code[i].op == Vinstr::setcc && code[i].setcc_.d.isVirt()) {
         cc = code[i].setcc_.cc;
         setcc_flags = code[i].setcc_.sf;
-        setcc_dest = code[i].setcc_.d;
+        setcc_dest.reset();
+        setcc_dest.add(code[i].setcc_.d);
         continue;
       }
-      if (setcc_flags.isValid() &&
-          match_testb(code[i], setcc_dest) &&
-          uses[code[i].testb_.sf] == 1) {
-        testb_flags = code[i].testb_.sf;
-        testb_index = i;
-        continue;
+      if (setcc_flags.isValid()) {
+        if (match_testb(code[i], setcc_dest) &&
+            uses[code[i].testb_.sf] == 1) {
+          testb_flags = code[i].testb_.sf;
+          testb_index = i;
+          continue;
+        }
+
+        if (auto const d = match_copy(unit, code[i], setcc_dest);
+            d.isValid() && d.isVirt()) {
+          setcc_dest.add(d);
+          continue;
+        }
       }
+
       if (match_jcc(code[i], testb_flags)) {
         code[testb_index] = nop{}; // erase the testb
         auto& jcc = code[i].jcc_;
@@ -159,6 +200,7 @@ void fuseBranches(Vunit& unit) {
 
       if (setcc_flags.isValid() && sets_flags(unit, code[i])) {
         setcc_flags = testb_flags = Vreg{};
+        setcc_dest.reset();
       }
     }
   }
@@ -167,4 +209,4 @@ void fuseBranches(Vunit& unit) {
   }
 }
 
-}}
+}

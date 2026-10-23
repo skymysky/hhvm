@@ -3,10 +3,7 @@
 class C {
   public $nonStaticInheritedProp;
 
-  public function nonStaticInheritedMethod() {
-    echo __METHOD__, ' of ', get_called_class(), "\n";
-    echo 'this: ', isset($this) ? 'defined' : 'undefined', "\n";
-  }
+  public function nonStaticInheritedMethod() :mixed{}
 }
 
 trait Tr {
@@ -14,31 +11,29 @@ trait Tr {
 
   public $nonStaticTraitProp;
 
-  public function nonStaticTraitMethod() {
-    echo __METHOD__, ' of ', get_called_class(), "\n";
-    echo 'this: ', isset($this) ? 'defined' : 'undefined', "\n";
-  }
-  public static function staticTraitMethod() {
+  public function nonStaticTraitMethod() :mixed{}
+
+  public static function staticTraitMethod() :mixed{
 
     echo __METHOD__, "\n";
   }
 
-  abstract public function nonStaticAbstract();
+  abstract public function nonStaticAbstract():mixed;
 }
 
 abstract final class Utils extends C {
   use Tr;
 
-  public static function staticMethod() {
+  public static function staticMethod() :mixed{
     echo __METHOD__, "\n";
     static::protStaticMethod();
   }
 
-  private static function privStaticMethod() {
+  private static function privStaticMethod() :mixed{
     echo __METHOD__, ' ', self::$prop, "\n";
   }
 
-  protected static function protStaticMethod() {
+  protected static function protStaticMethod() :mixed{
     echo __METHOD__, "\n";
     self::privStaticMethod();
   }
@@ -46,11 +41,9 @@ abstract final class Utils extends C {
   private static $prop = __CLASS__.'::prop';
 }
 
-function main() {
+function main() :mixed{
   Utils::staticMethod();
   Utils::staticTraitMethod();
-  Utils::nonStaticInheritedMethod(); // works because $this isn't accessed
-  Utils::nonStaticTraitMethod(); // works because $this isn't accessed
 
   $rc = new ReflectionClass(Utils::class);
   echo 'ReflectionClass::isAbstract', ' => ';
@@ -60,6 +53,7 @@ function main() {
   echo 'ReflectionClass::isInstantiable', ' => ';
   var_dump($rc->isInstantiable());
 }
-
+<<__EntryPoint>> function main_entry(): void {
 main();
 echo 'Done', "\n";
+}

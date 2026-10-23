@@ -14,14 +14,15 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_RUNTIME_VM_RESUMABLE_H_
-#define incl_HPHP_RUNTIME_VM_RESUMABLE_H_
+#pragma once
 
 #include "hphp/runtime/vm/act-rec.h"
 #include "hphp/runtime/vm/bytecode.h"
 #include "hphp/runtime/vm/func.h"
 #include "hphp/runtime/vm/native-data.h"
+#include "hphp/runtime/vm/vm-regs.h"
 #include "hphp/runtime/vm/jit/types.h"
+#include "hphp/util/alloc.h"
 
 namespace HPHP {
 
@@ -56,10 +57,21 @@ enum class ResumeMode : uint8_t {
 };
 
 char* resumeModeShortName(ResumeMode resumeMode);
+Optional<ResumeMode> nameToResumeMode(const std::string& name);
+
+ALWAYS_INLINE bool isResumed(const ActRec* ar) {
+  assertx(ar && ar->func()->validate());
+  // VM stack does not have resumed ActRecs.
+  if (LIKELY(isValidVMStackAddress(ar))) return false;
+  // Native stack may have fake ActRecs, which are not resumed.
+  if (UNLIKELY(((uintptr_t)ar - s_stackLimit) < s_stackSize)) return false;
+  // All ActRecs on the heap must be resumed.
+  return true;
+}
 
 ResumeMode resumeModeFromActRecImpl(ActRec* ar);
 ALWAYS_INLINE ResumeMode resumeModeFromActRec(ActRec* ar) {
-  if (LIKELY(!ar->resumed())) return ResumeMode::None;
+  if (LIKELY(!isResumed(ar))) return ResumeMode::None;
   return resumeModeFromActRecImpl(ar);
 }
 
@@ -108,8 +120,8 @@ struct alignas(16) Resumable {
   static constexpr ptrdiff_t resumeAddrOff() {
     return offsetof(Resumable, m_resumeAddr);
   }
-  static constexpr ptrdiff_t resumeOffsetOff() {
-    return offsetof(Resumable, m_resumeOffset);
+  static constexpr ptrdiff_t suspendOffsetOff() {
+    return offsetof(Resumable, m_suspendOffset);
   }
   static constexpr ptrdiff_t dataOff() {
     return sizeof(Resumable);
@@ -129,35 +141,23 @@ struct alignas(16) Resumable {
     return reinterpret_cast<Resumable*>(frame + frameSize);
   }
 
-  template<bool clone,
-           bool mayUseVV = true>
+  template<bool clone>
   void initialize(const ActRec* fp, jit::TCA resumeAddr,
-                  Offset resumeOffset, size_t frameSize, size_t totalSize) {
+                  Offset suspendOffset, size_t frameSize, size_t totalSize) {
     assertx(fp);
-    assertx(fp->resumed() == clone);
-    auto const func = fp->func();
+    assertx(isResumed(fp) == clone);
+    DEBUG_ONLY auto const func = fp->func();
     assertx(func);
     assertx(func->isResumable());
-    assertx(func->contains(resumeOffset));
+    assertx(func->contains(suspendOffset));
     // Check memory alignment
-    assertx((((uintptr_t) actRec()) & (sizeof(Cell) - 1)) == 0);
+    assertx(((uintptr_t) actRec()) % sizeof(TypedValue) == 0);
 
     if (!clone) {
       // Copy ActRec, locals and iterators
       auto src = reinterpret_cast<const char*>(fp) - frameSize;
       auto dst = reinterpret_cast<char*>(actRec()) - frameSize;
-      wordcpy(dst, src, frameSize + sizeof(ActRec));
-
-      // Set resumed flag.
-      actRec()->setResumed();
-
-      // Suspend VarEnv if needed
-      assertx(mayUseVV || !(func->attrs() & AttrMayUseVV));
-      if (mayUseVV &&
-          UNLIKELY(func->attrs() & AttrMayUseVV) &&
-          UNLIKELY(fp->hasVarEnv())) {
-        fp->getVarEnv()->suspend(fp, actRec());
-      }
+      memcpy16_inline(dst, src, frameSize + sizeof(ActRec));
     } else {
       // If we are cloning a Resumable, only copy the ActRec. The
       // caller will take care of copying locals, setting the VarEnv, etc.
@@ -165,13 +165,14 @@ struct alignas(16) Resumable {
       // going to overwrite m_sfp and m_savedRip, so don't copy them here.
       auto src = reinterpret_cast<const char*>(fp);
       auto dst = reinterpret_cast<char*>(actRec());
-      const size_t offset = offsetof(ActRec, m_func);
-      wordcpy(dst + offset, src + offset, sizeof(ActRec) - offset);
+      memcpy16_inline(dst + kNativeFrameSize,
+                      src + kNativeFrameSize,
+                      sizeof(ActRec) - kNativeFrameSize);
     }
 
     // Populate Resumable.
     m_resumeAddr = resumeAddr;
-    m_offsetAndSize = (totalSize << 32 | resumeOffset);
+    m_offsetAndSize = (totalSize << 32 | suspendOffset);
   }
 
   template<class T> static void Destroy(size_t size, T* obj) {
@@ -183,16 +184,36 @@ struct alignas(16) Resumable {
   ActRec* actRec() { return &m_actRec; }
   const ActRec* actRec() const { return &m_actRec; }
   jit::TCA resumeAddr() const { return m_resumeAddr; }
-  Offset resumeOffset() const {
-    assertx(m_actRec.func()->contains(m_resumeOffset));
-    return m_resumeOffset;
+  Offset suspendOffset() const {
+    assertx(m_actRec.func()->contains(m_suspendOffset));
+    return m_suspendOffset;
+  }
+  Offset resumeFromAwaitOffset() const {
+    assertx(m_actRec.func()->contains(m_suspendOffset));
+    auto const suspendPC = m_actRec.func()->at(m_suspendOffset);
+    assertx(isAwait(peek_op(suspendPC)));
+    auto const resumeOffset = m_suspendOffset + instrLen(suspendPC);
+    assertx(m_actRec.func()->contains(resumeOffset));
+    return resumeOffset;
+  }
+  Offset resumeFromYieldOffset() const {
+    assertx(m_actRec.func()->contains(m_suspendOffset));
+    // TODO(alexeyt) remove `yield from` and the need for this complexity
+    auto const pc = m_actRec.func()->at(m_suspendOffset);
+    DEBUG_ONLY auto const suspendedOp = peek_op(pc);
+    assertx(suspendedOp == OpCreateCont ||
+            suspendedOp == OpYield ||
+            suspendedOp == OpYieldK);
+    auto const resumeOffset = m_suspendOffset + instrLen(pc);
+    assertx(m_actRec.func()->contains(resumeOffset));
+    return resumeOffset;
   }
   size_t size() const { return m_size; }
 
-  void setResumeAddr(jit::TCA resumeAddr, Offset resumeOffset) {
-    assertx(m_actRec.func()->contains(resumeOffset));
+  void setResumeAddr(jit::TCA resumeAddr, Offset suspendOffset) {
+    assertx(m_actRec.func()->contains(suspendOffset));
     m_resumeAddr = resumeAddr;
-    m_resumeOffset = resumeOffset;
+    m_suspendOffset = suspendOffset;
   }
 
 private:
@@ -205,7 +226,7 @@ private:
   // Resume offset: bytecode offset from start of Unit's bytecode.
   union {
     struct {
-      Offset m_resumeOffset;
+      Offset m_suspendOffset;
 
       // Size of the memory block that includes this resumable.
       int32_t m_size;
@@ -220,5 +241,3 @@ static_assert(Resumable::arOff() == 0,
 //////////////////////////////////////////////////////////////////////
 
 }
-
-#endif

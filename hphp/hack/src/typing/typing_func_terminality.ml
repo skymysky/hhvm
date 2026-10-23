@@ -1,4 +1,4 @@
-(**
+(*
  * Copyright (c) 2015, Facebook, Inc.
  * All rights reserved.
  *
@@ -7,42 +7,72 @@
  *
  *)
 
-open Nast
+open Hh_prelude
+open Aast
 open Typing_defs
-
 module Env = Typing_env
-module T = Tast
-module TLazyHeap = Typing_lazy_heap
 
 (* Not adding a Typing_dep here because it will be added when the
  * Nast is fully processed (by the caller of this code) *)
-let get_fun = TLazyHeap.get_fun
+let get_fun env name =
+  match Typing_env.get_fun env name |> Decl_entry.to_option with
+  | Some { fe_type; _ } -> begin
+    match get_node fe_type with
+    | Tfun ft -> Some ft
+    | _ -> None
+  end
+  | _ -> None
 
-let get_static_meth tcopt (cls_name:string) (meth_name:string) =
-  match TLazyHeap.get_class tcopt cls_name with
-  | None -> None
-  | Some { Typing_defs.tc_smethods ; _ } ->
-    begin match SMap.get meth_name tc_smethods with
-      | None -> None
-      | Some { Typing_defs.ce_type = lazy (_r, Typing_defs.Tfun fty) ; _} ->
-        Some fty
-      | Some _ -> None
+let get_static_meth
+    (env : Typing_env_types.env) (cls_name : string) (meth_name : string) =
+  match Typing_env.get_class env cls_name with
+  | Decl_entry.DoesNotExist
+  | Decl_entry.NotYetAvailable ->
+    None
+  | Decl_entry.Found cls -> begin
+    match Typing_env.get_static_member true env cls meth_name with
+    | None -> None
+    | Some { Typing_defs.ce_type = (lazy ty); _ } -> begin
+      match get_node ty with
+      | Tfun fty -> Some fty
+      | _ -> None
     end
+  end
 
-let raise_exit_if_terminal = function
-  | None -> ()
-  | Some ({ Typing_defs.ft_ret = (_r, Typing_defs.Tprim Nast.Tnoreturn); _})
-    -> raise Exit
-  | Some _ -> ()
+let funopt_is_noreturn = function
+  | Some { ft_ret; _ } -> is_prim Tnoreturn ft_ret
+  | _ -> false
 
-let expression_exits (_, te) (_, ty) =
-  match te, ty with
-  | T.Assert(T.AE_assert (_, T.False)), _ -> true
-  | _, Tprim Tnoreturn -> true
-  | T.Yield_break, _ -> true
+let static_meth_is_noreturn env ci meth_id =
+  let class_name =
+    match ci with
+    | CI cls_id -> Some (snd cls_id)
+    | CIself
+    | CIstatic ->
+      Env.get_self_id env
+    | CIparent -> Env.get_parent_id env
+    | CIexpr _ -> None
+    | CIreified _ -> None
+    (* we declared the types, but didn't check the bodies yet
+                       so can't tell anything here *)
+  in
+  match class_name with
+  | Some class_name ->
+    funopt_is_noreturn (get_static_meth env class_name (snd meth_id))
+  | None -> false
+
+let typed_expression_exits (ty, _, _e) = is_type_no_return (get_node ty)
+
+let expression_exits env (_, _, e) =
+  match e with
+  | Call { func = (_, _, Id (_, fun_name)); _ } ->
+    funopt_is_noreturn @@ get_fun env fun_name
+  | Call { func = (_, _, Class_const ((_, _, ci), meth_id)); _ } ->
+    static_meth_is_noreturn env ci meth_id
   | _ -> false
 
 let is_noreturn env =
-  match (Env.get_return env).Typing_env_return_info.return_type with
-  | _, Tprim Tnoreturn -> true
-  | _ -> false
+  let (_env, ret_ty) =
+    Env.expand_type env (Env.get_return env).Typing_env_return_info.return_type
+  in
+  is_prim Tnoreturn ret_ty

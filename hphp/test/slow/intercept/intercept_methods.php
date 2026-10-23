@@ -1,17 +1,21 @@
-<?php
+<?hh
 
 class A {
-  function foo() { return 1; }
+  <<__NEVER_INLINE>>
+  function foo() :mixed{ return 1; }
 }
 
-function main(A $a) {
+function main(A $a) :mixed{
   var_dump($a->foo());
 }
-
-main(new A);
-function handler($name, $obj, $args, $data, &$done) {
-  $done = true;
-  return "string!";
+function handler($name, $obj, inout $args) :mixed{
+  return shape('value' => "string!");
 }
-fb_intercept('A::foo', 'handler');
+
+
+<<__EntryPoint>>
+function main_intercept_methods() :mixed{
 main(new A);
+fb_intercept2('A::foo', handler<>);
+main(new A);
+}

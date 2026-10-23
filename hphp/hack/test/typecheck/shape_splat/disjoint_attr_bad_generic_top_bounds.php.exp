@@ -1,0 +1,33 @@
+error: Typing[4419] Type alias marked `<<__DisjointShapeSplat>>` may contain overlapping shapes [1]
+-> Shape field `x` is defined here [2]
+-> Shape field `x` may also be provided by type parameter `T` [3]
+
+disjoint_attr_bad_generic_top_bounds.php:5:9
+ 3 | 
+ 4 | <<__DisjointShapeSplat>>
+ 5 | newtype BadNullable<
+   |         ^^^^^^^^^^^ [1]
+ 6 |   TU as ?shape('x' => int),
+ 7 |   T as TU as shape(...),
+ 8 | > = shape(...T, 'x' => bool);
+   |              ^ [3]
+   |                 ^^^ [2]
+ 9 | 
+10 | type NullableWitness = BadNullable<shape('x' => int), shape('x' => int)>;
+
+error: Typing[4419] Type alias marked `<<__DisjointShapeSplat>>` may contain overlapping shapes [1]
+-> Shape field `x` is defined here [2]
+-> Shape field `x` may also be provided by type parameter `T` [3]
+
+disjoint_attr_bad_generic_top_bounds.php:13:9
+11 | 
+12 | <<__DisjointShapeSplat>>
+13 | newtype BadNonnull<T as nonnull as shape(...)> =
+   |         ^^^^^^^^^^ [1]
+14 |   shape(...T, 'x' => bool);
+   |            ^ [3]
+   |               ^^^ [2]
+15 | 
+16 | type NonnullWitness = BadNonnull<shape('x' => int)>;
+
+2 errors found

@@ -1,0 +1,433 @@
+; FFI OCaml to Rust (../../target/*/librust_decl_ffi.a)
+; contains "external" function definition in .ml and
+; the symbol is provided by the ocaml-rs Rust package via caml! macro
+
+(data_only_dirs cargo rust_decl_ffi direct_decl_smart_constructors_obr)
+
+; so dune doesn't look at rust stuff
+
+(library
+ (name rust_decl_ffi)
+ (modules)
+ (wrapped false)
+ (foreign_archives rust_decl_ffi))
+
+(rule
+ (targets librust_decl_ffi.a)
+ (deps
+  (source_tree %{workspace_root}/hack/src))
+ (locks /cargo)
+ (action
+  (run
+   %{workspace_root}/hack/scripts/invoke_cargo.sh
+   rust_decl_ffi
+   rust_decl_ffi)))
+
+(library
+ (name class_diff)
+ (modules class_diff)
+ (libraries
+  decl_defs
+  typing_defs
+  yojson)
+ (preprocess
+  (pps
+   ppx_deriving.std
+   ppx_yojson_conv)))
+
+(library
+ (name decl)
+ (modules decl)
+ (libraries
+  class_diff
+  ast_provider
+  decl_class
+  decl_class_elements
+  decl_env
+  decl_fun_utils
+  decl_folded_class
+  decl_hint
+  decl_nast
+  decl_pos_utils
+  decl_store
+  full_fidelity
+  naming
+  naming_heap
+  procs_procs
+  shallow_class_diff
+  shallow_decl_defs
+  typing_defs)
+ (preprocess
+  (pps ppx_deriving.std)))
+
+(library
+ (name decl_nast)
+ (modules decl_nast)
+ (libraries
+  decl_env
+  decl_fun_utils
+  decl_hint
+  decl_init_check
+  decl_pos_utils
+  decl_reference
+  decl_utils
+  full_fidelity
+  naming
+  naming_attributes
+  naming_attributes_params
+  typing_defs)
+ (preprocess
+  (pps ppx_deriving.std)))
+
+(library
+ (name decl_folded_class)
+ (wrapped false)
+ (modules
+  decl_folded_class
+  decl_inherit
+  decl_requirements)
+ (libraries
+  ast_provider
+  decl_class_elements
+  decl_defs
+  decl_enforceability_shallow
+  decl_enum
+  decl_env
+  decl_fun_utils
+  decl_init_check
+  decl_instantiate
+  decl_members
+  decl_pos_utils
+  decl_store
+  decl_utils
+  naming
+  procs_procs
+  shallow_decl_defs
+  typing_defs
+  typing_pessimisation_deps)
+ (preprocess
+  (pps ppx_deriving.std)))
+
+(library
+ (name direct_decl_parser)
+ (modules direct_decl_parser)
+ (libraries
+  decl_parser_options
+  shallow_decl_defs
+  pos_or_decl
+  typing_defs
+  rust_decl_ffi
+  search_utils)
+ (preprocess
+  (pps ppx_deriving.std)))
+
+(library
+ (name decl_members)
+ (modules decl_members)
+ (libraries
+  decl_defs
+  decl_enforceability
+  typing_defs))
+
+(library
+ (name decl_class)
+ (modules decl_class)
+ (libraries
+   decl_defs
+   decl_enforceability_shallow
+   decl_instantiate
+   decl_members
+   decl_provider_internals
+   decl_store
+   decl_subst
+   typing_defs)
+ (preprocess
+  (pps ppx_deriving.std)))
+
+(library
+ (name decl_class_elements)
+ (modules decl_class_elements)
+ (libraries decl_defs decl_heap typing_defs)
+ (preprocess
+  (pps ppx_deriving.std)))
+
+(library
+ (name decl_compare)
+ (modules decl_compare)
+ (libraries
+  decl_defs
+  decl_heap
+  decl_pos_utils
+  fanout
+  naming_provider
+  provider_context
+  rust_provider_backend_stubs
+  typechecker_options
+  typing_defs
+  typing_deps)
+ (preprocess
+  (pps ppx_deriving.std)))
+
+(library
+ (name decl_defs)
+ (modules decl_defs)
+ (libraries pos_or_decl typing_defs utils_core)
+ (preprocess
+  (pps ppx_deriving.std)))
+
+(library
+  (name decl_enforceability)
+  (modules decl_enforceability)
+  (libraries
+   decl_entry
+   decl_env))
+
+(library
+  (name decl_enforceability_shallow)
+  (modules decl_enforceability_shallow)
+  (libraries
+   decl_enforceability
+   decl_provider_internals
+   naming_provider))
+
+(library
+ (name decl_enum)
+ (modules decl_enum)
+ (libraries decl_defs typing_defs)
+ (preprocess
+  (pps ppx_deriving.std)))
+
+(library
+ (name decl_env)
+ (modules decl_env)
+ (libraries decl_defs decl_store provider_context typing_defs typing_pessimisation_deps typing_deps)
+ (preprocess
+  (pps ppx_deriving.std)))
+
+(library
+ (name decl_export)
+ (modules decl_export)
+ (libraries decl decl_defs decl_store decl_provider naming naming_heap utils_core)
+ (preprocess
+  (pps ppx_deriving.std)))
+
+(library
+ (name decl_fun_utils)
+ (modules decl_fun_utils)
+ (libraries
+  annotated_ast_utils
+  decl_defs
+  decl_env
+  decl_hint
+  typing_defs )
+ (preprocess
+  (pps ppx_deriving.std)))
+
+(library
+ (name decl_heap)
+ (modules decl_heap)
+ (libraries decl_defs heap_shared_mem typing_defs)
+ (preprocess
+  (pps ppx_deriving.std)))
+
+(library
+ (name decl_store)
+ (modules decl_store)
+ (libraries decl_defs decl_heap typing_defs)
+ (preprocess
+  (pps ppx_deriving.std)))
+
+(library
+ (name decl_hint)
+ (modules decl_hint)
+ (libraries decl_defs decl_env typing_defs)
+ (preprocess
+  (pps ppx_deriving.std)))
+
+(library
+ (name decl_init_check)
+ (modules decl_init_check)
+ (libraries decl_defs decl_env shallow_decl_defs typing_defs)
+ (preprocess
+  (pps ppx_deriving.std)))
+
+(library
+ (name decl_instantiate)
+ (modules decl_instantiate)
+ (libraries
+  decl_defs
+  decl_subst
+  shallow_decl_defs
+  typing_defs
+  typing_ast)
+ (preprocess
+  (pps ppx_deriving.std)))
+
+(library
+ (name decl_pos_utils)
+ (modules decl_pos_utils)
+ (libraries decl_defs shallow_decl_defs typing_defs)
+ (preprocess
+  (pps ppx_deriving.std)))
+
+(library
+ (name decl_redecl_service)
+ (modules decl_redecl_service)
+ (libraries
+  decl
+  decl_class_elements
+  decl_compare
+  decl_provider
+  heap_global_storage
+  naming
+  procs_procs
+  remote_old_decl_client
+  rust_provider_backend_stubs
+  server_progress
+  shallow_decl_compare
+  typing_deps
+  utils_core
+  utils_exit)
+ (preprocess
+  (pps ppx_deriving.std)))
+
+(library
+ (name decl_subst)
+ (modules decl_subst)
+ (libraries decl_defs typing_defs)
+ (preprocess
+  (pps ppx_deriving.std)))
+
+(library
+ (name decl_utils)
+ (modules decl_utils)
+ (libraries
+  decl_defs
+  naming_attributes
+  naming_attributes_params
+  shallow_decl_defs
+  typing_defs
+  typing_error
+  )
+ (preprocess
+  (pps ppx_deriving.std)))
+
+(library
+ (name remote_old_decl_client)
+ (modules remote_old_decl_client)
+ (libraries
+  db_path_provider
+  file_info
+  future
+  naming_sqlite
+  process
+  process_types
+  provider_context
+  direct_decl_parser
+  shallow_decl_defs
+  sys_username
+  sys_utils
+  temp_file
+  typing_defs
+  remote_old_decls_ffi
+  config_file
+  utils_core
+  utils_www_root)
+ (preprocess
+  (pps ppx_deriving.std)))
+
+(library
+ (name shallow_class_diff)
+ (modules shallow_class_diff)
+ (libraries
+  class_diff
+  decl_defs
+  decl_pos_utils
+  decl_utils
+  package_info
+  provider_context
+  shallow_decl_defs
+  typing_defs)
+ (preprocess
+  (pps ppx_deriving.std)))
+
+(library
+ (name fanout)
+ (modules fanout)
+ (libraries
+  typing_deps))
+
+(library
+ (name shallow_class_fanout)
+ (modules shallow_class_fanout)
+ (libraries
+  class_diff
+  decl_defs
+  decl_provider
+  fanout
+  naming_provider
+  shallow_decl_defs
+  typing_defs)
+ (preprocess
+  (pps ppx_deriving.std)))
+
+(library
+ (name shallow_classes_heap)
+ (modules shallow_classes_heap)
+ (libraries
+  decl_defs
+  decl_utils
+  heap_shared_mem
+  naming
+  naming_heap
+  shallow_decl_defs
+  typing_defs)
+ (preprocess
+  (pps ppx_deriving.std)))
+
+(library
+ (name shallow_decl_compare)
+ (modules shallow_decl_compare)
+ (libraries
+  class_diff
+  decl_compare
+  decl_defs
+  package_info
+  shallow_class_diff
+  shallow_class_fanout
+  decl_provider
+  old_shallow_classes_provider
+  shallow_decl_defs
+  typing_defs)
+ (preprocess
+  (pps ppx_deriving.std)))
+
+(library
+ (name shallow_decl_defs)
+ (modules shallow_decl_defs)
+ (libraries decl_defs typing_defs)
+ (preprocess
+  (pps ppx_deriving.std)))
+
+(library
+ (name decl_counters)
+ (modules decl_counters)
+ (libraries counters logging utils_core relative_path)
+ (preprocess
+  (pps ppx_deriving.std)))
+
+(library
+ (name direct_decl_service)
+ (modules direct_decl_service)
+ (libraries
+  direct_decl_utils
+  direct_decl_parser
+  shallow_decl_defs
+  file_info
+  relative_path
+  typing_defs
+  provider_context
+  utils_find
+  procs_procs)
+ (preprocess
+  (pps ppx_deriving.std)))

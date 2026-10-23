@@ -1,0 +1,18 @@
+error: Parsing[1002] A parameter cannot be both `optional` and `inout`. [1]
+
+parameter_modifiers_optional_inout.php:4:32
+2 | // Optional and inout modifiers are incompatible in either order.
+3 | 
+4 | function f1((function(optional inout bool): void) $_): void {}
+  |                                ^^^^^ [1]
+5 | function f2((function(inout optional bool): void) $_): void {}
+
+error: Parsing[1002] A parameter cannot be both `optional` and `inout`. [1]
+
+parameter_modifiers_optional_inout.php:5:23
+3 | 
+4 | function f1((function(optional inout bool): void) $_): void {}
+5 | function f2((function(inout optional bool): void) $_): void {}
+  |                       ^^^^^ [1]
+
+2 errors found

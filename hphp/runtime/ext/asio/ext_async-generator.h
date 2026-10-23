@@ -35,25 +35,26 @@ struct c_Awaitable;
 ///////////////////////////////////////////////////////////////////////////////
 // class AsyncGenerator
 
-struct AsyncGenerator final : BaseGenerator {
+struct AsyncGenerator final : BaseGenerator,
+                              SystemLib::ClassLoader<"HH\\AsyncGenerator"> {
    AsyncGenerator() : m_waitHandle() {}
   ~AsyncGenerator();
 
   static ObjectData* Create(const ActRec* fp, size_t numSlots,
-                            jit::TCA resumeAddr, Offset resumeOffset);
-  static Class* getClass() {
-    assertx(s_class);
-    return s_class;
-  }
+                            jit::TCA resumeAddr, Offset suspendOffset);
   static constexpr ptrdiff_t objectOff() {
     return -(Native::dataOffset<AsyncGenerator>());
   }
+  static constexpr ptrdiff_t waitHandleOff() {
+    return offsetof(AsyncGenerator, m_waitHandle);
+  }
+
   static AsyncGenerator* fromObject(ObjectData *obj) {
     return Native::data<AsyncGenerator>(obj);
   }
 
-  c_StaticWaitHandle* yield(Offset resumeOffset,
-                            const Cell* key, Cell value);
+  c_StaticWaitHandle* yield(Offset suspendOffset,
+                            const TypedValue* key, TypedValue value);
   c_StaticWaitHandle* ret();
   c_StaticWaitHandle* fail(ObjectData* exception);
   void failCpp();
@@ -84,10 +85,6 @@ struct AsyncGenerator final : BaseGenerator {
 private:
   // valid only in Running state; null during eager execution
   req::ptr<c_AsyncGeneratorWaitHandle> m_waitHandle;
-
-public:
-  static Class* s_class;
-  static const StaticString s_className;
 };
 
 ///////////////////////////////////////////////////////////////////////////////

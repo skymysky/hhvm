@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 
 class TestCloneWhatBase {
   public function clone(): this {
@@ -13,4 +13,8 @@ final class TestCloneWhat extends TestCloneWhatBase {
   }
 }
 
+
+<<__EntryPoint>>
+function main_method_override() :mixed{
 echo "Hello\n";
+}

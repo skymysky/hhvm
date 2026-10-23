@@ -1,14 +1,14 @@
 <?hh
 
-function compare_lines($line_from_macro, $line_from_trace) {
-  if ($line_from_macro != $line_from_trace) {
+function compare_lines($line_from_macro, $line_from_trace) :mixed{
+  if (HH\Lib\Legacy_FIXME\neq($line_from_macro, $line_from_trace)) {
     echo "Expected line: ".$line_from_macro."\n";
     echo "Got line: ".$line_from_trace."\n";
   }
 }
 
 class A {
-  function x($line, $trace_elem = 0) {
+  function x($line, $trace_elem = 0) :mixed{
     compare_lines($line, debug_backtrace()[$trace_elem]['line']);
     return $this;
   }
@@ -23,33 +23,38 @@ class B {
 class C {
 }
 
-function newInstanceOfA($line) {
+function newInstanceOfA($line) :mixed{
   return (new A())->x($line, 1);
 }
 
-// UnboxR
-(new A())->x(__LINE__)->
-  x(__LINE__)->
-  x(__LINE__);
+// Box
+function box(inout $_) :mixed{}
 
-// PopR
-(new A())->x(__LINE__)
-  ;
+<<__EntryPoint>>
+function main(): void {
+  // non-PopC
+  (new A())->x(__LINE__)->
+    x(__LINE__)->
+    x(__LINE__);
 
-// BoxR
-$var = &newInstanceOfA(__LINE__);
-$var =
-  &newInstanceOfA(__LINE__)
-  ;
-$var =
-  &newInstanceOfA(__LINE__);
+  // PopC
+  (new A())->x(__LINE__)
+    ;
 
-// handled exception
-try {
-  throw new Exception(__LINE__);
-} catch (Exception $e) {
-  compare_lines($e->getMessage(), $e->getLine());
+  $x = newInstanceOfA(__LINE__); box(inout $x);
+
+  $x = newInstanceOfA(__LINE__); box(inout $x);
+
+
+  $x = newInstanceOfA(__LINE__); box(inout $x);
+
+  // handled exception
+  try {
+    throw new Exception((string)__LINE__);
+  } catch (Exception $e) {
+    compare_lines($e->getMessage(), $e->getLine());
+  }
+
+  // unhandled exception
+  throw new Exception((string)__LINE__);
 }
-
-// unhandled exception
-throw new Exception(__LINE__);

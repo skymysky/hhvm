@@ -1,4 +1,10 @@
-File "pending_trycatch8.php", line 22, characters 10-11:
-The variable $x is defined (Naming[2007])
-File "pending_trycatch8.php", line 15, characters 7-8:
-But in a different scope
+error: Naming[2050] Variable `$x` is undefined, or not always defined. [1]
+
+pending_trycatch8.php:25:10
+23 |   }
+24 | 
+25 |   return $x;
+   |          ^^ [1]
+26 | }
+
+1 error found

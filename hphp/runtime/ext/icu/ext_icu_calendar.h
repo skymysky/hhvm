@@ -14,8 +14,7 @@
    | license@php.net so we can mail you a copy immediately.               |
    +----------------------------------------------------------------------+
 */
-#ifndef incl_HPHP_INTL_CALENDAR_H
-#define incl_HPHP_INTL_CALENDAR_H
+#pragma once
 
 #include "hphp/runtime/ext/extension.h"
 #include "hphp/runtime/ext/icu/icu.h"
@@ -23,11 +22,10 @@
 #include <unicode/calendar.h>
 #include <unicode/gregocal.h>
 
-namespace HPHP { namespace Intl {
+namespace HPHP::Intl {
 /////////////////////////////////////////////////////////////////////////////
-extern const StaticString s_IntlCalendar;
 
-struct IntlCalendar : IntlError {
+struct IntlCalendar : IntlError, SystemLib::ClassLoader<"IntlCalendar"> {
   IntlCalendar() {}
   IntlCalendar(const IntlCalendar&) = delete;
   IntlCalendar& operator=(const IntlCalendar& src) {
@@ -46,11 +44,7 @@ struct IntlCalendar : IntlError {
   }
 
   static Object newInstance(icu::Calendar *cal) {
-    if (!c_IntlCalendar) {
-      c_IntlCalendar = Unit::lookupClass(s_IntlCalendar.get());
-      assertx(c_IntlCalendar);
-    }
-    Object ret{c_IntlCalendar};
+    Object ret{ classof() };
     if (cal) {
       Native::data<IntlCalendar>(ret)->setCalendar(cal);
     }
@@ -58,7 +52,7 @@ struct IntlCalendar : IntlError {
   }
 
   static IntlCalendar* Get(ObjectData* obj) {
-    return GetData<IntlCalendar>(obj, s_IntlCalendar);
+    return GetData<IntlCalendar>(obj, className());
   }
 
   bool isValid() const {
@@ -71,15 +65,12 @@ struct IntlCalendar : IntlError {
   }
 
   static const icu::Calendar* ParseArg(const Variant& cal, const icu::Locale &locale,
-                                       const String &funcname, IntlError *err,
+                                       const OptString &funcname, IntlError *err,
                                        int64_t &calType, bool &calOwned);
  protected:
   icu::Calendar *m_cal = nullptr;
-
-  static Class* c_IntlCalendar;
 };
 
 /////////////////////////////////////////////////////////////////////////////
-}} // namespace HPHP::Intl
+} // namespace HPHP::Intl
 
-#endif // incl_HPHP_INTL_CALENDAR_H

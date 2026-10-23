@@ -1,0 +1,21 @@
+error: Typing[4057] Invalid argument [1]
+-> The field `email` is missing [2]
+-> The field `email` is required here [3]
+
+sub_splat_contravariant_bound.php:19:21
+ 3 | 
+ 4 | // Contravariant bound: T must have at least 'id' and 'email'
+ 5 | function needs_user_fields<T as shape('id' => int, 'email' => string, ...)>(
+   |                                                    ^^^^^^^ [3]
+ 6 |   shape(...T, 'role' => string) $s,
+ 7 | ): void {
+   :
+16 | function test_missing_field(): void {
+17 |   // Missing 'email' — should error against T's bound
+18 |   $s = shape('id' => 1, 'role' => 'admin');
+   |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ [2]
+19 |   needs_user_fields($s);
+   |                     ^^ [1]
+20 | }
+
+1 error found

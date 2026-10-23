@@ -1,12 +1,11 @@
-#ifndef incl_HPHP_ICU_COLLATOR_H
-#define incl_HPHP_ICU_COLLATOR_H
+#pragma once
 
 #include "hphp/runtime/ext/extension.h"
 #include "hphp/runtime/ext/icu/icu.h"
 
 #include <unicode/ucol.h>
 
-namespace HPHP { namespace Intl {
+namespace HPHP::Intl {
 /////////////////////////////////////////////////////////////////////////////
 extern const StaticString s_Collator;
 
@@ -48,6 +47,5 @@ struct Collator : IntlError {
 };
 
 /////////////////////////////////////////////////////////////////////////////
-}} // namespace HPHP::Intl
+} // namespace HPHP::Intl
 
-#endif // incl_HPHP_ICU_COLLATOR_H

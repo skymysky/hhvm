@@ -1,14 +1,16 @@
 <?hh
 
 namespace A;
-const CO = "a";
-function f() { return "a"; }
+const string CO = "a";
+function f() :mixed{ return "a"; }
 
 namespace B;
-const CO = "b";
-function f() { return "b"; }
+const string CO = "b";
+function f() :mixed{ return "b"; }
 
 use A\f;
 use A\CO;
-var_dump(f());
-var_dump(CO);
+<<__EntryPoint>> function main(): void {
+\var_dump(f());
+\var_dump(CO);
+}

@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 /**
  * Copyright (c) 2014, Facebook, Inc.
  * All rights reserved.
@@ -11,7 +11,7 @@
 
 class A implements XHPChild {}
 
-class :x:dumb {}
+class :x:dumb extends XHPTest {}
 
 function foo(mixed $x): void {
   // Almost anything goes in XHP

@@ -1,0 +1,43 @@
+Code actions available:
+------------------------------------------
+Add __NeedsConcrete attribute (CodeActionKind: "quickfix") SELECTED
+Devmate Quick Fix - Dangerous access of abstract member `MyNamespace\A::m2`; it may be abstract and `static` might refer to an abstract class here. Consider adding the `__NeedsConcrete` attribute to the containing method. (CodeActionKind: "quickfix")
+Devmate Agent Fix - Dangerous access of abstract member `MyNamespace\A::m2`; it may be abstract and `static` might refer to an abstract class here. Consider adding the `__NeedsConcrete` attribute to the containing method. (CodeActionKind: "quickfix")
+
+JSON for selected code action:
+------------------------------------------
+{
+  "title": "Add __NeedsConcrete attribute",
+  "kind": "quickfix",
+  "diagnostics": [],
+  "edit": {
+    "changes": {
+      "FILE.php": [
+        {
+          "range": {
+            "start": { "line": 4, "character": 4 },
+            "end": { "line": 4, "character": 4 }
+          },
+          "newText": "<<__NeedsConcrete>>\n    "
+        }
+      ]
+    }
+  }
+}
+
+Applied edit for code action:
+------------------------------------------
+<?hh
+
+namespace MyNamespace {
+  abstract class A {
+    <<__NeedsConcrete>>
+    public static function m1(): void {
+      static::m2();
+      //       ^ at-caret
+    }
+
+    public static abstract function m2(): void;
+  }
+}
+

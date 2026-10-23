@@ -1,0 +1,129 @@
+(*
+ * Copyright (c) Facebook, Inc. and its affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the "hack" directory of this source tree.
+ *
+ *)
+
+(**
+  * Copyright (c) Facebook, Inc. and its affiliates.
+  *
+  * This source code is licensed under the MIT license found in the
+  * LICENSE file in the "hack" directory of this source tree.
+  *
+  *)
+
+type process_success = {
+  command_line: string;
+  stdout: string;
+}
+
+type process_failure = string
+
+type config = string * string S_map.t
+
+module Watchman_options = struct
+  type t = {
+    root: Path.t;
+    sockname: Path.t option;
+  }
+end
+
+module Naming_and_dep_table_info = struct
+  type main_artifacts = {
+    naming_table_path: Path.t;
+    naming_sqlite_table_path: Path.t;
+    dep_table_path: Path.t;
+    compressed_dep_table_path: Path.t;
+    errors_path: Path.t;
+    warning_hashes_path: Path.t;
+  }
+
+  type dirty_files = {
+    master_changes: Relative_path.Set.t;
+    local_changes: Relative_path.Set.t;
+  }
+
+  type additional_info = {
+    dirty_files_promise: dirty_files Future.t;
+    saved_state_revs_info: Server_env.saved_state_revs_info;
+  }
+
+  let additional_info_of_yojson _ : additional_info = failwith "Not implemented"
+
+  let yojson_of_additional_info _ = failwith "Not implemented"
+end
+
+module Naming_table_info = struct
+  type main_artifacts = { naming_table_path: Path.t }
+
+  type additional_info = unit
+end
+
+module Shallow_decls_info = struct
+  type main_artifacts = { shallow_decls_path: Path.t }
+
+  type additional_info = unit
+end
+
+type _ saved_state_type =
+  | Naming_and_dep_table_distc
+      : (Naming_and_dep_table_info.main_artifacts
+        * Naming_and_dep_table_info.additional_info)
+        saved_state_type
+  | Naming_table
+      : (Naming_table_info.main_artifacts * Naming_table_info.additional_info)
+        saved_state_type
+  | Shallow_decls
+      : (Shallow_decls_info.main_artifacts * Shallow_decls_info.additional_info)
+        saved_state_type
+
+(** List of files changed since the saved-state's commit. This list of files may
+include files other than Hack files, so the caller should filter the given list
+as necessary. *)
+type changed_files = Relative_path.t list
+
+let changed_files_of_yojson _ = failwith "Not implemented"
+
+let yojson_of_changed_files _ = failwith "Not implemented"
+
+type load_result = {
+  main_artifacts: Naming_and_dep_table_info.main_artifacts;
+  additional_info: Naming_and_dep_table_info.additional_info;
+  manifold_path: string;
+  changed_files_since_saved_state: changed_files;
+  is_cached: bool;
+}
+
+module LoadError = struct
+  type t = string
+
+  (* Please do not throw an exception here; it breaks hack for open source users *)
+  let short_user_message_of_error _ =
+    "Saved states are not supported in this build."
+
+  let medium_user_message_of_error _ =
+    "Saved states are not supported in this build."
+
+  let long_user_message_of_error _ =
+    "Saved states are not supported in this build."
+
+  let saved_state_manifold_api_key_of_error _ = None
+
+  let debug_details_of_error _ = ""
+
+  let category_of_error _ = ""
+
+  let is_error_actionable _ = false
+end
+
+let get_project_name _ = ""
+
+let ignore_saved_state_version_mismatch ~ignore_hh_version = ignore_hh_version
+
+let get_query_for_root ~root:_ ~relative_root:_ _ _ = ""
+
+module Eden_options = struct
+  type t = { lookup_timeout: int }
+end

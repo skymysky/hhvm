@@ -1,14 +1,12 @@
-<?php
+<?hh
 
-$tmp_sqlite = tempnam('/tmp', 'vmpdotest');
-
-function VS($x, $y) {
+function VS($x, $y) :mixed{
   var_dump($x === $y);
   if ($x !== $y) { echo "Failed: $y\n"; echo "Got: $x\n";
                    var_dump(debug_backtrace()); }
 }
 
-function createSqliteTestTable($tmp_sqlite) {
+function createSqliteTestTable($tmp_sqlite) :mixed{
   unlink($tmp_sqlite);
   $db = new SQLite3($tmp_sqlite);
   $db->exec("CREATE TABLE foo (bar STRING)");
@@ -17,9 +15,14 @@ function createSqliteTestTable($tmp_sqlite) {
   VS($db->lasterrorcode(), 0);
 }
 
-function cleanupSqliteTestTable($tmp_sqlite) {
+function cleanupSqliteTestTable($tmp_sqlite) :mixed{
   unlink($tmp_sqlite);
 }
+
+
+<<__EntryPoint>>
+function main_pdo_fetch_column() :mixed{
+$tmp_sqlite = tempnam(sys_get_temp_dir(), 'vmpdotest');
 
 createSqliteTestTable($tmp_sqlite);
 
@@ -33,4 +36,5 @@ try {
   var_dump($result->fetchColumn(3));
 } finally {
   cleanupSqliteTestTable($tmp_sqlite);
+}
 }

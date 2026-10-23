@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 
 // Test of expression dependent type of local variable for switch/case
 
@@ -17,7 +17,7 @@ abstract class C {
     hh_show($c->get());
 
     switch (0) {
-      case 1:
+      default:
         // Inside a case the id is still stable
         hh_show($c->get());
         $c = $c->get_a_C();

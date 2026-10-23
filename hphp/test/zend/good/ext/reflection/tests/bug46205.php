@@ -1,9 +1,9 @@
-<?php
-$x = new reflectionmethod('reflectionparameter', 'export');
+<?hh <<__EntryPoint>> function main(): void {
+$x = new ReflectionMethod('ReflectionParameter', 'export');
 $y = function() { };
 
 try {
-	$x->invokeArgs(new reflectionparameter('trim', 'str'), array($y, 1));
+    $x->invokeArgs(new ReflectionParameter('trim', 'str'), vec[$y, 1]);
 } catch (Exception $e) { }
-?>
-ok
+echo "ok";
+}

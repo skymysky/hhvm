@@ -14,19 +14,17 @@
    | license@php.net so we can mail you a copy immediately.               |
    +----------------------------------------------------------------------+
 */
-#ifndef incl_HPHP_ICU_TIMEZONE_H
-#define incl_HPHP_ICU_TIMEZONE_H
+#pragma once
 
 #include "hphp/runtime/ext/extension.h"
 #include "hphp/runtime/ext/icu/icu.h"
 
 #include <unicode/timezone.h>
 
-namespace HPHP { namespace Intl {
+namespace HPHP::Intl {
 /////////////////////////////////////////////////////////////////////////////
-extern const StaticString s_IntlTimeZone;
 
-struct IntlTimeZone : IntlError {
+struct IntlTimeZone : IntlError, SystemLib::ClassLoader<"IntlTimeZone"> {
   IntlTimeZone() {}
   IntlTimeZone(const IntlTimeZone&) = delete;
   IntlTimeZone& operator=(const IntlTimeZone& src) {
@@ -38,11 +36,7 @@ struct IntlTimeZone : IntlError {
   }
 
   static Object newInstance(icu::TimeZone *tz = nullptr, bool owned = true) {
-    if (!c_IntlTimeZone) {
-      c_IntlTimeZone = Unit::lookupClass(s_IntlTimeZone.get());
-      assertx(c_IntlTimeZone);
-    }
-    Object obj{c_IntlTimeZone};
+    Object obj{ classof() };
     if (tz) {
       Native::data<IntlTimeZone>(obj)->setTimeZone(tz, owned);
     }
@@ -50,7 +44,7 @@ struct IntlTimeZone : IntlError {
   }
 
   static IntlTimeZone* Get(ObjectData* obj) {
-    return GetData<IntlTimeZone>(obj, s_IntlTimeZone);
+    return GetData<IntlTimeZone>(obj, className());
   }
 
   void setTimeZone(icu::TimeZone *tz, bool owned = true) {
@@ -81,16 +75,13 @@ struct IntlTimeZone : IntlError {
 
   icu::TimeZone* timezone() const { return m_timezone; }
 
-  static icu::TimeZone* ParseArg(const Variant& arg, const String& funcname,
+  static icu::TimeZone* ParseArg(const Variant& arg, const OptString& funcname,
                                  IntlError *err);
  private:
   icu::TimeZone *m_timezone = nullptr;
   bool m_owned = false;
-
-  static Class* c_IntlTimeZone;
 };
 
 /////////////////////////////////////////////////////////////////////////////
-}} // namespace HPHP::Intl
+} // namespace HPHP::Intl
 
-#endif // incl_HPHP_ICU_TIMEZONE_H

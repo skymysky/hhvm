@@ -1,0 +1,77 @@
+error: Typing[4411] Invalid argument [1]
+-> This expression is readonly [1]
+-> It is incompatible with this parameter, which is mutable [2]
+
+readonly_immediate_call_stmt.php:16:16
+ 2 | <<file: __EnableUnstableFeatures('readonly')>>
+ 3 | 
+ 4 | function is_empty<T>(T $container)[]: bool {
+   |                        ^^^^^^^^^^ [2]
+ 5 |   return true;
+ 6 | }
+   :
+14 | 
+15 |   $x = readonly vec[];
+16 |   if (is_empty($x)) {
+   |                ^^ [1]
+17 |     echo "Hi";
+18 |   }
+
+error: Typing[4411] Invalid argument [1]
+-> This expression is readonly [1]
+-> It is incompatible with this parameter, which is mutable [2]
+
+readonly_immediate_call_stmt.php:19:19
+ 2 | <<file: __EnableUnstableFeatures('readonly')>>
+ 3 | 
+ 4 | function is_empty<T>(T $container)[]: bool {
+   |                        ^^^^^^^^^^ [2]
+ 5 |   return true;
+ 6 | }
+   :
+17 |     echo "Hi";
+18 |   }
+19 |   while (is_empty($x)) {
+   |                   ^^ [1]
+20 |   }
+21 |   do {
+
+error: Typing[4411] Invalid argument [1]
+-> This expression is readonly [1]
+-> It is incompatible with this parameter, which is mutable [2]
+
+readonly_immediate_call_stmt.php:23:21
+ 2 | <<file: __EnableUnstableFeatures('readonly')>>
+ 3 | 
+ 4 | function is_empty<T>(T $container)[]: bool {
+   |                        ^^^^^^^^^^ [2]
+ 5 |   return true;
+ 6 | }
+   :
+21 |   do {
+22 | 
+23 |   } while (is_empty($x));
+   |                     ^^ [1]
+24 |   foreach (return_vec($x) as $y) {
+25 |   }
+
+error: Typing[4411] Invalid argument [1]
+-> This expression is readonly [1]
+-> It is incompatible with this parameter, which is mutable [2]
+
+readonly_immediate_call_stmt.php:24:23
+ 6 | }
+ 7 | 
+ 8 | function return_vec(mixed $x): vec<int> {
+   |                           ^^ [2]
+ 9 |   return vec[0];
+10 | }
+   :
+22 | 
+23 |   } while (is_empty($x));
+24 |   foreach (return_vec($x) as $y) {
+   |                       ^^ [1]
+25 |   }
+26 | 
+
+4 errors found

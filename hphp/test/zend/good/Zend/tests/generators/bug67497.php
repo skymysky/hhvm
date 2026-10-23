@@ -1,14 +1,14 @@
-<?php
+<?hh
 
-function gen() {
+function gen() :AsyncGenerator<mixed,mixed,void>{
     $a = 1;
     yield $a;
 }
-
-@eval('abc');
+<<__EntryPoint>> function main(): void {
+eval('abc');
 
 $values = gen();
 $values->next();
 
-?>
-===DONE===
+echo "===DONE===\n";
+}

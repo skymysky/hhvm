@@ -1,10 +1,13 @@
 <?hh
 
-print "Test begin\n";
-
 class C {
-  function f() {}
-  function f() {}
+  function f() :mixed{}
+  function f() :mixed{}
 }
+<<__EntryPoint>>
+function main_entry(): void {
 
-print "Test end\n";
+  print "Test begin\n";
+
+  print "Test end\n";
+}

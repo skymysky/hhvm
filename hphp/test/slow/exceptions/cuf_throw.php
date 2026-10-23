@@ -1,18 +1,13 @@
-<?php
-
-set_error_handler(function() { throw new Exception; });
+<?hh
 
 class X {
-  function __destruct() {
-    echo __METHOD__, "\n";
-  }
 }
 
-function test($x) {
-  call_user_func(array($x, "FOO"));
+function test($x) :mixed{
+  call_user_func(vec[$x, "FOO"]);
 }
 
-function main() {
+function main() :mixed{
   try {
     test(new X);
   } catch (Exception $e) {
@@ -20,5 +15,11 @@ function main() {
   }
 }
 
+
+<<__EntryPoint>>
+function main_cuf_throw() :mixed{
+set_error_handler(function() { throw new Exception; });
+
 main();
 echo "Done\n";
+}

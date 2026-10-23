@@ -14,8 +14,7 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_SWEEPABLE_H_
-#define incl_HPHP_SWEEPABLE_H_
+#pragma once
 
 #include "hphp/util/assertions.h"
 #include "hphp/util/type-scan.h"
@@ -96,7 +95,7 @@ struct SweepableMember : Sweepable {
       uintptr_t(this) - offsetof(T, m_sweepable)
     );
     obj->sweep();
-  };
+  }
   void* owner() override {
     return reinterpret_cast<T*>(
       uintptr_t(this) - offsetof(T, m_sweepable)
@@ -107,4 +106,3 @@ struct SweepableMember : Sweepable {
 ///////////////////////////////////////////////////////////////////////////////
 }
 
-#endif

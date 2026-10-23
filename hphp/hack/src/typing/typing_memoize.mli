@@ -1,4 +1,4 @@
-(**
+(*
  * Copyright (c) 2017, Facebook, Inc.
  * All rights reserved.
  *
@@ -7,9 +7,10 @@
  *
  *)
 
-(**
- * Checks if a function/method can be memoized. If the function cannot be
- * memoized this will add an error to the gloabl error list
- *)
-val check_function: Typing_env.env -> Nast.fun_ -> unit
-val check_method: Typing_env.env -> Nast.method_ -> unit
+(** Checks if a function can be memoized. If the function cannot be
+    memoized this will add an error to the global error list. *)
+val check_function : Typing_env_types.env -> Nast.fun_ -> unit
+
+(** Checks if a method can be memoized. If the method cannot be
+    memoized this will add an error to the global error list. *)
+val check_method : Typing_env_types.env -> Nast.method_ -> unit

@@ -1,10 +1,20 @@
-Program %s/break.php loaded. Type '[r]un' or '[c]ontinue' to go.
-continue
-Break on line 3 of %s/break.php
-   2 
-   3*hphpd_break();
-   4 (END)
+Program %s/break.php loaded. Type '[r]un' to go.
+run
+Program %s/break.php exited normally.
+n
+Notice: Attempted to interpret unknown debugger command as PHP!
+
+Hit fatal : Undefined constant 'n'
+    #0 at [:1]
+    #1 include(), called at [:1]
+    #2 include(), called at [:0]
 
 n
-Program %s/break.php exited normally.
+Notice: Attempted to interpret unknown debugger command as PHP!
+
+Hit fatal : Undefined constant 'n'
+    #0 at [:1]
+    #1 include(), called at [:1]
+    #2 include(), called at [:0]
+
 quit

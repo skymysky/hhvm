@@ -1,4 +1,4 @@
-(**
+(*
  * Copyright (c) 2016, Facebook, Inc.
  * All rights reserved.
  *
@@ -8,451 +8,473 @@
  *
  *)
 
-open Hh_core
+open Hh_prelude
 open Integration_test_base_types
-open Reordered_argument_collections
-open ServerCommandTypes
-open SearchServiceRunner
-open Coverage_level
+open Server_command_types
+open Int.Replace_polymorphic_compare
+
+exception Integration_test_failure
+
+module FileMap = S_map
+module ErrorSet = S_set
 
 let root = "/"
+
 let hhi = "/hhi"
-let () = Hh_logger.Level.set_min_level Hh_logger.Level.Off
-let server_config = ServerEnvBuild.default_genv.ServerEnv.config
-let global_opts = GlobalOptions.make
-  ~tco_assume_php: false
-  ~tco_safe_array: false
-  ~tco_safe_vector_array: false
-  ~tco_user_attrs: None
-  ~tco_experimental_features: GlobalOptions.tco_experimental_all
-  ~tco_migration_flags: SSet.empty
-  ~tco_dynamic_view: false
-  ~tco_disallow_array_as_tuple: false
-  ~po_auto_namespace_map: []
-  ~po_deregister_php_stdlib:true
-  ~po_use_full_fidelity:true
-  ~tco_disallow_ambiguous_lambda:false
-  ~tco_disallow_array_typehint:false
-  ~tco_disallow_array_literal:false
-  ~tco_disallow_return_by_ref:false
-  ~tco_disallow_array_cell_pass_by_ref:false
-  ~tco_language_feature_logging:false
-  ~tco_unsafe_rx:false
-  ~tco_disallow_implicit_returns_in_non_void_functions:true
-  ~ignored_fixme_codes: ISet.empty
-  ~forward_compatibility_level: ForwardCompatibilityLevel.default
 
-let server_config = ServerConfig.set_tc_options server_config global_opts
-let server_config = ServerConfig.set_parser_options
-  server_config global_opts
+let tmp = "/tmp"
 
-let genv = ref { ServerEnvBuild.default_genv with
-  ServerEnv.config = server_config
-}
+let () = Folly.ensure_folly_init ()
 
-(* Hhi files are loaded during server setup. If given a list of string + contents, we add them
-to the test disk and add them to disk_needs_parsing. After one server run loop, they will be loaded.
-This isn't exactly the same as how initialization does it, but the purpose is not to test the hhi
-files, but to test incremental mode behavior with Hhi files present.
-*)
-let setup_server ?custom_config ?(hhi_files = []) ()  =
+let server_config = Server_env_build.default_genv.Server_env.config
+
+let po =
+  Parser_options.
+    {
+      default with
+      disable_xhp_element_mangling = false;
+      deregister_php_stdlib = true;
+    }
+
+let global_opts =
+  Global_options.set
+    ~po
+    ~tco_num_local_workers:1
+    ~tco_saved_state:Global_options.default_saved_state
+    ~tco_fetch_remote_old_decls:false
+    Global_options.default
+
+let server_config = Server_config.set_tc_options server_config global_opts
+
+let server_config = Server_config.set_parser_options server_config po
+
+let genv =
+  ref { Server_env_build.default_genv with Server_env.config = server_config }
+
+let did_init = ref false
+
+(* Init part common to fresh and saved state init *)
+let test_init_common ?(hhi_files = []) () =
+  if !did_init then
+    failwith
+      ("Initializing the server twice in same process. There is no guarantee of global state "
+      ^ "cleanup between them. Split your test in multiple separate tests, or run individual test "
+      ^ "cases in separate processes using Test.in_daemon.")
+  else
+    did_init := true;
+
+  Unix.putenv "HH_TEST_MODE" "1";
   Printexc.record_backtrace true;
-  EventLogger.init EventLogger.Event_logger_fake 0.0;
+  Event_logger.init_fake ();
   Relative_path.set_path_prefix Relative_path.Root (Path.make root);
   Relative_path.set_path_prefix Relative_path.Hhi (Path.make hhi);
-  let _ = SharedMem.init GlobalConfig.default_sharedmem_config in
+  Relative_path.set_path_prefix Relative_path.Tmp (Path.make tmp);
+  Server_progress.disable ();
+
+  let handle = Shared_mem.init ~num_workers:0 Shared_mem.default_config in
+  ignore (handle : Shared_mem.handle);
+
+  Server_main.force_break_recheck_loop_for_test true;
 
   List.iter hhi_files ~f:(fun (fn, contents) ->
-    TestDisk.set (Filename.concat hhi fn) contents
-  );
+      Test_disk.set (Filename.concat hhi fn) contents);
+  ()
 
-  let result = match custom_config with
-  | Some config -> ServerEnvBuild.make_env config
-  | None -> ServerEnvBuild.make_env !genv.ServerEnv.config in
-  let hhi_file_list = List.map hhi_files ~f:(fun (fn, _) ->
-    Relative_path.create (Relative_path.Hhi) (Filename.concat hhi fn)) in
+(* Hhi files are loaded during server setup. If given a list of string + contents, we add them
+   to the test disk and add them to disk_needs_parsing. After one server run loop, they will be loaded.
+   This isn't exactly the same as how initialization does it, but the purpose is not to test the hhi
+   files, but to test incremental mode behavior with Hhi files present.
+*)
+let setup_server ?custom_config ?(hhi_files = []) ?edges_dir () : Server_env.env
+    =
+  test_init_common () ~hhi_files;
+
+  let init_id = Random_id.short_string () in
+  let deps_mode =
+    match edges_dir with
+    | Some edges_dir ->
+      Typing_deps_mode.SaveToDiskMode
+        {
+          graph = None;
+          new_edges_dir = edges_dir;
+          human_readable_dep_map_dir = None;
+        }
+    | None -> Typing_deps_mode.InMemoryMode None
+  in
+  let env =
+    match custom_config with
+    | Some config -> Server_env_build.make_env ~init_id ~deps_mode config
+    | None ->
+      Server_env_build.make_env ~init_id ~deps_mode !genv.Server_env.config
+  in
+  let hhi_file_list =
+    List.map hhi_files ~f:(fun (fn, _) ->
+        Relative_path.create Relative_path.Hhi (Filename.concat hhi fn))
+  in
   let hhi_set = Relative_path.Set.of_list hhi_file_list in
-  { result with ServerEnv.disk_needs_parsing = hhi_set }
 
+  Server_progress.disable ();
+  (* Return environment *)
+  { env with Server_env.disk_needs_parsing = hhi_set }
 
-let default_loop_input = {
-  disk_changes = [];
-  new_client = None;
-  persistent_client_request = None;
-}
+let default_loop_input = { disk_changes = []; new_client = None }
 
-let run_loop_once : type a b. ServerEnv.env -> (a, b) loop_inputs ->
-    (ServerEnv.env * (a, b) loop_outputs) = fun env inputs ->
-  TestClientProvider.clear();
-  Option.iter inputs.new_client (function
-  | RequestResponse x ->
-    TestClientProvider.mock_new_client_type Non_persistent;
-    TestClientProvider.mock_client_request x
-  | ConnectPersistent ->
-    TestClientProvider.mock_new_client_type Persistent);
+let run_loop_once :
+    type a. Server_env.env -> a loop_inputs -> Server_env.env * a loop_outputs =
+ fun env inputs ->
+  Test_client_provider.clear ();
+  Option.iter inputs.new_client ~f:(function RequestResponse x ->
+      Test_client_provider.mock_new_client_type Non_persistent;
+      Test_client_provider.mock_client_request x);
 
-  Option.iter inputs.persistent_client_request (function
-    | Request x ->
-      TestClientProvider.mock_persistent_client_request x
-    | UncleanDisconect x ->
-      TestClientProvider.mock_persistent_client_request x;
-      TestClientProvider.mock_unclean_disconnect ()
-  );
-
-  let client_provider = ClientProvider.provider_for_test () in
-
+  let client_provider = Client_provider.provider_for_test () in
   let disk_changes =
-    List.map inputs.disk_changes (fun (x, y) -> root ^ x, y) in
-
-  List.iter disk_changes
-    (fun (path, contents) -> TestDisk.set path contents);
+    List.map inputs.disk_changes ~f:(fun (x, y) -> (root ^ x, y))
+  in
+  List.iter disk_changes ~f:(fun (path, contents) ->
+      Test_disk.set path contents);
 
   let did_read_disk_changes_ref = ref false in
-
-  let notifier () =
-    if not !did_read_disk_changes_ref then begin
+  let get_changes_sync () =
+    if not !did_read_disk_changes_ref then (
       did_read_disk_changes_ref := true;
-      SSet.of_list (List.map disk_changes fst)
-    end else SSet.empty
+      S_set.of_list (List.map disk_changes ~f:fst)
+    ) else
+      S_set.empty
   in
-
-  let genv = { !genv with
-    ServerEnv.notifier_async =
-      (fun () ->
-        ServerNotifierTypes.Notifier_synchronous_changes (notifier ()));
-    ServerEnv.notifier = notifier;
-  } in
-
+  let get_changes_async () =
+    Server_notifier.SyncChanges (get_changes_sync ())
+  in
+  let genv =
+    {
+      !genv with
+      Server_env.notifier =
+        Server_notifier.init_mock ~get_changes_sync ~get_changes_async;
+    }
+  in
   (* Always pick up disk changes in tests immediately *)
-  let env = ServerEnv.({ env with last_notifier_check_time = 0.0 }) in
-
-  let env = ServerMain.serve_one_iteration genv env client_provider in
-  SearchServiceRunner.run_completely genv;
-  env, {
-    did_read_disk_changes = !did_read_disk_changes_ref;
-    rechecked_count =
-      env.ServerEnv.recent_recheck_loop_stats.ServerEnv.rechecked_count;
-    new_client_response =
-      TestClientProvider.get_client_response Non_persistent;
-    persistent_client_response =
-      TestClientProvider.get_client_response Persistent;
-    push_message = TestClientProvider.get_push_message ();
-  }
+  let env = Server_env.{ env with last_notifier_check_time = 0.0 } in
+  let env = Server_main.serve_one_iteration genv env client_provider in
+  let {
+    Server_env.RecheckLoopStats.total_changed_files_count;
+    total_rechecked_count;
+    _;
+  } =
+    env.Server_env.last_recheck_loop_stats
+  in
+  ( env,
+    {
+      did_read_disk_changes = !did_read_disk_changes_ref;
+      total_changed_files_count;
+      total_rechecked_count;
+      last_actual_total_rechecked_count =
+        (match env.Server_env.last_recheck_loop_stats_for_actual_work with
+        | None -> None
+        | Some stats ->
+          Some stats.Server_env.RecheckLoopStats.total_rechecked_count);
+      new_client_response =
+        Test_client_provider.get_client_response Non_persistent;
+    } )
 
 let prepend_root x = root ^ x
 
 let fail x =
   print_endline x;
-  Printexc.(get_callstack 100 |> print_raw_backtrace stderr);
-  exit 1
+  Stdlib.Printexc.(get_callstack 100 |> print_raw_backtrace stderr);
+  raise Integration_test_failure
 
 (******************************************************************************(
  * Utility functions to help format/throw errors for informative errors
 )******************************************************************************)
+
+let relativize (s : string) : string =
+  let root_regexp =
+    Str.regexp (Str.quote (Relative_path.path_of_prefix Relative_path.Root))
+  in
+  Str.global_replace root_regexp "/" s
+
 let indent_string_with (indent : string) (error : string) : string =
-  indent ^ String.concat ("\n" ^ indent) Str.(split (regexp "\n") error)
+  indent ^ String.concat ~sep:("\n" ^ indent) Str.(split (regexp "\n") error)
+
 let indent_strings_with (indent : string) (errors : string list) : string =
-  String.concat "" @@ List.map ~f:(indent_string_with indent) errors
-let fail_on_none (error : string) optional_thing =
-  match optional_thing with
-  | None -> fail error
-  | Some _ -> ()
-let assert_responded (error : string) loop_output =
-  fail_on_none error loop_output.persistent_client_response
+  String.concat ~sep:"" @@ List.map ~f:(indent_string_with indent) errors
 
 let assertEqual expected got =
-  let expected = String.trim expected in
-  let got = String.trim got in
-  if expected <> got then fail
-    (Printf.sprintf "Expected:\n%s\nGot:\n%s\n" expected got)
+  let expected = String.strip expected in
+  let got = String.strip got in
+  if String.( <> ) expected got then
+    fail (Printf.sprintf "Expected:\n%s\n\nBut got:\n%s\n" expected got)
 
-let setup_disk env disk_changes =
-  let env, loop_output = run_loop_once env { default_loop_input with
-    disk_changes
-  } in
+let change_files env disk_changes =
+  let (env, loop_output) =
+    run_loop_once env { default_loop_input with disk_changes }
+  in
   if not loop_output.did_read_disk_changes then
     fail "Expected the server to process disk updates";
-  env
+  (env, loop_output)
 
-let connect_persistent_client env =
-  let env, _ = run_loop_once env { default_loop_input with
-    new_client = Some ConnectPersistent
-  } in
-  fail_on_none "Expected persistent client to be connected"
-    env.ServerEnv.persistent_client;
-  env
+let setup_disk env disk_changes = fst @@ change_files env disk_changes
 
-let assertSingleError expected err_list =
-  let error_strings =
-    List.map ~f:(fun x -> Errors.(to_string (to_absolute x))) err_list
-  in
-  match error_strings with
+let diagnostic_strings diag_list =
+  List.map
+    ~f:(fun x -> Diagnostics.to_string (User_diagnostic.to_absolute x))
+    diag_list
+
+let assertSingleDiagnostic expected diag_list =
+  let diagnostic_strings = diagnostic_strings diag_list in
+  match diagnostic_strings with
   | [x] -> assertEqual expected x
   | _ ->
-    let err_count = List.length err_list in
+    let diag_count = List.length diag_list in
     let fmt_expected = indent_string_with " < " expected in
-    let fmt_actual = indent_strings_with " > " error_strings in
-    let msg = Printf.sprintf
-"Expected to have exactly one error, namely:
+    let fmt_actual = indent_strings_with " > " diagnostic_strings in
+    let msg =
+      Printf.sprintf
+        "Expected to have exactly one diagnostic, namely:
 
 %s
 
-... but got %d errors...
+... but got %d diagnostics...
 
 %s
 "
-      fmt_expected
-      err_count
-      fmt_actual
+        fmt_expected
+        diag_count
+        fmt_actual
     in
     fail msg
 
-let subscribe_diagnostic ?(id=4) env =
-  let env, _ = run_loop_once env { default_loop_input with
-    persistent_client_request = Some (Request (
-      SUBSCRIBE_DIAGNOSTIC id
-    ))
-  } in
-  fail_on_none "Expected to subscribe to push diagnostics"
-    env.ServerEnv.diag_subscribe;
-  env
+let full_check_status env =
+  (* the empty string isn't just a test placeholder - when a file is deleted
+     or renamed, the content is set to the empty string internally *)
+  run_loop_once
+    env
+    {
+      default_loop_input with
+      disk_changes = [("__dummy_file_to_trigger_full_check.php", "")];
+    }
 
-let open_file env ?contents file_name =
-  let file_name = root ^ file_name in
-  let contents = match contents with
-    | Some contents -> contents
-    | _ -> TestDisk.get file_name
-  in
-  let env, loop_output = run_loop_once env { default_loop_input with
-    persistent_client_request = Some (Request (OPEN_FILE (file_name, contents)))
-  } in
-  assert_responded "Expected OPEN_FILE to be processeded" loop_output;
-  env
+let start_initial_full_check env =
+  (match env.Server_env.prechecked_files with
+  | Server_env.Initial_typechecking _ -> ()
+  | _ -> assert false);
 
-let edit_file env name contents =
-  let env, loop_output = run_loop_once env { default_loop_input with
-    persistent_client_request = Some (Request (EDIT_FILE
-      (root ^ name, [{Ide_api_types.range = None; text = contents;}])
-    ))
-  } in
-  assert_responded "Expected EDIT_FILE to be processed" loop_output;
-  env, loop_output
+  let (env, loop_output) = full_check_status env in
+  (match env.Server_env.prechecked_files with
+  | Server_env.Prechecked_files_ready _ -> ()
+  | _ -> assert false);
 
-let close_file env name =
-  let env, loop_output = run_loop_once env { default_loop_input with
-    persistent_client_request = Some (Request (CLOSE_FILE (root ^ name)))
-  } in
-  assert_responded "Expected CLOSE_FILE to be processeded" loop_output;
-  env, loop_output
+  let { total_rechecked_count; _ } = loop_output in
+  (* full_check_status adds a dummy file to trigger a recheck, so we subtract one here
+     and return the number of rechecked non-dummy files. *)
+  assert (total_rechecked_count >= 1);
+  (env, total_rechecked_count - 1)
 
-let wait env =
-  (* We simulate waiting one second since last command by manipulating
-   * last_command_time. Will not work on timers that compare against other
-   * counters. *)
-  ServerEnv.{ env with last_command_time = env.last_command_time -. 1.0 }
+let diagnostics_to_string buf x =
+  List.iter x ~f:(fun diagnostic ->
+      Printf.bprintf buf "%s\n" (Diagnostics.to_string diagnostic))
 
-let coverage_levels env file_input =
-  run_loop_once env { default_loop_input with
-    persistent_client_request = Some (Request (COVERAGE_LEVELS file_input))
-  }
-let coverage_counts env contents =
-  run_loop_once env { default_loop_input with
-    persistent_client_request = Some (Request (COVERAGE_COUNTS contents))
-  }
-
-let autocomplete env contents =
-  run_loop_once env { default_loop_input with
-    persistent_client_request = Some (Request (AUTOCOMPLETE contents))
-  }
-
-let ide_autocomplete env (path, line, column) =
-  let delimit_on_namespaces = false in
-  run_loop_once env { default_loop_input with
-    persistent_client_request = Some (Request (IDE_AUTOCOMPLETE
-      (root ^ path, Ide_api_types.{line; column}, delimit_on_namespaces)
-    ))
-  }
-
-let status ?(ignore_ide=false) env =
-  run_loop_once env { default_loop_input with
-    new_client = Some (RequestResponse (ServerCommandTypes.STATUS ignore_ide))
-  }
-
-let full_check env =
-  run_loop_once env { default_loop_input with
-    disk_changes = ["__dummy_file_to_trigger_full_check.php", ""]
-  }
-
-let assert_no_diagnostics loop_output =
-  match loop_output.push_message with
-  | Some (DIAGNOSTIC _) ->
-    fail "Did not expect to receive push diagnostics."
-  | Some NEW_CLIENT_CONNECTED ->
-    fail "Unexpected push message"
-  | _ -> ()
-
-let assert_has_diagnostics loop_output =
-  match loop_output.push_message with
-  | Some DIAGNOSTIC _ -> ()
-  | Some BUSY_STATUS s ->
-    let msg =
-      match s with
-      | Needs_local_typecheck -> "Needs_local_typecheck"
-      | Doing_local_typecheck -> "Doing_local_typecheck"
-      | Done_local_typecheck -> "Done_local_typecheck"
-      | Doing_global_typecheck _ -> "Doing_global_typecheck"
-      | Done_global_typecheck _ -> "Done_global_typecheck"
-    in
-    let msg =
-      Printf.sprintf "Expected DIAGNOSTIC, but got BUSY_STATUS %s." msg
-    in
-    fail msg
-  | Some NEW_CLIENT_CONNECTED ->
-    fail "Expected DIAGNOSTIC, but got NEW_CLIENT_CONNECTED."
-  | Some FATAL_EXCEPTION e
-  | Some NONFATAL_EXCEPTION e ->
-    let msg = Printf.sprintf
-      "Expected DIAGNOSTIC, but got NON/FATAL_EXCEPTION:\n%s"
-      e.Marshal_tools.message
-    in
-    fail msg
-  | None -> fail "Expected to receive push diagnostics."
-
-let errors_to_string buf x =
-  List.iter x ~f: begin fun error ->
-    Printf.bprintf buf "%s\n" (Errors.to_string error)
-  end
-
-let assert_errors errors expected =
+let assert_diagnostics diagnostics expected =
   let buf = Buffer.create 1024 in
-  (Errors.get_error_list errors)
-  |> List.map ~f:(Errors.to_absolute) |> errors_to_string buf;
+  Diagnostics.get_diagnostic_list diagnostics
+  |> List.map ~f:User_diagnostic.to_absolute
+  |> diagnostics_to_string buf;
   assertEqual expected (Buffer.contents buf)
 
-let assert_env_errors env expected =
-  assert_errors env.ServerEnv.errorl expected
+let assert_env_diagnostics env expected =
+  assert_diagnostics env.Server_env.diagnostics expected
 
-let assert_no_errors env =
-  assert_env_errors env ""
+let assert_no_diagnostics env = assert_env_diagnostics env ""
 
-let diagnostics_to_string x =
-  let buf = Buffer.create 1024 in
-  SMap.iter x ~f:begin fun path errors ->
-    Printf.bprintf buf "%s:\n" path;
-    errors_to_string buf errors;
-  end;
-  Buffer.contents buf
-
-let errors_to_string x =
-  let buf = Buffer.create 1024 in
-  errors_to_string buf x;
-  Buffer.contents buf
-
-let get_diagnostics loop_output =
-  match loop_output.push_message with
-  | Some (DIAGNOSTIC (_, m)) -> m
-  | _ -> fail "Expected push diagnostics"
-
-let assert_diagnostics loop_output expected =
-  let diagnostics = get_diagnostics loop_output in
-  let diagnostics_as_string = diagnostics_to_string diagnostics in
-  assertEqual expected diagnostics_as_string
-
-let assert_diagnostics_in loop_output filename expected =
-  let diagnostics = get_diagnostics loop_output in
-  let diagnostics = SMap.filter diagnostics
-    ~f:(fun path _ -> path = prepend_root filename) in
-  let diagnostics_as_string = diagnostics_to_string diagnostics in
-  assertEqual expected diagnostics_as_string
+let in_daemon f =
+  let handle =
+    Daemon.fork_FOR_TESTING_ON_UNIX_ONLY
+      ~channel_mode:`socket
+      Unix.(stdout, stderr)
+      (fun () _channels -> f ())
+      ()
+  in
+  match Unix.waitpid [] handle.Daemon.pid with
+  | (_, Unix.WEXITED 0) -> ()
+  | _ -> assert false
 
 let list_to_string l =
   let buf = Buffer.create 1024 in
   List.iter l ~f:(Printf.bprintf buf "%s ");
   Buffer.contents buf
 
-let coverage_levels_to_str_helper (pos, cl) =
-  let cl_str = string_of_level cl in
-  let interval = Pos.string pos in
-  interval^" "^cl_str
-
-let assert_coverage_levels loop_output expected =
-  let results, counts = match loop_output.persistent_client_response with
-    | Some res -> res
-    | _ -> fail "Expected coverage levels response"
+let assert_ide_completions response expected =
+  let results =
+    List.map response.Autocomplete_types.completions ~f:(fun x ->
+        x.Autocomplete_types.res_label)
   in
-  let strings_of_stats = [
-    "checked: "^(string_of_int counts.checked);
-    "partial: "^(string_of_int counts.partial);
-    "unchecked: "^(string_of_int counts.unchecked);
-    ]
-  in
-  let results_as_string =
-    List.map results coverage_levels_to_str_helper
-      |> List.sort ~cmp:compare |> List.append strings_of_stats
-      |> list_to_string in
-  let expected_as_string = list_to_string expected in
-  assertEqual expected_as_string results_as_string
-
-let assert_autocomplete loop_output expected =
-  let results = match loop_output.persistent_client_response with
-    | Some res -> res
-    | _ -> fail "Expected autocomplete response"
-  in
-  let results = results |> List.map ~f:(fun x -> x.AutocompleteTypes.res_name) in
-  (* The autocomplete results out of hack are unsorted *)
-  let results_as_string = results |> List.sort ~cmp:compare |> list_to_string in
-  let expected_as_string = expected |> List.sort ~cmp:compare |> list_to_string in
-  assertEqual expected_as_string results_as_string
-
-let assert_ide_autocomplete loop_output expected =
-  let results = match loop_output.persistent_client_response with
-    | Some res -> res
-    | _ -> fail "Expected autocomplete response"
-  in
-  let results = List.map results.AutocompleteTypes.completions
-    ~f:(fun x -> x.AutocompleteTypes.res_name) in
   let results_as_string = list_to_string results in
   let expected_as_string = list_to_string expected in
   assertEqual expected_as_string results_as_string
 
-let smap_to_str_list (f : 'a -> string) (m : 'a SMap.t) =
-  (m |> SMap.ordered_keys |> List.map) (fun s -> s^"< "^(m |> SMap.find s |> f)^">")
+let assert_needs_retry loop_output =
+  Done_or_retry.(
+    match loop_output.new_client_response with
+    | Some Retry -> ()
+    | Some (Done _) -> fail "Expected needing to retry"
+    | None -> fail "Expected response")
 
-let level_stats_to_str (ls : level_stats) =
-  let lvls =
-    [Ide_api_types.Checked; Ide_api_types.Partial; Ide_api_types.Unchecked] in
-  let str_list = List.map lvls
-    (fun lvl ->
-      (string_of_level lvl)^"="^(string_of_int (CLMap.find lvl ls).count)) in
-  list_to_string str_list
+let assert_response loop_output =
+  Done_or_retry.(
+    match loop_output.new_client_response with
+    | Some (Done res) -> res
+    | Some Retry -> fail "Expecteded not needing to retry"
+    | None -> fail "Expected response")
 
-let rec trie_to_string (base : string) (f : 'a -> string) (t : 'a trie) =
-  match t with
-  | Leaf a -> base^"( "^(f a)^")"
-  | Node (_, smap_of_tr) -> (*TODO: figure out why the first of the pair is duplicated*)
-    List.map (SMap.ordered_keys smap_of_tr)
-      (fun k -> trie_to_string (base^"/"^k) f (SMap.find k smap_of_tr))
-      |> list_to_string
-
-let assert_coverage_counts loop_output expected =
-  let resOpt = match loop_output.persistent_client_response with
-    | Some res -> res
-    | None -> fail "Expected coverage count response"
+let assert_find_refs loop_output expected =
+  let results = assert_response loop_output in
+  let results =
+    List.map results ~f:(fun Search_types.Find_refs.{ name; pos } ->
+        name ^ ": " ^ Pos.string pos)
   in
-  let results = match resOpt with
-    | Some res -> res
-    | None -> fail "Expected some coverage count response"
-  in
-  let results_as_string = trie_to_string ""
-    (fun x -> x |> smap_to_str_list level_stats_to_str |> list_to_string)
-      results in
+  let results_as_string = list_to_string results in
   let expected_as_string = list_to_string expected in
   assertEqual expected_as_string results_as_string
 
-let assert_status loop_output expected =
-  let {Server_status.error_list; _} = match loop_output.new_client_response with
-    | Some res -> res
-    | _ -> fail "Expected status response"
-  in
-  let results_as_string = errors_to_string error_list in
+let assert_rename loop_output expected =
+  let results = assert_response loop_output in
+  (* We don't have any (better than JSON) human-readable format for rename results,
+   * and I'm too lazy to write it. Tests will have to compare JSON outputs for now. *)
+  let results_as_string = Client_rename.patches_to_json_string results in
   assertEqual expected results_as_string
+
+let assert_needs_recheck env x =
+  if
+    not
+      Relative_path.(
+        Set.mem env.Server_env.needs_recheck (create_detect_prefix (root ^ x)))
+  then
+    let () = Printf.eprintf "Expected %s to need recheck\n" x in
+    assert false
+
+let assert_needs_no_recheck env x =
+  if
+    Relative_path.(
+      Set.mem env.Server_env.needs_recheck (create_detect_prefix (root ^ x)))
+  then
+    let () = Printf.eprintf "Expected %s not to need recheck\n" x in
+    assert false
+
+let doc (suffix : string) (file_contents : string) : Client_ide_message.document
+    =
+  {
+    Client_ide_message.file_path =
+      Relative_path.from_root ~suffix |> Relative_path.to_absolute |> Path.make;
+    file_contents;
+  }
+
+module Client = struct
+  type env = Client_ide_daemon.Test.env
+
+  let with_env ~(custom_config : Server_config.t option) (f : env -> unit) :
+      unit =
+    Printexc.record_backtrace true;
+    Event_logger.init_fake ();
+    Tempfile.with_real_tempdir @@ fun root ->
+    Tempfile.with_real_tempdir @@ fun hhi_root ->
+    Tempfile.with_real_tempdir @@ fun tmp ->
+    let naming_sqlite = Path.concat tmp "naming_table.sql" in
+    Relative_path.set_path_prefix Relative_path.Root root;
+    Relative_path.set_path_prefix Relative_path.Hhi hhi_root;
+    Relative_path.set_path_prefix Relative_path.Tmp tmp;
+    let (_save_result : Naming_sqlite.save_result) =
+      Naming_sqlite.save_file_infos
+        (Path.to_string naming_sqlite)
+        Relative_path.Map.empty
+        ~base_content_version:""
+    in
+    let env = Client_ide_daemon.Test.init ~custom_config ~naming_sqlite in
+    f env;
+    ()
+
+  let setup_disk (env : env) (files_and_contents : (string * string) list) : env
+      =
+    let files_and_contents =
+      List.map files_and_contents ~f:(fun (suffix, contents) ->
+          (Relative_path.from_root ~suffix, contents))
+    in
+    List.iter files_and_contents ~f:(fun (path, contents) ->
+        let file = Relative_path.to_absolute path in
+        Real_disk.write_file ~file ~contents;
+        Test_disk.set file contents);
+    Client_ide_daemon.Test.index
+      env
+      (Relative_path.Set.of_list (List.map files_and_contents ~f:fst))
+
+  let edit_file (env : env) (suffix : string) (contents : string) :
+      env * Client_ide_message.diagnostic list S_map.t =
+    let message =
+      Client_ide_message.(Did_open_or_change (doc suffix contents))
+    in
+    let (env, ()) = Client_ide_daemon.Test.handle env message in
+    let message = Client_ide_message.(Diagnostics (doc suffix contents)) in
+    let (env, diagnostics) = Client_ide_daemon.Test.handle env message in
+    let diagnostics = FileMap.singleton ("/" ^ suffix) diagnostics in
+    (env, diagnostics)
+
+  let open_file (env : env) (suffix : string) :
+      env * Client_ide_message.diagnostic list S_map.t =
+    let contents =
+      Test_disk.get
+        (Relative_path.from_root ~suffix |> Relative_path.to_absolute)
+    in
+    edit_file env suffix contents
+
+  let close_file (env : env) (suffix : string) :
+      env * Client_ide_message.diagnostic list S_map.t =
+    let message =
+      Client_ide_message.(
+        Did_close
+          (Relative_path.from_root ~suffix
+          |> Relative_path.to_absolute
+          |> Path.make))
+    in
+    let (env, diagnostics) = Client_ide_daemon.Test.handle env message in
+    let diagnostics = FileMap.singleton ("/" ^ suffix) diagnostics in
+    (env, diagnostics)
+
+  let diagnostics_to_string buf x =
+    List.iter x ~f:(fun diagnostic ->
+        (* For testing we just compare the error itself. Other tests
+           exercise full diagnostics information *)
+        Printf.bprintf
+          buf
+          "%s\n"
+          (Diagnostics.to_string diagnostic.Client_ide_message.diagnostic_error))
+
+  let diagnostics_to_string (x : Client_ide_message.diagnostic list S_map.t) =
+    let buf = Buffer.create 1024 in
+    S_map.iter
+      (fun path diagnostics ->
+        Printf.bprintf buf "%s:\n" path;
+        diagnostics_to_string buf diagnostics)
+      x;
+    Buffer.contents buf
+
+  let assert_no_diagnostics
+      (diagnostics : Client_ide_message.diagnostic list S_map.t) =
+    let is_any =
+      FileMap.exists (fun _file d -> not (List.is_empty d)) diagnostics
+    in
+    if is_any then begin
+      let diagnostics_as_string =
+        diagnostics_to_string diagnostics |> relativize
+      in
+      fail
+        ("Did not expect to receive IDE diagnostics. Got:\n"
+        ^ diagnostics_as_string)
+    end
+
+  let assert_diagnostics_string
+      (diagnostics : Client_ide_message.diagnostic list S_map.t)
+      (expected : string) : unit =
+    let diagnostics_as_string =
+      diagnostics_to_string diagnostics |> relativize
+    in
+    assertEqual expected diagnostics_as_string
+end

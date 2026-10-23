@@ -1,11 +1,10 @@
 <?hh
 
-function exn_throw($exn) {
+function exn_throw(Throwable $exn) :mixed{
   throw new Exception('throwing second');
 }
-
-function main() {
-  set_exception_handler('exn_throw');
+<<__EntryPoint>>
+function main() :mixed{
+  set_exception_handler(exn_throw<>);
   throw new Exception('throwing first');
 }
-main();

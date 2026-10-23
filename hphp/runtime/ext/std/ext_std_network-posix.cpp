@@ -18,30 +18,13 @@
 #include "hphp/runtime/ext/std/ext_std_network.h"
 #include "hphp/runtime/ext/std/ext_std_network-internal.h"
 
-#include <arpa/inet.h>
 #include <arpa/nameser.h>
-#include <netdb.h>
 #include <netinet/in.h>
 #include <resolv.h>
-#include <sys/socket.h>
 
-#include <folly/IPAddress.h>
 #include <folly/ScopeGuard.h>
 
-#include "hphp/runtime/base/builtin-functions.h"
-#include "hphp/runtime/base/file.h"
-#include "hphp/runtime/base/runtime-option.h"
-#include "hphp/runtime/ext/sockets/ext_sockets.h"
-#include "hphp/runtime/ext/std/ext_std_function.h"
-#include "hphp/runtime/ext/string/ext_string.h"
 #include "hphp/runtime/server/server-stats.h"
-#include "hphp/util/lock.h"
-#include "hphp/util/network.h"
-
-#if defined(__APPLE__)
-# include <arpa/nameser_compat.h>
-#include <vector>
-#endif
 
 
 namespace HPHP {
@@ -64,7 +47,7 @@ struct ResolverInit {
     return m_res;
   }
 
-  static THREAD_LOCAL(ResolverInit, s_res);
+  static RDS_LOCAL(ResolverInit, s_res);
 private:
   void initRes(void) {
     if (m_res) {
@@ -78,7 +61,7 @@ private:
 
   struct __res_state *m_res;
 };
-THREAD_LOCAL(ResolverInit, ResolverInit::s_res);
+RDS_LOCAL(ResolverInit, ResolverInit::s_res);
 
 /* just a hack to free resources allocated by glibc in __res_nsend()
  * See also:
@@ -98,8 +81,8 @@ static void php_dns_free_res(struct __res_state *res) {
 #endif
 }
 
-bool HHVM_FUNCTION(checkdnsrr, const String& host,
-                               const String& type /* = null_string */) {
+bool HHVM_FUNCTION(checkdnsrr, const OptString& host,
+                               const OptString& type /* = null_string */) {
   int ntype;
   if (!validate_dns_arguments(host, type, ntype)) {
     return false;
@@ -118,10 +101,10 @@ bool HHVM_FUNCTION(checkdnsrr, const String& host,
   return (i >= 0);
 }
 
-typedef union {
+union querybuf {
   HEADER qb1;
   u_char qb2[65536];
-} querybuf;
+};
 
 const StaticString
   s_host("host"),
@@ -152,12 +135,15 @@ const StaticString
   s_replacement("replacement"),
   s_class("class"),
   s_ttl("ttl"),
+  s_tag("tag"),
+  s_value("value"),
   s_A("A"),
   s_MX("MX"),
   s_CNAME("CNAME"),
   s_NS("NS"),
   s_PTR("PTR"),
   s_HINFO("HINFO"),
+  s_CAA("CAA"),
   s_TXT("TXT"),
   s_SOA("SOA"),
   s_AAAA("AAAA"),
@@ -184,7 +170,7 @@ static unsigned char *php_parserr(unsigned char *cp, unsigned char* end,
   char name[255 + 2];  // IETF STD 13 section 3.1; 255 bytes
   int have_v6_break = 0, in_v6_break = 0;
 
-  n = dn_expand(answer->qb2, answer->qb2+65536, cp, name, sizeof(name) - 2);
+  n = dn_expand(answer->qb2, end, cp, name, sizeof(name) - 2);
   if (n < 0) {
     return NULL;
   }
@@ -196,6 +182,10 @@ static unsigned char *php_parserr(unsigned char *cp, unsigned char* end,
   GETLONG(ttl, cp);
   GETSHORT(dlen, cp);
   CHECKCP(dlen);
+  if (dlen == 0) {
+    /* No data in the response - nothing to do */
+    return nullptr;
+  }
   if (type_to_fetch != T_ANY && type != type_to_fetch) {
     cp += dlen;
     return cp;
@@ -206,13 +196,13 @@ static unsigned char *php_parserr(unsigned char *cp, unsigned char* end,
     return cp;
   }
 
-  subarray.set(s_host, String(name, CopyString));
+  subarray.set(s_host, OptString(name, CopyString));
   switch (type) {
   case DNS_T_A:
     CHECKCP(4);
     subarray.set(s_type, s_A);
     snprintf(name, sizeof(name), "%d.%d.%d.%d", cp[0], cp[1], cp[2], cp[3]);
-    subarray.set(s_ip, String(name, CopyString));
+    subarray.set(s_ip, OptString(name, CopyString));
     cp += dlen;
     break;
   case DNS_T_MX:
@@ -220,27 +210,27 @@ static unsigned char *php_parserr(unsigned char *cp, unsigned char* end,
     subarray.set(s_type, s_MX);
     GETSHORT(n, cp);
     subarray.set(s_pri, n);
-    /* no break; */
+    [[fallthrough]];
   case DNS_T_CNAME:
     if (type == DNS_T_CNAME) {
       subarray.set(s_type, s_CNAME);
     }
-    /* no break; */
+    [[fallthrough]];
   case DNS_T_NS:
     if (type == DNS_T_NS) {
       subarray.set(s_type, s_NS);
     }
-    /* no break; */
+    [[fallthrough]];
   case DNS_T_PTR:
     if (type == DNS_T_PTR) {
       subarray.set(s_type, s_PTR);
     }
-    n = dn_expand(answer->qb2, answer->qb2+65536, cp, name, (sizeof name) - 2);
+    n = dn_expand(answer->qb2, end, cp, name, (sizeof name) - 2);
     if (n < 0) {
       return NULL;
     }
     cp += n;
-    subarray.set(s_target, String(name, CopyString));
+    subarray.set(s_target, OptString(name, CopyString));
     break;
   case DNS_T_HINFO:
     /* See RFC 1010 for values */
@@ -249,19 +239,40 @@ static unsigned char *php_parserr(unsigned char *cp, unsigned char* end,
     n = *cp & 0xFF;
     cp++;
     CHECKCP(n);
-    subarray.set(s_cpu, String((const char *)cp, n, CopyString));
+    subarray.set(s_cpu, OptString((const char *)cp, n, CopyString));
     cp += n;
     CHECKCP(1);
     n = *cp & 0xFF;
     cp++;
     CHECKCP(n);
-    subarray.set(s_os, String((const char *)cp, n, CopyString));
+    subarray.set(s_os, OptString((const char *)cp, n, CopyString));
+    cp += n;
+    break;
+  case DNS_T_CAA:
+    /* See RFC 8659 for values https://datatracker.ietf.org/doc/html/rfc8659 */
+    subarray.set(s_type, s_CAA);
+    CHECKCP(1);
+    n = *cp & 0xFF;
+    subarray.set(s_flags, n);
+    cp++;
+    CHECKCP(1);
+    n = *cp & 0xFF;
+    cp++;
+    CHECKCP(n);
+    subarray.set(s_tag, OptString((const char *)cp, n, CopyString));
+    cp += n;
+		if ( (size_t) dlen < ((size_t)n) + 2 ) {
+			return NULL;
+	  }
+    n = dlen - n - 2;
+    CHECKCP(n);
+    subarray.set(s_value, OptString((const char *)cp, n, CopyString));
     cp += n;
     break;
   case DNS_T_TXT: {
     int l1 = 0, l2 = 0;
 
-    String s = String(dlen, ReserveString);
+    OptString s = OptString(dlen, ReserveString);
     tp = (unsigned char *)s.mutableData();
 
     while (l1 < dlen) {
@@ -288,13 +299,13 @@ static unsigned char *php_parserr(unsigned char *cp, unsigned char* end,
       return NULL;
     }
     cp += n;
-    subarray.set(s_mname, String(name, CopyString));
+    subarray.set(s_mname, OptString(name, CopyString));
     n = dn_expand(answer->qb2, end, cp, name, (sizeof name) -2);
     if (n < 0) {
       return NULL;
     }
     cp += n;
-    subarray.set(s_rname, String(name, CopyString));
+    subarray.set(s_rname, OptString(name, CopyString));
     CHECKCP(5*4);
     GETLONG(n, cp);
     subarray.set(s_serial, n);
@@ -339,7 +350,7 @@ static unsigned char *php_parserr(unsigned char *cp, unsigned char* end,
     }
     tp[0] = '\0';
     subarray.set(s_type, s_AAAA);
-    subarray.set(s_ipv6, String(name, CopyString));
+    subarray.set(s_ipv6, OptString(name, CopyString));
     break;
   case DNS_T_A6:
     p = cp;
@@ -408,7 +419,7 @@ static unsigned char *php_parserr(unsigned char *cp, unsigned char* end,
       tp++;
     }
     tp[0] = '\0';
-    subarray.set(s_ipv6, String(name, CopyString));
+    subarray.set(s_ipv6, OptString(name, CopyString));
     if (cp < p + dlen) {
       n = dn_expand(answer->qb2, end, cp, name,
                     (sizeof name) - 2);
@@ -416,7 +427,7 @@ static unsigned char *php_parserr(unsigned char *cp, unsigned char* end,
         return NULL;
       }
       cp += n;
-      subarray.set(s_chain, String(name, CopyString));
+      subarray.set(s_chain, OptString(name, CopyString));
     }
     break;
   case DNS_T_SRV:
@@ -433,7 +444,7 @@ static unsigned char *php_parserr(unsigned char *cp, unsigned char* end,
       return NULL;
     }
     cp += n;
-    subarray.set(s_target, String(name, CopyString));
+    subarray.set(s_target, OptString(name, CopyString));
     break;
   case DNS_T_NAPTR:
     CHECKCP(2*2);
@@ -447,21 +458,21 @@ static unsigned char *php_parserr(unsigned char *cp, unsigned char* end,
     n = (cp[0] & 0xFF);
     ++cp;
     CHECKCP(n);
-    subarray.set(s_flags, String((const char *)cp, n, CopyString));
+    subarray.set(s_flags, OptString((const char *)cp, n, CopyString));
     cp += n;
 
     CHECKCP(1);
     n = (cp[0] & 0xFF);
     ++cp;
     CHECKCP(n);
-    subarray.set(s_services, String((const char *)cp, n, CopyString));
+    subarray.set(s_services, OptString((const char *)cp, n, CopyString));
     cp += n;
 
     CHECKCP(1);
     n = (cp[0] & 0xFF);
     ++cp;
     CHECKCP(n);
-    subarray.set(s_regex, String((const char *)cp, n, CopyString));
+    subarray.set(s_regex, OptString((const char *)cp, n, CopyString));
     cp += n;
 
     n = dn_expand(answer->qb2, end, cp, name, (sizeof name) - 2);
@@ -469,7 +480,7 @@ static unsigned char *php_parserr(unsigned char *cp, unsigned char* end,
       return NULL;
     }
     cp += n;
-    subarray.set(s_replacement, String(name, CopyString));
+    subarray.set(s_replacement, OptString(name, CopyString));
     break;
   default:
     cp += dlen;
@@ -480,13 +491,13 @@ static unsigned char *php_parserr(unsigned char *cp, unsigned char* end,
   return cp;
 }
 
-Variant HHVM_FUNCTION(dns_get_record, const String& hostname, int type /*= -1*/,
-                      VRefParam authnsRef /* = null */,
-                      VRefParam addtlRef /* = null */) {
+Variant HHVM_FUNCTION(dns_get_record, const OptString& hostname, int64_t type,
+                      Variant& authnsRef,
+                      Variant& addtlRef) {
   IOStatusHelper io("dns_get_record", hostname.data(), type);
   if (type < 0) type = PHP_DNS_ALL;
   if (type & ~PHP_DNS_ALL && type != PHP_DNS_ANY) {
-    raise_warning("Type '%d' not supported", type);
+    raise_warning("Type '%ld' not supported", type);
     return false;
   }
 
@@ -503,7 +514,7 @@ Variant HHVM_FUNCTION(dns_get_record, const String& hostname, int type /*= -1*/,
    * - In case of PHP_DNS_ANY we use the directly fetch DNS_T_ANY.
    *   (step NUMTYPES+1 )
    */
-  Array ret = Array::Create();
+  Array ret = Array::CreateVec();
   bool first_query = true;
   bool store_results = true;
   for (int t = (type == PHP_DNS_ANY ? (PHP_DNS_NUM_TYPES + 1) : 0);
@@ -523,6 +534,7 @@ Variant HHVM_FUNCTION(dns_get_record, const String& hostname, int type /*= -1*/,
     case 9:  type_to_fetch = type & PHP_DNS_SRV   ? DNS_T_SRV   : 0; break;
     case 10: type_to_fetch = type & PHP_DNS_NAPTR ? DNS_T_NAPTR : 0; break;
     case 11: type_to_fetch = type & PHP_DNS_A6    ? DNS_T_A6    : 0; break;
+    case 12: type_to_fetch = type & PHP_DNS_CAA   ? DNS_T_CAA   : 0; break;
     case PHP_DNS_NUM_TYPES:
       store_results = false;
       continue;
@@ -601,14 +613,14 @@ Variant HHVM_FUNCTION(dns_get_record, const String& hostname, int type /*= -1*/,
     }
   }
 
-  authnsRef.assignIfRef(authns);
-  addtlRef.assignIfRef(addtl);
+  authnsRef = authns;
+  addtlRef = addtl;
   return ret;
 }
 
-bool HHVM_FUNCTION(getmxrr, const String& hostname,
-                            VRefParam mxhostsRef,
-                            VRefParam weightsRef /* = null */) {
+bool HHVM_FUNCTION(getmxrr, const OptString& hostname,
+                            Variant& mxhostsRef,
+                            Variant& weightsRef) {
   IOStatusHelper io("dns_get_mx", hostname.data());
   int count, qdc;
   unsigned short type, weight;
@@ -619,8 +631,8 @@ bool HHVM_FUNCTION(getmxrr, const String& hostname,
   Array mxhosts;
   Array weights;
   SCOPE_EXIT {
-    mxhostsRef.assignIfRef(mxhosts);
-    weightsRef.assignIfRef(weights);
+    mxhostsRef = mxhosts;
+    weightsRef = weights;
   };
 
   /* Go! */
@@ -672,7 +684,7 @@ bool HHVM_FUNCTION(getmxrr, const String& hostname,
       return false;
     }
     cp += i;
-    mxhosts.append(String(buf, CopyString));
+    mxhosts.append(OptString(buf, CopyString));
     weights.append(weight);
   }
   res_nclose(res);

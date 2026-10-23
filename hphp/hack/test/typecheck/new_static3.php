@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 /**
  * Copyright (c) 2014, Facebook, Inc.
  * All rights reserved.
@@ -11,12 +11,14 @@
 
 <<__ConsistentConstruct>>
 class A {
+  <<__NeedsConcrete>>
   public static function bar(): void {
     $x = new static();
   }
 }
 
 class B {
+  <<__NeedsConcrete>>
   public static function bar(): void {
     $x = new static();
   }

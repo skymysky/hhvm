@@ -1,0 +1,29 @@
+error: Typing[4110] Method  `foo` in class `Foo` is not dynamically callable. [1]
+-> Typing error [1]
+-> Expected `dynamic` [2]
+-> Type `A<int>` is not a subtype of `dynamic` under dynamic-aware subtyping [2]
+
+call_meth_1.bad.php:17:33
+15 | class Foo {
+16 |   public function foo(A<int> $a) : void {
+17 |     (new C())->expect_A_int($a, new A<int>());
+   |                                 ^^^^^^^^^^^^ [1]
+   |                                     ^ [2]
+18 |   }
+19 |   public function bar(A<int> $a) : void {
+
+error: Typing[4110] Method  `bar` in class `Foo` is not dynamically callable. [1]
+-> Typing error [1]
+-> Expected `dynamic` [2]
+-> Type `A<int>` is not a subtype of `dynamic` under dynamic-aware subtyping [2]
+
+call_meth_1.bad.php:20:29
+18 |   }
+19 |   public function bar(A<int> $a) : void {
+20 |     (new C())->expect_A_int(new A<int>(), $a);
+   |                             ^^^^^^^^^^^^ [1]
+   |                                 ^ [2]
+21 |   }
+22 | }
+
+2 errors found

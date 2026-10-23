@@ -14,12 +14,11 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_EVAL_DEBUGGER_CMD_QUIT_H_
-#define incl_HPHP_EVAL_DEBUGGER_CMD_QUIT_H_
+#pragma once
 
 #include "hphp/runtime/debugger/debugger_command.h"
 
-namespace HPHP { namespace Eval {
+namespace HPHP::Eval {
 ///////////////////////////////////////////////////////////////////////////////
 
 struct CmdQuit : DebuggerCommand {
@@ -28,9 +27,10 @@ struct CmdQuit : DebuggerCommand {
   void help(DebuggerClient&) override;
   bool onServer(DebuggerProxy&) override;
   void onClient(DebuggerClient&) override;
+
+  std::string name() const override { return "quit"; }
 };
 
 ///////////////////////////////////////////////////////////////////////////////
-}}
+}
 
-#endif // incl_HPHP_EVAL_DEBUGGER_CMD_QUIT_H_

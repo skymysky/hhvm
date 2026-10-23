@@ -1,0 +1,6 @@
+bar_a
+  INSERT bar_a
+  constant
+bar_b
+  INSERT bar_b
+  constant

@@ -1,13 +1,16 @@
-<?php
+<?hh
 
 class A {
-  public function d() {}
+  public function d() :mixed{}
 }
 
 class B extends ReflectionClass {}
 
-function c() {}
+<<__DynamicallyCallable>> function c() :mixed{}
 
+
+<<__EntryPoint>>
+function main_is_hack_003() :mixed{
 $a = new ReflectionClass('A');
 $b = new ReflectionClass('B');
 $c = new ReflectionFunction('c');
@@ -20,3 +23,4 @@ var_dump($b->isHack());
 var_dump($c->isHack());
 var_dump($d->isHack());
 var_dump($rc->isHack());
+}

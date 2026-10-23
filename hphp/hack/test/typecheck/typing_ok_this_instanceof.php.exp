@@ -1,1 +1,11 @@
-No errors
+warning: Warn[12010] This `is` check is always `false`. The expression on the left has type `this` which shares no values with `B`. [1]
+
+typing_ok_this_instanceof.php:15:9
+13 | 
+14 |   public function foo(): void {
+15 |     if ($this is B) {
+   |         ^^^^^^^^^^ [1]
+16 |       $this->bar();
+17 |     }
+
+1 error found

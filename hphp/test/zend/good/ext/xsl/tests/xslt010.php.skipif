@@ -1,6 +1,7 @@
-<?php 
-require_once dirname(__FILE__) .'/skipif.inc';
-$proc = new xsltprocessor;
-if (!$proc->hasExsltSupport()) die('skip EXSLT support not available');
-if (LIBXSLT_VERSION < 10117) die('skip too old libxsl');
-?>
+<?hh 
+
+<<__EntryPoint>> function skip(): void {
+  if (!extension_loaded('xsl')) exit('skip xsl extension not available');
+  $proc = new XSLTProcessor();
+  if (!$proc->hasExsltSupport()) exit('skip EXSLT support not available');
+}

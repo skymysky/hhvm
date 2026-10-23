@@ -13,10 +13,18 @@
    | license@php.net so we can mail you a copy immediately.               |
    +----------------------------------------------------------------------+
 */
-#ifndef incl_HPHP_JIT_IRGEN_CALL_H_
-#define incl_HPHP_JIT_IRGEN_CALL_H_
+#pragma once
 
 #include <cstdint>
+
+#include "hphp/runtime/vm/hhbc.h"
+#include "hphp/runtime/vm/module.h"
+#include "hphp/runtime/vm/jit/extra-data.h"
+#include "hphp/runtime/vm/jit/ir-opcode.h"
+#include "hphp/runtime/vm/jit/irgen-interpone.h"
+#include "hphp/runtime/vm/jit/irgen-internal.h"
+#include "hphp/runtime/vm/jit/minstr-helpers.h"
+#include "hphp/runtime/vm/jit/stack-offsets.h"
 
 namespace HPHP {
 
@@ -34,26 +42,28 @@ struct IRGS;
 
 //////////////////////////////////////////////////////////////////////
 
-void fpushActRec(IRGS& env,
-                 SSATmp* func,
-                 SSATmp* objOrClass,
-                 uint32_t numArgs,
-                 const StringData* invName,
-                 SSATmp* dynamicCall);
+/*
+ * Lock the object on top of the stack if we just unwound a constructor
+ * frame called using FCallCtor with the LockWhileUnwinding flag.
+ */
+void emitLockObjOnFrameUnwind(IRGS& env, PC pc);
 
-void emitDirectCall(IRGS& env, Func* callee, uint32_t numParams,
-                    SSATmp* const* const args);
+Type callReturnType(const Func* callee, bool mayIntercept);
+Type awaitedCallReturnType(const Func* callee, bool mayIntercept);
+Type callOutType(const Func* callee, uint32_t inOutIdx, bool mayIntercept);
 
-SSATmp* implFCall(IRGS& env, uint32_t numParams, uint32_t numOut);
+/*
+ * Emits instructions to check and enforce module boundary violations
+ */
+void emitModuleBoundaryCheck(IRGS&, SSATmp* symbol, bool func = true);
 
-void emitCallerDynamicCallChecks(IRGS& env,
-                                 const Func* callee,
-                                 uint32_t numParams);
+void emitModuleBoundaryCheckKnown(IRGS&, const Class* symbol);
+void emitModuleBoundaryCheckKnown(IRGS&, const Func* symbol);
+void emitModuleBoundaryCheckKnown(IRGS&, const Class::Prop* symbol);
+void emitModuleBoundaryCheckKnown(IRGS&, const Class::SProp* symbol);
 
-Type callReturnType(const Func* callee);
-
+void emitStrictPackageDynamicReference(IRGS&, SSATmp* cls);
 //////////////////////////////////////////////////////////////////////
 
-}}}
 
-#endif
+}}}

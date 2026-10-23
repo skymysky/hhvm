@@ -1,0 +1,134 @@
+error: Typing[4323] Invalid argument [1]
+-> `T` is a constrained type parameter [2]
+-> This type constraint is violated [3]
+-> Expected `arraykey` [4]
+-> But got `float` [5]
+
+type_splat_expr_splat_bad.php:15:18
+ 2 | 
+ 3 | 
+ 4 | function foo<T as (arraykey...)>(int $x1, string $x2, ... T $args): void {
+   |              ^ [2]
+   |                   ^^^^^^^^^^^^^ [3]
+   |                    ^^^^^^^^ [4]
+ 5 |   var_dump($x1);
+ 6 |   var_dump($x2);
+   :
+10 | <<__EntryPoint>>
+11 | function testit(): void {
+12 |   $t2 = tuple(2, 2.3);
+   |                  ^^^ [5]
+13 |   $t3 = tuple('a', false, 2.3);
+14 |   $t4 = tuple(3, 'a', false, 2.3);
+15 |   foo(3, 'a', ...$t2);
+   |                  ^^^ [1]
+16 |   foo(3, ...$t3);
+17 |   foo(...$t4);
+
+error: Typing[4323] Invalid argument [1]
+-> `T` is a constrained type parameter [2]
+-> This type constraint is violated [3]
+-> Expected `arraykey` [4]
+-> But got `bool` [5]
+
+type_splat_expr_splat_bad.php:16:13
+ 2 | 
+ 3 | 
+ 4 | function foo<T as (arraykey...)>(int $x1, string $x2, ... T $args): void {
+   |              ^ [2]
+   |                   ^^^^^^^^^^^^^ [3]
+   |                    ^^^^^^^^ [4]
+ 5 |   var_dump($x1);
+ 6 |   var_dump($x2);
+   :
+11 | function testit(): void {
+12 |   $t2 = tuple(2, 2.3);
+13 |   $t3 = tuple('a', false, 2.3);
+   |                    ^^^^^ [5]
+14 |   $t4 = tuple(3, 'a', false, 2.3);
+15 |   foo(3, 'a', ...$t2);
+16 |   foo(3, ...$t3);
+   |             ^^^ [1]
+17 |   foo(...$t4);
+18 | }
+
+error: Typing[4323] Invalid argument [1]
+-> `T` is a constrained type parameter [2]
+-> This type constraint is violated [3]
+-> Expected `arraykey` [4]
+-> But got `float` [5]
+
+type_splat_expr_splat_bad.php:16:13
+ 2 | 
+ 3 | 
+ 4 | function foo<T as (arraykey...)>(int $x1, string $x2, ... T $args): void {
+   |              ^ [2]
+   |                   ^^^^^^^^^^^^^ [3]
+   |                    ^^^^^^^^ [4]
+ 5 |   var_dump($x1);
+ 6 |   var_dump($x2);
+   :
+11 | function testit(): void {
+12 |   $t2 = tuple(2, 2.3);
+13 |   $t3 = tuple('a', false, 2.3);
+   |                           ^^^ [5]
+14 |   $t4 = tuple(3, 'a', false, 2.3);
+15 |   foo(3, 'a', ...$t2);
+16 |   foo(3, ...$t3);
+   |             ^^^ [1]
+17 |   foo(...$t4);
+18 | }
+
+error: Typing[4323] Invalid argument [1]
+-> `T` is a constrained type parameter [2]
+-> This type constraint is violated [3]
+-> Expected `arraykey` [4]
+-> But got `bool` [5]
+
+type_splat_expr_splat_bad.php:17:10
+ 2 | 
+ 3 | 
+ 4 | function foo<T as (arraykey...)>(int $x1, string $x2, ... T $args): void {
+   |              ^ [2]
+   |                   ^^^^^^^^^^^^^ [3]
+   |                    ^^^^^^^^ [4]
+ 5 |   var_dump($x1);
+ 6 |   var_dump($x2);
+   :
+12 |   $t2 = tuple(2, 2.3);
+13 |   $t3 = tuple('a', false, 2.3);
+14 |   $t4 = tuple(3, 'a', false, 2.3);
+   |                       ^^^^^ [5]
+15 |   foo(3, 'a', ...$t2);
+16 |   foo(3, ...$t3);
+17 |   foo(...$t4);
+   |          ^^^ [1]
+18 | }
+
+error: Typing[4323] Invalid argument [1]
+-> `T` is a constrained type parameter [2]
+-> This type constraint is violated [3]
+-> Expected `arraykey` [4]
+-> But got `float` [5]
+
+type_splat_expr_splat_bad.php:17:10
+ 2 | 
+ 3 | 
+ 4 | function foo<T as (arraykey...)>(int $x1, string $x2, ... T $args): void {
+   |              ^ [2]
+   |                   ^^^^^^^^^^^^^ [3]
+   |                    ^^^^^^^^ [4]
+ 5 |   var_dump($x1);
+ 6 |   var_dump($x2);
+   :
+12 |   $t2 = tuple(2, 2.3);
+13 |   $t3 = tuple('a', false, 2.3);
+14 |   $t4 = tuple(3, 'a', false, 2.3);
+   |                              ^^^ [5]
+15 |   foo(3, 'a', ...$t2);
+16 |   foo(3, ...$t3);
+17 |   foo(...$t4);
+   |          ^^^ [1]
+18 | }
+
+5 errors found

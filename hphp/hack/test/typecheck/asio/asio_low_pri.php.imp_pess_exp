@@ -1,0 +1,21 @@
+error: Parsing[1002] Only non-generator async functions can be marked low priority. [1]
+
+asio_low_pri.php:8:3
+ 6 | }
+ 7 | 
+ 8 | <<__AsioLowPri>>
+   |   ^^^^^^^^^^^^ [1]
+ 9 | async function asio_test2(): AsyncGenerator<int, string, void> {
+10 |   // not allowed (must be non-generator async function)
+
+error: Parsing[1002] Only non-generator async functions can be marked low priority. [1]
+
+asio_low_pri.php:14:3
+12 | }
+13 | 
+14 | <<__AsioLowPri>>
+   |   ^^^^^^^^^^^^ [1]
+15 | function asio_test3(): void {
+16 |   // not allowed (must be non-generator async function)
+
+2 errors found

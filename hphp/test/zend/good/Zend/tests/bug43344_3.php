@@ -1,7 +1,8 @@
-<?php
+<?hh
 namespace Foo;
-function f($a=Foo::bar) {
-	return $a;
+function f($a=Foo::bar) :mixed{
+    return $a;
 }
+<<__EntryPoint>> function main(): void {
 echo f()."\n";
-?>
+}

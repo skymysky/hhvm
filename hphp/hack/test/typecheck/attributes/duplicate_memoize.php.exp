@@ -1,0 +1,13 @@
+error: NastCheck[3100] Methods cannot be both `__Memoize` and `__MemoizeLSB`. [1]
+-> Conflicting memoize attribute is here [2]
+
+duplicate_memoize.php:4:5
+2 | 
+3 | class MyClass {
+4 |   <<__Memoize, __MemoizeLSB>>
+  |     ^^^^^^^^^ [1]
+  |                ^^^^^^^^^^^^ [2]
+5 |   public static function foo(): int {
+6 |     return 1;
+
+1 error found

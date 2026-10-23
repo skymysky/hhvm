@@ -5,10 +5,10 @@ enum TestEnum : int {
   BAR = 1;
 }
 
-function reflection_class() {
+function reflection_class() :mixed{
   echo '= ', __FUNCTION__, ' =', "\n";
   $rc = new ReflectionClass(TestEnum::class);
-  echo (string) $rc, "\n";
+  echo $rc->__toString(), "\n";
   var_dump($rc->isEnum());
   var_dump($rc->isInstantiable());
   var_dump($rc->isAbstract());
@@ -18,7 +18,7 @@ function reflection_class() {
   var_dump($rc->getConstants());
 }
 
-function reflection_funcs() {
+function reflection_funcs() :mixed{
   echo '= ', __FUNCTION__, ' =', "\n";
   var_dump(enum_exists(TestEnum::class));
   var_dump(class_exists(TestEnum::class)); // true, similar to 'abstract class'
@@ -27,9 +27,7 @@ function reflection_funcs() {
   var_dump(get_class_constants(TestEnum::class));
 }
 
-function main() {
+<<__EntryPoint>> function main(): void {
   reflection_class();
   reflection_funcs();
 }
-
-main();

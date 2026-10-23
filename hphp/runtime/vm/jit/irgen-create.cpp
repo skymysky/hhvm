@@ -15,17 +15,19 @@
 */
 #include "hphp/runtime/vm/jit/irgen-create.h"
 
-#include "hphp/runtime/base/packed-array.h"
-#include "hphp/runtime/ext/std/ext_std_errorfunc.h"
+#include "hphp/runtime/base/vanilla-vec.h"
 #include "hphp/runtime/vm/class.h"
 #include "hphp/runtime/vm/jit/extra-data.h"
 #include "hphp/runtime/vm/jit/irgen.h"
-#include "hphp/runtime/vm/jit/irgen-exit.h"
 #include "hphp/runtime/vm/jit/irgen-interpone.h"
 #include "hphp/runtime/vm/jit/irgen-internal.h"
 #include "hphp/runtime/vm/jit/irgen-sprop-global.h"
+#include "hphp/runtime/vm/jit/irgen-types.h"
 
-namespace HPHP { namespace jit { namespace irgen {
+#include "hphp/util/configs/eval.h"
+#include "hphp/util/configs/hhir.h"
+
+namespace HPHP::jit::irgen {
 
 namespace {
 
@@ -44,7 +46,7 @@ void initProps(IRGS& env, const Class* cls) {
   ifThen(
     env,
     [&] (Block* taken) {
-      gen(env, CheckInitProps, taken, ClassData(cls));
+      gen(env, CheckRDSInitialized, taken, RDSHandleData { cls->propHandle() });
     },
     [&] {
       hint(env, Block::Hint::Unlikely);
@@ -54,87 +56,206 @@ void initProps(IRGS& env, const Class* cls) {
 }
 
 void initThrowable(IRGS& env, const Class* cls, SSATmp* throwable) {
-  assertx(cls->classof(SystemLib::s_ErrorClass) ||
-          cls->classof(SystemLib::s_ExceptionClass));
+  assertx(cls->classof(SystemLib::getErrorClass()) ||
+          cls->classof(SystemLib::getExceptionClass()));
   assertx(throwable->type() <= TObj);
 
   // Root of the class hierarchy.
-  auto const rootCls = cls->classof(SystemLib::s_ExceptionClass)
-    ? SystemLib::s_ExceptionClass : SystemLib::s_ErrorClass;
+  auto const rootCls = cls->classof(SystemLib::getExceptionClass())
+    ? SystemLib::getExceptionClass() : SystemLib::getErrorClass();
 
-  auto const propAddr = [&] (Slot idx) {
+  auto const propAddr = [&] (Slot slot) {
     return gen(
       env,
       LdPropAddr,
-      ByteOffsetData { (ptrdiff_t)rootCls->declPropOffset(idx) },
-      TInitNull.ptr(Ptr::Prop),
+      IndexData { rootCls->propSlotToIndex(slot) },
+      TCell,
       throwable
     );
   };
 
   // Load Exception::$traceOpts
-  auto const sprop = ldClsPropAddrKnown(
-    env, SystemLib::s_ExceptionClass, s_traceOpts.get());
+  auto const lookup = ldClsPropAddrKnown(
+    env,
+    SystemLib::getExceptionClass(),
+    s_traceOpts.get(),
+    false,
+    false,
+    ReadonlyOp::Any
+  );
+  assertx(lookup.typeConstraints->isInt());
+  auto const sprop = lookup.propPtr;
+  assertx(sprop);
 
   auto const trace = cond(
     env,
     [&] (Block* taken) {
-      gen(env, CheckTypeMem, TInt, taken, sprop);
+      return gen(env, CheckType, TInt, taken, gen(env, LdMem, TCell, sprop));
     },
-    [&] {
-      // sprop is an integer, load it
-      auto const opts = gen(env, LdMem, TInt, sprop);
-      return cond(
-        env,
-        [&] (Block* taken) {
-          if (!RuntimeOption::EnableArgsInBacktraces) {
-            auto const filterOpts =
-              gen(env, AndInt, opts, cns(env, ~k_DEBUG_BACKTRACE_IGNORE_ARGS));
-
-            gen(env, JmpNZero, taken, filterOpts);
-          } else {
-            auto const safe =
-              gen(env, EqInt, opts, cns(env, k_DEBUG_BACKTRACE_IGNORE_ARGS));
-            gen(env, JmpZero, taken, safe);
-          }
-        },
-        [&] {
-          // traceOpts is default value, use fast lazy construction
-          if (RuntimeOption::EvalEnableCompactBacktrace) {
-            return gen(env, DebugBacktraceFast);
-          }
-          return gen(env, DebugBacktrace, cns(env, 0));
-        },
-        [&] {
-          // Call debug_backtrace(traceOpts)
-          return gen(env, DebugBacktrace, opts);
-        });
+    [&] (SSATmp* opts) {
+      // sprop is an integer, use it
+      return gen(env, DebugBacktrace, opts);
     },
     [&] {
       // sprop is a garbage, use default traceOpts value (0)
-      if (!RuntimeOption::EnableArgsInBacktraces &&
-          RuntimeOption::EvalEnableCompactBacktrace) {
-        return gen(env, DebugBacktraceFast);
-      }
       return gen(env, DebugBacktrace, cns(env, 0));
     }
   );
 
   // $throwable->trace = $trace
-  auto const traceIdx = rootCls->lookupDeclProp(s_trace.get());
-  assertx(traceIdx != kInvalidSlot);
-  gen(env, StMem, propAddr(traceIdx), trace);
+  auto const traceSlot = rootCls->lookupDeclProp(s_trace.get());
+  assertx(traceSlot != kInvalidSlot);
+  assertx(rootCls->declPropTypeConstraint(traceSlot).isVec());
+  // `DebugBacktrace` unconditionally returns a `Vec`, so we shouldn't need to
+  // check that it's such before assigning it into `$trace`.
+  gen(env, StMem, propAddr(traceSlot), trace);
 
   // Populate $throwable->{file,line}
   if (UNLIKELY(curFunc(env)->isBuiltin())) {
     gen(env, InitThrowableFileAndLine, throwable);
   } else {
-    auto const fileIdx = rootCls->lookupDeclProp(s_file.get());
-    auto const lineIdx = rootCls->lookupDeclProp(s_line.get());
-    auto const unit = curFunc(env)->unit();
-    auto const line = unit->getLineNumber(bcOff(env));
-    gen(env, StMem, propAddr(fileIdx), cns(env, unit->filepath()));
-    gen(env, StMem, propAddr(lineIdx), cns(env, line));
+    auto const fileSlot = rootCls->lookupDeclProp(s_file.get());
+    auto const lineSlot = rootCls->lookupDeclProp(s_line.get());
+    auto const line = curSrcKey(env).lineNumber();
+    assertx(rootCls->declPropTypeConstraint(fileSlot).isString());
+    assertx(rootCls->declPropTypeConstraint(lineSlot).isInt());
+    gen(env, StMem, propAddr(fileSlot), cns(env, curFunc(env)->filename()));
+    gen(env, StMem, propAddr(lineSlot), cns(env, line));
+  }
+}
+
+void checkPropTypeRedefs(IRGS& env, const Class* cls) {
+  assertx(cls->maybeRedefinesPropTypes());
+  assertx(cls->parent());
+  assertx(Cfg::Eval::CheckPropTypeHints > 0);
+
+  ifThen(
+    env,
+    [&] (Block* taken) {
+      gen(
+        env,
+        CheckRDSInitialized,
+        taken,
+        RDSHandleData { cls->checkedPropTypeRedefinesHandle() }
+      );
+    },
+    [&] {
+      hint(env, Block::Hint::Unlikely);
+      IRUnit::Hinter h(env.irb->unit(), Block::Hint::Unlikely);
+
+      auto const parent = cls->parent();
+      if (parent->maybeRedefinesPropTypes()) checkPropTypeRedefs(env, parent);
+      for (auto const& prop : cls->declProperties()) {
+        if (prop.attrs & AttrNoBadRedeclare) continue;
+        auto const slot = parent->lookupDeclProp(prop.name);
+        assertx(slot != kInvalidSlot);
+        gen(env, PropTypeRedefineCheck, cns(env, cls), cns(env, slot));
+      }
+
+      gen(
+        env,
+        MarkRDSInitialized,
+        RDSHandleData { cls->checkedPropTypeRedefinesHandle() }
+      );
+    }
+  );
+}
+
+void checkPropInitialValues(IRGS& env, const Class* cls) {
+  assertx(cls->needsPropInitialValueCheck());
+
+  ifThen(
+    env,
+    [&] (Block* taken) {
+      gen(
+        env,
+        CheckRDSInitialized,
+        taken,
+        RDSHandleData { cls->checkedPropInitialValuesHandle() }
+      );
+    },
+    [&] {
+      hint(env, Block::Hint::Unlikely);
+      IRUnit::Hinter h(env.irb->unit(), Block::Hint::Unlikely);
+
+      auto const& props = cls->declProperties();
+
+      auto const anyUnresolved = [&] {
+        for (Slot slot = 0; slot < props.size(); ++slot) {
+          auto const& prop = props[slot];
+          for (auto const& tc : prop.typeConstraints.range()) {
+            if (tc.isUnresolved()) return true;
+          }
+        }
+        return false;
+      }();
+      if (anyUnresolved) {
+        // Will do all the checking for us
+        gen(env, PropTypeValid, cns(env, cls));
+        return;
+      }
+      assertx(Cfg::Eval::CheckPropTypeHints > 0);
+
+      for (Slot slot = 0; slot < props.size(); ++slot) {
+        auto const& prop = props[slot];
+
+        if (prop.attrs & (AttrInitialSatisfiesTC|AttrSystemInitialValue)) {
+          continue;
+        }
+        auto const isAnyCheckable = [&] {
+          for (auto const& tc : prop.typeConstraints.range()) {
+            if (tc.isCheckable()) return true;
+          }
+          return false;
+        }();
+        if (!isAnyCheckable) continue;
+        auto index = cls->propSlotToIndex(slot);
+        auto const tv = cls->declPropInit()[index].val.tv();
+        if (tv.m_type == KindOfUninit) continue;
+        assertx(!isClsMethType(tv.m_type));
+        verifyPropType(
+          env,
+          cns(env, cls),
+          &prop.typeConstraints,
+          slot,
+          cns(env, tv),
+          cns(env, makeStaticString(prop.name)),
+          false
+        );
+      }
+
+      gen(
+        env,
+        MarkRDSInitialized,
+        RDSHandleData { cls->checkedPropInitialValuesHandle() }
+      );
+    }
+  );
+}
+
+void initObjProps(IRGS& env, const Class* cls, SSATmp* obj) {
+  auto const nprops = cls->numDeclProperties();
+
+  if (nprops <= Cfg::HHIR::InliningMaxInitObjProps &&
+      cls->pinitVec().size() == 0) {
+    if (cls->hasMemoSlots()) {
+      gen(env, InitObjMemoSlots, ClassData(cls), obj);
+    }
+    for (int slot = 0; slot < nprops; ++slot) {
+      auto index = cls->propSlotToIndex(slot);
+      auto const tv = cls->declPropInit()[index].val.tv();
+      auto const val = cns(env, tv);
+      auto const addr = gen(
+        env,
+        LdPropAddr,
+        IndexData { cls->propSlotToIndex(slot) },
+        TCell,
+        obj
+      );
+      gen(env, StMem, addr, val);
+    }
+  } else {
+    gen(env, InitObjProps, ClassData(cls), obj);
   }
 }
 
@@ -142,15 +263,19 @@ void initThrowable(IRGS& env, const Class* cls, SSATmp* throwable) {
 
 }
 
-//////////////////////////////////////////////////////////////////////
-
 void initSProps(IRGS& env, const Class* cls) {
   cls->initSPropHandles();
   if (rds::isPersistentHandle(cls->sPropInitHandle())) return;
+
   ifThen(
     env,
     [&] (Block* taken) {
-      gen(env, CheckInitSProps, taken, ClassData(cls));
+      gen(
+        env,
+        CheckRDSInitialized,
+        taken,
+        RDSHandleData { cls->sPropInitHandle() }
+      );
     },
     [&] {
       hint(env, Block::Hint::Unlikely);
@@ -159,12 +284,20 @@ void initSProps(IRGS& env, const Class* cls) {
   );
 }
 
+//////////////////////////////////////////////////////////////////////
+
 SSATmp* allocObjFast(IRGS& env, const Class* cls) {
   // Make sure our property init vectors are all set up.
-  const bool props = cls->pinitVec().size() > 0;
-  const bool sprops = cls->numStaticProperties() > 0;
-  assertx((props || sprops) == cls->needInitialization());
+  auto const props = cls->pinitVec().size() > 0;
+  auto const sprops = cls->numStaticProperties() > 0;
+  auto const redefine = cls->maybeRedefinesPropTypes();
+  auto const propVal = cls->needsPropInitialValueCheck();
+  assertx(
+    (props || sprops || redefine || propVal) == cls->needInitialization()
+  );
   if (cls->needInitialization()) {
+    if (redefine) checkPropTypeRedefs(env, cls);
+    if (propVal) checkPropInitialValues(env, cls);
     if (props) initProps(env, cls);
     if (sprops) initSProps(env, cls);
   }
@@ -185,16 +318,12 @@ SSATmp* allocObjFast(IRGS& env, const Class* cls) {
     obj = gen(env, NewInstanceRaw, ClassData(cls));
 
     // Initialize the properties.
-    gen(env, InitObjProps, ClassData(cls), obj);
+    initObjProps(env, cls, obj);
   }
 
   // Initialize Throwable.
   if (cls->needsInitThrowable()) {
     initThrowable(env, cls, obj);
-  }
-
-  if (RuntimeOption::EnableObjDestructCall && cls->getDtor()) {
-    gen(env, RegisterLiveObj, obj);
   }
 
   return obj;
@@ -210,92 +339,67 @@ SSATmp* allocObjFast(IRGS& env, const Class* cls) {
  * this code is reachable it will always use the same closure Class*,
  * so we can just burn it into the TC without using RDS.
  */
-void emitCreateCl(IRGS& env, uint32_t numParams, uint32_t clsIx) {
-  auto const preCls = curFunc(env)->unit()->lookupPreClassId(clsIx);
-  auto cls = Unit::defClosure(preCls);
+void emitCreateCl(IRGS& env, uint32_t numParams, const StringData* name) {
+  auto const preCls = curFunc(env)->unit()->lookupPreClass(name);
+  assertx(preCls);
+  assertx(preCls->attrs() & AttrIsClosureClass);
+  auto const templateCls = Class::defClosure(preCls, false);
+  assertx(templateCls);
 
-  assertx(cls);
-  assertx(cls->attrs() & AttrUnique);
+  auto const cls = templateCls->rescope(const_cast<Class*>(curClass(env)));
 
-  cls = cls->rescope(const_cast<Class*>(curClass(env)));
+  assertx(!cls->needInitialization());
+  // In repo mode, rescoping should always use the template class
+  // (except if we're in a trait).
+  assertx(
+    IMPLIES(
+      Cfg::Repo::Authoritative &&
+        !(curFunc(env)->preClass() &&
+          curFunc(env)->preClass()->attrs() & AttrTrait),
+      cls == templateCls
+    )
+  );
 
-  auto const func = cls->getCachedInvoke();
-
-  auto const closure = allocObjFast(env, cls);
+  auto const func = cls->getRegularInvoke();
 
   auto const live_ctx = [&] {
-    auto const ldctx = ldCtx(env);
-    if (!ldctx->type().maybe(TObj)) {
-      return ldctx;
-    }
-    if (func->isStatic()) {
-      return gen(env, FwdCtxStaticCall, ldctx);
-    }
+    if (func->isStatic()) return ldCtxCls(env);
+    assertx(hasThis(env));
+    auto const ldctx = ldThis(env);
     gen(env, IncRef, ldctx);
     return ldctx;
   }();
 
-  gen(env, StClosureCtx, closure, live_ctx);
+  auto const closure = gen(env, ConstructClosure, ClassData(cls), live_ctx);
+
+  auto const hasCoeffectsProp = cls->hasClosureCoeffectsProp();
+  if (hasCoeffectsProp) numParams++;
+
+  assertx(cls->numDeclProperties() == numParams);
 
   SSATmp** args = (SSATmp**)alloca(sizeof(SSATmp*) * numParams);
   for (int32_t i = 0; i < numParams; ++i) {
-    args[numParams - i - 1] = popF(env);
+    auto const slot = numParams - i - 1;
+    if (hasCoeffectsProp && slot == cls->getCoeffectsProp()) {
+      assertx(cls->getCoeffectsProp() == 0);
+      assertx(cls->propSlotToIndex(slot) == slot);
+      args[slot] = curRequiredCoeffects(env);
+    } else {
+      args[slot] = popCU(env);
+    }
   }
 
-  int32_t propId = 0;
-  for (; propId < numParams; ++propId) {
+  for (int32_t propId = 0; propId < numParams; ++propId) {
     gen(
       env,
       StClosureArg,
-      ByteOffsetData { safe_cast<ptrdiff_t>(cls->declPropOffset(propId)) },
+      IndexData { cls->propSlotToIndex(propId) },
       closure,
       args[propId]
     );
   }
 
-  assertx(cls->numDeclProperties() == func->numStaticLocals() + numParams);
-
-  // Closure static variables are per instance, and need to start
-  // uninitialized.  After numParams use vars, the remaining instance
-  // properties hold any static locals.
-  for (int32_t numDeclProperties = cls->numDeclProperties();
-      propId < numDeclProperties;
-      ++propId) {
-    gen(
-      env,
-      StClosureArg,
-      ByteOffsetData { safe_cast<ptrdiff_t>(cls->declPropOffset(propId)) },
-      closure,
-      cns(env, TUninit)
-    );
-  }
-
   push(env, closure);
-}
-
-void emitNewArray(IRGS& env, uint32_t capacity) {
-  if (capacity == 0) {
-    push(env, cns(env, staticEmptyArray()));
-  } else {
-    push(env, gen(env, NewArray, cns(env, capacity)));
-  }
-}
-
-void emitNewMixedArray(IRGS& env, uint32_t capacity) {
-  if (capacity == 0) {
-    push(env, cns(env, staticEmptyArray()));
-  } else {
-    push(env, gen(env, NewMixedArray, cns(env, capacity)));
-  }
-}
-
-void emitNewDArray(IRGS& env, uint32_t capacity) {
-  assertx(!RuntimeOption::EvalHackArrDVArrs);
-  if (capacity == 0) {
-    push(env, cns(env, staticEmptyDArray()));
-  } else {
-    push(env, gen(env, NewDArray, cns(env, capacity)));
-  }
 }
 
 void emitNewDictArray(IRGS& env, uint32_t capacity) {
@@ -316,36 +420,26 @@ void emitNewKeysetArray(IRGS& env, uint32_t numArgs) {
   push(env, array);
 }
 
-void emitNewLikeArrayL(IRGS& env, int32_t id, uint32_t capacity) {
-  auto const ldrefExit = makeExit(env);
-  auto const ldPMExit = makePseudoMainExit(env);
-  auto const ld = ldLocInner(env, id, ldrefExit, ldPMExit, DataTypeSpecific);
-
-  SSATmp* arr;
-  if (ld->isA(TArr)) {
-    arr = gen(env, NewLikeArray, ld, cns(env, capacity));
-  } else {
-    capacity = (capacity ? capacity : MixedArray::SmallSize);
-    arr = gen(env, NewArray, cns(env, capacity));
+void emitNewVec(IRGS& env, uint32_t numArgs) {
+  if (numArgs == 0) {
+    push(env, cns(env, staticEmptyVec()));
+    return;
   }
-  push(env, arr);
-}
 
-namespace {
+  jit::vector<RepoAuthType> types(numArgs, RepoAuthType(RepoAuthType::Tag::InitCell));
+  auto const array = gen(env, AllocVec, VanillaVecData { numArgs });
 
-ALWAYS_INLINE
-void emitNewPackedLayoutArray(IRGS& env, uint32_t numArgs, Opcode op) {
-  auto const array = gen(
-    env,
-    op,
-    PackedArrayData { numArgs }
-  );
-  static constexpr auto kMaxUnrolledInitArray = 8;
-  if (numArgs > kMaxUnrolledInitArray) {
+  auto genAssert = [&]() {
+    using A = RepoAuthType::Array;
+    auto rat = A::tuple(A::Empty::No, types);
+    gen(env, AssertType, Type::Vec(rat), array);
+  };
+
+  if (numArgs > Cfg::HHIR::MaxInlineInitPackedElements) {
     gen(
       env,
-      InitPackedLayoutArrayLoop,
-      InitPackedArrayLoopData {
+      InitVecElemLoop,
+      InitVanillaVecLoopData {
         spOffBCFromIRSP(env),
         numArgs
       },
@@ -354,39 +448,25 @@ void emitNewPackedLayoutArray(IRGS& env, uint32_t numArgs, Opcode op) {
     );
     discard(env, numArgs);
     push(env, array);
+    genAssert();
     return;
   }
 
   for (int i = 0; i < numArgs; ++i) {
+    auto src = popC(env, DataTypeGeneric);
     gen(
       env,
-      InitPackedLayoutArray,
+      InitVecElem,
       IndexData { static_cast<uint32_t>(numArgs - i - 1) },
       array,
-      popC(env, DataTypeGeneric)
+      src
     );
   }
   push(env, array);
+  genAssert();
 }
 
-}
-
-void emitNewPackedArray(IRGS& env, uint32_t numArgs) {
-  emitNewPackedLayoutArray(env, numArgs, AllocPackedArray);
-}
-
-void emitNewVecArray(IRGS& env, uint32_t numArgs) {
-  emitNewPackedLayoutArray(env, numArgs, AllocVecArray);
-}
-
-void emitNewVArray(IRGS& env, uint32_t numArgs) {
-  assertx(!RuntimeOption::EvalHackArrDVArrs);
-  emitNewPackedLayoutArray(env, numArgs, AllocVArray);
-}
-
-namespace {
-
-void newStructImpl(IRGS& env, const ImmVector& immVec, Opcode op) {
+void emitNewStructDict(IRGS& env, const ImmVector& immVec) {
   auto const numArgs = immVec.size();
   auto const ids = immVec.vec32();
 
@@ -398,23 +478,20 @@ void newStructImpl(IRGS& env, const ImmVector& immVec, Opcode op) {
     extra.keys[i] = curUnit(env)->lookupLitstrId(ids[i]);
   }
 
-  discard(env, numArgs);
-  push(env, gen(env, op, extra, sp(env)));
-}
+  if (numArgs > Cfg::HHIR::MaxInlineInitMixedElements) {
+    auto const arr = gen(env, NewStructDict, extra, sp(env));
+    discard(env, numArgs);
+    push(env, arr);
+    return;
+  }
 
-}
-
-void emitNewStructArray(IRGS& env, const ImmVector& immVec) {
-  newStructImpl(env, immVec, NewStructArray);
-}
-
-void emitNewStructDArray(IRGS& env, const ImmVector& immVec) {
-  assertx(!RuntimeOption::EvalHackArrDVArrs);
-  newStructImpl(env, immVec, NewStructDArray);
-}
-
-void emitNewStructDict(IRGS& env, const ImmVector& immVec) {
-  newStructImpl(env, immVec, NewStructDict);
+  auto const arr = gen(env, AllocStructDict, extra);
+  for (int i = 0; i < numArgs; ++i) {
+    auto const index = numArgs - i - 1;
+    auto const data = KeyedIndexData(index, extra.keys[index]);
+    gen(env, InitDictElem, data, arr, popC(env, DataTypeGeneric));
+  }
+  push(env, arr);
 }
 
 void emitAddElemC(IRGS& env) {
@@ -422,61 +499,35 @@ void emitAddElemC(IRGS& env) {
   // and we don't want to constrain it if we're just going to InterpOne.
   auto const kt = topC(env, BCSPRelOffset{1}, DataTypeGeneric)->type();
   auto const at = topC(env, BCSPRelOffset{2}, DataTypeGeneric)->type();
-  Opcode op;
-  if (at <= TArr) {
-    if (kt <= TInt) {
-      op = AddElemIntKey;
-    } else if (kt <= TStr) {
-      op = AddElemStrKey;
-    } else {
-      interpOne(env, TArr, 3);
-      return;
-    }
-  } else if (at <= TDict) {
-    if (kt <= TInt) {
-      op = DictAddElemIntKey;
-    } else if (kt <= TStr) {
-      op = DictAddElemStrKey;
-    } else {
-      interpOne(env, TDict, 3);
-      return;
-    }
-  } else {
+
+  // This operation is only defined for dicts.
+  if (!(at <= TDict)) {
     PUNT(AddElemC-BadArr);
+  } else if (!kt.subtypeOfAny(TInt, TStr, TCls, TLazyCls)) {
+    interpOne(env, at.unspecialize(), 3);
+    return;
   }
 
-  // val is teleported from the stack to the array, so we don't have to do any
-  // refcounting.
+  // DictSet teleports the value from the stack into the base, and dec-refs the
+  // old base on copy / escalation, so we only need to to do refcount ops on
+  // the key.
   auto const val = popC(env, DataTypeGeneric);
-  auto const key = popC(env);
+  auto const key = convertClassKey(env, popC(env));
   auto const arr = popC(env);
-  // The AddElem* instructions decref their args, so don't decref pop'ed
-  // values.
-  push(env, gen(env, op, arr, key, val));
+  push(env, gen(env, DictSet, arr, key, val));
+  decRef(env, key);
 }
 
 void emitAddNewElemC(IRGS& env) {
   auto const arrType = topC(env, BCSPRelOffset{1})->type();
-  if (!arrType.subtypeOfAny(TArr, TKeyset, TVec)) {
-    return interpOne(env, *env.currentNormalizedInstruction);
+  // This operation is only defined for vecs and keysets.
+  if (!arrType.subtypeOfAny(TKeyset, TVec)) {
+    return interpOne(env);
   }
-  auto const val = popC(env, DataTypeCountness);
+  auto const val = popC(env, DataTypeGeneric);
   auto const arr = popC(env);
-  push(
-    env,
-    gen(
-      env,
-      [&]{
-        if (arr->isA(TArr))    return AddNewElem;
-        if (arr->isA(TKeyset)) return AddNewElemKeyset;
-        if (arr->isA(TVec))    return AddNewElemVec;
-        always_assert(false);
-      }(),
-      arr,
-      val
-    )
-  );
-  decRef(env, val);
+  auto const op = arr->isA(TVec) ? AddNewElemVec : AddNewElemKeyset;
+  push(env, gen(env, op, arr, val));
 }
 
 void emitNewCol(IRGS& env, CollectionType type) {
@@ -509,195 +560,69 @@ void emitColFromArray(IRGS& env, CollectionType type) {
   push(env, gen(env, NewColFromArray, NewColData{type}, arr));
 }
 
-void emitStaticLocInit(IRGS& env, int32_t locId, const StringData* name) {
-  auto const func = curFunc(env);
-  if (func->isPseudoMain()) PUNT(StaticLocInit);
-
-  auto const value = popC(env);
-
-  // Closures and generators from closures don't satisfy the "one static per
-  // source location" rule that the inline fastpath requires
-  auto const box = [&]{
-    if (func->isClosureBody()) {
-      assertx(func->isClosureBody());
-      assertx(!func->hasVariadicCaptureParam());
-      auto const obj = gen(
-        env, LdLoc, TObj, LocalId(func->numParams()), fp(env));
-
-      auto const theStatic = gen(env,
-                                 LdClosureStaticLoc,
-                                 StaticLocName { func, name },
-                                 obj);
-      ifThen(
-        env,
-        [&] (Block* taken) {
-          gen(env, CheckTypeMem, TBoxedCell, taken, theStatic);
-        },
-        [&] {
-          hint(env, Block::Hint::Unlikely);
-          gen(env, StMem, theStatic, value);
-          gen(env, BoxPtr, theStatic);
-        }
-      );
-      return gen(env, LdMem, TBoxedCell, theStatic);
-    }
-
-    ifThen(
-      env,
-      [&] (Block* taken) {
-        gen(
-          env,
-          CheckStaticLoc,
-          StaticLocName { func, name },
-          taken
-        );
-      },
-      [&] {
-        hint(env, Block::Hint::Unlikely);
-        gen(
-          env,
-          InitStaticLoc,
-          StaticLocName { func, name },
-          value
-        );
-      }
-    );
-    return gen(env, LdStaticLoc, StaticLocName { func, name });
-  }();
-
-  gen(env, IncRef, box);
-  auto const oldValue = ldLoc(env, locId, nullptr, DataTypeSpecific);
-  stLocRaw(env, locId, fp(env), box);
-  decRef(env, oldValue);
-  // We don't need to decref value---it's a bytecode invariant that
-  // our Cell was not ref-counted.
+void emitCheckClsReifiedGenericMismatch(IRGS& env) {
+  auto const cls = curClass(env);
+  if (!cls) {
+    // no static context class, so this will raise an error
+    interpOne(env);
+    return;
+  }
+  auto const reified = topC(env);
+  if (!reified->isA(TVec)) {
+    PUNT(CheckClsReifiedGenericMismatch-InvalidTS);
+  }
+  gen(env, CheckClsReifiedGenericMismatch, cns(env, cls), reified);
+  popDecRef(env);
 }
 
-void emitStaticLocCheck(IRGS& env, int32_t locId, const StringData* name) {
-  auto const func = curFunc(env);
-  if (func->isPseudoMain()) PUNT(StaticLocCheck);
-
-  auto bindLocal = [&] (SSATmp* box) {
-    gen(env, IncRef, box);
-    auto const oldValue = ldLoc(env, locId, nullptr, DataTypeGeneric);
-    stLocRaw(env, locId, fp(env), box);
-    decRef(env, oldValue);
-    return cns(env, true);
-  };
-
-  auto const inited = [&] {
-    if (func->isClosureBody()) {
-      auto const obj = gen(
-        env, LdLoc, TObj, LocalId(func->numParams()), fp(env));
-      auto const theStatic = gen(env,
-                                 LdClosureStaticLoc,
-                                 StaticLocName { func, name },
-                                 obj);
-      return cond(
-        env,
-        [&] (Block* taken) {
-          gen(env, CheckTypeMem, TBoxedCell, taken, theStatic);
-        },
-        [&] {
-          return bindLocal(gen(env, LdMem, TInitCell, theStatic));
-        },
-        [&] {
-          hint(env, Block::Hint::Unlikely);
-          return cns(env, false);
-        }
-      );
-    }
-
-    return cond(
-      env,
-      [&] (Block* taken) {
-        gen(
-          env,
-          CheckStaticLoc,
-          StaticLocName { func, name },
-          taken
-        );
-      },
-      [&] {
-        // Next: the static local is already initialized
-        return bindLocal(gen(env, LdStaticLoc, StaticLocName { func, name }));
-      },
-      [&] { // Taken: need to initialize the static local
-        return cns(env, false);
-      }
-    );
-  }();
-
-  push(env, inited);
+void emitClassHasReifiedGenerics(IRGS& env) {
+  auto const cls_ = topC(env);
+  if (!cls_->isA(TCls) && !cls_->isA(TLazyCls)) return interpOne(env);
+  auto const cls = cls_->isA(TLazyCls) ? ldCls(env, cls_) : cls_;
+  auto const result = gen(env, ClassHasReifiedGenerics, cls);
+  popDecRef(env);
+  push(env, result);
 }
 
-void emitStaticLocDef(IRGS& env, int32_t locId, const StringData* name) {
-  auto const func = curFunc(env);
-  if (func->isPseudoMain()) PUNT(StaticLocDef);
+void emitGetClsRGProp(IRGS& env) {
+  auto const cls_ = topC(env);
+  if (!cls_->isA(TCls) && !cls_->isA(TLazyCls)) return interpOne(env);
+  auto const cls = cls_->isA(TLazyCls) ? ldCls(env, cls_) : cls_;
+  auto const thiz = checkAndLoadThis(env);
+  auto const result = gen(env, GetClsRGProp, cls, thiz);
+  popDecRef(env);
+  push(env, result);
+}
 
-  auto const value = popC(env);
+void emitHasReifiedParent(IRGS& env) {
+  auto const cls_ = topC(env);
+  if (!cls_->isA(TCls) && !cls_->isA(TLazyCls)) return interpOne(env);
+  auto const cls = cls_->isA(TLazyCls) ? ldCls(env, cls_) : cls_;
+  auto const result = gen(env, HasReifiedParent, cls);
+  popDecRef(env);
+  push(env, result);
+}
 
-  auto const box = [&] {
-    if (func->isClosureBody()) {
-      auto const obj = gen(
-        env, LdLoc, TObj, LocalId(func->numParams()), fp(env));
-      auto const theStatic = gen(env,
-                                 LdClosureStaticLoc,
-                                 StaticLocName { func, name },
-                                 obj);
-      gen(env, StMem, theStatic, value);
-      auto const boxedStatic = gen(env, BoxPtr, theStatic);
-      return gen(env, LdMem, TBoxedInitCell, boxedStatic);
-    }
+void emitCheckClsRGSoft(IRGS& env) {
+  auto const cls_ = topC(env);
+  if (!cls_->isA(TCls) && !cls_->isA(TLazyCls)) return interpOne(env);
+  auto const cls = cls_->isA(TLazyCls) ? ldCls(env, cls_) : cls_;
+  gen(env, CheckClsRGSoft, cls);
+  popDecRef(env);
+}
 
-    auto init = [&] {
-      gen(
-        env,
-        InitStaticLoc,
-        StaticLocName { func, name },
-        value
-      );
-    };
-
-    if (func->isMemoizeWrapper() && !func->numParams()) {
-      ifThenElse(
-        env,
-        [&] (Block* taken) {
-          gen(
-            env,
-            CheckStaticLoc,
-            StaticLocName { func, name },
-            taken
-          );
-        },
-        [&] {
-          hint(env, Block::Hint::Unlikely);
-          auto oldBox = gen(env, LdStaticLoc, StaticLocName { func, name });
-          auto oldVal = gen(env, LdRef, TInitCell, oldBox);
-          init();
-          decRef(env, oldVal);
-        },
-        [&] {
-          init();
-        }
-      );
-    } else {
-      init();
-    }
-
-    return gen(
-      env,
-      LdStaticLoc,
-      StaticLocName { func, name }
-    );
-  }();
-
-  gen(env, IncRef, box);
-  auto const oldValue = ldLoc(env, locId, nullptr, DataTypeGeneric);
-  stLocRaw(env, locId, fp(env), box);
-  decRef(env, oldValue);
+void emitReifiedInit(IRGS& env, int32_t id) { 
+  auto const cls_ = topC(env);
+  if (!cls_->isA(TCls) && !cls_->isA(TLazyCls)) return interpOne(env);
+  auto const cls = cls_->isA(TLazyCls) ? ldCls(env, cls_) : cls_;
+  assertTypeLocal(env, id, TVec);  
+  auto* generics = ldLoc(env, id, DataTypeSpecific);
+  auto const obj = topC(env, BCSPRelOffset{1});
+  gen(env, ReifiedInit, cls, generics, obj);
+  popDecRef(env);
+  popDecRef(env);
 }
 
 //////////////////////////////////////////////////////////////////////
 
-}}}
+}

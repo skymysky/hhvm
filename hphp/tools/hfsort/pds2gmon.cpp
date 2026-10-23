@@ -19,7 +19,6 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <zlib.h>
 
 #define BUFLEN 1000
@@ -36,7 +35,7 @@ struct GmonArc {
   uint32_t count;       // number of arc traversals
 };
 
-void error(const char* msg) {
+[[noreturn]] void error(const char* msg) {
   printf("ERROR: %s\n", msg);
   exit(1);
 }

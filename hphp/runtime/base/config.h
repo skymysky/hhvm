@@ -14,41 +14,37 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_CONFIG_H_
-#define incl_HPHP_CONFIG_H_
+#pragma once
 
+#include "hphp/util/hash-map.h"
+#include "hphp/util/hash-set.h"
 #include "hphp/util/hdf.h"
+
+#include <folly/Format.h>
+
+#include <boost/container/flat_set.hpp>
 
 namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
 struct Variant;
 struct IniSettingMap;
-typedef std::map<std::string, std::string> ConfigMap;
-typedef std::set<std::string> ConfigSet;
+using ConfigMap = std::map<std::string, std::string>;
+using ConfigFastMap = hphp_fast_string_map<std::string>;
+using ConfigSet = std::set<std::string>;
 // with comparer
-typedef std::set<std::string, stdltistr> ConfigSetC;
-typedef std::map<std::string, std::string, stdltistr> ConfigMapC;
-typedef boost::container::flat_set<std::string> ConfigFlatSet;
-typedef hphp_string_imap<std::string> ConfigIMap;
-
-/**
- * Parts of the language can individually be made stricter, warning or
- * erroring when there's dangerous/unintuive usage; for example,
- * array_fill_keys() with non-int/string keys: Hack.Lang.StrictArrayFillKeys
- */
-enum class HackStrictOption {
-  OFF, // PHP5 behavior
-  WARN,
-  ON
-};
-
+using ConfigSetC = std::set<std::string, stdltistr>;
+using ConfigMapC = std::map<std::string, std::string, stdltistr>;
+using ConfigFlatSet = boost::container::flat_set<std::string>;
+using ConfigIMap = hphp_string_imap<std::string>;
+using ConfigIFastMap = hphp_fast_string_imap<std::string>;
+using ConfigFastSet = hphp_fast_string_set;
 
 struct Config {
   /*
    * Normalizes hdf string names to their ini counterparts
    *
    * We have special handling for a few hdf strings such as those containing
-   * MySQL, Eval, IPv[4|6] and EnableHipHopSyntax
+   * MySQL, Eval and IPv[4|6].
    */
   static std::string IniName(const Hdf& config,
                              const bool prepend_hhvm = true);
@@ -127,13 +123,10 @@ struct Config {
                    const Hdf& config, const std::string& name = "",
                    const double defValue = 0,
                    const bool prepend_hhvm = true);
-  static void Bind(HackStrictOption& loc, const IniSettingMap &ini,
-                   const Hdf& config, const std::string& name,
-                   HackStrictOption def);
   static void
-  Bind(std::vector<uint32_t>& loc, const IniSettingMap& ini,
+  Bind(std::vector<int32_t>& loc, const IniSettingMap& ini,
        const Hdf& config, const std::string& name = "",
-       const std::vector<uint32_t>& defValue = std::vector<uint32_t>(),
+       const std::vector<int32_t>& defValue = std::vector<int32_t>(),
        const bool prepend_hhvm = true);
   static void
   Bind(std::vector<std::string>& loc, const IniSettingMap& ini,
@@ -151,6 +144,10 @@ struct Config {
                    const std::string& name = "",
                    const ConfigMap& defValue = ConfigMap(),
                    const bool prepend_hhvm = true);
+  static void Bind(ConfigFastMap& loc, const IniSettingMap& ini, const Hdf& config,
+                   const std::string& name = "",
+                   const ConfigFastMap& defValue = ConfigFastMap(),
+                   const bool prepend_hhvm = true);
   static void Bind(ConfigMapC& loc, const IniSettingMap& ini, const Hdf& config,
                    const std::string& name = "",
                    const ConfigMapC& defValue = ConfigMapC(),
@@ -167,9 +164,17 @@ struct Config {
                    const std::string& name = "",
                    const ConfigIMap& defValue = ConfigIMap(),
                    const bool prepend_hhvm = true);
+  static void Bind(ConfigIFastMap& loc, const IniSettingMap& ini, const Hdf& config,
+                   const std::string& name = "",
+                   const ConfigIFastMap& defValue = ConfigIFastMap(),
+                   const bool prepend_hhvm = true);
   static void Bind(ConfigFlatSet& loc, const IniSettingMap& ini,
                    const Hdf& config, const std::string& name = "",
                    const ConfigFlatSet& defValue = ConfigFlatSet(),
+                   const bool prepend_hhvm = true);
+  static void Bind(ConfigFastSet& loc, const IniSettingMap& ini, const Hdf& config,
+                   const std::string& name = "",
+                   const ConfigFastSet& defValue = ConfigFastSet(),
                    const bool prepend_hhvm = true);
 
   /**
@@ -224,11 +229,11 @@ struct Config {
                           const std::string& name = "",
                           const double defValue = 0,
                           const bool prepend_hhvm = true);
-  static std::vector<uint32_t>
-  GetUInt32Vector(const IniSettingMap& ini, const Hdf& config,
-                  const std::string& name = "",
-                  const std::vector<uint32_t>& def = std::vector<uint32_t>{},
-                  const bool prepend_hhvm = true);
+  static std::vector<int32_t>
+  GetInt32Vector(const IniSettingMap& ini, const Hdf& config,
+                 const std::string& name = "",
+                 const std::vector<int32_t>& def = std::vector<int32_t>{},
+                 const bool prepend_hhvm = true);
   static std::vector<std::string>
   GetStrVector(const IniSettingMap& ini, const Hdf& config,
                const std::string& name = "",
@@ -244,6 +249,10 @@ struct Config {
                           const std::string& name = "",
                           const ConfigMap& defValue = ConfigMap(),
                           const bool prepend_hhvm = true);
+  static ConfigFastMap GetFastMap(const IniSettingMap& ini, const Hdf& config,
+                                  const std::string& name = "",
+                                  const ConfigFastMap& defValue = ConfigFastMap(),
+                                  const bool prepend_hhvm = true);
   static ConfigMapC GetMapC(const IniSettingMap& ini, const Hdf& config,
                           const std::string& name = "",
                           const ConfigMapC& defValue = ConfigMapC(),
@@ -260,10 +269,18 @@ struct Config {
                             const std::string& name = "",
                             const ConfigIMap& defValue = ConfigIMap(),
                             const bool prepend_hhvm = true);
+  static ConfigIFastMap GetIFastMap(const IniSettingMap& ini, const Hdf& config,
+                                    const std::string& name = "",
+                                    const ConfigIFastMap& defValue = ConfigIFastMap(),
+                                    const bool prepend_hhvm = true);
   static ConfigFlatSet GetFlatSet(const IniSettingMap& ini, const Hdf& config,
                                   const std::string& name = "",
                                   const ConfigFlatSet& defValue
                                     = ConfigFlatSet(),
+                                  const bool prepend_hhvm = true);
+  static ConfigFastSet GetFastSet(const IniSettingMap& ini, const Hdf& config,
+                                  const std::string& name = "",
+                                  const ConfigFastSet& defValue = ConfigFastSet(),
                                   const bool prepend_hhvm = true);
 
   /**
@@ -281,6 +298,15 @@ struct Config {
                                           const std::string&)> cb,
                       const IniSettingMap &ini, const Hdf& config,
                       const std::string &name, const bool prepend_hhvm = true);
+
+  static bool matchHdfPattern(const std::string &value,
+                              const IniSettingMap& ini, Hdf hdfPattern,
+                              const std::string& name,
+                              const std::string& suffix = "");
+
+  static bool matchHdfPatternSet(const std::string &value,
+                                 const IniSettingMap& ini, Hdf hdfPattern,
+                                 const std::string& name);
 
   private:
 
@@ -330,5 +356,3 @@ struct Config {
 };
 
 }
-
-#endif /* incl_HPHP_CONFIG_H_ */

@@ -1,4 +1,2 @@
-Fun \NS\bar -> Fun \NS\bar
-Fun \NS\bar -> Fun \NS\foo
-Fun \NS\foo -> Fun \NS\foo
-Fun \foo -> Fun \foo
+Fun NS\foo -> Fun NS\bar
+Type HH\string -> Fun foo

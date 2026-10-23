@@ -20,70 +20,249 @@
 
 namespace HPHP {
 
-const StaticString s_allows_unknown_fields("allows_unknown_fields");
-const StaticString s_elem_types("elem_types");
-const StaticString s_fields("fields");
-const StaticString s_kind("kind");
-const StaticString s_value("value");
-const StaticString s_nullable("nullable");
-const StaticString s_optional_shape_field("optional_shape_field");
-const StaticString s_classname("classname");
+extern const StaticString s_allows_unknown_fields;
+extern const StaticString s_elem_types;
+extern const StaticString s_optional_elem_types;
+extern const StaticString s_param_types;
+extern const StaticString s_return_type;
+extern const StaticString s_variadic_type;
+extern const StaticString s_splat_elem_types;
+extern const StaticString s_fields;
+extern const StaticString s_kind;
+extern const StaticString s_value;
+extern const StaticString s_nullable;
+extern const StaticString s_soft;
+extern const StaticString s_opaque;
+extern const StaticString s_optional_shape_field;
+extern const StaticString s_classname;
+extern const StaticString s_wildcard;
+extern const StaticString s_name;
+extern const StaticString s_generic_types;
+extern const StaticString s_is_cls_cns;
+extern const StaticString s_access_list;
+extern const StaticString s_root_name;
+extern const StaticString s_alias;
+extern const StaticString s_case_type;
+extern const StaticString s_callable;
+extern const StaticString s_exact;
+extern const StaticString s_typevars;
+extern const StaticString s_typevar_types;
+extern const StaticString s_union_types;
+extern const StaticString s_hh_this;
+extern const StaticString s_type_structure_non_existant_class;
+extern const StaticString s_with_refinements;
+extern const StaticString s_equals;
+extern const StaticString s_as;
+extern const StaticString s_super;
+extern const StaticString s_is_ctx;
+
+// Fixed error messages
+extern const StaticString s_reified_type_must_be_ts;
+extern const StaticString s_new_instance_of_not_string;
+
 
 ///////////////////////////////////////////////////////////////////////////////
 
+namespace detail {
+
+ALWAYS_INLINE bool is_ts_bool(const ArrayData* ts, const OptString& s) {
+  auto const field = ts->get(s.get());
+  assertx(!field.is_init() || (isBoolType(field.type()) && field.val().num));
+  return field.is_init();
+}
+
+ALWAYS_INLINE const ArrayData* get_ts_varray(const ArrayData* ts,
+                                             const OptString& s) {
+  auto const field = ts->get(s.get());
+  assertx(tvIsVec(field));
+  return field.val().parr;
+}
+
+ALWAYS_INLINE const ArrayData* get_ts_varray_opt(const ArrayData* ts,
+                                                 const OptString& s) {
+  auto const field = ts->get(s.get());
+  if (!field.is_init()) return nullptr;
+  assertx(tvIsVec(field));
+  return field.val().parr;
+}
+
+ALWAYS_INLINE const ArrayData* get_ts_darray(const ArrayData* ts,
+                                             const OptString& s) {
+  auto const field = ts->get(s.get());
+  assertx(tvIsDict(field));
+  return field.val().parr;
+}
+
+ALWAYS_INLINE const ArrayData* get_ts_darray_opt(const ArrayData* ts,
+                                                 const OptString& s) {
+  auto const field = ts->get(s.get());
+  if (!field.is_init()) return nullptr;
+  assertx(tvIsDict(field));
+  return field.val().parr;
+}
+
+ALWAYS_INLINE const StringData* get_ts_string(const ArrayData* ts,
+                                              const OptString& s) {
+  auto const field = ts->get(s.get());
+  assertx(isStringType(field.type()));
+  return field.val().pstr;
+}
+
+ALWAYS_INLINE const StringData* get_ts_string_opt(const ArrayData* ts,
+                                                  const OptString& s) {
+  auto const field = ts->get(s.get());
+  if (!field.is_init()) return nullptr;
+  assertx(isStringType(field.type()));
+  return field.val().pstr;
+}
+
+} // detail
+
 ALWAYS_INLINE bool is_ts_nullable(const ArrayData* ts) {
-  auto const nullable_field = ts->rval(s_nullable.get());
-  assertx(nullable_field == nullptr ||
-    (isBoolType(nullable_field.type()) && nullable_field.val().num));
-  return nullable_field != nullptr;
+  return detail::is_ts_bool(ts, s_nullable);
 }
 
-ALWAYS_INLINE const TypeStructure::Kind get_ts_kind(const ArrayData* ts) {
-  auto const kind_field = ts->rval(s_kind.get());
-  assertx(kind_field != nullptr && isIntType(kind_field.type()));
-  return static_cast<TypeStructure::Kind>(kind_field.val().num);
+ALWAYS_INLINE bool is_ts_soft(const ArrayData* ts) {
+  return detail::is_ts_bool(ts, s_soft);
 }
 
-ALWAYS_INLINE const ArrayData* get_ts_elem_types(const ArrayData* ts) {
-  auto const elem_types_field = ts->rval(s_elem_types.get());
-  assertx(elem_types_field != nullptr && isArrayType(elem_types_field.type()));
-  return elem_types_field.val().parr;
-}
-
-ALWAYS_INLINE const ArrayData* get_ts_fields(const ArrayData* ts) {
-  auto const fields_field = ts->rval(s_fields.get());
-  assertx(fields_field != nullptr && isArrayType(fields_field.type()));
-  return fields_field.val().parr;
+ALWAYS_INLINE const bool is_optional_ts_shape_field(const ArrayData* ts) {
+  return detail::is_ts_bool(ts, s_optional_shape_field);
 }
 
 ALWAYS_INLINE const bool does_ts_shape_allow_unknown_fields(
   const ArrayData* ts
 ) {
-  auto const allows_unknown_fields = ts->rval(s_allows_unknown_fields.get());
-  assertx(allows_unknown_fields == nullptr ||
-    (isBoolType(allows_unknown_fields.type()) &&
-      allows_unknown_fields.val().num));
-  return allows_unknown_fields != nullptr;
+  return detail::is_ts_bool(ts, s_allows_unknown_fields);
 }
 
-ALWAYS_INLINE const bool is_optional_ts_shape_field(const ArrayData* ts) {
-  auto const optional_shape_field = ts->rval(s_optional_shape_field.get());
-  assertx(optional_shape_field == nullptr ||
-    (isBoolType(optional_shape_field.type()) &&
-      optional_shape_field.val().num));
-  return optional_shape_field != nullptr;
+ALWAYS_INLINE const bool does_ts_tuple_allow_optional_or_unknown_fields(
+  const ArrayData* ts
+) {
+  return ts->exists(s_variadic_type.get())
+  || ts->exists(s_optional_elem_types.get());
 }
 
-ALWAYS_INLINE const ArrayData* get_ts_value_field(const ArrayData* ts) {
-  auto const value_field = ts->rval(s_value.get());
-  assertx(value_field != nullptr && isArrayType(value_field.type()));
-  return value_field.val().parr;
+ALWAYS_INLINE const ArrayData* get_ts_elem_types(const ArrayData* ts) {
+  return detail::get_ts_varray(ts, s_elem_types);
+}
+
+ALWAYS_INLINE const ArrayData* get_ts_optional_elem_types_opt(const ArrayData* ts) {
+  return detail::get_ts_varray_opt(ts, s_optional_elem_types);
+}
+
+ALWAYS_INLINE const ArrayData* get_ts_param_types(const ArrayData* ts) {
+  return detail::get_ts_varray(ts, s_param_types);
+}
+
+ALWAYS_INLINE const ArrayData* get_ts_return_type(const ArrayData* ts) {
+  return detail::get_ts_darray(ts, s_return_type);
+}
+
+ALWAYS_INLINE const ArrayData* get_ts_variadic_type_opt(const ArrayData* ts) {
+  return detail::get_ts_darray_opt(ts, s_variadic_type);
+}
+
+ALWAYS_INLINE const ArrayData* get_ts_splat_elem_types_opt(const ArrayData* ts) {
+  return detail::get_ts_varray_opt(ts, s_splat_elem_types);
+}
+
+ALWAYS_INLINE const ArrayData* get_ts_fields(const ArrayData* ts) {
+  return detail::get_ts_darray(ts, s_fields);
+}
+
+ALWAYS_INLINE const ArrayData* get_ts_value(const ArrayData* ts) {
+  return detail::get_ts_darray(ts, s_value);
+}
+
+ALWAYS_INLINE const ArrayData* get_ts_access_list(const ArrayData* ts) {
+  return detail::get_ts_varray(ts, s_access_list);
+}
+
+ALWAYS_INLINE const ArrayData* get_ts_generic_types(const ArrayData* ts) {
+  return detail::get_ts_varray(ts, s_generic_types);
+}
+
+ALWAYS_INLINE const ArrayData* get_ts_generic_types_opt(const ArrayData* ts) {
+  return detail::get_ts_varray_opt(ts, s_generic_types);
+}
+
+ALWAYS_INLINE const ArrayData* get_ts_union_types(const ArrayData* ts) {
+  return detail::get_ts_varray(ts, s_union_types);
+}
+
+ALWAYS_INLINE const ArrayData* get_ts_union_types_opt(const ArrayData* ts) {
+  return detail::get_ts_varray_opt(ts, s_union_types);
+}
+
+ALWAYS_INLINE const ArrayData* get_ts_refinement_types(const ArrayData* ts) {
+  return detail::get_ts_darray(ts, s_with_refinements);
+}
+
+ALWAYS_INLINE const ArrayData* get_ts_refinement_types_opt(const ArrayData* ts) {
+  return detail::get_ts_darray_opt(ts, s_with_refinements);
 }
 
 ALWAYS_INLINE const StringData* get_ts_classname(const ArrayData* ts) {
-  auto const classname_field = ts->rval(s_classname.get());
-  assertx(classname_field != nullptr && isStringType(classname_field.type()));
-  return classname_field.val().pstr;
+  return detail::get_ts_string(ts, s_classname);
+}
+
+ALWAYS_INLINE const StringData* get_ts_name(const ArrayData* ts) {
+  return detail::get_ts_string(ts, s_name);
+}
+
+ALWAYS_INLINE const StringData* get_ts_root_name(const ArrayData* ts) {
+  return detail::get_ts_string(ts, s_root_name);
+}
+
+ALWAYS_INLINE const StringData* get_ts_alias(const ArrayData* ts) {
+  return detail::get_ts_string(ts, s_alias);
+}
+
+ALWAYS_INLINE const StringData* get_ts_case_type(const ArrayData* ts) {
+  return detail::get_ts_string(ts, s_case_type);
+}
+
+ALWAYS_INLINE const StringData* get_ts_case_type_opt(const ArrayData* ts) {
+  return detail::get_ts_string_opt(ts, s_case_type);
+}
+
+ALWAYS_INLINE const TypeStructure::Kind get_ts_kind(const ArrayData* ts) {
+  auto const kind_field = ts->get(s_kind.get());
+  assertx(isIntType(kind_field.type()));
+  return static_cast<TypeStructure::Kind>(kind_field.val().num);
+}
+
+inline const ArrayData* get_ts_typevar_types_opt(const ArrayData* ts) {
+  return detail::get_ts_darray_opt(ts, s_typevar_types);
+}
+
+ALWAYS_INLINE bool isValidTSType(TypedValue c, bool error) {
+  if (!tvIsDict(c)) {
+    if (error) raise_error("Type structure must be a darray");
+    return false;
+  }
+  return true;
+}
+
+ALWAYS_INLINE bool isWildCard(const ArrayData* ts) {
+  return get_ts_kind(ts) == TypeStructure::Kind::T_typevar &&
+         ts->exists(s_name.get()) &&
+         get_ts_name(ts)->equal(s_wildcard.get());
+}
+
+ALWAYS_INLINE
+const StringData* get_ts_this_type_access(const ArrayData* ts) {
+  if (get_ts_kind(ts) != TypeStructure::Kind::T_typeaccess ||
+      !get_ts_root_name(ts)->tsame(s_hh_this.get()) ||
+      is_ts_nullable(ts)) {
+    return nullptr;
+  }
+  auto const accList = get_ts_access_list(ts);
+  if (accList->size() != 1) return nullptr;
+  auto const name = accList->at(int64_t(0));
+  if (!tvIsString(&name)) return nullptr;
+  return name.m_data.pstr;
 }
 
 ///////////////////////////////////////////////////////////////////////////////

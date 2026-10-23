@@ -1,0 +1,8 @@
+Change to $my_var
+
+<?hh
+
+function foo(): void {
+  $my_var = 123;
+  $x = $my_var;
+}

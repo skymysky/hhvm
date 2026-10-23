@@ -1,2 +1,2 @@
 
-Fatal error: %s
+Catchable fatal error: Argument 1 passed to Generator::throw() must implement interface Throwable, stdClass given in %s/throw_not_an_exception.php on line 9

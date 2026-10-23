@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 /**
  * Copyright (c) 2014, Facebook, Inc.
  * All rights reserved.
@@ -9,10 +9,12 @@
  *
  */
 
-// testing loops scoping
+function might_throw(): void {}
 
+// testing loops scoping
 function stmt(): void {
   try {
+    might_throw();
     $x = 0;
     throw new Exception('this is a test');
   }

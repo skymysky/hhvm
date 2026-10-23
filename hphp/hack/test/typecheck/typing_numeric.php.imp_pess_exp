@@ -1,0 +1,14 @@
+error: Typing[4110] Invalid return type [1]
+-> Expected `float` [2]
+-> But got `int` because it is the result of a division `/` [1]
+
+typing_numeric.php:13:10
+10 |  */
+11 | 
+12 | function f1(int $x, int $y): float {
+   |                              ^^^^^ [2]
+13 |   return $x / $y;
+   |          ^^^^^^^ [1]
+14 | }
+
+1 error found

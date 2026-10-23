@@ -1,0 +1,29 @@
+error: Typing[4429] Typing error [1]
+-> Expected `num` because this is used in an arithmetic operation [2]
+-> But got `vec<int>` [3]
+
+disallow_array_addition.php:4:10
+1 | <?hh
+2 | 
+3 | function foo(varray<int> $a, varray<int> $b): mixed {
+  |              ^^^^^^^^^^^ [3]
+4 |   return $a + $b;
+  |          ^^ [1]
+  |          ^^^^^^^ [2]
+5 | }
+
+error: Typing[4429] Typing error [1]
+-> Expected `num` because this is used in an arithmetic operation [2]
+-> But got `vec<int>` [3]
+
+disallow_array_addition.php:4:15
+1 | <?hh
+2 | 
+3 | function foo(varray<int> $a, varray<int> $b): mixed {
+  |                              ^^^^^^^^^^^ [3]
+4 |   return $a + $b;
+  |          ^^^^^^^ [2]
+  |               ^^ [1]
+5 | }
+
+2 errors found

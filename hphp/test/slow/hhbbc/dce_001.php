@@ -1,14 +1,14 @@
 <?hh
 
-function asd() { return 12; }
-function bsd() { return mt_rand() ? 12.0 : 42.0; }
-function lol(double $x) { echo "heh\n"; }
+function asd() :mixed{ return 12; }
+function bsd() :mixed{ return mt_rand() ? 12.0 : 42.0; }
+function lol(float $x) :mixed{ echo "heh\n"; }
 
 /*
  * This is a case where global dce can change the type of locals
  * across blocks.
  */
-function foo() {
+function foo() :mixed{
   $x = asd(); // This store can be eliminated, but $x :: Int only if
               // it happened.
   for ($i = 0; $i < 10; ++$i) {
@@ -18,4 +18,8 @@ function foo() {
   lol($x);
 }
 
+
+<<__EntryPoint>>
+function main_dce_001() :mixed{
 foo();
+}

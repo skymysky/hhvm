@@ -1,0 +1,19 @@
+error: Typing[4231] The `Bad` attribute cannot be used on a type constant. [1]
+-> The attribute's class is defined here. To be available for use on a type constant, the `Bad` class must implement `HH\TypeConstantAttribute`. [2]
+
+typeconst.php:19:5
+ 6 | }
+ 7 | 
+ 8 | class Bad implements HH\ClassAttribute {
+   |       ^^^ [2]
+ 9 |   public function __construct(public string $s) {}
+10 | }
+   :
+17 |   abstract const type Tu;
+18 | 
+19 |   <<Bad("hi")>>
+   |     ^^^ [1]
+20 |   abstract const type Tv as int;
+21 | }
+
+1 error found

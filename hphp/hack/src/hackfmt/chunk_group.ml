@@ -1,4 +1,4 @@
-(**
+(*
  * Copyright (c) 2016, Facebook, Inc.
  * All rights reserved.
  *
@@ -7,82 +7,96 @@
  *
  *)
 
-open Hh_core
+open Hh_prelude
 
 type t = {
   chunks: Chunk.t list;
-  rule_map: Rule.t IMap.t;
-  rule_dependency_map: (int list) IMap.t;
+  rule_map: Rule.t I_map.t;
+  rule_dependency_map: int list I_map.t;
   block_indentation: int;
 }
 
-let get_rule_count t =
-  IMap.cardinal t.rule_map
+let get_rule_count t = I_map.cardinal t.rule_map
 
 let get_rules t =
   (* TODO verify or log if there are unused rules *)
-  List.map (IMap.bindings t.rule_map) ~f:fst
+  List.map (I_map.bindings t.rule_map) ~f:fst
 
 let get_rule_kind t id =
-  let r = IMap.find_unsafe id t.rule_map in
+  let r = I_map.find id t.rule_map in
   r.Rule.kind
 
 let get_char_range t =
-  t.chunks |> List.fold ~init:(max_int,0)
-    ~f:(fun (start_char, end_char) chunk ->
-      let chunk_start, chunk_end = Chunk.get_range chunk in
-      min start_char chunk_start,
-      max end_char chunk_end
-    )
+  t.chunks
+  |> List.fold ~init:(Int.max_value, 0) ~f:(fun (start_char, end_char) chunk ->
+         let (chunk_start, chunk_end) = Chunk.get_range chunk in
+         (min start_char chunk_start, max end_char chunk_end))
 
-let constrain_rules t rbm rule_list =
-  let aux rule_id = Rule.cares_about_children (get_rule_kind t rule_id) in
-  let rules_that_care = List.filter rule_list ~f:aux in
-  List.fold rules_that_care ~init:rbm ~f:(fun acc k -> IMap.add k true acc)
+let propagate_breakage t initial_bindings =
+  initial_bindings
+  |> I_map.filter (fun _ is_broken -> is_broken)
+  |> I_map.keys
+  |> List.fold ~init:initial_bindings ~f:(fun acc rule_id ->
+         let dependencies =
+           Option.value
+             ~default:[]
+             (I_map.find_opt rule_id t.rule_dependency_map)
+         in
+         dependencies
+         |> List.filter ~f:(fun id ->
+                Rule.cares_about_children (get_rule_kind t id))
+         |> List.fold ~init:acc ~f:(fun acc id -> I_map.add id true acc))
+
+let get_always_rules t =
+  t.rule_map
+  |> I_map.filter (fun _ v -> Rule.is_always v.Rule.kind)
+  |> I_map.keys
 
 let get_always_rule_bindings t =
-  let is_always_rule _k v = v.Rule.kind = Rule.Always in
-  let always_rules = IMap.filter is_always_rule t.rule_map in
-  IMap.map (fun _ -> true) always_rules
+  get_always_rules t
+  |> List.fold ~init:I_map.empty ~f:(fun acc id -> I_map.add id true acc)
 
 let get_initial_rule_bindings t =
-  let is_always_rule _k v = v.Rule.kind = Rule.Always in
-  let always_rules = IMap.filter is_always_rule t.rule_map in
-  let get_dependencies rule_id =
-    try IMap.find_unsafe rule_id t.rule_dependency_map with Not_found -> [] in
-  let constrain k _v acc = constrain_rules t acc (get_dependencies k) in
-  let init_map = IMap.map (fun _ -> true) always_rules in
-  IMap.fold constrain always_rules init_map
+  propagate_breakage t (get_always_rule_bindings t)
 
 (* When a child rule is broken on, all its parent rules must break too. *)
 let is_dependency_satisfied parent_kind parent_val child_val =
   (* If the parent rule doesn't care about whether its child rules break, then
    * the dependency doesn't matter. *)
-  if not (Rule.cares_about_children parent_kind) then true
+  if not (Rule.cares_about_children parent_kind) then
+    true
   else
     (* Otherwise, the dependency is only unsatisfied when the parent rule is
      * bound not to break and the child rule is bound to break. *)
-    match parent_val, child_val with
-    | Some false, true -> false
+    match (parent_val, child_val) with
+    | (Some false, true) -> false
     | _ -> true
 
 let are_rule_bindings_valid t rbm =
-  let valid_map = IMap.mapi (fun rule_id v ->
-    let parent_list = try IMap.find_unsafe rule_id t.rule_dependency_map
-      with Not_found -> []
-    in
-    List.for_all parent_list ~f:(fun parent_id ->
-      let parent_rule = IMap.find_unsafe parent_id t.rule_map in
-      let parent_value = IMap.get parent_id rbm in
-      is_dependency_satisfied parent_rule.Rule.kind parent_value v
-    )
-  ) rbm in
-  List.for_all ~f:(fun x -> x) @@ List.map ~f:snd @@ IMap.bindings valid_map
+  let valid_map =
+    I_map.mapi
+      (fun rule_id v ->
+        let parent_list =
+          Option.value
+            ~default:[]
+            (I_map.find_opt rule_id t.rule_dependency_map)
+        in
+        List.for_all parent_list ~f:(fun parent_id ->
+            let parent_rule = I_map.find parent_id t.rule_map in
+            let parent_value = I_map.find_opt parent_id rbm in
+            is_dependency_satisfied parent_rule.Rule.kind parent_value v))
+      rbm
+  in
+  List.for_all ~f:(fun x -> x) @@ List.map ~f:snd @@ I_map.bindings valid_map
 
 let dependency_map_to_string t =
-  let get_map_values map = List.map ~f:snd @@ IMap.bindings @@ map in
-  let str_list = get_map_values @@ IMap.mapi (fun k v_list ->
-    let values = List.map v_list ~f:string_of_int in
-    string_of_int k ^ ": [" ^ String.concat ", " values ^ "]"
-  ) t.rule_dependency_map in
-  "{" ^ String.concat ", " str_list ^ "}"
+  let get_map_values map = List.map ~f:snd @@ I_map.bindings @@ map in
+  let str_list =
+    get_map_values
+    @@ I_map.mapi
+         (fun k v_list ->
+           let values = List.map v_list ~f:string_of_int in
+           string_of_int k ^ ": [" ^ String.concat ~sep:", " values ^ "]")
+         t.rule_dependency_map
+  in
+  "{" ^ String.concat ~sep:", " str_list ^ "}"

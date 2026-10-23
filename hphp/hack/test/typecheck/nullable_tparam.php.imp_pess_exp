@@ -1,0 +1,57 @@
+error: Typing[4323] Invalid argument [1]
+-> `T` is a constrained type parameter [2]
+-> This type constraint is violated [3]
+-> Expected `int` [3]
+-> But got `T` [4]
+
+nullable_tparam.php:6:10
+1 | <?hh
+2 | 
+3 | function expect<T as int>(?T $_): void {}
+  |                 ^ [2]
+  |                      ^^^ [3]
+4 | 
+5 | function test<T>(?T $x): void {
+  |                   ^ [4]
+6 |   expect($x);
+  |          ^^ [1]
+7 | }
+
+error: Typing[4323] Invalid argument [1]
+-> `T` is a constrained type parameter [2]
+-> This type constraint is violated [3]
+-> Expected `int` [3]
+-> But got `mixed` [4]
+->   by the definition of `T` [5]
+
+nullable_tparam.php:6:10
+1 | <?hh
+2 | 
+3 | function expect<T as int>(?T $_): void {}
+  |                 ^ [2]
+  |                      ^^^ [3]
+4 | 
+5 | function test<T>(?T $x): void {
+  |               ^ [5]
+  |                   ^ [4]
+6 |   expect($x);
+  |          ^^ [1]
+7 | }
+
+error: Typing[4110] Invalid argument [1]
+-> Expected `null` or something of type `int` [2]
+-> But got `T` [3]
+
+nullable_tparam.php:6:10
+1 | <?hh
+2 | 
+3 | function expect<T as int>(?T $_): void {}
+  |                           ^^ [2]
+4 | 
+5 | function test<T>(?T $x): void {
+  |                   ^ [3]
+6 |   expect($x);
+  |          ^^ [1]
+7 | }
+
+3 errors found

@@ -17,6 +17,7 @@
 #ifndef incl_HPHP_OFFLINE_TRANS_DATA_
 #define incl_HPHP_OFFLINE_TRANS_DATA_
 
+#include <iosfwd>
 #include <map>
 #include <string>
 #include <unordered_map>
@@ -33,8 +34,9 @@
 namespace HPHP { namespace jit {
 
 struct OfflineCode;
+struct RepoWrapper;
 
-typedef char MD5Str[33];
+typedef char SHA1Str[41];
 
 struct TransAddrRange {
   TCA    start;
@@ -50,12 +52,12 @@ struct TransAddrRange {
 struct OfflineTransData {
   explicit OfflineTransData(const std::string& dumpDir)
     : dumpDir(dumpDir) {
-    loadTCData(dumpDir);
+    loadTCHeader();
   }
 
   uint32_t getNumTrans() const {
     return nTranslations;
-  };
+  }
 
   uint32_t getNumFuncs() const {
     return funcIds.size();
@@ -109,28 +111,12 @@ struct OfflineTransData {
     return repoSchema;
   }
 
-  TCA getHotBase() const {
-    return ahotBase;
-  }
-
-  TCA getHotFrontier() const {
-    return ahotFrontier;
-  }
-
   TCA getMainBase() const {
     return aBase;
   }
 
   TCA getMainFrontier() const {
     return aFrontier;
-  }
-
-  TCA getProfBase() const {
-    return aprofBase;
-  }
-
-  TCA getProfFrontier() const {
-    return aprofFrontier;
   }
 
   TCA getColdBase() const {
@@ -149,15 +135,19 @@ struct OfflineTransData {
     return frozenFrontier;
   }
 
+  const std::string& getBlockMap() const {
+    return blockMap;
+  }
+
   // Find translations that belong to the selectedFuncId
   void findFuncTrans(uint32_t selectedFuncId, std::vector<TransID> *inodes);
 
   void printTransRec(TransID transId, const PerfEventsMap<TransID>& transStats);
+  void printTransRec(std::ostream& os, TransID transId,
+                     const PerfEventsMap<TransID>& transStats);
 
   bool isAddrInSomeTrans(TCA addr) const {
-    if ((ahotBase   <= addr && addr < ahotFrontier)  ||
-        (aBase      <= addr && addr < aFrontier)     ||
-        (aprofBase  <= addr && addr < aprofFrontier) ||
+    if ((aBase      <= addr && addr < aFrontier)     ||
         (coldBase   <= addr && addr < coldFrontier)  ||
         (frozenBase <= addr && addr < frozenFrontier)) {
       return getTransContaining(addr) != INVALID_ID;
@@ -169,7 +159,10 @@ struct OfflineTransData {
     annotationsVerbosity = level;
   }
 
+  void loadTCData(RepoWrapper* repoWrapper);
+
 private:
+  uint32_t                    headerSize;
   uint32_t                    nTranslations;
   std::vector<TransRec>       translations;
   std::vector<TransIDSet>     preds;
@@ -182,12 +175,8 @@ private:
   Addr2TransMap               addr2TransMap;
 
   char                        repoSchema[100];
-  TCA                         ahotBase;
-  TCA                         ahotFrontier;
   TCA                         aBase;
   TCA                         aFrontier;
-  TCA                         aprofBase;
-  TCA                         aprofFrontier;
   TCA                         coldBase;
   TCA                         coldFrontier;
   TCA                         frozenBase;
@@ -199,8 +188,9 @@ private:
 
   uint32_t                    annotationsVerbosity;
 
-  void loadTCData(std::string dumpDir);
+  std::string                 blockMap;
 
+  void loadTCHeader();
 };
 
 } }

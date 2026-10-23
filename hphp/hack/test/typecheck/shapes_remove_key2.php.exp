@@ -1,0 +1,107 @@
+error: Typing[4165] The field `a` may not be present in this shape. Use `??` or `Shapes::idx()` instead. [1]
+-> This is where the field was declared as optional. [2]
+
+shapes_remove_key2.php:5:6
+2 | 
+3 | function test_open1(shape('a' => int, 'b' => int, ...) $s): void {
+4 |   Shapes::removeKey(inout $s, 'a');
+  |                               ^^^ [2]
+5 |   $s['a'];
+  |      ^^^ [1]
+6 |   $s['b'];
+7 | }
+
+error: Typing[4165] The field `a` may not be present in this shape. Use `??` or `Shapes::idx()` instead. [1]
+-> This is where the field was declared as optional. [2]
+
+shapes_remove_key2.php:11:6
+ 8 | 
+ 9 | function test_open2(shape('a' => int, ...) $s): void {
+10 |   Shapes::removeKey(inout $s, 'a');
+   |                               ^^^ [2]
+11 |   $s['a'];
+   |      ^^^ [1]
+12 |   $s['b'];
+13 | }
+
+error: Typing[4108] This shape doesn't have a field `b` [1]
+-> The shape is defined here [2]
+
+shapes_remove_key2.php:12:6
+ 8 | 
+ 9 | function test_open2(shape('a' => int, ...) $s): void {
+10 |   Shapes::removeKey(inout $s, 'a');
+   |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ [2]
+11 |   $s['a'];
+12 |   $s['b'];
+   |      ^^^ [1]
+13 | }
+14 | 
+
+error: Typing[4165] The field `a` may not be present in this shape. Use `??` or `Shapes::idx()` instead. [1]
+-> This is where the field was declared as optional. [2]
+
+shapes_remove_key2.php:17:6
+14 | 
+15 | function test_open3(shape('b' => int, ...) $s): void {
+16 |   Shapes::removeKey(inout $s, 'a');
+   |                               ^^^ [2]
+17 |   $s['a'];
+   |      ^^^ [1]
+18 |   $s['b'];
+19 | }
+
+error: Typing[4108] This shape doesn't have a field `a` [1]
+-> The shape is defined here [2]
+
+shapes_remove_key2.php:23:6
+20 | 
+21 | function test_closed1(shape('a' => int, 'b' => int) $s): void {
+22 |   Shapes::removeKey(inout $s, 'a');
+   |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ [2]
+23 |   $s['a'];
+   |      ^^^ [1]
+24 |   $s['b'];
+25 | }
+
+error: Typing[4108] This shape doesn't have a field `a` [1]
+-> The shape is defined here [2]
+
+shapes_remove_key2.php:29:6
+26 | 
+27 | function test_closed2(shape('a' => int) $s): void {
+28 |   Shapes::removeKey(inout $s, 'a');
+   |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ [2]
+29 |   $s['a'];
+   |      ^^^ [1]
+30 |   $s['b'];
+31 | }
+
+error: Typing[4108] This shape doesn't have a field `b` [1]
+-> The shape is defined here [2]
+
+shapes_remove_key2.php:30:6
+26 | 
+27 | function test_closed2(shape('a' => int) $s): void {
+28 |   Shapes::removeKey(inout $s, 'a');
+   |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ [2]
+29 |   $s['a'];
+30 |   $s['b'];
+   |      ^^^ [1]
+31 | }
+32 | 
+
+error: Typing[4108] This shape doesn't have a field `a` [1]
+-> The shape is defined here [2]
+
+shapes_remove_key2.php:35:6
+32 | 
+33 | function test_closed3(shape('b' => int) $s): void {
+34 |   Shapes::removeKey(inout $s, 'a');
+   |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ [2]
+35 |   $s['a'];
+   |      ^^^ [1]
+36 |   $s['b'];
+37 | }
+
+8 errors found

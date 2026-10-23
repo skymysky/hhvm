@@ -1,5 +1,5 @@
-<?php
-function foo () {
+<?hh
+function foo () :mixed{
     do {
         try {
             try {
@@ -11,6 +11,6 @@ function foo () {
         }
     } while (0);
 }
-
+<<__EntryPoint>> function main(): void {
 foo();
-?>
+}

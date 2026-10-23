@@ -2,16 +2,21 @@
 
 class Blah extends Exception {}
 
-async function foo() {
+async function foo() :Awaitable<mixed>{
   throw new Blah();
 }
 
-async function bar() {
-  $x = await foo();
-  var_dump($x);
+async function bar() :Awaitable<mixed>{
+  try {
+    $x = await foo();
+    var_dump($x);
+  } catch (Exception $e) {
+    echo "rethrowing\n";
+    throw $e;
+  }
 }
 
-function main() {
+function main() :mixed{
   $x = bar();
 
   try {
@@ -21,7 +26,7 @@ function main() {
   }
 
   $x = bar();
-  if (!$x->isFinished()) { die("test failed"); }
+  if (!$x->isFinished()) { exit("test failed"); }
   try {
     var_dump(HH\Asio\result($x));
   } catch (Blah $x) {
@@ -29,5 +34,9 @@ function main() {
   }
 }
 
+
+<<__EntryPoint>>
+function main_await_failure() :mixed{
 main();
 echo "done\n";
+}

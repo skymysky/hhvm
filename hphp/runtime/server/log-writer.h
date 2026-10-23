@@ -13,8 +13,7 @@
    | license@php.net so we can mail you a copy immediately.               |
    +----------------------------------------------------------------------+
 */
-#ifndef incl_HPHP_LOG_WRITER_H_
-#define incl_HPHP_LOG_WRITER_H_
+#pragma once
 
 #include <string>
 
@@ -78,7 +77,7 @@ bool FieldGenerator::gen(char field, const std::string& arg, T& out) {
   switch (field) {
   case 'b':
     if (responseSize == 0) return false;
-    // Fall through
+    [[fallthrough]];
   case 'B':
     out = folly::to<T>(responseSize);
     break;
@@ -152,10 +151,14 @@ bool FieldGenerator::gen(char field, const std::string& arg, T& out) {
       }
     }
     break;
+  case 'M':
+    // current Unix timestamp in microseconds
+    out = folly::to<T>(Timer::GetCurrentTimeMicros());
+    break;
   case 'n':
     if (arg.empty()) return false;
     {
-      String note = ServerNote::Get(arg);
+      OptString note = ServerNote::Get(arg);
       if (note.isNull()) return false;
       out = folly::to<T>(note.data());
     }
@@ -213,7 +216,7 @@ bool FieldGenerator::gen(char field, const std::string& arg, T& out) {
     break;
   case 'U':
     {
-      String b, q;
+      OptString b, q;
       RequestURI::splitURL(transport->getUrl(), b, q);
       out = folly::to<T>(b.c_str());
     }
@@ -226,7 +229,7 @@ bool FieldGenerator::gen(char field, const std::string& arg, T& out) {
     {
       std::string host = transport->getHeader("Host");
       const std::string &sname = VirtualHost::GetCurrent()->serverName(host);
-      if (sname.empty() || RuntimeOption::ForceServerNameToHeader) {
+      if (sname.empty() || Cfg::Server::ForceServerNameToHeader) {
         out = folly::to<T>(host);
       } else {
         out = folly::to<T>(sname);
@@ -256,5 +259,3 @@ bool FieldGenerator::gen(char field, const std::string& arg, T& out) {
 
 ///////////////////////////////////////////////////////////////////////////////
 }
-
-#endif // incl_HPHP_LOG_WRITER_H_

@@ -1,12 +1,16 @@
-<?php
+<?hh
 
-function x() {
-  $y1 = new stdclass;
-  $y = new stdclass;
+function x() :mixed{
+  $y1 = new stdClass;
+  $y = new stdClass;
   $y->dyn = $y1;
-  unset($y1);
+  $y1 = null;
   var_dump($y);
-  unset($y);
-  var_dump(new stdclass);
+  $y = null;
+  var_dump(new stdClass);
 }
+
+<<__EntryPoint>>
+function main_oid_order() :mixed{
 x();
+}

@@ -1,21 +1,22 @@
-<?
+<?hh
 
-function foo() {
+<<__NEVER_INLINE>>
+function foo() :mixed{
   return 4;
 }
 
-function bar($x) {
+<<__NEVER_INLINE>>
+function bar($x) :mixed{
   echo var_dump($x[3]);
 }
 
-function main() {
-  $a = array(1, 2, 3, foo());
+function main() :mixed{
+  $a = vec[1, 2, 3, foo()];
   bar($a);
 }
 
-if (is_callable('__hhvm_intrinsics\disable_inlining')) {
-  __hhvm_intrinsics\disable_inlining('foo');
-  __hhvm_intrinsics\disable_inlining('bar');
-}
 
+<<__EntryPoint>>
+function main_disable_inlining() :mixed{
 main();
+}

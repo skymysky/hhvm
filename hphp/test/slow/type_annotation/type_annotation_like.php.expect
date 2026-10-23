@@ -1,0 +1,133 @@
+=== A ===
+string(6) "HH\int"
+dict(1) {
+  ["kind"]=>
+  int(1)
+}
+=== B ===
+string(14) "HH\vec<HH\int>"
+dict(2) {
+  ["kind"]=>
+  int(20)
+  ["generic_types"]=>
+  vec(1) {
+    dict(1) {
+      ["kind"]=>
+      int(1)
+    }
+  }
+}
+=== C ===
+string(26) "HH\dict<HH\string, HH\int>"
+dict(2) {
+  ["kind"]=>
+  int(19)
+  ["generic_types"]=>
+  vec(2) {
+    dict(1) {
+      ["kind"]=>
+      int(4)
+    }
+    dict(1) {
+      ["kind"]=>
+      int(1)
+    }
+  }
+}
+=== D ===
+string(27) "(HH\int, HH\float, HH\bool)"
+dict(2) {
+  ["kind"]=>
+  int(10)
+  ["elem_types"]=>
+  vec(3) {
+    dict(1) {
+      ["kind"]=>
+      int(1)
+    }
+    dict(1) {
+      ["kind"]=>
+      int(3)
+    }
+    dict(1) {
+      ["kind"]=>
+      int(2)
+    }
+  }
+}
+=== E ===
+string(45) "HH\shape('x'=>HH\string, 'y'=>HH\vec<HH\int>)"
+dict(2) {
+  ["kind"]=>
+  int(14)
+  ["fields"]=>
+  dict(2) {
+    ["x"]=>
+    dict(1) {
+      ["kind"]=>
+      int(4)
+    }
+    ["y"]=>
+    dict(2) {
+      ["kind"]=>
+      int(20)
+      ["generic_types"]=>
+      vec(1) {
+        dict(1) {
+          ["kind"]=>
+          int(1)
+        }
+      }
+    }
+  }
+}
+=== F ===
+string(21) "(function (): HH\int)"
+dict(3) {
+  ["kind"]=>
+  int(11)
+  ["return_type"]=>
+  dict(1) {
+    ["kind"]=>
+    int(1)
+  }
+  ["param_types"]=>
+  vec(0) {
+  }
+}
+=== G ===
+string(10) "HH\this::F"
+dict(3) {
+  ["kind"]=>
+  int(11)
+  ["return_type"]=>
+  dict(1) {
+    ["kind"]=>
+    int(1)
+  }
+  ["param_types"]=>
+  vec(0) {
+  }
+}
+=== H ===
+string(7) "?HH\int"
+dict(2) {
+  ["nullable"]=>
+  bool(true)
+  ["kind"]=>
+  int(1)
+}
+=== I ===
+string(1) "C"
+dict(2) {
+  ["kind"]=>
+  int(15)
+  ["classname"]=>
+  string(1) "C"
+}
+=== J ===
+string(6) "HH\int"
+dict(1) {
+  ["kind"]=>
+  int(1)
+}

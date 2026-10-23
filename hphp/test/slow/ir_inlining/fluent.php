@@ -1,4 +1,4 @@
-<?php
+<?hh
 
 class FluentObj {
   private
@@ -12,29 +12,29 @@ class FluentObj {
     $this->first = $first;
   }
 
-  public function setSecond($x) {
+  public function setSecond($x) :mixed{
     $this->second = $x;
     return $this;
   }
-  public function setThird($x) {
+  public function setThird($x) :mixed{
     $this->third = $x;
     return $this;
   }
-  public function setFourth($x) {
+  public function setFourth($x) :mixed{
     $this->fourth = $x;
     return $this;
   }
-  public function setFifth($x) {
+  public function setFifth($x) :mixed{
     $this->fifth = $x;
     return $this;
   }
 
-  public function getValue() {
+  public function getValue() :mixed{
     return $this->first;
   }
 }
 
-function main() {
+function main() :mixed{
   $k = (new FluentObj('a'))
     ->setSecond('b')
     ->setThird('c')
@@ -44,4 +44,8 @@ function main() {
   echo $k;
   echo "\n";
 }
+
+<<__EntryPoint>>
+function main_fluent() :mixed{
 main();
+}

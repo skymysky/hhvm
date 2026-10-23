@@ -1,5 +1,6 @@
-<?php
-$filename = dirname(__FILE__)."/DOMDocument_saveHTMLFile_formatOutput".time().".html";
+<?hh
+<<__EntryPoint>> function main(): void {
+$filename = sys_get_temp_dir().'/'.'formatOutput.html';
 $doc = new DOMDocument('1.0');
 $doc->formatOutput = true;
 $root = $doc->createElement('html');
@@ -14,4 +15,4 @@ $bytes = $doc->saveHTMLFile($filename);
 var_dump($bytes);
 echo file_get_contents($filename);
 unlink($filename);
-?>
+}

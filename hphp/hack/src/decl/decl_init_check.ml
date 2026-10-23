@@ -1,4 +1,4 @@
-(**
+(*
  * Copyright (c) 2015, Facebook, Inc.
  * All rights reserved.
  *
@@ -7,10 +7,18 @@
  *
  *)
 
-open Hh_core
+open Hh_prelude
 open Decl_defs
-open Nast
+open Aast
+open Shallow_decl_defs
 open Typing_defs
+module Attrs = Naming_attributes
+module SN = Naming_special_names
+
+(** Helpers for checking initialization of class properties by looking at decls. *)
+
+type get_class_add_dep =
+  Decl_env.env -> string -> Decl_defs.decl_class_type option
 
 let parent_init_prop = "parent::" ^ SN.Members.__construct
 
@@ -18,103 +26,223 @@ let parent_init_prop = "parent::" ^ SN.Members.__construct
  * a class variable that needs to be initialized. It's a bit hacky
  * but it works. The idea here is that if the parent needs to be
  * initialized, we add a phony class variable. *)
-let add_parent_construct c decl_env props parent_hint =
+let add_parent_construct
+    ~(get_class_add_dep : get_class_add_dep) decl_env c props parent_hint =
   match parent_hint with
-    | (_, Happly ((_, parent), _)) ->
-      let class_ = Decl_env.get_class_dep decl_env parent in
-      (match class_ with
-        | Some class_ when
-            class_.dc_need_init && c.c_constructor <> None
-            -> SSet.add parent_init_prop props
-        | _ -> props
-      )
-    | _ -> props
+  | (_, Happly ((_, parent), _)) ->
+    (match get_class_add_dep decl_env parent with
+    | Some class_ when class_.dc_need_init ->
+      let (c_constructor, _, _) = split_methods c.c_methods in
+      if Option.is_some c_constructor then
+        S_set.add parent_init_prop props
+      else
+        props
+    | _ -> props)
+  | _ -> props
 
-let parent decl_env props c =
-  if c.c_mode = FileInfo.Mdecl then props
+(* As above, but for shallow_class decls rather than class NASTs. *)
+let add_parent_construct_from_shallow_decl
+    ~get_class_add_dep decl_env sc props parent_ty =
+  match get_node parent_ty with
+  | Tapply ((_, parent), _) ->
+    (match get_class_add_dep decl_env parent with
+    | Some class_ when class_.dc_need_init && Option.is_some sc.sc_constructor
+      ->
+      S_set.add parent_init_prop props
+    | _ -> props)
+  | _ -> props
+
+let parent ~(get_class_add_dep : get_class_add_dep) decl_env c acc =
+  if File_info.is_hhi c.c_mode then
+    acc
+  else if Ast_defs.is_c_trait c.c_kind then
+    let (req_extends, _req_implements, _req_class, req_this_as) =
+      split_reqs c.c_reqs
+    in
+    List.fold_left
+      (req_extends @ req_this_as)
+      ~init:acc
+      ~f:(add_parent_construct ~get_class_add_dep decl_env c)
   else
-    if c.c_kind = Ast.Ctrait
-    then List.fold_left c.c_req_extends
-      ~f:(add_parent_construct c decl_env) ~init:props
-    else match c.c_extends with
-    | [] -> props
-    | parent_hint :: _ -> add_parent_construct c decl_env props parent_hint
+    match c.c_extends with
+    | [] -> acc
+    | parent_ty :: _ ->
+      add_parent_construct ~get_class_add_dep decl_env c acc parent_ty
 
-let prop_needs_init add_to_acc acc cv =
-  if cv.cv_is_xhp then acc else begin
-    match cv.cv_type with
-      | None
-      | Some (_, Hoption _)
-      | Some (_, Hmixed) -> acc
-      | Some _ when cv.cv_expr = None -> add_to_acc cv acc
-      | Some _ -> acc
-  end
+(* As above, but for shallow_class decls rather than class NASTs. *)
+let parent_from_shallow_decl
+    ~(get_class_add_dep : get_class_add_dep) decl_env sc acc =
+  if File_info.is_hhi sc.sc_mode then
+    acc
+  else if Ast_defs.is_c_trait sc.sc_kind then
+    List.fold_left
+      sc.sc_req_extends
+      ~init:acc
+      ~f:(add_parent_construct_from_shallow_decl ~get_class_add_dep decl_env sc)
+  else
+    match sc.sc_extends with
+    | [] -> acc
+    | parent_ty :: _ ->
+      add_parent_construct_from_shallow_decl
+        ~get_class_add_dep
+        decl_env
+        sc
+        acc
+        parent_ty
 
-let parent_props decl_env acc c =
-  List.fold_left c.c_extends ~f:begin fun acc parent ->
-    match parent with
-    | _, Happly ((_, parent), _) ->
-      let tc = Decl_env.get_class_dep decl_env parent in
-      (match tc with
+let is_lateinit cv =
+  Attrs.mem SN.UserAttributes.uaLateInit cv.cv_user_attributes
+
+let prop_may_need_init cv =
+  if Option.is_some cv.cv_xhp_attr then
+    false
+  else if is_lateinit cv then
+    false
+  else
+    match snd cv.cv_type with
+    | None
+    | Some (_, Hoption _)
+    | Some (_, Hmixed) ->
+      false
+    | Some _ -> Option.is_none cv.cv_expr
+
+(* As above, but for shallow_class decls rather than class NASTs. *)
+let shallow_prop_may_need_init sp =
+  if Option.is_some sp.sp_xhp_attr then
+    false
+  else if sp_lateinit sp then
+    false
+  else
+    sp_needs_init sp
+
+let own_props c props =
+  List.fold_left c.c_vars ~init:props ~f:(fun acc cv ->
+      if prop_may_need_init cv then
+        S_set.add (snd cv.cv_id) acc
+      else
+        acc)
+
+let init_not_required_props c props =
+  List.fold_left c.c_vars ~init:props ~f:(fun acc cv ->
+      if prop_may_need_init cv then
+        acc
+      else
+        S_set.add (snd cv.cv_id) acc)
+
+let parent_props ~(get_class_add_dep : get_class_add_dep) decl_env c props =
+  List.fold_left c.c_extends ~init:props ~f:(fun acc parent ->
+      match parent with
+      | (_, Happly ((_, parent), _)) ->
+        let tc = get_class_add_dep decl_env parent in
+        (match tc with
         | None -> acc
         | Some { dc_deferred_init_members = members; _ } ->
-          SSet.union members acc)
-    | _ -> acc
-  end ~init:acc
+          S_set.union members acc)
+      | _ -> acc)
 
-let trait_props decl_env props c =
-  List.fold_left c.c_uses ~f:begin fun acc -> function
-    | _, Happly ((_, trait), _) -> begin
-      let class_ = Decl_env.get_class_dep decl_env trait in
-      match class_ with
-      | None -> acc
-      | Some { dc_construct = cstr; dc_deferred_init_members = members; _ } -> begin
-        (* If our current class defines its own constructor, completely ignore
-         * the fact that the trait may have had one defined and merge in all of
-         * its members.
-         * If the curr. class does not have its own constructor, only fold in
-         * the trait members if it would not have had its own constructor when
-         * defining `dc_deferred_init_members`. See logic in `class_` for
-         * Ast.Cabstract to see where this deviated for traits.
-         *)
-        match fst cstr with
-          | None -> SSet.union members acc
-          | Some cstr when cstr.elt_origin <> trait || cstr.elt_abstract ->
-              SSet.union members acc
-          | _ when c.c_constructor <> None -> SSet.union members acc
-          | _ -> acc
-      end
-    end
-    | _ -> acc
-  end ~init:props
+(* As above, but for shallow_class decls rather than class NASTs. *)
+let parent_props_from_shallow_decl
+    ~(get_class_add_dep : get_class_add_dep) decl_env sc props =
+  List.fold_left sc.sc_extends ~init:props ~f:(fun acc parent ->
+      match get_node parent with
+      | Tapply ((_, parent), _) ->
+        let tc = get_class_add_dep decl_env parent in
+        (match tc with
+        | None -> acc
+        | Some { dc_deferred_init_members = members; _ } ->
+          S_set.union members acc)
+      | _ -> acc)
 
-(* return a tuple of the private init-requiring props of the class
- * and the other init-requiring props of the class and its ancestors *)
-let classify_props_for_decl decl_env c =
-  let adder = begin fun cv (private_props, hierarchy_props) ->
-    let cname = snd cv.cv_id in
-    if cv.cv_visibility = Private then
-      (SSet.add cname private_props), hierarchy_props
-    else
-      private_props, (SSet.add cname hierarchy_props)
-  end in
-  let acc = (SSet.empty, SSet.empty) in
-  let priv_props, props =
-    List.fold_left ~f:(prop_needs_init adder) ~init:acc c.c_vars in
-  let props = parent_props decl_env props c in
-  let props = parent decl_env props c in
-  priv_props, props
+let trait_props ~(get_class_add_dep : get_class_add_dep) decl_env c props =
+  List.fold_left c.c_uses ~init:props ~f:(fun acc trait_hint ->
+      match trait_hint with
+      | (_, Happly ((_, trait), _)) ->
+        let class_ = get_class_add_dep decl_env trait in
+        (match class_ with
+        | None -> acc
+        | Some { dc_construct = cstr; dc_deferred_init_members = members; _ } ->
+          (* If our current class defines its own constructor, completely ignore
+           * the fact that the trait may have had one defined and merge in all of
+           * its members.
+           * If the curr. class does not have its own constructor, only fold in
+           * the trait members if it would not have had its own constructor when
+           * defining `dc_deferred_init_members`. See logic in `class_` for
+           * Ast_defs.Cclass (Abstract) to see where this deviated for traits. *)
+          (match fst cstr with
+          | None -> S_set.union members acc
+          | Some cstr
+            when String.( <> ) cstr.elt_origin trait || get_elt_abstract cstr ->
+            S_set.union members acc
+          | _ ->
+            let (c_constructor, _, _) = split_methods c.c_methods in
+            if Option.is_some c_constructor then
+              S_set.union members acc
+            else
+              acc))
+      | _ -> acc)
 
-let class_ ~has_own_cstr decl_env c =
+(** return the private init-requiring props of the class from its NAST *)
+let get_private_deferred_init_props c =
+  List.fold_left c.c_vars ~init:S_set.empty ~f:(fun priv_props cv ->
+      let name = snd cv.cv_id in
+      let visibility = cv.cv_visibility in
+      if prop_may_need_init cv && Aast.(equal_visibility visibility Private)
+      then
+        S_set.add name priv_props
+      else
+        priv_props)
+
+(** return all init-requiring props of the class and its ancestors from the
+    given shallow class decl and the ancestors' folded decls. *)
+let get_nonprivate_deferred_init_props
+    ~(get_class_add_dep : get_class_add_dep) decl_env sc =
+  let props =
+    List.fold_left sc.sc_props ~init:S_set.empty ~f:(fun props sp ->
+        if shallow_prop_may_need_init sp then
+          S_set.add (snd sp.sp_name) props
+        else
+          props)
+  in
+  let props =
+    parent_props_from_shallow_decl ~get_class_add_dep decl_env sc props
+  in
+  let props = parent_from_shallow_decl ~get_class_add_dep decl_env sc props in
+  props
+
+let private_deferred_init_props ~has_own_cstr c =
   match c.c_kind with
-  | Ast.Cabstract when not has_own_cstr ->
-    let priv_props, props = classify_props_for_decl decl_env c in
-    if priv_props <> SSet.empty then
-      (* XXX: should priv_props be checked for a trait?
-       * see chown_privates in typing_inherit *)
-      Errors.constructor_required c.c_name priv_props;
-    SSet.union priv_props props
-  | Ast.Ctrait ->
-    let priv_props, props = classify_props_for_decl decl_env c in
-    SSet.union priv_props props
-  | _ -> SSet.empty
+  | Ast_defs.Cclass k when Ast_defs.is_abstract k && not has_own_cstr ->
+    get_private_deferred_init_props c
+  | Ast_defs.Ctrait -> get_private_deferred_init_props c
+  | Ast_defs.(Cclass _ | Cinterface | Cenum | Cenum_class _) -> S_set.empty
+
+let nonprivate_deferred_init_props
+    ~has_own_cstr ~(get_class_add_dep : get_class_add_dep) decl_env sc =
+  match sc.sc_kind with
+  | Ast_defs.Cclass k when Ast_defs.is_abstract k && not has_own_cstr ->
+    get_nonprivate_deferred_init_props ~get_class_add_dep decl_env sc
+  | Ast_defs.Ctrait ->
+    get_nonprivate_deferred_init_props ~get_class_add_dep decl_env sc
+  | Ast_defs.(Cclass _ | Cinterface | Cenum | Cenum_class _) -> S_set.empty
+
+(**
+ * [parent_initialized_members decl_env c] returns all members initialized in
+ * the parents of [c], s.t. they should not be readable within [c]'s
+ * [__construct] method until _after_ [parent::__construct] has been called.
+ *)
+let parent_initialized_members ~get_class_add_dep decl_env c =
+  let parent_initialized_members_helper = function
+    | None -> S_set.empty
+    | Some { dc_props; _ } ->
+      dc_props
+      |> S_map.filter (fun _ p -> Decl_defs.get_elt_needs_init p)
+      |> S_map.keys
+      |> S_set.of_list
+  in
+  List.fold_left c.c_extends ~init:S_set.empty ~f:(fun acc parent ->
+      match parent with
+      | (_, Happly ((_, parent), _)) ->
+        get_class_add_dep decl_env parent
+        |> parent_initialized_members_helper
+        |> S_set.union acc
+      | _ -> acc)

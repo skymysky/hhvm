@@ -19,27 +19,33 @@
 
 #include <map>
 
-#include "hphp/util/md5.h"
-#include "hphp/runtime/vm/repo.h"
+#include "hphp/runtime/vm/unit.h"
+
+#include "hphp/util/sha1.h"
 
 namespace HPHP { namespace jit {
 
 struct RepoWrapper {
 private:
-  typedef std::map<MD5, Unit*> CacheType;
+  typedef std::map<int64_t, Unit*> CacheType;
 
-  Repo* repo;
   CacheType unitCache;
+  bool m_hasRepo;
 
   RepoWrapper(const RepoWrapper& other);
   RepoWrapper& operator=(RepoWrapper other);
 
 public:
-  RepoWrapper(const char* repoSchema, const std::string& configFile);
+  RepoWrapper(const char* repoSchema,
+              const std::string& repoFileName,
+              Hdf& hdf,
+              const bool shouldPrint = true);
   ~RepoWrapper();
 
+  bool hasRepo() const { return m_hasRepo; }
   void addUnit(Unit* u);
-  Unit* getUnit(MD5 md5);
+  Unit* getUnit(int64_t sn);
+  Func* getFunc(int64_t sn, Id funcSn);
 };
 
 } }

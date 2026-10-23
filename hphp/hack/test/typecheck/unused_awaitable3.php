@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 /**
  * Copyright (c) 2014, Facebook, Inc.
  * All rights reserved.
@@ -10,7 +10,7 @@
  */
 
 function prep<T>(Awaitable<T> $x): T {
-  // UNSAFE
+  throw new Exception();
 }
 
 async function a(): Awaitable<int> {

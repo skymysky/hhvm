@@ -14,15 +14,16 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_JIT_CALL_SPEC_H_
-#define incl_HPHP_JIT_CALL_SPEC_H_
+#pragma once
 
 #include "hphp/runtime/ext/asio/asio-blockable.h"
 
+#include "hphp/runtime/vm/jit/jit-resume-addr.h"
 #include "hphp/runtime/vm/jit/type.h"
 #include "hphp/runtime/vm/jit/vasm-reg.h"
 
 #include "hphp/runtime/base/array-data.h"
+#include "hphp/runtime/vm/class-meth-data-ref.h"
 
 #include <array>
 #include <cstdint>
@@ -45,31 +46,38 @@ namespace detail {
  * Type::operator| can't reasonably be made constexpr. This macro constructs a
  * constexpr Type that's the union of two other non-Mem, non-specialized Types.
  */
-#define U(t1, t2) Type(Type::k##t1 | Type::k##t2, Ptr::NotPtr, Mem::NotMem)
+#define U(t1, t2) Type(Type::k##t1 | Type::k##t2, PtrLocation::Bottom)
 
 #define CPP_TYPES                \
   T(ActRec*, TFramePtr)          \
   T(AsioBlockableChain, TABC)    \
   T(Class*, TCls)                \
+  T(JitResumeAddr, TTop)         \
+  T(LazyClassData, TLazyCls)     \
   T(Func*, TFunc)                \
-  T(NamedEntity*, TNamedEntity)  \
-  T(RefData*, TBoxedInitCell)    \
+  T(RFuncData*, TRFunc)          \
+  T(ClsMethDataRef, TClsMeth)    \
+  T(RClsMethData*, TRClsMeth)    \
+  T(NamedType*, TNamedType)      \
+  T(NamedFunc*, TNamedFunc)      \
   T(ResourceHdr*, TRes)          \
   T(StringData*, TStr)           \
   T(TCA, TTCA)                   \
-  T(TypedValue&, TPtrToGen)      \
-  T(TypedValue*, TPtrToGen)      \
-  T(TypedValue, TGen)            \
+  T(TypedValue&, TPtr)           \
+  T(TypedValue*, TPtr)           \
+  T(TypedValue, TCell)           \
+  T(bool*, TPtr)                 \
+  T(void*, TVoidPtr)             \
   T(bool, TBool)                 \
   T(double, TDbl)                \
-  T(int32_t, TInt)               \
-  T(int64_t, TInt)               \
+  T(int, TInt)                   \
+  T(long, TInt)                  \
+  T(long long, TInt)             \
   T(unsigned long, TInt)         \
   T(unsigned long long, TInt)    \
   T(unsigned int, U(Int, RDSHandle)) \
-  /* tv_[rl]val will be TLvalToGen once we have proper JIT support for them */ \
-  T(tv_lval, TPtrToGen)          \
-  T(tv_rval, TPtrToGen)
+  T(tv_lval, TLval)              \
+  T(tv_rval, TLval)
 
 /*
  * jit_cpp_type<> handles all types that are the same for parameters and return
@@ -133,10 +141,6 @@ template<typename T> struct jit_ret_type : jit_cpp_type<T> {};
 template<> struct jit_ret_type<void>  {
   static auto constexpr type() { return TTop; }
 };
-template<> struct jit_ret_type<void*> {
-  static auto constexpr type() { return TTop; }
-};
-
 
 template<typename T>
 struct strip_inner_const { using type = T; };
@@ -198,15 +202,6 @@ struct CallSpec {
     Smashable,
 
     /*
-     * Call to an ArrayData vtable function.
-     *
-     * This is used to call ArrayData APIs by loading the appropriate function
-     * table for the desired function family out of g_array_funcs, and indexing
-     * into it with the ArrayKind of the passed ArrayData* argument.
-     */
-    ArrayVirt,
-
-    /*
      * Call the appropriate destructor (i.e., release) function for the unitary
      * argument.
      *
@@ -223,6 +218,14 @@ struct CallSpec {
      * TODO(#8425101): Make this true.
      */
     Stub,
+
+    /*
+     * Call the appropriate release function for an object.
+     *
+     * A Vreg containing the object's class is used to determine the correct
+     * function to call.
+     */
+    ObjDestructor
   };
 
   CallSpec() = delete;
@@ -239,7 +242,7 @@ struct CallSpec {
    */
   template<class Ret, class... Args>
   static CallSpec direct(Ret (*fp)(Args...), const FuncType* type) {
-    return CallSpec{Kind::Direct, reinterpret_cast<void*>(fp), type};
+    return CallSpec { Kind::Direct, reinterpret_cast<void*>(fp), type };
   }
 
   template<class F>
@@ -277,23 +280,6 @@ struct CallSpec {
   }
 
   /*
-   * An ArrayVirt call, for the array function table `p'.
-   *
-   * Takes a pointer to an array of function pointers to use for the particular
-   * entry point.  For example,
-   *
-   *   CallSpec::array(&g_array_funcs.nvGetInt)
-   *
-   * The call mechanism assumes that the first argument to the function is an
-   * ArrayData*, and loads the kind from there.
-   */
-  template<class Ret, class... Args>
-  static CallSpec array(Ret (*const (*p)[ArrayData::kNumKinds])(Args...)) {
-    const void* vp = p;
-    return CallSpec { Kind::ArrayVirt, const_cast<void*>(vp) };
-  }
-
-  /*
    * A Destructor call for the DataType in `r'.
    */
   static CallSpec destruct(Vreg r) {
@@ -305,6 +291,13 @@ struct CallSpec {
    */
   static CallSpec stub(TCA addr) {
     return CallSpec { Kind::Stub, addr };
+  }
+
+  /*
+   * A Destructor for an object with class `cls'.
+   */
+  static CallSpec objDestruct(Vreg cls) {
+    return CallSpec { Kind::ObjDestructor, cls };
   }
 
   /////////////////////////////////////////////////////////////////////////////
@@ -325,18 +318,11 @@ struct CallSpec {
   }
 
   /*
-   * The table of array functions, for ArrayVirt calls.
-   */
-  void* arrayTable() const {
-    assertx(kind() == Kind::ArrayVirt);
-    return m_u.fp;
-  }
-
-  /*
    * The register containing the DataType, for Destructor calls.
    */
   Vreg reg() const {
-    assertx(kind() == Kind::Destructor);
+    assertx(kind() == Kind::Destructor ||
+            kind() == Kind::ObjDestructor);
     return m_u.reg;
   }
 
@@ -356,6 +342,21 @@ struct CallSpec {
                        const std::vector<Type>& args) const;
 
   /////////////////////////////////////////////////////////////////////////////
+
+  bool operator==(const CallSpec& o) const {
+    auto const k1 = kind();
+    auto const k2 = o.kind();
+    if (k1 != k2) return false;
+    switch (k1) {
+      case CallSpec::Kind::Direct:
+      case CallSpec::Kind::Smashable:  return address() == o.address();
+      case CallSpec::Kind::Destructor: return reg() == o.reg();
+      case CallSpec::Kind::Stub:       return stubAddr() == o.stubAddr();
+      case CallSpec::Kind::ObjDestructor: return reg() == o.reg();
+    }
+    always_assert(false);
+  }
+  bool operator!=(const CallSpec& o) const { return !(*this == o); }
 
 private:
   union U {
@@ -382,5 +383,3 @@ private:
 ///////////////////////////////////////////////////////////////////////////////
 
 }}
-
-#endif

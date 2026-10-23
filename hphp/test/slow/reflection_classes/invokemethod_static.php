@@ -1,18 +1,23 @@
-<?php
+<?hh
 
 class Foo {
-  public static function bar() {
-    var_dump(func_get_args());
+  <<__DynamicallyCallable>>
+  public static function bar(...$args) :mixed{
+    var_dump($args);
   }
 }
 
 class Bar {
 }
 
-function main() {
+function main() :mixed{
   $m = new ReflectionMethod('Foo', 'bar');
   $m->invoke($m);
   $m->invoke(new Bar());
 }
 
+
+<<__EntryPoint>>
+function main_invokemethod_static() :mixed{
 main();
+}

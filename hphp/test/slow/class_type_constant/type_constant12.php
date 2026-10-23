@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 
 interface I {
   const T = 0;
@@ -9,3 +9,8 @@ abstract class P {
 }
 
 class C extends P implements I {}
+
+<<__EntryPoint>>
+function main(): void {
+  echo "Done.\n";
+}

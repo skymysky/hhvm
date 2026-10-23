@@ -1,0 +1,147 @@
+warning: Warn[12038] Method invoked on a value of type `dynamic` [1]
+-> This expression has type `dynamic` [2]
+
+dynamic_call_warning.php:4:7
+1 | <?hh
+2 | 
+3 | function test_method_call_on_dynamic(dynamic $x): void {
+  |                                      ^^^^^^^ [2]
+4 |   $x->foo();
+  |       ^^^ [1]
+5 | }
+6 | 
+
+warning: Warn[12039] Value of type `dynamic` called as a function [1]
+-> This expression has type `dynamic` [2]
+
+dynamic_call_warning.php:8:4
+ 5 | }
+ 6 | 
+ 7 | function test_function_call_on_dynamic(dynamic $x): void {
+   |                                        ^^^^^^^ [2]
+ 8 |   ($x)();
+   |    ^^ [1]
+ 9 | }
+10 | 
+
+warning: Warn[12042] Property accessed on a value of type `dynamic` [1]
+-> This expression has type `dynamic` [2]
+
+dynamic_call_warning.php:12:12
+ 9 | }
+10 | 
+11 | function test_property_access_on_dynamic(dynamic $x): void {
+   |                                          ^^^^^^^ [2]
+12 |   $y = $x->bar;
+   |            ^^^ [1]
+13 | }
+14 | 
+
+warning: Warn[12040] Indexing into a value of type `dynamic` [1]
+-> This expression has type `dynamic` [2]
+
+dynamic_call_warning.php:34:8
+31 | }
+32 | 
+33 | function test_array_index_on_dynamic(dynamic $x): void {
+   |                                      ^^^^^^^ [2]
+34 |   $y = $x[0];
+   |        ^^ [1]
+35 | }
+36 | 
+
+warning: Warn[12040] Indexing into a value of type `dynamic` [1]
+-> This expression has type `dynamic` [2]
+
+dynamic_call_warning.php:38:3
+35 | }
+36 | 
+37 | function test_array_update_on_dynamic(dynamic $x): void {
+   |                                       ^^^^^^^ [2]
+38 |   $x[0] = 42;
+   |   ^^ [1]
+39 | }
+40 | 
+
+warning: Warn[12040] Appending to a value of type `dynamic` [1]
+-> This expression has type `dynamic` [2]
+
+dynamic_call_warning.php:42:3
+39 | }
+40 | 
+41 | function test_array_append_on_dynamic(dynamic $x): void {
+   |                                       ^^^^^^^ [2]
+42 |   $x[] = 42;
+   |   ^^ [1]
+43 | }
+44 | 
+
+error: Typing[4053] No instance method `bar` in `C` [1]
+-> This is why I think it is an object of type C from this `is` expression test [2]
+-> Declaration of `C` is here [3]
+
+dynamic_call_warning.php:17:9
+14 | 
+15 | function test_method_call_through_intersection(dynamic $x): void {
+16 |   if ($x is C) {
+   |             ^ [2]
+17 |     $x->bar();
+   |         ^^^ [1]
+18 |   }
+19 | }
+   :
+25 | }
+26 | 
+27 | class C {}
+   |       ^ [3]
+28 | 
+29 | function test_no_warn_on_non_dynamic(int $x): void {
+
+error: Typing[4009] This call is invalid, this is not a function, it is an object of type C [1]
+
+dynamic_call_warning.php:23:5
+21 | function test_function_call_through_intersection(dynamic $x): void {
+22 |   if ($x is C) {
+23 |     ($x)();
+   |     ^^^^^^ [1]
+24 |   }
+25 | }
+
+error: Typing[4110] Typing error [1]
+-> Expected an array that can be indexed [1]
+-> But got `C` from this `is` expression test [2]
+
+dynamic_call_warning.php:47:10
+44 | 
+45 | function test_array_index_through_intersection(dynamic $x): void {
+46 |   if ($x is C) {
+   |             ^ [2]
+47 |     $y = $x[0];
+   |          ^^^^^ [1]
+48 |   }
+49 | }
+
+error: Typing[4053] Typing error [1]
+-> No property `bar` in `C` [2]
+-> This is why I think it is an object of type C from this `is` expression test [3]
+-> Declaration of `C` is here [4]
+
+dynamic_call_warning.php:53:10
+25 | }
+26 | 
+27 | class C {}
+   |       ^ [4]
+28 | 
+29 | function test_no_warn_on_non_dynamic(int $x): void {
+   :
+50 | 
+51 | function test_property_access_through_intersection(dynamic $x): void {
+52 |   if ($x is C) {
+   |             ^ [3]
+53 |     $y = $x->bar;
+   |          ^^ [1]
+   |              ^^^ [2]
+54 |   }
+55 | }
+
+10 errors found

@@ -14,12 +14,11 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_PROCESS_EXEC_H_
-#define incl_HPHP_PROCESS_EXEC_H_
+#pragma once
 
 #include <string>
 
-namespace HPHP { namespace proc {
+namespace HPHP::proc {
 ////////////////////////////////////////////////////////////////////////////////
 
 /*
@@ -54,6 +53,5 @@ struct EnableForkInDebuggerGuard {
 };
 
 ////////////////////////////////////////////////////////////////////////////////
-}}
+}
 
-#endif

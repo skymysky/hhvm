@@ -13,7 +13,7 @@ namespace HH {
  * the same result for subsequent requests.
  */
 <<__Native>>
-function server_warmup_status(): string;
+function server_warmup_status(): ?string;
 
 /**
  * Returns a good description of the warmup status of the server, based on
@@ -25,7 +25,10 @@ function server_warmup_status(): string;
  * i.e., once it returns empty string, it will keep returning empty string.
  */
 <<__Native>>
-function server_warmup_status_monotonic(): string;
+function server_warmup_status_monotonic(): ?string;
+
+<<__Native>>
+function set_endpoint_name(string $name): void;
 
 /**
  * Returns a description of the context in which the request is executing.
@@ -38,56 +41,134 @@ function server_warmup_status_monotonic(): string;
  * on an unnamed JobQueue within the server.
  */
 <<__Native>>
-function execution_context(): string;
+function execution_context()[read_globals]: ?string;
+
+<<__Native, __IsFoldable>>
+function array_mark_legacy(mixed $v, bool $recursive = false)[]: mixed;
+
+<<__Native, __IsFoldable>>
+function array_unmark_legacy(mixed $v, bool $recursive = false)[]: mixed;
+
+<<__IsFoldable>>
+function array_mark_legacy_recursive(mixed $v)[]: mixed {
+  return array_mark_legacy($v, true);
+}
+
+<<__IsFoldable>>
+function array_unmark_legacy_recursive(mixed $v)[]: mixed {
+  return array_unmark_legacy($v, true);
+}
+
+<<__Native, __IsFoldable>>
+function is_array_marked_legacy(mixed $v)[]: bool;
+
+namespace __internal {
+/*
+ * Return the current hhvm runtime executable path
+ */
+<<__Native>>
+function hhvm_binary(): ?string;
+}
 
 }
 
 namespace {
 
-/* Checks whether the client disconnected.
+const float INF = 1e308 + 1e308;
+const float NAN = (1e308 + 1e308) - (1e308 + 1e308);
+const bool ZEND_THREAD_SAFE = true;
+
+const int UPLOAD_ERR_OK =         0;
+const int UPLOAD_ERR_INI_SIZE =   1;
+const int UPLOAD_ERR_FORM_SIZE =  2;
+const int UPLOAD_ERR_PARTIAL =    3;
+const int UPLOAD_ERR_NO_FILE =    4;
+const int UPLOAD_ERR_NO_TMP_DIR = 6;
+const int UPLOAD_ERR_CANT_WRITE = 7;
+const int UPLOAD_ERR_EXTENSION =  8;
+
+const int CREDITS_GROUP =    1 << 0;
+const int CREDITS_GENERAL =  1 << 1;
+const int CREDITS_SAPI =     1 << 2;
+const int CREDITS_MODULES =  1 << 3;
+const int CREDITS_DOCS =     1 << 4;
+const int CREDITS_FULLPAGE = 1 << 5;
+const int CREDITS_QA =       1 << 6;
+const int CREDITS_ALL = 0xFFFFFFFF;
+
+const int PHP_INT_SIZE = 8; // sizeof(int64_t)
+
+// FIXME: These values are hardcoded from their previous IDL values
+// Grab their correct values from the system as appropriate
+const string PHP_EOL = "\n";
+const string PHP_CONFIG_FILE_PATH = "";
+const string PHP_CONFIG_FILE_SCAN_DIR = "";
+const string PHP_DATADIR = "";
+const string PHP_EXTENSION_DIR = "";
+const string PHP_LIBDIR = "";
+const string PHP_LOCALSTATEDIR = "";
+const string PHP_PREFIX = "";
+const string PHP_SHLIB_SUFFIX = "so";
+const string PHP_SYSCONFDIR = "";
+const string PEAR_EXTENSION_DIR = "";
+const string PEAR_INSTALL_DIR = "";
+const string DEFAULT_INCLUDE_PATH = "";
+
+// I'm honestly not sure where these constants came from
+// I've brought them for ward from their IDL definitions
+// with their previous hard-coded values.
+const int CODESET =         14;
+const int RADIXCHAR =    65536;
+const int THOUSEP =      65537;
+const int ALT_DIGITS =  131119;
+const int AM_STR =      131110;
+const int PM_STR =      131111;
+const int D_T_FMT =     131112;
+const int D_FMT =       131113;
+const int ERA =         131116;
+const int ERA_D_FMT =   131118;
+const int ERA_D_T_FMT = 131120;
+const int ERA_T_FMT =   131121;
+const int CRNCYSTR =    262159;
+
+newtype BuiltinPseudoConstantLineNumber as int = int;
+newtype BuiltinPseudoConstantName as string = string;
+newtype BuiltinPseudoConstantClass as BuiltinPseudoConstantName = BuiltinPseudoConstantName;
+newtype BuiltinPseudoConstantTrait as BuiltinPseudoConstantName = BuiltinPseudoConstantName;
+newtype BuiltinPseudoConstantFile as BuiltinPseudoConstantName = BuiltinPseudoConstantName;
+newtype BuiltinPseudoConstantDir as BuiltinPseudoConstantName = BuiltinPseudoConstantName;
+newtype BuiltinPseudoConstantFunction as BuiltinPseudoConstantName = BuiltinPseudoConstantName;
+newtype BuiltinPseudoConstantMethod as BuiltinPseudoConstantName = BuiltinPseudoConstantName;
+newtype BuiltinPseudoConstantNamespace as BuiltinPseudoConstantName = BuiltinPseudoConstantName;
+newtype BuiltinPseudoConstantCompilerFrontend as BuiltinPseudoConstantName = BuiltinPseudoConstantName;
+
+/** Checks whether the client disconnected.
  * @return int - Returns 1 if client disconnected, 0 otherwise.
  */
 <<__Native>>
 function connection_aborted(): int;
 
-/* Gets the connection status bitfield.
+/** Gets the connection status bitfield.
  * @return int - Returns the connection status bitfield, which can be used
  * against the CONNECTION_XXX constants to determine the connection status.
  */
 <<__Native>>
 function connection_status(): int;
 
-/* Determines whether the script timed out.
+/** Determines whether the script timed out.
  * @return int - Returns 1 if the script timed out, 0 otherwise.
  */
 <<__Native>>
 function connection_timeout(): int;
 
-/* @param string $name - The constant name.
+/** @param string $name - The constant name.
  * @return mixed - Returns the value of the constant, or NULL if the constant
  * is not defined.
  */
-<<__Native>>
+<<__Native("NoRecording")>>
 function constant(string $name): mixed;
 
-/* Defines a named constant at runtime.
- * @param string $name - The name of the constant.
- * @param mixed $value - The value of the constant; only scalar and null
- * values are allowed. Scalar values are integer, float, string or boolean
- * values. It is possible to define resource constants, however it is not
- * recommended and may cause unpredictable behavior.
- * @param bool $case_insensitive - If set to TRUE, the constant will be
- * defined case-insensitive. The default behavior is case-sensitive; i.e.
- * CONSTANT and Constant represent different values.  Case-insensitive
- * constants are stored as lower-case.
- * @return bool - Returns TRUE on success or FALSE on failure.
- */
-<<__Native>>
-function define(string $name,
-                mixed $value,
-                bool $case_insensitive = false): bool;
-
-/* Checks whether the given constant exists and is defined.  If you want to
+/** Checks whether the given constant exists and is defined.  If you want to
  * see if a variable exists, use isset() as defined() only applies to
  * constants. If you want to see if a function exists, use function_exists().
  * @param string $name - The constant name.
@@ -99,7 +180,7 @@ function define(string $name,
 function defined(string $name,
                  bool $autoload = true): bool;
 
-/* Sets whether a client disconnect should cause a script to be aborted.  When
+/** Sets whether a client disconnect should cause a script to be aborted.  When
  * running PHP as a command line script, and the script's tty goes away
  * without the script being terminated then the script will die the next time
  * it tries to write anything, unless value is set to TRUE
@@ -111,7 +192,7 @@ function defined(string $name,
 <<__Native>>
 function ignore_user_abort(bool $setting = false): int;
 
-/* Pack given arguments into binary string according to format.  The idea for
+/** Pack given arguments into binary string according to format.  The idea for
  * this function was taken from Perl and all formatting codes work the same as
  * in Perl. However, there are some formatting codes that are missing such as
  * Perl's "u" format code.  Note that the distinction between signed and
@@ -144,9 +225,9 @@ function ignore_user_abort(bool $setting = false): int;
  * @return mixed - Returns a binary string containing data.
  */
 <<__Native, __IsFoldable>>
-function pack(string $format, ...$args): mixed;
+function pack(string $format, mixed... $args)[]: mixed;
 
-/* @param int $seconds - Halt time in seconds.
+/** @param int $seconds - Halt time in seconds.
  * @return int - Returns zero on success, or FALSE on errors. If the call was
  * interrupted by a signal, sleep() returns the number of seconds left to
  * sleep.
@@ -158,7 +239,7 @@ function pack(string $format, ...$args): mixed;
 <<__Native("NoFCallBuiltin")>>
 function sleep(int $seconds): int;
 
-/* Delays program execution for the given number of micro seconds.
+/** Delays program execution for the given number of micro seconds.
  * @param int $micro_seconds - Halt time in micro seconds. A micro second is
  * one millionth of a second.
  *
@@ -167,7 +248,7 @@ function sleep(int $seconds): int;
 <<__Native("NoFCallBuiltin")>>
 function usleep(int $micro_seconds): void;
 
-/* Delays program execution for the given number of seconds and nanoseconds.
+/** Delays program execution for the given number of seconds and nanoseconds.
  * @param int $seconds - Must be a positive integer.
  * @param int $nanoseconds - Must be a positive integer less than 1 billion.
  * @return mixed - Returns TRUE on success or FALSE on failure.  If the delay
@@ -181,7 +262,7 @@ function usleep(int $micro_seconds): void;
 function time_nanosleep(int $seconds,
                         int $nanoseconds): mixed;
 
-/* Makes the script sleep until the specified timestamp.
+/** Makes the script sleep until the specified timestamp.
  * @param float $timestamp - The timestamp when the script should wake.
  * @return bool - Returns TRUE on success or FALSE on failure.
  *
@@ -190,7 +271,7 @@ function time_nanosleep(int $seconds,
 <<__Native("NoFCallBuiltin")>>
 function time_sleep_until(float $timestamp): bool;
 
-/* Gets a prefixed unique identifier based on the current time in
+/** Gets a prefixed unique identifier based on the current time in
  * microseconds.
  * @param string $prefix - Can be useful, for instance, if you generate
  * identifiers simultaneously on several hosts that might happen to generate
@@ -204,9 +285,9 @@ function time_sleep_until(float $timestamp): bool;
  */
 <<__Native>>
 function uniqid(string $prefix = "",
-                bool $more_entropy = false): string;
+                bool $more_entropy = false): ?string;
 
-/* Unpacks from a binary string into an array according to the given format.
+/** Unpacks from a binary string into an array according to the given format.
  * unpack() works slightly different from Perl as the unpacked data is stored
  * in an associative array. To accomplish this you have to name the different
  * format codes and separate them by a slash /.
@@ -217,70 +298,42 @@ function uniqid(string $prefix = "",
  */
 <<__Native, __IsFoldable>>
 function unpack(string $format,
-                string $data): mixed;
+                string $data)[]: mixed;
 
-/* Returns three samples representing the average system load (the number of
+/** Returns three samples representing the average system load (the number of
  * processes in the system run queue) over the last 1, 5 and 15 minutes,
  * respectively.
  * @return array - Returns an array with three samples (last 1, 5 and 15
  * minutes).
  */
 <<__Native>>
-function sys_getloadavg(): array;
+function sys_getloadavg(): vec<float>;
 
-/* token_get_all() parses the given source string into PHP language tokens
- * using the Zend engine's lexical scanner.  For a list of parser tokens, see
- * List of Parser Tokens, or use token_name() to translate a token value into
- * its string representation.
- * @param string $source - The PHP source to parse.
- * @return array - An array of token identifiers. Each individual token
- * identifier is either a single character (i.e.: ;, ., >, !, etc...), or a
- * three element array containing the token index in element 0, the string
- * content of the original token in element 1 and the line number in element
- * 2.
- */
-<<__Native>>
-function token_get_all(string $source): array;
-
-/* token_name() gets the symbolic name for a PHP token value.
- * @param int $token - The token value.
- * @return string - The symbolic name of the given token. The returned name
- * returned matches the name of the matching token constant.
- */
-<<__ParamCoerceModeFalse, __Native>>
-function token_name(int $token): string;
-
-/* Casts a given value to a string.
+/** Casts a given value to a string.
  * @param mixed $v - The value being casted to a string.
  * @return string - The result of the string cast.
  */
 <<__Native, __IsFoldable>>
-function hphp_to_string(mixed $v): string;
-
-function __hhas_adata(string $incorrect_hhas_adata) {
-  throw new Exception(
-    "__hhas_adata may only be called with a scalar string argument."
-  );
-}
+function hphp_to_string(mixed $v)[]: ?string;
 
 }
 
 namespace __SystemLib {
 
-/* max2() returns the max of two operands (optimized FCallBuiltin for max).
+/** max2() returns the max of two operands (optimized FCallBuiltin for max).
  * @param mixed $arg1 - The first operand of max.
  * @param mixed $arg2 - The second operand of max.
  * @return mixed - The max of two operands.
  */
-<<__Native, __HipHopSpecific, __IsFoldable>>
+<<__Native, __IsFoldable>>
 function max2(mixed $arg1, mixed $arg2): mixed;
 
-/* min2() returns the min of two operands (optimized FCallBuiltin for min).
+/** min2() returns the min of two operands (optimized FCallBuiltin for min).
  * @param mixed $arg1 - The first operand of min.
  * @param mixed $arg2 - The second operand of min.
  * @return mixed - The min of two operands.
  */
-<<__Native, __HipHopSpecific, __IsFoldable>>
+<<__Native, __IsFoldable>>
 function min2(mixed $arg1, mixed $arg2): mixed;
 
 }

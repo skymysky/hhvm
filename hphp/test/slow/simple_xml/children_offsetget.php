@@ -1,5 +1,8 @@
-<?php
+<?hh
 
+
+<<__EntryPoint>>
+function main_children_offsetget() :mixed{
 $element = simplexml_load_string(<<<EOF
 <root>
   <hello>world</hello>
@@ -7,4 +10,5 @@ $element = simplexml_load_string(<<<EOF
 EOF
 );
 
-var_dump((string)$element->children()[0]);
+var_dump($element->children()->offsetGet(0)->__toString());
+}

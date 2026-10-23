@@ -1,6 +1,6 @@
-<?php
+<?hh
 
-function test($a) {
+function test($a) :mixed{
   $f = function() use($a) {
     yield 1;
     yield 2;
@@ -11,4 +11,8 @@ function test($a) {
   }
 }
 
+
+<<__EntryPoint>>
+function main_unused() :mixed{
 test("unused");
+}

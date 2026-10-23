@@ -1,22 +1,27 @@
 <?hh
 
-$LOG_ROOT = '/tmp/hhvm_server';
-require __DIR__ . '/../../util/server_tests.inc';
+function init() {
+  require __DIR__ . '/../../util/server_tests.inc';
+  ServerUtilServerTests::$LOG_ROOT = ServerUtilServerTests::working_dir() . '/hhvm_server';
+}
 
-function runTest($testController, $customArgs = '') {
+function runTest($testController, $customArgs = '', $repoArgs = '') {
   $pid = posix_getpid();
   try {
-    $serverProc = $serverPort = $adminPort = null;
+    $serverProc = null;
+    $serverPort = null;
+    $adminPort = null;
     $debugPort = false;
-    $serverProc = startServer(&$serverPort, &$adminPort, &$debugPort,
+    $serverProc = startServer(inout $serverPort, inout $adminPort, inout $debugPort,
                               __DIR__.'/..', __DIR__.'/../server_root',
-                              $customArgs);
+                              $customArgs, null, $repoArgs);
     $testController($serverPort);
     stopServer($adminPort, $serverProc);
   } catch (Exception $e) {
-    error_log("Caught exception, test failed, pid=$pid, exn=".$e->getMessage());
+    error_log("Caught exception, test failed, pid=$pid, exn=\n".$e->__toString());
     killChildren($pid);
     if ($serverProc) proc_close($serverProc);
     error_log('test failed');
+    exit(-1);
   }
 }

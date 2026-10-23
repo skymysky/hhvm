@@ -1,6 +1,6 @@
-<?php
+<?hh
 class TestSoapClient extends SoapClient {
-	function __doRequest($request, $location, $action, $version, $one_way = 0) {
+	function __dorequest($request, $location, $action, $version, $one_way = 0) :mixed{
 		return <<<EOF
 <?xml version="1.0" encoding="utf-8"?>
 <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
@@ -33,17 +33,21 @@ class TestSoapClient extends SoapClient {
 EOF;
 	}
 }
-for ($i = 0; $i < 10; $i++) {
-	$ws=new TestSoapClient(dirname(__FILE__).'/bug37083.wsdl',
-                   array('encoding'=>'ISO-8859-1',
-                         'cache_wsdl'=>WSDL_CACHE_BOTH));
-	$search=new stdClass();
-	$search->queryString='argo';
-	$search->ranges[]=$r=new stdClass();
-	$r->field='maxDateTime';
-	$r->min='2003-04-01';
-	$search->index='all';
-	$res=$ws->search($search,0,10);
+<<__EntryPoint>>
+function main_entry(): void {
+  for ($i = 0; $i < 10; $i++) {
+  	$ws=new TestSoapClient(dirname(__FILE__).'/bug37083.wsdl',
+                     dict['encoding'=>'ISO-8859-1',
+                           'cache_wsdl'=>WSDL_CACHE_BOTH]);
+  	$search=new stdClass();
+  	$search->queryString='argo';
+  	$search->ranges = vec[];
+  	$r = new stdClass();
+  	$search->ranges[] = $r;
+  	$r->field='maxDateTime';
+  	$r->min='2003-04-01';
+  	$search->index='all';
+  	$res=$ws->__soapcall('search', vec[$search,0,10]);
+  }
+  echo "ok\n";
 }
-echo "ok\n";
-?>

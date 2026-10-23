@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 /**
  * Copyright (c) 2014, Facebook, Inc.
  * All rights reserved.
@@ -27,7 +27,7 @@ async function bar<Tu as B>(
     A $rule,
     C<Tu> $rule2,
   ): Awaitable<int> {
-  if (!($rule instanceof C)) {
+  if (!($rule is C<_>)) {
     echo 'blah';
     return 123;
   }

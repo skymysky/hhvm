@@ -1,9 +1,9 @@
-<?php
+<?hh
 
 class A {
   public $a = 1;
   private $b = "hello";
-  protected $c = array(1, 2);
+  protected $c = vec[1, 2];
 }
 
 class B extends A {
@@ -15,18 +15,15 @@ class C {
   function __construct() {
     $this->a = null;
     $this->b = acos(1.01);
-    $this->c = log(0);
+    $this->c = log(0.0);
     echo "C has a safe constructor.\n";
   }
-  function __destruct() {
-    echo "C has a safe destructor.\n";
-  }
-  function __wakeup() {
+  function __wakeup() :mixed{
     echo "C wakes up safely.\n";
   }
-  function __sleep() {
+  function __sleep() :mixed{
     echo "C sleeps safely.\n";
-    return array('a', 'b', 'c');
+    return vec['a', 'b', 'c'];
   }
 }
 
@@ -35,15 +32,12 @@ class DangerousClass {
   function __construct() {
     echo "I have dangerous constructor.\n";
   }
-  function __destruct() {
-    echo "I have dangerous destructor.\n";
-  }
-  function __wakeup() {
+  function __wakeup() :mixed{
     echo "I wake up dangerously.\n";
   }
-  function __sleep() {
+  function __sleep() :mixed{
     echo "I sleep dangerously.\n";
-    return array('danger');
+    return vec['danger'];
   }
 }
 
@@ -55,10 +49,10 @@ class E {
 }
 
 class F implements Serializable {
-  public function serialize() {
+  public function serialize() :mixed{
     return "SerializedData";
   }
-  public function unserialize($serialized) {
+  public function unserialize($serialized) :mixed{
     echo "unserialize: $serialized\n";
     return $this;
   }
@@ -67,29 +61,33 @@ class F implements Serializable {
 class G extends DangerousClass {
 }
 
-function test_serialization($obj, $class_whitelist) {
+function test_serialization($obj, $class_whitelist) :mixed{
   $str = serialize($obj);
   var_dump($str);
-  $new_obj = unserialize($str, $class_whitelist);
+  $new_obj = unserialize($str, darray($class_whitelist));
   var_dump($new_obj);
-  unset($obj);
-  unset($new_obj);
+  $obj = null;
+  $new_obj = null;
   echo "========================\n";
 }
 
-function main() {
-  test_serialization(new A, []);
-  test_serialization(new B, array('A', 'B'));
-  test_serialization(new C, array('C'));
-  test_serialization(new DangerousClass, array());
-  test_serialization(new E, array('E'));
-  test_serialization(new F, array('F'));
-  test_serialization(new G, array('G'));
-  test_serialization(array("Hello World<>$%", acos(1.01), log(0), 50), array());
+<<__EntryPoint>> function main(): void {
+  test_serialization(new A, vec[]);
+  test_serialization(new B, vec['A', 'B']);
+  test_serialization(new C, vec['C']);
+  test_serialization(new DangerousClass, vec[]);
+  test_serialization(new E, vec['E']);
+  test_serialization(new F, vec['F']);
+  test_serialization(new G, vec['G']);
+  test_serialization(vec["Hello World<>$%", acos(1.01), log(0.0), 50], vec[]);
   test_serialization(
-    array( new A, array(new B, array(new C, array(new E, array(new F))))),
-    array('abc' => 'A', 5 => 'C', 'E', 'B', 'F')
+    vec[ new A, vec[new B, vec[new C, vec[new E, vec[new F]]]]],
+    dict[
+      'abc' => 'A',
+      5 => 'C',
+      6 => 'E',
+      7 => 'B',
+      8 => 'F'
+    ]
   );
 }
-
-main();

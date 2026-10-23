@@ -1,8 +1,12 @@
-<?php
+<?hh
 
 class X {
- static function g() {
+ static function g() :mixed{
 }
 }
+
+<<__EntryPoint>>
+function main_167() :mixed{
 ;
-echo 'abc' . X::g() . 'efg';
+echo 'abc' . (string)(X::g()) . 'efg';
+}

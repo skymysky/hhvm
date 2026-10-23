@@ -17,6 +17,7 @@
 #include "hphp/runtime/vm/jit/irlower-internal.h"
 
 #include "hphp/runtime/base/object-data.h"
+#include "hphp/runtime/vm/act-rec.h"
 #include "hphp/runtime/vm/resumable.h"
 
 #include "hphp/runtime/vm/jit/types.h"
@@ -34,9 +35,10 @@
 #include "hphp/runtime/vm/jit/vasm-reg.h"
 
 #include "hphp/runtime/ext/asio/asio-blockable.h"
-#include "hphp/runtime/ext/asio/ext_await-all-wait-handle.h"
+#include "hphp/runtime/ext/asio/ext_concurrent-wait-handle.h"
 #include "hphp/runtime/ext/asio/ext_async-function-wait-handle.h"
 #include "hphp/runtime/ext/asio/ext_async-generator.h"
+#include "hphp/runtime/ext/asio/ext_static-wait-handle.h"
 #include "hphp/runtime/ext/asio/ext_wait-handle.h"
 #include "hphp/runtime/ext/asio/ext_waitable-wait-handle.h"
 #include "hphp/runtime/ext/generator/ext_generator.h"
@@ -44,9 +46,9 @@
 #include "hphp/util/asm-x64.h"
 #include "hphp/util/trace.h"
 
-namespace HPHP { namespace jit { namespace irlower {
+namespace HPHP::jit::irlower {
 
-TRACE_SET_MOD(irlower);
+TRACE_SET_MOD(irlower)
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -55,9 +57,9 @@ void cgStArResumeAddr(IRLS& env, const IRInstruction* inst) {
   auto& v = vmain(env);
 
   auto const addrOff = Resumable::resumeAddrOff() - Resumable::arOff();
-  auto const offsetOff = Resumable::resumeOffsetOff() - Resumable::arOff();
+  auto const offsetOff = Resumable::suspendOffsetOff() - Resumable::arOff();
   v << store{srcLoc(env, inst, 1).reg(), ar[addrOff]};
-  v << storeli{inst->extra<ResumeOffset>()->off, ar[offsetOff]};
+  v << storeli{inst->extra<SuspendOffset>()->off, ar[offsetOff]};
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -78,24 +80,28 @@ void cgContEnter(IRLS& env, const IRInstruction* inst) {
   auto const fp = srcLoc(env, inst, 1).reg();
   auto const genFP = srcLoc(env, inst, 2).reg();
   auto const target = srcLoc(env, inst, 3).reg();
+  auto const sendVal = srcLoc(env, inst, 4);
 
   auto const extra = inst->extra<ContEnter>();
   auto const spOff = extra->spOffset;
-  auto const returnOff = extra->returnBCOffset;
+  auto const callOffAndFlags = safe_cast<int32_t>(
+    ActRec::encodeCallOffsetAndFlags(extra->callBCOffset, 0));
 
   auto& v = vmain(env);
 
   auto const next = v.makeBlock();
 
   v << store{fp, genFP[AROFF(m_sfp)]};
-  v << storeli{returnOff, genFP[AROFF(m_soff)]};
+  v << storeli{callOffAndFlags, genFP[AROFF(m_callOffAndFlags)]};
 
-  v << copy{genFP, fp};
+  v << pushvmfp{genFP};
   auto const sync_sp = v.makeReg();
-  v << lea{sp[cellsToBytes(spOff.offset)], sync_sp};
+  v << lea{sp[cellsToBytes(spOff.offset - 1)], sync_sp};
   v << syncvmsp{sync_sp};
 
-  v << contenter{fp, target, cross_trace_regs_resumed(),
+  storeTV(v, sync_sp[0], sendVal, inst->src(4));
+
+  v << contenter{genFP, target, cross_trace_regs_resumed(),
                  {next, label(env, inst->taken())}};
   v = next;
 
@@ -109,7 +115,7 @@ void cgContEnter(IRLS& env, const IRInstruction* inst) {
   }
 }
 
-void cgContPreNext(IRLS& env, const IRInstruction* inst) {
+void cgContCheckNext(IRLS& env, const IRInstruction* inst) {
   auto const cont = srcLoc(env, inst, 0).reg();
   auto const checkStarted = inst->src(1)->boolVal();
   auto const isAsync = inst->extra<IsAsyncData>()->isAsync;
@@ -120,57 +126,15 @@ void cgContPreNext(IRLS& env, const IRInstruction* inst) {
   // These asserts make sure that the startedCheck work.
   static_assert(uint8_t(BaseGenerator::State::Created) == 0, "used below");
   static_assert(uint8_t(BaseGenerator::State::Started) == 1, "used below");
-  static_assert(uint8_t(BaseGenerator::State::Done) > 3, "");
-
-  // These asserts ensure that the state transition works.  If we're in the
-  // Created state we want to transition to Priming, and if we're in the
-  // Started state we want to transition to Running.  By laying out the enum
-  // this way we can avoid the branch and just transition by adding 2 to the
-  // current state.
-  static_assert(uint8_t(BaseGenerator::State::Priming) ==
-                uint8_t(BaseGenerator::State::Created) + 2, "used below");
-  static_assert(uint8_t(BaseGenerator::State::Running) ==
-                uint8_t(BaseGenerator::State::Started) + 2, "used below");
 
   // Take exit if state != 1 (checkStarted) or if state > 1 (!checkStarted).
-  auto stateOff = BaseGenerator::stateOff() - genOffset(isAsync);
+  auto const cc = checkStarted ? CC_NE : CC_A;
+  auto const stateOff = BaseGenerator::stateOff() - genOffset(isAsync);
   v << cmpbim{int8_t(BaseGenerator::State::Started), cont[stateOff], sf};
-  fwdJcc(v, env, checkStarted ? CC_NE : CC_A, sf, inst->taken());
-
-  // Transition the generator into either the Priming state (if we were just
-  // created) or the Running state (if we were started).  Due to the way the
-  // enum is layed out, we can model this by just adding 2.
-  v << addlim{int8_t(2), cont[stateOff], v.makeReg()};
+  v << jcc{cc, sf, {label(env, inst->next()), label(env, inst->taken())}};
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-
-void cgContStartedCheck(IRLS& env, const IRInstruction* inst) {
-  auto const cont = srcLoc(env, inst, 0).reg();
-  auto const isAsync = inst->extra<IsAsyncData>()->isAsync;
-  auto& v = vmain(env);
-
-  static_assert(uint8_t(BaseGenerator::State::Created) == 0, "used below");
-
-  // Take exit if state == 0.
-  auto const sf = v.makeReg();
-  auto const stateOff = BaseGenerator::stateOff() - genOffset(isAsync);
-  v << testbim{int8_t(0xffu), cont[stateOff], sf};
-  v << jcc{CC_Z, sf, {label(env, inst->next()), label(env, inst->taken())}};
-}
-
-void cgContStarted(IRLS& env, const IRInstruction* inst) {
-  auto const dst = dstLoc(env, inst, 0).reg();
-  auto const cont = srcLoc(env, inst, 0).reg();
-  auto& v = vmain(env);
-
-  // Return true if generator state is not in the Created state.
-  auto const sf = v.makeReg();
-  auto const stateOff = BaseGenerator::stateOff() -
-                        genOffset(false /* isAsync */);
-  v << cmpbim{int8_t(BaseGenerator::State::Created), cont[stateOff], sf};
-  v << setcc{CC_NE, sf, dst};
-}
 
 void cgContValid(IRLS& env, const IRInstruction* inst) {
   auto const dst = dstLoc(env, inst, 0).reg();
@@ -286,15 +250,15 @@ namespace {
 
 constexpr ptrdiff_t ar_rel(ptrdiff_t off) {
   return off - AFWH::arOff();
-};
+}
 
 /*
  * Check if obj is an Awaitable. Passes CC_BE on sf if it is.
  */
 void emitIsAwaitable(Vout& v, Vreg obj, Vreg sf) {
   auto constexpr minwh = (int)HeaderKind::WaitHandle;
-  auto constexpr maxwh = (int)HeaderKind::AwaitAllWH;
-  static_assert(maxwh - minwh == 2, "WH range check needs updating");
+  auto constexpr maxwh = (int)HeaderKind::ConcurrentWH;
+  static_assert(maxwh - minwh == 3, "WH range check needs updating");
 
   auto const kind = v.makeReg();
   auto const wh_index = v.makeReg();
@@ -306,25 +270,70 @@ void emitIsAwaitable(Vout& v, Vreg obj, Vreg sf) {
 }
 
 IMPL_OPCODE_CALL(CreateAFWH)
-IMPL_OPCODE_CALL(CreateAFWHNoVV)
+IMPL_OPCODE_CALL(CreateAFWHL)
 IMPL_OPCODE_CALL(CreateAGWH)
-IMPL_OPCODE_CALL(CreateSSWH)
+IMPL_OPCODE_CALL(CreateFSWH)
 IMPL_OPCODE_CALL(AFWHPrepareChild)
 
-void cgCreateAAWH(IRLS& env, const IRInstruction* inst) {
-  auto const fp = srcLoc(env, inst, 0).reg();
-  auto const extra = inst->extra<CreateAAWHData>();
+void cgCreateSSWH(IRLS& env, const IRInstruction* inst) {
+  auto& v = vmain(env);
+  auto const val = srcLoc(env, inst, 0).reg();
+  auto const dst = dstLoc(env, inst, 0).reg();
+
+  if (inst->src(0)->type() <= TNull) {
+    auto const handle = c_StaticWaitHandle::NullHandle.handle();
+    markRDSAccess(v, handle);
+    v << load{rvmtl()[handle], dst};
+    emitIncRef(v, dst, TRAP_REASON);
+    return;
+  }
+
+  if (inst->src(0)->type() <= TBool) {
+    auto const trueHandle = c_StaticWaitHandle::TrueHandle.handle();
+    auto const falseHandle = c_StaticWaitHandle::FalseHandle.handle();
+
+    if (inst->src(0)->hasConstVal(TBool)) {
+      auto const handle = inst->src(0)->boolVal() ? trueHandle : falseHandle;
+      markRDSAccess(v, handle);
+      v << load{rvmtl()[handle], dst};
+      emitIncRef(v, dst, TRAP_REASON);
+      return;
+    }
+
+    auto const sf = v.makeReg();
+    auto const hreg = v.makeReg();
+    v << testb{val, val, sf};
+    v << cmovq{CC_NZ, sf, v.cns(falseHandle), v.cns(trueHandle), hreg};
+    markRDSAccess(v, hreg);
+    v << load{hreg[rvmtl()], dst};
+    emitIncRef(v, dst, TRAP_REASON);
+    return;
+  }
+
+  cgCallHelper(
+    v,
+    env,
+    CallSpec::direct(c_StaticWaitHandle::CreateSucceeded),
+    callDest(env, inst),
+    SyncOptions::None,
+    argGroup(env, inst).typedValue(0)
+  );
+}
+
+void cgCreateCCWH(IRLS& env, const IRInstruction* inst) {
+  auto const extra = inst->extra<CreateCCWHData>();
 
   cgCallHelper(
     vmain(env),
     env,
-    CallSpec::direct(c_AwaitAllWaitHandle::fromFrameNoCheck),
+    CallSpec::direct(c_ConcurrentWaitHandle::fromFrameNoCheck),
     callDest(env, inst),
     SyncOptions::Sync,
     argGroup(env, inst)
-      .imm(extra->count)
+      .ssa(0)
+      .imm(extra->first)
+      .imm(extra->first + extra->count)
       .ssa(1)
-      .addr(fp, localOffset(extra->first))
   );
 }
 
@@ -333,18 +342,24 @@ void cgCountWHNotDone(IRLS& env, const IRInstruction* inst) {
   auto const extra = inst->extra<CountWHNotDone>();
 
   auto& v = vmain(env);
-  auto const base = v.makeReg();
-  auto const loc = v.cns((extra->count - 1) * 2);
+
+  assertx(extra->count > 0);
+  auto const start_type_ptr = v.makeReg();
+  auto const start_data_ptr = v.makeReg();
+  auto const end_ptr = v.makeReg();
   auto const cnt = v.cns(0);
+  v << lea{ptrToLocalType(fp, extra->first), start_type_ptr};
+  v << lea{ptrToLocalData(fp, extra->first), start_data_ptr};
+  v << lea{ptrToLocalType(fp, extra->first + extra->count), end_ptr};
 
-  v << lea{fp[localOffset(extra->first + extra->count - 1)], base};
-
-  auto out = doWhile(v, CC_GE, {loc, cnt},
+  auto out = doWhile(v, CC_NE, {start_type_ptr, start_data_ptr, cnt},
     [&] (const VregList& in, const VregList& out) {
-      auto const loc_in  = in[0],  cnt_in  = in[1];
-      auto const loc_out = out[0], cnt_out = out[1];
-      auto const type_loc = base[loc_in * 8 + TVOFF(m_type)];
-      auto const data_loc = base[loc_in * 8 + TVOFF(m_data)];
+      auto const type_ptr_in = in[0];
+      auto const data_ptr_in = in[1];
+      auto const cnt_in = in[2];
+      auto const type_ptr_out = out[0];
+      auto const data_ptr_out = out[1];
+      auto const cnt_out = out[2];
       auto const sf_is_wh = v.makeReg();
       auto const sf_is_finished = v.makeReg();
       auto const sf_cont = v.makeReg();
@@ -353,20 +368,19 @@ void cgCountWHNotDone(IRLS& env, const IRInstruction* inst) {
       auto const loop_cont = v.makeBlock();
 
       // Skip nulls.
-      emitTypeTest(
-        v, env, TNull, type_loc, data_loc, v.makeReg(),
-        [&] (ConditionCode cc, Vreg sf) {
-          ifThen(v, cc, sf, [&] (Vout& v) {
-            v << phijmp{loop_cont, v.makeTuple({cnt_in})};
-          });
-        }
-      );
+      auto const sf_is_null = v.makeReg();
+      emitCmpTVType(v, sf_is_null, KindOfNull, *type_ptr_in);
+      ifThen(v, CC_E, sf_is_null, [&] (Vout& v) {
+        v << phijmp{loop_cont, v.makeTuple({cnt_in})};
+      });
 
       // Take exit on non-objects.
-      emitTypeCheck(v, env, TObj, type_loc, data_loc, inst->taken());
+      auto const sf_is_obj = v.makeReg();
+      emitCmpTVType(v, sf_is_obj, KindOfObject, *type_ptr_in);
+      fwdJcc(v, env, CC_NE, sf_is_obj, inst->taken());
 
       // Take exit on non-Awaitables.
-      v << load{data_loc, obj};
+      v << load{*data_ptr_in, obj};
       emitIsAwaitable(v, obj, sf_is_wh);
       fwdJcc(v, env, CC_A, sf_is_wh, inst->taken());
 
@@ -386,15 +400,17 @@ void cgCountWHNotDone(IRLS& env, const IRInstruction* inst) {
 
       v << phijmp{loop_cont, v.makeTuple({cnt_new})};
 
-      // Add 2 to the loop variable because we can only scale by at most 8.
       v = loop_cont;
       v << phidef{v.makeTuple({cnt_out})};
-      v << subqi{2, loc_in, loc_out, sf_cont};
+
+      nextLocal(v, type_ptr_in, data_ptr_in, type_ptr_out, data_ptr_out);
+      v << cmpq{type_ptr_out, end_ptr, sf_cont};
       return sf_cont;
-    }
+    },
+    extra->count
   );
 
-  v << copy{out[1], dstLoc(env, inst, 0).reg()};
+  v << copy{out[2], dstLoc(env, inst, 0).reg()};
 }
 
 void cgAFWHBlockOn(IRLS& env, const IRInstruction* inst) {
@@ -410,27 +426,65 @@ void cgAFWHBlockOn(IRLS& env, const IRInstruction* inst) {
 
   auto const blockableOff = AFWH::childrenOff() + AFWH::Node::blockableOff();
 
-  // parent->m_blockable.m_bits = child->m_parentChain.m_firstParent|Kind::AFWH;
+  // parent->m_blockable.m_bits = child->m_parentChain.m_lastParent|Kind::AFWH;
   static_assert(
     uint8_t(AsioBlockable::Kind::AsyncFunctionWaitHandleNode) == 0,
     "AFWH kind must be 0."
   );
-  auto const firstParentOff = c_WaitableWaitHandle::parentChainOff() +
-                              AsioBlockableChain::firstParentOff();
-  auto const nextParentOff = blockableOff + AsioBlockable::bitsOff();
+  auto const lastParentOff = c_WaitableWaitHandle::parentChainOff() +
+                              AsioBlockableChain::lastParentOff();
+  auto const prevParentOff = blockableOff + AsioBlockable::bitsOff();
 
-  auto const firstParent = v.makeReg();
-  v << load{child[firstParentOff], firstParent};
-  v << store{firstParent, parentAR[ar_rel(nextParentOff)]};
+  auto const lastParent = v.makeReg();
+  v << load{child[lastParentOff], lastParent};
+  v << store{lastParent, parentAR[ar_rel(prevParentOff)]};
 
-  // child->m_parentChain.m_firstParent = &parent->m_blockable;
+  // child->m_parentChain.m_lastParent = &parent->m_blockable;
   auto objToAR = v.makeReg();
   v << lea{parentAR[ar_rel(blockableOff)], objToAR};
-  v << store{objToAR, child[firstParentOff]};
+  v << store{objToAR, child[lastParentOff]};
 
   // parent->m_child = child;
   auto const childOff = AFWH::childrenOff() + AFWH::Node::childOff();
   v << store{child, parentAR[ar_rel(childOff)]};
+}
+
+void cgAFWHPushTailFrame(IRLS& env, const IRInstruction* inst) {
+  auto const wh = srcLoc(env, inst, 0).reg();
+  auto const id = inst->src(1)->intVal();
+  auto const taken = label(env, inst->taken());
+  auto& v = vmain(env);
+
+  // We "own" this AFWH if it has exactly two references: one that we hold,
+  // and one that its child holds. This IR op is only used on blocked AFWHs.
+  auto constexpr kAFWHHeaderKind = (int32_t)HeaderKind::AsyncFuncWH;
+  auto constexpr kAFWHOwnedCount = int32_t{2};
+
+  auto const sf1 = v.makeReg();
+  auto const sf2 = v.makeReg();
+  v << cmpbim{kAFWHHeaderKind, wh[HeapObject::kind_offset()], sf1};
+  ifThen(v, CC_NE, sf1, taken);
+  v << cmplim{kAFWHOwnedCount, wh[HeapObject::count_offset()], sf2};
+  ifThen(v, CC_NE, sf2, taken);
+
+  // Check that we have room for another ID in m_tailFrameIds by testing its
+  // highest bit. See comments in async-function-wait-handle.h for details.
+  static_assert(AFWH::kNumTailFrames == 4, "");
+  static_assert(sizeof(AsyncFrameId) == 2, "");
+  always_assert(0 < id && id <= kMaxAsyncFrameId);
+  auto const sf3 = v.makeReg();
+  v << testbim{-0b10000000, wh[AFWH::tailFramesOff() + 7], sf3};
+  ifThen(v, CC_Z, sf3, taken);
+
+  // Push the new ID into the least-significant bits of m_tailFrameIds.
+  auto const old_val = v.makeReg();
+  auto const shifted = v.makeReg();
+  auto const new_val = v.makeReg();
+  auto const shift = safe_cast<int32_t>(8 * sizeof(AsyncFrameId));
+  v << load{wh[AFWH::tailFramesOff()], old_val};
+  v << shlqi{shift, old_val, shifted, v.makeReg()};
+  v << orqi{safe_cast<int32_t>(id), shifted, new_val, v.makeReg()};
+  v << store{new_val, wh[AFWH::tailFramesOff()]};
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -485,4 +539,4 @@ void cgLdAFWHActRec(IRLS& env, const IRInstruction* inst) {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-}}}
+}

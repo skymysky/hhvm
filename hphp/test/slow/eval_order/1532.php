@@ -1,13 +1,11 @@
-<?php
+<?hh
 
-trait T {
+trait T1532 {
 }
-function __autoload($c) {
-  var_dump($c);
-  class A {
- use T;
- }
+
+<<__EntryPoint>>
+function main_1532() :mixed{
+  var_dump(class_uses("A1532", false));
+  var_dump(class_uses("A1532"));
+  var_dump(class_exists("A1532"));
 }
-var_dump(class_uses("A", false));
-var_dump(class_uses("A"));
-var_dump(class_exists("A"));

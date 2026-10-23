@@ -13,25 +13,24 @@
    | license@php.net so we can mail you a copy immediately.               |
    +----------------------------------------------------------------------+
 */
-#ifndef incl_HHBBC_INTERP_H_
-#define incl_HHBBC_INTERP_H_
+#pragma once
 
 #include <functional>
 #include <vector>
 #include <bitset>
 
-#include <folly/Optional.h>
-
-#include "hphp/hhbbc/misc.h"
-#include "hphp/hhbbc/index.h"
-#include "hphp/hhbbc/type-system.h"
+#include "hphp/hhbbc/bc.h"
 #include "hphp/hhbbc/context.h"
+#include "hphp/hhbbc/index.h"
+#include "hphp/hhbbc/misc.h"
+#include "hphp/hhbbc/type-system.h"
 
-namespace HPHP { namespace HHBBC {
+namespace HPHP::HHBBC {
 
 struct PropertiesInfo;
 struct CollectedInfo;
 struct State;
+struct StateMutationUndo;
 struct StepFlags;
 struct Bytecode;
 struct ISS;
@@ -40,10 +39,11 @@ namespace res { struct Func; }
 
 //////////////////////////////////////////////////////////////////////
 
-constexpr auto kReadOnlyConstant = kInvalidDataType;
-constexpr auto kDynamicConstant = kExtraInvalidDataType;
-
-//////////////////////////////////////////////////////////////////////
+struct BlockUpdateInfo {
+  BlockId fallthrough{NoBlockId};
+  uint32_t unchangedBcs{0};
+  CompactVector<Bytecode> replacedBcs;
+};
 
 /*
  * RunFlags are information about running an entire block in the
@@ -54,7 +54,7 @@ struct RunFlags {
    * If this is not none, the interpreter executed a return in this
    * block, with this type.
    */
-  folly::Optional<Type> returned;
+  Optional<Type> returned;
 
   /*
    * If returned is set, and the returned value was a parameter,
@@ -62,19 +62,20 @@ struct RunFlags {
    * NoLocalId.
    */
   LocalId retParam{NoLocalId};
+  BlockUpdateInfo updateInfo;
 
   /*
-   * Map from the local statics whose types were used by this block,
-   * to the type that was used.  This is used to force re-analysis of
-   * the corresponding blocks when the type of the static changes.
+   * See FuncAnalysisResult for details.
    */
-  std::shared_ptr<hphp_fast_map<LocalId,Type>> usedLocalStatics;
+  std::bitset<64> usedParams;
+
+  bool canSuspend{false};
+  bool noThrow{true};
 };
 
 //////////////////////////////////////////////////////////////////////
 
 constexpr int kMaxTrackedLocals = 512;
-constexpr int kMaxTrackedClsRefSlots = 64;
 
 /*
  * StepFlags are information about the effects of a single opcode.
@@ -93,12 +94,6 @@ struct StepFlags {
    * handle those cases specially.
    */
   bool wasPEI = true;
-
-  /*
-   * If set to something other than NoBlockId, then this block
-   * unconditionally falls through to that block.
-   */
-  BlockId jmpDest = NoBlockId;
 
   /*
    * If an instruction sets this flag, it means that if it pushed a
@@ -120,6 +115,18 @@ struct StepFlags {
   bool effectFree = false;
 
   /*
+   * Set by impl_vec to indicate that this instruction was already
+   * dealt with via reduce.
+   */
+  bool reduced = false;
+
+  /*
+   * If set to something other than NoBlockId, then this block
+   * unconditionally falls through to that block.
+   */
+  BlockId jmpDest = NoBlockId;
+
+  /*
    * If an instruction may read or write to locals, these flags
    * indicate which ones.  We don't track this information for local
    * ids past kMaxTrackedLocals, which are assumed to always be in
@@ -137,16 +144,21 @@ struct StepFlags {
   std::bitset<kMaxTrackedLocals> mayReadLocalSet;
 
   /*
-   * If the instruction on this step could've been replaced with
-   * cheaper bytecode, this is the list of bytecode that can be used.
+   * See FuncAnalysisResult for details.
    */
-  folly::Optional<std::vector<Bytecode>> strengthReduced;
+  std::bitset<64> usedParams;
+
+  /*
+   * Whether this instruction can cause the containing async function to
+   * suspend. Sequential instructions are combined with logical-or.
+   */
+  bool canSuspend{false};
 
   /*
    * If this is not none, the interpreter executed a return on this
    * step, with this type.
    */
-  folly::Optional<Type> returned;
+  Optional<Type> returned;
 
   /*
    * If returned is set, and the returned value was a parameter,
@@ -154,14 +166,6 @@ struct StepFlags {
    * NoLocalId.
    */
   LocalId retParam{NoLocalId};
-
-  /*
-   * Map from the local statics whose types were used by this
-   * instruction, to the type that was used.  This is used to force
-   * re-analysis of the corresponding blocks when the type of the
-   * static changes.
-   */
-  std::shared_ptr<hphp_fast_map<LocalId,Type>> usedLocalStatics;
 };
 
 //////////////////////////////////////////////////////////////////////
@@ -171,11 +175,13 @@ struct StepFlags {
  * instruction, or for a whole block).
  */
 struct Interp {
-  const Index& index;
-  Context ctx;
+  const IIndex& index;
+  AnalysisContext ctx;
   CollectedInfo& collect;
-  borrowed_ptr<const php::Block> blk;
+  const BlockId bid;
+  const php::Block* blk;
   State& state;
+  StateMutationUndo* undo = nullptr;
 };
 
 /*
@@ -196,9 +202,13 @@ StepFlags step(Interp&, const Bytecode& op);
  *
  * If the PropagateFn is called with a nullptr State, it means that
  * the given block should be re-processed.
+ *
+ * If the block needs to be reprocessed, RollbackFn will be called to
+ * "roll-back" any states propagated to other blocks.
  */
 using PropagateFn = std::function<void (BlockId, const State*)>;
-RunFlags run(Interp&, PropagateFn);
+using RollbackFn = std::function<void()>;
+RunFlags run(Interp&, const State& in, const PropagateFn&, const RollbackFn&);
 
 /*
  * Dispatch a bytecode to the default interpreter.
@@ -213,23 +223,24 @@ void default_dispatch(ISS&, const Bytecode&);
 /*
  * Can this call be converted to an FCallBuiltin
  */
-bool can_emit_builtin(borrowed_ptr<const php::Func> func,
-                      int numParams, bool hasUnpack);
+bool optimize_builtin(ISS& env, const php::Func* func, const FCallArgs& fca);
 
-void finish_builtin(ISS& env,
-                    borrowed_ptr<const php::Func> func,
-                    uint32_t numParams,
-                    bool unpack);
+/*
+ * Static list of all builtins which can be potentially optimized
+ * specially.
+ */
+const std::vector<SString>& special_builtins();
 
-bool handle_function_exists(ISS& env, int numArgs, bool allowConstProp);
+Optional<Type>
+const_fold(ISS& env, uint32_t nArgs, uint32_t numExtraInputs,
+           const php::Func& phpFunc, bool variadicsPacked);
 
-folly::Optional<Type>
-const_fold(ISS& env, uint32_t nArgs, const res::Func& rfunc);
-
-folly::Optional<Type> thisType(const Interp& interp);
+/*
+ * Extracts name from the type either by using a reified name specialization or
+ * by looking at the typed value
+ */
+SString getNameFromType(const Type& t);
 
 //////////////////////////////////////////////////////////////////////
 
-}}
-
-#endif
+}

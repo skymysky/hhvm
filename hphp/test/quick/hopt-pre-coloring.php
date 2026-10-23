@@ -1,7 +1,7 @@
 <?hh
 // Test the effectiveness of pre-coloring
 // Shouldn't have any shuffling for concats
-function foo($t0, $t1, $t2, $t3, $t4, $t5, $t6) {
+function foo(int $t0, int $t1, int $t2, int $t3, int $t4, int $t5, int $t6) :void{
   $sum = 0;
   $sum = $sum + $t0;
   $sum = $sum + $t1;
@@ -16,5 +16,6 @@ function foo($t0, $t1, $t2, $t3, $t4, $t5, $t6) {
     echo "concat = " . $concat . "\n";
   }
 }
-
+<<__EntryPoint>> function main(): void {
 foo(1, 2, 3, 4, 5, 6, 7);
+}

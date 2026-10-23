@@ -13,14 +13,13 @@
    | license@php.net so we can mail you a copy immediately.               |
    +----------------------------------------------------------------------+
 */
-#ifndef incl_HPHP_WRITELEASE_H_
-#define incl_HPHP_WRITELEASE_H_
+#pragma once
 
 #include "hphp/util/assertions.h"
 #include "hphp/util/compilation-flags.h"
-#include "hphp/runtime/base/runtime-option.h"
 
 #include "hphp/runtime/vm/jit/types.h"
+#include "hphp/runtime/vm/jit/code-view.h"
 
 #include <pthread.h>
 
@@ -32,11 +31,10 @@ namespace jit {
 
 /*
  * Set whether or not the current thread is allowed to acquire the global write
- * lease or a concurrent (Func-specific) write lease. Used to enforce
- * Eval.NumSingleJitRequests.
+ * lease or a concurrent (Func-specific) write lease.  Used to disable jit for
+ * certain requests.
  */
 void setMayAcquireLease(bool f);
-void setMayAcquireConcurrentLease(bool f);
 
 bool couldAcquireOptimizeLease(const Func*);
 
@@ -58,6 +56,9 @@ struct LeaseHolder {
   LeaseHolder(const Func* f, TransKind kind, bool isWorker = false);
   ~LeaseHolder();
 
+  LeaseHolder(const LeaseHolder&) = delete;
+  LeaseHolder& operator=(const LeaseHolder&) = delete;
+
   /*
    * Returns true iff all the necessary locks were acquired and it's ok to
    * continue with translation.
@@ -67,11 +68,15 @@ struct LeaseHolder {
   }
 
   /*
-   * Check if the combination of RuntimeOption::EvalJitConcurrently and kind
+   * Check if the combination of Cfg::Jit::Concurrently and kind
    * require acquiring more locks than this LeaseHolder currently has. If so
    * and they can't be acquired, return false. Otherwise, return true.
    */
   bool checkKind(TransKind kind);
+
+  void setDropHint(std::chrono::milliseconds dropHint) {
+    if (m_viewer) m_viewer->setDropHint(dropHint);
+  }
 
  private:
   bool acquireKind(TransKind kind);
@@ -88,8 +93,7 @@ struct LeaseHolder {
   bool m_acquiredThread{false};
   TransKind m_acquiredKind{TransKind::Invalid};
   LockLevel m_level{LockLevel::None};
+  std::optional<ViewHolder> m_viewer{};
 };
 
 }} // HPHP::jit
-
-#endif /* incl_HPHP_WRITELEASE_H_ */

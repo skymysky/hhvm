@@ -1,8 +1,11 @@
-<?php
+<?hh
 
-$separators = [
-  'multichar' => ['herp', 'derp'],
-  'multibyte' => ['¡', '×']
+
+<<__EntryPoint>>
+function main_number_format_multibyte() :mixed{
+$separators = dict[
+  'multichar' => vec['herp', 'derp'],
+  'multibyte' => vec['¡', '×']
 ];
 
 var_dump(
@@ -14,3 +17,4 @@ var_dump(
     $separators
   )
 );
+}

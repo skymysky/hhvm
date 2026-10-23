@@ -1,21 +1,9 @@
-<?php
+<?hh
 
-function __autoload($name) {
-  switch ($name) {
-    case 'C':      class C {
+<<__EntryPoint>>
+function main_1353() :mixed{
+  $r1 = new ReflectionClass('Test1353\\C');
+  $r2 = new ReflectionMethod('Test1353\\M', 'foo');
+  var_dump($r1->getName());
+  var_dump($r2->getName());
 }
-      break;
-    case 'M':      class M {
- function foo() {
-}
- }
-      break;
-    default: class C{
-}
- class M {
-}
-  }
-  var_dump($name);
-}
-$r1 = new ReflectionClass('C');
-$r2 = new ReflectionMethod('M', 'foo');

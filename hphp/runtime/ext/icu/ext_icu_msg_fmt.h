@@ -1,5 +1,4 @@
-#ifndef incl_HPHP_ICU_MSGFMT_H
-#define incl_HPHP_ICU_MSGFMT_H
+#pragma once
 
 #include "hphp/runtime/ext/extension.h"
 #include "hphp/runtime/ext/icu/icu.h"
@@ -8,7 +7,7 @@
 #include <unicode/msgfmt.h>
 #include <unicode/fmtable.h>
 
-namespace HPHP { namespace Intl {
+namespace HPHP::Intl {
 /////////////////////////////////////////////////////////////////////////////
 extern const StaticString s_MessageFormatter;
 
@@ -28,7 +27,7 @@ struct MessageFormatter : IntlError {
     }
   }
 
-  bool openFormatter(const String& pattern, const String& locale);
+  bool openFormatter(const OptString& pattern, const OptString& locale);
   UNUSED
   bool processNamedTypes();
   bool processNumericTypes();
@@ -52,7 +51,7 @@ struct MessageFormatter : IntlError {
     return (icu::MessageFormat*)m_formatter;
   }
 
-  bool setPattern(const String& pattern);
+  bool setPattern(const OptString& pattern);
 
   bool isTzSet() const { return m_tzSet; }
   bool usesDate() const { return m_usesDate; }
@@ -78,8 +77,8 @@ private:
     return true;
   }
 
-  typedef std::map<icu::UnicodeString, icu::Formattable::Type> NamedPartsMap;
-  typedef std::map<int64_t, icu::Formattable::Type> NumericPartsMap;
+  using NamedPartsMap = std::map<icu::UnicodeString, icu::Formattable::Type>;
+  using NumericPartsMap = std::map<int64_t, icu::Formattable::Type>;
 
   UMessageFormat* m_formatter{nullptr};
   NamedPartsMap m_namedParts{};
@@ -89,6 +88,4 @@ private:
 };
 
 /////////////////////////////////////////////////////////////////////////////
-}} // namespace HPHP::Intl
-
-#endif // incl_HPHP_ICU_MSGFMT_H
+} // namespace HPHP::Intl

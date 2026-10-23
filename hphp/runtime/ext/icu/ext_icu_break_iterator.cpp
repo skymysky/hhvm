@@ -1,13 +1,12 @@
 #include "hphp/runtime/ext/icu/ext_icu_break_iterator.h"
 
-namespace HPHP { namespace Intl {
+using icu::BreakIterator;
+using icu::RuleBasedBreakIterator;
+
+namespace HPHP::Intl {
 
 const StaticString
-  s_IntlBreakIterator("IntlBreakIterator"),
-  s_IntlCodePointBreakIterator("IntlCodePointBreakIterator");
-
-Class* IntlBreakIterator::c_IntlBreakIterator = nullptr;
-Class* IntlBreakIterator::c_IntlCodePointBreakIterator = nullptr;
+  s_IntlBreakIterator("IntlBreakIterator");
 
 //////////////////////////////////////////////////////////////////////////////
 // class IntlBreakIterator
@@ -21,15 +20,26 @@ Class* IntlBreakIterator::c_IntlCodePointBreakIterator = nullptr;
 inline Object ibi_create(const char *funcname,
                          icu::BreakIterator *(*func)(const icu::Locale&,
                                                      UErrorCode&),
-                         const String& locale) {
+                         const OptString& locale) {
   UErrorCode error = U_ZERO_ERROR;
-  auto bi = func(Locale::createFromName(locale.c_str()), error);
+  auto bi = func(icu::Locale::createFromName(locale.c_str()), error);
   if (U_FAILURE(error)) {
     s_intl_error->setError(error, "%s: error creating BreakIterator", funcname);
     return Object();
   }
 
   return IntlBreakIterator::newInstance(bi);
+}
+
+//////////////////////////////////////////////////////////////////////////////
+// class IntlCodePointBreakIterator
+
+Object IntlCodePointBreakIterator::newInstance(CodePointBreakIterator* bi) {
+  Object obj{ classof() };
+  if (bi) {
+    Native::data<IntlBreakIterator>(obj)->setBreakIterator(bi);
+  }
+  return obj;
 }
 
 /////////////////////////////////////////////////////////////////////////////
@@ -42,7 +52,7 @@ static Object HHVM_STATIC_METHOD(IntlBreakIterator, createCharacterInstance,
 }
 
 static Object HHVM_STATIC_METHOD(IntlBreakIterator, createCodePointInstance) {
-  return IntlBreakIterator::newCodePointInstance(new CodePointBreakIterator());
+  return IntlCodePointBreakIterator::newInstance(new CodePointBreakIterator());
 }
 
 static Object HHVM_STATIC_METHOD(IntlBreakIterator, createLineInstance,
@@ -107,8 +117,8 @@ static int64_t HHVM_METHOD(IntlBreakIterator, getErrorCode) {
   return data->getErrorCode();
 }
 
-static String HHVM_METHOD(IntlBreakIterator, getErrorMessage) {
-  FETCH_BI(data, this_, empty_string());
+static OptString HHVM_METHOD(IntlBreakIterator, getErrorMessage) {
+  FETCH_BI(data, this_, String::Empty());
   return data->getErrorMessage();
 }
 
@@ -128,11 +138,11 @@ static Variant HHVM_METHOD(IntlBreakIterator, getLocale, int64_t locale_type) {
                    "breakiter_get_locale: Call to ICU method has failed");
     return false;
   }
-  return String(locale.getName(), CopyString);
+  return OptString(locale.getName(), CopyString);
 }
 
 static Object
-HHVM_METHOD(IntlBreakIterator, getPartsIterator, const String& /*key_type*/) {
+HHVM_METHOD(IntlBreakIterator, getPartsIterator, const OptString& /*key_type*/) {
   throw_not_implemented("IntlBreakIterator::getPartsIterator");
 }
 
@@ -234,7 +244,7 @@ static Variant HHVM_METHOD(IntlBreakIterator, previous) {
   return ret;
 }
 
-static bool HHVM_METHOD(IntlBreakIterator, setText, const String& text) {
+static bool HHVM_METHOD(IntlBreakIterator, setText, const OptString& text) {
   FETCH_BI(data, this_, false);
   return data->setText(text);
 }
@@ -249,12 +259,18 @@ static int64_t HHVM_METHOD(IntlCodePointBreakIterator, getLastCodePoint) {
 //////////////////////////////////////////////////////////////////////////////
 
 static void HHVM_METHOD(IntlRuleBasedBreakIterator, __construct,
-                        const String& rules, bool compiled /*=false*/) {
+                        const OptString& rules, bool compiled /*=false*/) {
   s_intl_error->clearError();
   auto data = Native::data<IntlBreakIterator>(this_);
   if (compiled) {
 #if U_ICU_VERSION_MAJOR_NUM * 100 + U_ICU_VERSION_MINOR_NUM >= 408
     UErrorCode error = U_ZERO_ERROR;
+
+    // NB: Ownership of the storage containing the compiled rules remains with
+    // the caller of this function. The compiled rules must not be modified or
+    // deleted during the life of the break iterator.
+    data->m_compiledRules = rules;
+
     auto bi = new RuleBasedBreakIterator((uint8_t*)rules.c_str(), rules.size(),
                                          error);
     if (U_FAILURE(error)) {
@@ -327,7 +343,7 @@ static Variant HHVM_METHOD(IntlRuleBasedBreakIterator, getRuleStatusVec) {
                           "obtaining the status values");
     return false;
   }
-  Array ret = Array::Create();
+  Array ret = Array::CreateVec();
   for (int32_t i = 0; i < count; ++i) {
     ret.append((int64_t)rules[i]);
   }
@@ -344,7 +360,7 @@ static Variant HHVM_METHOD(IntlRuleBasedBreakIterator, getBinaryRules) {
                    "rbbi_get_binary_rules: the rules are too large");
     return false;
   }
-  return String((const char*)rules, rules_len, CopyString);
+  return OptString((const char*)rules, rules_len, CopyString);
 }
 #endif
 
@@ -356,7 +372,7 @@ static Object HHVM_METHOD(IntlPartsIterator, getBreakIterator) {
 
 //////////////////////////////////////////////////////////////////////////////
 
-void IntlExtension::initBreakIterator() {
+void IntlExtension::registerNativeBreakIterator() {
   HHVM_STATIC_ME(IntlBreakIterator, createCharacterInstance);
   HHVM_STATIC_ME(IntlBreakIterator, createCodePointInstance);
   HHVM_STATIC_ME(IntlBreakIterator, createLineInstance);
@@ -415,10 +431,8 @@ void IntlExtension::initBreakIterator() {
   HHVM_RCC_INT(IntlBreakIterator, SENTENCE_SEP, UBRK_SENTENCE_SEP);
   HHVM_RCC_INT(IntlBreakIterator, SENTENCE_SEP_LIMIT, UBRK_SENTENCE_SEP_LIMIT);
 
-  Native::registerNativeDataInfo<IntlBreakIterator>(s_IntlBreakIterator.get());
-
-  loadSystemlib("icu_break_iterator");
+  Native::registerNativeDataInfo<IntlBreakIterator>();
 }
 
 //////////////////////////////////////////////////////////////////////////////
-}} // namespace HPHP::Intl
+} // namespace HPHP::Intl

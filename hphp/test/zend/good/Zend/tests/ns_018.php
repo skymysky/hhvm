@@ -1,9 +1,10 @@
-<?php
+<?hh
 namespace test;
-
-function foo() {
-	return __FUNCTION__;
+<<__DynamicallyCallable>>
+function foo() :mixed{
+    return __FUNCTION__;
 }
-
-$x = __NAMESPACE__ . "\\foo"; 
-echo $x(),"\n";
+<<__EntryPoint>> function main(): void {
+$x = __NAMESPACE__ . "\\foo";
+echo \HH\dynamic_fun($x)(),"\n";
+}

@@ -5,26 +5,17 @@ class C {
   public function instanceFoo(): void {}
 }
 
-function test(C $c): void {
+function test(C $c, dict<int, int> $d): void {
   echo('foo');
   print('foo');
 
-  fun('test');
-  class_meth(C::class, 'staticFoo');
-  inst_meth($c, 'instanceFoo');
+  test<>;
+  C::staticFoo<>;
   meth_caller(C::class, 'instanceFoo');
 
-  empty($c);
   isset($c);
-  unset($c);
+  unset($d[0]);
 
-  assert(true);
   invariant(true, 'foo');
   invariant_violation('foo');
-}
-
-<<__Rx>>
-function rx_test(): void {
-  $c = \HH\Rx\mutable(new C());
-  \HH\Rx\freeze($c);
 }

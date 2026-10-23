@@ -1,0 +1,51 @@
+[packages]
+
+[packages.shared]
+include_paths = ["//shared/"]
+
+[packages.intern]
+include_paths = ["//intern/"]
+includes = ["shared"]
+
+# A package that opts into strict isolation. Its presence may not be dynamically
+# observed (no `package` expression / `__RequirePackage`), and
+# package_exclude_patterns (e.g. __tests__) do not grant a typecheck exemption
+# for references into it.
+[packages.isolated]
+include_paths = ["//isolated/"]
+includes = ["intern", "shared"]
+enable_strict_isolation = true
+
+[packages.standalone]
+include_paths = ["//standalone/"]
+
+# Does not opt in to `allow_deployed_packages_checking`, so it may not be
+# checked for -- but unlike strict isolation, it is still joinable by override.
+[packages.unobservable]
+include_paths = ["//unobservable/"]
+includes = ["intern", "shared"]
+
+# Exists so a file has a package that can legally override into `unobservable`.
+[packages.host]
+include_paths = ["//host/"]
+includes = ["unobservable", "intern", "shared"]
+
+[packages.strict_soft_consumer]
+include_paths = ["//strict_soft_consumer/"]
+includes = ["intern", "shared"]
+soft_includes = ["isolated"]
+
+[packages.strict_hard_consumer]
+include_paths = ["//strict_hard_consumer/"]
+includes = ["isolated", "intern", "shared"]
+
+[packages.strict_deployment]
+allow_deployed_packages_checking = true
+includes = [
+  "standalone",
+  "strict_soft_consumer",
+  "strict_hard_consumer",
+  "isolated",
+  "intern",
+  "shared",
+]

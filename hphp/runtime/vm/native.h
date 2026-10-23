@@ -13,16 +13,18 @@
    | license@php.net so we can mail you a copy immediately.               |
    +----------------------------------------------------------------------+
 */
-#ifndef incl_HPHP_RUNTIME_VM_NATIVE_H
-#define incl_HPHP_RUNTIME_VM_NATIVE_H
+#pragma once
 
 #include "hphp/runtime/base/type-string.h"
+#include "hphp/runtime/base/type-nonnull-ret.h"
 #include "hphp/runtime/base/typed-value.h"
 #include "hphp/runtime/base/tv-mutate.h"
 #include "hphp/runtime/base/tv-variant.h"
 
 #include "hphp/runtime/vm/func.h"
+#include "hphp/runtime/vm/class-meth-data-ref.h"
 #include "hphp/util/abi-cxx.h"
+#include "hphp/util/configs/eval.h"
 
 #include <type_traits>
 
@@ -31,7 +33,8 @@ struct ActRec;
 struct Class;
 struct FuncEmitter;
 struct Object;
-};
+struct Extension;
+}
 
 /* Macros related to declaring/registering internal implementations
  * of <<__Native>> global functions.
@@ -50,20 +53,9 @@ struct Object;
  *
  * To finish exposing it to PHP, add an entry to Systemlib
  * using matching hack typehints:
- *   <?php
+ *   <?hh
  *   <<__Native>>
  *   function sum(int $a, int $b): int;
- *
- ****************************************************************************
- *
- * For functions with variadic args or other "special" handling,
- * declare the prototype as a BuiltinFuncPtr:
- *   TypedValue* HHVM_FN(sum)(ActRec* ar) { ... }
- * And declare it in Systemlib with the "ActRec" subattribute
- *   <?php
- *   <<__Native("ActRec")>>
- *   function sum(int $a, int $b): int;
- * Registering the function in moduleLoad() remains the same.
  *
  ****************************************************************************
  *
@@ -79,10 +71,10 @@ struct Object;
  *   virtual moduleLoad(const IniSetting::Map& ini, Hdf config) {
  *     HHVM_NAME_FE(sum, my_sum_function)
  *   }
- * Or an explicit call to registerBuiltinNativeFunc()
+ * Or an explicit call to registerNativeFunc()
  *   static const StaticString s_sum("sum");
  *   virtual moduleLoad(const IniSetting::Map& ini, Hdf config) {
- *     Native::registerBuiltinNativeFunc(s_sum, (void*)my_sum_function);
+ *     Native::registerNativeFunc(s_sum, (void*)my_sum_function);
  *   }
  *
  ****************************************************************************
@@ -93,20 +85,36 @@ struct Object;
  * function or for registering functions that live in a namespace.
  *
  */
+
+// Dispatcher used by REGISTER_NATIVE_FUNC to wrap every registered function
+// pointer in Native::AbiShim. For return types the runtime already handles
+// (StringRet, OptString, int64_t, Variant, ...) AbiShim's primary template is
+// the identity, so the registered pointer is byte-identical to `fp`. For
+// return types that need conversion (currently only HPHP::String → StringRet)
+// AbiShim's partial specialization registers a synthesized shim instead.
+#define HHVM_ABI_SHIM(fp) (Native::AbiShim<fp>::call)
+
+#define REGISTER_NATIVE_FUNC(functable, name, f) do { \
+  Native::registerNativeFunc(functable, name, HHVM_ABI_SHIM(f)); \
+} while(0)
+
 #define HHVM_FN(fn) f_ ## fn
 #define HHVM_FUNCTION(fn, ...) \
         HHVM_FN(fn)(__VA_ARGS__)
-#define HHVM_NAMED_FE_STR(fn, fimpl) \
+#define HHVM_NAMED_FE_STR(fn, fimpl, functable) \
         do { \
-          /* This calls Extension::registerExtensionFunction() on the */ \
-          /* local 'this' at the call site. */ \
-          String name{makeStaticString(fn)}; \
+          OptString name{makeStaticString(fn)}; \
           registerExtensionFunction(name); \
-          Native::registerBuiltinNativeFunc(name, fimpl); \
+          REGISTER_NATIVE_FUNC(functable, fn, fimpl); \
         } while(0)
-#define HHVM_NAMED_FE(fn, fimpl) HHVM_NAMED_FE_STR(#fn, fimpl)
-#define HHVM_FE(fn) HHVM_NAMED_FE_STR(#fn, HHVM_FN(fn))
-#define HHVM_FALIAS(fn, falias) HHVM_NAMED_FE_STR(#fn, HHVM_FN(falias))
+#define HHVM_NAMED_FE(fn, fimpl)\
+  HHVM_NAMED_FE_STR(#fn, fimpl, nativeFuncs())
+#define HHVM_FE(fn) \
+  HHVM_NAMED_FE_STR(#fn, HHVM_FN(fn), nativeFuncs())
+#define HHVM_FALIAS(fn, falias)\
+  HHVM_NAMED_FE_STR(#fn, HHVM_FN(falias), nativeFuncs())
+#define HHVM_FALIAS_FE_STR(fn, falias)\
+  HHVM_NAMED_FE_STR(fn, HHVM_FN(falias), nativeFuncs())
 
 /* Macros related to declaring/registering internal implementations
  * of <<__Native>> class instance methods.
@@ -121,7 +129,7 @@ struct Object;
 #define HHVM_METHOD(cn, fn, ...) \
         HHVM_MN(cn,fn)(ObjectData* const this_, ##__VA_ARGS__)
 #define HHVM_NAMED_ME(cn,fn,mimpl) \
-        Native::registerBuiltinNativeFunc(#cn "->" #fn, mimpl)
+  REGISTER_NATIVE_FUNC(nativeFuncs(), #cn "->" #fn, mimpl)
 #define HHVM_ME(cn,fn) HHVM_NAMED_ME(cn,fn, HHVM_MN(cn,fn))
 #define HHVM_MALIAS(cn,fn,calias,falias) \
   HHVM_NAMED_ME(cn,fn,HHVM_MN(calias,falias))
@@ -139,7 +147,7 @@ struct Object;
 #define HHVM_STATIC_METHOD(cn, fn, ...) \
         HHVM_STATIC_MN(cn,fn)(const Class *self_, ##__VA_ARGS__)
 #define HHVM_NAMED_STATIC_ME(cn,fn,mimpl) \
-        Native::registerBuiltinNativeFunc(#cn "::" #fn, mimpl)
+  REGISTER_NATIVE_FUNC(nativeFuncs(), #cn "::" #fn, mimpl)
 #define HHVM_STATIC_ME(cn,fn) HHVM_NAMED_STATIC_ME(cn,fn,HHVM_STATIC_MN(cn,fn))
 #define HHVM_STATIC_MALIAS(cn,fn,calias,falias) \
   HHVM_NAMED_STATIC_ME(cn,fn,HHVM_STATIC_MN(calias,falias))
@@ -153,9 +161,6 @@ struct Object;
 #define HHVM_RC_INT(const_name, const_value)                         \
   Native::registerConstant<KindOfInt64>(                             \
     makeStaticString(#const_name), int64_t{const_value});
-#define HHVM_RC_DBL(const_name, const_value)                         \
-  Native::registerConstant<KindOfDouble>(                            \
-    makeStaticString(#const_name), double{const_value});
 #define HHVM_RC_BOOL(const_name, const_value)                        \
   Native::registerConstant<KindOfBoolean>(                           \
     makeStaticString(#const_name), bool{const_value});
@@ -166,9 +171,6 @@ struct Object;
 #define HHVM_RC_INT_SAME(const_name)                                 \
   Native::registerConstant<KindOfInt64>(                             \
     makeStaticString(#const_name), int64_t{const_name});
-#define HHVM_RC_DBL_SAME(const_name)                                 \
-  Native::registerConstant<KindOfDouble>(                            \
-    makeStaticString(#const_name), double{const_name});
 #define HHVM_RC_BOOL_SAME(const_name)                                \
   Native::registerConstant<KindOfBoolean>(                           \
     makeStaticString(#const_name), bool{const_name});
@@ -186,18 +188,38 @@ struct Object;
   Native::registerClassConstant<KindOfBoolean>(s_##class_name.get(), \
     makeStaticString(#const_name), bool{const_value});
 
-// Register a dynamic constant. This will not be optimized by hhbbc
-#define HHVM_RC_DYNAMIC(const_name, const_value_cell)           \
-  Native::registerConstant(makeStaticString(#const_name),       \
-                           const_value_cell, true);
-
 namespace HPHP { namespace Native {
 //////////////////////////////////////////////////////////////////////////////
 
+// Dispatcher used by REGISTER_NATIVE_FUNC to wrap every registered function
+// pointer. The primary template is the identity: `call` is the function
+// pointer itself, so registration is byte-identical to passing the raw
+// pointer. Partial specializations on a specific user return type can
+// synthesize a shim that drains the user-facing RAII type into a POD ABI
+// return type without changing the call's runtime ABI.
+template<auto F>
+struct AbiShim {
+  static constexpr auto call = F;
+};
+
+// Specialization: when the user body returns HPHP::String (RAII non-null),
+// synthesize a shim that drains it into POD StringRet for the ABI. The drain
+// logic itself lives on String (see String::asRet in type-nonnull-ret.h);
+// this just calls it.
+template<typename... Args, HPHP::String(*F)(Args...)>
+struct AbiShim<F> {
+  // StringRet must remain register-returnable (POD 8B in %rax) for this shim
+  // to compile to a register-return ABI. If StringRet ever stops being
+  // trivially-copyable, this assert fires before the silent ABI breakage does.
+  static_assert(std::is_trivially_copyable_v<StringRet>);
+  static constexpr auto call = +[](Args... args) -> StringRet {
+    return F(args...).asRet();
+  };
+};
+
+//////////////////////////////////////////////////////////////////////////////
+
 // Maximum number of args for a native function call
-// Beyond this number, a function/method will have to
-// take a raw ActRec (using <<__Native("ActRec")>>) and
-// deal with the args using getArg<KindOf*>(ar, argNum)
 //
 // To paraphrase you-know-who, "32 args should be enough for anybody"
 //
@@ -209,15 +231,11 @@ inline int maxFCallBuiltinArgs() {
   return kMaxBuiltinArgs;
 }
 
-inline bool allowFCallBuiltinDoubles() {
-  return true;
-}
-
 enum Attr {
   AttrNone         = 0,
-  AttrActRec       = (1u << 0),
-  AttrOpCodeImpl   = (1u << 1), //Methods whose implementation is in the emitter
-  AttrTakesNumArgs = (1u << 2), //Takes an additional "func_num_args()" arg
+
+  // Methods whose implementation is generated by HackC.
+  AttrOpCodeImpl   = (1u << 0),
 };
 
 /**
@@ -226,49 +244,41 @@ enum Attr {
  *
  * Uses typehints in Func and tvCast*InPlace
  */
-bool coerceFCallArgs(TypedValue* args,
-                     int32_t numArgs, int32_t numNonDefault,
-                     const Func* func);
+void coerceFCallArgsFromLocals(const ActRec* fp,
+                               int32_t numArgs,
+                               const Func* func);
 
-/**
- * Dispatches a call to the native function bound to <func>
- * If <ctx> is not nullptr, it is prepended to <args> when
- * calling.
- */
-template<bool usesDoubles>
-void callFunc(const Func* func, void* ctx,
-              TypedValue* args, int32_t numNonDefault,
-              TypedValue& ret);
-
-/**
- * Extract the name used to invoke the function from the ActRec where name
- * maybe be stored in invName, or may include the classname (e.g. Class::func)
- */
-const StringData* getInvokeName(ActRec* ar);
-
-#define NATIVE_TYPES                                \
+#define NATIVE_TYPES                                  \
   /* kind       arg type              return type */  \
-  X(Int32,      int32_t,              int32_t)        \
   X(Int64,      int64_t,              int64_t)        \
   X(Double,     double,               double)         \
   X(Bool,       bool,                 bool)           \
   X(Object,     const Object&,        Object)         \
-  X(String,     const String&,        String)         \
+  X(OptString,  const OptString&,     OptString)      \
   X(Array,      const Array&,         Array)          \
-  X(Resource,   const Resource&,      Resource)       \
-  X(Mixed,      const Variant&,       Variant)        \
-  X(ObjectArg,  ObjectArg,            ObjectArg)      \
-  X(StringArg,  StringArg,            StringArg)      \
-  X(ArrayArg,   ArrayArg,             ArrayArg)       \
-  X(ResourceArg,ResourceArg,          ResourceArg)    \
-  X(OutputArg,  OutputArg,            OutputArg)      \
-  X(ARReturn,   TypedValue*,          TypedValue*)    \
-  X(MixedTV,    TypedValue,           TypedValue)     \
-  X(MixedRef,   const VRefParamValue&,VRefParamValue) \
-  X(VarArgs,    ActRec*,              ActRec*)        \
-  X(This,       ObjectData*,          ObjectData*)    \
+  X(Resource,   const OptResource&,   OptResource)    \
+  X(Func,       Func*,                Func*)          \
   X(Class,      const Class*,         const Class*)   \
+  X(ClsMeth,    ClsMethDataRef,       ClsMethDataRef) \
+  X(Mixed,      const Variant&,       Variant)        \
+  X(ObjectNN,   ObjectArg,            ObjectRet)      \
+  X(String,     StringArg,            StringRet)      \
+  X(ArrayNN,    ArrayArg,             ArrayRet)       \
+  X(ResourceArg,ResourceArg,          ResourceArg)    \
+  X(MixedTV,    TypedValue,           TypedValue)     \
+  X(This,       ObjectData*,          ObjectData*)    \
   X(Void,       void,                 void)           \
+  X(IntIO,      int64_t&,             int64_t&)       \
+  X(DoubleIO,   double&,              double&)        \
+  X(BoolIO,     bool&,                bool&)          \
+  X(ObjectIO,   Object&,              Object&)        \
+  X(StringIO,   OptString&,              OptString&)        \
+  X(ArrayIO,    Array&,               Array&)         \
+  X(ResourceIO, OptResource&,         OptResource&)   \
+  X(FuncIO,     Func*&,               Func*&)         \
+  X(ClassIO,    Class*&,              Class*&)        \
+  X(ClsMethIO,  ClsMethDataRef&,      ClsMethDataRef&)\
+  X(MixedIO,    Variant&,             Variant&)       \
   /**/
 
 template <class T>
@@ -296,7 +306,6 @@ using ObjectArg   = Native::NativeArg<ObjectData>;
 using StringArg   = Native::NativeArg<StringData>;
 using ArrayArg    = Native::NativeArg<ArrayData>;
 using ResourceArg = Native::NativeArg<ResourceData>;
-using OutputArg   = Native::NativeArg<RefData>;
 
 namespace Native {
 
@@ -309,15 +318,29 @@ struct NativeSig {
 
   NativeSig() : ret(Type::Void) {}
 
-  NativeSig(Type _ret, const std::vector<Type>& _args)
-      : ret(_ret), args(_args) {
-  }
+  NativeSig(Type ret, const std::vector<Type>& args)
+      : ret(ret), args(args)
+  {}
+
+  NativeSig(Type ret, std::vector<Type>&& args)
+    : ret(ret), args(std::move(args))
+  {}
+
+  NativeSig(NativeSig&&) = default;
+  NativeSig(const NativeSig&) = default;
+
+  NativeSig& operator=(const NativeSig&) = default;
+  NativeSig& operator=(NativeSig&&) = default;
 
   template<class Ret>
   explicit NativeSig(Ret (*ptr)());
 
   template<class Ret, class... Args>
   explicit NativeSig(Ret (*ptr)(Args...));
+
+  bool operator==(const NativeSig& other) const {
+    return ret == other.ret && args == other.args;
+  }
 
   std::string toString(const char* classname, const char* fname) const;
 
@@ -401,9 +424,29 @@ struct NativeFunctionInfo {
     , ptr(reinterpret_cast<NativeFunction>(f))
   {}
 
+  explicit operator bool() const { return ptr != nullptr; }
+
+  bool operator==(const NativeFunctionInfo& other) const {
+    return ptr == other.ptr && sig == other.sig;
+  }
+
   NativeSig sig;
   NativeFunction ptr;
 };
+
+/*
+ * Default values to be passed to builtins which use inout paramaters purely
+ * as out values, ignoring their inputs.
+ */
+Optional<TypedValue> builtinInValue(const Func* builtin, uint32_t i);
+
+/**
+* This function inspects the user attribute map to determine if a given
+* parameter is out-only. It returns a pair that contains a boolean
+* indicating that the attribute is present, and an optional return type,
+* if specified by the user.
+*/
+std::pair<bool, MaybeDataType> typeForOutParam(const UserAttributeMap& map);
 
 /////////////////////////////////////////////////////////////////////////////
 
@@ -426,37 +469,26 @@ void getFunctionPointers(const NativeFunctionInfo& info,
                          ArFunction& bif,
                          NativeFunction& nif);
 
-/**
- * Fallback method bound to declared methods with no matching
- * internal implementation.
- */
-TypedValue* unimplementedWrapper(ActRec* ar);
-
 /////////////////////////////////////////////////////////////////////////////
 
 /**
- * registerBuiltinNativeFunc() and getNativeFunction() provide access to a
- * case insensitive map of "name" to function pointer.
+ * registerNativeFunc() and getNativeFunction() use a provided
+ * FuncTable that is a case sensitive map of "name" to function pointer.
+ * We require case-correct symbols for the purpose of binding native impls
+ * to their PHP decls, regardless of how the language treats the symbols.
  *
  * Extensions should generally add items to this map using the HHVM_FE/ME
- * macros above. The function name (key) must be a static string because
- * the underlying table is shared and outlives individual requests.
+ * macros above. The function name (key) must be a static string.
  */
 
-void registerBuiltinNativeFunc(const StringData*, const NativeFunctionInfo&);
-
-// Extensions can register a resolver at moduleInit() time, that is called
-// to get called to lookup non-builtin native functions. The resolver
-// must be thread-safe.
-using NativeFuncResolver = std::function<
-  folly::Optional<NativeFunctionInfo> (const String& name)
->;
-extern std::vector<NativeFuncResolver> s_nativeFuncResolvers;
+struct FuncTable;
+void registerNativeFunc(FuncTable&, const StringData*,
+                        const NativeFunctionInfo&);
 
 // Helper accepting a C-string name
 template <class Fun> typename
   std::enable_if<!std::is_member_function_pointer<Fun>::value, void>::type
-registerBuiltinNativeFunc(const char* name, Fun func) {
+registerNativeFunc(FuncTable& nativeFuncs, const char* name, Fun func) {
   static_assert(
     std::is_pointer<Fun>::value &&
     std::is_function<typename std::remove_pointer<Fun>::type>::value,
@@ -466,13 +498,14 @@ registerBuiltinNativeFunc(const char* name, Fun func) {
     detail::understandable_sig<Fun>::value,
     "Arguments on builtin function were not understood types"
   );
-  registerBuiltinNativeFunc(makeStaticString(name), NativeFunctionInfo(func));
+  registerNativeFunc(nativeFuncs, makeStaticString(name),
+                     NativeFunctionInfo(func));
 }
 
 // Helper accepting a possibly nonstatic HPHP::String name
 template <class Fun> typename
   std::enable_if<!std::is_member_function_pointer<Fun>::value, void>::type
-registerBuiltinNativeFunc(const String& name, Fun func) {
+registerNativeFunc(FuncTable& nativeFuncs, const OptString& name, Fun func) {
   static_assert(
     std::is_pointer<Fun>::value &&
     std::is_function<typename std::remove_pointer<Fun>::type>::value,
@@ -482,10 +515,11 @@ registerBuiltinNativeFunc(const String& name, Fun func) {
     detail::understandable_sig<Fun>::value,
     "Arguments on builtin function were not understood types"
   );
-  registerBuiltinNativeFunc(makeStaticString(name), NativeFunctionInfo(func));
+  registerNativeFunc(nativeFuncs, makeStaticString(name),
+                     NativeFunctionInfo(func));
 }
 
-// Specializations of registerBuiltinNativeFunc for taking pointers to member
+// Specializations of registerNativeFunc for taking pointers to member
 // functions and making them look like HNI wrapper funcs.
 //
 // This allows invoking object method calls directly, but ONLY for specialized
@@ -495,60 +529,67 @@ registerBuiltinNativeFunc(const String& name, Fun func) {
 // you are not implementing one of these
 template<class Ret, class Cls> typename
   std::enable_if<std::is_base_of<ObjectData, Cls>::value, void>::type
-registerBuiltinNativeFunc(const char* name, Ret (Cls::*func)()) {
-  registerBuiltinNativeFunc(name, (Ret (*)(ObjectData*))getMethodPtr(func));
+registerNativeFunc(FuncTable& nativeFuncs, const char* name,
+                   Ret (Cls::*func)()) {
+  registerNativeFunc(nativeFuncs, name,
+                     (Ret (*)(ObjectData*))getMethodPtr(func));
 }
 
 template<class Ret, class Cls, class... Args> typename
   std::enable_if<std::is_base_of<ObjectData, Cls>::value, void>::type
-registerBuiltinNativeFunc(const char* name, Ret (Cls::*func)(Args...)) {
-  registerBuiltinNativeFunc(
-      name, (Ret (*)(ObjectData*, Args...))getMethodPtr(func)
+registerNativeFunc(FuncTable& nativeFuncs, const char* name,
+                   Ret (Cls::*func)(Args...)) {
+  registerNativeFunc(
+      nativeFuncs, name, (Ret (*)(ObjectData*, Args...))getMethodPtr(func)
   );
 }
 
 template<class Ret, class Cls> typename
   std::enable_if<std::is_base_of<ObjectData, Cls>::value, void>::type
-registerBuiltinNativeFunc(const char* name, Ret (Cls::*func)() const) {
-  registerBuiltinNativeFunc(name, (Ret (*)(ObjectData*))getMethodPtr(func));
+registerNativeFunc(FuncTable& nativeFuncs, const char* name,
+                          Ret (Cls::*func)() const) {
+  registerNativeFunc(nativeFuncs, name,
+                     (Ret (*)(ObjectData*))getMethodPtr(func));
 }
 
 template<class Ret, class Cls, class... Args> typename
   std::enable_if<std::is_base_of<ObjectData, Cls>::value, void>::type
-registerBuiltinNativeFunc(const char* name,
-                          Ret (Cls::*func)(Args...) const) {
-  registerBuiltinNativeFunc(
-      name, (Ret (*)(ObjectData*, Args...))getMethodPtr(func)
+registerNativeFunc(FuncTable& nativeFuncs, const char* name,
+                   Ret (Cls::*func)(Args...) const) {
+  registerNativeFunc(
+      nativeFuncs, name, (Ret (*)(ObjectData*, Args...))getMethodPtr(func)
   );
 }
 
 /////////////////////////////////////////////////////////////////////////////
 
 const char* checkTypeFunc(const NativeSig& sig,
-                          const TypeConstraint& retType,
-                          const Func* func);
+                          const FuncEmitter* func);
 
-NativeFunctionInfo getNativeFunction(const StringData* fname,
+OptString fullName(const StringData* fname, const StringData* cname,
+                   bool isStatic);
+
+NativeFunctionInfo getNativeFunction(const FuncTable& nativeFuncs,
+                                     const StringData* fname,
                                      const StringData* cname = nullptr,
                                      bool isStatic = false);
 
-NativeFunctionInfo getNativeFunction(const char* fname,
-                                      const char* cname = nullptr,
-                                      bool isStatic = false);
+NativeFunctionInfo getNativeFunction(const FuncTable& nativeFuncs,
+                                     const char* fname,
+                                     const char* cname = nullptr,
+                                     bool isStatic = false);
 
 //////////////////////////////////////////////////////////////////////////////
 // Global constants
 
-typedef std::map<const StringData*,TypedValueAux> ConstantMap;
+using ConstantMap = std::map<const StringData*,TypedValueAux>;
 extern ConstantMap s_constant_map;
 
 inline
-bool registerConstant(const StringData* cnsName, Cell cns,
-                      bool dynamic = false) {
-  assertx(cellIsPlausible(cns) && cns.m_type != KindOfUninit);
+bool registerConstant(const StringData* cnsName, TypedValue cns) {
+  assertx(tvIsPlausible(cns) && cns.m_type != KindOfUninit);
   auto& dst = s_constant_map[cnsName];
-  *static_cast<Cell*>(&dst) = cns;
-  dst.dynamic() = dynamic;
+  *static_cast<TypedValue*>(&dst) = cns;
   return bindPersistentCns(cnsName, cns);
 }
 
@@ -574,24 +615,21 @@ const ConstantMap& getConstants() {
   return s_constant_map;
 }
 
-using ConstantCallback = const Variant& (*)();
-bool registerConstant(const StringData*, ConstantCallback);
-
 //////////////////////////////////////////////////////////////////////////////
 // Class Constants
 
-typedef hphp_hash_map<const StringData*, ConstantMap,
-                      string_data_hash, string_data_isame> ClassConstantMapMap;
+using ClassConstantMapMap = hphp_hash_map<const StringData*, ConstantMap,
+                      string_data_hash, string_data_tsame>;
 extern ClassConstantMapMap s_class_constant_map;
 
 inline
 bool registerClassConstant(const StringData *clsName,
                            const StringData *cnsName,
-                           Cell cns) {
-  assertx(cellIsPlausible(cns));
+                           TypedValue cns) {
+  assertx(tvIsPlausible(cns));
   auto &cls = s_class_constant_map[clsName];
-  assertx(cls.find(cnsName) == cls.end());
-  *static_cast<Cell*>(&cls[cnsName]) = cns;
+  assertx(!cls.contains(cnsName));
+  *static_cast<TypedValue*>(&cls[cnsName]) = cns;
   return true;
 }
 
@@ -623,7 +661,11 @@ const ConstantMap* getClassConstants(const StringData* clsName) {
   return &clsit->second;
 }
 
+typedef void (*FinishFunc)(Class* cls);
+
+void registerClassExtraDataHandler(const OptString& clsName, FinishFunc fn);
+
+FinishFunc getClassExtraDataHandler(const StringData* clsName);
+
 //////////////////////////////////////////////////////////////////////////////
 }} // namespace HPHP::Native
-
-#endif

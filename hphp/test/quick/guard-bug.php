@@ -1,16 +1,23 @@
 <?hh
 
-function k() {
-  global $x;
-  if (!isset($x)) {
-    $x = fopen(__FILE__, 'r');
+abstract final class GuardBug { public static $x; }
+
+function k() :mixed{
+  // a comment!
+  if (!isset(GuardBug::$x)) {
+    GuardBug::$x = fopen(__FILE__, 'r');
   }
-  return $x;
+  return GuardBug::$x;
 }
 
-while ($line = fgets(k())) {
-    $parts = explode(' ', $line);
-    $file = $parts[0];
+<<__EntryPoint>>
+function main(): void {
+  $line = fgets(k());
+  while ($line) {
+      $parts = explode(' ', $line);
+      $file = $parts[0];
 
-    echo "$file -\n";
+      echo "$file -\n";
+      $line = fgets(k());
+  }
 }

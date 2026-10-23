@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 /**
  * Copyright (c) 2014, Facebook, Inc.
  * All rights reserved.
@@ -12,6 +12,6 @@
 class C {}
 
 function f(): void {
-  $a = array('foo' => 'C');
+  $a = dict['foo' => 'C'];
   new $a['foo']();
 }

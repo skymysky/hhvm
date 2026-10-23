@@ -4,6 +4,6 @@
 // `this`, which is implemented as a special `as` type constraint
 class Foo<+T> {
   public function bar(): this {
-    // UNSAFE
+    return $this;
   }
 }

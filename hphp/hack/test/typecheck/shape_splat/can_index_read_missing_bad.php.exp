@@ -1,0 +1,14 @@
+error: Typing[4108] This shape doesn't have a field `missing` [1]
+-> The shape is defined here [2]
+
+can_index_read_missing_bad.php:7:6
+3 | 
+4 | function read_missing<T as shape(...)>(
+5 |   shape(...T, 'name' => string) $s,
+  |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ [2]
+6 | ): void {
+7 |   $s['missing'];
+  |      ^^^^^^^^^ [1]
+8 | }
+
+1 error found

@@ -22,13 +22,13 @@
 
 #include <folly/Lazy.h>
 
-namespace HPHP { namespace HHBBC {
+namespace HPHP::HHBBC {
 
 std::vector<Bytecode> samples {
   bc::True {},
   bc::Int { 52 },
   bc::False {},
-  bc::FPushFunc { 2, {}, false },
+  bc::FCallFunc { FCallArgs(2) },
 };
 
 TEST(Bytecode, EqualityComparable) {
@@ -70,4 +70,4 @@ TEST(Bytecode, Hash) {
   EXPECT_EQ(map[b2], bc::Int { 5 });
 }
 
-}}
+}

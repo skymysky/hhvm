@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 // Copyright 2004-present Facebook. All Rights Reserved.
 
 // Function type
@@ -50,5 +50,6 @@ function breakIt(): void {
   $c = getThing1()->apply($x);
 }
 
-/* HH_FIXME[1002] */
-breakIt();
+function main(): void {
+  breakIt();
+}

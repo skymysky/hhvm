@@ -1,0 +1,10 @@
+error: Typing[4482] Using `Foo::class` in this position will trigger an implicit runtime conversion to string, please use `nameof Foo` [1]
+
+classname.php:7:9
+5 | 
+6 | enum E: string {
+7 |   FOO = Foo::class;
+  |         ^^^^^^^^^^ [1]
+8 | }
+
+1 error found

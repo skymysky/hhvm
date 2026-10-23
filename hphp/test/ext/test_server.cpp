@@ -16,8 +16,6 @@
 
 #include "hphp/test/ext/test_server.h"
 
-#include "hphp/compiler/option.h"
-
 #include "hphp/util/async-func.h"
 #include "hphp/util/process-exec.h"
 
@@ -28,11 +26,11 @@
 #include "hphp/runtime/base/comparisons.h"
 #include "hphp/runtime/base/http-client.h"
 #include "hphp/runtime/base/program-functions.h"
-#include "hphp/runtime/base/runtime-option.h"
 #include "hphp/runtime/server/server.h"
 
 #include <sys/types.h>
 
+#include <filesystem>
 #include <fstream>
 #include <memory>
 #include <sys/param.h>
@@ -55,11 +53,9 @@ static int s_server_port = 0;
 static int s_admin_port = 0;
 static int s_rpc_port = 0;
 static int inherit_fd = -1;
-static std::unique_ptr<AsyncFunc<TestServer>> s_func;
 static char s_pidfile[PATH_MAX];
 static char s_repoFile[PATH_MAX];
 static char s_logFile[PATH_MAX];
-static char s_filename[PATH_MAX];
 static int k_timeout = 30;
 
 bool TestServer::VerifyServerResponse(const char* input, const char** outputs,
@@ -87,28 +83,11 @@ bool TestServer::VerifyServerResponse(const char* input, const char** outputs,
   func.start();
 
   bool passed = true;
-  if (s_func) {
-    if (!s_func->waitForEnd(k_timeout)) {
-      // Takeover didn't complete in 30s, stop the old server
-      fprintf(stderr, "stopping HHVM\n");
-      AsyncFunc<TestServer> stopFunc(this, &TestServer::KillServer);
-      stopFunc.run();
-      fprintf(stderr, "Waiting for stop\n");
-      stopFunc.waitForEnd();
-      fprintf(stderr, "Waiting for old HHVM\n");
-      s_func->waitForEnd();
-      // Mark this test a failure
-      fprintf(stderr, "Proceeding to test\n");
-      passed = false;
-    }
-    s_func.reset();
-  }
-
   std::string actual;
 
   int url = 0;
   for (url = 0; url < nUrls; url++) {
-    String server = "http://";
+    OptString server = "http://";
     server += HHVM_FN(php_uname)("n").toString();
     server += ":" + folly::to<std::string>(port) + "/";
     server += urls[url];
@@ -124,7 +103,7 @@ bool TestServer::VerifyServerResponse(const char* input, const char** outputs,
       }
       if (header) {
         HHVM_FN(curl_setopt)(c.toResource(), CURLOPT_HTTPHEADER,
-                      make_packed_array(header));
+                      make_vec_array(header));
       }
       if (responseHeader) {
         HHVM_FN(curl_setopt)(c.toResource(), CURLOPT_HEADER, 1);
@@ -174,19 +153,19 @@ void TestServer::RunServer() {
   auto const rpcConfig = "-vSatellites.rpc.Port=" +
     folly::to<std::string>(s_rpc_port);
   auto const fd = folly::to<std::string>(inherit_fd);
-  auto option = inherit_fd >= 0
-    ? "--port-fd=" + fd
-    : "-vServer.TakeoverFilename=" + std::string(s_filename);
+  auto option = "--port-fd=" + fd;
   auto serverType = std::string("-vServer.Type=") + m_serverType;
   auto pidFile = std::string("-vPidFile=") + s_pidfile;
-  auto repoFile = std::string("-vRepo.Central.Path=") + s_repoFile;
+  auto repoFile = std::string("-vRepo.Path=") + s_repoFile;
   auto logFile = std::string("-vLog.File=") + s_logFile;
+  auto sourceRoot = std::string("-vServer.SourceRoot=") +
+    (std::filesystem::current_path() / "runtime" / "tmp").native();
 
   const char *argv[] = {
     "__HHVM__", "--mode=server", "--config=test/ext/config-server.hdf",
     portConfig.c_str(), adminConfig.c_str(), rpcConfig.c_str(),
     option.c_str(), serverType.c_str(), pidFile.c_str(), repoFile.c_str(),
-    logFile.c_str(),
+    logFile.c_str(), sourceRoot.c_str(),
     nullptr
   };
 
@@ -195,13 +174,13 @@ void TestServer::RunServer() {
   argv[0] = HHVM_PATH;
 #endif
 
-  proc::exec(argv[0], argv, nullptr, out, &err);
+  HPHP::proc::exec(argv[0], argv, nullptr, out, &err);
 }
 
 void TestServer::StopServer() {
   for (int i = 0; i < 10; i++) {
     Variant c = HHVM_FN(curl_init)();
-    String url = "http://";
+    OptString url = "http://";
     url += HHVM_FN(php_uname)("n").toString();
     url += ":" + folly::to<std::string>(s_admin_port) + "/stop";
     HHVM_FN(curl_setopt)(c.toResource(), CURLOPT_URL, url);
@@ -231,7 +210,7 @@ void TestServer::KillServer() {
   std::string out, err;
   const char *argv[] = {"kill", buf, nullptr};
   for (int i = 0; i < 10; i++) {
-    auto ret = proc::exec(argv[0], argv, nullptr, out, &err);
+    auto ret = HPHP::proc::exec(argv[0], argv, nullptr, out, &err);
     if (ret) {
       return;
     }
@@ -240,7 +219,7 @@ void TestServer::KillServer() {
   // Last resort
   const char *argv9[] = {"kill", "-9", buf, nullptr};
   for (int i = 0; i < 10; i++) {
-    auto ret = proc::exec(argv9[0], argv9, nullptr, out, &err);
+    auto ret = HPHP::proc::exec(argv9[0], argv9, nullptr, out, &err);
     if (ret) {
       return;
     }
@@ -254,6 +233,9 @@ void TestServer::KillServer() {
 struct TestServerRequestHandler : RequestHandler {
   explicit TestServerRequestHandler(int timeout) : RequestHandler(timeout) {}
   // implementing RequestHandler
+  void teardownRequest(Transport* /*transport*/) noexcept override {
+    // do nothing
+  }
   void handleRequest(Transport* /*transport*/) override {
     // do nothing
   }
@@ -273,7 +255,7 @@ static int find_server_port(const std::string &serverType) {
       server->stop();
       server->waitForEnd();
       return port;
-    } catch (const FailedToListenException& e) {
+    } catch (const FailedToListenException&) {
       if (tries >= 100) throw;
     }
   }
@@ -297,14 +279,12 @@ bool TestServer::RunTests(const std::string &which) {
   close(tmpfd);
 
   RUN_TEST(TestInheritFdServer);
-  RUN_TEST(TestTakeoverServer);
   RUN_TEST(TestSanity);
   RUN_TEST(TestServerVariables);
   RUN_TEST(TestInteraction);
   RUN_TEST(TestGet);
   RUN_TEST(TestPost);
   RUN_TEST(TestExpectContinue);
-  RUN_TEST(TestCookie);
   RUN_TEST(TestResponseHeader);
   RUN_TEST(TestSetCookie);
   //RUN_TEST(TestRequestHandling);
@@ -319,25 +299,25 @@ bool TestServer::RunTests(const std::string &which) {
 ///////////////////////////////////////////////////////////////////////////////
 
 bool TestServer::TestSanity() {
-  VSR("<?php print 'Hello, World!';",
+  VSR("<?hh print 'Hello, World!';",
       "Hello, World!");
   return true;
 }
 
 bool TestServer::TestServerVariables() {
-  VSR("<?php var_dump($_POST, $_GET);",
+  VSR("<?hh var_dump(\\HH\\global_get('_POST'), \\HH\\global_get('_GET'));",
       "array(0) {\n}\narray(0) {\n}\n");
 
-  VSR("<?php print $_SERVER['REQUEST_URI'];",
+  VSR("<?hh print \\HH\\global_get('_SERVER')['REQUEST_URI'];",
       "/string");
 
-  VSGET("<?php "
-        "var_dump($_SERVER['PATH_INFO']);"
-        "var_dump(clean($_SERVER['PATH_TRANSLATED']));"
-        "var_dump($_SERVER['SCRIPT_NAME']);"
-        "var_dump($_SERVER['REQUEST_URI']);"
-        "var_dump(clean($_SERVER['SCRIPT_FILENAME']));"
-        "var_dump($_SERVER['QUERY_STRING']);"
+  VSGET("<?hh "
+        "var_dump(\\HH\\global_get('_SERVER')['PATH_INFO']);"
+        "var_dump(clean(\\HH\\global_get('_SERVER')['PATH_TRANSLATED']));"
+        "var_dump(\\HH\\global_get('_SERVER')['SCRIPT_NAME']);"
+        "var_dump(\\HH\\global_get('_SERVER')['REQUEST_URI']);"
+        "var_dump(clean(\\HH\\global_get('_SERVER')['SCRIPT_FILENAME']));"
+        "var_dump(\\HH\\global_get('_SERVER')['QUERY_STRING']);"
         "function clean($x) { return str_replace(getcwd(),'',$x); }",
 
         "string(13) \"/path/subpath\"\n"
@@ -349,14 +329,14 @@ bool TestServer::TestServerVariables() {
 
         "string/path/subpath?a=1&b=2");
 
-  VSGET("<?php "
-        "var_dump($_SERVER['PATH_INFO']);"
-        "var_dump(clean($_SERVER['PATH_TRANSLATED']));"
-        "var_dump($_SERVER['SCRIPT_NAME']);"
-        "var_dump($_SERVER['REQUEST_URI']);"
-        "var_dump(clean($_SERVER['SCRIPT_FILENAME']));"
-        "var_dump($_SERVER['QUERY_STRING']);"
-        "var_dump(isset($_ENV['HPHP_RPC']));"
+  VSGET("<?hh "
+        "var_dump(\\HH\\global_get('_SERVER')['PATH_INFO']);"
+        "var_dump(clean(\\HH\\global_get('_SERVER')['PATH_TRANSLATED']));"
+        "var_dump(\\HH\\global_get('_SERVER')['SCRIPT_NAME']);"
+        "var_dump(\\HH\\global_get('_SERVER')['REQUEST_URI']);"
+        "var_dump(clean(\\HH\\global_get('_SERVER')['SCRIPT_FILENAME']));"
+        "var_dump(\\HH\\global_get('_SERVER')['QUERY_STRING']);"
+        "var_dump(isset(\\HH\\global_get('_ENV')['HPHP_RPC']));"
         "function clean($x) { return str_replace(getcwd(),'',$x); }",
 
         "NULL\n"
@@ -374,8 +354,8 @@ bool TestServer::TestServerVariables() {
 
 bool TestServer::TestInteraction() {
   // run this twice to test lvalBlackHole
-  VSR2("<?php "
-        "$a[] = new stdclass;"
+  VSR2("<?hh "
+        "$a[] = new stdClass;"
         "var_dump(count(array_combine($a, $a)));",
         "");
 
@@ -383,16 +363,16 @@ bool TestServer::TestInteraction() {
 }
 
 bool TestServer::TestGet() {
-  VSGET("<?php var_dump($_GET['name']);",
+  VSGET("<?hh var_dump(\\HH\\global_get('_GET')['name']);",
         "string(0) \"\"\n", "string?name");
 
-  VSGET("<?php var_dump($_GET['name'], $_GET['id']);",
+  VSGET("<?hh var_dump(\\HH\\global_get('_GET')['name'], \\HH\\global_get('_GET')['id']);",
         "string(0) \"\"\nstring(1) \"1\"\n", "string?name&id=1");
 
-  VSGET("<?php print $_GET['name'];",
+  VSGET("<?hh print \\HH\\global_get('_GET')['name'];",
         "value", "string?name=value");
 
-  VSGET("<?php var_dump($_GET['names']);",
+  VSGET("<?hh var_dump(\\HH\\global_get('_GET')['names']);",
         "array(2) {\n"
         "  [1]=>\n"
         "  string(3) \"foo\"\n"
@@ -401,7 +381,7 @@ bool TestServer::TestGet() {
         "}\n",
         "string?names[1]=foo&names[2]=bar");
 
-  VSGET("<?php var_dump($_GET['names']);",
+  VSGET("<?hh var_dump(\\HH\\global_get('_GET')['names']);",
         "array(2) {\n"
         "  [0]=>\n"
         "  string(3) \"foo\"\n"
@@ -410,22 +390,16 @@ bool TestServer::TestGet() {
         "}\n",
         "string?names[]=foo&names[]=bar");
 
-  VSGET("<?php print $_REQUEST['name'];",
-        "value", "string?name=value");
-
   return true;
 }
 
 bool TestServer::TestPost() {
   const char *params = "name=value";
 
-  VSPOST("<?php print $_POST['name'];",
+  VSPOST("<?hh print \\HH\\global_get('_POST')['name'];",
          "value", "string", params);
 
-  VSPOST("<?php print $_REQUEST['name'];",
-         "value", "string", params);
-
-  VSPOST("<?php print $HTTP_RAW_POST_DATA;",
+  VSPOST("<?hh print $HTTP_RAW_POST_DATA;",
          "name=value", "string", params);
 
   return true;
@@ -434,50 +408,40 @@ bool TestServer::TestPost() {
 bool TestServer::TestExpectContinue() {
   const char *params = "name=value";
 
-  VSRX("<?php print $_POST['name'];",
+  VSRX("<?hh print \\HH\\global_get('_POST')['name'];",
        "value", "string", "POST", "Expect: 100-continue", params);
 
   return true;
 }
 
-bool TestServer::TestCookie() {
-  VSRX("<?php print $_COOKIE['name'];",
-       "value", "string", "GET", "Cookie: name=value;", nullptr);
-
-  VSRX("<?php print $_COOKIE['name2'];",
-       "value2", "string", "GET", "Cookie: n=v;name2=value2;n3=v3", nullptr);
-
-  return true;
-}
-
 bool TestServer::TestResponseHeader() {
-  VSR("<?php header('Set-Cookie: name=value'); var_dump(headers_list());",
+  VSR("<?hh header('Set-Cookie: name=value'); var_dump(headers_list());",
       "array(1) {\n"
       "  [0]=>\n"
       "  string(22) \"Set-Cookie: name=value\"\n"
       "}\n");
 
-  VSRES("<?php header('Set-Cookie: name=value');",
+  VSRES("<?hh header('Set-Cookie: name=value');",
         "Set-Cookie: name=value");
 
-  VSRES("<?php header('Location: new/url');",
+  VSRES("<?hh header('Location: new/url');",
         "302");
 
-  VSRES("<?php header(\"Test-Header: x\ry\"); echo 'done';",
+  VSRES("<?hh header(\"Test-Header: x\ry\"); echo 'done';",
         "done");
 
   return true;
 }
 
 bool TestServer::TestSetCookie() {
-  VSR("<?php setcookie('name', 'value'); var_dump(headers_list());",
+  VSR("<?hh setcookie('name', 'value'); var_dump(headers_list());",
       "array(1) {\n"
       "  [0]=>\n"
       "  string(22) \"Set-Cookie: name=value\"\n"
       "}\n");
   return true;
 
-  VSRES("<?php setcookie('name', 'value');",
+  VSRES("<?hh setcookie('name', 'value');",
         "Set-Cookie: name=value");
 
   return true;
@@ -502,14 +466,17 @@ struct TestTransport final : Transport {
   uint16_t getRemotePort() override { return 0; }
   Method getMethod() override { return Transport::Method::GET; }
   std::string getHeader(const char* /*name*/) override { return ""; }
-  void getHeaders(HeaderMap& /*headers*/) override {}
+  const HeaderMap& getHeaders() override {
+    static const HeaderMap emptyMap{};
+    return emptyMap;
+  }
   void addHeaderImpl(const char* /*name*/, const char* /*value*/) override {}
   void removeHeaderImpl(const char* /*name*/) override {}
 
   /**
    * Get a description of the type of transport.
    */
-  String describe() const override {
+  OptString describe() const override {
     return s_test;
   }
 
@@ -528,11 +495,11 @@ struct TestTransport final : Transport {
   }
 };
 
-typedef std::shared_ptr<TestTransport> TestTransportPtr;
-typedef std::vector<TestTransportPtr> TestTransportPtrVec;
-typedef AsyncFunc<TestTransport> TestTransportAsyncFunc;
-typedef std::shared_ptr<TestTransportAsyncFunc> TestTransportAsyncFuncPtr;
-typedef std::vector<TestTransportAsyncFuncPtr> TestTransportAsyncFuncPtrVec;
+using TestTransportPtr = std::shared_ptr<TestTransport>;
+using TestTransportPtrVec = std::vector<TestTransportPtr>;
+using TestTransportAsyncFunc = AsyncFunc<TestTransport>;
+using TestTransportAsyncFuncPtr = std::shared_ptr<TestTransportAsyncFunc>;
+using TestTransportAsyncFuncPtrVec = std::vector<TestTransportAsyncFuncPtr>;
 
 #define TEST_SIZE 100
 
@@ -542,7 +509,7 @@ typedef std::vector<TestTransportAsyncFuncPtr> TestTransportAsyncFuncPtrVec;
  * all handling are thread-safe.
  */
 bool TestServer::TestRequestHandling() {
-  RuntimeOption::AllowedFiles.insert("/string");
+  Cfg::Server::AllowedFiles.insert("/string");
   TestTransportPtrVec transports(TEST_SIZE);
   TestTransportAsyncFuncPtrVec funcs(TEST_SIZE);
   for (unsigned int i = 0; i < TEST_SIZE; i++) {
@@ -560,7 +527,7 @@ bool TestServer::TestRequestHandling() {
   }
   for (unsigned int i = 0; i < TEST_SIZE; i++) {
     VS(transports[i]->m_code, 200);
-    VS(String(transports[i]->m_response), "Hello, world!");
+    VS(OptString(transports[i]->m_response), "Hello, world!");
   }
   return Count(true);
 }
@@ -618,40 +585,8 @@ void TestServer::CleanupPreBoundSocket() {
 }
 
 bool TestServer::TestInheritFdServer() {
-  WITH_PREBOUND_SOCKET(VSR("<?php print 'Hello, World!';",
+  WITH_PREBOUND_SOCKET(VSR("<?hh print 'Hello, World!';",
       "Hello, World!"));
-  return true;
-}
-
-bool TestServer::TestTakeoverServer() {
-  // start a server
-  snprintf(s_filename, MAXPATHLEN, "/tmp/hphp_takeover_XXXXXX");
-  auto const tmpfd = mkstemp(s_filename);
-  close(tmpfd);
-
-  s_func.reset(new AsyncFunc<TestServer>(this, &TestServer::RunServer));
-  s_func->start();
-
-  // Wait for the server to actually start
-  HttpClient http;
-  StringBuffer response;
-  req::vector<String> responseHeaders;
-  auto url = "http://127.0.0.1:" + folly::to<std::string>(s_server_port) +
-    "/status.php";
-  HeaderMap headers;
-  for (int i = 0; i < 10; i++) {
-    int code = http.get(url.c_str(), response, &headers, &responseHeaders);
-    if (code > 0) {
-      break;
-    }
-    sleep(1);
-  }
-
-  // will start a second server, which should takeover
-  VSR("<?php print 'Hello, World!';",
-      "Hello, World!");
-  unlink(s_filename);
-  s_filename[0] = 0;
   return true;
 }
 
@@ -660,10 +595,12 @@ bool TestServer::TestTakeoverServer() {
 struct EchoHandler final : RequestHandler {
   explicit EchoHandler(int timeout) : RequestHandler(timeout) {}
   // implementing RequestHandler
-  void handleRequest(Transport *transport) override {
+  void teardownRequest(Transport*) noexcept override {
+    hphp_memory_cleanup();
+  }
+  void handleRequest(Transport* transport) override {
     g_context.getCheck();
-    HeaderMap headers;
-    transport->getHeaders(headers);
+    const HeaderMap& headers = transport->getHeaders();
 
     std::string response;
     response = "\nGET param: name = ";
@@ -690,9 +627,8 @@ struct EchoHandler final : RequestHandler {
 
     transport->addHeader("Custom", "blah");
     transport->sendString(response);
-    hphp_memory_cleanup();
   }
-  void abortRequest(Transport *transport) override {
+  void abortRequest(Transport* transport) override {
     transport->sendString("Service Unavailable", 503);
   }
 };
@@ -706,7 +642,7 @@ bool TestServer::TestHttpClient() {
       server->setRequestHandlerFactory<EchoHandler>(0);
       server->start();
       break;
-    } catch (const FailedToListenException& e) {
+    } catch (const FailedToListenException&) {
       if (s_server_port == PORT_MAX) throw;
     }
   }
@@ -722,7 +658,7 @@ bool TestServer::TestHttpClient() {
   for (int i = 0; i < 10; i++) {
     HttpClient http;
     StringBuffer response;
-    req::vector<String> responseHeaders;
+    req::vector<OptString> responseHeaders;
     int code = http.get(url.c_str(), response, &headers, &responseHeaders);
     VS(code, 200);
     VS(response.data(),
@@ -746,7 +682,7 @@ bool TestServer::TestHttpClient() {
   for (int i = 0; i < 10; i++) {
     HttpClient http;
     StringBuffer response;
-    req::vector<String> responseHeaders;
+    req::vector<OptString> responseHeaders;
     int code = http.post(url.c_str(), "postdata", 8, response, &headers,
                          &responseHeaders);
     VS(code, 200);
@@ -781,28 +717,28 @@ bool TestServer::TestHttpClient() {
 
 bool TestServer::TestRPCServer() {
   // the simplest case
-  VSGETP("<?php\n"
+  VSGETP("<?hh\n"
          "function f() { return 100; }\n",
          "100",
          "f?auth=test",
          s_rpc_port);
 
   // array output
-  VSGETP("<?php\n"
-         "function f($a) { return array(1, 2, 3, $a); }\n",
+  VSGETP("<?hh\n"
+         "function f($a) { return varray[1, 2, 3, $a]; }\n",
          "[1,2,3,\"hello\"]",
          "f?auth=test&p=\"hello\"",
          s_rpc_port);
 
   // associate arrays
-  VSGETP("<?php\n"
+  VSGETP("<?hh\n"
          "function f($a, $b) { return array_merge($a, $b); }\n",
          "{\"a\":1,\"0\":2,\"1\":1,\"2\":2}",
          "f?auth=test&p={\"a\":1,\"1\":2}&p=[1,2]",
          s_rpc_port);
 
   // builtin function and static method
-  VSGETP("<?php\n"
+  VSGETP("<?hh\n"
          "class A { static function f($a) { return $a; } }\n",
          "100",
          "call_user_func?auth=test&p=\"A::f\"&p=100",
@@ -810,15 +746,15 @@ bool TestServer::TestRPCServer() {
 
   // invoking a file, with NO json encoding
   // "int(100)" is printed twice, one from warmup, and the other from include
-  VSGETP("<?php\n"
+  VSGETP("<?hh\n"
          "var_dump(100);\n",
          "int(100)\n"
          "int(100)\n",
          "?include=string&output=1&auth=test",
          s_rpc_port);
 
-  VSGETP("<?php\n"
-         "var_dump(isset($_ENV['HPHP_RPC']));\n",
+  VSGETP("<?hh\n"
+         "var_dump(isset(\\HH\\global_get('_ENV')['HPHP_RPC']));\n",
          "bool(true)\n"
          "bool(true)\n",
          "?include=string&output=1&auth=test",
@@ -828,8 +764,8 @@ bool TestServer::TestRPCServer() {
 }
 
 bool TestServer::TestXboxServer() {
-  VSGET("<?php\n"
-        "if (array_key_exists('main', $_GET)) {\n"
+  VSGET("<?hh\n"
+        "if (array_key_exists('main', \\HH\\global_get('_GET'))) {\n"
         "  $t = xbox_task_start('1');\n"
         "  xbox_task_result($t, 0, $r);\n"
         "  var_dump($r);\n"
@@ -857,7 +793,6 @@ bool TestServer::TestXboxServer() {
         "    if ($msg == '1') return xbox_get_thread_timeout();\n"
         "    else if ($msg == '2') xbox_set_thread_timeout(5);\n"
         "    else if ($msg == '3') return xbox_get_thread_time();\n"
-        "    else xbox_schedule_thread_reset();\n"
         "  }\n"
         "}\n",
         "int(10)\n"
@@ -871,11 +806,11 @@ bool TestServer::TestXboxServer() {
 }
 
 bool TestServer::TestPageletServer() {
-  VSGET("<?php\n"
-        "if (array_key_exists('pagelet', $_GET)) {\n"
+  VSGET("<?hh\n"
+        "if (array_key_exists('pagelet', \\HH\\global_get('_GET'))) {\n"
         "  echo 'Hello from the pagelet!';\n"
         "} else {\n"
-        "  $h = array('Host: ' . $_SERVER['HTTP_HOST']);\n"
+        "  $h = array('Host: ' . \\HH\\global_get('_SERVER')['HTTP_HOST']);\n"
         "  $t = pagelet_server_task_start('/string?pagelet=1', $h, '');\n"
         "  echo 'First! ';\n"
         "  $r = pagelet_server_task_result($t, $h, $c);\n"
@@ -885,11 +820,11 @@ bool TestServer::TestPageletServer() {
         "string");
 
   // POST vs GET
-  VSGET("<?php\n"
-        "if (array_key_exists('pagelet', $_GET)) {\n"
-        "  echo $_SERVER['REQUEST_METHOD'];\n"
+  VSGET("<?hh\n"
+        "if (array_key_exists('pagelet', \\HH\\global_get('_GET'))) {\n"
+        "  echo \\HH\\global_get('_SERVER')['REQUEST_METHOD'];\n"
         "} else {\n"
-        "  $h = array('Host: ' . $_SERVER['HTTP_HOST']);\n"
+        "  $h = array('Host: ' . \\HH\\global_get('_SERVER')['HTTP_HOST']);\n"
         "  $t = pagelet_server_task_start('/string?pagelet=1', $h, '');\n"
         "  echo 'First! ';\n"
         "  $r = pagelet_server_task_result($t, $h, $c);\n"
@@ -898,8 +833,8 @@ bool TestServer::TestPageletServer() {
         "First! GET",
         "string");
 
-  VSGET("<?php\n"
-        "if ($_SERVER['THREAD_TYPE'] == 'Pagelet Thread') {\n"
+  VSGET("<?hh\n"
+        "if (\\HH\\global_get('_SERVER')['THREAD_TYPE'] == 'Pagelet Thread') {\n"
         "  echo 'hello';\n"
         "  pagelet_server_flush();\n"
         "  ob_start();\n"
@@ -907,7 +842,7 @@ bool TestServer::TestPageletServer() {
         "  pagelet_server_flush();\n"
         "  echo 'what';\n"
         "} else {\n"
-        "  $h = array('Host: ' . $_SERVER['HTTP_HOST']);\n"
+        "  $h = array('Host: ' . \\HH\\global_get('_SERVER')['HTTP_HOST']);\n"
         "  $t = pagelet_server_task_start('/string', $h, '');\n"
         "  for ($i = 0; ; $i++) {\n"
         "    while (($s = pagelet_server_task_status($t)) == \n"

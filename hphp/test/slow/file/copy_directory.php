@@ -1,9 +1,12 @@
-<?php
+<?hh
+
 // Copyright 2004-present Facebook. All Rights Reserved.
 
-$file_path = dirname(__FILE__);
-$src_dir = "$file_path/copy_dir_src";
-$dest_dir = "$file_path/copy_dir_dest";
+<<__EntryPoint>>
+function main_copy_directory() :mixed{
+
+$src_dir = sys_get_temp_dir().'/'.'copy_dir_src';
+$dest_dir = sys_get_temp_dir().'/'.'copy_dir_dest';
 
 // Create the source directory
 mkdir("$src_dir");
@@ -22,3 +25,4 @@ echo "dest exists: " . (file_exists($dest_dir) ? "true" : "false");
 unlink("$src_dir/a.txt");
 unlink("$src_dir/b.txt");
 rmdir("$src_dir");
+}

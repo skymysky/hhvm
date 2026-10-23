@@ -1,7 +1,7 @@
 <?hh
 
-function consumeArrayOfIntToInt(array<int, int> $_): void {}
+function consumeArrayOfIntToInt(darray<int, int> $_): void {}
 
-function test(array<int> $arrayOfInt): void {
+function test(varray<int> $arrayOfInt): void {
   consumeArrayOfIntToInt($arrayOfInt);
 }

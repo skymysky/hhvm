@@ -1,4 +1,4 @@
-<?php
+<?hh
 /*
  * This test is intended to ensure that we restore %rsp correctly as we unwind
  * through TC frames.
@@ -14,50 +14,50 @@
  * tc_unwind_resume() or discardStackTemps(), or a callee of one of those.
  */
 
-function foo($a) {
+function foo($a) :mixed{
   return bar($a);
 }
 
-function bar($a) {
+function bar($a) :mixed{
   return baz($a, 'garbanzo');
 }
 
-function baz($a, $b) {
+function baz($a, $b) :mixed{
   return quux($b, $a);
 }
 
-function chwrap($x) {
+function chwrap($x) :mixed{
   return choose($x);
 }
 
-function choose($a) {
-  $arr = array('banana', $a, 'apple');
-  $dict = array(
+function choose($a) :mixed{
+  $arr = vec['banana', $a, 'apple'];
+  $dict = dict[
     'banana' => 'banana',
     $a => $a,
     'apple' => 'apple',
-  );
+  ];
 
   $out = array_map(
     function ($val) { return strrev($val); },
     $arr
   );
 
-  foreach ($out as &$thing) {
-    $thing = $thing . 'boop';
+  foreach ($out as $idx => $thing) {
+    $out[$idx] = $thing . 'boop';
   }
 
   return $arr[0] === 'bananaboop';
 }
 
-function quux($b, $a) {
-  $arr = array($b, 'banana', $a, 'apple');
-  $dict = array(
+function quux($b, $a) :mixed{
+  $arr = vec[$b, 'banana', $a, 'apple'];
+  $dict = dict[
     $b => $b,
     'banana' => 'banana',
     $a => $a,
     'apple' => 'apple',
-  );
+  ];
 
   $out = array_map(
     function ($val) {
@@ -66,13 +66,17 @@ function quux($b, $a) {
     $arr
   );
 
-  foreach ($out as &$thing) {
-    $thing = chwrap($thing) ? foo($thing) : bar($thing);
+  foreach ($out as $idx => $thing) {
+    $out[$idx] = chwrap($thing) ? foo($thing) : bar($thing);
   }
   return $out;
 }
 
-function main() {
+function main() :mixed{
   foo('tofu');
 }
+
+<<__EntryPoint>>
+function main_catch_trace_rematerialize() :mixed{
 main();
+}

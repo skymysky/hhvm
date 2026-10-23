@@ -1,0 +1,30 @@
+error: Typing[4305] Invalid reified hint [1]
+-> This is not reified, it cannot be used as a reified type argument [1]
+-> `Tc` is reified [2]
+
+valid_targ_tpenv_bounds_test3.php:7:39
+4 | class A {}
+5 | 
+6 | class Test<reify Tc as A> {
+  |                  ^^ [2]
+7 |   public function f<Tf as Tc>(): Test<Tf> {
+  |                                       ^^ [1]
+8 |     return new Test<Tf>();
+9 |   }
+
+error: Typing[4305] Invalid reified hint [1]
+-> This is not reified, it cannot be used as a reified type argument [1]
+-> `Tc` is reified [2]
+
+valid_targ_tpenv_bounds_test3.php:8:21
+ 4 | class A {}
+ 5 | 
+ 6 | class Test<reify Tc as A> {
+   |                  ^^ [2]
+ 7 |   public function f<Tf as Tc>(): Test<Tf> {
+ 8 |     return new Test<Tf>();
+   |                     ^^ [1]
+ 9 |   }
+10 | 
+
+2 errors found

@@ -1,4 +1,9 @@
-<?php
+<?hh
 
-if (!$a = true) {
+
+<<__EntryPoint>>
+function main_1255() :mixed{
+$a = true;
+if (!$a) {
+}
 }

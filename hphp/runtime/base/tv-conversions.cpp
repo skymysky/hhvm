@@ -14,33 +14,31 @@
    +----------------------------------------------------------------------+
 */
 
+#include <fmt/format.h>
+
 #include "hphp/runtime/base/array-data.h"
 #include "hphp/runtime/base/array-init.h"
-#include "hphp/runtime/base/array-iterator.h"
 #include "hphp/runtime/base/collections.h"
 #include "hphp/runtime/base/datatype.h"
 #include "hphp/runtime/base/double-to-int64.h"
 #include "hphp/runtime/base/dummy-resource.h"
-#include "hphp/runtime/base/mixed-array.h"
 #include "hphp/runtime/base/object-data.h"
-#include "hphp/runtime/base/packed-array.h"
-#include "hphp/runtime/base/ref-data.h"
 #include "hphp/runtime/base/resource-data.h"
 #include "hphp/runtime/base/runtime-error.h"
-#include "hphp/runtime/base/runtime-option.h"
-#include "hphp/runtime/base/set-array.h"
 #include "hphp/runtime/base/string-data.h"
 #include "hphp/runtime/base/tv-mutate.h"
 #include "hphp/runtime/base/tv-refcount.h"
+#include "hphp/runtime/base/tv-val.h"
 #include "hphp/runtime/base/tv-variant.h"
 #include "hphp/runtime/base/type-array.h"
+#include "hphp/runtime/base/typed-value.h"
 #include "hphp/runtime/base/type-object.h"
 #include "hphp/runtime/base/type-string.h"
 #include "hphp/runtime/base/type-variant.h"
-#include "hphp/runtime/base/typed-value.h"
+#include "hphp/runtime/base/vanilla-vec.h"
 
+#include "hphp/runtime/vm/class-meth-data-ref.h"
 #include "hphp/runtime/vm/func.h"
-#include "hphp/runtime/vm/vm-regs.h"
 
 #include "hphp/system/systemlib.h"
 
@@ -50,13 +48,22 @@ namespace HPHP {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-void tvCastToBooleanInPlace(TypedValue* tv) {
+namespace {
+template <typename T>
+ArrayData* makeSingletonDict(const T& t) {
+  DictInit init(1);
+  init.append(t);
+  return init.create();
+}
+}
+
+template<typename T>
+enable_if_lval_t<T, void> tvCastToBooleanInPlace(T tv) {
   assertx(tvIsPlausible(*tv));
-  tvUnboxIfNeeded(*tv);
   bool b;
 
   do {
-    switch (tv->m_type) {
+    switch (type(tv)) {
       case KindOfUninit:
       case KindOfNull:
         b = false;
@@ -66,219 +73,258 @@ void tvCastToBooleanInPlace(TypedValue* tv) {
         return;
 
       case KindOfInt64:
-        b = (tv->m_data.num != 0LL);
+        b = (val(tv).num != 0LL);
         continue;
 
       case KindOfDouble:
-        b = (tv->m_data.dbl != 0);
+        b = (val(tv).dbl != 0);
         continue;
 
       case KindOfPersistentString:
-        b = tv->m_data.pstr->toBoolean();
+        b = val(tv).pstr->toBoolean();
         continue;
 
       case KindOfString:
-        b = tv->m_data.pstr->toBoolean();
+        b = val(tv).pstr->toBoolean();
         tvDecRefStr(tv);
         continue;
 
       case KindOfPersistentVec:
       case KindOfPersistentDict:
       case KindOfPersistentKeyset:
-      case KindOfPersistentArray:
-        b = !tv->m_data.parr->empty();
+        b = !val(tv).parr->empty();
         continue;
 
       case KindOfVec:
       case KindOfDict:
       case KindOfKeyset:
-      case KindOfArray:
-        b = !tv->m_data.parr->empty();
+        b = !val(tv).parr->empty();
         tvDecRefArr(tv);
         continue;
 
       case KindOfObject:
-        b = tv->m_data.pobj->toBoolean();
+        b = val(tv).pobj->toBoolean();
         tvDecRefObj(tv);
         continue;
 
       case KindOfResource:
-        b = tv->m_data.pres->data()->o_toBoolean();
+        b = true;
         tvDecRefRes(tv);
         continue;
 
-      case KindOfRef:
-      // TODO (T29639296)
+      case KindOfClsMeth:
+        b = true;
+        continue;
+
+      case KindOfRClsMeth:
+        tvDecRefRClsMeth(tv);
+        b = true;
+        continue;
+
+      case KindOfRFunc:
+        tvDecRefRFunc(tv);
+        b = true;
+        continue;
+
       case KindOfFunc:
-        break;
+      case KindOfClass:
+      case KindOfLazyClass:
+      case KindOfEnumClassLabel:
+        b = true;
+        continue;
     }
     not_reached();
   } while (0);
 
-  tv->m_data.num = b;
-  tv->m_type = KindOfBoolean;
+  val(tv).num = b;
+  type(tv) = KindOfBoolean;
 }
 
 bool tvCastToBoolean(TypedValue tv) {
   assertx(tvIsPlausible(tv));
-  if (isRefType(tv.m_type)) {
-    tv = *tv.m_data.pref->tv();
-  }
-  return cellToBool(tv);
+  return tvToBool(tv);
 }
 
-void tvCastToDoubleInPlace(TypedValue* tv) {
+template<typename T>
+enable_if_lval_t<T, void> tvCastToDoubleInPlace(T tv) {
   assertx(tvIsPlausible(*tv));
-  tvUnboxIfNeeded(*tv);
   double d;
 
+  auto const op = "float conversion";
   do {
-    switch (tv->m_type) {
+    switch (type(tv)) {
       case KindOfUninit:
       case KindOfNull:
         d = 0.0;
         continue;
 
       case KindOfBoolean:
-        assertx(tv->m_data.num == 0LL || tv->m_data.num == 1LL);
-        // fallthru
+        assertx(val(tv).num == 0LL || val(tv).num == 1LL);
+        [[fallthrough]];
       case KindOfInt64:
-        d = (double)(tv->m_data.num);
+        d = (double)(val(tv).num);
         continue;
 
       case KindOfDouble:
         return;
 
       case KindOfPersistentString:
-        d = tv->m_data.pstr->toDouble();
+        d = val(tv).pstr->toDouble();
         continue;
 
       case KindOfString:
-        d = tv->m_data.pstr->toDouble();
+        d = val(tv).pstr->toDouble();
         tvDecRefStr(tv);
         continue;
 
       case KindOfPersistentVec:
       case KindOfPersistentDict:
       case KindOfPersistentKeyset:
-      case KindOfPersistentArray:
-        d = tv->m_data.parr->empty() ? 0 : 1;
+        d = val(tv).parr->empty() ? 0 : 1;
         continue;
 
       case KindOfVec:
       case KindOfDict:
       case KindOfKeyset:
-      case KindOfArray:
-        d = tv->m_data.parr->empty() ? 0 : 1;
+        d = val(tv).parr->empty() ? 0 : 1;
         tvDecRefArr(tv);
         continue;
 
       case KindOfObject:
-        d = tv->m_data.pobj->toDouble();
+        d = val(tv).pobj->toDouble();
         tvDecRefObj(tv);
         continue;
 
       case KindOfResource:
-        d = tv->m_data.pres->data()->o_toDouble();
+        d = val(tv).pres->data()->o_toDouble();
         tvDecRefRes(tv);
         continue;
 
-      case KindOfRef:
-      // TODO (T29639296)
+      case KindOfRFunc:
+        throw_convert_rfunc_to_type("float");
+
       case KindOfFunc:
-        break;
+        invalidFuncConversion("float");
+
+      case KindOfClass:
+        d = classToStringHelper(val(tv).pclass, op)->toDouble();
+        continue;
+
+      case KindOfLazyClass:
+        d = lazyClassToStringHelper(val(tv).plazyclass, op)->toDouble();
+        continue;
+
+      case KindOfClsMeth:
+        throwInvalidClsMethToType("float");
+
+      case KindOfRClsMeth:
+        throw_convert_rcls_meth_to_type("float");
+
+      case KindOfEnumClassLabel:
+        throw_convert_ecl_to_type("float");
     }
     not_reached();
   } while (0);
 
-  tv->m_data.dbl = d;
-  tv->m_type = KindOfDouble;
+  val(tv).dbl = d;
+  type(tv) = KindOfDouble;
 }
 
-void tvCastToInt64InPlace(TypedValue* tv) {
+template<typename T>
+enable_if_lval_t<T, void> tvCastToInt64InPlace(T tv) {
   assertx(tvIsPlausible(*tv));
-  tvUnboxIfNeeded(*tv);
-
-  assertx(cellIsPlausible(*tv));
+  assertx(tvIsPlausible(*tv));
   int64_t i;
 
+  auto const op = "int conversion";
   do {
-    switch (tv->m_type) {
+    switch (type(tv)) {
       case KindOfUninit:
       case KindOfNull:
-        tv->m_data.num = 0LL;
-        // fallthru
+        val(tv).num = 0LL;
+        [[fallthrough]];
       case KindOfBoolean:
-        assertx(tv->m_data.num == 0LL || tv->m_data.num == 1LL);
-        tv->m_type = KindOfInt64;
-        // fallthru
+        assertx(val(tv).num == 0LL || val(tv).num == 1LL);
+        type(tv) = KindOfInt64;
+        [[fallthrough]];
       case KindOfInt64:
         return;
 
       case KindOfDouble:
-        i = double_to_int64(tv->m_data.dbl);
+        i = double_to_int64(val(tv).dbl);
         continue;
 
       case KindOfPersistentString:
-        i = tv->m_data.pstr->toInt64();
+        i = val(tv).pstr->toInt64();
         continue;
 
       case KindOfString:
-        i = tv->m_data.pstr->toInt64();
+        i = val(tv).pstr->toInt64();
         tvDecRefStr(tv);
         continue;
 
       case KindOfPersistentVec:
       case KindOfPersistentDict:
       case KindOfPersistentKeyset:
-      case KindOfPersistentArray:
-        i = tv->m_data.parr->empty() ? 0 : 1;
+        i = val(tv).parr->empty() ? 0 : 1;
         continue;
 
       case KindOfVec:
       case KindOfDict:
       case KindOfKeyset:
-      case KindOfArray:
-        i = tv->m_data.parr->empty() ? 0 : 1;
+        i = val(tv).parr->empty() ? 0 : 1;
         tvDecRefArr(tv);
         continue;
 
       case KindOfObject:
-        i = tv->m_data.pobj->toInt64();
+        i = val(tv).pobj->toInt64();
         tvDecRefObj(tv);
         continue;
 
       case KindOfResource:
-        i = tv->m_data.pres->data()->o_toInt64();
+        i = val(tv).pres->data()->o_toInt64();
         tvDecRefRes(tv);
         continue;
 
-      case KindOfRef:
-      // TODO (T29639296)
+      case KindOfRFunc:
+        throw_convert_rfunc_to_type("int");
+
       case KindOfFunc:
-        break;
+        invalidFuncConversion("int");
+        continue;
+
+      case KindOfClass:
+        i = classToStringHelper(val(tv).pclass, op)->toInt64();
+        continue;
+
+      case KindOfLazyClass:
+        i = lazyClassToStringHelper(val(tv).plazyclass, op)->toInt64();
+        continue;
+
+      case KindOfClsMeth:
+        throwInvalidClsMethToType("int");
+
+      case KindOfRClsMeth:
+        throw_convert_rcls_meth_to_type("int");
+
+      case KindOfEnumClassLabel:
+        throw_convert_ecl_to_type("int");
     }
     not_reached();
   } while (0);
 
-  tv->m_data.num = i;
-  tv->m_type = KindOfInt64;
+  val(tv).num = i;
+  type(tv) = KindOfInt64;
 }
 
 int64_t tvCastToInt64(TypedValue tv) {
   assertx(tvIsPlausible(tv));
-  if (isRefType(tv.m_type)) {
-    tv = *tv.m_data.pref->tv();
-  }
-  return cellToInt(tv);
+  return tvToInt(tv);
 }
 
 double tvCastToDouble(TypedValue tv) {
   assertx(tvIsPlausible(tv));
-  if (isRefType(tv.m_type)) {
-    tv = *tv.m_data.pref->tv();
-  }
-
+  auto const op = "float conversion";
   switch (tv.m_type) {
     case KindOfUninit:
     case KindOfNull:
@@ -286,7 +332,7 @@ double tvCastToDouble(TypedValue tv) {
 
     case KindOfBoolean:
       assertx(tv.m_data.num == 0LL || tv.m_data.num == 1LL);
-      // fallthru
+      [[fallthrough]];
     case KindOfInt64:
       return (double)(tv.m_data.num);
 
@@ -303,8 +349,6 @@ double tvCastToDouble(TypedValue tv) {
     case KindOfDict:
     case KindOfPersistentKeyset:
     case KindOfKeyset:
-    case KindOfPersistentArray:
-    case KindOfArray:
       return tv.m_data.parr->empty() ? 0.0 : 1.0;
 
     case KindOfObject:
@@ -313,25 +357,39 @@ double tvCastToDouble(TypedValue tv) {
     case KindOfResource:
       return tv.m_data.pres->data()->o_toDouble();
 
-    case KindOfRef:
-    // TODO (T29639296)
+    case KindOfRFunc:
+      throw_convert_rfunc_to_type("float");
+
     case KindOfFunc:
-      break;
+      invalidFuncConversion("float");
+
+    case KindOfClass:
+      return classToStringHelper(tv.m_data.pclass, op)->toDouble();
+
+    case KindOfLazyClass:
+      return lazyClassToStringHelper(tv.m_data.plazyclass, op)->toDouble();
+
+    case KindOfClsMeth:
+      throwInvalidClsMethToType("float");
+
+    case KindOfRClsMeth:
+      throw_convert_rcls_meth_to_type("float");
+
+    case KindOfEnumClassLabel:
+      throw_convert_ecl_to_type("float");
   }
   not_reached();
 }
 
 const StaticString
   s_1("1"),
-  s_scalar("scalar");
+  s_scalar("scalar"),
+  s_enumClassLabel("EnumClassLabel");
 
-void tvCastToStringInPlace(TypedValue* tv) {
+template<typename T> enable_if_lval_t<T, void> tvCastToStringInPlace(
+  T tv, const ConvThrowMode mode) {
   assertx(tvIsPlausible(*tv));
-  tvUnboxIfNeeded(*tv);
-  cellCastToStringInPlace(tv);
-}
 
-void cellCastToStringInPlace(tv_lval tv) {
   auto string = [&](StringData* s) {
     type(tv) = KindOfString;
     val(tv).pstr = s;
@@ -342,18 +400,22 @@ void cellCastToStringInPlace(tv_lval tv) {
     val(tv).pstr = s;
   };
 
+  auto const op = "string conversion";
   switch (type(tv)) {
     case KindOfUninit:
     case KindOfNull:
+      handleConvThrowMode(mode, "null", "string");
       return persistentString(staticEmptyString());
 
     case KindOfBoolean:
+      handleConvThrowMode(mode, "bool", "string");
       return persistentString(val(tv).num ? s_1.get() : staticEmptyString());
 
     case KindOfInt64:
       return string(buildStringData(val(tv).num));
 
     case KindOfDouble:
+      handleConvThrowMode(mode, "double", "string");
       return string(buildStringData(val(tv).dbl));
 
     case KindOfPersistentString:
@@ -362,73 +424,104 @@ void cellCastToStringInPlace(tv_lval tv) {
 
     case KindOfVec:
     case KindOfPersistentVec:
-      raise_notice("Vec to string conversion");
-      if (type(tv) == KindOfVec) tvDecRefArr(*tv);
-      return persistentString(vec_string.get());
+      SystemLib::throwInvalidOperationExceptionObject(
+        "Vec to string conversion"
+      );
 
     case KindOfDict:
     case KindOfPersistentDict:
-      raise_notice("Dict to string conversion");
-      if (type(tv) == KindOfDict) tvDecRefArr(*tv);
-      return persistentString(dict_string.get());
+      SystemLib::throwInvalidOperationExceptionObject(
+        "Dict to string conversion"
+      );
 
     case KindOfKeyset:
     case KindOfPersistentKeyset:
-      raise_notice("Keyset to string conversion");
-      if (type(tv) == KindOfKeyset) tvDecRefArr(*tv);
-      return persistentString(keyset_string.get());
-
-    case KindOfArray:
-    case KindOfPersistentArray:
-      raise_notice("Array to string conversion");
-      if (type(tv) == KindOfArray) tvDecRefArr(*tv);
-      return persistentString(array_string.get());
+      SystemLib::throwInvalidOperationExceptionObject(
+        "Keyset to string conversion"
+      );
 
     case KindOfObject:
-      cellMove(
+      tvMove(
         make_tv<KindOfString>(val(tv).pobj->invokeToString().detach()),
         tv
       );
       return;
 
     case KindOfResource:
-      cellMove(
+      handleConvThrowMode(mode, "resource", "string");
+      tvMove(
         make_tv<KindOfString>(val(tv).pres->data()->o_toString().detach()),
         tv
       );
       return;
 
-    case KindOfRef:
-    // TODO (T29639296)
-    case KindOfFunc:
-      break;
+    case KindOfRFunc:
+      throw_convert_rfunc_to_type("string");
+
+    case KindOfFunc: {
+      invalidFuncConversion("string");
+    }
+
+    case KindOfClass: {
+      auto const s = classToStringHelper(val(tv).pclass, op);
+      return persistentString(const_cast<StringData*>(s));
+    }
+
+    case KindOfLazyClass: {
+      auto const s = lazyClassToStringHelper(val(tv).plazyclass, op);
+      return persistentString(const_cast<StringData*>(s));
+    }
+
+    case KindOfClsMeth:
+      throwInvalidClsMethToType("string");
+
+    case KindOfRClsMeth:
+      throw_convert_rcls_meth_to_type("string");
+
+    case KindOfEnumClassLabel:
+      return persistentString(s_enumClassLabel.get());
   }
   not_reached();
 }
 
-StringData* tvCastToStringData(TypedValue tv) {
-  assertx(tvIsPlausible(tv));
-  if (isRefType(tv.m_type)) {
-    tv = *tv.m_data.pref->tv();
-  }
-  return cellCastToStringData(tv);
+template<typename T> enable_if_lval_t<T, void> tvCastToStringInPlace(T tv) {
+  tvCastToStringInPlace(tv, ConvThrowMode::None);
 }
 
-StringData* cellCastToStringData(Cell tv) {
-  assert(tv.m_type != KindOfRef);
+void tvSetLegacyArrayInPlace(tv_lval tv, bool isLegacy) {
+  if (!tvIsVec(tv) && !tvIsDict(tv)) return;
 
+  auto const adIn = val(tv).parr;
+  auto const ad = adIn->setLegacyArray(adIn->cowCheck(), isLegacy);
+  if (ad == adIn) return;
+
+  decRefArr(adIn);
+  val(tv).parr = ad;
+  type(tv) = dt_with_rc(type(tv));
+  assertx(tvIsPlausible(*tv));
+}
+
+StringData* tvCastToStringData(
+  TypedValue tv,
+  const ConvThrowMode mode) {
+  assertx(tvIsPlausible(tv));
+
+  auto const op = "string conversion";
   switch (tv.m_type) {
     case KindOfUninit:
     case KindOfNull:
+      handleConvThrowMode(mode, "null", "string");
       return staticEmptyString();
 
     case KindOfBoolean:
+      handleConvThrowMode(mode, "bool", "string");
       return tv.m_data.num ? s_1.get() : staticEmptyString();
 
     case KindOfInt64:
       return buildStringData(tv.m_data.num);
 
     case KindOfDouble:
+      handleConvThrowMode(mode, "double", "string");
       return buildStringData(tv.m_data.dbl);
 
     case KindOfPersistentString:
@@ -442,52 +535,75 @@ StringData* cellCastToStringData(Cell tv) {
 
     case KindOfPersistentVec:
     case KindOfVec:
-      raise_notice("Vec to string conversion");
-      return vec_string.get();
+      SystemLib::throwInvalidOperationExceptionObject(
+        "Vec to string conversion"
+      );
 
     case KindOfPersistentDict:
     case KindOfDict:
-      raise_notice("Dict to string conversion");
-      return dict_string.get();
+      SystemLib::throwInvalidOperationExceptionObject(
+        "Dict to string conversion"
+      );
 
     case KindOfPersistentKeyset:
     case KindOfKeyset:
-      raise_notice("Keyset to string conversion");
-      return keyset_string.get();
-
-    case KindOfPersistentArray:
-    case KindOfArray:
-      raise_notice("Array to string conversion");
-      return array_string.get();
+      SystemLib::throwInvalidOperationExceptionObject(
+        "Keyset to string conversion"
+      );
 
     case KindOfObject:
+      // not adding new conversion notice here because it's
+      // handled downstream via another notice
       return tv.m_data.pobj->invokeToString().detach();
 
     case KindOfResource:
+      handleConvThrowMode(mode, "resource", "string");
       return tv.m_data.pres->data()->o_toString().detach();
 
-    case KindOfRef:
-    // TODO (T29639296)
-    case KindOfFunc:
-      not_reached();
+    case KindOfRFunc:
+      throw_convert_rfunc_to_type("string");
+
+    case KindOfFunc: {
+      invalidFuncConversion("string");
+    }
+
+    case KindOfClass: {
+      auto const s = classToStringHelper(tv.m_data.pclass, op);
+      return const_cast<StringData*>(s);
+    }
+
+    case KindOfLazyClass: {
+      auto const s = lazyClassToStringHelper(tv.m_data.plazyclass, op);
+      return const_cast<StringData*>(s);
+    }
+
+    case KindOfClsMeth:
+      throwInvalidClsMethToType("string");
+
+    case KindOfRClsMeth:
+      throw_convert_rcls_meth_to_type("string");
+
+    case KindOfEnumClassLabel:
+      return s_enumClassLabel.get();
   }
   not_reached();
 }
 
-String tvCastToString(TypedValue tv) {
-  return String::attach(tvCastToStringData(tv));
+StringData* tvCastToStringData(TypedValue tv) {
+  return tvCastToStringData(tv, ConvThrowMode::None);
 }
 
+OptString tvCastToString(TypedValue tv) {
+  return OptString::attach(tvCastToStringData(tv));
+}
+
+template <IntishCast IC>
 ArrayData* tvCastToArrayLikeData(TypedValue tv) {
   assertx(tvIsPlausible(tv));
-  if (isRefType(tv.m_type)) {
-    tv = *tv.m_data.pref->tv();
-  }
-
   switch (tv.m_type) {
     case KindOfUninit:
     case KindOfNull:
-      return ArrayData::Create();
+      return staticEmptyDictArray();
 
     case KindOfBoolean:
     case KindOfInt64:
@@ -495,162 +611,142 @@ ArrayData* tvCastToArrayLikeData(TypedValue tv) {
     case KindOfPersistentString:
     case KindOfString:
     case KindOfResource:
-      return ArrayData::Create(tv);
+    case KindOfFunc:
+    case KindOfClass:
+    case KindOfLazyClass:
+      return makeSingletonDict(tv);
 
     case KindOfPersistentVec:
     case KindOfVec:
     case KindOfPersistentDict:
     case KindOfDict:
     case KindOfPersistentKeyset:
-    case KindOfKeyset:
-    case KindOfPersistentArray:
-    case KindOfArray: {
+    case KindOfKeyset: {
       auto const ad = tv.m_data.parr;
       ad->incRefCount();
       return ad;
     }
 
+    case KindOfClsMeth:
+      throwInvalidClsMethToType("array");
+
+    case KindOfRClsMeth:
+      throw_convert_rcls_meth_to_type("array");
+
     case KindOfObject: {
-      auto ad = tv.m_data.pobj->toArray();
-      assertx(ad->isPHPArray());
+      auto ad = tv.m_data.pobj->toArray<IC>();
+      // When we cast a closure to an array, we get back a vec.
+      assertx(ad->isDictType() || ad->isVecType());
       return ad.detach();
     }
 
-    case KindOfRef:
-    // TODO (T29639296)
-    case KindOfFunc:
-      break;
+    case KindOfRFunc:
+      throw_convert_rfunc_to_type("array");
+
+    case KindOfEnumClassLabel:
+      throw_convert_ecl_to_type("array");
   }
   not_reached();
 }
 
+template
+ArrayData* tvCastToArrayLikeData<IntishCast::None>(TypedValue);
+template
+ArrayData* tvCastToArrayLikeData<IntishCast::Cast>(TypedValue);
+
+template <IntishCast IC /* = IntishCast::None */>
 Array tvCastToArrayLike(TypedValue tv) {
-  return Array::attach(tvCastToArrayLikeData(tv));
+  return Array::attach(tvCastToArrayLikeData<IC>(tv));
 }
 
-void tvCastToArrayInPlace(TypedValue* tv) {
+template Array tvCastToArrayLike<IntishCast::Cast>(TypedValue);
+template Array tvCastToArrayLike<IntishCast::None>(TypedValue);
+
+template<typename T, IntishCast IC /* = IntishCast::None */>
+enable_if_lval_t<T, void> tvCastToArrayInPlace(T tv) {
   assertx(tvIsPlausible(*tv));
-  tvUnboxIfNeeded(*tv);
   ArrayData* a;
 
   do {
-    switch (tv->m_type) {
+    switch (type(tv)) {
       case KindOfUninit:
       case KindOfNull:
-        a = ArrayData::Create();
+        a = staticEmptyDictArray();
         continue;
 
       case KindOfBoolean:
       case KindOfInt64:
       case KindOfDouble:
       case KindOfPersistentString:
-        a = ArrayData::Create(tvAsVariant(tv));
+        a = makeSingletonDict(*tv);
         continue;
 
       case KindOfString:
-        a = ArrayData::Create(tvAsVariant(tv));
+        a = makeSingletonDict(*tv);
         tvDecRefStr(tv);
         continue;
 
-      case KindOfPersistentVec: {
-        auto* adIn = tv->m_data.parr;
-        assertx(adIn->isVecArray());
-        a = PackedArray::ToPHPArrayVec(adIn, true);
-        assertx(a != adIn);
-        continue;
-      }
-
-      case KindOfVec: {
-        auto* adIn = tv->m_data.parr;
-        assertx(adIn->isVecArray());
-        a = PackedArray::ToPHPArrayVec(adIn, adIn->cowCheck());
-        if (a != adIn) tvDecRefArr(tv);
-        continue;
-      }
-
-      case KindOfPersistentDict: {
-        auto* adIn = tv->m_data.parr;
-        assertx(adIn->isDict());
-        a = MixedArray::ToPHPArrayDict(adIn, true);
-        assertx(a != adIn);
-        continue;
-      }
-
-      case KindOfDict: {
-        auto* adIn = tv->m_data.parr;
-        assertx(adIn->isDict());
-        a = MixedArray::ToPHPArrayDict(adIn, adIn->cowCheck());
-        if (a != adIn) tvDecRefArr(tv);
-        continue;
-      }
-
-      case KindOfPersistentKeyset: {
-        auto* adIn = tv->m_data.parr;
-        assertx(adIn->isKeyset());
-        a = SetArray::ToPHPArray(adIn, true);
-        assertx(a != adIn);
-        continue;
-      }
-
+      case KindOfPersistentVec:
+      case KindOfVec:
+      case KindOfPersistentDict:
+      case KindOfDict:
+      case KindOfPersistentKeyset:
       case KindOfKeyset: {
-        auto* adIn = tv->m_data.parr;
-        assertx(adIn->isKeyset());
-        a = SetArray::ToPHPArray(adIn, adIn->cowCheck());
-        if (a != adIn) tvDecRefArr(tv);
+        auto* adIn = val(tv).parr;
+        a = [&]{
+          assertx(IC == IntishCast::Cast || IC == IntishCast::None);
+          return IC == IntishCast::Cast
+            ? adIn->toDictIntishCast(adIn->cowCheck())
+            : adIn->toDict(adIn->cowCheck());
+        }();
+        if (a != adIn) decRefArr(adIn);
         continue;
       }
 
-      case KindOfPersistentArray: {
-        auto* adIn = tv->m_data.parr;
-        assertx(adIn->isPHPArray());
-        if (adIn->isNotDVArray()) return;
-        a = adIn->toPHPArray(true);
-        assertx(a != adIn);
+      case KindOfObject: {
+        a = val(tv).pobj->template toArray<IC>().toDict().detach();
+        tvDecRefObj(tv);
         continue;
       }
-
-      case KindOfArray: {
-        auto* adIn = tv->m_data.parr;
-        assertx(adIn->isPHPArray());
-        if (adIn->isNotDVArray()) return;
-        a = adIn->toPHPArray(adIn->cowCheck());
-        if (a != adIn) tvDecRefArr(tv);
-        continue;
-      }
-
-      case KindOfObject:
-        // For objects, we fall back on the Variant machinery
-        tvAsVariant(tv) = tv->m_data.pobj->toArray();
-        return;
 
       case KindOfResource:
-        a = ArrayData::Create(tvAsVariant(tv));
+        a = makeSingletonDict(*tv);
         tvDecRefRes(tv);
         continue;
 
-      case KindOfRef:
-      // TODO (T29639296)
       case KindOfFunc:
-        break;
+      case KindOfClass:
+      case KindOfLazyClass:
+        a = makeSingletonDict(*tv);
+        continue;
+
+      case KindOfClsMeth:
+        throwInvalidClsMethToType("array");
+
+      case KindOfRClsMeth:
+        throw_convert_rcls_meth_to_type("array");
+
+      case KindOfRFunc:
+        throw_convert_rfunc_to_type("array");
+
+      case KindOfEnumClassLabel:
+        throw_convert_ecl_to_type("array");
     }
     not_reached();
   } while (0);
 
-  assertx(a->isPHPArray());
-  assertx(a->isNotDVArray());
-
-  tv->m_data.parr = a;
-  tv->m_type = KindOfArray;
-  assertx(cellIsPlausible(*tv));
+  *tv = make_array_like_tv(a);
+  assertx(tvIsPlausible(*tv));
+  assertx(a->isDictType());
 }
 
-void tvCastToVecInPlace(TypedValue* tv) {
+template<typename T>
+enable_if_lval_t<T, void> tvCastToVecInPlace(T tv) {
   assertx(tvIsPlausible(*tv));
-  tvUnboxIfNeeded(*tv);
   ArrayData* a;
 
   do {
-    switch (tv->m_type) {
+    switch (type(tv)) {
       case KindOfUninit:
       case KindOfNull:
         SystemLib::throwInvalidOperationExceptionObject(
@@ -684,29 +780,10 @@ void tvCastToVecInPlace(TypedValue* tv) {
         );
 
       case KindOfPersistentDict:
-      case KindOfDict: {
-        auto* adIn = tv->m_data.parr;
-        assertx(adIn->isDict());
-        a = MixedArray::ToVecDict(adIn, adIn->cowCheck());
-        assertx(a != adIn);
-        decRefArr(adIn);
-        continue;
-      }
-
+      case KindOfDict:
       case KindOfPersistentKeyset:
       case KindOfKeyset: {
-        auto* adIn = tv->m_data.parr;
-        assertx(adIn->isKeyset());
-        a = SetArray::ToVec(adIn, adIn->cowCheck());
-        assertx(a != adIn);
-        decRefArr(adIn);
-        continue;
-      }
-
-      case KindOfPersistentArray:
-      case KindOfArray: {
-        auto* adIn = tv->m_data.parr;
-        assertx(adIn->isPHPArray());
+        auto* adIn = val(tv).parr;
         a = adIn->toVec(adIn->cowCheck());
         if (a != adIn) decRefArr(adIn);
         continue;
@@ -714,35 +791,59 @@ void tvCastToVecInPlace(TypedValue* tv) {
 
       case KindOfPersistentVec:
       case KindOfVec:
-        assertx(tv->m_data.parr->isVecArray());
+        assertx(val(tv).parr->isVecType());
         return;
 
       case KindOfObject:
-        a = castObjToVec(tv->m_data.pobj);
+        a = castObjToVec(val(tv).pobj);
         // We might have re-entered, so tv may not contain the object anymore.
         tvDecRefGen(tv);
         continue;
 
-      case KindOfRef:
-      // TODO (T29639296)
+      case KindOfRFunc:
+        throw_convert_rfunc_to_type("vec");
+
       case KindOfFunc:
-        break;
+        SystemLib::throwInvalidOperationExceptionObject(
+          "Func to vec conversion"
+        );
+
+      case KindOfClass:
+        SystemLib::throwInvalidOperationExceptionObject(
+          "Class to vec conversion"
+        );
+
+      case KindOfLazyClass:
+        SystemLib::throwInvalidOperationExceptionObject(
+          "Lazy class to vec conversion"
+        );
+
+      case KindOfClsMeth:
+        SystemLib::throwInvalidOperationExceptionObject(
+          "ClsMeth to vec conversion"
+        );
+
+      case KindOfRClsMeth:
+        throw_convert_rcls_meth_to_type("vec");
+
+      case KindOfEnumClassLabel:
+        throw_convert_ecl_to_type("vec");
     }
     not_reached();
   } while (0);
 
-  tv->m_data.parr = a;
-  tv->m_type = KindOfVec;
-  assertx(cellIsPlausible(*tv));
+  val(tv).parr = a;
+  type(tv) = KindOfVec;
+  assertx(tvIsPlausible(*tv));
 }
 
-void tvCastToDictInPlace(TypedValue* tv) {
+template<typename T>
+enable_if_lval_t<T, void> tvCastToDictInPlace(T tv) {
   assertx(tvIsPlausible(*tv));
-  tvUnboxIfNeeded(*tv);
   ArrayData* a;
 
   do {
-    switch (tv->m_type) {
+    switch (type(tv)) {
       case KindOfUninit:
       case KindOfNull:
         SystemLib::throwInvalidOperationExceptionObject(
@@ -776,28 +877,10 @@ void tvCastToDictInPlace(TypedValue* tv) {
         );
 
       case KindOfPersistentVec:
-      case KindOfVec: {
-        auto* adIn = tv->m_data.parr;
-        assertx(adIn->isVecArray());
-        a = PackedArray::ToDictVec(adIn, adIn->cowCheck());
-        assertx(a != adIn);
-        decRefArr(adIn);
-        continue;
-      }
-
+      case KindOfVec:
       case KindOfPersistentKeyset:
       case KindOfKeyset: {
-        auto* adIn = tv->m_data.parr;
-        assertx(adIn->isKeyset());
-        a = SetArray::ToDict(adIn, adIn->cowCheck());
-        if (a != adIn) decRefArr(adIn);
-        continue;
-      }
-
-      case KindOfPersistentArray:
-      case KindOfArray: {
-        auto* adIn = tv->m_data.parr;
-        assertx(adIn->isPHPArray());
+        auto* adIn = val(tv).parr;
         a = adIn->toDict(adIn->cowCheck());
         if (a != adIn) decRefArr(adIn);
         continue;
@@ -805,35 +888,60 @@ void tvCastToDictInPlace(TypedValue* tv) {
 
       case KindOfPersistentDict:
       case KindOfDict:
-        assertx(tv->m_data.parr->isDict());
+        assertx(val(tv).parr->isDictType());
         return;
 
       case KindOfObject:
-        a = castObjToDict(tv->m_data.pobj);
+        a = castObjToDict(val(tv).pobj);
         // We might have re-entered, so tv may not contain the object anymore.
         tvDecRefGen(tv);
         continue;
 
-      case KindOfRef:
-      // TODO (T29639296)
+      case KindOfRFunc:
+        throw_convert_rfunc_to_type("dict");
+
       case KindOfFunc:
-        break;
+        SystemLib::throwInvalidOperationExceptionObject(
+          "Func to dict conversion"
+        );
+
+      case KindOfClass:
+        SystemLib::throwInvalidArgumentExceptionObject(
+          "Class to dict conversion"
+        );
+
+      case KindOfLazyClass:
+        SystemLib::throwInvalidArgumentExceptionObject(
+          "Lazy class to dict conversion"
+        );
+
+      case KindOfClsMeth: {
+        SystemLib::throwInvalidOperationExceptionObject(
+          "ClsMeth to dict conversion"
+        );
+      }
+
+      case KindOfRClsMeth:
+        throw_convert_rcls_meth_to_type("dict");
+
+      case KindOfEnumClassLabel:
+        throw_convert_ecl_to_type("dict");
     }
     not_reached();
   } while (0);
 
-  tv->m_data.parr = a;
-  tv->m_type = KindOfDict;
-  assertx(cellIsPlausible(*tv));
+  val(tv).parr = a;
+  type(tv) = KindOfDict;
+  assertx(tvIsPlausible(*tv));
 }
 
-void tvCastToKeysetInPlace(TypedValue* tv) {
+template<typename T>
+enable_if_lval_t<T, void> tvCastToKeysetInPlace(T tv) {
   assertx(tvIsPlausible(*tv));
-  tvUnboxIfNeeded(*tv);
   ArrayData* a;
 
   do {
-    switch (tv->m_type) {
+    switch (type(tv)) {
       case KindOfUninit:
       case KindOfNull:
         SystemLib::throwInvalidOperationExceptionObject(
@@ -867,28 +975,10 @@ void tvCastToKeysetInPlace(TypedValue* tv) {
         );
 
       case KindOfPersistentVec:
-      case KindOfVec: {
-        auto* adIn = tv->m_data.parr;
-        assertx(adIn->isVecArray());
-        a = PackedArray::ToKeysetVec(adIn, adIn->cowCheck());
-        assertx(a != adIn);
-        decRefArr(adIn);
-        continue;
-      }
-
+      case KindOfVec:
       case KindOfPersistentDict:
       case KindOfDict: {
-        auto* adIn = tv->m_data.parr;
-        assertx(adIn->isDict());
-        a = MixedArray::ToKeysetDict(adIn, adIn->cowCheck());
-        if (a != adIn) decRefArr(adIn);
-        continue;
-      }
-
-      case KindOfPersistentArray:
-      case KindOfArray: {
-        auto* adIn = tv->m_data.parr;
-        assertx(adIn->isPHPArray());
+        auto* adIn = val(tv).parr;
         a = adIn->toKeyset(adIn->cowCheck());
         if (a != adIn) decRefArr(adIn);
         continue;
@@ -896,242 +986,55 @@ void tvCastToKeysetInPlace(TypedValue* tv) {
 
       case KindOfPersistentKeyset:
       case KindOfKeyset:
-        assertx(tv->m_data.parr->isKeyset());
+        assertx(val(tv).parr->isKeysetType());
         return;
 
       case KindOfObject:
-        a = castObjToKeyset(tv->m_data.pobj);
+        a = castObjToKeyset(val(tv).pobj);
         // We might have re-entered, so tv may not contain the object anymore.
         tvDecRefGen(tv);
         continue;
 
-      case KindOfRef:
-      // TODO (T29639296)
+      case KindOfRFunc:
+        throw_convert_rfunc_to_type("keyset");
+
       case KindOfFunc:
-        break;
+        SystemLib::throwInvalidOperationExceptionObject(
+          "Func to keyset conversion"
+        );
+
+      case KindOfClass:
+        SystemLib::throwInvalidOperationExceptionObject(
+          "Class to keyset conversion"
+        );
+
+      case KindOfLazyClass:
+        SystemLib::throwInvalidOperationExceptionObject(
+          "Lazy class to keyset conversion"
+        );
+
+      case KindOfClsMeth: {
+        SystemLib::throwInvalidOperationExceptionObject(
+          "ClsMeth to keyset conversion"
+        );
+      }
+
+      case KindOfRClsMeth:
+        throw_convert_rcls_meth_to_type("keyset");
+
+      case KindOfEnumClassLabel:
+        throw_convert_ecl_to_type("keyset");
     }
     not_reached();
   } while (0);
 
-  tv->m_data.parr = a;
-  tv->m_type = KindOfKeyset;
-  assertx(cellIsPlausible(*tv));
-}
-
-void tvCastToVArrayInPlace(TypedValue* tv) {
-  assertx(!RuntimeOption::EvalHackArrDVArrs);
+  val(tv).parr = a;
+  type(tv) = KindOfKeyset;
   assertx(tvIsPlausible(*tv));
-  tvUnboxIfNeeded(*tv);
-  ArrayData* a;
-
-  do {
-    switch (tv->m_type) {
-      case KindOfUninit:
-      case KindOfNull:
-        SystemLib::throwInvalidOperationExceptionObject(
-          "Null to varray conversion"
-        );
-
-      case KindOfBoolean:
-        SystemLib::throwInvalidOperationExceptionObject(
-          "Bool to varray conversion"
-        );
-
-      case KindOfInt64:
-        SystemLib::throwInvalidOperationExceptionObject(
-          "Int to varray conversion"
-        );
-
-      case KindOfDouble:
-        SystemLib::throwInvalidOperationExceptionObject(
-          "Double to varray conversion"
-        );
-
-      case KindOfPersistentString:
-      case KindOfString:
-        SystemLib::throwInvalidOperationExceptionObject(
-          "String to varray conversion"
-        );
-
-      case KindOfResource:
-        SystemLib::throwInvalidOperationExceptionObject(
-          "Resource to varray conversion"
-        );
-
-      case KindOfPersistentVec:
-      case KindOfVec: {
-        auto* adIn = tv->m_data.parr;
-        assertx(adIn->isVecArray());
-        a = PackedArray::ToVArrayVec(adIn, adIn->cowCheck());
-        if (a != adIn) decRefArr(adIn);
-        continue;
-      }
-
-      case KindOfPersistentDict:
-      case KindOfDict: {
-        auto* adIn = tv->m_data.parr;
-        assertx(adIn->isDict());
-        a = MixedArray::ToVArrayDict(adIn, adIn->cowCheck());
-        assertx(a != adIn);
-        decRefArr(adIn);
-        continue;
-      }
-
-      case KindOfPersistentKeyset:
-      case KindOfKeyset: {
-        auto* adIn = tv->m_data.parr;
-        assertx(adIn->isKeyset());
-        a = SetArray::ToVArray(adIn, adIn->cowCheck());
-        assertx(a != adIn);
-        decRefArr(adIn);
-        continue;
-      }
-
-      case KindOfPersistentArray:
-      case KindOfArray: {
-        auto* adIn = tv->m_data.parr;
-        assertx(adIn->isPHPArray());
-        if (adIn->isVArray()) return;
-        a = adIn->toVArray(adIn->cowCheck());
-        assertx(a->isPacked());
-        assertx(a->isVArray());
-        if (a == adIn) return;
-        decRefArr(adIn);
-        continue;
-      }
-
-      case KindOfObject:
-        a = castObjToVArray(tv->m_data.pobj);
-        // We might have re-entered, so tv may not contain the object anymore.
-        tvDecRefGen(tv);
-        continue;
-
-      case KindOfRef:
-      // TODO (T29639296)
-      case KindOfFunc:
-        break;
-    }
-    not_reached();
-  } while (0);
-
-  assertx(a->isPacked());
-  assertx(a->isVArray());
-
-  tv->m_data.parr = a;
-  tv->m_type = KindOfArray;
-  assertx(cellIsPlausible(*tv));
-}
-
-void tvCastToDArrayInPlace(TypedValue* tv) {
-  assertx(!RuntimeOption::EvalHackArrDVArrs);
-  assertx(tvIsPlausible(*tv));
-  tvUnboxIfNeeded(*tv);
-  ArrayData* a;
-
-  do {
-    switch (tv->m_type) {
-      case KindOfUninit:
-      case KindOfNull:
-        SystemLib::throwInvalidOperationExceptionObject(
-          "Null to darray conversion"
-        );
-
-      case KindOfBoolean:
-        SystemLib::throwInvalidOperationExceptionObject(
-          "Bool to darray conversion"
-        );
-
-      case KindOfInt64:
-        SystemLib::throwInvalidOperationExceptionObject(
-          "Int to darray conversion"
-        );
-
-      case KindOfDouble:
-        SystemLib::throwInvalidOperationExceptionObject(
-          "Double to darray conversion"
-        );
-
-      case KindOfPersistentString:
-      case KindOfString:
-        SystemLib::throwInvalidOperationExceptionObject(
-          "String to darray conversion"
-        );
-
-      case KindOfResource:
-        SystemLib::throwInvalidOperationExceptionObject(
-          "Resource to darray conversion"
-        );
-
-      case KindOfPersistentVec:
-      case KindOfVec: {
-        auto* adIn = tv->m_data.parr;
-        assertx(adIn->isVecArray());
-        a = PackedArray::ToDArrayVec(adIn, adIn->cowCheck());
-        assertx(a != adIn);
-        decRefArr(adIn);
-        continue;
-      }
-
-      case KindOfPersistentDict:
-      case KindOfDict: {
-        auto* adIn = tv->m_data.parr;
-        assertx(adIn->isDict());
-        a = MixedArray::ToDArrayDict(adIn, adIn->cowCheck());
-        if (a != adIn) decRefArr(adIn);
-        continue;
-      }
-
-      case KindOfPersistentKeyset:
-      case KindOfKeyset: {
-        auto* adIn = tv->m_data.parr;
-        assertx(adIn->isKeyset());
-        a = SetArray::ToDArray(adIn, adIn->cowCheck());
-        assertx(a != adIn);
-        decRefArr(adIn);
-        continue;
-      }
-
-      case KindOfPersistentArray:
-      case KindOfArray: {
-        auto* adIn = tv->m_data.parr;
-        assertx(adIn->isPHPArray());
-        if (adIn->isDArray()) return;
-        a = adIn->toDArray(adIn->cowCheck());
-        assertx(a->isMixed());
-        assertx(a->isDArray());
-        if (a == adIn) return;
-        decRefArr(adIn);
-        continue;
-      }
-
-      case KindOfObject:
-        a = castObjToDArray(tv->m_data.pobj);
-        // We might have re-entered, so tv may not contain the object anymore.
-        tvDecRefGen(tv);
-        continue;
-
-      case KindOfRef:
-      // TODO (T29639296)
-      case KindOfFunc:
-        break;
-    }
-    not_reached();
-  } while (0);
-
-  assertx(a->isMixed());
-  assertx(a->isDArray());
-
-  tv->m_data.parr = a;
-  tv->m_type = KindOfArray;
-  assertx(cellIsPlausible(*tv));
 }
 
 ObjectData* tvCastToObjectData(TypedValue tv) {
   assertx(tvIsPlausible(tv));
-  if (isRefType(tv.m_type)) {
-    tv = *tv.m_data.pref->tv();
-  }
-
   switch (tv.m_type) {
     case KindOfUninit:
     case KindOfNull:
@@ -1142,8 +1045,11 @@ ObjectData* tvCastToObjectData(TypedValue tv) {
     case KindOfDouble:
     case KindOfPersistentString:
     case KindOfString:
+    case KindOfFunc:
+    case KindOfClass:
+    case KindOfLazyClass:
     case KindOfResource: {
-      ArrayInit props(1, ArrayInit::Map{});
+      DictInit props(1);
       props.set(s_scalar, tv);
       return ObjectData::FromArray(props.create()).detach();
     }
@@ -1153,458 +1059,152 @@ ObjectData* tvCastToObjectData(TypedValue tv) {
     case KindOfPersistentDict:
     case KindOfDict:
     case KindOfPersistentKeyset:
-    case KindOfKeyset: {
-      auto const arr = Array::attach(tv.m_data.parr->toPHPArray(true));
-      return ObjectData::FromArray(arr.get()).detach();
-    }
-
-    case KindOfPersistentArray:
-    case KindOfArray:
+    case KindOfKeyset:
       return ObjectData::FromArray(tv.m_data.parr).detach();
 
     case KindOfObject:
       tv.m_data.pobj->incRefCount();
       return tv.m_data.pobj;
 
-    case KindOfRef:
-    // TODO (T29639296)
-    case KindOfFunc:
-      break;
+    case KindOfClsMeth:
+      throwInvalidClsMethToType("object");
+
+    case KindOfRClsMeth:
+      throw_convert_rcls_meth_to_type("object");
+
+    case KindOfRFunc:
+      throw_convert_rfunc_to_type("object");
+
+    case KindOfEnumClassLabel:
+      throw_convert_ecl_to_type("object");
   }
   not_reached();
 }
 
-Object tvCastToObject(TypedValue tv) {
-  return Object::attach(tvCastToObjectData(tv));
-}
-
-void tvCastToObjectInPlace(TypedValue* tv) {
+template<typename T>
+enable_if_lval_t<T, void> tvCastToResourceInPlace(T tv) {
   assertx(tvIsPlausible(*tv));
-  tvUnboxIfNeeded(*tv);
-  ObjectData* o;
 
   do {
-    switch (tv->m_type) {
-      case KindOfUninit:
-      case KindOfNull:
-        o = SystemLib::AllocStdClassObject().detach();
-        continue;
-
-      case KindOfBoolean:
-      case KindOfInt64:
-      case KindOfDouble:
-      case KindOfPersistentString:
-      case KindOfResource: {
-        ArrayInit props(1, ArrayInit::Map{});
-        props.set(s_scalar, *tv);
-        o = ObjectData::FromArray(props.create()).detach();
-        continue;
-      }
-
-      case KindOfString: {
-        ArrayInit props(1, ArrayInit::Map{});
-        props.set(s_scalar, *tv);
-        o = ObjectData::FromArray(props.create()).detach();
-        tvDecRefStr(tv);
-        continue;
-      }
-
-      case KindOfPersistentVec:
-      case KindOfVec:
-      case KindOfPersistentDict:
-      case KindOfDict:
-      case KindOfPersistentKeyset:
-      case KindOfKeyset:
-        tvCastToArrayInPlace(tv);
-        // Fall-through to array case
-      case KindOfPersistentArray:
-      case KindOfArray:
-        // For arrays, we fall back on the Variant machinery
-        tvAsVariant(tv) = ObjectData::FromArray(tv->m_data.parr);
-        return;
-
-      case KindOfObject:
-        return;
-
-      case KindOfRef:
-      // TODO (T29639296)
-      case KindOfFunc:
-        break;
-    }
-    not_reached();
-  } while (0);
-
-  tv->m_data.pobj = o;
-  tv->m_type = KindOfObject;
-  assertx(cellIsPlausible(*tv));
-}
-
-void tvCastToNullableObjectInPlace(TypedValue* tv) {
-  if (isNullType(tv->m_type)) {
-    // XXX(t3879280) This happens immediately before calling an extension
-    // function that takes an optional Object argument. We want to end up
-    // passing const Object& holding nullptr, so by clearing out m_data.pobj we
-    // can unconditionally treat &tv->m_data.pobj as a const Object& in the
-    // function being called. This violates the invariant that the value of
-    // m_data doesn't matter in a KindOfNull TypedValue.
-    tv->m_data.pobj = nullptr;
-  } else {
-    tvCastToObjectInPlace(tv);
-  }
-}
-
-void tvCastToResourceInPlace(TypedValue* tv) {
-  assertx(tvIsPlausible(*tv));
-  tvUnboxIfNeeded(*tv);
-
-  do {
-    switch (tv->m_type) {
+    switch (type(tv)) {
       DT_UNCOUNTED_CASE:
         continue;
+      case KindOfRFunc:
       case KindOfString:
       case KindOfVec:
       case KindOfDict:
       case KindOfKeyset:
-      case KindOfArray:
       case KindOfObject:
+      case KindOfRClsMeth:
         tvDecRefCountable(tv);
         continue;
       case KindOfResource:
         // no op, return
         return;
-      case KindOfRef:
-        break;
     }
     not_reached();
   } while (0);
 
-  tv->m_type = KindOfResource;
-  tv->m_data.pres = req::make<DummyResource>().detach()->hdr();
-  assertx(cellIsPlausible(*tv));
-}
-
-bool tvCoerceParamToBooleanInPlace(TypedValue* tv,
-                                   bool builtin) {
+  type(tv) = KindOfResource;
+  val(tv).pres = req::make<DummyResource>().detach()->hdr();
   assertx(tvIsPlausible(*tv));
-  tvUnboxIfNeeded(*tv);
-
-  switch (tv->m_type) {
-    case KindOfNull:
-      // In PHP 7 mode handling of null types is stricter
-      if (RuntimeOption::PHP7_ScalarTypes && !builtin) return false;
-      // fall-through
-
-    case KindOfUninit:
-    case KindOfBoolean:
-    case KindOfInt64:
-    case KindOfDouble:
-    case KindOfPersistentString:
-    case KindOfString:
-      tvCastToBooleanInPlace(tv);
-      return true;
-
-    case KindOfPersistentVec:
-    case KindOfVec:
-    case KindOfPersistentDict:
-    case KindOfDict:
-    case KindOfPersistentKeyset:
-    case KindOfKeyset:
-    case KindOfPersistentArray:
-    case KindOfArray:
-    case KindOfObject:
-    case KindOfResource:
-      return false;
-
-    case KindOfRef:
-    // TODO (T29639296)
-    case KindOfFunc:
-      break;
-  }
-  not_reached();
-}
-
-static bool tvCanBeCoercedToNumber(const TypedValue* tv,
-                                   bool builtin) {
-  switch (tv->m_type) {
-    case KindOfUninit:
-    case KindOfBoolean:
-    case KindOfInt64:
-    case KindOfDouble:
-      return true;
-
-    case KindOfNull:
-      // In PHP 7 mode handling of null types is stricter
-      return !RuntimeOption::PHP7_ScalarTypes || builtin;
-
-    case KindOfPersistentString:
-    case KindOfString:
-      return tv->m_data.pstr->isNumeric();
-
-    case KindOfPersistentVec:
-    case KindOfVec:
-    case KindOfPersistentDict:
-    case KindOfDict:
-    case KindOfPersistentKeyset:
-    case KindOfKeyset:
-    case KindOfPersistentArray:
-    case KindOfArray:
-    case KindOfObject:
-    case KindOfResource:
-      return false;
-
-    case KindOfRef:
-    // TODO (T29639296)
-    case KindOfFunc:
-      break;
-  }
-  not_reached();
-}
-
-bool tvCoerceParamToInt64InPlace(TypedValue* tv,
-                                 bool builtin) {
-  assertx(tvIsPlausible(*tv));
-  tvUnboxIfNeeded(*tv);
-  if (!tvCanBeCoercedToNumber(tv, builtin)) {
-    return false;
-  }
-  // In PHP 7 mode doubles only convert to integers when the conversion is non-
-  // narrowing
-  if (RuntimeOption::PHP7_ScalarTypes && tv->m_type == KindOfDouble) {
-    if (tv->m_data.dbl < std::numeric_limits<int64_t>::min()) return false;
-    if (tv->m_data.dbl > std::numeric_limits<int64_t>::max()) return false;
-    if (std::isnan(tv->m_data.dbl)) return false;
-  }
-  tvCastToInt64InPlace(tv);
-  return true;
-}
-
-bool tvCoerceParamToDoubleInPlace(TypedValue* tv,
-                                  bool builtin) {
-  assertx(tvIsPlausible(*tv));
-  tvUnboxIfNeeded(*tv);
-  if (!tvCanBeCoercedToNumber(tv, builtin)) {
-    return false;
-  }
-  tvCastToDoubleInPlace(tv);
-  return true;
-}
-
-bool tvCoerceParamToStringInPlace(TypedValue* tv,
-                                  bool builtin) {
-  assertx(tvIsPlausible(*tv));
-  tvUnboxIfNeeded(*tv);
-
-  switch (tv->m_type) {
-    case KindOfNull:
-      // In PHP 7 mode handling of null types is stricter
-      if (RuntimeOption::PHP7_ScalarTypes && !builtin) {
-        return false;
-      }
-      // fall-through
-
-    case KindOfUninit:
-    case KindOfBoolean:
-    case KindOfInt64:
-    case KindOfDouble:
-    case KindOfPersistentString:
-    case KindOfString:
-      tvCastToStringInPlace(tv);
-      return true;
-
-    case KindOfPersistentVec:
-    case KindOfVec:
-    case KindOfPersistentDict:
-    case KindOfDict:
-    case KindOfPersistentKeyset:
-    case KindOfKeyset:
-    case KindOfPersistentArray:
-    case KindOfArray:
-      return false;
-
-    case KindOfObject:
-      if (tv->m_data.pobj->hasToString()) {
-        tvAsVariant(tv) = tv->m_data.pobj->invokeToString();
-        return true;
-      }
-      return false;
-
-    case KindOfResource:
-      return false;
-
-    case KindOfRef:
-    // TODO (T29639296)
-    case KindOfFunc:
-      break;
-  }
-  not_reached();
-}
-
-bool tvCoerceParamToArrayInPlace(TypedValue* tv, bool /*builtin*/) {
-  assertx(tvIsPlausible(*tv));
-  tvUnboxIfNeeded(*tv);
-
-  switch (tv->m_type) {
-    case KindOfUninit:
-    case KindOfNull:
-    case KindOfBoolean:
-    case KindOfInt64:
-    case KindOfDouble:
-    case KindOfPersistentString:
-    case KindOfString:
-    case KindOfPersistentVec:
-    case KindOfVec:
-    case KindOfPersistentDict:
-    case KindOfDict:
-    case KindOfPersistentKeyset:
-    case KindOfKeyset:
-      return false;
-
-    case KindOfPersistentArray:
-    case KindOfArray:
-      return true;
-
-    case KindOfObject:
-      if (LIKELY(tv->m_data.pobj->isCollection())) {
-        tvAsVariant(tv) = tv->m_data.pobj->toArray();
-        return true;
-      }
-      return false;
-    case KindOfResource:
-      return false;
-
-    case KindOfRef:
-    // TODO (T29639296)
-    case KindOfFunc:
-      break;
-  }
-  not_reached();
-}
-
-bool tvCoerceParamToVecInPlace(TypedValue* tv, bool /*builtin*/) {
-  assertx(tvIsPlausible(*tv));
-  tvUnboxIfNeeded(*tv);
-
-  switch (tv->m_type) {
-    case KindOfUninit:
-    case KindOfNull:
-    case KindOfBoolean:
-    case KindOfInt64:
-    case KindOfDouble:
-    case KindOfPersistentString:
-    case KindOfString:
-    case KindOfObject:
-    case KindOfResource:
-    case KindOfPersistentDict:
-    case KindOfDict:
-    case KindOfPersistentKeyset:
-    case KindOfKeyset:
-    case KindOfPersistentArray:
-    case KindOfArray:
-      return false;
-
-    case KindOfPersistentVec:
-    case KindOfVec:
-      return true;
-
-    case KindOfRef:
-    // TODO (T29639296)
-    case KindOfFunc:
-      break;
-  }
-  not_reached();
-}
-
-bool tvCoerceParamToDictInPlace(TypedValue* tv, bool /*builtin*/) {
-  assertx(tvIsPlausible(*tv));
-  tvUnboxIfNeeded(*tv);
-
-  switch (tv->m_type) {
-    case KindOfUninit:
-    case KindOfNull:
-    case KindOfBoolean:
-    case KindOfInt64:
-    case KindOfDouble:
-    case KindOfPersistentString:
-    case KindOfString:
-    case KindOfObject:
-    case KindOfResource:
-    case KindOfPersistentVec:
-    case KindOfVec:
-    case KindOfPersistentKeyset:
-    case KindOfKeyset:
-    case KindOfPersistentArray:
-    case KindOfArray:
-      return false;
-
-    case KindOfPersistentDict:
-    case KindOfDict:
-      return true;
-
-    case KindOfRef:
-    // TODO (T29639296)
-    case KindOfFunc:
-      break;
-  }
-  not_reached();
-}
-
-bool tvCoerceParamToKeysetInPlace(TypedValue* tv, bool /*builtin*/) {
-  assertx(tvIsPlausible(*tv));
-  tvUnboxIfNeeded(*tv);
-
-  switch (tv->m_type) {
-    case KindOfUninit:
-    case KindOfNull:
-    case KindOfBoolean:
-    case KindOfInt64:
-    case KindOfDouble:
-    case KindOfPersistentString:
-    case KindOfString:
-    case KindOfObject:
-    case KindOfResource:
-    case KindOfPersistentVec:
-    case KindOfVec:
-    case KindOfPersistentDict:
-    case KindOfDict:
-    case KindOfPersistentArray:
-    case KindOfArray:
-      return false;
-
-    case KindOfPersistentKeyset:
-    case KindOfKeyset:
-      return true;
-
-    case KindOfRef:
-    // TODO (T29639296)
-    case KindOfFunc:
-      break;
-  }
-  not_reached();
-}
-
-bool tvCoerceParamToObjectInPlace(TypedValue* tv, bool /*builtin*/) {
-  assertx(tvIsPlausible(*tv));
-  tvUnboxIfNeeded(*tv);
-  return tv->m_type == KindOfObject;
-}
-
-bool tvCoerceParamToNullableObjectInPlace(TypedValue* tv, bool /*builtin*/) {
-  assertx(tvIsPlausible(*tv));
-  tvUnboxIfNeeded(*tv);
-  if (isNullType(tv->m_type)) {
-    // See comment in tvCastToNullableObjectInPlace
-    tv->m_data.pobj = nullptr;
-    return true;
-  }
-  return tv->m_type == KindOfObject;
-}
-
-bool tvCoerceParamToResourceInPlace(TypedValue* tv, bool /*builtin*/) {
-  assertx(tvIsPlausible(*tv));
-  tvUnboxIfNeeded(*tv);
-  return tv->m_type == KindOfResource;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 
+char const *conv_throw_mode_names[] = { "None", "Throw" };
+
+const char* convThrowModeToName(ConvThrowMode mode) {
+  return conv_throw_mode_names[
+    static_cast<uint8_t>(mode) - static_cast<uint8_t>(ConvThrowMode::None)
+  ];
+}
+
+void handleConvThrowMode(
+  ConvThrowMode mode,
+  const char* const from,
+  const char* const to) {
+  if (mode == ConvThrowMode::None) return;
+  const auto str = folly::sformat(
+    "Attempted {} to {} conversion for {}", from, to,
+    s_ConvThrowReasonConcat.get());
+  SystemLib::throwInvalidOperationExceptionObject(str);
+}
+
+const StaticString s_ConvThrowReasonConcat("string concatenation/interpolation");
+
+void throwBitOpBadTypesException(tv_rval t1, tv_rval t2) {
+  SystemLib::throwInvalidOperationExceptionObject(fmt::format(
+    "Cannot perform a bitwise operation on {} and {}",
+    describe_actual_type(t1), describe_actual_type(t2)));
+}
+void throwIncDecBadTypeException(const char* t) {
+  SystemLib::throwInvalidOperationExceptionObject(fmt::format(
+    "Cannot perform pre/post inc/dec on {}", t));
+}
+void throwMathBadTypesException(tv_rval t1, tv_rval t2) {
+  SystemLib::throwInvalidOperationExceptionObject(fmt::format(
+    "Cannot perform mathematical operation on {} and {}",
+    describe_actual_type(t1), describe_actual_type(t2)));
+}
+
+namespace {
+void throwCmpBadTypesExceptionImpl(tv_rval t1, const char* t2) {
+  SystemLib::throwInvalidOperationExceptionObject(fmt::format(
+    "Cannot compare {} and {} using a relational operator",
+    describe_actual_type(t1), t2));
+}
+}
+
+void throwCmpBadTypesException(tv_rval t1, tv_rval t2) {
+  throwCmpBadTypesExceptionImpl(t1, describe_actual_type(t2).c_str());
+}
+void throwCmpBadTypesException(tv_rval t1, DataType dt) {
+   const char* rhs = [&] {
+      switch(dt) {
+        case DataType::Boolean:  return "bool";
+        case DataType::Int64:    return "int";
+        case DataType::Double:   return "float";
+        case DataType::String:   return "string";
+        case DataType::Vec:      return "vec";
+        case DataType::Dict:     return "dict";
+        case DataType::Keyset:   return "keyset";
+        case DataType::Resource: return "resource";
+        case DataType::ClsMeth:  return "clsmeth";
+        default: always_assert(false);
+      }
+      not_reached();
+   }();
+  throwCmpBadTypesExceptionImpl(t1, rhs);
+}
+
+///////////////////////////////////////////////////////////////////////////////
+#define X(kind) \
+template void tvCastTo##kind##InPlace<TypedValue*>(TypedValue*); \
+template void tvCastTo##kind##InPlace<tv_lval>(tv_lval); \
+template void tvCastTo##kind##InPlace<arr_lval>(arr_lval);
+X(Boolean)
+X(Int64)
+X(Double)
+X(String)
+X(Vec)
+X(Dict)
+X(Keyset)
+X(Resource)
+#undef X
+
+#define X(kind) template void \
+  tvCastToStringInPlace<kind>(kind, const ConvThrowMode);
+X(TypedValue*)
+X(tv_lval)
+X(arr_lval)
+#undef X
+
+#define X(kind, IC) \
+template void tvCastTo##kind##InPlace<TypedValue*, IC>(TypedValue*); \
+template void tvCastTo##kind##InPlace<tv_lval, IC>(tv_lval); \
+template void tvCastTo##kind##InPlace<arr_lval, IC>(arr_lval);
+X(Array, IntishCast::Cast)
+X(Array, IntishCast::None)
+#undef X
 }

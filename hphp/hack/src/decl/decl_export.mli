@@ -1,0 +1,25 @@
+(*
+ * Copyright (c) 2018, Facebook, Inc.
+ * All rights reserved.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the "hack" directory of this source tree.
+ *
+ *)
+
+type saved_legacy_decls [@@deriving show]
+
+val collect_legacy_decls : Provider_context.t -> S_set.t -> saved_legacy_decls
+
+val restore_legacy_decls : saved_legacy_decls -> int
+
+type saved_shallow_decls = { classes: Shallow_decl_defs.shallow_class S_map.t }
+[@@deriving show]
+
+val collect_shallow_decls :
+  Provider_context.t ->
+  Multi_worker.worker list option ->
+  S_set.t ->
+  saved_shallow_decls
+
+val restore_shallow_decls : saved_shallow_decls -> int

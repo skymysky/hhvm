@@ -13,7 +13,9 @@
    | obtain it through the world-wide-web, please send a note to          |
    | license@php.net so we can mail you a copy immediately.               |
    +----------------------------------------------------------------------+
-*/
+ */
+
+namespace {
 
 /**
  * An asynchronous MySQL client.
@@ -62,7 +64,7 @@ final class AsyncMysqlClient {
    * @param $limit - The limit for all pools.
    *
    */
-  <<__HipHopSpecific, __Native>>
+  <<__Native>>
   public static function setPoolsConnectionLimit(int $limit): void;
 
   /**
@@ -86,11 +88,18 @@ final class AsyncMysqlClient {
    * @param $timeout_micros - Timeout, in microseconds, for the connect; -1 for
    *                          default, 0 for no timeout.
    * @param $ssl_context - Optionally allow the connection to tunnel via SSL.
+   * @param $tcp_timeout_micros - Timeout, in microseconds, for the tcp phase of
+   *                          connect operation; Default: 0 for no timeout.
+   * @param $sni_server_name - SNI hostname to use when connecting via SSL.
+   * @param $server_cert_extensions - collection of name of TLS cert extension
+                                      names used to validate server cert
+   * @param $server_cert_values - collection of accepted values in server cert
+   *                              for "server_cert_extension" extension
    *
    * @return - an `Awaitable` representing an `AsyncMysqlConnection`. `await`
    * or `join` this result to obtain the actual connection.
    */
-  <<__HipHopSpecific, __Native>>
+  <<__Native>>
   public static function connect(string $host,
                                  int $port,
                                  string $dbname,
@@ -98,6 +107,10 @@ final class AsyncMysqlClient {
                                  string $password,
                                  int $timeout_micros = -1,
                                  ?MySSLContextProvider $ssl_context = null,
+                                 int $tcp_timeout_micros = 0,
+                                 string $sni_server_name = "",
+                                 string $server_cert_extension = "",
+                                 string $server_cert_values = "",
                                 ): Awaitable<AsyncMysqlConnection>;
 
   /**
@@ -123,7 +136,7 @@ final class AsyncMysqlClient {
    * @return - an `Awaitable` representing an `AsyncMysqlConnection`. `await`
    * or `join` this result to obtain the actual connection.
    */
-  <<__HipHopSpecific, __Native>>
+  <<__Native>>
   public static function connectWithOpts(string $host,
                                         int $port,
                                         string $dbname,
@@ -149,48 +162,28 @@ final class AsyncMysqlClient {
    * @param $user - The user to connect as.
    * @param $password - The password to connect with.
    * @param $connection_options - A set of options used for connection.
+   * @param $query_attributes - Query attributes. Empty by default.
    *
    * @return - an `Awaitable` representing the result of your connect and query
    * This is a tuple where the latter contains information about the connection
    * retrieval, and the former has the query results
    */
-  <<__HipHopSpecific, __Native>>
-    public static function connectAndQuery(
-                                        array $queries,
+  <<__Native>>
+  public static function connectAndQuery(
+                                        vec<string> $queries,
                                         string $host,
                                         int $port,
                                         string $dbname,
                                         string $user,
                                         string $password,
                                         AsyncMysqlConnectionOptions $conn_opts,
+                                        dict<string, string> $query_attributes
+                                            = dict[],
                                       ): Awaitable<(
                                           AsyncMysqlConnectResult,
+                                          /* HH_FIXME[2049] TODO(T121423772) [systemlib] Hack Collections */
                                           Vector<AsyncMysqlQueryResult>
                                       )>;
-
-  /**
-   * Create a new async connection from a synchronous MySQL instance.
-   *
-   * This is a synchronous function. You will block until the connection has
-   * been adopted to an `AsyncMysqlConnection`. Then you will be able to use
-   * the async `AsyncMysqlConnection` methods like `queryf()`, etc.
-   *
-   * This is a tricky function to use and we are actually thinking of
-   * deprecating it. This function *requires* a deprecated, MySQL resource.
-   * Once this resource is adopted by a call to this function, it is no longer
-   * valid in the context on which it was being used.
-   *
-   * If you are using this function, you might consider just creating a
-   * connection pool via `AsyncMysqlConnectionPool` since you presumably have
-   * all the connection details anyway.
-   *
-   * @param $connection - The synchronous MySQL connection.
-   *
-   * @return - An `AsyncMysqlConnection` instance.
-   */
-  <<__HipHopSpecific, __Native>>
-  public static function adoptConnection(mixed $connection
-                                        ): AsyncMysqlConnection;
 }
 
 /**
@@ -210,7 +203,7 @@ final class AsyncMysqlClient {
  * @guide /hack/async/introduction
  * @guide /hack/async/extensions
  */
-<<__NativeData("AsyncMysqlConnectionPool")>>
+<<__NativeData>>
 class AsyncMysqlConnectionPool {
 
   /**
@@ -248,7 +241,7 @@ class AsyncMysqlConnectionPool {
    *                        depending on the option.
    */
   <<__Native>>
-  public function __construct(array $pool_options): void;
+  public function __construct(darray<string, mixed> $pool_options): void;
 
   /**
    * Returns statistical information for the current pool.
@@ -266,8 +259,8 @@ class AsyncMysqlConnectionPool {
    *
    * @return - A string-keyed `array` with the statistical information above.
    */
-  <<__HipHopSpecific, __Native>>
-  public function getPoolStats(): array;
+  <<__Native>>
+  public function getPoolStats(): darray<string, mixed>;
 
   /**
    * Begin an async connection to a MySQL instance.
@@ -286,19 +279,34 @@ class AsyncMysqlConnectionPool {
    * @param $extra_key - An extra parameter to help the internal connection
    *                     pool infrastructure separate connections even better.
    *                     Usually, the default `""` is fine.
+   * @param $ssl_context - Optionally allow the connection to tunnel via SSL.
+   * @param $tcp_timeout_micros - Timeout, in microseconds, for the tcp phase of
+   *                          connect operation; Default: 0 for no timeout.
+   * @param $sni_server_name - SNI hostname to use when connecting via SSL.
+   * @param $server_cert_extensions - collection of name of TLS cert extension
+                                      names used to validate server cert
+   * @param $server_cert_values - collection of accepted values in server cert
+   *                              for "server_cert_extension" extension
    *
+   * @return - an `Awaitable` representing an `AsyncMysqlConnection`. `await`
+   * or `join` this result to obtain the actual connection.
    */
-  <<__HipHopSpecific, __Native>>
+  <<__Native>>
   public function connect(string $host,
                           int $port,
                           string $dbname,
                           string $user,
                           string $password,
                           int $timeout_micros = -1,
-                          string $extra_key = ""
+                          string $extra_key = "",
+                          ?MySSLContextProvider $ssl_context = null,
+                          int $tcp_timeout_micros = 0,
+                          string $sni_server_name = "",
+                          string $server_cert_extensions = "",
+                          string $server_cert_values = "",
                          ): Awaitable<AsyncMysqlConnection>;
 
-  <<__HipHopSpecific, __Native>>
+  <<__Native>>
   public function connectWithOpts(string $host,
                           int $port,
                           string $dbname,
@@ -307,6 +315,21 @@ class AsyncMysqlConnectionPool {
                           AsyncMysqlConnectionOptions $conn_options,
                           string $extra_key = "",
                          ): Awaitable<AsyncMysqlConnection>;
+
+  <<__Native>>
+  public function connectAndQuery(
+    vec<string> $queries,
+    string $host,
+    int $port,
+    string $dbname,
+    string $user,
+    string $password,
+    AsyncMysqlConnectionOptions $conn_opts,
+    string $extra_key = "",
+    dict<string, string> $query_attributes = dict[],
+  ):
+  /* HH_FIXME[2049] TODO(T121423772) [systemlib] Hack Collections */
+  Awaitable<(AsyncMysqlConnectResult, Vector<AsyncMysqlQueryResult>)>;
 }
 
 /**
@@ -320,7 +343,7 @@ class AsyncMysqlConnectionPool {
  * @guide /hack/async/introduction
  * @guide /hack/async/extensions
  */
-<<__NativeData("AsyncMysqlConnection")>>
+<<__NativeData>>
 final class AsyncMysqlConnection {
 
   private function __construct(): void {
@@ -344,14 +367,17 @@ final class AsyncMysqlConnection {
    * @param $timeout_micros - The maximum time, in microseconds, in which the
    *                          query must be completed; -1 for default, 0 for
    *                          no timeout.
+   * @param $query_attributes - Query attributes. Empty by default.
    *
    * @return - an `Awaitable` representing the result of your query. Use
    *           `await` or `join` to get the actual `AsyncMysqlQueryResult`
    *           object.
    */
-  <<__HipHopSpecific, __Native>>
-    function query(string $query,
-                   int $timeout_micros = -1): Awaitable<AsyncMysqlQueryResult>;
+  <<__Native>>
+    public function query(string $query,
+                  int $timeout_micros = -1,
+                  dict<string, string> $query_attributes = dict[],
+                  ): Awaitable<AsyncMysqlQueryResult>;
 
   /**
    * Execute a query with placeholders and parameters.
@@ -396,9 +422,15 @@ final class AsyncMysqlConnection {
    *           `await` or `join` to get the actual `AsyncMysqlQueryResult`
    *           object.
    */
-  <<__HipHopSpecific, __Native>>
-  function queryf(string $pattern,
-                  ...$args): Awaitable<AsyncMysqlQueryResult>;
+  <<__Native>>
+  public function queryf(
+    string $pattern,
+    mixed ...$args
+  ): Awaitable<AsyncMysqlQueryResult>;
+  <<__Native>>
+  public function queryAsync(
+    \HH\Lib\SQL\Query $query,
+  ): Awaitable<AsyncMysqlQueryResult>;
 
   /**
    * Begin running a query with multiple statements.
@@ -418,15 +450,19 @@ final class AsyncMysqlConnection {
    * @param $timeout_micros - The maximum time, in microseconds, in which the
    *                          query must be completed; -1 for default, 0 for
    *                          no timeout.
+   * @param $query_attributes - Query attributes. Empty by default.
    *
    * @return - an `Awaitable` representing the result of your multi-query. Use
    *           `await` or `join` to get the actual `Vector` of
    *           `AsyncMysqlQueryResult` objects.
    */
-  <<__HipHopSpecific, __Native>>
-  function multiQuery(
-    array $queries,
-    int $timeout_micros = -1): Awaitable<Vector<AsyncMysqlQueryResult>>;
+  <<__Native>>
+  public function multiQuery(vec<string> $queries,
+                      int $timeout_micros = -1,
+                      dict<string, string> $query_attributes = dict[],
+                      ):
+                      /* HH_FIXME[2049] TODO(T121423772) [systemlib] Hack Collections */
+                      Awaitable<Vector<AsyncMysqlQueryResult>>;
 
   /**
    * Escape a string to be safe to include in a raw query.
@@ -445,27 +481,14 @@ final class AsyncMysqlConnection {
    *
    * @return - The escaped string.
    */
-  <<__HipHopSpecific, __Native>>
-  function escapeString(string $data): string;
+  <<__Native>>
+  public function escapeString(string $data): ?string;
 
   /**
    * Close the current connection.
    */
-  <<__HipHopSpecific, __Native>>
-  function close(): void;
-
-  /**
-   * Releases the current connection and returns a synchronous MySQL connection.
-   *
-   * This method will destroy the current `AsyncMysqlConnection` object and give
-   * you back a vanilla, synchronous MySQL resource.
-   *
-   * @return - A `resource` representing a
-   *           [MySQL](http://php.net/manual/en/book.mysql.php) resource, or
-   *           `false` on failure.
-   */
-  <<__HipHopSpecific, __Native>>
-  function releaseConnection(): mixed;
+  <<__Native>>
+  public function close(): void;
 
   /**
    * Checks if the data inside `AsyncMysqlConnection` object is valid. For
@@ -474,8 +497,8 @@ final class AsyncMysqlConnection {
    * @return - `true` if MySQL resource is valid and can be accessed;
    *           `false` otherwise.
    */
-  <<__HipHopSpecific, __Native>>
-  function isValid(): bool;
+  <<__Native>>
+  public function isValid(): bool;
 
 
 
@@ -484,8 +507,8 @@ final class AsyncMysqlConnection {
    *
    * @return - The server version as a `string`.
    */
-  <<__HipHopSpecific, __Native>>
-  function serverInfo(): string;
+  <<__Native>>
+  public function serverInfo(): ?string;
 
   /**
    * Returns whether or not the current connection reused the SSL session
@@ -497,8 +520,8 @@ final class AsyncMysqlConnection {
    * @return - `true` if this is a SSL connection and the SSL session was
    *           reused; `false` otherwise.
    */
-  <<__HipHopSpecific, __Native>>
-  function sslSessionReused(): bool;
+  <<__Native>>
+  public function sslSessionReused(): bool;
 
 
   /**
@@ -507,8 +530,8 @@ final class AsyncMysqlConnection {
    *
    * @return - `true` if this is a SSL connection; `false` otherwise
    */
-  <<__HipHopSpecific, __Native>>
-  function isSSL(): bool;
+  <<__Native>>
+  public function isSSL(): bool;
 
   /**
    * The number of errors, warnings, and notes returned during execution of
@@ -516,24 +539,24 @@ final class AsyncMysqlConnection {
    *
    * @return - The `int` count of errors, warnings, etc.
    */
-  <<__HipHopSpecific, __Native>>
-  function warningCount(): int;
+  <<__Native>>
+  public function warningCount(): int;
 
   /**
    * The hostname associated with the current connection.
    *
    * @return - The hostname as a `string`.
    */
-  <<__HipHopSpecific, __Native>>
-  function host(): string;
+  <<__Native>>
+  public function host(): ?string;
 
   /**
    * The port on which the MySQL instance is running.
    *
    * @return - The port as an `int`.
    */
-  <<__HipHopSpecific, __Native>>
-  function port(): int;
+  <<__Native>>
+  public function port(): int;
 
   /**
    * Sets if the current connection can be recycled without any clean up.
@@ -547,8 +570,8 @@ final class AsyncMysqlConnection {
    * @param $reusable - Pass `true` to make the connection reusable; `false`
    *                    otherwise.
    */
-  <<__HipHopSpecific, __Native>>
-  function setReusable(bool $reusable): void;
+  <<__Native>>
+  public function setReusable(bool $reusable): void;
 
   /**
    * Returns whether or not the current connection is reusable.
@@ -559,8 +582,8 @@ final class AsyncMysqlConnection {
    *
    * @return - `true` if the connection is reusable; `false` otherwise.
    */
-  <<__HipHopSpecific, __Native>>
-  function isReusable(): bool;
+  <<__Native>>
+  public function isReusable(): bool;
 
   /**
    * Last time a successful activity was made in the current connection, in
@@ -568,11 +591,11 @@ final class AsyncMysqlConnection {
    *
    * The first successful activity of the current connection is its creation.
    *
-   * @return - A `float` representing the the number of seconds ago since epoch
+   * @return - A `float` representing the number of seconds ago since epoch
    *           that we had successful activity on the current connection.
    */
-  <<__HipHopSpecific, __Native>>
-  function lastActivityTime(): float;
+  <<__Native>>
+  public function lastActivityTime(): float;
 
   /**
    * Returns the `AsyncMysqlConnectResult` for the current connection.
@@ -583,8 +606,74 @@ final class AsyncMysqlConnection {
    * @return - An `AsyncMysqlConnectResult` object or `null` if the
    *           `AsyncMysqlConnection` was not created in the MySQL client.
    */
-  <<__HipHopSpecific, __Native>>
-  function connectResult(): ?AsyncMysqlConnectResult;
+  <<__Native>>
+  public function connectResult(): ?AsyncMysqlConnectResult;
+
+  /**
+   * Returns Common Name attribute of the TLS certificate presented
+   * by MySQL server.
+   *
+   * This information can be used while troubleshooting TLS handshake
+   * failures happening on connect stage.
+   *
+   * @return - a string containing Common Name value from the server
+   *           certificate presented by MySQL.
+   */
+  <<__Native>>
+  public function getSslCertCn(): ?string;
+
+  /**
+   * Returns Server Alternative Names attribute of the TLS certificate
+   * presented by MySQL server.
+   *
+   * This information can be used while troubleshooting TLS handshake
+   * failures happening on connect stage.
+   *
+   * @return - a vector of strings containing a collection of Server
+   *           Alternative Names values from the server certificate presented
+   *           by MySQL.
+   */
+  <<__Native>>
+  /* HH_FIXME[2049] TODO(T121423772) [systemlib] Hack Collections */
+  public function getSslCertSan(): Vector<string>;
+
+  /**
+   * Returns values from the selected cert extensions of the TLS certificate
+   * presented by MySQL server.
+   *
+   * This information can be used while troubleshooting TLS handshake
+   * failures happening on connect stage.
+   *
+   * @return - a vector of strings containing a collection of the selected
+   *           cert extension values from the server certificate presented
+   *           by MySQL.
+   */
+  <<__Native>>
+  /* HH_FIXME[2049] TODO(T121423772) [systemlib] Hack Collections */
+  public function getSslCertExtensions(): Vector<string>;
+
+  /**
+   * Returns a boolean value indicating if server cert validation was enforced
+   * for this connection.
+   *
+   * This information can be used while troubleshooting TLS handshake
+   * failures happening on connect stage.
+   *
+   * @return - "true" if server cert validation was enforced during TLS
+   *           handshake for this connection, "false" otherwise.
+   */
+  <<__Native>>
+  public function isSslCertValidationEnforced(): bool;
+
+  /**
+   * Retrieve the SSL/TLS version for a connection
+   *
+   * This information can be logged to have visibility on what was resolved during the TLS handshake.
+   *
+   * @return - The TLS version or an empty string
+   */
+  <<__Native>>
+  public function getSslVersion(): ?string;
 }
 
 /**
@@ -599,7 +688,7 @@ final class AsyncMysqlConnection {
  * @guide /hack/async/introduction
  * @guide /hack/async/extensions
  */
-<<__NativeData("MySSLContextProvider")>>
+<<__NativeData>>
 class MySSLContextProvider {
   /**
    * @internal
@@ -614,8 +703,21 @@ class MySSLContextProvider {
    *
    * @return - `true` if the provider is valid; `false` otherwise.
    */
-  <<__HipHopSpecific, __Native>>
+  <<__Native>>
   public function isValid(): bool;
+
+  /**
+   * Allows to disable TLS session resumption for the connections
+   * created using this provider.
+   * The resumption is enabled by default. Disabling sesison resumption
+   * can be helpful in test scenarios. It allows to force full TLS
+   * handshake for every newly created connection.
+   *
+   * @param $allow - Pass `true` to enable session resumption; `false`
+   *                 otherwise.
+   */
+  <<__Native>>
+  public function allowSessionResumption(bool $allow): void;
 }
 
 /**
@@ -628,33 +730,85 @@ class MySSLContextProvider {
  * @guide /hack/async/introduction
  * @guide /hack/async/extensions
  */
-<<__NativeData("AsyncMysqlConnectionOptions")>>
+<<__NativeData>>
 class AsyncMysqlConnectionOptions {
 
   // Sets the Connect Timeout for each connection attempt
-  <<__HipHopSpecific, __Native>>
+  <<__Native>>
   public function setConnectTimeout(int $timeout): void;
 
+  // Sets the Connect Tcp Timeout for each connection attempt
+  // This timeout is for only tcp handshake phase of the connect op
+  <<__Native>>
+  public function setConnectTcpTimeout(int $timeout): void;
+
   // Sets the number of attempts this operation will retry connecting
-  <<__HipHopSpecific, __Native>>
+  <<__Native>>
   public function setConnectAttempts(int $attempts): void;
 
   // Sets the total timeout that the connect will use
-  <<__HipHopSpecific, __Native>>
+  <<__Native>>
   public function setTotalTimeout(int $timeout): void;
 
   // Sets the maximum time for a running query
-  <<__HipHopSpecific, __Native>>
+  <<__Native>>
   public function setQueryTimeout(int $timeout): void;
 
   // Sets a map of connection attributes that will be sent to Mysql in the
   // Connection Attributes Handshake field
-  <<__HipHopSpecific, __Native>>
-  public function setConnectionAttributes(array<string,string> $attrs): void;
+  <<__Native>>
+  public function setConnectionAttributes(darray<string,string> $attrs): void;
 
   // SSL Configuration if SSL is to be used for connection
-  <<__HipHopSpecific, __Native>>
+  <<__Native>>
   public function setSSLOptionsProvider(?MySSLContextProvider $ssl_opts): void;
+
+  // SNI hostname to use when connecting via SSL
+  <<__Native>>
+  public function setSniServerName(string $sni_server_name) : void;
+
+  // Enable reset conn before pooled conn is returned to pool
+  <<__Native>>
+  public function enableResetConnBeforeClose(): void;
+
+  // Enable delayed reset conn before pooled conn is returned to pool
+  <<__Native>>
+  public function enableDelayedResetConn(): void;
+
+  // Enable change_user feature in connection pool
+  <<__Native>>
+  public function enableChangeUser(): void;
+
+  // TLS cert extension parameters to validate server cert
+  <<__Native>>
+  public function setServerCertValidation(string $extensions = "",
+                                          string $values = ""): void;
+
+  // Gets the Connect Timeout for each connection attempt
+  <<__Native>>
+  public function getConnectTimeout(): int;
+
+  // Gets the Connect Tcp Timeout for each connection attempt
+  // Returns -1 if not set
+  <<__Native>>
+  public function getConnectTcpTimeout(): int;
+
+  // Gets the number of attempts this operation will retry connecting
+  <<__Native>>
+  public function getConnectAttempts(): int;
+
+  // Gets the total timeout that the connect will use
+  <<__Native>>
+  public function getTotalTimeout(): int;
+
+  // Gets the maximum time for a running query
+  <<__Native>>
+  public function getQueryTimeout(): int;
+
+  // Gets the map of connection attributes that will be sent to Mysql in the
+  // Connection Attributes Handshake field
+  <<__Native>>
+  public function getConnectionAttributes(): darray<string, string>;
 }
 /**
  * Provides timing statistics about the MySQL client.
@@ -678,7 +832,7 @@ class AsyncMysqlConnectionOptions {
  * @guide /hack/async/introduction
  * @guide /hack/async/extensions
  */
-<<__NativeData("AsyncMysqlClientStats")>>
+<<__NativeData>>
 class AsyncMysqlClientStats {
   /**
    * @internal
@@ -702,8 +856,8 @@ class AsyncMysqlClientStats {
    * @return - A `float` representing the average for an event to happen on this
    *           MySQL client.
    */
-  <<__HipHopSpecific, __Native>>
-  function ioEventLoopMicrosAvg() : float;
+  <<__Native>>
+  public function ioEventLoopMicrosAvg() : float;
 
   /**
    * Average delay between when a callback is scheduled in the MySQL client
@@ -717,8 +871,8 @@ class AsyncMysqlClientStats {
    * @return - A `float` representing the average callback delay on this
    *           MySQL client.
    */
-  <<__HipHopSpecific, __Native>>
-  function callbackDelayMicrosAvg() : float;
+  <<__Native>>
+  public function callbackDelayMicrosAvg() : float;
 
   /**
    * Average of reported busy time in the client's IO thread.
@@ -728,8 +882,8 @@ class AsyncMysqlClientStats {
    * @return - A `float` representing the average busy time of this
    *           MySQL client's IO Thread.
    */
-  <<__HipHopSpecific, __Native>>
-  function ioThreadBusyMicrosAvg() : float;
+  <<__Native>>
+  public function ioThreadBusyMicrosAvg() : float;
 
   /**
    * Average of reported idle time in the client's IO thread.
@@ -739,8 +893,8 @@ class AsyncMysqlClientStats {
    * @return - A `float` representing the average busy time of this
    *           MySQL client's IO Thread.
    */
-  <<__HipHopSpecific, __Native>>
-  function ioThreadIdleMicrosAvg() : float;
+  <<__Native>>
+  public function ioThreadIdleMicrosAvg() : float;
 
   /**
    * Size of this client's event base notification queue.
@@ -749,8 +903,8 @@ class AsyncMysqlClientStats {
    * @return - A `int` representing the size of notification queue of this
    *           MySQL client's IO Thread.
    */
-  <<__HipHopSpecific, __Native>>
-  function notificationQueueSize() : int;
+  <<__Native>>
+  public function notificationQueueSize() : int;
 
 }
 
@@ -764,7 +918,6 @@ class AsyncMysqlClientStats {
  * @guide /hack/async/introduction
  * @guide /hack/async/extensions
  */
-<<__NativeData("AsyncMysqlResult")>>
 abstract class AsyncMysqlResult {
 
   /**
@@ -782,21 +935,21 @@ abstract class AsyncMysqlResult {
    *
    * @return - the total operation time as `int` microseconds.
    */
-  abstract function elapsedMicros(): int;
+  public abstract function elapsedMicros(): int;
 
   /**
    * The start time for the specific MySQL operation, in seconds since epoch.
    *
    * @return - the start time as `float` seconds since epoch.
    */
-  abstract function startTime(): float;
+  public abstract function startTime(): float;
 
   /**
    * The end time for the specific MySQL operation, in seconds since epoch.
    *
    * @return - the end time as `float` seconds since epoch.
    */
-  abstract function endTime(): float;
+  public abstract function endTime(): float;
 
   /**
    * Returns the MySQL client statistics at the moment the result was created.
@@ -807,7 +960,87 @@ abstract class AsyncMysqlResult {
    * @return - an `AsyncMysqlClientStats` object to query about event and
    *           callback timing to the MySQL client for the specific result.
    */
-  abstract function clientStats(): AsyncMysqlClientStats;
+  public abstract function clientStats(): AsyncMysqlClientStats;
+
+  /**
+   * Returns whether or not the current connection reused the SSL session
+   * from another SSL connection. The session is set by MySSLContextProvider.
+   * Some cases, the server can deny the session that was set and the handshake
+   * will create a new one, in those cases this function will return `false`.
+   * If this connections isn't SSL, `false` will be returned as well.
+   *
+   * @return - `true` if this is a SSL connection and the SSL session was
+   *           reused; `false` otherwise.
+   */
+  <<__Native>>
+  public function sslSessionReused(): bool;
+
+  /**
+   * Returns Common Name attribute of the TLS certificate presented
+   * by MySQL server.
+   *
+   * This information can be used while troubleshooting TLS handshake
+   * failures happening on connect stage.
+   *
+   * @return - a string containing Common Name value from the server
+   *           certificate presented by MySQL.
+   */
+  <<__Native>>
+  public function getSslCertCn(): ?string;
+
+  /**
+   * Returns Server Alternative Names attribute of the TLS certificate
+   * presented by MySQL server.
+   *
+   * This information can be used while troubleshooting TLS handshake
+   * failures happening on connect stage.
+   *
+   * @return - a vector of strings containing Server Alternative Names values
+   *           from the server certificate presented by MySQL.
+   */
+  <<__Native>>
+  /* HH_FIXME[2049] TODO(T121423772) [systemlib] Hack Collections */
+  public function getSslCertSan(): Vector<string>;
+
+  /**
+   * Returns values from the selected cert extensions of the TLS certificate
+   * presented by MySQL server.
+   *
+   * This information can be used while troubleshooting TLS handshake
+   * failures happening on connect stage.
+   *
+   * @return - a vector of strings containing the selected cert extension
+   *           values from the server certificate presented by MySQL.
+   */
+  <<__Native>>
+  /* HH_FIXME[2049] TODO(T121423772) [systemlib] Hack Collections */
+  public function getSslCertExtensions(): Vector<string>;
+
+  /**
+   * Returns a boolean value indicating if server cert validation was enforced
+   * for this connection.
+   *
+   * This information can be used while troubleshooting TLS handshake
+   * failures happening on connect stage.
+   *
+   * @return - `true` if server cert validation was enforced during TLS
+   *           handshake for this connection, `false` otherwise.
+   */
+  <<__Native>>
+  public function isSslCertValidationEnforced(): bool;
+
+  /**
+   * Returns the TLS protocol version negotiated for this connection (e.g.
+   * "TLSv1.2" or "TLSv1.3"), as resolved during the TLS handshake.
+   *
+   * Unlike `AsyncMysqlConnection::getSslVersion()`, this is available on the
+   * result object, so it can be read on the connect-and-query path where no
+   * `AsyncMysqlConnection` is returned.
+   *
+   * @return - The TLS version, or an empty string for non-SSL connections.
+   */
+  <<__Native>>
+  public function getSslVersion(): ?string;
 
 }
 
@@ -821,7 +1054,7 @@ abstract class AsyncMysqlResult {
  * @guide /hack/async/introduction
  * @guide /hack/async/extensions
  */
-<<__NativeData("AsyncMysqlConnectResult")>>
+<<__NativeData>>
 final class AsyncMysqlConnectResult extends AsyncMysqlResult {
 
   /**
@@ -838,24 +1071,24 @@ final class AsyncMysqlConnectResult extends AsyncMysqlResult {
    *
    * @return - the total establishing connection time as `int` microseconds.
    */
-  <<__HipHopSpecific, __Native>>
-  function elapsedMicros(): int;
+  <<__Native>>
+  public function elapsedMicros(): int;
 
   /**
    * The start time for the connection operation, in seconds since epoch.
    *
    * @return - the start time as `float` seconds since epoch.
    */
-  <<__HipHopSpecific, __Native>>
-  function startTime(): float;
+  <<__Native>>
+  public function startTime(): float;
 
   /**
    * The end time of the connection operation, in seconds since epoch.
    *
    * @return - the end time as `float` seconds since epoch.
    */
-  <<__HipHopSpecific, __Native>>
-  function endTime(): float;
+  <<__Native>>
+  public function endTime(): float;
 
   /**
    * Returns the MySQL client statistics at the moment the connection was
@@ -867,8 +1100,8 @@ final class AsyncMysqlConnectResult extends AsyncMysqlResult {
    * @return - an `AsyncMysqlClientStats` object to query about event and
    *           callback timing to the MySQL client for the connection.
    */
-  <<__HipHopSpecific, __Native>>
-  function clientStats(): AsyncMysqlClientStats;
+  <<__Native>>
+  public function clientStats(): AsyncMysqlClientStats;
 
 }
 
@@ -881,7 +1114,7 @@ final class AsyncMysqlConnectResult extends AsyncMysqlResult {
  * @guide /hack/async/introduction
  * @guide /hack/async/extensions
  */
-<<__NativeData("AsyncMysqlErrorResult")>>
+<<__NativeData>>
 class AsyncMysqlErrorResult extends AsyncMysqlResult {
 
   /**
@@ -897,24 +1130,24 @@ class AsyncMysqlErrorResult extends AsyncMysqlResult {
    *
    * @return - the total error producing time as `int` microseconds.
    */
-  <<__HipHopSpecific, __Native>>
-  function elapsedMicros(): int;
+  <<__Native>>
+  public function elapsedMicros(): int;
 
   /**
    * The start time when the error was produced, in seconds since epoch.
    *
    * @return - the start time as `float` seconds since epoch.
    */
-  <<__HipHopSpecific, __Native>>
-  function startTime(): float;
+  <<__Native>>
+  public function startTime(): float;
 
   /**
    * The end time when the error was produced, in seconds since epoch.
    *
    * @return - the end time as `float` seconds since epoch.
    */
-  <<__HipHopSpecific, __Native>>
-  function endTime(): float;
+  <<__Native>>
+  public function endTime(): float;
 
   /**
    * Returns the MySQL client statistics for the events that produced the error.
@@ -926,8 +1159,8 @@ class AsyncMysqlErrorResult extends AsyncMysqlResult {
    *           callback timing to the MySQL client for whatever caused the
    *            error.
    */
-  <<__HipHopSpecific, __Native>>
-  function clientStats(): AsyncMysqlClientStats;
+  <<__Native>>
+  public function clientStats(): AsyncMysqlClientStats;
 
   /**
    * Returns the MySQL error number for this result.
@@ -938,28 +1171,16 @@ class AsyncMysqlErrorResult extends AsyncMysqlResult {
    *
    * @return - The error number as an `int`.
    */
-  <<__HipHopSpecific, __Native>>
-  function mysql_errno(): int;
+  <<__Native>>
+  public function mysql_errno(): int;
 
   /**
    * Returns a human-readable string for the error encountered in this result.
    *
    * @return - The error string.
    */
-  <<__HipHopSpecific, __Native>>
-  function mysql_error(): string;
-
-  /**
-   * Returns an alternative, normalized version of the error message provided by
-   * mysql_error().
-   *
-   * Sometimes the message is the same, depending on if there was an explicit
-   * normalized string provided by the MySQL client.
-   *
-   * @return - The normalized error string.
-   */
-  <<__HipHopSpecific, __Native>>
-  function mysql_normalize_error(): string;
+  <<__Native>>
+  public function mysql_error(): ?string;
 
   /**
    * The type of failure that produced this result.
@@ -969,8 +1190,8 @@ class AsyncMysqlErrorResult extends AsyncMysqlResult {
    *
    * @return - the type of failure, either `'TimedOut'` or `'Failed'`.
    */
-  <<__HipHopSpecific, __Native>>
-  function failureType(): string;
+  <<__Native>>
+  public function failureType(): ?string;
 }
 
 /**
@@ -983,7 +1204,7 @@ class AsyncMysqlErrorResult extends AsyncMysqlResult {
  * @guide /hack/async/introduction
  * @guide /hack/async/extensions
  */
-<<__NativeData("AsyncMysqlQueryErrorResult")>>
+<<__NativeData>>
 final class AsyncMysqlQueryErrorResult extends AsyncMysqlErrorResult {
 
   /**
@@ -1002,8 +1223,8 @@ final class AsyncMysqlQueryErrorResult extends AsyncMysqlErrorResult {
    *
    * @return - The number of successful queries before the error as an `int`.
    */
-  <<__HipHopSpecific, __Native>>
-  function numSuccessfulQueries(): int;
+  <<__Native>>
+  public function numSuccessfulQueries(): int;
 
   /**
    * Returns the results that were fetched by the successful query statements.
@@ -1011,8 +1232,9 @@ final class AsyncMysqlQueryErrorResult extends AsyncMysqlErrorResult {
    * @return - A `Vector` of `AsyncMysqlQueryResult` objects for each result
    *           produced by a successful query statement.
    */
-  <<__HipHopSpecific, __Native>>
-  function getSuccessfulResults(): Vector<AsyncMysqlQueryResult>;
+  <<__Native>>
+  /* HH_FIXME[2049] TODO(T121423772) [systemlib] Hack Collections */
+  public function getSuccessfulResults(): Vector<AsyncMysqlQueryResult>;
 }
 
 /**
@@ -1029,7 +1251,7 @@ final class AsyncMysqlQueryErrorResult extends AsyncMysqlErrorResult {
  * @guide /hack/async/introduction
  * @guide /hack/async/extensions
  */
-<<__NativeData("AsyncMysqlQueryResult")>>
+<<__NativeData>>
 final class AsyncMysqlQueryResult extends AsyncMysqlResult {
 
   /**
@@ -1045,24 +1267,24 @@ final class AsyncMysqlQueryResult extends AsyncMysqlResult {
    *
    * @return - the total successful result producing time as `int` microseconds.
    */
-  <<__HipHopSpecific, __Native>>
-  function elapsedMicros(): int;
+  <<__Native>>
+  public function elapsedMicros(): int;
 
   /**
    * The start time when the successful query began, in seconds since epoch.
    *
    * @return - the start time as `float` seconds since epoch.
    */
-  <<__HipHopSpecific, __Native>>
-  function startTime(): float;
+  <<__Native>>
+  public function startTime(): float;
 
   /**
    * The end time when the successful query began, in seconds since epoch.
    *
    * @return - the end time as `float` seconds since epoch.
    */
-  <<__HipHopSpecific, __Native>>
-  function endTime(): float;
+  <<__Native>>
+  public function endTime(): float;
 
   /**
    * Returns the MySQL client statistics at the moment the successful query
@@ -1074,8 +1296,8 @@ final class AsyncMysqlQueryResult extends AsyncMysqlResult {
    * @return - an `AsyncMysqlClientStats` object to query about event and
    *           callback timing to the MySQL client for the query.
    */
-  <<__HipHopSpecific, __Native>>
-  function clientStats(): AsyncMysqlClientStats;
+  <<__Native>>
+  public function clientStats(): AsyncMysqlClientStats;
 
   /**
    * The number of database rows affected in the current result.
@@ -1091,8 +1313,8 @@ final class AsyncMysqlQueryResult extends AsyncMysqlResult {
    *
    * @return - The number of rows affected as an `int`.
    */
-  <<__HipHopSpecific, __Native>>
-  function numRowsAffected(): int;
+  <<__Native>>
+  public function numRowsAffected(): int;
 
   /**
    * The last ID inserted, if one existed, for the query that produced the
@@ -1103,8 +1325,8 @@ final class AsyncMysqlQueryResult extends AsyncMysqlResult {
    *
    * @return - The last insert id, or 0 if none existed.
    */
-  <<__HipHopSpecific, __Native>>
-  function lastInsertId(): int;
+  <<__Native>>
+  public function lastInsertId(): int;
 
   /**
    * The number of rows in the current result.
@@ -1120,8 +1342,8 @@ final class AsyncMysqlQueryResult extends AsyncMysqlResult {
    *
    * @return - The number of rows in the current result as an `int`.
    */
-  <<__HipHopSpecific, __Native>>
-  function numRows(): int;
+  <<__Native>>
+  public function numRows(): int;
 
   /**
    * Returns the actual rows returned by the successful query, each row
@@ -1137,8 +1359,9 @@ final class AsyncMysqlQueryResult extends AsyncMysqlResult {
    *           rows and the `Map` elements are the column names and values
    *           associated with that row.
    */
-  <<__HipHopSpecific, __Native>>
-  function mapRows(): Vector<Map>;
+  <<__Native>>
+  /* HH_FIXME[2049] TODO(T121423772) [systemlib] Hack Collections */
+  public function mapRows(): Vector<Map<string, ?string>>;
 
   /**
    * Returns the actual rows returned by the successful query, each row
@@ -1155,8 +1378,9 @@ final class AsyncMysqlQueryResult extends AsyncMysqlResult {
    *           represents the rows and each inner `Vector` represent the
    *           column values for each row.
    */
-  <<__HipHopSpecific, __Native>>
-  function vectorRows(): Vector;
+  <<__Native>>
+  /* HH_FIXME[2049] TODO(T121423772) [systemlib] Hack Collections */
+  public function vectorRows(): Vector<KeyedContainer<int, ?string>>;
 
   /**
    * Returns the actual rows returned by the successful query, each row
@@ -1170,8 +1394,12 @@ final class AsyncMysqlQueryResult extends AsyncMysqlResult {
    *           rows and the `Map` elements are the column names and typed values
    *           associated with that row.
    */
-  <<__HipHopSpecific, __Native>>
-  function mapRowsTyped(): Vector;
+  <<__Native>>
+  /* HH_FIXME[2049] TODO(T121423772) [systemlib] Hack Collections */
+  public function mapRowsTyped():  Vector<Map<string, mixed>>;
+
+  <<__Native>>
+  public function dictRowsTyped(): vec<dict<string, arraykey>>;
 
   /**
    * Returns the actual rows returned by the successful query, each row
@@ -1185,8 +1413,9 @@ final class AsyncMysqlQueryResult extends AsyncMysqlResult {
    *           represents the rows and each inner `Vector` represent the typed
    *           column values for each row.
    */
-  <<__HipHopSpecific, __Native>>
-  function vectorRowsTyped(): Vector;
+  <<__Native>>
+  /* HH_FIXME[2049] TODO(T121423772) [systemlib] Hack Collections */
+  public function vectorRowsTyped(): Vector<KeyedContainer<int, mixed>>;
 
   /**
    * Returns a `Vector` representing all row blocks returned by the successful
@@ -1205,8 +1434,9 @@ final class AsyncMysqlQueryResult extends AsyncMysqlResult {
    * @return - A `Vector` of `AsyncMysqlRowBlock` objects, the total number
    *           of which represent the full result of the query.
    */
-  <<__HipHopSpecific, __Native>>
-  function rowBlocks(): Vector<AsyncMysqlRowBlock>;
+  <<__Native>>
+  /* HH_FIXME[2049] TODO(T121423772) [systemlib] Hack Collections */
+  public function rowBlocks(): Vector<AsyncMysqlRowBlock>;
 
   /**
    * Returns whether or not any of the queries executed did not use an index
@@ -1215,8 +1445,8 @@ final class AsyncMysqlQueryResult extends AsyncMysqlResult {
    * @return - 'true' if no index was used for any of the queries executed,
    *              'false' otherwise
    */
-  <<__HipHopSpecific, __Native>>
-  function noIndexUsed(): bool;
+  <<__Native>>
+  public function noIndexUsed(): bool;
 
   /**
    * The GTID of database returned for the current commit.
@@ -1225,8 +1455,62 @@ final class AsyncMysqlQueryResult extends AsyncMysqlResult {
    *
    * @return - The gtid of the current commit as a `string`.
    */
-  <<__HipHopSpecific, __Native>>
-  function recvGtid(): string;
+  <<__Native>>
+  public function recvGtid(): ?string;
+
+  /**
+   * The response attributes returned for the current query
+   *
+   * @return - A Map<string, string> of the response attributes from MySQL
+   */
+  <<__Native>>
+  /* HH_FIXME[2049] TODO(T121423772) [systemlib] Hack Collections */
+  public function responseAttributes(): Map<string, string>;
+
+  /**
+   * The number of bytes in the current result set.
+   *
+   * This is particularly useful for `SELECT` statements.
+   *
+   * See the MySQL's mysql_fetch_lengths() api documentation for
+   * more information.
+   *
+   * @return - The size of result set in bytes as an `int`.
+   */
+  <<__Native>>
+  public function resultSizeBytes(): int;
+
+  /**
+   * The MySQL info string for the current query.
+   *
+   * This contains information about the affected rows for DML statements
+   * like INSERT, UPDATE, DELETE. For UPDATE statements, it includes
+   * "Rows matched: X  Changed: Y  Warnings: Z".
+   *
+   * @return - The MySQL info string, or `null` if not available.
+   */
+  <<__Native>>
+  public function mysqlInfo(): ?string;
+
+  /**
+   * The number of rows matched by an UPDATE or DELETE statement.
+   *
+   * This is different from `numRowsAffected()` for UPDATE statements where
+   * a row is matched but not changed (because the new values are the same
+   * as the old values).
+   *
+   * @return - The number of matched rows, or `null` if not available.
+   */
+  <<__Native>>
+  public function rowsMatched(): ?int;
+
+  /**
+   * The number of warnings generated by the current query.
+   *
+   * @return - The number of warnings as an `int`.
+   */
+  <<__Native>>
+  public function warningsCount(): int;
 }
 
 /**
@@ -1246,8 +1530,8 @@ final class AsyncMysqlQueryResult extends AsyncMysqlResult {
  * @guide /hack/async/introduction
  * @guide /hack/async/extensions
  */
-<<__NativeData("AsyncMysqlRowBlock")>>
-final class AsyncMysqlRowBlock implements IteratorAggregate, Countable {
+<<__NativeData>>
+final class AsyncMysqlRowBlock implements IteratorAggregate<mixed>, Countable {
   /**
    * @internal
    */
@@ -1265,8 +1549,8 @@ final class AsyncMysqlRowBlock implements IteratorAggregate, Countable {
    * @return - The value of the field (column) at the given row.
    *
    */
-  <<__HipHopSpecific, __Native>>
-  function at(int $row, mixed $field): mixed;
+  <<__Native>>
+  public function at(int $row, mixed $field): mixed;
 
   /**
    * Get a certain field (column) value from a certain row as `int`.
@@ -1280,8 +1564,8 @@ final class AsyncMysqlRowBlock implements IteratorAggregate, Countable {
    * @return - The `int` value of the field (column); or an `Exception` if it
    *           the column is not integral.
    */
-  <<__HipHopSpecific, __Native>>
-  function getFieldAsInt(int $row, mixed $field): int;
+  <<__Native>>
+  public function getFieldAsInt(int $row, mixed $field): int;
 
   /**
    * Get a certain field (column) value from a certain row as `double`.
@@ -1295,8 +1579,8 @@ final class AsyncMysqlRowBlock implements IteratorAggregate, Countable {
    * @return - The `double` value of the field (column); or an `Exception` if it
    *           the column is not numeric.
    */
-  <<__HipHopSpecific, __Native>>
-  function getFieldAsDouble(int $row, mixed $field): float;
+  <<__Native>>
+  public function getFieldAsDouble(int $row, mixed $field): float;
 
   /**
    * Get a certain field (column) value from a certain row as `string`.
@@ -1306,8 +1590,8 @@ final class AsyncMysqlRowBlock implements IteratorAggregate, Countable {
    *
    * @return - The `string` value of the field (column).
    */
-  <<__HipHopSpecific, __Native>>
-  function getFieldAsString(int $row, mixed $field): string;
+  <<__Native>>
+  public function getFieldAsString(int $row, mixed $field): ?string;
 
   /**
    * Returns whether a field (column) value is `null`.
@@ -1317,8 +1601,8 @@ final class AsyncMysqlRowBlock implements IteratorAggregate, Countable {
    *
    * @return - `true` if the column value is `null`; `false` otherwise.
    */
-  <<__HipHopSpecific, __Native>>
-  function isNull(int $row, mixed $field): bool;
+  <<__Native>>
+  public function isNull(int $row, mixed $field): bool;
 
   /**
    * Returns the type of the field (column).
@@ -1330,8 +1614,8 @@ final class AsyncMysqlRowBlock implements IteratorAggregate, Countable {
    *
    * @return - The type of the field as an `int`.
    */
-  <<__HipHopSpecific, __Native>>
-  function fieldType(mixed $field): int;
+  <<__Native>>
+  public function fieldType(mixed $field): int;
 
   /**
    * Returns the flags of the field (column).
@@ -1344,8 +1628,8 @@ final class AsyncMysqlRowBlock implements IteratorAggregate, Countable {
    *
    * @return - The flags of the column as an `int`.
    */
-  <<__HipHopSpecific, __Native>>
-  function fieldFlags(mixed $field): int;
+  <<__Native>>
+  public function fieldFlags(mixed $field): int;
 
   /**
    * Returns the name of the field (column).
@@ -1354,16 +1638,16 @@ final class AsyncMysqlRowBlock implements IteratorAggregate, Countable {
    *
    * @return - The name of the column as a `string`.
    */
-  <<__HipHopSpecific, __Native>>
-  function fieldName(int $field): string;
+  <<__Native>>
+  public function fieldName(int $field): ?string;
 
   /**
    * Returns whether there were any rows are returned in the current row block.
    *
    * @return - `true` if there are rows; `false` otherwise.
    */
-  <<__HipHopSpecific, __Native>>
-  function isEmpty(): bool;
+  <<__Native>>
+  public function isEmpty(): bool;
 
   /**
    * Returns the number of fields (columns) associated with the current row
@@ -1371,16 +1655,16 @@ final class AsyncMysqlRowBlock implements IteratorAggregate, Countable {
    *
    * @return - The number of columns in the current row block.
    */
-  <<__HipHopSpecific, __Native>>
-  function fieldsCount(): int;
+  <<__Native>>
+  public function fieldsCount(): int;
 
   /**
    * Returns the number of rows in the current row block.
    *
    * @return - The number of rows in the current row block.
    */
-  <<__HipHopSpecific, __Native>>
-  function count(): int;
+  <<__Native>>
+  public function count()[]: int;
 
   /**
    * Get the iterator for the rows in the block.
@@ -1388,8 +1672,8 @@ final class AsyncMysqlRowBlock implements IteratorAggregate, Countable {
    * @return - An `AsyncMysqlRowBlockIterator` to iterate over the current
    *            row block.
    */
-  <<__HipHopSpecific, __Native>>
-  function getIterator(): AsyncMysqlRowBlockIterator;
+  <<__Native>>
+  public function getIterator(): AsyncMysqlRowBlockIterator;
 
   /**
    * Get a certain row in the current row block.
@@ -1399,8 +1683,8 @@ final class AsyncMysqlRowBlock implements IteratorAggregate, Countable {
    * @return - The `AsyncMysqlRow` representing one specific row in the current
    *           row block.
    */
-  <<__HipHopSpecific, __Native>>
-  function getRow(int $row): AsyncMysqlRow;
+  <<__Native>>
+  public function getRow(int $row): AsyncMysqlRow;
 }
 
 /**
@@ -1412,8 +1696,8 @@ final class AsyncMysqlRowBlock implements IteratorAggregate, Countable {
  * @guide /hack/async/introduction
  * @guide /hack/async/extensions
  */
-<<__NativeData("AsyncMysqlRowBlockIterator")>>
-final class AsyncMysqlRowBlockIterator implements HH\KeyedIterator {
+<<__NativeData>>
+final class AsyncMysqlRowBlockIterator implements HH\KeyedIterator<string, AsyncMysqlRow> {
 
   /**
    * @internal
@@ -1429,15 +1713,15 @@ final class AsyncMysqlRowBlockIterator implements HH\KeyedIterator {
    * @return - `true` if the iterator is still pointing to a valid row;
    *            otherwise `false`.
    */
-  <<__HipHopSpecific, __Native>>
-  function valid(): bool;
+  <<__Native>>
+  public function valid(): bool;
 
   /**
    * Advance the iterator to the next row.
    *
    */
-  <<__HipHopSpecific, __Native>>
-  function next(): void;
+  <<__Native>>
+  public function next(): void;
 
   /**
    * Get the current row.
@@ -1445,8 +1729,8 @@ final class AsyncMysqlRowBlockIterator implements HH\KeyedIterator {
    * @return - The `AsyncMysqlRow` associated with the current iterator
    *           position.
    */
-  <<__HipHopSpecific, __Native>>
-  function current(): AsyncMysqlRow;
+  <<__Native>>
+  public function current(): AsyncMysqlRow;
 
   /**
    * Get the current row number
@@ -1454,15 +1738,15 @@ final class AsyncMysqlRowBlockIterator implements HH\KeyedIterator {
    * @return - The current row number associated with the current iterator
    *           position.
    */
-  <<__HipHopSpecific, __Native>>
-  function key(): int;
+  <<__Native>>
+  public function key(): int;
 
   /**
    * Reset the iterator to the first row.
    *
    */
-  <<__HipHopSpecific, __Native>>
-  function rewind(): void;
+  <<__Native>>
+  public function rewind(): void;
 }
 
 /**
@@ -1475,7 +1759,7 @@ final class AsyncMysqlRowBlockIterator implements HH\KeyedIterator {
  * @guide /hack/async/introduction
  * @guide /hack/async/extensions
  */
-<<__NativeData("AsyncMysqlRow")>>
+<<__NativeData>>
 final class AsyncMysqlRow implements MysqlRow {
 
   /**
@@ -1494,8 +1778,8 @@ final class AsyncMysqlRow implements MysqlRow {
    * @return - The value of the field (column).
    *
    */
-  <<__HipHopSpecific, __Native>>
-  function at(mixed $field): mixed;
+  <<__Native>>
+  public function at(mixed $field): mixed;
 
   /**
    * Get a certain field (column) value as an `int`.
@@ -1508,8 +1792,8 @@ final class AsyncMysqlRow implements MysqlRow {
    * @return - The `int` value of the field (column); or an `Exception` if it
    *           the column is not integral.
    */
-  <<__HipHopSpecific, __Native>>
-  function getFieldAsInt(mixed $field): int;
+  <<__Native>>
+  public function getFieldAsInt(mixed $field): int;
 
   /**
    * Get a certain field (column) value as a `double`.
@@ -1522,8 +1806,8 @@ final class AsyncMysqlRow implements MysqlRow {
    * @return - The `double` value of the field (column); or an `Exception` if it
    *           the column is not numeric.
    */
-  <<__HipHopSpecific, __Native>>
-  function getFieldAsDouble(mixed $field): float;
+  <<__Native>>
+  public function getFieldAsDouble(mixed $field): float;
 
   /**
    * Get a certain field (column) value as a `string`.
@@ -1532,8 +1816,9 @@ final class AsyncMysqlRow implements MysqlRow {
    *
    * @return - The `string` value of the field (column).
    */
-  <<__HipHopSpecific, __Native>>
-  function getFieldAsString(mixed $field): string;
+  <<__Native>>
+  /* HH_FIXME[4341] override returns `?string` to match underlying OptString */
+  public function getFieldAsString(mixed $field): ?string;
 
   /**
    * Returns whether a field (column) value is `null`.
@@ -1542,8 +1827,8 @@ final class AsyncMysqlRow implements MysqlRow {
    *
    * @return - `true` if the column value is `null`; `false` otherwise.
    */
-  <<__HipHopSpecific, __Native>>
-  function isNull(mixed $field): bool;
+  <<__Native>>
+  public function isNull(mixed $field): bool;
 
   /**
    * Returns the type of the field (column).
@@ -1555,24 +1840,24 @@ final class AsyncMysqlRow implements MysqlRow {
    *
    * @return - The type of the field as an `int`.
    */
-  <<__HipHopSpecific, __Native>>
-  function fieldType(mixed $field): int;
+  <<__Native>>
+  public function fieldType(mixed $field): int;
 
   /**
    * Get the number of fields (columns) in the current row.
    *
    * @return - The number of columns in the current row.
    */
-  <<__HipHopSpecific, __Native>>
-  function count(): int;
+  <<__Native>>
+  public function count()[]: int;
 
   /**
    * Get the iterator over the fields in the current row.
    *
    * @return - An `AsyncMysqlRowIterator` to iterate over the current row.
    */
-  <<__HipHopSpecific, __Native>>
-  function getIterator(): AsyncMysqlRowIterator;
+  <<__Native>>
+  public function getIterator(): AsyncMysqlRowIterator;
 }
 
 /**
@@ -1584,8 +1869,8 @@ final class AsyncMysqlRow implements MysqlRow {
  * @guide /hack/async/introduction
  * @guide /hack/async/extensions
  */
-<<__NativeData("AsyncMysqlRowIterator")>>
-final class AsyncMysqlRowIterator implements HH\KeyedIterator {
+<<__NativeData>>
+final class AsyncMysqlRowIterator implements HH\KeyedIterator<string, string> {
   /**
    * @internal
    */
@@ -1600,15 +1885,15 @@ final class AsyncMysqlRowIterator implements HH\KeyedIterator {
    * @return - `true` if the iterator is still pointing to a valid column;
    *            otherwise `false`.
    */
-  <<__HipHopSpecific, __Native>>
-  function valid(): bool;
+  <<__Native>>
+  public function valid(): bool;
 
   /**
    * Advance the iterator to the next field (column).
    *
    */
-  <<__HipHopSpecific, __Native>>
-  function next(): void;
+  <<__Native>>
+  public function next(): void;
 
   /**
    * Get the current field (column) name.
@@ -1616,8 +1901,9 @@ final class AsyncMysqlRowIterator implements HH\KeyedIterator {
    * @return - The column name associated with the current iterator
    *           position.
    */
-  <<__HipHopSpecific, __Native>>
-  function current(): string;
+  <<__Native>>
+  /* HH_FIXME[4341] override returns `?string` to match underlying OptString */
+  public function current(): ?string;
 
   /**
    * Get the current field (column) number.
@@ -1625,13 +1911,36 @@ final class AsyncMysqlRowIterator implements HH\KeyedIterator {
    * @return - The column number associated with the current iterator position.
    *
    */
-  <<__HipHopSpecific, __Native>>
-  function key(): int;
+  <<__Native>>
+  public function key(): int;
 
   /**
    * Reset the iterator to the first field (column).
    *
    */
-  <<__HipHopSpecific, __Native>>
-  function rewind(): void;
+  <<__Native>>
+  public function rewind(): void;
+}
+
+}
+
+namespace HH\Lib\SQL {
+  type QueryFormatString = string;
+
+  final class Query {
+    private QueryFormatString $format;
+    private Container<mixed> $args;
+    public function __construct(QueryFormatString $format, mixed ...$args) {
+      $this->format = $format;
+      $this->args = $args;
+    }
+
+    <<__Native, \NoDoc>>
+    public function toString__FOR_DEBUGGING_ONLY(
+      \AsyncMysqlConnection $conn,
+    ): ?string;
+
+    <<__Native, \NoDoc>>
+    public function toUnescapedString__FOR_DEBUGGING_ONLY__UNSAFE(): ?string;
+  }
 }

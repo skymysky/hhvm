@@ -14,8 +14,7 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_JIT_IRLOWER_INTERNAL_H_
-#define incl_HPHP_JIT_IRLOWER_INTERNAL_H_
+#pragma once
 
 #include "hphp/runtime/vm/jit/call-spec.h"
 #include "hphp/runtime/vm/jit/ir-opcode.h"
@@ -23,7 +22,7 @@
 
 #include "hphp/util/asm-x64.h"
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -52,8 +51,10 @@ Vout& vcold(IRLS& env);
 Vlabel label(IRLS& env, Block* b);
 
 /*
- * Get the SSATmp location descriptor for the i-th src or dst of `inst'.
+ * Get the SSATmp location descriptor for an SSATmp*, or the i-th src or dst of
+ * `inst'.
  */
+Vloc tmpLoc(IRLS& env, const SSATmp* tmp);
 Vloc srcLoc(IRLS& env, const IRInstruction* inst, unsigned i);
 Vloc dstLoc(IRLS& env, const IRInstruction* inst, unsigned i);
 
@@ -130,10 +131,14 @@ void emitTypeCheck(Vout& v, IRLS& env, Type type,
 void emitCheckSurpriseFlags(Vout& v, Vreg fp, Vlabel handleSurprise);
 
 /*
- * Check the surprise flags, and call functionEnterHelper if they are set.
+ * Whether JIT lowering should emit debug-only code.
  */
-void emitCheckSurpriseFlagsEnter(Vout& v, Vout& vcold, Vreg fp,
-                                 Fixup fixup, Vlabel catchBlock);
+bool emitDebugCode();
+
+/*
+ * Emits vasm instructions to get crc32 hash of the given arr
+ */
+Vreg emitHashInt64(IRLS& env, const IRInstruction* inst, Vreg arr);
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -144,8 +149,6 @@ IR_OPCODES
 
 ///////////////////////////////////////////////////////////////////////////////
 
-}}}
+}}
 
-#include "irlower-internal-inl.h"
-
-#endif
+#include "hphp/runtime/vm/jit/irlower-internal-inl.h"

@@ -1,5 +1,0 @@
-<?php
-	if (!defined("IMAGETYPE_JPEG")) {
-		die("skip jpeg format is not available");
-	}
-?>

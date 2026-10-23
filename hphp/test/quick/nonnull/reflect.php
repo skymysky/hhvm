@@ -2,7 +2,7 @@
 
 class Foo {
   const type T = nonnull;
-  function bar(nonnull $a, int $b, Foo::T $c): nonnull {
+  public function bar(nonnull $a, int $b, Foo::T $c): nonnull {
     return $a;
   }
 }
@@ -11,19 +11,24 @@ function foobar(vec<nonnull> $x): nonnull {
   return $x;
 }
 
-function dump($x) {
-  var_dump((string)$x->getReturnType());
+function dump(ReflectionFunctionAbstract $x) :void{
+  $return_type = HH\FIXME\UNSAFE_CAST<?ReflectionType, ReflectionType>(
+    $x->getReturnType(),
+    'The reflected declarations have return types',
+  );
+  var_dump($return_type->__toString());
   foreach ($x->getParameters() as $param) {
-    var_dump($param->isArray());
-    var_dump((string)$param->getType());
+    $type = HH\FIXME\UNSAFE_CAST<?ReflectionType, ReflectionType>(
+      $param->getType(),
+      'The reflected declarations have parameter types',
+    );
+    var_dump($type->__toString());
   }
 }
 
-function main() {
+<<__EntryPoint>> function main(): void {
   echo "\nReflectionMethod:\n";
   dump(new ReflectionMethod('Foo::bar'));
   echo "\nReflectionFunction:\n";
   dump(new ReflectionFunction('foobar'));
 }
-
-main();

@@ -1,0 +1,13 @@
+error: Typing[4063] You are trying to access an element of this container but the container could be `null`.  [1]
+-> This is what makes me believe it can be `null` [2]
+
+nullable_array_access_wrong_element.php:5:10
+2 | 
+3 | 
+4 | function testit(?vec<bool> $vb):float {
+  |                 ^^^^^^^^^^ [2]
+5 |   return $vb[0];
+  |          ^^^^^^ [1]
+6 | }
+
+1 error found

@@ -20,10 +20,10 @@
 #include "hphp/runtime/debugger/cmd/all.h"
 #include "hphp/util/logger.h"
 
-namespace HPHP { namespace Eval {
+namespace HPHP::Eval {
 ///////////////////////////////////////////////////////////////////////////////
 
-TRACE_SET_MOD(debugger);
+TRACE_SET_MOD(debugger)
 
 void CmdExtended::list(DebuggerClient &client) {
   if (client.argCount() == 0) {
@@ -177,7 +177,6 @@ bool CmdExtended::onServer(DebuggerProxy& /*proxy*/) {
 const ExtendedCommandMap &CmdExtended::GetExtendedCommandMap() {
   static ExtendedCommandMap s_command_map = {
     { "ample"    , "CmdExample" },
-    { "tension"  , "CmdExtension" },
   };
   return s_command_map;
 }
@@ -186,8 +185,6 @@ DebuggerCommandPtr CmdExtended::CreateExtendedCommand(const std::string &cls) {
   std::shared_ptr<CmdExtended> ret;
   if (cls == "CmdExample") {
     ret = std::make_shared<CmdExample>();
-  } else if (cls == "CmdExtension") {
-    ret = std::make_shared<CmdExtension>();
   }
 
   if (ret) {
@@ -199,4 +196,4 @@ DebuggerCommandPtr CmdExtended::CreateExtendedCommand(const std::string &cls) {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-}}
+}

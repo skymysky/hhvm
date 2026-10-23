@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 
 class Foo {
   public static function fooMeth(): void {}
@@ -9,7 +9,7 @@ class Bar {
 }
 
 function gives_a_bar(classname<Foo> $foo): classname<Bar> {
-  return Bar::class;
+  return nameof Bar;
 }
 
 function test_secondary_call(): void {

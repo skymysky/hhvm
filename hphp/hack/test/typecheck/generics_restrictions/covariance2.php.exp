@@ -1,0 +1,29 @@
+error: Typing[4120] Illegal usage of a covariant type parameter [1]
+-> This is where the parameter was declared as covariant `+` [2]
+-> Function parameters are contravariant [1]
+
+covariance2.php:4:24
+1 | <?hh
+2 | 
+3 | interface X<+T> {
+  |              ^ [2]
+4 |   public function test(T $x): void;
+  |                        ^ [1]
+5 |   public function test2(T... $x): void;
+6 | }
+
+error: Typing[4120] Illegal usage of a covariant type parameter [1]
+-> This is where the parameter was declared as covariant `+` [2]
+-> Function parameters are contravariant [1]
+
+covariance2.php:5:25
+1 | <?hh
+2 | 
+3 | interface X<+T> {
+  |              ^ [2]
+4 |   public function test(T $x): void;
+5 |   public function test2(T... $x): void;
+  |                         ^ [1]
+6 | }
+
+2 errors found

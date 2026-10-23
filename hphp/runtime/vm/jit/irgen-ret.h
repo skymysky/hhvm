@@ -13,10 +13,9 @@
    | license@php.net so we can mail you a copy immediately.               |
    +----------------------------------------------------------------------+
 */
-#ifndef incl_HPHP_IRGEN_RET_H_
-#define incl_HPHP_IRGEN_RET_H_
+#pragma once
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 
 struct IRSPRelOffset;
 
@@ -34,6 +33,5 @@ IRSPRelOffset offsetToReturnSlot(IRGS&);
 
 //////////////////////////////////////////////////////////////////////
 
-}}}
+}}
 
-#endif

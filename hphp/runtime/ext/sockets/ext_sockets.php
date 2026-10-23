@@ -54,7 +54,7 @@
  *
  */
 <<__Native>>
-function socket_create(int $domain, int $type, int $protocol): mixed;
+function socket_create(int $domain, int $type, int $protocol)[leak_safe]: mixed;
 
 /**
  * socket_create_listen() creates a new socket resource of type AF_INET
@@ -101,7 +101,8 @@ function socket_create_listen(int $port, int $backlog = 128): mixed;
 function socket_create_pair(int $domain,
                             int $type,
                             int $protocol,
-                            mixed &$fd): bool;
+                            <<__OutOnly>>
+                            inout mixed $fd): bool;
 
 /**
  * The socket_get_option() function retrieves the value for the option
@@ -111,7 +112,7 @@ function socket_create_pair(int $domain,
  *
  */
 <<__Native>>
-function socket_get_option(resource $socket, int $level, int $optname): mixed;
+function socket_get_option(resource $socket, int $level, int $optname)[leak_safe]: mixed;
 
 /**
  * Queries the remote side of the given socket which may either result in
@@ -137,8 +138,10 @@ function socket_get_option(resource $socket, int $level, int $optname): mixed;
  */
 <<__Native>>
 function socket_getpeername(resource $socket,
-                            mixed &$address,
-                            mixed &$port = null): bool;
+                            <<__OutOnly>>
+                            inout mixed $address,
+                            <<__OutOnly>>
+                            inout mixed $port)[leak_safe]: bool;
 
 /**
  * @param resource $socket - A valid socket resource created with
@@ -160,8 +163,10 @@ function socket_getpeername(resource $socket,
  */
 <<__Native>>
 function socket_getsockname(resource $socket,
-                            mixed &$address,
-                            mixed &$port = null): bool;
+                            <<__OutOnly>>
+                            inout mixed $address,
+                            <<__OutOnly>>
+                            inout mixed $port)[]: bool;
 
 /**
  * The socket_set_block() function removes the O_NONBLOCK flag on the socket
@@ -177,7 +182,7 @@ function socket_getsockname(resource $socket,
  *
  */
 <<__Native>>
-function socket_set_block(resource $socket): bool;
+function socket_set_block(resource $socket)[leak_safe]: bool;
 
 /**
  * The socket_set_nonblock() function sets the O_NONBLOCK flag on the socket
@@ -194,7 +199,7 @@ function socket_set_block(resource $socket): bool;
  *
  */
 <<__Native>>
-function socket_set_nonblock(resource $socket): bool;
+function socket_set_nonblock(resource $socket)[leak_safe]: bool;
 
 /**
  * The socket_set_option() function sets the option specified by the optname
@@ -219,7 +224,7 @@ function socket_set_nonblock(resource $socket): bool;
 function socket_set_option(resource $socket,
                            int $level,
                            int $optname,
-                           mixed $optval): bool;
+                           mixed $optval)[leak_safe]: bool;
 
 /**
  * Initiate a connection to address using the socket resource socket, which
@@ -242,7 +247,7 @@ function socket_set_option(resource $socket,
  *
  */
 <<__Native>>
-function socket_connect(resource $socket, string $address, int $port = 0): bool;
+function socket_connect(resource $socket, string $address, int $port = 0)[leak_safe]: bool;
 
 /**
  * Binds the name given in address to the socket described by socket. This has
@@ -335,17 +340,19 @@ function socket_listen(resource $socket, int $backlog = 0): bool;
  *
  */
 <<__Native>>
-function socket_select(mixed &$read,
-                       mixed &$write,
-                       mixed &$except,
+function socket_select(inout mixed $read,
+                       inout mixed $write,
+                       inout mixed $except,
                        mixed $vtv_sec,
-                       int $tv_usec = 0): mixed;
+                       int $tv_usec = 0)[leak_safe]: mixed;
 
 <<__Native>>
 function socket_server(string $hostname,
-                       int $port = -1,
-                       mixed &$errnum = null,
-                       mixed &$errstr = null): mixed;
+                       int $port,
+                       <<__OutOnly>>
+                       inout mixed $errnum,
+                       <<__OutOnly>>
+                       inout mixed $errstr): mixed;
 
 /**
  * After the socket socket has been created using socket_create(), bound to a
@@ -505,7 +512,8 @@ function socket_sendto(resource $socket,
  */
 <<__Native>>
 function socket_recv(resource $socket,
-                     mixed &$buf,
+                     <<__OutOnly>>
+                     inout mixed $buf,
                      int $len,
                      int $flags): mixed;
 
@@ -549,11 +557,14 @@ function socket_recv(resource $socket,
  */
 <<__Native>>
 function socket_recvfrom(resource $socket,
-                         mixed &$buf,
+                         <<__OutOnly>>
+                         inout mixed $buf,
                          int $len,
                          int $flags,
-                         mixed &$name,
-                         mixed &$port = -1): mixed;
+                         <<__OutOnly>>
+                         inout mixed $name,
+                         <<__OutOnly>>
+                         inout mixed $port): mixed;
 
 /**
  * The socket_shutdown() function allows you to stop incoming, outgoing or all
@@ -580,7 +591,7 @@ function socket_shutdown(resource $socket, int $how = 0): bool;
  *
  */
 <<__Native>>
-function socket_close(resource $socket): void;
+function socket_close(resource $socket)[write_props]: void;
 
 /**
  * socket_strerror() takes as its errno parameter a socket error code as
@@ -597,7 +608,7 @@ function socket_close(resource $socket): void;
  *
  */
 <<__Native>>
-function socket_strerror(int $errnum): string;
+function socket_strerror(int $errnum)[]: ?string;
 
 /**
  * If a socket resource is passed to this function, the last error which
@@ -616,7 +627,7 @@ function socket_strerror(int $errnum): string;
  *
  */
 <<__Native>>
-function socket_last_error(?resource $socket = null): int;
+function socket_last_error(?resource $socket = null)[read_globals]: int;
 
 /**
  * This function clears the error code on the given socket or the global last

@@ -1,12 +1,16 @@
-<?php
+<?hh
 
-function less($a, $b) {
+function less($a, $b) :mixed{
  return $a < $b;
  }
 
-function main($a) {
-  usort(&$a, 'less');
+function main($a) :mixed{
+  usort(inout $a, less<>);
   var_dump($a);
 }
 
-main(array(1,2));
+
+<<__EntryPoint>>
+function main_usort() :mixed{
+main(vec[1,2]);
+}

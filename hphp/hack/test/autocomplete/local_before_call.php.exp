@@ -1,0 +1,6 @@
+$bar
+  INSERT $bar
+  int
+$baz
+  INSERT $baz
+  int

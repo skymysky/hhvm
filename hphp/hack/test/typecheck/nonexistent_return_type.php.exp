@@ -1,0 +1,11 @@
+error: Naming[2049] Unbound name: `no_such_type` [1]
+
+nonexistent_return_type.php:3:17
+1 | <?hh
+2 | 
+3 | function foo(): no_such_type {
+  |                 ^^^^^^^^^^^^ [1]
+4 |   throw new Exception('');
+5 | }
+
+1 error found

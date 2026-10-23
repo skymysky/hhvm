@@ -1,3 +1,3 @@
 <?hh
 
-function f(classname<int> $x) {}
+function f(classname<int> $x): void {}

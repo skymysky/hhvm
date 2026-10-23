@@ -11,7 +11,7 @@
  * given width, it is broken apart.
  * @return mixed - Returns the given string wrapped at the specified length.
  */
-<<__Native, __ParamCoerceModeNull>>
+<<__Native>>
 function wordwrap(string $str, int $width = 75, string $break = "\n",
                   bool $cut = false): mixed;
 
@@ -84,8 +84,8 @@ function wordwrap(string $str, int $width = 75, string $break = "\n",
  *
  * Variables will be co-erced to a suitable type for the specifier:
  */
-<<__Native, __Rx>>
-function sprintf(mixed $format, ...$args): mixed;
+<<__Native, __IsFoldable>>
+function sprintf(mixed $format, mixed... $args)[]: mixed;
 
 /* Return a formatted string
  *
@@ -94,16 +94,16 @@ function sprintf(mixed $format, ...$args): mixed;
  *
  * @param string $format - See sprintf() for a description of format.
  */
-<<__Native, __Rx>>
-function vsprintf(mixed $format, mixed $args): mixed;
+<<__Native, __IsFoldable>>
+function vsprintf(mixed $format, mixed $args)[]: mixed;
 
 /**
  * Produces output according to format.
  *
  * @param string $format - See sprintf() for a description of format.
  */
-<<__Native>>
-function printf(mixed $format, ...$args): mixed;
+<<__Native("NoRecording")>>
+function printf(mixed $format, mixed... $args): mixed;
 
 /* Output a formatted string
  *
@@ -113,5 +113,5 @@ function printf(mixed $format, ...$args): mixed;
  * Operates as printf() but accepts an array of arguments,
  * rather than a variable number of arguments.
  */
-<<__Native>>
+<<__Native("NoRecording")>>
 function vprintf(mixed $format, mixed $args): mixed;

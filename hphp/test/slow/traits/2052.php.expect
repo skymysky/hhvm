@@ -18,6 +18,7 @@ int(2)
 int(2)
 int(2)
 int(2)
+Error: Cannot perform pre/post inc/dec on null
 int(2)
 int(2)
 int(2)

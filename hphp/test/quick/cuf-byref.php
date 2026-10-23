@@ -1,15 +1,34 @@
 <?hh
-error_reporting(-1);
-function foo(&$a) { var_dump($a++); }
-function test($cuf, $f) {
-  $a = array(1);
-  $cuf($f, $a);
-  var_dump($a, array(1));
-  $cuf($f, array(1));
-  var_dump($a, array(1));
-  call_user_func_array($f, $a);
-  var_dump($a, array(1));
-  call_user_func_array($f, array(1));
-  var_dump($a, array(1));
+function foo(inout $a) :mixed{ $t = $a; $a++; var_dump($t); }
+function test($cuf, $f) :mixed{
+  $a = vec[1];
+  try {
+    HH\dynamic_fun($cuf)($f, $a);
+  } catch (Exception $e) {
+    var_dump($e->getMessage());
+  }
+  var_dump($a, vec[1]);
+  try {
+    HH\dynamic_fun($cuf)($f, vec[1]);
+  } catch (Exception $e) {
+    var_dump($e->getMessage());
+  }
+  var_dump($a, vec[1]);
+  try {
+    call_user_func_array($f, $a);
+  } catch (Exception $e) {
+    var_dump($e->getMessage());
+  }
+  var_dump($a, vec[1]);
+  try {
+    call_user_func_array($f, vec[1]);
+  } catch (Exception $e) {
+    var_dump($e->getMessage());
+  }
+  var_dump($a, vec[1]);
 }
-test('call_user_func_array', 'foo');
+<<__EntryPoint>>
+function main_entry(): void {
+  error_reporting(-1);
+  test('call_user_func_array', foo<>);
+}

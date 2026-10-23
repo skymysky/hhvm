@@ -14,15 +14,14 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_JIT_TYPE_SOURCE_H_
-#define incl_HPHP_JIT_TYPE_SOURCE_H_
+#pragma once
 
 #include "hphp/runtime/vm/jit/containers.h"
 #include "hphp/util/assertions.h"
 
 #include <string>
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 
 struct IRInstruction;
 struct SSATmp;
@@ -77,11 +76,10 @@ struct TypeSource {
   Kind kind;
 };
 
-typedef jit::flat_set<TypeSource> TypeSourceSet;
+using TypeSourceSet = jit::flat_set<TypeSource>;
 
 std::string show(const TypeSource&);
 std::string show(const TypeSourceSet&);
 
-}}
+}
 
-#endif

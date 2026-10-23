@@ -1,4 +1,4 @@
-<?hh // decl /* -*- mode: php -*- */
+<?hh /* -*- mode: php -*- */
 /**
  * Copyright (c) 2014, Facebook, Inc.
  * All rights reserved.
@@ -9,9 +9,9 @@
  */
 
 final class WeakRef<T> {
-  public function __construct(T $object);
-  public function acquire(): bool;
-  public function get(): ?T;
-  public function release(): bool;
-  public function valid(): bool;
+  public function __construct(T $object)[];
+  public function acquire()[write_props]: bool;
+  public function get()[]: ?T;
+  public function release()[write_props]: bool;
+  public function valid()[]: bool;
 }

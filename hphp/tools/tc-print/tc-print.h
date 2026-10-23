@@ -17,23 +17,28 @@
 #ifndef incl_HPHP_TCPRINT_H_
 #define incl_HPHP_TCPRINT_H_
 
+#include "hphp/tools/tc-print/annotation-cache.h"
 #include "hphp/tools/tc-print/offline-trans-data.h"
 #include "hphp/tools/tc-print/repo-wrapper.h"
 #include "hphp/tools/tc-print/tc-print-logger.h"
 
-#include <folly/Format.h>
+#include <fmt/core.h>
 
 #include <iostream>
 #include <string>
 
-template<typename... Args>
-[[noreturn]] void error(Args&&... args) {
-  std::cerr << "Error: " << folly::format(std::forward<Args>(args)...) << '\n';
+template<typename Fmt, typename... Args>
+[[noreturn]] void error(Fmt&& fmtStr, Args&&... args) {
+  std::cerr << "Error: "
+            << fmt::format(fmt::runtime(std::forward<Fmt>(fmtStr)),
+                           std::forward<Args>(args)...)
+            << '\n';
   exit(1);
 }
 
 extern HPHP::jit::RepoWrapper* g_repo;
 extern HPHP::jit::OfflineTransData* g_transData;
 extern HPHP::TCPrintLogger* g_logger;
+extern std::unique_ptr<HPHP::AnnotationCache> g_annotations;
 
 #endif

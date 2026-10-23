@@ -14,8 +14,7 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_UTIL_HFSORT_H
-#define incl_HPHP_UTIL_HFSORT_H
+#pragma once
 
 #include <string>
 #include <unordered_set>
@@ -23,7 +22,7 @@
 
 #include "hphp/util/hash.h"
 
-namespace HPHP { namespace hfsort {
+namespace HPHP::hfsort {
 
 using TargetId = int32_t;
 constexpr TargetId InvalidId = -1;
@@ -54,13 +53,13 @@ struct ArcHash {
 };
 
 struct Target {
-  explicit Target(uint32_t size, uint32_t samples = 0)
+  explicit Target(uint32_t size, uint64_t samples = 0)
     : size(size)
     , samples(samples)
   {}
 
   uint32_t size;
-  uint32_t samples;
+  uint64_t samples;
 
   // preds and succs contain no duplicate elements and self arcs are not allowed
   std::vector<TargetId> preds;
@@ -68,13 +67,15 @@ struct Target {
 };
 
 struct TargetGraph {
-  TargetId addTarget(uint32_t size, uint32_t samples = 0);
-  void setSamples(TargetId id, uint32_t samples);
+  TargetId addTarget(uint32_t size, uint64_t samples = 0);
+  void setSamples(TargetId id, uint64_t samples);
+  void addSamples(TargetId id, uint64_t samples);
+  uint64_t getSamples(TargetId id);
   const Arc& incArcWeight(TargetId src, TargetId dst, double w = 1.0);
   void normalizeArcWeights();
 
   template<class L>
-  void printDot(char* fileName, L getLabel) const;
+  void printDot(const char* fileName, L getLabel) const;
 
   std::vector<Target> targets;
   std::unordered_set<Arc, ArcHash> arcs;
@@ -82,6 +83,7 @@ struct TargetGraph {
 
 struct Cluster {
   Cluster(TargetId id, const Target& f);
+  Cluster(const std::vector<TargetId>& ids, const TargetGraph& cg);
 
   std::string toString() const;
   double density() const;
@@ -112,7 +114,7 @@ std::vector<Cluster> pettisAndHansen(const TargetGraph& cg);
 /////////////////////////////////////////////////////////////////////////
 
 template<class L>
-void TargetGraph::printDot(char* fileName, L getLabel) const {
+void TargetGraph::printDot(const char* fileName, L getLabel) const {
   FILE* file = fopen(fileName, "wt");
   if (!file) return;
 
@@ -121,7 +123,7 @@ void TargetGraph::printDot(char* fileName, L getLabel) const {
     if (targets[f].samples == 0) continue;
     fprintf(
       file,
-      "f%lu [label=\"%s\\nsamples=%u\\nsize=%u\"];\n",
+      "f%lu [label=\"%s\\nsamples=%lu\\nsize=%u\"];\n",
       f,
       getLabel(f),
       targets[f].samples,
@@ -146,6 +148,4 @@ void TargetGraph::printDot(char* fileName, L getLabel) const {
   fclose(file);
 }
 
-}}
-
-#endif
+}

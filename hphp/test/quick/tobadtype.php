@@ -1,30 +1,30 @@
-<?hh ;
+<?hh
 
 class X {
-  function not__toString() { throw new Exception('boom'); }
+  function not__toString() :mixed{ throw new Exception('boom'); }
 }
 
-function error_handler() {
+function error_handler() :mixed{
   throw new Exception("user error handler");
 }
-//set_error_handler('error_handler');
+//set_error_handler(error_handler<>);
 
-function foo($x) {
+function foo($x) :mixed{
   return $x;
 }
 
-function testStr($x) {
+function testStr($x) :mixed{
   return foo((string)$x);
 }
 
-function testInt($x) {
+function testInt($x) :mixed{
   return foo((int)$x);
 }
 
-function testDbl($x) {
-  return foo((double)$x);
+function testDbl($x) :mixed{
+  return foo((float)$x);
 }
-
+<<__EntryPoint>> function main(): void {
 echo "test int\n";
 
 try {
@@ -47,4 +47,5 @@ try {
   testStr(new X);
 } catch (Exception $e) {
   var_dump($e->getMessage());
+}
 }

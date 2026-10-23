@@ -1,10 +1,14 @@
-<?php
+<?hh
 
-function p(array $i = null) {
+function p(?AnyArray $i = null) :mixed{
   var_dump($i);
-  $i = array();
+  $i = vec[];
 }
-p();
-function q() {
+function q() :mixed{
   p(null);
+}
+
+<<__EntryPoint>>
+function main_1747() :mixed{
+p();
 }

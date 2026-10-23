@@ -14,8 +14,7 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_TEMP_FILE_H_
-#define incl_HPHP_TEMP_FILE_H_
+#pragma once
 
 #include "hphp/runtime/base/plain-file.h"
 
@@ -27,19 +26,19 @@ namespace HPHP {
  * from the file system on close.
  */
 struct TempFile : PlainFile {
-  DECLARE_RESOURCE_ALLOCATION(TempFile);
+  DECLARE_RESOURCE_ALLOCATION(TempFile)
 
   explicit TempFile(bool autoDelete = true,
-                    const String& wrapper_type = null_string,
-                    const String& stream_type = empty_string_ref);
+                    const OptString& wrapper_type = null_string,
+                    const OptString& stream_type = empty_string_ref);
   virtual ~TempFile();
 
   // overriding ResourceData
-  const String& o_getClassNameHook() const override { return classnameof(); }
+  const OptString& o_getClassNameHook() const override { return classnameof(); }
 
   // implementing File
-  bool open(const String& filename, const String& mode) override;
-  bool close() override;
+  bool open(const OptString& filename, const OptString& mode) override;
+  bool close(int* unused = nullptr) final;
 
   Object await(uint16_t /*events*/, double /*timeout*/) override {
     SystemLib::throwExceptionObject(
@@ -54,11 +53,9 @@ private:
   bool m_autoDelete;
   std::string m_rawName;
 
-  bool closeImpl();
   int64_t getLength();
 };
 
 ///////////////////////////////////////////////////////////////////////////////
 }
 
-#endif // incl_HPHP_TEMP_FILE_H_

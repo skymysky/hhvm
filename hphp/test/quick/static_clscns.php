@@ -5,15 +5,14 @@ class C {
     var_dump(isset($this));
     var_dump(static::CLASSNAME);
   }
-  public function foo() {
+  public function foo() :mixed{
     var_dump(isset($this));
     var_dump(static::CLASSNAME);
   }
-  public static function bar() {
-    var_dump(isset($this));
+  public static function bar() :mixed{
     var_dump(static::CLASSNAME);
   }
-  public function yar() {
+  public function yar() :mixed{
     var_dump(isset($this));
     var_dump(static::CLASSNAME);
   }
@@ -25,25 +24,22 @@ class D extends C {
     var_dump(isset($this));
     var_dump(static::CLASSNAME);
   }
-  public function yar() {
+  public function yar() :mixed{
     var_dump(isset($this));
     var_dump(static::CLASSNAME);
     C::yar();
   }
 }
-
+<<__EntryPoint>> function main(): void {
 $c = new C;
 $d = new D;
 echo "**************\n";
 $c->foo();
 $d->foo();
 echo "**************\n";
-$c->bar();
-$d->bar();
-echo "**************\n";
-C::foo();
+C::bar();
 D::bar();
 echo "**************\n";
+$c->yar();
 $d->yar();
-D::yar();
-
+}

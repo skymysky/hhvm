@@ -18,16 +18,13 @@
 
 #include "hphp/runtime/base/collections.h"
 #include "hphp/runtime/base/object-data.h"
-#include "hphp/runtime/base/packed-array.h"
 
 #include "hphp/runtime/ext/collections/ext_collections.h"
 #include "hphp/runtime/ext/collections/ext_collections-pair.h"
 #include "hphp/runtime/ext/collections/ext_collections-vector.h"
 #include "hphp/runtime/ext/collections/hash-collection.h"
 
-#include "hphp/runtime/vm/jit/types.h"
 #include "hphp/runtime/vm/jit/call-spec.h"
-#include "hphp/runtime/vm/jit/code-gen-cf.h"
 #include "hphp/runtime/vm/jit/code-gen-helpers.h"
 #include "hphp/runtime/vm/jit/extra-data.h"
 #include "hphp/runtime/vm/jit/ir-instruction.h"
@@ -42,9 +39,9 @@
 #include "hphp/util/asm-x64.h"
 #include "hphp/util/trace.h"
 
-namespace HPHP { namespace jit { namespace irlower {
+namespace HPHP::jit::irlower {
 
-TRACE_SET_MOD(irlower);
+TRACE_SET_MOD(irlower)
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -100,7 +97,7 @@ void cgNewCol(IRLS& env, const IRInstruction* inst) {
     return CallSpec::direct(helper);
   }();
   cgCallHelper(vmain(env), env, target, callDest(env, inst),
-               SyncOptions::Sync, argGroup(env, inst));
+               SyncOptions::None, argGroup(env, inst));
 }
 
 IMPL_OPCODE_CALL(NewPair)
@@ -112,7 +109,7 @@ void cgNewColFromArray(IRLS& env, const IRInstruction* inst) {
     return CallSpec::direct(helper);
   }();
   cgCallHelper(vmain(env), env, target, callDest(env, inst),
-               SyncOptions::Sync, argGroup(env, inst).ssa(0));
+               SyncOptions::None, argGroup(env, inst).ssa(0));
 }
 
 void cgLdColVec(IRLS& env, const IRInstruction* inst) {
@@ -123,6 +120,7 @@ void cgLdColVec(IRLS& env, const IRInstruction* inst) {
   auto const dst = dstLoc(env, inst, 0).reg();
   auto& v = vmain(env);
 
+  // Can't use ConstVector, as that includes Pair.
   always_assert_flog(
     ty == TBottom ||
     collections::isType(cls, CollectionType::Vector, CollectionType::ImmVector),
@@ -183,51 +181,40 @@ void cgLdVectorSize(IRLS& env, const IRInstruction* inst) {
   v << loadzlq{src[BaseVector::sizeOffset()], dst};
 }
 
-void cgLdVectorBase(IRLS& env, const IRInstruction* inst) {
-  assertHasVectorSrc(inst, true);
-
-  auto const src = srcLoc(env, inst, 0).reg();
-  auto const dst = dstLoc(env, inst, 0).reg();
-  auto& v = vmain(env);
-
-  auto const arr = v.makeReg();
-  v << load{src[BaseVector::arrOffset()], arr};
-  v << lea{arr[PackedArray::entriesOffset()], dst};
-}
-
-void cgVectorHasImmCopy(IRLS& env, const IRInstruction* inst) {
-  assertHasVectorSrc(inst, false);
-
-  auto const src = srcLoc(env, inst, 0).reg();
-  auto& v = vmain(env);
-
-  auto const arr = v.makeReg();
-  v << load{src[BaseVector::arrOffset()], arr};
-  auto const sf = emitCmpRefCount(v, OneReference, arr);
-  v << jcc{CC_NE, sf, {label(env, inst->next()), label(env, inst->taken())}};
-}
-
-void cgVectorDoCow(IRLS& env, const IRInstruction* inst) {
-  assertHasVectorSrc(inst, false);
-
-  cgCallHelper(vmain(env), env, CallSpec::direct(triggerCow),
-               kVoidDest, SyncOptions::Sync, argGroup(env, inst).ssa(0));
-}
-
 ///////////////////////////////////////////////////////////////////////////////
 // Pair
 
-void cgLdPairBase(IRLS& env, const IRInstruction* inst) {
+void cgLdPairElem(IRLS& env, const IRInstruction* inst) {
   DEBUG_ONLY auto const pair = inst->src(0);
   assertx(pair->type() < TObj);
   assertx(collections::isType(pair->type().clsSpec().cls(),
                               CollectionType::Pair));
 
+  auto& v = vmain(env);
+
   auto const src = srcLoc(env, inst, 0).reg();
-  auto const dst = dstLoc(env, inst, 0).reg();
-  vmain(env) << lea{src[c_Pair::dataOffset()], dst};
+  auto const idxReg = srcLoc(env, inst, 1).reg();
+  auto const idx = inst->src(1);
+
+  const size_t start = c_Pair::dataOffset();
+
+  auto const loadAt = [&](Vptr vptr) {
+    loadTV(v, inst->dst(0), dstLoc(env, inst, 0), vptr);
+  };
+
+  if (idx->hasConstVal()) {
+    auto const idxVal = idx->intVal();
+    assertx(idxVal >= 0 && idxVal <= 1);
+    loadAt(src[safe_cast<uint32_t>(start + idxVal * sizeof(TypedValue))]);
+  } else {
+    static_assert(sizeof(TypedValue) == 16, "");
+    auto const offset = v.makeReg();
+    auto const sf = v.makeReg();
+    v << shlqi{4, idxReg, offset, sf};
+    loadAt(src[offset + start]);
+  }
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 
-}}}
+}

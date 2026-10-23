@@ -14,11 +14,12 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_TYPED_VALUE_H_
-#define incl_HPHP_TYPED_VALUE_H_
+#pragma once
 
 #include "hphp/runtime/base/datatype.h"
-
+#include "hphp/runtime/base/types.h"
+#include "hphp/runtime/vm/class-meth-data-ref.h"
+#include "hphp/runtime/vm/lazy-class.h"
 #include "hphp/util/type-scan.h"
 #include "hphp/util/type-traits.h"
 
@@ -34,11 +35,17 @@ namespace HPHP {
 struct ArrayData;
 struct MaybeCountable;
 struct ObjectData;
-struct RefData;
 struct ResourceHdr;
+struct StaticCoeffects;
 struct StringData;
 struct MemoCacheBase;
 struct Func;
+struct RFuncData;
+struct Class;
+struct RClsMethData;
+
+struct BlobEncoder;
+struct BlobDecoder;
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -48,24 +55,78 @@ struct Func;
  * This union may only be used in contexts that have a discriminator, e.g. in
  * TypedValue (below), or when the type is known beforehand.
  */
+#if defined(__x86_64__) || defined(__aarch64__)
+#pragma pack(push, 1)
+#endif
 union Value {
   int64_t       num;    // KindOfInt64, KindOfBool (must be zero-extended)
   double        dbl;    // KindOfDouble
   StringData*   pstr;   // KindOfString, KindOfPersistentString
-  ArrayData*    parr;   // KindOfArray, KindOfVec, KindOfDict, KindOfKeyset
+  ArrayData*    parr;   // KindOf{Persistent,}{Vec,Dict,Keyset,{,D,V}Array}
   ObjectData*   pobj;   // KindOfObject
   ResourceHdr*  pres;   // KindOfResource
-  RefData*      pref;   // KindOfRef
   MaybeCountable* pcnt; // for alias-safe generic refcounting operations
   MemoCacheBase* pcache; // Not valid except when in a MemoSlot
-  Func*         pfunc;  // KindOfFunc
+  const Func*   pfunc;  // KindOfFunc
+  RFuncData*    prfunc; // KindOfRFunc
+  Class*        pclass; // KindOfClass
+  ClsMethDataRef pclsmeth; // KindOfClsMeth
+  RClsMethData* prclsmeth; // KindOfRClsMeth
+  LazyClassData plazyclass;   // KindOfLazyClass
+};
+#if defined(__x86_64__) || defined(__aarch64__)
+#pragma pack(pop)
+#endif
+
+#if defined(__x86_64__) || defined(__aarch64__)
+static_assert(alignof(Value) == 1);
+#else
+static_assert(alignof(Value) == 8);
+#endif
+static_assert(sizeof(Value) == 8);
+
+struct ConstModifierFlags {
+
+  // Note that cgCheckSubClsCns relies on Value being 0.
+  enum class Kind : uint8_t { Value = 0, Type = 1, Context = 2 };
+
+  static const char* show(Kind t) {
+    switch (t) {
+      case Kind::Value:   return "constant";
+      case Kind::Type:    return "type constant";
+      case Kind::Context: return "context constant";
+    }
+    not_reached();
+  }
+
+  Kind kind;
+  bool isAbstract;
 };
 
-enum VarNrFlag { NR_FLAG = 1 << 29 };
+union AuxFlagsUnion {
+  uint16_t u_raw;
+  ConstModifierFlags u_constModifierFlags;
+};
+
+static_assert(sizeof(AuxFlagsUnion) == 2);
 
 struct ConstModifiers {
-  bool isAbstract;
-  bool isType;
+
+  union {
+    uint32_t u_coeffectsData;
+    UninitPackedPtr<const StringData> u_clsName;
+  };
+
+  const StringData* getPointedClsName() const {
+    return u_clsName;
+  }
+
+  void setPointedClsName(StringData* clsName) {
+    u_clsName = clsName;
+  }
+
+  StaticCoeffects getCoeffects(ConstModifierFlags flags) const;
+  void setCoeffects(StaticCoeffects coeffects);
 };
 
 /*
@@ -76,38 +137,45 @@ struct ConstModifiers {
 union AuxUnion {
   // Undiscriminated raw value.
   uint32_t u_raw;
-  // True if we're suspending an FCallAwait.
-  uint32_t u_fcallAwaitFlag;
-  // Key type and hash for MixedArray.
+  // True if the function was supposed to return an Awaitable, but instead
+  // returned the value that would be packed inside that Awaitable. If this
+  // flag is false, it doesn't mean that the TV is a non-finished Awaitable,
+  // or an Awaitable at all.
+  uint32_t u_asyncEagerReturnFlag;
+  // Key type and hash for VanillaDict.
   int32_t u_hash;
-  // Magic number for asserts in VarNR.
-  VarNrFlag u_varNrFlag;
-  // Used by Class::initPropsImpl() for deep init.
-  bool u_deepInit;
-  // Used by unit.cpp to squirrel away RDS handles.
-  int32_t u_rdsHandle;
   // Used by Class::Const.
   ConstModifiers u_constModifiers;
-  // Used by InvokeResult.
-  bool u_ok;
-  // Used by system constants
-  bool u_dynamic;
 };
+
+static_assert(sizeof(AuxUnion) == 4);
 
 /*
  * A TypedValue is a type-discriminated PHP Value.
  */
-struct TypedValue {
+struct alignas(8) TypedValue {
   Value m_data;
   DataType m_type;
+  AuxFlagsUnion m_auxFlags;
   AuxUnion m_aux;
 
   std::string pretty() const; // debug formatting. see trace.h
+
+  // Accessors to simplify the migration from tv_rval to TypedValue.
+  bool is_init() const { return m_type != KindOfUninit; }
+  DataType type() const { return m_type; }
+  Value val() const { return m_data; }
+
+  void serde(BlobEncoder&) const;
+  void serde(BlobDecoder&, bool makeStatic = true);
 
   TYPE_SCAN_CUSTOM() {
     if (isRefcountedType(m_type)) scanner.scan(m_data.pcnt);
   }
 };
+
+static_assert(alignof(TypedValue) == 8);
+static_assert(sizeof(TypedValue) == 16);
 
 constexpr size_t kTypedValueAlignMask = sizeof(TypedValue) - 1;
 
@@ -123,23 +191,24 @@ static_assert((sizeof(TypedValue) & (kTypedValueAlignMask)) == 0,
 static_assert(sizeof(TypedValue) <= 16, "Don't add big things to AuxUnion");
 
 /*
+ * Used to set m_data when a PreClassEmitter::Const's valOption() is
+ * none to distinguish from constants that have an 86cinit. See
+ * tvWriteConstValMissing.
+ *
+ * NB: We want the least significant bit to be unset to avoid
+ * confusion with a resolved type-structure (see Class::clsCnsGet).
+ */
+constexpr int64_t kConstValMissing = -2;
+static_assert(!(kConstValMissing & 0x1));
+
+/*
  * Subclass of TypedValue which exposes m_aux accessors.
  */
 struct TypedValueAux : TypedValue {
-  static constexpr size_t auxOffset = offsetof(TypedValue, m_aux);
-  static constexpr size_t auxSize = sizeof(decltype(m_aux));
-
   const int32_t& hash() const { return m_aux.u_hash; }
         int32_t& hash()       { return m_aux.u_hash; }
 
-  const VarNrFlag& varNrFlag() const { return m_aux.u_varNrFlag; }
-        VarNrFlag& varNrFlag()       { return m_aux.u_varNrFlag; }
-
-  const bool& deepInit() const { return m_aux.u_deepInit; }
-        bool& deepInit()       { return m_aux.u_deepInit; }
-
-  const int32_t& rdsHandle() const { return m_aux.u_rdsHandle; }
-        int32_t& rdsHandle()       { return m_aux.u_rdsHandle; }
+  bool is_const_val_missing() const { return m_data.num == kConstValMissing; }
 
   const ConstModifiers& constModifiers() const {
     return m_aux.u_constModifiers;
@@ -148,8 +217,15 @@ struct TypedValueAux : TypedValue {
     return m_aux.u_constModifiers;
   }
 
-  const bool& dynamic() const { return m_aux.u_dynamic; }
-        bool& dynamic()       { return m_aux.u_dynamic; }
+  const ConstModifierFlags& constModifierFlags() const {
+    return m_auxFlags.u_constModifierFlags;
+  }
+  ConstModifierFlags& constModifierFlags() {
+    return m_auxFlags.u_constModifierFlags;
+  }
+
+  void serde(BlobEncoder&) const = delete;
+  void serde(BlobDecoder&) = delete;
 };
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -161,21 +237,6 @@ struct TypedValueAux : TypedValue {
  */
 constexpr size_t kTVSimdAlign = 0x10;
 
-/*
- * These may be used to provide a little more self-documentation about whether
- * typed values must be cells (not KindOfRef) or ref (must be KindOfRef).
- *
- * See bytecode.specification for details.  Note that in
- * bytecode.specification, refs are abbreviated as "V".
- */
-using Cell = TypedValue;
-using Ref = TypedValue;
-
-/*
- * A TypedNum is a TypedValue that is either KindOfDouble or KindOfInt64.
- */
-using TypedNum = TypedValue;
-
 ///////////////////////////////////////////////////////////////////////////////
 
 /*
@@ -183,127 +244,6 @@ using TypedNum = TypedValue;
  * assertx().
  */
 bool tvIsPlausible(TypedValue);
-bool cellIsPlausible(Cell);
-bool refIsPlausible(Ref);
-
-///////////////////////////////////////////////////////////////////////////////
-
-template<DataType> struct DataTypeCPPType;
-
-#define X(dt, cpp) \
-template<> struct DataTypeCPPType<dt> { using type = cpp; }
-
-X(KindOfUninit,       void);
-X(KindOfNull,         void);
-X(KindOfBoolean,      bool);
-X(KindOfInt64,        int64_t);
-X(KindOfDouble,       double);
-X(KindOfArray,        ArrayData*);
-X(KindOfPersistentArray,  const ArrayData*);
-X(KindOfVec,          ArrayData*);
-X(KindOfPersistentVec, const ArrayData*);
-X(KindOfDict,         ArrayData*);
-X(KindOfPersistentDict, const ArrayData*);
-X(KindOfKeyset,       ArrayData*);
-X(KindOfPersistentKeyset, const ArrayData*);
-X(KindOfObject,       ObjectData*);
-X(KindOfResource,     ResourceHdr*);
-X(KindOfRef,          RefData*);
-X(KindOfString,       StringData*);
-X(KindOfPersistentString, const StringData*);
-X(KindOfFunc,         Func*);
-
-#undef X
-
-/*
- * Pack a base data element into a Value.
- */
-template<class T>
-typename std::enable_if<
-  std::is_integral<T>::value,
-  Value
->::type make_value(T t) { Value v; v.num = t; return v; }
-
-template<class T>
-typename std::enable_if<
-  std::is_pointer<T>::value,
-  Value
->::type make_value(T t) {
-  Value v;
-  v.num = reinterpret_cast<int64_t>(t);
-  return v;
-}
-
-inline Value make_value(double d) { Value v; v.dbl = d; return v; }
-
-/*
- * Pack a base data element into a TypedValue for use elsewhere in the runtime.
- *
- * TypedValue tv = make_tv<KindOfInt64>(123);
- */
-template<DataType DType>
-typename std::enable_if<
-  !std::is_same<typename DataTypeCPPType<DType>::type,void>::value,
-  TypedValue
->::type make_tv(typename DataTypeCPPType<DType>::type val) {
-  TypedValue ret;
-  ret.m_data = make_value(val);
-  ret.m_type = DType;
-  assertx(tvIsPlausible(ret));
-  return ret;
-}
-
-template<DataType DType>
-typename std::enable_if<
-  std::is_same<typename DataTypeCPPType<DType>::type,void>::value,
-  TypedValue
->::type make_tv() {
-  TypedValue ret;
-  ret.m_type = DType;
-  assertx(tvIsPlausible(ret));
-  return ret;
-}
-
-/*
- * Extract the underlying data element for the TypedValue
- *
- * int64_t val = unpack_tv<KindOfInt64>(tv);
- */
-template <DataType DType>
-typename std::enable_if<
-  std::is_same<typename DataTypeCPPType<DType>::type,double>::value,
-  double
->::type unpack_tv(TypedValue *tv) {
-  assertx(DType == tv->m_type);
-  assertx(tvIsPlausible(*tv));
-  return tv->m_data.dbl;
-}
-
-template <DataType DType>
-typename std::enable_if<
-  std::is_integral<typename DataTypeCPPType<DType>::type>::value,
-  typename DataTypeCPPType<DType>::type
->::type unpack_tv(TypedValue *tv) {
-  assertx(DType == tv->m_type);
-  assertx(tvIsPlausible(*tv));
-  return tv->m_data.num;
-}
-
-template <DataType DType>
-typename std::enable_if<
-  std::is_pointer<typename DataTypeCPPType<DType>::type>::value,
-  typename DataTypeCPPType<DType>::type
->::type unpack_tv(TypedValue *tv) {
-  assertx((DType == tv->m_type) ||
-         (isStringType(DType) && isStringType(tv->m_type)) ||
-         (isArrayType(DType) && isArrayType(tv->m_type)) ||
-         (isVecType(DType) && isVecType(tv->m_type)) ||
-         (isDictType(DType) && isDictType(tv->m_type)) ||
-         (isKeysetType(DType) && isKeysetType(tv->m_type)));
-  assertx(tvIsPlausible(*tv));
-  return reinterpret_cast<typename DataTypeCPPType<DType>::type>
-           (tv->m_data.pstr);
-}
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -355,17 +295,115 @@ using enable_if_tv_val_t = typename std::enable_if<
   Ret
 >::type;
 
-/*
- * TV-lval API for TypedValue.
- */
+// TV-lval / -rval API for TypedValue& / const TypedValue&, respectively.
 ALWAYS_INLINE DataType& type(TypedValue& tv) { return tv.m_type; }
 ALWAYS_INLINE Value& val(TypedValue& tv) { return tv.m_data; }
-ALWAYS_INLINE TypedValue as_tv(TypedValue& tv) { return tv; }
+ALWAYS_INLINE const DataType& type(const TypedValue& tv) { return tv.m_type; }
+ALWAYS_INLINE const Value& val(const TypedValue& tv) { return tv.m_data; }
+ALWAYS_INLINE TypedValue as_tv(const TypedValue& tv) { return tv; }
+
+// TV-lval / -rval API for TypedValue* / const TypedValue*, respectively.
 ALWAYS_INLINE DataType& type(TypedValue* tv) { return tv->m_type; }
 ALWAYS_INLINE Value& val(TypedValue* tv) { return tv->m_data; }
-ALWAYS_INLINE DataType type(const TypedValue* tv) { return tv->m_type; }
-ALWAYS_INLINE Value val(const TypedValue* tv) { return tv->m_data; }
+ALWAYS_INLINE const DataType& type(const TypedValue* tv) { return tv->m_type; }
+ALWAYS_INLINE const Value& val(const TypedValue* tv) { return tv->m_data; }
 ALWAYS_INLINE TypedValue as_tv(const TypedValue* tv) { return *tv; }
+
+///////////////////////////////////////////////////////////////////////////////
+
+template<DataType> struct DataTypeCPPType;
+
+#define X(dt, cpp) \
+template<> struct DataTypeCPPType<dt> { using type = cpp; }
+
+X(KindOfUninit,       void);
+X(KindOfNull,         void);
+X(KindOfBoolean,      bool);
+X(KindOfInt64,        int64_t);
+X(KindOfDouble,       double);
+X(KindOfVec,          ArrayData*);
+X(KindOfPersistentVec, const ArrayData*);
+X(KindOfDict,         ArrayData*);
+X(KindOfPersistentDict, const ArrayData*);
+X(KindOfKeyset,       ArrayData*);
+X(KindOfPersistentKeyset, const ArrayData*);
+X(KindOfObject,       ObjectData*);
+X(KindOfResource,     ResourceHdr*);
+X(KindOfString,       StringData*);
+X(KindOfPersistentString, const StringData*);
+X(KindOfFunc,         Func*);
+X(KindOfRFunc,        RFuncData*);
+X(KindOfClass,        Class*);
+X(KindOfClsMeth,      ClsMethDataRef);
+X(KindOfRClsMeth,     RClsMethData*);
+X(KindOfLazyClass,    LazyClassData);
+X(KindOfEnumClassLabel, const StringData*);
+
+#undef X
+
+/*
+ * Pack a base data element into a Value.
+ */
+template<class T>
+typename std::enable_if<
+  std::is_integral<T>::value,
+  Value
+>::type make_value(T t) { Value v; v.num = t; return v; }
+
+template<class T>
+typename std::enable_if<
+  std::is_pointer<T>::value,
+  Value
+>::type make_value(T t) {
+  Value v;
+  v.num = reinterpret_cast<int64_t>(t);
+  return v;
+}
+
+inline Value make_value(double d) { Value v; v.dbl = d; return v; }
+
+inline Value make_value(ClsMethDataRef clsMeth) {
+  Value v;
+  v.pclsmeth = clsMeth;
+  return v;
+}
+
+inline Value make_value(LazyClassData lclass) {
+  Value v;
+  v.plazyclass = lclass;
+  return v;
+}
+
+/*
+ * Pack a base data element into a TypedValue for use elsewhere in the runtime.
+ *
+ * TypedValue tv = make_tv<KindOfInt64>(123);
+ */
+template<DataType DType>
+typename std::enable_if<
+  !std::is_same<typename DataTypeCPPType<DType>::type,void>::value,
+  TypedValue
+>::type make_tv(typename DataTypeCPPType<DType>::type val) {
+  TypedValue ret;
+  ret.m_data = make_value(val);
+  ret.m_type = DType;
+  assertx(tvIsPlausible(ret));
+  return ret;
+}
+
+template<DataType DType>
+typename std::enable_if<
+  std::is_same<typename DataTypeCPPType<DType>::type,void>::value,
+  TypedValue
+>::type make_tv() {
+  auto const ret = TypedValue { Value{}, DType, {0}, {0} };
+  assertx(tvIsPlausible(ret));
+  return ret;
+}
+
+ALWAYS_INLINE TypedValue make_tv_of_type(Value value, DataType dt) {
+  return TypedValue { value, dt, {0}, {0} };
+}
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -373,11 +411,9 @@ ALWAYS_INLINE TypedValue as_tv(const TypedValue* tv) { return *tv; }
  * Unlike init_null_variant and uninit_variant, these should be placed in
  * .rodata and cause a segfault if written to.
  */
-extern const Cell immutable_null_base;
-extern const Cell immutable_uninit_base;
+extern const TypedValue immutable_null_base;
+extern const TypedValue immutable_uninit_base;
 
 ///////////////////////////////////////////////////////////////////////////////
 
 }
-
-#endif

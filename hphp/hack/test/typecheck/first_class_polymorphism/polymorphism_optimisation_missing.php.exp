@@ -1,0 +1,41 @@
+error: Naming[2049] Unbound name: `Nope` [1]
+
+polymorphism_optimisation_missing.php:5:40
+3 | 
+4 | class Blah {
+5 |   public function poly<T>((function(): Nope<T>) $_): Nope<?T> {
+  |                                        ^^^^ [1]
+6 |     throw new Exception("not implemented");
+7 |   }
+
+error: Naming[2049] Unbound name: `Nope` [1]
+
+polymorphism_optimisation_missing.php:5:54
+3 | 
+4 | class Blah {
+5 |   public function poly<T>((function(): Nope<T>) $_): Nope<?T> {
+  |                                                      ^^^^ [1]
+6 |     throw new Exception("not implemented");
+7 |   }
+
+error: Naming[2049] Unbound name: `Nope` [1]
+
+polymorphism_optimisation_missing.php:16:20
+14 |     HH\FunctionRef<(readonly function<T>(
+15 |       Blah,
+16 |       (function(): Nope<T>),
+   |                    ^^^^ [1]
+17 |     ): Nope<?T>)>,
+18 |   >($f);
+
+error: Naming[2049] Unbound name: `Nope` [1]
+
+polymorphism_optimisation_missing.php:17:8
+15 |       Blah,
+16 |       (function(): Nope<T>),
+17 |     ): Nope<?T>)>,
+   |        ^^^^ [1]
+18 |   >($f);
+19 | }
+
+4 errors found

@@ -1,5 +1,5 @@
 <?hh
-function main() {
+function main() :mixed{
   $m = Map {};
   $m[1] = 1;
   unset($m[1]);
@@ -19,4 +19,8 @@ function main() {
   for ($i = 10000; $i >= 1; --$i) unset($m[$i]);
   echo "Done\n";
 }
+
+<<__EntryPoint>>
+function main_map_grow_shrink() :mixed{
 main();
+}

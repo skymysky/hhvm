@@ -14,8 +14,7 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_DATA_BLOCK_H
-#define incl_HPHP_DATA_BLOCK_H
+#pragma once
 
 #include <cstdint>
 #include <cstring>
@@ -68,9 +67,12 @@ struct DataBlockFull : std::runtime_error {
  */
 struct DataBlock {
   DataBlock() = default;
-
+  DataBlock(const DataBlock&) = default;
+  DataBlock& operator=(const DataBlock&) = default;
   DataBlock(DataBlock&& other) = default;
   DataBlock& operator=(DataBlock&& other) = default;
+
+  static constexpr size_t kPageSize = 2*1024*1024; // 2MiB page
 
   /**
    * Uses an existing chunk of memory.
@@ -85,6 +87,7 @@ struct DataBlock {
     m_base = m_frontier = start;
     m_destBase = dest;
     m_size = sz;
+    m_maxSize = sz;
     m_maxGrow = maxGrow;
     m_name = name;
   }
@@ -97,6 +100,16 @@ struct DataBlock {
     init(start, start, sz, sz, name);
   }
 
+  void alignFrontier(size_t align) {
+    assertx(align == 1 || align == 2 || align == 4 || align == 8 ||
+            align == 16 || align == kPageSize);
+
+    auto const mask = align - 1;
+    auto const nf = (uint8_t*)(((uintptr_t)m_frontier + mask) & ~mask);
+    assertCanEmit(nf - m_frontier);
+    setFrontier(nf);
+  }
+
   /*
    * allocRaw
    * alloc
@@ -106,13 +119,23 @@ struct DataBlock {
    */
   void* allocRaw(size_t sz, size_t align = 16) {
     // Round frontier up to a multiple of align
-    align = folly::nextPowTwo(align) - 1;
-    auto const nf = (uint8_t*)(((uintptr_t)m_frontier + align) & ~align);
-    assertCanEmit(nf - m_frontier + sz);
-    setFrontier(nf);
+    alignFrontier(align);
+    assertCanEmit(sz);
     auto data = m_frontier;
     m_frontier += sz;
-    assertx(m_frontier <= m_base + m_size);
+    assertx(m_frontier <= m_base + m_maxSize);
+    return data;
+  }
+
+  void* allocRawBackward(size_t sz, size_t align = 16) {
+    assertx(align == 1 || align == 2 || align == 4 || align == 8 ||
+            align == 16 || align == kPageSize);
+    auto const mask = align - 1;
+    auto const data = (uint8_t*)(((uintptr_t)m_base + m_maxSize - sz) & ~mask);
+    if (data < m_frontier) reportFull(sz);
+    assertx(m_frontier <= data);
+    assertx(data + sz <= m_base + m_maxSize);
+    m_maxSize = data - m_base;
     return data;
   }
 
@@ -120,10 +143,20 @@ struct DataBlock {
     return (T*)allocRaw(sizeof(T) * n, align);
   }
 
+  DataBlock allocChild(size_t size, const char* name, bool forward, size_t pageSize = kPageSize) {
+    size_t Mask = pageSize - 1;
+    size = (size + Mask) & ~Mask;
+    assertx(forward || m_size == m_maxGrow);
+    auto const start = forward ? allocRaw(size, pageSize) : allocRawBackward(size, pageSize);
+    DataBlock r;
+    r.init((Address)start, size, name);
+    return r;
+  }
+
   bool canEmit(size_t nBytes) {
     assert(m_frontier >= m_base);
-    assert(m_frontier <= m_base + m_size);
-    return m_frontier + nBytes <= m_base + m_size;
+    assert(m_frontier <= m_base + m_maxSize);
+    return m_frontier + nBytes <= m_base + m_maxSize;
   }
 
   bool grow(size_t nBytes) {
@@ -142,6 +175,7 @@ struct DataBlock {
     if (!m_destBuf) reportMallocError(amt);
     m_destBase = m_destBuf.get();
     m_size = amt;
+    m_maxSize = amt;
     return true;
   }
 
@@ -182,7 +216,7 @@ struct DataBlock {
 
   void bytes(size_t n, const uint8_t *bs) {
     assertCanEmit(n);
-    if (n <= 8 && m_destBase == m_base) {
+    if (n <= 8 && canEmit(8) && m_destBase == m_base) {
       // If it is a modest number of bytes, try executing in one machine
       // store. This allows control-flow edges, including nop, to be
       // appear idempotent on other CPUs. If m_destBase != m_base then the
@@ -212,8 +246,9 @@ struct DataBlock {
     alloc<uint8_t>(1, nbytes);
   }
 
-  Address base() const { return m_base; }
+  Address     base() const { return m_base; }
   Address frontier() const { return m_frontier; }
+  size_t      size() const { return m_size; }
   std::string name() const { return m_name; }
 
   /*
@@ -222,14 +257,18 @@ struct DataBlock {
    * it must be used before writing or reading from any address returned by
    * DataBlock.
    */
-  Address toDestAddress(CodeAddress addr) {
+  Address toDestAddress(CodeAddress addr) const {
     assertx(m_base <= addr && addr <= (m_base + m_size));
     return Address(m_destBase + (addr - m_base));
   }
 
   void setFrontier(Address addr) {
-    assertx(m_base <= addr && addr <= (m_base + m_size));
+    assertx(m_base <= addr && addr <= (m_base + m_maxSize));
     m_frontier = addr;
+  }
+
+  void moveFrontier(int64_t offset) {
+    setFrontier(m_frontier + offset);
   }
 
   size_t capacity() const {
@@ -237,11 +276,11 @@ struct DataBlock {
   }
 
   size_t used() const {
-    return m_frontier - m_base;
+    return (m_frontier - m_base) + (m_size - m_maxSize);
   }
 
   size_t available() const {
-    return m_size - (m_frontier - m_base);
+    return m_size - used();
   }
 
   bool contains(ConstCodeAddress addr) const {
@@ -254,7 +293,7 @@ struct DataBlock {
   }
 
   bool empty() const {
-    return m_base == m_frontier;
+    return used() == 0;
   }
 
   void clear() {
@@ -262,7 +301,7 @@ struct DataBlock {
   }
 
   void zero() {
-    memset(m_destBase, 0, m_frontier - m_base);
+    memset(m_destBase, 0, capacity());
     clear();
   }
 
@@ -284,12 +323,54 @@ struct DataBlock {
   }
 
   static void syncDirect(Address begin,  Address end) {
-    if (arch() == Arch::ARM) {
+    if (arch::any<arch::ARM>() && begin < end) {
       __builtin___clear_cache(reinterpret_cast<char*>(begin),
                               reinterpret_cast<char*>(end));
 
     }
   }
+
+  // Below code is copied from code-buffer-vixl.h to adapt vixl to HHVM code blocks.
+  ptrdiff_t GetOffsetFrom(ptrdiff_t offset) const {
+    ptrdiff_t cursor_offset = frontier() - base();
+    return cursor_offset - offset;
+  }
+
+  ptrdiff_t GetCursorOffset() const { return GetOffsetFrom(0); }
+
+  template <typename T>
+  T GetOffsetAddress(ptrdiff_t offset) const {
+    return reinterpret_cast<T>(m_destBase + offset);
+  }
+
+  // Return the address of the start of the emitted code.
+  template <typename T>
+  T GetStartAddress() const {
+    return GetOffsetAddress<T>(0);
+  }
+
+  size_t GetRemainingBytes() const {
+    return (base() + capacity()) - frontier();
+  }
+
+  size_t GetCapacity() const {
+    return capacity();
+  }
+
+  void EmitString(const char* string) {
+    const auto len = strlen(string) + 1;
+    assertCanEmit(len);
+    memcpy(dest(), string, len);
+    setFrontier(frontier() + len);
+  }
+
+  template <typename T>
+  void Emit(T value) {
+    assertCanEmit(sizeof(value));
+    memcpy(dest(), &value, sizeof(value));
+    setFrontier(frontier() + sizeof(value));
+  }
+  /////////////////////////////////////////////////////////////////////////////
 
 private:
 
@@ -311,10 +392,17 @@ private:
   // to a separate location. The actual writes will be to m_dest.
   Address m_destBase{nullptr};
 
+  // DataBlock's used and unused memory is organized in the following manner:
+  // m_base    m_frontier        m_base+m_maxSize  m_base+m_size
+  //  |           |>                  <|               |
+  //  v           v                    v               v
+  //  [############)...................[###############)
+  //  |-- used  --|------ unused ------|---- used -----|
   Address m_base{nullptr};
   Address m_frontier{nullptr};
   size_t  m_size{0};
-  size_t  m_maxGrow{0};
+  size_t m_maxSize{0};
+  size_t  m_maxGrow{0}; // Total the block can grow to
   std::string m_name;
 
   size_t m_nfree{0};
@@ -355,5 +443,3 @@ struct CodeCursor : UndoMarker {
   ~CodeCursor() { undo(); }
 };
 }
-
-#endif

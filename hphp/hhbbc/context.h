@@ -13,20 +13,24 @@
    | license@php.net so we can mail you a copy immediately.               |
    +----------------------------------------------------------------------+
 */
-#ifndef incl_HHBBC_CONTEXT_H_
-#define incl_HHBBC_CONTEXT_H_
+#pragma once
 
 #include <folly/Hash.h>
-#include <folly/Optional.h>
 
-#include "hphp/hhbbc/index.h"
+#include "hphp/hhbbc/representation.h"
 #include "hphp/hhbbc/type-system.h"
+#include "hphp/hhbbc/wide-func.h"
 
-namespace HPHP { namespace HHBBC {
+#include "hphp/util/compact-vector.h"
+
+namespace HPHP::HHBBC {
 
 //////////////////////////////////////////////////////////////////////
 
+struct CollectedInfo;
 struct ContextHash;
+struct FuncAnalysis;
+struct IIndex;
 
 //////////////////////////////////////////////////////////////////////
 
@@ -36,46 +40,94 @@ struct ContextHash;
  * need a "context", to allow recording dependencies.
  */
 struct Context {
-  borrowed_ptr<const php::Unit> unit;
-  borrowed_ptr<php::Func> func;
-  borrowed_ptr<const php::Class> cls;
+  SString unit;
+  const php::Func* func;
+  const php::Class* cls;
+  const Context* dep{nullptr};
 
-  using Hash = ContextHash;
+  const Context& forDep() const { return dep ? *dep : *this; }
 };
-struct ContextHash {
-  size_t operator()(const Context& c) const {
-    return pointer_hash<void>{}(c.func ? (void*)c.func :
-                                c.cls ? (void*)c.cls : (void*)c.unit);
-  }
-};
-
-inline bool operator==(Context a, Context b) {
-  return a.unit == b.unit && a.func == b.func && a.cls == b.cls;
-}
-
-inline bool operator<(Context a, Context b) {
-  return std::make_tuple(a.unit, a.func, a.cls) <
-         std::make_tuple(b.unit, b.func, b.cls);
-}
 
 /*
- * Context for a call to a function.  This means the types and number
- * of arguments, and where it is being called from.
+ * Context for a call to a function.  This is the function itself,
+ * plus the types and number of arguments, a list of named arguments,
+ * and the type of $this/get_called_context().
  */
 struct CallContext {
-  Context caller;
-  std::vector<Type> args;
+  const php::Func* callee;
+  CompactVector<Type> args;
+  NamedArgNameVec argNames;
   Type context;
 };
 
-inline bool operator==(const CallContext& a, const CallContext& b) {
-  return a.caller == b.caller &&
-         equivalently_refined(a.args, b.args) &&
-         equivalently_refined(a.context, b.context);
+inline NamedArgNameVec copy_arg_names(const NamedArgNameVec* names) {
+  return names ? *names : NamedArgNameVec{};
 }
+
+inline bool operator==(const CallContext& a, const CallContext& b) {
+  return a.callee == b.callee &&
+         a.argNames == b.argNames &&
+         equal(a.args, b.args) &&
+         equal(a.context, b.context);
+}
+
+struct CallContextHasher {
+  size_t operator()(const CallContext& c) const {
+    auto ret = folly::hash::hash_combine(
+      c.callee,
+      c.args.size(),
+      c.argNames.size(),
+      c.context.hash()
+    );
+    for (auto& t : c.args) {
+      ret = folly::hash::hash_combine(ret, t.hash());
+    }
+    for (auto& name : c.argNames) {
+      ret = folly::hash::hash_combine(ret, name);
+    }
+    return ret;
+  }
+};
+
+struct CallContextHashCompare {
+  bool equal(const CallContext& a, const CallContext& b) const {
+    return a == b;
+  }
+  size_t hash(const CallContext& c) const {
+    return CallContextHasher{}(c);
+  }
+};
 
 //////////////////////////////////////////////////////////////////////
 
-}}
+/*
+ * Context used to analyze a function. Anyone constructing this context
+ * must ensure that the provided WideFunc lives longer than the context.
+ */
+struct AnalysisContext {
+  SString unit;
+  const php::WideFunc& func;
+  const php::Class* cls;
+  const Context* dep{nullptr};
 
-#endif
+  operator Context() const { return { unit, func, cls, dep }; }
+};
+
+/*
+ * Context used for per-block optimizations. As with AnalysisContext,
+ * callers must ensure that all the references here outlive this context.
+ * The WideFunc in this struct will always match the func in ainfo.ctx.
+ */
+struct VisitContext {
+  const IIndex& index;
+  const FuncAnalysis& ainfo;
+  CollectedInfo& collect;
+  php::WideFunc& func;
+
+  VisitContext(const IIndex& index, const FuncAnalysis& ainfo,
+               CollectedInfo& collect, php::WideFunc& func);
+};
+
+//////////////////////////////////////////////////////////////////////
+
+}

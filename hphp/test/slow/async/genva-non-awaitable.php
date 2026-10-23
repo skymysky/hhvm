@@ -2,41 +2,41 @@
 
 class Foo {}
 
-async function test_short($input) {
+async function test_short($input) :Awaitable<mixed>{
   var_dump($input);
   try {
-    await genva(
-      async {},
-      $input,
-      async {},
-    );
+    concurrent {
+      await async {};
+      await $input;
+      await async {};
+    }
     echo "ok\n";
   } catch (Exception $e) {
     echo $e->getMessage()."\n";
   }
 }
 
-async function test_long($input) {
+async function test_long($input) :Awaitable<mixed>{
   var_dump($input);
   try {
-    await genva(
-      async {},
-      async {},
-      async {},
-      async {},
-      $input,
-      async {},
-      async {},
-      async {},
-      async {},
-    );
+    concurrent {
+      await async {};
+      await async {};
+      await async {};
+      await async {};
+      await $input;
+      await async {};
+      await async {};
+      await async {};
+      await async {};
+    }
     echo "ok\n";
   } catch (Exception $e) {
     echo $e->getMessage()."\n";
   }
 }
 
-async function test() {
+async function test() :Awaitable<mixed>{
   await test_short(null);
   await test_short(async {});
   await test_short(RescheduleWaitHandle::create(0, 0));
@@ -55,4 +55,8 @@ async function test() {
   await test_long(new Foo());
 }
 
+
+<<__EntryPoint>>
+function main_genva_non_awaitable() :mixed{
 HH\Asio\join(test());
+}

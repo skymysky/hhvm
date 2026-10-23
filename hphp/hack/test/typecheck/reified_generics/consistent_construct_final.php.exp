@@ -1,0 +1,11 @@
+error: Typing[4310] Cannot call `new static` because the current class has reified generics [1]
+
+consistent_construct_final.php:6:5
+4 | final class C<reify T> {
+5 |   public function f(): void {
+6 |     new static();
+  |     ^^^^^^^^^^^^ [1]
+7 |   }
+8 | }
+
+1 error found

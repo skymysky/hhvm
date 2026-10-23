@@ -14,20 +14,21 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_OBJECT_DATA_H_
-#define incl_HPHP_OBJECT_DATA_H_
+#pragma once
 
 #include "hphp/runtime/base/classname-is.h"
 #include "hphp/runtime/base/countable.h"
 #include "hphp/runtime/base/memory-manager.h"
 #include "hphp/runtime/base/req-ptr.h"
+#include "hphp/runtime/base/tv-conv-throw.h"
 #include "hphp/runtime/base/tv-val.h"
 #include "hphp/runtime/base/weakref-data.h"
 
 #include "hphp/runtime/vm/class.h"
 #include "hphp/runtime/vm/hhbc.h"
 
-#include "hphp/util/low-ptr.h"
+#include "hphp/util/ptr.h"
+#include "hphp/util/rds-local.h"
 
 #include <vector>
 
@@ -36,28 +37,8 @@ namespace HPHP {
 
 struct TypedValue;
 
-#define INVOKE_FEW_ARGS_COUNT 6
-#define INVOKE_FEW_ARGS_DECL3                        \
-  const Variant& a0 = uninit_variant,                \
-  const Variant& a1 = uninit_variant,                \
-  const Variant& a2 = uninit_variant
-#define INVOKE_FEW_ARGS_DECL6                        \
-  INVOKE_FEW_ARGS_DECL3,                             \
-  const Variant& a3 = uninit_variant,                \
-  const Variant& a4 = uninit_variant,                \
-  const Variant& a5 = uninit_variant
-#define INVOKE_FEW_ARGS_DECL10                       \
-  INVOKE_FEW_ARGS_DECL6,                             \
-  const Variant& a6 = uninit_variant,                \
-  const Variant& a7 = uninit_variant,                \
-  const Variant& a8 = uninit_variant,                \
-  const Variant& a9 = uninit_variant
-#define INVOKE_FEW_ARGS_HELPER(kind,num) kind##num
-#define INVOKE_FEW_ARGS(kind,num) \
-  INVOKE_FEW_ARGS_HELPER(INVOKE_FEW_ARGS_##kind,num)
-#define INVOKE_FEW_ARGS_DECL_ARGS INVOKE_FEW_ARGS(DECL,INVOKE_FEW_ARGS_COUNT)
-
-void deepInitHelper(TypedValue* propVec, const TypedValueAux* propData,
+void deepInitHelper(ObjectProps* propVec,
+                    const Class::PropInitVec* propInitVec,
                     size_t nProps);
 
 namespace Native {
@@ -65,26 +46,43 @@ namespace Native {
                                          size_t nProps);
 }
 
-// A slot to store memoization data in. This can be either a Cell storing a
+// A slot to store memoization data in. This can be either a TypedValue storing a
 // single value, or a pointer to a memoization cache.
 struct MemoSlot {
 public:
   /*
-   * We use the type field of the Cell to determine whether this is a single
-   * value or a memo cache. If the type is kInvalidDataType (which cannot occur
-   * for a valid Cell), its a memo cache. As a special case, if type is Uninit,
-   * and the pointer is null, it can also be a cache (its also a value). This
-   * lets us initialize the slots with zero regardless of how it will be
-   * used. When its actually used, the correct type will be filed in. The
-   * ambiguity isn't an issue because these predicates are just for assertions
-   * (the type of the slot is implied by the function).
+   * When we initialize a MemoSlot, we both make its type KindOfUninit
+   * (so that it's a valid value slot) and make its cache pointer nullptr
+   * (so that it's a valid cache slot). We don't need to know which one it is.
    */
+  void init() {
+    value.m_data.pcache = nullptr;
+    value.m_type = KindOfUninit;
+  }
 
+  /*
+   * We use the type field of the TypedValue to determine whether this is a
+   * single value or a memo cache:
+   *
+   *  - If the type is kInvalidDataType (i.e. it's not a valid TypedValue),
+   *    this slot is for a memo cache.
+   *
+   *  - If the type is valid and not KindOfUninit, then it's a single value.
+   *
+   *  - If the type is Uninit, and the cache pointer is nullptr, we cannot
+   *    distinguish the two cases - that's how we initialize these slots.
+   *
+   * The ambiguity in the last case is okay, because we only use the helpers
+   * below for assertions. For any given memo slot, the single vs. multiple
+   * value distinction is implied by whether the function takes arguments.
+   */
   bool isCache() const {
     return value.m_type == kInvalidDataType ||
-      (value.m_type == KindOfUninit && value.m_data.pcache == nullptr);
+           (value.m_type == KindOfUninit && value.m_data.pcache == nullptr);
   }
-  bool isValue() const { return value.m_type != kInvalidDataType; }
+  bool isValue() const {
+    return value.m_type != kInvalidDataType;
+  }
 
   // Get a reference to the pointer to the cache, for the purpose of a set on
   // the cache. Since we're going to be creating a cache in this slot, change
@@ -104,14 +102,14 @@ public:
     return value.m_data.pcache;
   }
 
-  Cell* getValue() {
+  TypedValue* getValue() {
     assertx(isValue());
-    assertx(cellIsPlausible(value));
+    assertx(tvIsPlausible(value));
     return &value;
   }
-  const Cell* getValue() const {
+  const TypedValue* getValue() const {
     assertx(isValue());
-    assertx(cellIsPlausible(value));
+    assertx(tvIsPlausible(value));
     return &value;
   }
 
@@ -120,39 +118,37 @@ public:
     assertx(isCache());
     value.m_data.pcache = nullptr;
   }
+
 private:
   TYPE_SCAN_CUSTOM() {
     isCache() ? scanner.scan(value.m_data.pcache) : scanner.scan(value);
   }
 
-  Cell value;
+  TypedValue value;
 };
-static_assert(sizeof(MemoSlot) == sizeof(Cell), "");
+static_assert(sizeof(MemoSlot) == sizeof(TypedValue), "");
 
-struct InvokeResult {
-  TypedValue val;
-  InvokeResult() {}
-  InvokeResult(bool ok, TypedValue v) : val(v) {
-    val.m_aux.u_ok = ok;
-  }
-  InvokeResult(bool ok, Variant&& v);
-  bool ok() const { return val.m_aux.u_ok; }
-  explicit operator bool() const { return ok(); }
-};
-
-#ifdef _MSC_VER
+#if defined(__x86_64__)
 #pragma pack(push, 1)
 #endif
+
 struct ObjectData : Countable, type_scan::MarkCollectable<ObjectData> {
   enum Attribute : uint8_t {
-    NoDestructor       = 0x01, // __destruct()
+    NoAttrs            = 0x00,
     IsWeakRefed        = 0x02, // Is pointed to by at least one WeakRef
     HasDynPropArr      = 0x04, // has a dynamic properties array
     IsBeingConstructed = 0x08, // Constructor for most derived class has not
-                               // finished. Only set during construction when
-                               // the class has immutable properties (to
-                               // temporarily allow writing to them).
-    UsedMemoCache      = 0x10  // Object has had data set in its memo slots
+                               // finished. Set during construction to
+                               // temporarily allow writing to const props.
+    UsedMemoCache      = 0x10, // Object has had data set in its memo slots
+    BigAllocSize       = 0x20, // The object was allocated using Big Size
+#ifndef NDEBUG
+    SmallAllocSize     = 0x40, // For Debug, the object was allocated with
+                               // small buffers. If needed can be removed to
+                               // free up Attribute bits.
+#else
+    SmallAllocSize     = NoAttrs,
+#endif
   };
 
   static constexpr size_t offsetofAttrs() {
@@ -163,12 +159,6 @@ struct ObjectData : Countable, type_scan::MarkCollectable<ObjectData> {
     return sizeof(m_aux16);
   }
 
- private:
-  static __thread uint32_t os_max_id;
-
- public:
-  static void resetMaxId();
-
   explicit ObjectData(Class*, uint8_t flags = 0,
                       HeaderKind = HeaderKind::Object);
   ~ObjectData();
@@ -177,9 +167,9 @@ struct ObjectData : Countable, type_scan::MarkCollectable<ObjectData> {
   ObjectData(const ObjectData&) = delete;
   ObjectData& operator=(const ObjectData&) = delete;
 
+  enum class InitRaw {};
  protected:
   enum class NoInit {};
-  enum class InitRaw {};
 
   // for JIT-generated instantiation with inlined property init
   explicit ObjectData(Class* cls, InitRaw, uint8_t flags = 0,
@@ -192,7 +182,10 @@ struct ObjectData : Countable, type_scan::MarkCollectable<ObjectData> {
  public:
   ALWAYS_INLINE void decRefAndRelease() {
     assertx(kindIsValid());
-    if (decReleaseCheck()) release();
+    if (decReleaseCheck()) {
+      auto const cls = getVMClass();
+      return cls->releaseFunc()(this, cls);
+    }
   }
   bool kindIsValid() const { return isObjectKind(headerKind()); }
 
@@ -202,20 +195,51 @@ struct ObjectData : Countable, type_scan::MarkCollectable<ObjectData> {
 
   void setWeakRefed() { setAttribute(IsWeakRefed); }
 
-  public:
+  void setReifiedGenerics(Class*, ArrayData*);
+
+ private:
+  template <bool Unlocked, typename Init>
+  static ObjectData* newInstanceImpl(Class*, Init);
+
 
   /*
-   * Call newInstance() to instantiate a PHP object. The initial ref-count will
-   * be greater than zero. Since this gives you a raw pointer, it is your
-   * responsibility to manage the ref-count yourself. Whenever possible, prefer
-   * using the Object class instead, which takes care of this for you.
+   * Allocate space for an object data of type `cls`.  If it should have a
+   * Memo header create space for that and initialize it.
+   *
+   * Return the pointer to address where the object-data should start (`mem`),
+   * along with flags indicating if the allocation was a small or big size
+   * class alloc (`flags`).  These flags ultimately must be incorporated into
+   * the object-data's attributes in order for the deallocation to follow the
+   * correct path.
    */
+  struct Alloc {
+    void* mem;
+    uint8_t flags;
+  };
+  static Alloc allocMemoInit(Class* cls);
+ public:
+  /*
+   * Call newInstance() to instantiate a PHP object. The initial ref-count will
+   * be greater than zero. Will raise if the class has reified generics; if
+   * the class may have reified generics, you must use newInstanceReified.
+   * Since this gives you a raw pointer, it is your responsibility to manage
+   * the ref-count yourself. Whenever possible, prefer using the Object class
+   * instead, which takes care of this for you.
+   */
+  template <bool Unlocked = false>
   static ObjectData* newInstance(Class*);
 
   /*
+   * Same as newInstance, but classes with reified generics are allowed.
+   * If the class has reified generics, the second arg must be an array of
+   * type structures representing the reified types.
+   */
+  template <bool Unlocked = false>
+  static ObjectData* newInstanceReified(Class*, ArrayData*);
+
+  /*
    * Instantiate a new object without initializing its declared properties. The
-   * given Class must be a concrete, regular Class, without an instanceCtor or
-   * customInit.
+   * given Class must be a concrete, regular Class.
    */
   static ObjectData* newInstanceNoPropInit(Class*);
 
@@ -225,42 +249,29 @@ struct ObjectData : Countable, type_scan::MarkCollectable<ObjectData> {
    * uninitialized object of that class. These are meant to be called from the
    * JIT, where the cls, size, and attributes are constants at JIT time.
    *
-   * newInstanceRaw<> should be called only when and cls->getODAttrs() ==
-   * DefaultAttrs; otherwise, use newInstanceRawAttrs. The big=true versions
-   * should be called when size > kMaxSmallSize.
+   * The big=true versions should be called when size > kMaxSmallSize.
    *
    * The memo versions should be used if the object has memo slots.
    *
    * The initial ref-count will be set to one.
    */
-  static const uint8_t DefaultAttrs = NoDestructor;
-
   static ObjectData* newInstanceRawSmall(Class*, size_t size, size_t index);
   static ObjectData* newInstanceRawBig(Class*, size_t size);
-  static ObjectData* newInstanceRawAttrsSmall(Class*, size_t size, size_t index,
-                                              uint8_t attrs);
-  static ObjectData* newInstanceRawAttrsBig(Class*, size_t size,
-                                            uint8_t attrs);
 
   static ObjectData* newInstanceRawMemoSmall(Class*, size_t size,
                                              size_t index, size_t objoff);
   static ObjectData* newInstanceRawMemoBig(Class*, size_t size, size_t objoff);
-  static ObjectData* newInstanceRawMemoAttrsSmall(Class*, size_t size,
-                                                  size_t index, size_t objoff,
-                                                  uint8_t attrs);
-  static ObjectData* newInstanceRawMemoAttrsBig(Class*, size_t size,
-                                                size_t objoff, uint8_t attrs);
 
-  void release() noexcept;
-  void releaseNoObjDestructCheck() noexcept;
+  /*
+   * Default release function, used for non-closure, non-native objects.
+   */
+  static void release(ObjectData* obj, const Class* cls) noexcept;
 
   Class* getVMClass() const;
-  void setVMClass(Class* cls);
   StrNR getClassName() const;
-  uint32_t getId() const;
 
   // instanceof() can be used for both classes and interfaces.
-  bool instanceof(const String&) const;
+  bool instanceof(const OptString&) const;
   bool instanceof(const Class*) const;
 
   template <typename T>
@@ -282,9 +293,12 @@ struct ObjectData : Countable, type_scan::MarkCollectable<ObjectData> {
   // in C++, you need this.
   bool isCppBuiltin() const;
 
-  // Is this an object with (some) immutable properties for which construction
-  // has not finished yet?
+  // Is this an object for which construction has not finished yet?
   bool isBeingConstructed() const;
+  // Clear the IsBeingConstructed bit to indicate that construction is done.
+  void lockObject();
+  // Temporarily set the IsBeingConstructed bit
+  void unlockObject();
 
   // Whether the object is a collection, [and [not] mutable].
   bool isCollection() const;
@@ -300,9 +314,6 @@ struct ObjectData : Countable, type_scan::MarkCollectable<ObjectData> {
   void setAttribute(Attribute);
   bool hasInstanceDtor() const;
   bool hasNativeData() const;
-  bool noDestruct() const;
-  void setNoDestruct();
-  void clearNoDestruct();
 
   Object iterableObject(bool& isIterable, bool mayImplementIterator = true);
 
@@ -313,7 +324,9 @@ struct ObjectData : Countable, type_scan::MarkCollectable<ObjectData> {
   bool toBoolean() const;
   int64_t toInt64() const;
   double toDouble() const;
-  Array toArray(bool pubOnly = false) const;
+
+  template <IntishCast IC = IntishCast::None>
+  Array toArray(bool pubOnly = false, bool ignoreLateInit = false) const;
 
   /*
    * Comparisons.
@@ -322,41 +335,28 @@ struct ObjectData : Countable, type_scan::MarkCollectable<ObjectData> {
    */
   bool equal(const ObjectData&) const;
   bool less(const ObjectData&) const;
+  bool lessEqual(const ObjectData&) const;
   bool more(const ObjectData&) const;
+  bool moreEqual(const ObjectData&) const;
   int64_t compare(const ObjectData&) const;
-
-  /*
-   * Call this object's destructor, if it has one. No restrictions are placed
-   * on the object's refcount, since this is used on objects still alive at
-   * request shutdown.
-   */
-  void destructForExit();
 
  private:
   void instanceInit(Class*);
-  bool destructImpl();
 
  public:
 
-  enum IterMode { EraseRefs, CreateRefs, PreserveRefs };
-  /*
-   * Create an array of object properties suitable for iteration.
-   *
-   * EraseRefs    - array should contain unboxed properties
-   * CreateRefs   - array should contain boxed properties
-   * PreserveRefs - reffiness of properties should be preserved in returned
-   *                array
-   */
-  Array o_toIterArray(const String& context, IterMode mode);
+  Array o_toIterArray(const Class* ctx);
 
-  Variant o_get(const String& s, bool error = true,
-                const String& context = null_string);
+  Variant o_get(const OptString& s, bool error = true,
+                const OptString& context = null_string);
 
-  void o_set(const String& s, const Variant& v,
-             const String& context = null_string);
+  void o_set(const OptString& s, const Variant& v,
+             const OptString& context = null_string);
 
   void o_setArray(const Array& properties);
-  void o_getArray(Array& props, bool pubOnly = false) const;
+  void o_getArray(Array& props,
+                  bool pubOnly = false,
+                  bool ignoreLateInit = false) const;
 
   static Object FromArray(ArrayData* properties);
 
@@ -366,20 +366,28 @@ struct ObjectData : Countable, type_scan::MarkCollectable<ObjectData> {
   // invokeFuncFew(), and vm_decode_function(). We should remove these APIs and
   // migrate all callers to use invokeFunc(), invokeFuncFew(), and
   // vm_decode_function() instead.
-  Variant o_invoke(const String& s, const Variant& params, bool fatal = true);
-  Variant o_invoke_few_args(const String& s, int count,
-                            INVOKE_FEW_ARGS_DECL_ARGS);
+  Variant o_invoke(const OptString& s, const Variant& params, bool fatal = true);
+  Variant o_invoke_few_args(const OptString& s,
+                            RuntimeCoeffects providedCoeffects,
+                            int count,
+                            const Variant& a0 = uninit_variant,
+                            const Variant& a1 = uninit_variant,
+                            const Variant& a2 = uninit_variant,
+                            const Variant& a3 = uninit_variant,
+                            const Variant& a4 = uninit_variant);
 
   ObjectData* clone();
 
-  Variant offsetGet(Variant key);
-  String invokeToString();
+  OptString invokeToString();
   bool hasToString();
 
-  Variant invokeSleep();
-  Variant invokeToDebugDisplay();
-  Variant invokeWakeup();
-  Variant invokeDebugInfo();
+  Variant invokeSleep(RuntimeCoeffects);
+  Variant invokeToDebugDisplay(RuntimeCoeffects);
+  Variant invokeWakeup(RuntimeCoeffects);
+  Variant invokeDebugInfo(RuntimeCoeffects);
+
+  Variant static InvokeSimple(ObjectData* data, const StaticString& name,
+                              RuntimeCoeffects);
 
   /*
    * Returns whether this object has any dynamic properties.
@@ -408,13 +416,26 @@ struct ObjectData : Countable, type_scan::MarkCollectable<ObjectData> {
   void setDynProps(const Array&);
   void reserveDynProps(int nProp);
 
-  // accessors for the declared properties area
-  TypedValue* propVecForWrite();
-  TypedValue* propVecForConstruct();
-  const TypedValue* propVec() const;
+  // Accessors for the declared properties area. Note that if the caller writes
+  // to these properties, they are responsible for validating the values with
+  // any type-hints on the properties. Likewise the caller is responsible for
+  // enforcing AttrLateInit.
+  ObjectProps* props();
+  const ObjectProps* props() const;
 
-  // accessors for declared properties at statically known offsets
-  // in the lval case, the property must be statically known to be mutable
+  // TODO(T61738946): These can be const once we remove support for coercing
+  // class_meth types.
+  void verifyPropTypeHints();
+  void verifyPropTypeHints(size_t end);
+  void verifyPropTypeHint(Slot slot);
+
+  bool assertPropTypeHints() const;
+
+  // Accessors for declared properties at statically known offsets. In the lval
+  // case, the property must be statically known to be mutable. If the caller
+  // modifies the lval, they are responsible for validating the value with any
+  // type-hint on that property. Likewise the caller is responsible for
+  // enforcing AttrLateInit.
   tv_lval propLvalAtOffset(Slot);
   tv_rval propRvalAtOffset(Slot) const;
 
@@ -451,85 +472,78 @@ struct ObjectData : Countable, type_scan::MarkCollectable<ObjectData> {
    */
   Array& reserveProperties(int nProp = 2);
 
-  [[noreturn]] NEVER_INLINE
-  void throwMutateImmutable(Slot prop) const;
-  [[noreturn]] NEVER_INLINE
-  void throwBindImmutable(Slot prop) const;
+  [[noreturn]] NEVER_INLINE void throwMutateConstProp(Slot prop) const;
+  [[noreturn]] NEVER_INLINE void throwMustBeMutable(Slot prop) const;
+  [[noreturn]] NEVER_INLINE void throwMustBeEnclosedInReadonly(Slot prop) const;
+  [[noreturn]] NEVER_INLINE void throwMustBeReadonly(Slot prop) const;
+  [[noreturn]] NEVER_INLINE void throwMustBeValueType(Slot prop) const;
 
  public:
-  // never box the lval returned from getPropLval; use propB or vGetProp instead
-  tv_lval getPropLval(const Class*, const StringData*);
-  tv_rval getProp(const Class*, const StringData*) const;
-  tv_lval vGetProp(const Class*, const StringData*);
-  // don't use vGetPropIgnoreAccessibility in new code
-  tv_lval vGetPropIgnoreAccessibility(const StringData*);
+  // never box the lval returned from getPropLval; use propB instead
+  tv_lval getPropLval(const MemberLookupContext&, const StringData*);
+  tv_rval getProp(const MemberLookupContext&, const StringData*) const;
+  // Like getProp() but does not throw for <<__LateInit>>. Value can be
+  // KindOfUninit.
+  tv_rval getPropIgnoreLateInit(const MemberLookupContext& ctx,
+                                const StringData* key) const;
+  // don't use getPropIgnoreAccessibility in new code
+  tv_lval getPropIgnoreAccessibility(const StringData*);
+
+  void deserializeAllLazyProps();
+  static void deserializeLazyProp(tv_lval prop);
+  static bool isLazyProp(tv_rval prop);
 
  private:
   struct PropLookup {
-    tv_lval prop;
+    tv_lval val;
+    const Class::Prop* prop;
     Slot slot;
     bool accessible;
-    bool immutable;
+    bool isConst;
+    bool readonly;
   };
 
-  template <bool forWrite>
+  void checkReadonly(const PropLookup&, ReadonlyOp, bool) const;
+
+  template <bool forWrite, bool forRead, bool ignoreLateInit>
   ALWAYS_INLINE
-  PropLookup getPropImpl(const Class*, const StringData*);
+  PropLookup getPropImpl(const MemberLookupContext&, const StringData*);
 
   enum class PropMode : int {
     ReadNoWarn,
     ReadWarn,
     DimForWrite,
-    Bind,
   };
 
   template<PropMode mode>
-  tv_lval propImpl(TypedValue* tvRef, const Class* ctx, const StringData* key);
+  tv_lval propImpl(TypedValue* tvRef, const MemberLookupContext& ctx, const StringData* key, const ReadonlyOp op = ReadonlyOp::Any);
 
-  bool propEmptyImpl(const Class* ctx, const StringData* key);
-
-  void setDynProp(const StringData* key, Cell val);
-
-  bool invokeSet(const StringData* key, Cell val);
-  InvokeResult invokeGet(const StringData* key);
-  InvokeResult invokeIsset(const StringData* key);
-  bool invokeUnset(const StringData* key);
-  InvokeResult invokeNativeGetProp(const StringData* key);
-  bool invokeNativeSetProp(const StringData* key, Cell val);
-  InvokeResult invokeNativeIssetProp(const StringData* key);
-  bool invokeNativeUnsetProp(const StringData* key);
-
-  void getProp(const Class* klass, bool pubOnly, const PreClass::Prop* prop,
-               Array& props, std::vector<bool>& inserted) const;
-  void getProps(const Class* klass, bool pubOnly, const PreClass* pc,
-                Array& props, std::vector<bool>& inserted) const;
-  void getTraitProps(const Class* klass, bool pubOnly, const Class* trait,
-                     Array& props, std::vector<bool>& inserted) const;
+  void setDynProp(const StringData* key, TypedValue val);
 
  public:
-  tv_lval prop(TypedValue* tvRef, const Class* ctx, const StringData* key);
-  tv_lval propW(TypedValue* tvRef, const Class* ctx, const StringData* key);
-  tv_lval propD(TypedValue* tvRef, const Class* ctx, const StringData* key);
-  tv_lval propB(TypedValue* tvRef, const Class* ctx, const StringData* key);
+  tv_lval prop(TypedValue* tvRef, const MemberLookupContext& ctx, const StringData* key, const ReadonlyOp op);
+  tv_lval propW(TypedValue* tvRef, const MemberLookupContext& ctx, const StringData* key, const ReadonlyOp op);
+  tv_lval propU(TypedValue* tvRef, const MemberLookupContext& ctx, const StringData* key, const ReadonlyOp op);
+  tv_lval propD(TypedValue* tvRef, const MemberLookupContext& ctx, const StringData* key, const ReadonlyOp op);
 
-  bool propIsset(const Class* ctx, const StringData* key);
-  bool propEmpty(const Class* ctx, const StringData* key);
+  bool propIsset(const MemberLookupContext& ctx, const StringData* key);
 
-  void setProp(Class* ctx, const StringData* key, Cell val);
-  tv_lval setOpProp(TypedValue& tvRef, Class* ctx, SetOpOp op,
-                    const StringData* key, Cell* val);
+  void setProp(const MemberLookupContext& ctx, const StringData* key, TypedValue val, ReadonlyOp op = ReadonlyOp::Any);
+  tv_lval setOpProp(TypedValue& tvRef, const MemberLookupContext& ctx, SetOpOp op,
+                    const StringData* key, TypedValue* val);
 
-  Cell incDecProp(Class* ctx, IncDecOp op, const StringData* key);
+  TypedValue incDecProp(const MemberLookupContext& ctx, IncDecOp op, const StringData* key);
 
-  void unsetProp(Class* ctx, const StringData* key);
+  void unsetProp(const MemberLookupContext& ctx, const StringData* key);
 
   tv_lval makeDynProp(const StringData* key);
 
-  static void raiseObjToIntNotice(const char*);
-  static void raiseObjToDoubleNotice(const char*);
+  static void throwObjToIntException(const char*);
+  static void throwObjToDoubleException(const char*);
   static void raiseAbstractClassError(Class*);
-  void raiseUndefProp(const StringData*);
-  void raiseCreateDynamicProp(const StringData*);
+  void throwUndefPropException(const StringData*) const;
+  void raiseCreateDynamicProp(const StringData*) const;
+  void raiseReadDynamicProp(const StringData*) const;
 
   static constexpr ptrdiff_t getVMClassOffset() {
     return offsetof(ObjectData, m_cls);
@@ -542,38 +556,34 @@ private:
     ObjectData* src, Class* cls, size_t nProps);
 
   bool toBooleanImpl() const noexcept;
-  int64_t toInt64Impl() const noexcept;
-  double toDoubleImpl() const noexcept;
 
   bool slowDestroyCheck() const;
+  void slowDestroyCases();
 
-// offset:  0        8       12   16   20          32
-// 64bit:   header   cls          id   [subclass]  [props...]
-// lowptr:  header   cls     id   [subclass][props...]
+  bool assertTypeHint(tv_rval, Slot) const;
+
+  // TODO(T61738946): We can take a tv_rval here once we remove support for
+  // coercing class_meth types.
+  void verifyPropTypeHintImpl(tv_lval, const Class::Prop&) const;
+
+// offset:     0       8       12      16
+// 64bit:      header  cls             [subclass][props...]
+// packedptr:  header  cls     [subclass][props...]
 
 private:
-  LowPtr<Class> m_cls;
-  uint32_t o_id; // id of this object (used for var_dump(), and WeakRefs)
+  const PackedPtr<Class> m_cls;
 };
-#ifdef _MSC_VER
+#if defined(__x86_64__)
 #pragma pack(pop)
 #endif
 
-struct CountableHelper {
-  explicit CountableHelper(ObjectData* object) : m_object(object) {
-    object->incRefCount();
-  }
-  ~CountableHelper() {
-    m_object->decRefCount();
-  }
-
-  CountableHelper(const CountableHelper&) = delete;
-  CountableHelper& operator=(const CountableHelper&) = delete;
-
-private:
-  ObjectData *m_object;
-};
-
+#if defined(__x86_64__)
+static_assert(sizeof(ObjectData) == 12, "Change this only on purpose");
+static_assert(alignof(ObjectData) == 1);
+#else
+static_assert(sizeof(ObjectData) == 16, "Change this only on purpose");
+static_assert(alignof(ObjectData) == 8);
+#endif
 ///////////////////////////////////////////////////////////////////////////////
 
 ALWAYS_INLINE void decRefObj(ObjectData* obj) {
@@ -598,13 +608,13 @@ ALWAYS_INLINE void tvWriteObject(ObjectData* pobj, TypedValue* to) {
   CLASSNAME_IS(#originalName)                                          \
   friend ObjectData* new_##originalName##_Instance(Class*);            \
   friend void delete_##originalName(ObjectData*, const Class*);        \
-  static HPHP::LowPtr<Class> s_classOf;                                \
-  static inline HPHP::LowPtr<Class>& classof() {                       \
+  static HPHP::PackedPtr<Class> s_classOf;                             \
+  static inline HPHP::PackedPtr<Class>& classof() {                    \
     return s_classOf;                                                  \
   }
 
 #define IMPLEMENT_CLASS_NO_SWEEP(cls)                                  \
-  HPHP::LowPtr<Class> c_##cls::s_classOf;
+  HPHP::PackedPtr<Class> c_##cls::s_classOf;
 
 namespace req {
 
@@ -636,5 +646,3 @@ typename std::enable_if<
 #undef incl_HPHP_OBJECT_DATA_INL_H_
 
 ///////////////////////////////////////////////////////////////////////////////
-
-#endif

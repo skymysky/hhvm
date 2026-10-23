@@ -1,6 +1,6 @@
-<?php
+<?hh
 
-function foo($a) {
+function foo($a) :mixed{
   $flag = true;
   try {
     f($a);
@@ -10,7 +10,11 @@ function foo($a) {
   }
   var_dump($flag);
 }
-function f($a) {
+function f($a) :mixed{
  if ($a) throw new Exception('What?');
  }
+
+<<__EntryPoint>>
+function main_64() :mixed{
 foo(1);
+}

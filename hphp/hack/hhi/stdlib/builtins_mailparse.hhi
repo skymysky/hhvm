@@ -1,4 +1,4 @@
-<?hh     /* -*- php -*- */
+<?hh /* -*- php -*- */
 /**
  * Copyright (c) 2014, Facebook, Inc.
  * All rights reserved.
@@ -9,34 +9,72 @@
  */
 
 <<__PHPStdLib>>
-function mail($to, $subject, $message, $additional_headers = null, $additional_parameters = null) { }
+function mail(
+  string $to,
+  string $subject,
+  string $message,
+  string $additional_headers = "",
+  string $additional_parameters = "",
+): bool;
 <<__PHPStdLib>>
-function ezmlm_hash($addr) { }
+function ezmlm_hash(string $addr): int;
 <<__PHPStdLib>>
-function mailparse_msg_create() { }
+function mailparse_msg_create(): resource;
 <<__PHPStdLib>>
-function mailparse_msg_free($mimemail) { }
+function mailparse_msg_free(resource $mimemail): bool;
 <<__PHPStdLib>>
-function mailparse_msg_parse_file($filename) { }
+function mailparse_msg_parse_file(
+  string $filename,
+): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function mailparse_msg_parse($mimemail, $data) { }
+function mailparse_msg_parse(
+  resource $mimemail,
+  string $data,
+): bool;
 <<__PHPStdLib>>
-function mailparse_msg_extract_part_file($mimemail, $filename, $callbackfunc = "") { }
+function mailparse_msg_extract_part_file(
+  resource $mimemail,
+  HH\FIXME\MISSING_PARAM_TYPE $filename,
+  HH\FIXME\MISSING_PARAM_TYPE $callbackfunc = "",
+): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function mailparse_msg_extract_whole_part_file($mimemail, $filename, $callbackfunc = "") { }
+function mailparse_msg_extract_whole_part_file(
+  resource $mimemail,
+  HH\FIXME\MISSING_PARAM_TYPE $filename,
+  HH\FIXME\MISSING_PARAM_TYPE $callbackfunc = "",
+): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function mailparse_msg_extract_part($mimemail, $msgbody, $callbackfunc = "") { }
+function mailparse_msg_extract_part(
+  resource $mimemail,
+  HH\FIXME\MISSING_PARAM_TYPE $msgbody,
+  HH\FIXME\MISSING_PARAM_TYPE $callbackfunc = "",
+): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function mailparse_msg_get_part_data($mimemail) { }
+function mailparse_msg_get_part_data(
+  resource $mimemail,
+): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function mailparse_msg_get_part($mimemail, $mimesection) { }
+function mailparse_msg_get_part(
+  resource $mimemail,
+  string $mimesection,
+): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function mailparse_msg_get_structure($mimemail) { }
+function mailparse_msg_get_structure(
+  resource $mimemail,
+): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function mailparse_rfc822_parse_addresses($addresses) { }
+function mailparse_rfc822_parse_addresses(
+  string $addresses,
+): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function mailparse_stream_encode($sourcefp, $destfp, $encoding) { }
+function mailparse_stream_encode(
+  resource $sourcefp,
+  resource $destfp,
+  string $encoding,
+): bool;
 <<__PHPStdLib>>
-function mailparse_uudecode_all($fp) { }
+function mailparse_uudecode_all(resource $fp): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function mailparse_determine_best_xfer_encoding($fp) { }
+function mailparse_determine_best_xfer_encoding(
+  resource $fp,
+): HH\FIXME\MISSING_RETURN_TYPE;

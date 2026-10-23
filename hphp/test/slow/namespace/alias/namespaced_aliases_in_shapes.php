@@ -7,4 +7,8 @@ class MyClass {
 }
 type MyShape = shape('derp' => MyClass::MySubShape);
 
-var_dump(type_structure(MyShape::class));
+
+<<__EntryPoint>>
+function main_namespaced_aliases_in_shapes() :mixed{
+\var_dump(type_structure(MyShape::class));
+}

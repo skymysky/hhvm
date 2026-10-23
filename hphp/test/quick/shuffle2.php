@@ -1,6 +1,6 @@
 <?hh
 
-function iss($a, $i) {
+function iss(KeyedContainer<arraykey, mixed> $a, int $i) :mixed{
   $max = 10;
   for ($i = 0; $i < $max; $i++) {
     isset($a[$i]);
@@ -10,10 +10,10 @@ function iss($a, $i) {
   }
   return isset($a[$i]);
 }
-
-$a = array('a', 2, false);
+<<__EntryPoint>> function main(): void {
+$a = vec['a', 2, false];
 var_dump(iss($a, 5));
 
-$a = array('a'=>'b', 1=>'c', 2=>4, 'c'=>3, 0=>'hello');
+$a = dict['a'=>'b', 1=>'c', 2=>4, 'c'=>3, 0=>'hello'];
 var_dump(iss($a, 5));
-
+}

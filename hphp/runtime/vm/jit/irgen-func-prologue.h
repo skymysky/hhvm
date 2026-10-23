@@ -14,15 +14,14 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_JIT_IRGEN_FUNC_PROLOGUE_H
-#define incl_HPHP_JIT_IRGEN_FUNC_PROLOGUE_H
+#pragma once
 
 #include "hphp/runtime/vm/func.h"
 #include "hphp/runtime/vm/jit/types.h"
 
 #include <cstdint>
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 
 struct SSATmp;
 
@@ -32,19 +31,69 @@ struct IRGS;
 
 ///////////////////////////////////////////////////////////////////////////////
 
-void emitPrologueLocals(IRGS& env, uint32_t argc,
-                        const Func* func, SSATmp* closureOpt);
+/*
+ * To facilitate tight code generation for prologues, the definition of namedArgNames
+ * is subtle. A nullptr (as opposed to a cns(env, nullptr)) value indicates that we don't
+ * know the namedArgNames value, and instead must rely on the prologue flags to check for
+ * the existence of any named args. That situation occurs in the prologues of functions
+ * without named args. This behavior allows us to immediately release the named arg names
+ * register in the common case.
+ */
+void emitCalleeNamedArgChecks(IRGS& env, const Func* callee, uint32_t posArgc,
+                              SSATmp* prologueFlags, SSATmp* namedArgNames);
+/*
+ * Check for presence, count and wildcard match of generics.
+ *
+ * If `pushed' is true, generics are on the stack. Otherwise, generics may or
+ * may not be above the stack, depending on the prologueFlags.
+ *
+ * If `namedArgsAccountedInStack` is false, the generics checks will assume that the stack
+ * top is namedArgNames->size() lower than it should be.
+ *
+ * After this check, generics will be on the stack iff the function has reified
+ * generics.
+ */
+void emitCalleeGenericsChecks(IRGS& env, const Func* callee,
+                              SSATmp* prologueFlags, SSATmp* namedArgNames,
+                              bool pushed, bool namedArgsAccountedInStack);
 
-void emitFuncPrologue(IRGS& env, uint32_t argc, TransID transID);
+void emitCalleeArgumentArityChecks(IRGS& env, const Func* callee,
+                                   uint32_t& argc);
 
-void emitFuncBodyDispatch(IRGS& env, const DVFuncletsVec& dvs);
+void emitCalleeArgumentTypeChecks(IRGS& env, const Func* callee,
+                                  uint32_t argc, SSATmp* prologueCtx);
 
-void emitCalleeDynamicCallCheck(IRGS& env);
+void emitCalleeDynamicCallChecks(IRGS& env, const Func* callee,
+                                SSATmp* prologueFlags);
 
-void emitCallMCheck(IRGS& env);
+void emitCalleeCoeffectChecks(IRGS& env, const Func* callee,
+                              SSATmp* prologueFlags, SSATmp* providedCoeffects,
+                              bool skipCoeffectsCheck,
+                              uint32_t argc, SSATmp* prologueCtx);
+
+void emitCalleeRecordFuncCoverage(IRGS& env, const Func* callee);
+
+void emitInitFuncInputs(IRGS& env, const Func* callee, uint32_t argc);
+
+void emitInitFuncInputsInline(IRGS& env, const Func* callee, uint32_t argc,
+                              SSATmp* fp);
+
+/* Pushes uninits for missing optional named params and re-arranges positionals
+ * and named args such that they're in the position the func entry expects.
+ * Expects and reified generics and coeffects to be on the stack already.
+ * Returns true if any uninits were emitted.
+ */
+bool emitInitFuncNamedParams(IRGS& env, const Func* callee,
+                             uint32_t posArgc, const ArrayData* namedArgNames);
+
+
+void emitFuncPrologue(IRGS& env, const Func* callee, uint32_t argc,
+                      TransID transID);
+
+void emitFuncEntry(IRGS& env);
+void emitNamedParamsFuncEntry(IRGS& env);
 
 ///////////////////////////////////////////////////////////////////////////////
 
-}}}
+}}
 
-#endif // incl_HPHP_JIT_IRGEN_FUNC_PROLOGUE_H

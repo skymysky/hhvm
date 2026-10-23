@@ -1,0 +1,17 @@
+error: Parsing[1002] Variadic parameters cannot be marked readonly [1]
+
+variadic_readonly.php:3:28
+1 | <?hh
+2 | 
+3 | function foo((function(int,readonly string...):void) $f, readonly bool... $args):void { }
+  |                            ^^^^^^^^^^^^^^^^^^ [1]
+
+error: Parsing[1002] Variadic parameters cannot be marked readonly [1]
+
+variadic_readonly.php:3:58
+1 | <?hh
+2 | 
+3 | function foo((function(int,readonly string...):void) $f, readonly bool... $args):void { }
+  |                                                          ^^^^^^^^^^^^^^^^^^^^^^ [1]
+
+2 errors found

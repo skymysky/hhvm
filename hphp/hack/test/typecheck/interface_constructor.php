@@ -1,4 +1,5 @@
-<?hh // strict
+////file1.php
+<?hh
 /**
  * Copyright (c) 2014, Facebook, Inc.
  * All rights reserved.
@@ -13,4 +14,6 @@ interface Foo {
   public function __construct(int $x);
 }
 
+////file2.php
+<?hh
 class A implements Foo {}

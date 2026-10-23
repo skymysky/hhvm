@@ -1,0 +1,16 @@
+error: Typing[4305] Invalid reified hint [1]
+-> This is the late static bound `this` type, it cannot be used as a reified type argument [1]
+-> `T` is reified [2]
+
+valid_targ_this.php:6:21
+1 | <?hh
+2 | 
+3 | class C<reify T> {}
+  |               ^ [2]
+4 | 
+5 | class X {
+6 |   const type X1 = C<this>;
+  |                     ^^^^ [1]
+7 | }
+
+1 error found

@@ -1,6 +1,6 @@
-<?php
+<?hh
 
-function thrower() {
+function thrower() :mixed{
   for ($i = 0; $i < 10; ++$i) mt_rand();  // make it not-inlinable
   // Make hhbbc not prove it's going to throw:
   for ($i = 0; $i < 10 + mt_rand() ? 1 : 0; ++$i) {
@@ -10,7 +10,7 @@ function thrower() {
   return false;
 }
 
-function better_handle_exceptions_if_you_inline() {
+function better_handle_exceptions_if_you_inline() :mixed{
   try {
     thrower();
   } catch (Exception $x) {
@@ -19,7 +19,7 @@ function better_handle_exceptions_if_you_inline() {
   }
 }
 
-function main() {
+function main() :mixed{
   // Generate a prologue for thrower:
   try { thrower(); } catch (Exception $x) {}
 
@@ -36,4 +36,8 @@ function main() {
   var_dump($z);
 }
 
+
+<<__EntryPoint>>
+function main_try_catch_call_001() :mixed{
 main();
+}

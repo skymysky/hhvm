@@ -18,10 +18,14 @@
 
 #include "hphp/util/embedded-data.h"
 
+#include <folly/Conv.h>
 #include <folly/Range.h>
+
 #include <atomic>
+#include <cstdlib>
 #include <mutex>
 #include <string>
+#include <unistd.h>
 
 namespace HPHP {
 ////////////////////////////////////////////////////////////////////////////////
@@ -33,6 +37,7 @@ std::mutex mtx;
 std::string repoSchema;
 std::string compiler;
 std::string buildid;
+int64_t timestamp;
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -70,7 +75,22 @@ void readBuildInfo() {
   compiler = get("compiler_id");
   buildid = get("build_id");
 
+  try {
+    timestamp = std::stoll(get("compiler_ts"));
+  } catch(std::exception& ) {
+    timestamp = 0;
+  }
+
   inited.store(true, std::memory_order_release);
+}
+
+template<typename ValueFn>
+void replacePlaceholder(std::string& target,
+                        const char* placeholder,
+                        ValueFn&& value) {
+  auto const pos = target.find(placeholder);
+  if (pos == std::string::npos) return;
+  target.replace(pos, strlen(placeholder), value());
 }
 
 }
@@ -87,21 +107,37 @@ folly::StringPiece compilerId() {
   return compiler;
 }
 
+int64_t compilerTimestamp() {
+  readBuildInfo();
+  return timestamp;
+}
+
 folly::StringPiece buildId() {
   readBuildInfo();
   return buildid;
 }
 
-const char* kSchemaPlaceholder = "%{schema}";
-
-std::string insertSchema(const char* path) {
-  assert(strstr(repoSchemaId().begin(), kSchemaPlaceholder) == nullptr);
-  std::string result = path;
-  size_t idx;
-  if ((idx = result.find(kSchemaPlaceholder)) != std::string::npos) {
-    result.replace(idx, strlen(kSchemaPlaceholder), repoSchemaId().begin());
+void replacePlaceholders(std::string& s,
+                         const hphp_fast_string_map<std::string>& replaces) {
+  replacePlaceholder(s, "%{schema}", [] { return repoSchemaId().begin(); });
+  replacePlaceholder(s, "%{euid}", [] {
+    return folly::to<std::string>(geteuid());
+  });
+  replacePlaceholder(s, "%{user}", [] {
+    auto user = getenv("SUDO_USER");
+    if (user == nullptr) user = getenv("USER");
+    return user != nullptr ? user : "%{user}";
+  });
+  replacePlaceholder(s, "%{pid}", [] {
+    return folly::to<std::string>(getpid());
+  });
+  for (auto& p : replaces) {
+    replacePlaceholder(s, p.first.data(), [&] { return p.second; });
   }
-  return result;
+}
+
+void replacePlaceholders(std::string& s) {
+  replacePlaceholders(s, {});
 }
 
 ////////////////////////////////////////////////////////////////////////////////

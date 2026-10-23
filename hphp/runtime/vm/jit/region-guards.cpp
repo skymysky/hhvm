@@ -21,6 +21,7 @@
 #include <folly/Hash.h>
 
 #include "hphp/util/assertions.h"
+#include "hphp/util/configs/jit.h"
 #include "hphp/util/trace.h"
 
 #include "hphp/runtime/vm/jit/containers.h"
@@ -32,20 +33,20 @@
 
 namespace HPHP { namespace jit {
 
-TRACE_SET_MOD(pgo);
+TRACE_SET_MOD(pgo)
 
 //////////////////////////////////////////////////////////////////////
 
 namespace {
 
 struct BlockData {
-  RegionDesc::BlockId              blockId;
-  RegionDesc::Block::GuardedLocVec guards;
-  jit::vector<Type>                origTypes;
-  bool                             relaxed; // block had some type guard relaxed
-  bool                             deleted; // block became unnecessary
-  bool                             merged; // another block was merged into this
-  int64_t                          weight;
+  RegionDesc::BlockId blockId;
+  GuardedLocations    guards;
+  jit::vector<Type>   origTypes;
+  bool                relaxed; // block had some type guard relaxed
+  bool                deleted; // block became unnecessary
+  bool                merged; // another block was merged into this
+  int64_t             weight;
 };
 
 using BlockDataVec = jit::vector<BlockData>;
@@ -117,24 +118,22 @@ LocationTypeWeights findLocationTypes(const BlockDataVec& blockData) {
 
 /*
  * We consider relaxation profitable if there's not a single dominating type
- * that accounts for RuntimeOption::EvalJitPGORelaxPercent or more of the time
- * during profiling.  Besides that, if `guardCategory' is DataTypeCountness, we
- * also consider relaxing all the way to Gen, in which case `guardCategory' is
- * updated to DataTypeGeneric.
+ * that accounts for Cfg::Jit::PGORelaxPercent or more of the time
+ * during profiling.
  */
 bool relaxIsProfitable(const jit::hash_map<Type,int64_t>& typeWeights,
                        Type                               guardType,
                        DataTypeCategory&                  guardCategory) {
-  assertx(guardType <= TGen);
+  assertx(guardType <= TCell);
   auto relaxedType = relaxType(guardType, guardCategory);
 
-  int64_t totalWgt   = 0; // sum of all the block weights
+  DEBUG_ONLY int64_t totalWgt   = 0; // sum of all the block weights
   int64_t relaxWgt   = 0; // total weight if we relax guardType w/ guardCategory
   int64_t noRelaxWgt = 0; // total weight if we don't relax guardType at all
   for (auto& typeWgt : typeWeights) {
     auto type = typeWgt.first;
     auto weight = typeWgt.second;
-    assertx(type <= TGen);
+    assertx(type <= TCell);
     const bool fitsConstraint = guardCategory == DataTypeSpecialized
       ? type.isSpecialized()
       : typeFitsConstraint(type, guardCategory);
@@ -144,40 +143,13 @@ bool relaxIsProfitable(const jit::hash_map<Type,int64_t>& typeWeights,
     if (relaxType(type, guardCategory) == relaxedType) relaxWgt += weight;
   }
 
-  // Consider relaxing Countness to Gen, which we do if the sum of the weights
-  // of all the blocks that would pass the relaxed guard would be less than a
-  // certain threshold.  We use different thresholds for counted versus
-  // uncounted types, because incref/decref are much more expensive for Gen than
-  // for uncounted (where it's a no-op).  For counted types, the difference
-  // between generic and specialized incref/decrefs is much smaller, so we're
-  // willing to relax to Gen more often for counted types.
-  bool profitable = false;
-  auto newCategory = guardCategory;
-  if (guardCategory == DataTypeCountness) {
-    const auto cntPct = RuntimeOption::EvalJitPGORelaxCountedToGenPercent;
-    const auto uncPct = RuntimeOption::EvalJitPGORelaxUncountedToGenPercent;
-    if ((guardType.maybe(TCounted)  && relaxWgt * 100 < cntPct * totalWgt) ||
-        (!guardType.maybe(TCounted) && relaxWgt * 100 < uncPct * totalWgt)) {
-      newCategory = DataTypeGeneric;
-      profitable = true;
-    }
-  }
-
-  // If we didn't relax to Gen, consider relaxing to the input guardCategory.
-  if (!profitable) {
-    if (noRelaxWgt * 100 < relaxWgt * RuntimeOption::EvalJitPGORelaxPercent) {
-      profitable = true;
-    }
-  }
-
+  // Consider relaxing to the input guardCategory.
+  auto const profitable =
+    (noRelaxWgt * 100 < relaxWgt * Cfg::Jit::PGORelaxPercent);
   FTRACE(3,
          "relaxIsProfitable({}, {}): noRelaxWgt={} ; relaxWgt={} ; totalWgt={} "
-         "=> ({}, {})\n",
-         guardType, guardCategory, noRelaxWgt, relaxWgt, totalWgt,
-         profitable, newCategory
-        );
-
-  guardCategory = newCategory;
+         "=> {}\n",
+         guardType, guardCategory, noRelaxWgt, relaxWgt, totalWgt, profitable);
   return profitable;
 }
 
@@ -202,7 +174,7 @@ void relaxGuards(BlockDataVec& blockData) {
       }
 
       auto oldType = guard.type;
-      always_assert_flog(oldType <= TGen, "oldType = {}", oldType);
+      always_assert_flog(oldType <= TCell, "oldType = {}", oldType);
       guard.type = relaxType(guard.type, guard.category);
       if (oldType != guard.type) {
         bd.relaxed = true;
@@ -219,8 +191,7 @@ void relaxGuards(BlockDataVec& blockData) {
  * Determine whether two blocks are equivalent, which entails:
  *
  *  1) Their type guards are identical after relaxation;
- *  2) Their type predictions are identical;
- *  3) Their sets of successor region blocks are identical.
+ *  2) Their sets of successor region blocks are identical.
  */
 bool equivalent(const BlockData&  bd1,
                 const BlockData&  bd2,
@@ -234,12 +205,7 @@ bool equivalent(const BlockData&  bd1,
   auto const block1 = region.block(bd1.blockId);
   auto const block2 = region.block(bd2.blockId);
 
-  // 2) Compare input type predictions
-  const auto& predictedTypes1 = block1->typePredictions();
-  const auto& predictedTypes2 = block2->typePredictions();
-  if (predictedTypes1 != predictedTypes2) return false;
-
-  // 3) Compare the sets of successor blocks
+  // 2) Compare the sets of successor blocks
   if (region.succs(bd1.blockId) != region.succs(bd2.blockId)) return false;
 
   return true;
@@ -368,12 +334,15 @@ void updateWeights(const RegionDesc&   region,
 }
 
 /*
- * This function sorts the `blockData' vector in decreasing order or
- * weight, and keeping the deleted ones at the end.
+ * This function sorts the `blockData' vector in decreasing order or weight,
+ * while keeping the region entry first and the deleted blocks at the end.
  */
-void sortBlockData(BlockDataVec& blockData) {
+void sortBlockData(BlockDataVec& blockData, RegionDesc::BlockId entryId) {
   std::sort(blockData.begin(), blockData.end(),
             [&](const BlockData& bd1, const BlockData& bd2) {
+              const auto isEntry1 = bd1.blockId == entryId;
+              const auto isEntry2 = bd2.blockId == entryId;
+              if (isEntry1 != isEntry2) return isEntry1;
               if (bd1.deleted != bd2.deleted) return bd1.deleted < bd2.deleted;
               return bd1.weight > bd2.weight;
             });
@@ -411,7 +380,7 @@ void updateRegion(RegionDesc&         region,
     // Actually update the type guards.
     newBlock->clearPreConditions();
     for (auto& guard : bd.guards) {
-      if (guard.type < TGen) {
+      if (guard.type < TCell) {
         newBlock->addPreCondition(guard);
       }
     }
@@ -517,27 +486,27 @@ void optimizeChain(RegionDesc&         region,
                    RegionDesc::BlockId rootId,
                    const ProfData&     profData) {
   auto blockData = createBlockData(region, rootId, profData);
-  FTRACE(2, "optimizeGuards(rootId {}): before relaxGuards:\n{}\n",
+  FTRACE(2, "optimizeChain(rootId {}): before relaxGuards:\n{}\n",
          rootId, show(blockData));
   relaxGuards(blockData);
 
-  FTRACE(2, "optimizeGuards(rootId {}): before removeDuplicates:\n{}\n",
+  FTRACE(2, "optimizeChain(rootId {}): before removeDuplicates:\n{}\n",
          rootId, show(blockData));
   removeDuplicates(blockData, region);
 
-  FTRACE(2, "optimizeGuards(rootId {}): before unrelaxGuards:\n{}\n",
+  FTRACE(2, "optimizeChain(rootId {}): before unrelaxGuards:\n{}\n",
          rootId, show(blockData));
   unrelaxGuards(blockData);
 
-  FTRACE(2, "optimizeGuards(rootId {}): before updateWeights:\n{}\n",
+  FTRACE(2, "optimizeChain(rootId {}): before updateWeights:\n{}\n",
          rootId, show(blockData));
   updateWeights(region, rootId, blockData, profData);
 
-  FTRACE(2, "optimizeGuards(rootId {}): before sortBlockData:\n{}\n",
+  FTRACE(2, "optimizeChain(rootId {}): before sortBlockData:\n{}\n",
          rootId, show(blockData));
-  sortBlockData(blockData);
+  sortBlockData(blockData, region.entry()->id());
 
-  FTRACE(2, "optimizeGuards(rootId {}): before updateRegion:\n{}\n",
+  FTRACE(2, "optimizeChain(rootId {}): before updateRegion:\n{}\n",
          rootId, show(blockData));
   updateRegion(region, blockData, rootId);
 }
@@ -554,50 +523,6 @@ void optimizeProfiledGuards(RegionDesc& region, const ProfData& profData) {
   auto chainRoots = findRetransChainRoots(region);
   for (auto rootId : chainRoots) {
     optimizeChain(region, rootId, profData);
-  }
-}
-
-//////////////////////////////////////////////////////////////////////
-
-void optimizeGuards(RegionDesc& region, bool simple) {
-  for (auto block : region.blocks()) {
-    bool relaxed = false;
-    RegionDesc::Block::GuardedLocVec newPreConds;
-    auto& oldPreConds = block->typePreConditions();
-
-    for (auto& preCond : oldPreConds) {
-      assertx(preCond.type <= TGen);
-      auto category = preCond.category;
-      if (simple && category > DataTypeGeneric && category < DataTypeSpecific) {
-        category = DataTypeSpecific;
-      }
-      auto newType = relaxType(preCond.type, category);
-
-      if (newType != TGen) {
-        newPreConds.push_back({preCond.location, newType, preCond.category});
-      }
-
-      if (newType != preCond.type) {
-        assertx(preCond.type < newType);
-        FTRACE(1, "optimizeGuard: Block {}, {} [{}]: {} => {}\n",
-               block->id(), show(preCond.location),
-               typeCategoryName(category), preCond.type, newType);
-        relaxed = true;
-      }
-    }
-
-    if (relaxed) {
-      // Note that we don't update the original block, but instead
-      // make a copy and update it instead.  This allows the `region'
-      // to originally contain blocks stored in ProfData, which may be
-      // reused later with different guard-relaxation decisions.
-      auto newBlock = std::make_shared<RegionDesc::Block>(*block);
-      newBlock->clearPreConditions();
-      for (auto& preCond : newPreConds) {
-        newBlock->addPreCondition(preCond);
-      }
-      region.replaceBlock(block->id(), newBlock);
-    }
   }
 }
 

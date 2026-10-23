@@ -1,7 +1,19 @@
-File "fake_members11.php", line 22, characters 7-19:
-You are trying to access an element of this container but the container could be null.  (Typing[4063])
-File "fake_members11.php", line 13, characters 11-22:
-This is what makes me believe it can be null
-File "fake_members11.php", line 21, characters 7-29:
-All the local information about the member foo has been invalidated during this call.
-This is a limitation of the type-checker, use a local if that's the problem.
+error: Typing[4370] This is not an object of type `KeyedContainer`, this is a nullable type [1]
+-> Definition is here [2]
+
+fake_members11.php:22:7
+11 | 
+12 | class Bar1 {
+13 |   private ?Vector<int> $foo;
+   |           ^^^^^^^^^^^^ [2]
+14 | 
+15 |   public function __construct(?Vector<int> $foo) {
+   :
+20 |     if ($this->foo !== null) {
+21 |       random_other_function();
+22 |       $this->foo[0] = 0;
+   |       ^^^^^^^^^^^^^^^^^ [1]
+23 |     }
+24 |   }
+
+1 error found

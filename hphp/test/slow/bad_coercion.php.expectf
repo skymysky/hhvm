@@ -1,12 +1,11 @@
-bool(false)
-bool(false)
+Warning: Argument 1 passed to is_nan() must be an instance of float, int given in %s/bad_coercion.php on line %d
 
-Warning: is_nan() expects parameter 1 to be double, string given in %s on line %d
-NULL
+Warning: Argument 1 passed to is_nan() must be an instance of float, string given in %s/bad_coercion.php on line %d
 
-Warning: is_nan() expects parameter 1 to be double, string given in %s on line %d
-NULL
-bool(false)
+Warning: Argument 1 passed to is_nan() must be an instance of float, string given in %s/bad_coercion.php on line %d
 
-Warning: is_nan() expects parameter 1 to be double, string given in %s on line %d
-NULL
+Warning: Argument 1 passed to is_nan() must be an instance of float, string given in %s/bad_coercion.php on line %d
+
+Warning: Argument 1 passed to is_nan() must be an instance of float, string given in %s/bad_coercion.php on line %d
+
+Warning: Argument 1 passed to is_nan() must be an instance of float, string given in %s/bad_coercion.php on line %d

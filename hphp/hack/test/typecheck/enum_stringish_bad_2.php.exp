@@ -1,0 +1,22 @@
+error: Typing[4110] Invalid return type [1]
+-> Expected `Stringish` [2]
+-> But got `int` [3]
+->   by the definition of `E` [4]
+
+enum_stringish_bad_2.php:10:10
+ 2 | // Copyright 2004-present Facebook. All Rights Reserved.
+ 3 | 
+ 4 | enum E: int as int {
+   |                ^^^ [4]
+ 5 |   FOO = 1;
+ 6 |   BAR = 2;
+ 7 | }
+ 8 | 
+ 9 | function test(E $x): Stringish {
+   |               ^ [3]
+   |                      ^^^^^^^^^ [2]
+10 |   return $x;
+   |          ^^ [1]
+11 | }
+
+1 error found

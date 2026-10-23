@@ -1,65 +1,69 @@
 <?hh
-function test($x) {
+function test($x) :mixed{
   try {
-    var_dump($x[5] = 7);
+    $x[5] = 7; var_dump($x[5]);
   } catch (Exception $e) {
     echo $e->getMessage(), "\n";
   }
   try {
-    var_dump($x['a'] = 'c');
+    $x['a'] = 'c'; var_dump($x['a']);
   } catch (Exception $e) {
     echo $e->getMessage(), "\n";
   }
   try {
-    var_dump(++$x[5]);
+    ++$x[5]; var_dump($x[5]);
   } catch (Exception $e) {
     echo $e->getMessage(), "\n";
   }
   try {
-    var_dump(++$x['a']);
+    ++$x['a']; var_dump($x['a']);
   } catch (Exception $e) {
     echo $e->getMessage(), "\n";
   }
   try {
-    var_dump($x[5] += 3);
+    $x[5] += 3; var_dump($x[5]);
   } catch (Exception $e) {
     echo $e->getMessage(), "\n";
   }
   try {
-    var_dump($x['a'] .= 'd');
+    $x['a'] .= 'd'; var_dump($x['a']);
   } catch (Exception $e) {
     echo $e->getMessage(), "\n";
   }
   try {
-    var_dump($x[''][0] = 1);
+    $x[''][0] = 1; var_dump($x[''][0]);
   } catch (Exception $e) {
     echo $e->getMessage(), "\n";
   }
   try {
-    var_dump($x[''][] = 1);
+    $x[''][] = 1; var_dump(1);
   } catch (Exception $e) {
     echo $e->getMessage(), "\n";
   }
   try {
-    var_dump($x['']->prop = 123);
+    $x['']->prop = 123; var_dump(123);
   } catch (Exception $e) {
     echo $e->getMessage(), "\n";
   }
   try {
-    var_dump($x[] = 123);
+    $t = 123; $x[] = $t; var_dump($t);
   } catch (Exception $e) {
     echo $e->getMessage(), "\n";
   }
   try {
-    var_dump($y = $x['a'][0]);
+    $y = $x['a'][0]; var_dump($y);
   } catch (Exception $e) {
     echo $e->getMessage(), "\n";
   }
   var_dump($x);
 }
-function main() {
+function main() :mixed{
   test(Set {5, 'a', 0, ''});
   echo "----\n";
   test(ImmSet {5, 'a', 0, ''});
 }
+
+<<__EntryPoint>>
+function main_set_invalid_operations() :mixed{
 main();
+}

@@ -1,0 +1,18 @@
+error: Typing[4038] Invalid format string `%=s` in `"%=s"` [1]
+-> You can add a new format specifier by adding `format_eof()` to `X` [2]
+
+printf9.php:34:5
+18 |   public function format_0x25(): Y;
+19 |   public function format_upcase_n(int $i): string;
+20 |   public function format_wild(): X;
+   |                                  ^ [2]
+21 | }
+22 | 
+   :
+32 |   g('x %=us %=N. %=R=m#=Z##s', 'foo', 42, 'bar');
+33 |   g('%=s=N %=%%%.s %=ss%N', -5, 'baz', 'qux', 6.);
+34 |   g('%=s'); // error
+   |     ^^^^^ [1]
+35 | }
+
+1 error found

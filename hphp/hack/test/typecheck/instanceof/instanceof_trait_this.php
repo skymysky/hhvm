@@ -2,8 +2,8 @@
 
 trait Tr {
 
-  public static function perhaps($x): ?this {
-    if ($x instanceof static) {
+  public static function perhaps(mixed $x): ?this {
+    if ($x is this) {
       hh_show($x);
       return $x;
     }

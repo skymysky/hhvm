@@ -1,5 +1,4 @@
-#ifndef incl_HPHP_EXT_COLLECTIONS_SET_H
-#define incl_HPHP_EXT_COLLECTIONS_SET_H
+#pragma once
 
 #include "hphp/runtime/ext/collections/ext_collections.h"
 #include "hphp/runtime/ext/collections/hash-collection.h"
@@ -23,7 +22,7 @@ struct SetIterator;
  * any PHP-land class. That job is delegated to its c_-prefixed child classes.
  */
 struct BaseSet : HashCollection {
-  void addAllKeysOf(Cell container);
+  void addAllKeysOf(TypedValue container);
   void addAll(const Variant& t);
 
   void init(const Variant& t) {
@@ -37,8 +36,8 @@ protected:
 
   void addRaw(int64_t k);
   void addRaw(StringData* k);
-  void addRaw(Cell tv) {
-    assertx(!isRefType(tv.m_type));
+  void addRaw(TypedValue tv) {
+    tv = tvClassToString(tv);
     if (tv.m_type == KindOfInt64) {
       addRaw(tv.m_data.num);
     } else if (isStringType(tv.m_type)) {
@@ -47,7 +46,7 @@ protected:
       throwBadValueType();
     }
   }
-  void addRaw(const Variant& v) { addRaw(*v.asCell()); }
+  void addRaw(const Variant& v) { addRaw(*v.asTypedValue()); }
 
 public:
   /*
@@ -55,8 +54,8 @@ public:
    */
   void add(int64_t k);
   void add(StringData* k);
-  void add(Cell tv) {
-    assertx(!isRefType(tv.m_type));
+  void add(TypedValue tv) {
+    tv = tvClassToString(tv);
     if (tv.m_type == KindOfInt64) {
       add(tv.m_data.num);
     } else if (isStringType(tv.m_type)) {
@@ -65,7 +64,19 @@ public:
       throwBadValueType();
     }
   }
-  void add(const Variant& v) { add(*v.asCell()); }
+  void add(const Variant& v) { add(*v.asTypedValue()); }
+
+  /*
+   * Append an element to the Set, increffing it if it's refcounted.
+   *
+   * When there is a conflict, the add() API is supposed to replace the
+   * existing element with the new element in place. However since Sets
+   * currently only support integer and string elements, there is no way
+   * user code can really tell whether the existing element was replaced
+   * so for efficiency we do nothing.
+   */
+  void SetIntMoveSkipConflict(int64_t k, TypedValue v);
+  void SetStrMoveSkipConflict(StringData* k, TypedValue v);
 
   /*
    * Prepend an element to the Set, increffing it if it's refcounted.
@@ -73,6 +84,7 @@ public:
   void addFront(int64_t k);
   void addFront(StringData* k);
   void addFront(TypedValue tv) {
+    tv = tvClassToString(tv);
     if (tv.m_type == KindOfInt64) {
       addFront(tv.m_data.num);
     } else if (isStringType(tv.m_type)) {
@@ -92,18 +104,25 @@ public:
     std::is_base_of<BaseSet, TSet>::value, TSet*>::type
   static Clone(ObjectData* obj);
 
-  static Array ToArray(const ObjectData* obj);
+  template <IntishCast intishCast = IntishCast::None>
+  static Array ToArray(const ObjectData* obj) {
+    check_collection_cast_to_array();
+    return const_cast<BaseSet*>(
+      static_cast<const BaseSet*>(obj)
+    )->toPHPArrayImpl<intishCast>();
+  }
+
   static bool ToBool(const ObjectData* obj);
 
   template <bool throwOnMiss>
   static TypedValue* OffsetAt(ObjectData* obj, const TypedValue* key) {
-    assertx(!isRefType(key->m_type));
     auto set = static_cast<BaseSet*>(obj);
+    auto const ktv = tvClassToString(*key);
     ssize_t p;
-    if (key->m_type == KindOfInt64) {
-      p = set->find(key->m_data.num, hash_int64(key->m_data.num));
-    } else if (isStringType(key->m_type)) {
-      p = set->find(key->m_data.pstr, key->m_data.pstr->hash());
+    if (ktv.m_type == KindOfInt64) {
+      p = set->find(ktv.m_data.num, hash_int64(ktv.m_data.num));
+    } else if (isStringType(ktv.m_type)) {
+      p = set->find(ktv.m_data.pstr, ktv.m_data.pstr->hash());
     } else {
       BaseSet::throwBadValueType();
     }
@@ -113,15 +132,14 @@ public:
     if (!throwOnMiss) {
       return nullptr;
     }
-    if (key->m_type == KindOfInt64) {
-      collections::throwUndef(key->m_data.num);
+    if (ktv.m_type == KindOfInt64) {
+      collections::throwUndef(ktv.m_data.num);
     } else {
-      assertx(isStringType(key->m_type));
-      collections::throwUndef(key->m_data.pstr);
+      assertx(isStringType(ktv.m_type));
+      collections::throwUndef(ktv.m_data.pstr);
     }
   }
   static bool OffsetIsset(ObjectData* obj, const TypedValue* key);
-  static bool OffsetEmpty(ObjectData* obj, const TypedValue* key);
   static bool OffsetContains(ObjectData* obj, const TypedValue* key);
   static void OffsetUnset(ObjectData* obj, const TypedValue* key);
 
@@ -134,19 +152,6 @@ protected:
     vec->init(VarNR(this));
     return Object{std::move(vec)};
   }
-
-  template<class TSet, bool useKey>
-  typename std::enable_if<
-    std::is_base_of<BaseSet, TSet>::value, Object>::type
-  php_map(const Variant& callback);
-
-  template<class TSet, bool useKey>
-  typename std::enable_if<
-    std::is_base_of<BaseSet, TSet>::value, Object>::type
-  php_filter(const Variant& callback);
-
-  template<bool useKey>
-  Object php_retain(const Variant& callback);
 
   template<class TSet>
   typename std::enable_if<
@@ -161,17 +166,7 @@ protected:
   template<class TSet>
   typename std::enable_if<
     std::is_base_of<BaseSet, TSet>::value, Object>::type
-  php_takeWhile(const Variant& fn);
-
-  template<class TSet>
-  typename std::enable_if<
-    std::is_base_of<BaseSet, TSet>::value, Object>::type
   php_skip(const Variant& n);
-
-  template<class TSet>
-  typename std::enable_if<
-    std::is_base_of<BaseSet, TSet>::value, Object>::type
-  php_skipWhile(const Variant& fn);
 
   template<class TSet>
   typename std::enable_if<
@@ -199,7 +194,7 @@ protected:
     if (container.isNull()) {
       return Object(req::make<TSet>());
     }
-    const auto& cellContainer = container_as_cell(container);
+    auto const& cellContainer = container_as_tv(container);
     auto target = req::make<TSet>();
     target->addAllKeysOf(cellContainer);
     return Object(std::move(target));
@@ -220,7 +215,7 @@ protected:
     ssize_t pos_limit = ad->iter_end();
     for (ssize_t pos = ad->iter_begin(); pos != pos_limit;
          pos = ad->iter_advance(pos)) {
-      set->addRaw(tvToCell(ad->atPos(pos)));
+      set->addRaw(ad->nvGetVal(pos));
     }
     set->shrinkIfCapacityTooHigh(oldCap); // ... and shrink if we were wrong
     return Object(std::move(set));
@@ -228,12 +223,13 @@ protected:
 
   Object getIterator();
   bool php_contains(const Variant& key) {
-    DataType t = key.getType();
+    auto const ktv = tvClassToString(*key.asTypedValue());
+    DataType t = type(ktv);
     if (t == KindOfInt64) {
-      return contains(key.toInt64());
+      return contains(ktv.m_data.num);
     }
     if (isStringType(t)) {
-      return contains(key.getStringData());
+      return contains(ktv.m_data.pstr);
     }
     throwBadValueType();
   }
@@ -268,7 +264,7 @@ private:
 /////////////////////////////////////////////////////////////////////////////
 // c_Set
 
-struct c_Set : BaseSet {
+struct c_Set : BaseSet, SystemLib::ClassLoader<"HH\\Set"> {
   DECLARE_COLLECTIONS_CLASS(Set)
 
  public:
@@ -287,50 +283,43 @@ struct c_Set : BaseSet {
   friend struct collections::CollectionsExtension;
 
   Object getImmutableCopy();
-  Object php_add(const Variant& val) {
+  void php_add(const Variant& val) {
     add(val);
-    return Object{this};
   }
-  Object php_addAll(const Variant& it) {
+  void php_addAll(const Variant& it) {
     addAll(it);
-    return Object{this};
   }
-  Object php_addAllKeysOf(const Variant& container) {
+  void php_addAllKeysOf(const Variant& container) {
     if (!container.isNull()) {
-      const auto& containerCell = container_as_cell(container);
+      auto const& containerCell = container_as_tv(container);
       addAllKeysOf(containerCell);
     }
-    return Object{this};
   }
-  Object php_clear() {
-    clear();
-    return Object{this};
-  }
-  Object php_remove(const Variant& key) {
-    DataType t = key.getType();
+  void php_remove(const Variant& key) {
+    auto const ktv = tvClassToString(*key.asTypedValue());
+    DataType t = type(ktv);
     if (t == KindOfInt64) {
-      remove(key.toInt64());
+      remove(ktv.m_data.num);
     } else if (isStringType(t)) {
-      remove(key.getStringData());
+      remove(ktv.m_data.pstr);
     } else {
       throwBadValueType();
     }
-    return Object{this};
   }
-  Object php_removeAll(const Variant& it) {
+  void php_removeAll(const Variant& it) {
     size_t sz;
     ArrayIter iter = getArrayIterHelper(it, sz);
     for (; iter; ++iter) {
       Variant v = iter.second();
-      if (v.isInteger()) {
-        remove(v.toInt64());
-      } else if (v.isString()) {
-        remove(v.getStringData());
+      auto const vtv = tvClassToString(*v.asTypedValue());
+      if (type(vtv) == KindOfInt64) {
+        remove(vtv.m_data.num);
+      } else if (isStringType(type(vtv))) {
+        remove(vtv.m_data.pstr);
       } else {
         throwBadValueType();
       }
     }
-    return Object{this};
   }
   void php_reserve(int64_t cap) {
     if (UNLIKELY(cap < 0)) {
@@ -345,7 +334,7 @@ struct c_Set : BaseSet {
 ///////////////////////////////////////////////////////////////////////////////
 // class ImmSet
 
-struct c_ImmSet : BaseSet {
+struct c_ImmSet : BaseSet, SystemLib::ClassLoader<"HH\\ImmSet"> {
   DECLARE_COLLECTIONS_CLASS(ImmSet)
 
   explicit c_ImmSet()
@@ -361,10 +350,7 @@ struct c_ImmSet : BaseSet {
 namespace collections {
 /////////////////////////////////////////////////////////////////////////////
 
-extern const StaticString
-  s_SetIterator;
-
-struct SetIterator {
+struct SetIterator : SystemLib::ClassLoader<"SetIterator"> {
   SetIterator() {}
   SetIterator(const SetIterator& src) = delete;
   SetIterator& operator=(const SetIterator& src) {
@@ -375,9 +361,7 @@ struct SetIterator {
   ~SetIterator() {}
 
   static Object newInstance() {
-    static Class* cls = Unit::lookupClass(s_SetIterator.get());
-    assertx(cls);
-    return Object{cls};
+    return Object{classof()};
   }
 
   void setSet(BaseSet* mp) {
@@ -387,7 +371,7 @@ struct SetIterator {
 
   Variant current() const {
     auto st = m_obj.get();
-    if (!st->iter_valid(m_pos)) {
+    if (!st->iter_valid_and_not_tombstone(m_pos)) {
       throw_iterator_not_valid();
     }
     return tvAsCVarRef(st->iter_value(m_pos));
@@ -396,7 +380,7 @@ struct SetIterator {
   Variant key() const { return current(); }
 
   bool valid() const {
-    return m_obj->iter_valid(m_pos);
+    return m_obj->iter_valid_and_not_tombstone(m_pos);
   }
 
   void next() {
@@ -416,4 +400,3 @@ struct SetIterator {
 
 /////////////////////////////////////////////////////////////////////////////
 }}
-#endif

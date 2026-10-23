@@ -1,13 +1,18 @@
-<?php
+<?hh
+
 // Source php weakref extension
-$o = new StdClass;
+<<__EntryPoint>>
+function main_weakref_clone_acquire_count() :mixed{
+$o = new stdClass;
 $wr1 = new WeakRef($o);
 $wr1->acquire();
 $wr2 = clone $wr1;
 $wr2->release();
-unset($o);
+__hhvm_intrinsics\launder_value($o);
+$o = null;
 var_dump($wr1->valid());
 var_dump($wr2->valid());
 $wr1->release();
 var_dump($wr1->valid());
 var_dump($wr2->valid());
+}

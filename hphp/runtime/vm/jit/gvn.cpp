@@ -15,11 +15,14 @@
 */
 #include "hphp/runtime/vm/jit/opt.h"
 
+#include "hphp/runtime/base/perf-warning.h"
+
 #include "hphp/runtime/vm/jit/analysis.h"
 #include "hphp/runtime/vm/jit/block.h"
 #include "hphp/runtime/vm/jit/cfg.h"
 #include "hphp/runtime/vm/jit/containers.h"
 #include "hphp/runtime/vm/jit/ir-instruction.h"
+#include "hphp/runtime/vm/jit/mutation.h"
 #include "hphp/runtime/vm/jit/ssa-tmp.h"
 #include "hphp/runtime/vm/jit/state-vector.h"
 #include "hphp/runtime/vm/jit/pass-tracer.h"
@@ -28,11 +31,12 @@
 #include "hphp/util/dataflow-worklist.h"
 
 #include <sstream>
+#include <fmt/format.h>
 #include <folly/small_vector.h>
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 
-TRACE_SET_MOD(hhir_gvn);
+TRACE_SET_MOD(hhir_gvn)
 
 //////////////////////////////////////////////////////////////////////
 
@@ -185,26 +189,24 @@ bool supportsGVN(const IRInstruction* inst) {
   case Shr:
   case Floor:
   case Ceil:
-  case AddIntO:
-  case SubIntO:
   case MulIntO:
   case XorBool:
-  case ConvBoolToArr:
-  case ConvDblToArr:
-  case ConvIntToArr:
   case ConvDblToBool:
   case ConvIntToBool:
   case ConvBoolToDbl:
   case ConvIntToDbl:
   case ConvBoolToInt:
   case ConvDblToInt:
-  case ConvClsToCctx:
+  case ConvFuncPrologueFlagsToARFlags:
   case DblAsBits:
+  case IntAsPtrToElem:
+  case PtrToElemAsInt:
   case GtInt:
   case GteInt:
   case LtInt:
   case LteInt:
   case EqInt:
+  case EqClassId:
   case NeqInt:
   case CmpInt:
   case GtDbl:
@@ -223,13 +225,6 @@ bool supportsGVN(const IRInstruction* inst) {
   case SameStr:
   case NSameStr:
   case CmpStr:
-  case GtStrInt:
-  case GteStrInt:
-  case LtStrInt:
-  case LteStrInt:
-  case EqStrInt:
-  case NeqStrInt:
-  case CmpStrInt:
   case GtBool:
   case GteBool:
   case LtBool:
@@ -239,14 +234,8 @@ bool supportsGVN(const IRInstruction* inst) {
   case CmpBool:
   case SameObj:
   case NSameObj:
-  case SameVec:
-  case NSameVec:
-  case SameDict:
-  case NSameDict:
-  case EqKeyset:
-  case NeqKeyset:
-  case SameKeyset:
-  case NSameKeyset:
+  case SameArrLike:
+  case NSameArrLike:
   case GtRes:
   case GteRes:
   case LtRes:
@@ -255,7 +244,9 @@ bool supportsGVN(const IRInstruction* inst) {
   case NeqRes:
   case CmpRes:
   case EqCls:
+  case EqLazyCls:
   case EqFunc:
+  case EqFuncId:
   case EqStrPtr:
   case InstanceOf:
   case InstanceOfIface:
@@ -263,59 +254,114 @@ bool supportsGVN(const IRInstruction* inst) {
   case ExtendsClass:
   case InstanceOfBitmask:
   case NInstanceOfBitmask:
-  case InterfaceSupportsArr:
-  case InterfaceSupportsVec:
-  case InterfaceSupportsDict:
-  case InterfaceSupportsKeyset:
+  case InterfaceSupportsArrLike:
   case InterfaceSupportsStr:
   case InterfaceSupportsInt:
   case InterfaceSupportsDbl:
   case HasToString:
-  case IsType:
-  case IsNType:
+  case IsLegacyArrLike:
   case IsWaitHandle:
   case IsCol:
-  case IsDVArray:
   case LdRDSAddr:
-  case LdCtx:
-  case LdCctx:
-  case LdClsCtx:
-  case LdClsCctx:
+  case LdFrameThis:
+  case LdFrameCls:
   case LdClsCtor:
   case DefConst:
-  case DefCls:
   case LdCls:
   case LdClsCached:
   case LdClsInitData:
+  case LdClsFromClsMeth:
+  case LdSmashableFunc:
+  case LdFuncFromClsMeth:
+  case LdFuncInOutBits:
   case LdFuncVecLen:
   case LdClsMethod:
   case LdIfaceMethod:
   case LdPropAddr:
-  case LdClsPropAddrOrNull:
-  case LdClsPropAddrOrRaise:
+  case LdPublicFunc:
   case LdObjClass:
   case LdClsName:
-  case LdARNumParams:
+  case LdLazyClsName:
+  case LdEnumClassLabelName:
   case Mov:
   case LdContActRec:
   case LdAFWHActRec:
-  case LdPackedArrayDataElemAddr:
-  case LdStaticLoc:
+  case LdVecElemAddr:
   case OrdStr:
   case ChrInt:
   case CheckRange:
-  case CountArrayFast:
   case CountVec:
   case CountDict:
   case CountKeyset:
+  case BespokeGet:
+  case BespokeGetThrow:
+  case BespokeIterEnd:
+  case LdMonotypeDictTombstones:
+  case LdMonotypeDictKey:
+  case LdMonotypeDictVal:
+  case LdMonotypeVecElem:
+  case LdTypeStructureVal:
+  case LdTypeStructureValCns:
   case Select:
   case StrictlyIntegerConv:
+  case LookupSPropSlot:
+  case ConvPtrToLval:
+  case RaiseErrorOnInvalidIsAsExpressionType:
+  case LdUnitPerRequestFilepath:
+  case DirFromFilepath:
+  case AKExistsDict:
+  case AKExistsKeyset:
+  case DictGet:
+  case DictGetK:
+  case DictGetQuiet:
+  case DictIdx:
+  case DictIsset:
+  case DictIterEnd:
+  case KeysetGet:
+  case KeysetGetK:
+  case KeysetGetQuiet:
+  case KeysetIdx:
+  case KeysetIsset:
+  case KeysetIterEnd:
+  case CheckDictOffset:
+  case CheckKeysetOffset:
+  case CheckDictKeys:
+  case CheckArrayCOW:
+  case CheckMissingKeyInArrLike:
+  case LdFuncRequiredCoeffects:
+  case FuncHasAttr:
+  case ClassHasAttr:
+  case StructDictSlot:
+  case StructDictElemAddr:
+  case StructDictSlotInPos:
+  case LdStructDictKey:
+  case LdStructDictVal:
+  case LdClsPropAddrOrNull:
+  case LdClsPropAddrOrRaise:
+  case LdPtrIterKey:
+  case LdPtrIterVal:
+  case GetDictPtrIter:
+  case GetKeysetPtrIter:
+  case BespokeIterGetKey:
+  case BespokeIterGetVal:
     return true;
 
-  case SameArr:
-  case NSameArr:
-    return !RuntimeOption::EvalHackArrCompatDVCmpNotices;
+  case EqArrLike:
+  case NeqArrLike:
+    // Keyset equality comparisons never re-enter or throw
+    return inst->src(0)->type() <= TKeyset && inst->src(1)->type() <= TKeyset;
 
+  case IsTypeStruct:
+    // Resources can change type without generating a new SSATmp,
+    // so its not safe to GVN
+    return !opcodeMayRaise(IsTypeStruct) && !inst->src(1)->type().maybe(TRes);
+
+  case LdFuncCached: {
+    // Do not need to reload a function within a translation except if it
+    // could have been renamed.
+    auto const funcName = inst->extra<FuncNameData>()->name;
+    return !RO::funcIsRenamable(funcName);
+  }
   default:
     return false;
   }
@@ -339,8 +385,6 @@ bool visitInstruction(
   auto& globalTable = *env.globalTable;
   auto& localTable = *env.localTable;
   auto& nameTable = *env.nameTable;
-
-  if (isCallOp(inst->op())) nameTable.clear();
 
   if (!supportsGVN(inst)) return false;
 
@@ -427,10 +471,20 @@ void runAnalysis(
  * to IncRef the replacement value. Its not enough to IncRef it where
  * the replacement occurs (where a refcount would originally have been
  * produced), because the replacement value might not survive that
- * long. Instead, we need to IncRef it right after the canonical
- * instruction. However, in general there will be paths from the
- * canonical instruction that don't reach the replaced instruction, so
- * we'll need to insert DecRefs on those paths.
+ * long. For example:
+ *
+ * (1) t2:Str = CastIntToStr t1:Int
+ * ....
+ * (2) DecRef t2:Str
+ * ....
+ * (3) t3:Str = CastIntToStr t1:Int
+ *
+ * The DecRef in (2) might release t2. So, inserting an IncRef after
+ * (3) isn't correct, as t2 will have already been released. Instead,
+ * we need to IncRef it right after the canonical instruction
+ * (1). However, in general there will be paths from the canonical
+ * instruction that don't reach the replaced instruction, so we'll
+ * need to insert DecRefs on those paths.
  *
  * As an example, given:
  *
@@ -463,15 +517,14 @@ void runAnalysis(
  * ensure Orig's dst lives until Rep2), and a DecRef in exit2 (to keep
  * the RefCounts balanced).
  *
- * We do this by computing Availability, Anticipability and
- * Partial-Anticipability of the candidate instructions (Orig, Rep1
- * and Rep2 in the example). After each candidate instruction we
- * insert an IncRef if a candidate is Partially-Anticipated-out. If a
- * candidate is Available-in and not Partially-Anticipated-in, we
- * insert a DecRef if its Partially-Anticipated out of all
- * predecessors. This could fail to insert DecRefs if we don't split
- * critical edges - but in that case there simply wouldn't be anywhere
- * to insert the DecRef.
+ * We do this by computing the Partial-Anticipability of the candidate
+ * instructions (Orig, Rep1 and Rep2 in the example). After each
+ * candidate instruction we insert an IncRef if a candidate is
+ * Partially-Anticipated-out. If a candidateis
+ * Partially-Anticipated-out in a predecessor, but not
+ * Partially-Anticipated-in in the successor, then a DecRef is
+ * inserted in the successor. Since critical edges are split, this
+ * covers all of the cases.
  */
 constexpr uint32_t kMaxTrackedPrcs = 64;
 
@@ -480,20 +533,14 @@ struct PrcState {
 
   uint32_t rpoId;
 
+  /* original definition of candidates (kills pant) */
+  Bits orig;
   /* local is the set of candidates in this block */
   Bits local;
-  /* antIn = local | antOut */
-  Bits antIn;
-  /* pantIn = local | pantOut */
+  /* pantIn = (local | pantOut) - orig */
   Bits pantIn;
-  /* antOut = Intersection<succs>(antIn) (empty if numSucc==0) */
-  Bits antOut;
   /* pantOut = Union<succs>(pantIn) */
   Bits pantOut;
-  /* avlIn = Intersection<preds>(avlOut) (empty if numPred==0) */
-  Bits avlIn;
-  /* avlOut = local | avlIn */
-  Bits avlOut;
 };
 
 std::string show(const PrcState::Bits& bits) {
@@ -509,21 +556,16 @@ std::string show(const PrcState::Bits& bits) {
 }
 
 std::string show(const PrcState& state) {
-  return folly::sformat(
-    "   antIn   : {}\n"
+  return fmt::format(
     "   pantIn  : {}\n"
-    "   avlIn   : {}\n"
+    "   orig    : {}\n"
     "   local   : {}\n"
-    "   antOut  : {}\n"
-    "   pantOut : {}\n"
-    "   avlOut  : {}\n",
-    show(state.antIn),
+    "   pantOut : {}\n",
     show(state.pantIn),
-    show(state.avlIn),
+    show(state.orig),
     show(state.local),
-    show(state.antOut),
-    show(state.pantOut),
-    show(state.avlOut));
+    show(state.pantOut)
+  );
 }
 
 struct PrcEnv {
@@ -541,22 +583,18 @@ struct PrcEnv {
 void insertIncRefs(PrcEnv& env) {
   auto antQ =
     dataflow_worklist<uint32_t, std::less<uint32_t>>(env.rpoBlocks.size());
-  auto avlQ =
-    dataflow_worklist<uint32_t, std::greater<uint32_t>>(env.rpoBlocks.size());
 
   env.states.resize(env.unit.numBlocks());
   for (uint32_t i = 0; i < env.rpoBlocks.size(); i++) {
     auto blk = env.rpoBlocks[i];
     auto& state = env.states[blk->id()];
     state.rpoId = i;
-    if (blk->numSuccs()) state.antOut.set();
-    if (blk->numPreds()) state.avlIn.set();
     antQ.push(i);
-    avlQ.push(i);
   }
 
   auto id = 0;
-  for (auto& v : env.insertMap) {
+  for (auto const& v : env.insertMap) {
+    assertx(!v.empty());
     for (auto const tmp : v) {
       auto const blk = tmp->inst()->block();
       auto& state = env.states[blk->id()];
@@ -565,45 +603,26 @@ void insertIncRefs(PrcEnv& env) {
         continue;
       }
     }
+    env.states[v[0]->inst()->block()->id()].orig.set(id);
     id++;
   }
 
-  using Bits = PrcState::Bits;
   // compute anticipated
   do {
     auto const blk = env.rpoBlocks[antQ.pop()];
     auto& state = env.states[blk->id()];
-    state.antIn = state.antOut | state.local;
-    state.pantIn = state.pantOut | state.local;
+    state.pantIn = (state.pantOut | state.local) & ~state.orig;
     blk->forEachPred(
       [&] (Block* b) {
         auto& s = env.states[b->id()];
-        auto const antOut = s.antOut & state.antIn;
         auto const pantOut = s.pantOut | state.pantIn;
-        if (antOut != s.antOut || pantOut != s.pantOut) {
-          s.antOut = antOut;
+        if (pantOut != s.pantOut) {
           s.pantOut = pantOut;
           antQ.push(s.rpoId);
         }
       }
     );
   } while (!antQ.empty());
-
-  // compute available
-  do {
-    auto const blk = env.rpoBlocks[avlQ.pop()];
-    auto& state = env.states[blk->id()];
-    state.avlOut = state.avlIn | state.local;
-    blk->forEachSucc(
-      [&] (Block* b) {
-        auto& s = env.states[b->id()];
-        auto const avlIn = s.avlIn & state.avlOut;
-        if (avlIn != s.avlIn) {
-          s.avlIn = avlIn;
-          avlQ.push(s.rpoId);
-        }
-      });
-  } while (!avlQ.empty());
 
   for (auto blk : env.rpoBlocks) {
     auto& state = env.states[blk->id()];
@@ -633,7 +652,8 @@ void insertIncRefs(PrcEnv& env) {
       if (inc.test(0)) {
         auto const& tmps = env.insertMap[inc_id];
         auto insert = [&] (IRInstruction* inst) {
-          FTRACE(3, "Inserting IncRef into B{}\n", blk->id());
+          FTRACE(3, "Inserting IncRef into B{} for t{}\n",
+                 blk->id(), tmps[0]->id());
           auto const iter = std::next(blk->iteratorTo(inst));
           blk->insert(iter, env.unit.gen(IncRef, inst->bcctx(), tmps[0]));
         };
@@ -653,45 +673,57 @@ void insertIncRefs(PrcEnv& env) {
         if (state.pantOut.test(inc_id)) insert(last->inst());
       }
     }
-    auto dec = state.avlIn & ~state.pantIn;
-    if (dec.any()) {
-      blk->forEachPred(
-        [&] (Block* pred) {
-          auto& pstate = env.states[pred->id()];
-          dec &= pstate.pantOut;
-        });
 
-      for (auto dec_id = 0; dec.any(); dec >>= 1, dec_id++) {
-        if (dec.test(0)) {
-          FTRACE(3, "Inserting DecRef into B{}\n", blk->id());
-          auto const tmp = env.insertMap[dec_id][0];
-          blk->prepend(env.unit.gen(DecRef, tmp->inst()->bcctx(),
-                                    DecRefData{}, tmp));
+    if (state.pantOut.any()) {
+      blk->forEachSucc(
+        [&] (Block* succ) {
+          auto dec = state.pantOut & ~env.states[succ->id()].pantIn;
+          if (!dec.any()) return;
+          for (auto dec_id = 0; dec.any(); dec >>= 1, dec_id++) {
+            if (!dec.test(0)) continue;
+            auto const tmp = env.insertMap[dec_id][0];
+            FTRACE(3, "Inserting DecRef into B{} for t{}\n",
+                   blk->id(), tmp->id());
+            succ->prepend(env.unit.gen(DecRef, tmp->inst()->bcctx(),
+                                       DecRefData{}, tmp));
+          }
         }
-      }
+      );
     }
   }
 }
 
 using ActionMap = jit::fast_map<SSATmp*, std::vector<SSATmp*>>;
 
-void tryReplaceInstruction(
+bool tryReplaceInstruction(
   IRUnit& unit,
   const IdomVector& idoms,
   IRInstruction* inst,
   ValueNumberTable& table,
   ActionMap& actionMap
 ) {
+  auto changed = false;
   if (inst->hasDst()) {
     auto const dst = inst->dst();
     auto const valueNumber = table[dst].value;
     if (valueNumber &&
         valueNumber != dst &&
         is_tmp_usable(idoms, valueNumber, inst->block())) {
+      changed = true;
       if (inst->producesReference()) {
         auto& v = actionMap[valueNumber];
         if (!v.size()) v.push_back(valueNumber);
         v.push_back(dst);
+      }
+      if (inst->isBlockEnd()) {
+        // Because the output of an equivalent instruction is available, we
+        // know that this instruction must take its next branch.
+        FTRACE(1,
+               "eliminating throwing instruction {}\n",
+               inst->toString()
+              );
+        assertx(inst->next());
+        inst->block()->push_back(unit.gen(Jmp, inst->bcctx(), inst->next()));
       }
       if (!(valueNumber->type() <= dst->type())) {
         FTRACE(1,
@@ -700,6 +732,13 @@ void tryReplaceInstruction(
                dst->type().toString()
               );
         unit.replace(inst, AssertType, dst->type(), valueNumber);
+      } else {
+        FTRACE(1,
+               "replacing {} with Mov({})\n",
+               inst->toString(),
+               *valueNumber
+              );
+        unit.replace(inst, Mov, valueNumber);
       }
     }
   }
@@ -722,23 +761,27 @@ void tryReplaceInstruction(
              *valueNumber->inst()
             );
       inst->setSrc(i, valueNumber);
+      changed = true;
     }
   }
+
+  return changed;
 }
 
-void replaceRedundantComputations(
+bool replaceRedundantComputations(
   IRUnit& unit,
   const IdomVector& idoms,
   const BlockList& blocks,
   ValueNumberTable& table
 ) {
   ActionMap actionMap;
+  auto changed = false;
   for (auto block : blocks) {
     for (auto& inst : *block) {
-      tryReplaceInstruction(unit, idoms, &inst, table, actionMap);
+      changed |= tryReplaceInstruction(unit, idoms, &inst, table, actionMap);
     }
   }
-  if (actionMap.empty()) return;
+  if (actionMap.empty()) return changed;
   PrcEnv env(unit, blocks);
   for (auto& elm : actionMap) {
     if (env.insertMap.size() == kMaxTrackedPrcs) {
@@ -753,15 +796,27 @@ void replaceRedundantComputations(
       continue;
     }
     env.insertMap.push_back(std::move(elm.second));
+    if (env.insertMap.size() >= kMaxTrackedPrcs) {
+      logPerfWarning(
+        "gvnMaxPrcs",
+        [&](StructuredLogEntry& cols) {
+          auto const func = unit.context().initSrcKey.func();
+          cols.setStr("func", func->fullName()->slice());
+          cols.setStr("filename", func->unit()->origFilepath()->slice());
+          cols.setStr("hhir_unit", show(unit));
+        }
+      );
+    }
   }
   insertIncRefs(env);
+  return changed;
 }
 
 } // namespace
 
 /////////////////////////////////////////////////////////////////////////
 
-void gvn(IRUnit& unit) {
+bool gvn(IRUnit& unit) {
   PassTracer tracer{&unit, Trace::hhir_gvn, "gvn"};
   Timer t(Timer::optimize_gvn, unit.logEntry().get_pointer());
   splitCriticalEdges(unit);
@@ -781,8 +836,12 @@ void gvn(IRUnit& unit) {
   // algorithm presented in the 1996 paper "SCC-based Value Numbering" by
   // Cooper and Simpson.
   runAnalysis(state, unit, rpoBlocks);
-  replaceRedundantComputations(unit, idoms, rpoBlocks, globalTable);
+  auto const changed =
+    replaceRedundantComputations(unit, idoms, rpoBlocks, globalTable);
   state.globalTable = nullptr;
+  // We might have added a new use of a SSATmp past a CheckType or
+  // AssertType on it, so refine if necessary.
+  return changed;
 }
 
-}}
+}

@@ -13,8 +13,7 @@
    | license@php.net so we can mail you a copy immediately.               |
    +----------------------------------------------------------------------+
 */
-#ifndef incl_HPHP_ALIAS_ANALYSIS_H_
-#define incl_HPHP_ALIAS_ANALYSIS_H_
+#pragma once
 
 #include <bitset>
 #include <string>
@@ -26,7 +25,7 @@
 
 #include "hphp/util/sparse-id-containers.h"
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 
 struct IRUnit;
 
@@ -39,7 +38,7 @@ struct IRUnit;
  * using information from this module must be conservative about locations that
  * aren't assigned an id.  (E.g. via calls to may_alias in AliasAnalysis.)
  */
-constexpr uint32_t kMaxTrackedALocs = 256;
+constexpr uint32_t kMaxTrackedALocs = 512;
 using ALocBits = std::bitset<kMaxTrackedALocs>;
 
 //////////////////////////////////////////////////////////////////////
@@ -79,47 +78,36 @@ struct AliasAnalysis {
   using LocationMap = jit::hash_map<AliasClass,ALocBits,AliasClass::Hash>;
 
   /*
-   * If an AStack covers multiple locations, it will have an entry in this
-   * map. It is OK if not all locations covered by the AStack are tracked. We
-   * only store the tracked subset here.
+   * If an AStack, ALocal, or AIter alias class covers multiple locations,
+   * it will have an entry in the appropriate map here. It is okay if not all
+   * the memory locations aliased by the alias class are tracked. We only
+   * store the tracked subset here.
    */
-  LocationMap stack_ranges;
+  LocationMap stk_expand_map;
+  LocationMap loc_expand_map;
+  LocationMap iter_expand_map;
 
   /*
-   * Similar to `stack_ranges', if an AFrame covers multiple locations, it will
-   * have an entry in this map.
-   */
-  LocationMap local_sets;
-
-  /*
-   * Similar to `stack_ranges', if an AClsRefSlot covers multiple locations, it
-   * will have an entry in this map.
-   */
-  LocationMap clsref_sets;
-
-  /*
-   * Short-hand to find an alias class in the locations map, or get folly::none
+   * Short-hand to find an alias class in the locations map, or get std::nullopt
    * if the alias class wasn't assigned an ALocMeta structure.
    */
-  folly::Optional<ALocMeta> find(AliasClass) const;
+  Optional<ALocMeta> find(AliasClass) const;
 
   /*
    * Several larger sets of locations, we have a set of all the ids assigned to
    * properties, elemIs, frame locals, etc.  This is used by may_alias below.
    */
+  ALocBits all_closureArg;
   ALocBits all_props;
   ALocBits all_elemIs;
-  ALocBits all_frame;
+  ALocBits all_elemSs;
+  ALocBits all_local;
   ALocBits all_stack;
-  ALocBits all_clsRefSlot;
   ALocBits all_rds;
-  ALocBits all_ref;
-  ALocBits all_iterPos;
-  ALocBits all_iterBase;
-  ALocBits all_cufIterFunc;
-  ALocBits all_cufIterCtx;
-  ALocBits all_cufIterInvName;
-  ALocBits all_cufIterDynamic;
+  ALocBits all_iter;
+  ALocBits all_fcontext;
+  ALocBits all_ffunc;
+  ALocBits all_fmeta;
 
   /*
    * Return the number of distinct locations we're tracking by id
@@ -155,15 +143,10 @@ struct AliasAnalysis {
    *
    * Right now, this function will work for specific AliasClasses we've
    * assigned ids---for larger classes, it only supports stack ranges observed
-   * during alias collection, AFrameAny, and some cases of unions of those---if
+   * during alias collection, ALocalAny, and some cases of unions of those---if
    * you need more to work, the implementation will need some improvements.
    */
   ALocBits expand(AliasClass acls) const;
-
-  /*
-   * Sets of alias classes that are used by expand().
-   */
-  jit::hash_map<AliasClass,ALocBits,AliasClass::Hash> stk_expand_map;
 };
 
 //////////////////////////////////////////////////////////////////////
@@ -196,6 +179,4 @@ std::string show(ALocBits);
 
 //////////////////////////////////////////////////////////////////////
 
-}}
-
-#endif
+}

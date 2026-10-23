@@ -1,6 +1,6 @@
 #include "hphp/runtime/ext/icu/ext_icu_uspoof.h"
 
-namespace HPHP { namespace Intl {
+namespace HPHP::Intl {
 /////////////////////////////////////////////////////////////////////////////
 // class SpoofChecker
 
@@ -13,8 +13,8 @@ const StaticString s_SpoofChecker("SpoofChecker");
       "Call to invalid SpoofChecker Object"); \
   }
 
-static bool HHVM_METHOD(SpoofChecker, isSuspicious, const String& text,
-                                                    VRefParam issuesFound) {
+static bool HHVM_METHOD(SpoofChecker, isSuspicious, const OptString& text,
+                                                    int64_t& issuesFound) {
   FETCH_SPOOF(data, this_);
   UErrorCode error = U_ZERO_ERROR;
   int32_t ret = uspoof_checkUTF8(data->checker(),
@@ -25,13 +25,13 @@ static bool HHVM_METHOD(SpoofChecker, isSuspicious, const String& text,
                          "error %d (%s)",
                          text.c_str(), error, u_errorName(error));
   }
-  issuesFound.assignIfRef(ret);
+  issuesFound = ret;
   return ret != 0;
 }
 
-static bool HHVM_METHOD(SpoofChecker, areConfusable, const String& s1,
-                                                     const String& s2,
-                                                     VRefParam issuesFound) {
+static bool HHVM_METHOD(SpoofChecker, areConfusable, const OptString& s1,
+                                                     const OptString& s2,
+                                                     int64_t& issuesFound) {
   FETCH_SPOOF(data, this_);
   UErrorCode error = U_ZERO_ERROR;
   int32_t ret = uspoof_areConfusableUTF8(data->checker(),
@@ -43,11 +43,11 @@ static bool HHVM_METHOD(SpoofChecker, areConfusable, const String& s1,
                          " error %d (%s)",
                          s1.c_str(), s2.c_str(), error, u_errorName(error));
   }
-  issuesFound.assignIfRef(ret);
+  issuesFound = ret;
   return ret != 0;
 }
 
-static void HHVM_METHOD(SpoofChecker, setAllowedLocales, const String& locs) {
+static void HHVM_METHOD(SpoofChecker, setAllowedLocales, const OptString& locs) {
   FETCH_SPOOF(data, this_);
   UErrorCode error = U_ZERO_ERROR;
   uspoof_setAllowedLocales(data->checker(), locs.c_str(), &error);
@@ -70,7 +70,7 @@ static void HHVM_METHOD(SpoofChecker, setChecks, int64_t checks) {
 
 //////////////////////////////////////////////////////////////////////////////
 
-void IntlExtension::initUSpoof() {
+void IntlExtension::registerNativeUSpoof() {
   HHVM_RCC_INT(SpoofChecker, SINGLE_SCRIPT_CONFUSABLE,
                USPOOF_SINGLE_SCRIPT_CONFUSABLE);
   HHVM_RCC_INT(SpoofChecker, MIXED_SCRIPT_CONFUSABLE,
@@ -88,9 +88,7 @@ void IntlExtension::initUSpoof() {
   HHVM_ME(SpoofChecker, setChecks);
 
   Native::registerNativeDataInfo<SpoofChecker>(s_SpoofChecker.get());
-
-  loadSystemlib("icu_uspoof");
 }
 
 //////////////////////////////////////////////////////////////////////////////
-}} // namespace HPHP::Intl
+} // namespace HPHP::Intl

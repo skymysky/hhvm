@@ -1,4 +1,4 @@
-<?php
+<?hh
 require_once(dirname(__FILE__) . DIRECTORY_SEPARATOR . 'config.inc');
 require_once(dirname(__FILE__) . '/../../pdo/tests/pdo_test.inc');
 
@@ -23,7 +23,7 @@ class MySQLPDOTest extends PDOTest {
 
 		$db = new $classname($dsn, $user, $pass, $attr);
 		if (!$db) {
-			die("Could not create PDO object (DSN=$dsn, user=$user)\n");
+			exit("Could not create PDO object (DSN=$dsn, user=$user)\n");
 		}
 
 		$db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_WARNING);
@@ -50,7 +50,7 @@ class MySQLPDOTest extends PDOTest {
 		if (!$new_options)
 			return PDO_MYSQL_TEST_DSN . $addition;
 
-		$old_options = array();
+		$old_options = dict[];
 		$dsn = substr(PDO_MYSQL_TEST_DSN,
 			strpos(PDO_MYSQL_TEST_DSN, ':') + 1,
 			strlen(PDO_MYSQL_TEST_DSN));
@@ -121,12 +121,12 @@ class MySQLPDOTest extends PDOTest {
 
 		if (!function_exists('sys_get_temp_dir')) {
 
-			if (!empty($_ENV['TMP']))
-				return realpath( $_ENV['TMP'] );
-			if (!empty($_ENV['TMPDIR']))
-				return realpath( $_ENV['TMPDIR'] );
-			if (!empty($_ENV['TEMP']))
-				return realpath( $_ENV['TEMP'] );
+			if (\HH\global_get('_ENV')['TMP'] ?? false)
+				return realpath( \HH\global_get('_ENV')['TMP'] );
+			if (\HH\global_get('_ENV')['TMPDIR'] ?? false)
+				return realpath( \HH\global_get('_ENV')['TMPDIR'] );
+			if (\HH\global_get('_ENV')['TEMP'] ?? false)
+				return realpath( \HH\global_get('_ENV')['TEMP'] );
 
 			$temp_file = tempnam(md5(uniqid(rand(), TRUE)), '');
 			if ($temp_file) {
@@ -143,7 +143,7 @@ class MySQLPDOTest extends PDOTest {
 
 	static function detect_transactional_mysql_engine($db) {
 		foreach ($db->query("show variables like 'have%'") as $row) {
-			if (!empty($row) && $row[1] == 'YES' && ($row[0] == 'have_innodb' || $row[0] == 'have_bdb')) {
+			if (($row ?? false) && $row[1] == 'YES' && ($row[0] == 'have_innodb' || $row[0] == 'have_bdb')) {
 				return str_replace("have_", "", $row[0]);
 			}
 		}
@@ -174,4 +174,3 @@ class MySQLPDOTest extends PDOTest {
 	}
 
 }
-?>

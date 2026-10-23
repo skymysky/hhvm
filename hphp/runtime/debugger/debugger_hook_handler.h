@@ -14,13 +14,12 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_EVAL_HOOK_HANDLER_H_
-#define incl_EVAL_HOOK_HANDLER_H_
+#pragma once
 
 #include "hphp/runtime/debugger/debugger.h"
 #include "hphp/runtime/vm/debugger-hook.h"
 
-namespace HPHP { namespace Eval {
+namespace HPHP::Eval {
 
 /*
  * Called by the proxy whenever its breakpoint list is updated.  Since this
@@ -31,6 +30,8 @@ void proxySetBreakPoints(DebuggerProxy* proxy);
 
 /* Debugger hook for hphpd. */
 struct HphpdHook final : DebuggerHook {
+  void onRequestInit() override;
+
   static DebuggerHook* GetInstance();
 
   void onOpcode(const unsigned char* /*pc*/) override {
@@ -47,7 +48,7 @@ struct HphpdHook final : DebuggerHook {
 
   void onError(const ExtendedException& /*ee*/, int /*errnum*/,
                const std::string& message) override {
-    Debugger::InterruptVMHook(ExceptionThrown, String(message));
+    Debugger::InterruptVMHook(ExceptionThrown, OptString(message));
   }
 
   void onFileLoad(Unit* unit) override;
@@ -58,6 +59,4 @@ private:
   ~HphpdHook() override {}
 };
 
-}}
-
-#endif
+}

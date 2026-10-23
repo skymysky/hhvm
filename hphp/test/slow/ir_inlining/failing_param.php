@@ -1,10 +1,10 @@
-<?php
+<?hh
 
-function wat(string $x) {
+function wat(string $x) :mixed{
   return 12;
 }
 
-function main() {
+function main() :mixed{
   try {
     wat(12);
   }
@@ -13,4 +13,8 @@ function main() {
  }
 }
 
+
+<<__EntryPoint>>
+function main_failing_param() :mixed{
 main();
+}

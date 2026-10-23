@@ -14,8 +14,7 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_EVAL_DEBUGGER_CMD_THREAD_H_
-#define incl_HPHP_EVAL_DEBUGGER_CMD_THREAD_H_
+#pragma once
 
 #include <vector>
 
@@ -24,7 +23,7 @@
 #include "hphp/runtime/debugger/debugger_base.h"
 #include "hphp/runtime/debugger/debugger_command.h"
 
-namespace HPHP { namespace Eval {
+namespace HPHP::Eval {
 ///////////////////////////////////////////////////////////////////////////////
 
 struct CmdThread : DebuggerCommand, IDebuggable {
@@ -36,6 +35,8 @@ struct CmdThread : DebuggerCommand, IDebuggable {
   bool onServer(DebuggerProxy&) override;
   void onClient(DebuggerClient&) override;
 
+  std::string name() const override { return "thread"; }
+
 protected:
   void sendImpl(DebuggerThriftBuffer&) override;
   void recvImpl(DebuggerThriftBuffer&) override;
@@ -44,13 +45,12 @@ private:
   // implementing IDebuggable
   void debuggerInfo(InfoVec&) override;
 
-  req::root<String> m_out;
+  req::root<OptString> m_out;
   std::vector<DThreadInfoPtr> m_threads;
 
   void processList(DebuggerClient &client, bool output = true);
 };
 
 ///////////////////////////////////////////////////////////////////////////////
-}}
+}
 
-#endif // incl_HPHP_EVAL_DEBUGGER_CMD_THREAD_H_

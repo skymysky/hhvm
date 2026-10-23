@@ -1,8 +1,8 @@
 <?hh
 
 class base {
-  protected static function __xhpAttributeDeclaration(): array {
-    return [];
+  protected static function __xhpAttributeDeclaration()[]: darray {
+    return dict[];
   }
 }
 
@@ -26,4 +26,8 @@ class :foo extends base {
   }
 }
 
+
+<<__EntryPoint>>
+function main_nullable_types() :mixed{
 :foo::dumpAttributes();
+}

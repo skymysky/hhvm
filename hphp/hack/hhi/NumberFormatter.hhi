@@ -1,4 +1,4 @@
-<?hh // decl
+<?hh
 /**
  * Copyright (c) 2014, Facebook, Inc.
  * All rights reserved.
@@ -7,110 +7,116 @@
  * LICENSE file in the "hack" directory of this source tree.
  *
  */
+
 class NumberFormatter {
 
-  const PATTERN_DECIMAL                    = 0 ;
-  const DECIMAL                            = 1 ;
-  const CURRENCY                           = 2 ;
-  const PERCENT                            = 3 ;
-  const SCIENTIFIC                         = 4 ;
-  const SPELLOUT                           = 5 ;
-  const ORDINAL                            = 6 ;
-  const DURATION                           = 7 ;
-  const PATTERN_RULEBASED                  = 8 ;
-  const IGNORE                             = 9 ;
-  const DEFAULT_STYLE                      = 10;
-  const ROUND_CEILING                      = 11;
-  const ROUND_FLOOR                        = 12;
-  const ROUND_DOWN                         = 13;
-  const ROUND_UP                           = 14;
-  const ROUND_HALFEVEN                     = 15;
-  const ROUND_HALFDOWN                     = 16;
-  const ROUND_HALFUP                       = 17;
-  const PAD_BEFORE_PREFIX                  = 18;
-  const PAD_AFTER_PREFIX                   = 19;
-  const PAD_BEFORE_SUFFIX                  = 20;
-  const PAD_AFTER_SUFFIX                   = 21;
-  const PARSE_INT_ONLY                     = 22;
-  const GROUPING_USED                      = 23;
-  const DECIMAL_ALWAYS_SHOWN               = 24;
-  const MAX_INTEGER_DIGITS                 = 25;
-  const MIN_INTEGER_DIGITS                 = 26;
-  const INTEGER_DIGITS                     = 27;
-  const MAX_FRACTION_DIGITS                = 28;
-  const MIN_FRACTION_DIGITS                = 29;
-  const FRACTION_DIGITS                    = 30;
-  const MULTIPLIER                         = 31;
-  const GROUPING_SIZE                      = 32;
-  const ROUNDING_MODE                      = 33;
-  const ROUNDING_INCREMENT                 = 34;
-  const FORMAT_WIDTH                       = 35;
-  const PADDING_POSITION                   = 36;
-  const SECONDARY_GROUPING_SIZE            = 37;
-  const SIGNIFICANT_DIGITS_USED            = 38;
-  const MIN_SIGNIFICANT_DIGITS             = 39;
-  const MAX_SIGNIFICANT_DIGITS             = 40;
-  const LENIENT_PARSE                      = 41;
-  const POSITIVE_PREFIX                    = 42;
-  const POSITIVE_SUFFIX                    = 43;
-  const NEGATIVE_PREFIX                    = 44;
-  const NEGATIVE_SUFFIX                    = 45;
-  const PADDING_CHARACTER                  = 46;
-  const CURRENCY_CODE                      = 47;
-  const DEFAULT_RULESET                    = 48;
-  const PUBLIC_RULESETS                    = 49;
-  const DECIMAL_SEPARATOR_SYMBOL           = 50;
-  const GROUPING_SEPARATOR_SYMBOL          = 51;
-  const PATTERN_SEPARATOR_SYMBOL           = 52;
-  const PERCENT_SYMBOL                     = 53;
-  const ZERO_DIGIT_SYMBOL                  = 54;
-  const DIGIT_SYMBOL                       = 55;
-  const MINUS_SIGN_SYMBOL                  = 56;
-  const PLUS_SIGN_SYMBOL                   = 57;
-  const CURRENCY_SYMBOL                    = 58;
-  const INTL_CURRENCY_SYMBOL               = 59;
-  const MONETARY_SEPARATOR_SYMBOL          = 60;
-  const EXPONENTIAL_SYMBOL                 = 61;
-  const PERMILL_SYMBOL                     = 62;
-  const PAD_ESCAPE_SYMBOL                  = 63;
-  const INFINITY_SYMBOL                    = 64;
-  const NAN_SYMBOL                         = 65;
-  const SIGNIFICANT_DIGIT_SYMBOL           = 66;
-  const MONETARY_GROUPING_SEPARATOR_SYMBOL = 67;
-  const TYPE_DEFAULT                       = 68;
-  const TYPE_INT32                         = 69;
-  const TYPE_INT64                         = 70;
-  const TYPE_DOUBLE                        = 71;
-  const TYPE_CURRENCY                      = 72;
+  const int PATTERN_DECIMAL;
+  const int DECIMAL;
+  const int CURRENCY;
+  const int PERCENT;
+  const int SCIENTIFIC;
+  const int SPELLOUT;
+  const int ORDINAL;
+  const int DURATION;
+  const int PATTERN_RULEBASED;
+  const int IGNORE;
+  const int DEFAULT_STYLE;
+  const int ROUND_CEILING;
+  const int ROUND_FLOOR;
+  const int ROUND_DOWN;
+  const int ROUND_UP;
+  const int ROUND_HALFEVEN;
+  const int ROUND_HALFDOWN;
+  const int ROUND_HALFUP;
+  const int PAD_BEFORE_PREFIX;
+  const int PAD_AFTER_PREFIX;
+  const int PAD_BEFORE_SUFFIX;
+  const int PAD_AFTER_SUFFIX;
+  const int PARSE_INT_ONLY;
+  const int GROUPING_USED;
+  const int DECIMAL_ALWAYS_SHOWN;
+  const int MAX_INTEGER_DIGITS;
+  const int MIN_INTEGER_DIGITS;
+  const int INTEGER_DIGITS;
+  const int MAX_FRACTION_DIGITS;
+  const int MIN_FRACTION_DIGITS;
+  const int FRACTION_DIGITS;
+  const int MULTIPLIER;
+  const int GROUPING_SIZE;
+  const int ROUNDING_MODE;
+  const int ROUNDING_INCREMENT;
+  const int FORMAT_WIDTH;
+  const int PADDING_POSITION;
+  const int SECONDARY_GROUPING_SIZE;
+  const int SIGNIFICANT_DIGITS_USED;
+  const int MIN_SIGNIFICANT_DIGITS;
+  const int MAX_SIGNIFICANT_DIGITS;
+  const int LENIENT_PARSE;
+  const int POSITIVE_PREFIX;
+  const int POSITIVE_SUFFIX;
+  const int NEGATIVE_PREFIX;
+  const int NEGATIVE_SUFFIX;
+  const int PADDING_CHARACTER;
+  const int CURRENCY_CODE;
+  const int DEFAULT_RULESET;
+  const int PUBLIC_RULESETS;
+  const int DECIMAL_SEPARATOR_SYMBOL;
+  const int GROUPING_SEPARATOR_SYMBOL;
+  const int PATTERN_SEPARATOR_SYMBOL;
+  const int PERCENT_SYMBOL;
+  const int ZERO_DIGIT_SYMBOL;
+  const int DIGIT_SYMBOL;
+  const int MINUS_SIGN_SYMBOL;
+  const int PLUS_SIGN_SYMBOL;
+  const int CURRENCY_SYMBOL;
+  const int INTL_CURRENCY_SYMBOL;
+  const int MONETARY_SEPARATOR_SYMBOL;
+  const int EXPONENTIAL_SYMBOL;
+  const int PERMILL_SYMBOL;
+  const int PAD_ESCAPE_SYMBOL;
+  const int INFINITY_SYMBOL;
+  const int NAN_SYMBOL;
+  const int SIGNIFICANT_DIGIT_SYMBOL;
+  const int MONETARY_GROUPING_SEPARATOR_SYMBOL;
+  const int TYPE_DEFAULT;
+  const int TYPE_INT32;
+  const int TYPE_INT64;
+  const int TYPE_DOUBLE;
+  const int TYPE_CURRENCY;
 
-  <<__Rx>>
-  public function __construct(string $locale, int $style, string $pattern = "#,##0.###");
-  <<__Rx, __MaybeMutable>>
-  public function formatCurrency(float $value, string $currency) : string;
-  <<__Rx, __MaybeMutable>>
- public function format(mixed $value, int $type = NumberFormatter::TYPE_DEFAULT) : string;
-  <<__Rx, __MaybeMutable>>
-  public function getAttribute(int $attr) : int;
-  <<__Rx, __MaybeMutable>>
-  public function getErrorCode() : int;
-  <<__Rx, __MaybeMutable>>
-  public function getErrorMessage() : string;
-  <<__Rx, __MaybeMutable>>
-  public function getLocale(int $type = Locale::ACTUAL_LOCALE) : string;
-  <<__Rx, __MaybeMutable>>
-  public function getPattern() : string;
-  <<__Rx, __MaybeMutable>>
-  public function getSymbol(int $attr) : string;
-  <<__Rx, __MaybeMutable>>
-  public function getTextAttribute(int $attr) : string;
-  public function parseCurrency(string $value, string &$currency, int &$position = 0) : float;
-  public function parse(string $value, int $type = NumberFormatter::TYPE_DOUBLE, int &$position = 0) : mixed;
-  <<__Rx, __Mutable>>
-  public function setAttribute(int $attr, int $value) : bool;
-  <<__Rx, __Mutable>>
-  public function setPattern(string $pattern) : bool;
-  <<__Rx, __Mutable>>
-  public function setSymbol(int $attr, string $value) : bool;
-  <<__Rx, __Mutable>>
-  public function setTextAttribute(int $attr, string $value) : bool;
+  public function __construct(
+    string $locale,
+    int $style,
+    string $pattern = "#,##0.###",
+  );
+  public function formatCurrency(float $value, string $currency)[]: string;
+  public function format(
+    mixed $value,
+    int $type = NumberFormatter::TYPE_DEFAULT,
+  )[]: string;
+  public function getAttribute(int $attr)[]: int;
+  public function getErrorCode()[]: int;
+  public function getErrorMessage()[]: string;
+  public function getLocale(int $type = Locale::ACTUAL_LOCALE)[]: string;
+  public function getPattern()[]: string;
+  public function getSymbol(int $attr)[]: string;
+  public function getTextAttribute(int $attr)[]: string;
+  public function parseCurrency(
+    string $value,
+    inout string $currency,
+    inout int $position,
+  ): float;
+  public function parse(
+    string $value,
+    int $type = NumberFormatter::TYPE_DOUBLE,
+  ): mixed;
+  public function parseWithPosition(
+    string $value,
+    int $type,
+    inout int $position,
+  ): mixed;
+  public function setAttribute(int $attr, int $value)[]: bool;
+  public function setPattern(string $pattern)[]: bool;
+  public function setSymbol(int $attr, string $value)[]: bool;
+  public function setTextAttribute(int $attr, string $value)[]: bool;
 }

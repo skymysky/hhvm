@@ -1,5 +1,9 @@
-<?php
+<?hh
 
-$a = array(10);
+
+<<__EntryPoint>>
+function main_279() :mixed{
+$a = vec[10];
  $a[] = 'test';
          var_dump($a);
+}

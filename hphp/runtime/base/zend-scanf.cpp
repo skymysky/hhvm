@@ -75,7 +75,7 @@
 #define SCAN_ERROR_INTERNAL           (SCAN_ERROR_WRONG_PARAM_COUNT - 1)
 
 /*
- * Flag values used internally by [f|s]canf.
+ * Flag values used internally by (f|s)scanf.
  */
 #define SCAN_NOSKIP     0x1       /* Don't skip blanks. */
 #define SCAN_SUPPRESS   0x2       /* Suppress assignment. */
@@ -101,13 +101,13 @@
   char end;
 };
 
-typedef struct CharSet {
+struct CharSet {
   int exclude;    /* 1 if this is an exclusion set. */
   int nchars;
   char *chars;
   int nranges;
   Range *ranges;
-} CharSet;
+};
 
 namespace HPHP {
 /**
@@ -381,7 +381,7 @@ notXpg:
     if (gotXpg) {
 mixedXPG:
       if (nassign != staticAssign) req::free((char *)nassign);
-      throw_invalid_argument
+      raise_invalid_argument_warning
         ("format: cannot mix \"%%\" and \"%%n$\" conversion specifiers");
       return SCAN_ERROR_INVALID_FORMAT;
     }
@@ -435,7 +435,7 @@ xpgCheckDone:
       /* problem - cc                                               */
       /*
         if (flags & SCAN_WIDTH) {
-        throw_invalid_argument
+        raise_invalid_argument_warning
         ("format: Field width may not be specified in %c conversion");
         }
         return SCAN_ERROR_INVALID_FORMAT;
@@ -468,12 +468,12 @@ xpgCheckDone:
       break;
     badSet:
       if (nassign != staticAssign) req::free((char *)nassign);
-      throw_invalid_argument("format: Unmatched [ in format string");
+      raise_invalid_argument_warning("format: Unmatched [ in format string");
       return SCAN_ERROR_INVALID_FORMAT;
 
     default:
       if (nassign != staticAssign) req::free((char *)nassign);
-      throw_invalid_argument("Bad scan conversion character \"%c\"", *ch);
+      raise_invalid_argument_warning("Bad scan conversion character \"%c\"", *ch);
       return SCAN_ERROR_INVALID_FORMAT;
     }
 
@@ -524,7 +524,7 @@ xpgCheckDone:
   for (i = 0; i < numVars; i++) {
     if (nassign[i] > 1) {
       if (nassign != staticAssign) req::free((char *)nassign);
-      throw_invalid_argument
+      raise_invalid_argument_warning
         ("format: Variable is assigned by multiple \"%%n$\" specifiers");
       return SCAN_ERROR_INVALID_FORMAT;
     } else if (!xpgSize && (nassign[i] == 0)) {
@@ -533,7 +533,7 @@ xpgCheckDone:
        * used, and/or numVars != 0), then too many vars were given
        */
       if (nassign != staticAssign) req::free((char *)nassign);
-      throw_invalid_argument
+      raise_invalid_argument_warning
         ("format: Variable is not assigned by any conversion specifiers");
       return SCAN_ERROR_INVALID_FORMAT;
     }
@@ -545,10 +545,10 @@ xpgCheckDone:
 badIndex:
   if (nassign != staticAssign) req::free((char *)nassign);
   if (gotXpg) {
-    throw_invalid_argument
+    raise_invalid_argument_warning
       ("format: \"%%n$\" argument index out of range");
   } else {
-    throw_invalid_argument
+    raise_invalid_argument_warning
       ("format: Different numbers of variable names and field specifiers");
   }
   return SCAN_ERROR_INVALID_FORMAT;
@@ -679,7 +679,8 @@ int string_sscanf(const char *string, const char *format, int numVars,
     switch (*ch) {
     case 'n':
       if (!(flags & SCAN_SUPPRESS)) {
-        returnArray.append((int)(string - baseString));
+        auto const key = safe_cast<int64_t>(returnArray.size());
+        returnArray.set(key, (int)(string - baseString));
       }
       nconversions++;
       continue;
@@ -790,7 +791,8 @@ int string_sscanf(const char *string, const char *format, int numVars,
         }
       }
       if (!(flags & SCAN_SUPPRESS)) {
-        returnArray.append(String(string, end-string, CopyString));
+        auto const key = safe_cast<int64_t>(returnArray.size());
+        returnArray.set(key, OptString(string, end-string, CopyString));
       }
       string = end;
       break;
@@ -823,7 +825,8 @@ int string_sscanf(const char *string, const char *format, int numVars,
         goto done;
       }
       if (!(flags & SCAN_SUPPRESS)) {
-        returnArray.append(String(string, end-string, CopyString));
+        auto const key = safe_cast<int64_t>(returnArray.size());
+        returnArray.set(key, OptString(string, end-string, CopyString));
       }
       string = end;
       break;
@@ -946,11 +949,12 @@ int string_sscanf(const char *string, const char *format, int numVars,
       if (!(flags & SCAN_SUPPRESS)) {
         *end = '\0';
         value = (int64_t) (*fn)(buf, nullptr, base);
+        auto const key = safe_cast<int64_t>(returnArray.size());
         if ((flags & SCAN_UNSIGNED) && (value < 0)) {
           snprintf(buf, sizeof(buf), "%lu", (long)value); /* INTL: ISO digit */
-          returnArray.append(String(buf, CopyString));
+          returnArray.set(key, OptString(buf, CopyString));
         } else {
-          returnArray.append(value);
+          returnArray.set(key, value);
         }
       }
       break;
@@ -1047,7 +1051,8 @@ int string_sscanf(const char *string, const char *format, int numVars,
         double dvalue;
         *end = '\0';
         dvalue = strtod(buf, nullptr);
-        returnArray.append(dvalue);
+        auto const key = safe_cast<int64_t>(returnArray.size());
+        returnArray.set(key, dvalue);
       }
       break;
     } /* switch (op) */

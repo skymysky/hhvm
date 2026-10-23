@@ -1,11 +1,15 @@
-<?php
-parse_str("b=Hello+Again+World&c=Hi+Mom", $_GET);
-$_REQUEST = array_merge($_REQUEST, $_GET);
-_filter_snapshot_globals();
+<?hh
 
-parse_str("a=Hello+World", $_POST);
-$_REQUEST = array_merge($_REQUEST, $_POST);
-_filter_snapshot_globals();
- 
+<<__EntryPoint>>
+function main() :mixed{
+$get = \HH\global_get('_GET');
+parse_str("b=Hello+Again+World&c=Hi+Mom", inout $get);
+\HH\global_set('_GET', $get);
+
+$post = \HH\global_get('_POST');
+parse_str("a=Hello+World", inout $post);
+\HH\global_set('_POST', $post);
+
 error_reporting(0);
-echo "post-a=({$_POST['a']}) get-b=({$_GET['b']}) get-c=({$_GET['c']})"?>
+echo "post-a=(".\HH\global_get('_POST')['a'].") get-b=(".\HH\global_get('_GET')['b'].") get-c=(".\HH\global_get('_GET')['c'].")";
+}

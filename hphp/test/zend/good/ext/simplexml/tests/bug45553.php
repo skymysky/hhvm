@@ -1,4 +1,4 @@
-<?php
+<?hh <<__EntryPoint>> function main(): void {
 $xml =<<<XML
 <xml xmlns:a="http://a">
     <data a:label="I am A" label="I am Nothing">test1</data>
@@ -10,14 +10,14 @@ $x = simplexml_load_string($xml);
 $x->registerXPathNamespace("a", "http://a");
 
 $atts = $x->xpath("/xml/data/@a:label");
-echo $atts[0] . "\n";
+echo ($atts[0])->__toString() . "\n";
 $atts = $x->xpath("/xml/a:data");
-echo $atts[0]->attributes() . "\n";
+echo $atts[0]->attributes()->__toString() . "\n";
 $atts = $x->xpath("/xml/a:data/@a:label");
-echo $atts[0] . "\n";
+echo ($atts[0])->__toString() . "\n";
 $atts = $x->xpath("/xml/a:data/@label");
-echo $atts[0] . "\n";
+echo ($atts[0])->__toString() . "\n";
 $atts = $x->xpath("/xml/data/@label");
-echo $atts[0] . "\n";
-?>
-===DONE===
+echo ($atts[0])->__toString() . "\n";
+echo "===DONE===\n";
+}

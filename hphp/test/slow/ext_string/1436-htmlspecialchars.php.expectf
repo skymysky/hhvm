@@ -3,15 +3,17 @@ string(14) "foo&lt;&gt;bar"
 string(0) ""
 string(0) ""
 NULL
-string(0) ""
-array(1) {
+
+Warning: Argument 1 passed to htmlspecialchars() must be an instance of string, null given in %s/test/slow/ext_string/1436-htmlspecialchars.php on line 24
+dict(1) {
   ["str"]=>
   string(3) "aaa"
 }
 
-Warning: htmlspecialchars() expects parameter 1 to be string, array given in %s/test/slow/ext_string/1436-htmlspecialchars.php on line 17
-NULL
+Warning: Argument 1 passed to htmlspecialchars() must be an instance of string, HH\dict given in %s/test/slow/ext_string/1436-htmlspecialchars.php on line 24
 int(42)
-string(2) "42"
+
+Warning: Argument 1 passed to htmlspecialchars() must be an instance of string, int given in %s/test/slow/ext_string/1436-htmlspecialchars.php on line 24
 float(1.234)
-string(5) "1.234"
+
+Warning: Argument 1 passed to htmlspecialchars() must be an instance of string, float given in %s/test/slow/ext_string/1436-htmlspecialchars.php on line 24

@@ -1,2 +1,19 @@
-File "trait3.php", line 4, characters 7-7:
-A trait cannot be sealed (Typing[4245])
+error: Typing[4238] You cannot use sealed trait `T` [1]
+-> Declaration is here [2]
+
+trait3.php:10:16
+ 2 | 
+ 3 | <<__Sealed(A::class)>>
+ 4 | trait T {}
+   |       ^ [2]
+ 5 | 
+ 6 | abstract class A {
+ 7 |   use T; // ok
+ 8 | }
+ 9 | 
+10 | abstract class B {
+   |                ^ [1]
+11 |   use T; // error
+12 | }
+
+1 error found

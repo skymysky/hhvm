@@ -1,7 +1,7 @@
-<?php
+<?hh
 
-function asd() { return 12; }
-function foo() {
+function asd() :mixed{ return 12; }
+function foo() :mixed{
   $x = asd();
   for ($i = 0; $i < 10; ++$i) { echo $i . "\n"; }
   $x += 2;
@@ -9,4 +9,8 @@ function foo() {
   echo "\n";
 }
 
+
+<<__EntryPoint>>
+function main_dce_002() :mixed{
 foo();
+}

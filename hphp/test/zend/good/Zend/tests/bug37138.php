@@ -1,13 +1,13 @@
-<?php
-function __autoload ($CN) {var_dump ($CN);}
+<?hh
 class st {
-	public static function e () {echo ("EHLO\n");}
-	public static function e2 () {call_user_func (array ('self', 'e'));}
+  <<__DynamicallyCallable>> public static function e() :mixed{ echo ("EHLO\n"); }
+  public static function e2() :mixed{ call_user_func(vec[self::class, 'e']); }
 }
 class stch extends st {
-	public static function g () {call_user_func (array ('parent', 'e'));}
+  public static function g() :mixed{ call_user_func(vec[parent::class, 'e']); }
 }
-st::e ();
-st::e2 ();
-stch::g ();
-?>
+<<__EntryPoint>> function main(): void {
+  st::e();
+  st::e2();
+  stch::g();
+}

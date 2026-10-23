@@ -8,5 +8,6 @@
  *
  */
 
-class InvalidOperationException extends RuntimeException
-  implements Stringish {}
+class InvalidOperationException
+  extends RuntimeException
+  implements StringishObject {}

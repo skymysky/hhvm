@@ -1,10 +1,10 @@
-<?php
-$plaintxt = b<<<EOT
+<?hh <<__EntryPoint>> function main(): void {
+$plaintxt = <<<EOT
 hello world
 is a very common test
 for all languages
 EOT;
-$dirname = 'gzfile_temp';
+$dirname = sys_get_temp_dir().'/'.'gzfile_temp';
 $filename = $dirname.'/gzfile_basic2.txt';
 mkdir($dirname);
 $h = fopen($filename, 'w');
@@ -16,5 +16,5 @@ var_dump(gzfile( $filename ) );
 
 unlink($filename);
 rmdir($dirname);
-?>
-===DONE===
+echo "===DONE===\n";
+}

@@ -1,14 +1,19 @@
-<?php
+<?hh
 
 class thing {
   private $prop;
 
-  function go() {
+  function go() :mixed{
     $idx = 'five';
-    $instances[$this->prop] = false;
+    $instances = dict[];
+    $instances[(string)$this->prop] = false;
     return isset($this->prop[$idx]);
   }
 }
 
+
+<<__EntryPoint>>
+function main_local_type() :mixed{
 $t = new thing;
 var_dump($t->go());
+}

@@ -1,24 +1,7 @@
+Warning: supplied key param cannot be coerced into a public key in %s/test/zend/good/ext/openssl/tests/bug38255.php on line 13
 
-Warning: %s
-
-Warning: %s
+Warning: supplied key param cannot be coerced into a public key in %s/test/zend/good/ext/openssl/tests/bug38255.php on line 17
 bool(false)
 
-Warning: %s
-bool(false)
-
-Warning: %s
-NULL
-
-Warning: %s
-NULL
-
-Warning: %s
-NULL
-
-Warning: %s
-NULL
-
-Warning: %s
-NULL
+Warning: openssl_verify() expects at least 3 positional parameters, 0 given in %s/test/zend/good/ext/openssl/tests/bug38255.php on line 18
 Done

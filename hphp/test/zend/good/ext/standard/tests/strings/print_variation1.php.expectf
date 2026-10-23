@@ -24,18 +24,12 @@ int(1)
 101234567000
 int(1)
 -- Iteration 9 --
-
-Notice: %s
 Array
 int(1)
 -- Iteration 10 --
-
-Notice: %s
 Array
 int(1)
 -- Iteration 11 --
-
-Notice: %s
 Array
 int(1)
 -- Iteration 12 --
@@ -57,15 +51,6 @@ int(1)
 
 int(1)
 -- Iteration 18 --
-sample object
-int(1)
--- Iteration 19 --
 Resource id #%d
-int(1)
--- Iteration 20 --
-
-int(1)
--- Iteration 21 --
-
 int(1)
 ===DONE===

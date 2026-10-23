@@ -1,0 +1,18 @@
+error: Typing[4110] Invalid argument [1]
+-> Expected `int` [2]
+-> But got `string` [3]
+
+infer_suffix_masks_input_bad.php:9:20
+ 3 | 
+ 4 | function needs_int_suffix<T as shape(...)>(
+ 5 |   shape(...T, 'suffix' => int) $s,
+   |                           ^^^ [2]
+ 6 | ): void {}
+ 7 | 
+ 8 | function test(): void {
+ 9 |   needs_int_suffix(shape('suffix' => 'wrong', 'tail' => true));
+   |                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ [1]
+   |                                      ^^^^^^^ [3]
+10 | }
+
+1 error found

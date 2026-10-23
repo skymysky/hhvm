@@ -1,8 +1,11 @@
 <?hh
 
 
-function main($o) {
-  $o = $o->circle = $o;
+function main($o) :mixed{
+  $o->circle = $o;
+  $o = $o->circle;
   $o->foo();
 }
-main(new stdclass);
+<<__EntryPoint>> function main_entry(): void {
+main(new stdClass);
+}

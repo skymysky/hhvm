@@ -1,12 +1,10 @@
 <?hh
 // Copyright 2004-2015 Facebook. All Rights Reserved.
 
-echo "Starting\n";
-
 class C {
-  public function foo() {
+  public function foo() :mixed{
     echo "foo\n";
-    $x = array();
+    $x = vec[];
     if ($x) {
       print_r($x);
     } else {
@@ -14,9 +12,11 @@ class C {
     }
   }
 }
-
+<<__EntryPoint>> function main(): void {
+echo "Starting\n";
 $c = new C;
 $val = $c->foo();
 echo $val;
 echo "\n";
 echo "Done\n";
+}

@@ -1,4 +1,4 @@
-<?php
+<?hh <<__EntryPoint>> function main(): void {
 error_reporting(E_ALL|E_STRICT);
 
 $num_increments = 100;
@@ -8,21 +8,22 @@ $increment = 50;
 /* Create some more holes to give the memory allocator something to
  * work with. */
 $num = 5000;
-$a = Array();
+$a = dict[];
 for ($i=0; $i<$num; $i++) {
-  $a[$i] = Array(1);
+  $a[$i] = vec[1];
 }
+$b = dict[];
 for ($i=0; $i<$num; $i++) {
   $b[$i] = $a[$i][0];
 }
-unset($a);
+$a = null;
 
 for ($i=0;$i<$num_repeats;$i++) {
   $evil = "";
   for ($j=0;$j<$num_increments;$j++) {
     $evil .= str_repeat("a", $increment);
   }
-  unset($evil);
+  $evil = null;
 }
 echo "ok\n";
-?>
+}

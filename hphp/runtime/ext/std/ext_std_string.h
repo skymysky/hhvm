@@ -15,8 +15,7 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_EXT_STD_STRING_H_
-#define incl_HPHP_EXT_STD_STRING_H_
+#pragma once
 
 #include "hphp/runtime/ext/std/ext_std.h"
 
@@ -25,10 +24,9 @@ namespace HPHP {
 
 extern const StaticString s_nl;
 
-Variant HHVM_FUNCTION(wordwrap, const String& str, int64_t linewidth = 75,
-                      const String& brk = s_nl, bool cut = false);
+Variant HHVM_FUNCTION(wordwrap, const OptString& str, int64_t linewidth = 75,
+                      const OptString& brk = s_nl, bool cut = false);
 
 ///////////////////////////////////////////////////////////////////////////////
 }
 
-#endif // incl_HPHP_EXT_OUTPUT_H_

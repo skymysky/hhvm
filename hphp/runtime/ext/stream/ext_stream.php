@@ -15,8 +15,14 @@
  *
  */
 <<__Native>>
-function stream_context_create(?array $options = null,
-                               ?array $params = null): mixed;
+function stream_context_create(
+  ?darray<string, darray<string, mixed>> $options = null,
+  ?shape(
+    ?'options' => darray<string, darray<string, mixed>>,
+    ?'notification' => mixed,
+    ...
+  ) $params = null,
+): mixed;
 
 /**
  * @param array $options - The options to set for the default context.
@@ -27,7 +33,9 @@ function stream_context_create(?array $options = null,
  * @return mixed - Returns the default stream context.
  *
  */
-function stream_context_set_default(?array $options = null): mixed {
+function stream_context_set_default(
+  ?darray<string, darray<string, mixed>> $options = null,
+): mixed {
   return stream_context_get_default($options);
 }
 
@@ -41,7 +49,9 @@ function stream_context_set_default(?array $options = null): mixed {
  *
  */
 <<__Native>>
-function stream_context_get_default(?array $options = null): mixed;
+function stream_context_get_default(
+  ?darray<string, darray<string, mixed>> $options = null,
+): mixed;
 
 /**
  * @param resource $stream_or_context - The stream or context to get options
@@ -76,8 +86,14 @@ function stream_context_set_option(mixed $stream_or_context = null,
 function stream_context_get_params(resource $stream_or_context): mixed;
 
 <<__Native>>
-function stream_context_set_params(resource $stream_or_context,
-                                   array $params): bool;
+function stream_context_set_params(
+  resource $stream_or_context,
+  shape(
+    ?'options' => darray<string, darray<string, mixed>>,
+    ?'notification' => mixed,
+    ...
+  ) $params,
+): bool;
 
 /**
  * Makes a copy of up to maxlength bytes of data from the current position (or
@@ -113,7 +129,7 @@ function stream_copy_to_stream(resource $source,
  * @return mixed - Returns a string or FALSE on failure.
  *
  */
-<<__Native, __ParamCoerceModeFalse>>
+<<__Native>>
 function stream_get_contents(resource $handle,
                              int $maxlen = -1,
                              int $offset = -1): mixed;
@@ -169,24 +185,24 @@ function stream_get_line(resource $handle,
  *
  */
 <<__Native>>
-function stream_get_meta_data(resource $stream): mixed;
+function stream_get_meta_data(resource $stream)[]: mixed;
 
 /**
  * @return array - Returns an indexed array of socket transports names.
  *
  */
 <<__Native>>
-function stream_get_transports(): array;
+function stream_get_transports(): vec<string>;
 
 /**
- * Retrieve list of registered streams available on the running system.
- *
- * @return array - Returns an indexed array containing the name of all stream
- *   wrappers available on the running system.
- *
- */
+* Retrieve list of registered streams available on the running system.
+*
+* @return array - Returns an indexed array containing the name of all stream
+*   wrappers available on the running system.
+*
+*/
 <<__Native>>
-function stream_get_wrappers(): array;
+function stream_get_wrappers(): varray<string>;
 
 /**
  * Checks if a stream is a local stream
@@ -198,60 +214,6 @@ function stream_get_wrappers(): array;
  */
 <<__Native>>
 function stream_is_local(mixed $stream_or_url): bool;
-
-/**
- * This function is an alias of: stream_wrapper_register().
- *
- */
-<<__Native>>
-function stream_register_wrapper(string $protocol,
-                                 string $classname,
-                                 int $flags = 0): bool;
-
-/**
- * Allows you to implement your own protocol handlers and streams for use with
- *   all the other filesystem functions (such as fopen(), fread() etc.).
- *
- * @param string $protocol - The wrapper name to be registered.
- * @param string $classname - The classname which implements the protocol.
- * @param int $flags - Should be set to STREAM_IS_URL if protocol is a URL
- *   protocol. Default is 0, local stream.
- *
- * @return bool - Returns TRUE on success or FALSE on failure.
- *   stream_wrapper_register() will return FALSE if the protocol already has a
- *   handler.
- *
- */
-<<__Native>>
-function stream_wrapper_register(string $protocol,
-                                 string $classname,
-                                 int $flags = 0): bool;
-
-/**
- * Restores a built-in wrapper previously unregistered with
- *   stream_wrapper_unregister().
- *
- * @param string $protocol
- *
- * @return bool - Returns TRUE on success or FALSE on failure.
- *
- */
-<<__Native>>
-function stream_wrapper_restore(string $protocol): bool;
-
-/**
- * Allows you to disable an already defined stream wrapper. Once the wrapper
- *   has been disabled you may override it with a user-defined wrapper using
- *   stream_wrapper_register() or re-enable it later on with
- *   stream_wrapper_restore().
- *
- * @param string $protocol
- *
- * @return bool - Returns TRUE on success or FALSE on failure.
- *
- */
-<<__Native>>
-function stream_wrapper_unregister(string $protocol): bool;
 
 /**
  * Resolve filename against the include path according to the same rules as
@@ -313,12 +275,12 @@ function stream_resolve_include_path(string $filename,
  *   interrupted by an incoming signal).
  *
  */
-<<__Native>>
-function stream_select(mixed &$read,
-                       mixed &$write,
-                       mixed &$except,
+<<__Native("NoFCallBuiltin")>>
+function stream_select(inout mixed $read,
+                       inout mixed $write,
+                       inout mixed $except,
                        mixed $vtv_sec,
-                       int $tv_usec = 0): mixed;
+                       int $tv_usec = 0)[leak_safe]: mixed;
 
 /**
  * Awaitable version of stream_select()
@@ -332,7 +294,7 @@ function stream_select(mixed &$read,
  * @return int - Result code
  *               STREAM_AWAIT_CLOSED: Stream is closed
  *               STREAM_AWAIT_READY: Activity on the provided stream
- *               STREAM_AWAIT_TIMEOUT: No activity (timeout occured)
+ *               STREAM_AWAIT_TIMEOUT: No activity (timeout occurred)
  *               STREAM_AWAIT_ERROR: Error
  */
 <<__Native>>
@@ -356,7 +318,7 @@ function stream_await(resource $fp,
  *
  */
 <<__Native>>
-function stream_set_blocking(resource $stream, bool $mode): bool;
+function stream_set_blocking(resource $stream, bool $mode)[leak_safe]: bool;
 
 /**
  * Set read file buffering on the given stream.
@@ -401,7 +363,7 @@ function stream_set_chunk_size(resource $stream, int $chunk_size): mixed;
 <<__Native>>
 function stream_set_timeout(resource $stream,
                             int $seconds,
-                            int $microseconds = 0): bool;
+                            int $microseconds = 0)[leak_safe]: bool;
 
 /**
  * Sets the buffering for write operations on the given stream to buffer
@@ -431,7 +393,8 @@ function set_file_buffer(resource $stream, int $buffer): int;
  * @param resource $server_socket - The server socket to accept a connection
  *   from.
  * @param float $timeout - Override the default socket accept timeout. Time
- *   should be given in seconds.
+ *   should be given in seconds. Negative value are interpretted as default
+ *   timeout.
  * @param mixed $peername - Will be set to the name (address) of the client
  *   which connected, if included and available from the selected transport.
  *   Can also be determined later using stream_socket_get_name().
@@ -442,8 +405,9 @@ function set_file_buffer(resource $stream, int $buffer): int;
  */
 <<__Native>>
 function stream_socket_accept(resource $server_socket,
-                              float $timeout = -1.0,
-                              mixed &$peername = null): mixed;
+                              float $timeout,
+                              <<__OutOnly>>
+                              inout mixed $peername)[leak_safe]: mixed;
 
 /**
  * Creates a stream or datagram socket on the specified local_socket.  This
@@ -478,11 +442,13 @@ function stream_socket_accept(resource $server_socket,
  */
 <<__Native>>
 function stream_socket_server(string $local_socket,
-                              mixed &$errnum = null,
-                              mixed &$errstr = null,
+                              <<__OutOnly>>
+                              inout mixed $errnum,
+                              <<__OutOnly>>
+                              inout mixed $errstr,
                               int $flags = STREAM_SERVER_BIND |
                                 STREAM_SERVER_LISTEN,
-                              ?resource $context = null): mixed;
+                              ?resource $context = null)[leak_safe]: mixed;
 
 /**
  * Initiates a stream or datagram connection to the destination specified by
@@ -519,8 +485,10 @@ function stream_socket_server(string $local_socket,
  */
 <<__Native>>
 function stream_socket_client(string $remote_socket,
-                              mixed &$errnum = null,
-                              mixed &$errstr = null,
+                              <<__OutOnly>>
+                              inout mixed $errnum,
+                              <<__OutOnly>>
+                              inout mixed $errstr,
                               float $timeout = -1.0,
                               int $flags = 0,
                               ?resource $context = null): mixed;
@@ -574,7 +542,7 @@ function stream_socket_enable_crypto(
  *
  */
 <<__Native>>
-function stream_socket_get_name(resource $handle, bool $want_peer): mixed;
+function stream_socket_get_name(resource $handle, bool $want_peer)[leak_safe]: mixed;
 
 /**
  * stream_socket_pair() creates a pair of connected, indistinguishable socket
@@ -618,8 +586,9 @@ function stream_socket_pair(int $domain, int $type, int $protocol): mixed;
 <<__Native>>
 function stream_socket_recvfrom(resource $socket,
                                 int $length,
-                                int $flags = 0,
-                                mixed &$address = null): mixed;
+                                int $flags,
+                                <<__OutOnly>>
+                                inout mixed $address): mixed;
 
 /**
  * Sends the specified data through the socket.

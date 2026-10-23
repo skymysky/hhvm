@@ -1,0 +1,9 @@
+error: Naming[2128] Hack does not support top level statements. Use the `__EntryPoint` attribute on a function instead [1]
+
+test_toplevel_stmt_in_namespace.php:6:1
+4 |   echo $x + $x;
+5 | }
+6 | foo(true);
+  | ^^^^^^^^^^ [1]
+
+1 error found

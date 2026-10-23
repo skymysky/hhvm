@@ -1,11 +1,15 @@
 <?hh
 
 class C {
-  function m() { echo "done.\n"; }
+  function m() :mixed{ echo "done.\n"; }
 }
 
-function f() {
+function f() :mixed{
   new C()->m();
 }
 
+
+<<__EntryPoint>>
+function main_relaxed_new() :mixed{
 f();
+}

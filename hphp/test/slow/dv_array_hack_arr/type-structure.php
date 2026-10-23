@@ -1,18 +1,18 @@
 <?hh
 // Copyright 2004-present Facebook. All Rights Reserved.
 
-type T1 = (bool, int, string, array);
-type T2 = shape('a' => bool, 'c' => int, 'd' => array);
+type T1 = (bool, int, string, AnyArray);
+type T2 = shape('a' => bool, 'c' => int, 'd' => AnyArray);
 type T3 = varray;
 type T4 = darray;
 type T5 = varray_or_darray;
 
 class C {
-  const type T = ?array<int, @bool>;
-  const type U = map<arraykey, Vector<array<int>>>;
+  const type T = ?darray<int, <<__Soft>> bool>;
+  const type U = Map<arraykey, Vector<varray<int>>>;
   const type V = (int, ?float, bool);
   const type W = (function (): void);
-  const type X = (function (mixed, resource): array);
+  const type X = (function (mixed, resource): AnyArray);
 }
 
 newtype MyAlias<T> = Set<T>;
@@ -35,13 +35,13 @@ class D {
   const type V = bool;
 }
 
-function dump($x) {
+function dump($x) :mixed{
   var_dump(
     __hhvm_intrinsics\serialize_keep_dvarrays($x)
   );
 }
 
-function main() {
+function main() :mixed{
   dump(type_structure(T1::class));
   dump(type_structure(T2::class));
   dump(type_structure(T3::class));
@@ -72,4 +72,8 @@ function main() {
   dump(type_structure(D::class, 'U'));
 
 }
+
+<<__EntryPoint>>
+function main_type_structure() :mixed{
 main();
+}

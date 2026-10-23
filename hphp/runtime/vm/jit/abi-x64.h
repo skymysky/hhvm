@@ -14,15 +14,15 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_JIT_ABI_X64_H_
-#define incl_HPHP_JIT_ABI_X64_H_
+#pragma once
 
 #include "hphp/runtime/vm/jit/abi-regs.h"
 #include "hphp/runtime/vm/jit/phys-reg.h"
+#include "hphp/runtime/vm/jit/types.h"
 
 #include "hphp/util/asm-x64.h"
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 
 struct Abi;
 
@@ -43,6 +43,9 @@ constexpr PhysReg rsp()   { return reg::rsp; }
 
 inline RegSet vm_regs_no_sp()   { return rvmfp() | rvmtl(); }
 inline RegSet vm_regs_with_sp() { return vm_regs_no_sp() | rvmsp(); }
+inline RegSet cross_jit_save() {
+  return reg::rbx | reg::r12 | reg::r13 | reg::r14 | reg::r15;
+}
 
 constexpr PhysReg rret_data() { return reg::rax; }
 constexpr PhysReg rret_type() { return reg::rdx; }
@@ -63,6 +66,7 @@ RegSet arg_regs_simd(size_t n);
 RegSet arg_regs_ind_ret(size_t n);
 
 constexpr PhysReg r_svcreq_req()  { return reg::rdi; }
+constexpr PhysReg r_svcreq_spoff()  { return reg::rbx; }
 constexpr PhysReg r_svcreq_stub() { return reg::r10; }
 PhysReg r_svcreq_sf();
 PhysReg r_svcreq_arg(size_t i);
@@ -75,6 +79,4 @@ inline Vflags required_flags(jit::ConditionCode /*cc*/) {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-}}}
-
-#endif
+}}

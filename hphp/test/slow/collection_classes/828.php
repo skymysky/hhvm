@@ -1,6 +1,6 @@
 <?hh
 
-function f() {
+function f() :mixed{
   $obj = new stdClass();
   $a = Vector {
 $obj, $obj}
@@ -23,4 +23,8 @@ $obj, $obj}
   $a[0]->prop = 44;
   var_dump($a[1]->prop);
 }
+
+<<__EntryPoint>>
+function main_828() :mixed{
 f();
+}

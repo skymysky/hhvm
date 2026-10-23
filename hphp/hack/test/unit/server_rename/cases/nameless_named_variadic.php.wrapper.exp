@@ -1,0 +1,4 @@
+<?hh
+// @no-wrapper
+<<file: __EnableUnstableFeatures('named_parameters')>>
+function renamed(named int...): void {}

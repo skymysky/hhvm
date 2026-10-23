@@ -1,0 +1,21 @@
+warning: Warn[12010] This `is` check is always `false`. The expression on the left has type `int` which shares no values with `string`. [1]
+
+bug_union_inter1.php:6:13
+4 |     (Map {'a' => 0})->map(
+5 |       $value ==> {
+6 |         if ($value is string || $value is bool) {
+  |             ^^^^^^^^^^^^^^^^ [1]
+7 |           return (string) $value;
+8 |         }
+
+warning: Warn[12010] This `is` check is always `false`. The expression on the left has type `int` which shares no values with `bool`. [1]
+
+bug_union_inter1.php:6:33
+4 |     (Map {'a' => 0})->map(
+5 |       $value ==> {
+6 |         if ($value is string || $value is bool) {
+  |                                 ^^^^^^^^^^^^^^ [1]
+7 |           return (string) $value;
+8 |         }
+
+2 errors found

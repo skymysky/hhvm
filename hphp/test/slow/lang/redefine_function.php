@@ -1,10 +1,10 @@
-<?php
+<?hh
 
 /* some doc */
 function
 foo
 ()
-{
+:mixed{
 }
-function foo() {
+function foo() :mixed{
 }

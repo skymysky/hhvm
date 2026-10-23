@@ -14,8 +14,9 @@
    +----------------------------------------------------------------------+
 */
 
-#include "hphp/runtime/ext/vsdebug/debugger.h"
 #include "hphp/runtime/ext/vsdebug/command.h"
+#include "hphp/runtime/ext/vsdebug/debugger.h"
+#include "hphp/runtime/ext/vsdebug/debugger-request-info.h"
 
 namespace HPHP {
 namespace VSDEBUG {
@@ -58,15 +59,14 @@ bool TerminateThreadsCommand::executeImpl(DebuggerSession* /*session*/,
                                           folly::dynamic* /*responseMsg*/
 ) {
   if (m_requestId > 0) {
-    RequestInfo* ri = m_debugger->getRequestInfo();
+    DebuggerRequestInfo* ri = m_debugger->getRequestInfo();
     ri->m_flags.terminateRequest = true;
-    TI().m_reqInjectionData.setDebuggerIntr(true);
+    RID().setDebuggerIntr(true);
     return true;
   }
 
   const folly::dynamic& message = getMessage();
   const auto dispatchRequest = [&](request_id_t requestId) {
-    m_debugger->sendUserMessage(std::to_string(requestId).c_str());
     if (requestId > 0) {
       m_debugger->dispatchCommandToRequest(
         requestId,
@@ -78,12 +78,12 @@ bool TerminateThreadsCommand::executeImpl(DebuggerSession* /*session*/,
     const auto& args = tryGetObject(message, "arguments", s_emptyArgs);
     const auto& val = args["threadIds"];
     if (val.isArray()) {
-      for (const auto requestIdVal : val) {
+      for (const auto& requestIdVal : val) {
         auto requestId = requestIdVal.isInt() ? requestIdVal.asInt() : -1;
         dispatchRequest(requestId);
       }
     }
-  } catch (std::out_of_range& e) {
+  } catch (std::out_of_range&) {
   }
 
   // Do not resume target.

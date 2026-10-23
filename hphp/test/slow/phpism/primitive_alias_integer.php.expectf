@@ -1,0 +1,1 @@
+Fatal error: No such type `integer`, did you mean `int`? in %s on line %d

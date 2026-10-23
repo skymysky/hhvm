@@ -13,31 +13,87 @@
    | license@php.net so we can mail you a copy immediately.               |
    +----------------------------------------------------------------------+
 */
-#ifndef incl_HPHP_OPTIONS_UTIL_H_
-#define incl_HPHP_OPTIONS_UTIL_H_
+#pragma once
 
 #include "hphp/hhbbc/hhbbc.h"
 #include "hphp/hhbbc/misc.h"
 
-namespace HPHP { namespace HHBBC {
+#include "hphp/util/trace.h"
 
-namespace php { struct Class; }
-namespace php { struct Func; }
+namespace HPHP::HHBBC {
 
-//////////////////////////////////////////////////////////////////////
+struct Context;
 
-bool method_map_contains(const MethodMap&,
-                         borrowed_ptr<const php::Class>,
-                         borrowed_ptr<const php::Func>);
-bool is_trace_function(borrowed_ptr<const php::Class>,
-                       borrowed_ptr<const php::Func>);
-
-int trace_bump_for(borrowed_ptr<const php::Class>,
-                   borrowed_ptr<const php::Func>);
+namespace php {
+struct Class;
+struct Func;
+struct Unit;
+}
 
 //////////////////////////////////////////////////////////////////////
 
-}}
+#ifdef HPHP_TRACE
 
+bool is_trace_function(const php::Class*,
+                       const php::Func*,
+                       const php::Unit* = nullptr);
+bool is_trace_function(SString cls, SString func, SString unit);
+bool is_trace_function(const Context&);
+
+int trace_bump_for(const php::Class*,
+                   const php::Func*,
+                   const php::Unit* = nullptr);
+int trace_bump_for(SString cls, SString func, SString unit);
+int trace_bump_for(const Context&);
+
+#else
+
+inline bool is_trace_function(const php::Class*,
+                              const php::Func*,
+                              const php::Unit* = nullptr) { return false; }
+inline bool is_trace_function(SString, SString, SString) { return false; }
+inline bool is_trace_function(const Context&) { return false; }
+inline int trace_bump_for(const php::Class*,
+                          const php::Func*,
+                          const php::Unit* = nullptr) { return 0; }
+inline int trace_bump_for(SString, SString, SString) { return 0; }
+inline int trace_bump_for(const Context&) { return 0; }
 
 #endif
+//////////////////////////////////////////////////////////////////////
+
+template <typename... T>
+inline
+std::array<Trace::Bump, sizeof...(T)> trace_bump(const Context& ctx,
+                                                 T... mods) {
+  auto const b = trace_bump_for(ctx);
+  return { Trace::Bump{mods, b}... };
+}
+
+template <typename... T>
+inline
+std::array<Trace::Bump, sizeof...(T)> trace_bump(const php::Func& f,
+                                                 T... mods) {
+  auto const b = trace_bump_for(nullptr, &f, nullptr);
+  return { Trace::Bump{mods, b}... };
+}
+
+template <typename... T>
+inline
+std::array<Trace::Bump, sizeof...(T)> trace_bump(const php::Class& c,
+                                                 T... mods) {
+  auto const b = trace_bump_for(&c, nullptr, nullptr);
+  return { Trace::Bump{mods, b}... };
+}
+
+template <typename... T>
+inline
+std::array<Trace::Bump, sizeof...(T)> trace_bump(const php::Unit& u,
+                                                 T... mods) {
+  auto const b = trace_bump_for(nullptr, nullptr, &u);
+  return { Trace::Bump{mods, b}... };
+}
+
+//////////////////////////////////////////////////////////////////////
+
+}

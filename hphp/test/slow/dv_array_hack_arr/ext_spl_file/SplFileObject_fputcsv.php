@@ -1,8 +1,11 @@
 <?hh
-$file = __DIR__ . '/SplFileObject_fputcsv.csv';
+
+<<__EntryPoint>>
+function main_spl_file_object_fputcsv() :mixed{
+$file = sys_get_temp_dir().'/'.'SplFileObject_fputcsv.csv';
 $fo = new SplFileObject($file, 'w');
 
-$list = array (
+$list = dict [
   0 => 'aaa,bbb',
   1 => 'aaa,"bbb"',
   2 => '"aaa","bbb"',
@@ -23,25 +26,27 @@ $list = array (
   17 => 'aaa"\\"a","bbb"',
   18 => '"\\"","aaa"',
   19 => '"\\""",aaa',
-);
+];
 
 foreach ($list as $v) {
-	$fo->fputcsv(explode(',', $v));
+  $fo->fputcsv(varray(explode(',', $v)));
 }
-unset($fo);
+$fo = null;
 
 $res = file($file);
-foreach($res as &$val)
+foreach($res as $k  => $val)
 {
-	$val = substr($val, 0, -1);
+  $res[$k] = substr($val, 0, -1);
 }
 echo '$list = ';var_export($res);echo ";\n";
 
 $fp = fopen($file, "r");
-$res = array();
-while($l=fgetcsv($fp))
+$res = vec[];
+$l = fgetcsv($fp);
+while($l)
 {
-	$res[] = join(',',$l);
+  $res[] = join(',',$l);
+  $l = fgetcsv($fp);
 }
 fclose($fp);
 
@@ -49,5 +54,5 @@ echo '$list = ';var_export($res);echo ";\n";
 
 echo '===DONE===';
 
-$file = __DIR__ . '/SplFileObject_fputcsv.csv';
 unlink($file);
+}

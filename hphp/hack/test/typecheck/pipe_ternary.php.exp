@@ -1,0 +1,19 @@
+error: Typing[4110] Invalid argument [1]
+-> Expected `string` [2]
+-> But got `int` [3]
+
+pipe_ternary.php:11:17
+ 7 | // this will report a type error at expect_string
+ 8 | function expect_fail(bool $b): void {
+ 9 |   $broken = 1 |> ($b ? $$ : $$);
+   |             ^ [3]
+10 |   expect_int($broken);
+11 |   expect_string($broken);
+   |                 ^^^^^^^ [1]
+12 | }
+13 | 
+14 | function expect_int(int $i): void {}
+15 | function expect_string(string $s): void {}
+   |                        ^^^^^^ [2]
+
+1 error found

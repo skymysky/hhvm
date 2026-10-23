@@ -1,19 +1,19 @@
-<?php
+<?hh
 
 interface Test
 {
-	function show();
+    function show():mixed;
 }
 
 class Tester extends Test
 {
-	function show() {
-		echo __METHOD__ . "\n";
-	}
+    function show() :mixed{
+        echo __METHOD__ . "\n";
+    }
 }
-
+<<__EntryPoint>> function main(): void {
 $o = new Tester;
 $o->show();
 
-?>
-===DONE===
+echo "===DONE===\n";
+}

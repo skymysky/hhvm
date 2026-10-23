@@ -15,7 +15,7 @@ interface J extends I {
   const X = 'J::X';
 }
 
-function reflect() {
+function reflect() :mixed{
   echo "\n",'== ', __FUNCTION__, ' ==', "\n";
   var_dump(get_class_constants(I::class));
   $rc = new ReflectionClass(I::class);
@@ -36,7 +36,7 @@ function reflect() {
   var_dump($rc->hasConstant('X'));
 }
 
-function main() {
+function main() :mixed{
   var_dump(C::X);
   var_dump(C::Y);
   var_dump(C::Z);
@@ -48,4 +48,8 @@ function main() {
   reflect();
 }
 
+
+<<__EntryPoint>>
+function main_abstract_const() :mixed{
 main();
+}

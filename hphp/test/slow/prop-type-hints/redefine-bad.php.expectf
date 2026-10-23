@@ -1,0 +1,288 @@
+Warning: C::p1 must have a type of int as defined in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p1 includes a type of string but has no equivalent definition in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p2 must have a type of string as defined in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p2 includes a type of int but has no equivalent definition in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p3 must have a type of bool as defined in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p3 includes a type of float but has no equivalent definition in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p4 must have a type of float as defined in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p4 includes a type of num but has no equivalent definition in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p6 must have a type of resource as defined in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p6 includes a type of Cls1 but has no equivalent definition in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p7 must have a type of nonnull as defined in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p7 includes a type of int but has no equivalent definition in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p8 must have a type of num as defined in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p8 includes a type of int but has no equivalent definition in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p9 must have a type of arraykey as defined in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p9 includes a type of string but has no equivalent definition in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p10 must have a type of HH\vec as defined in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p10 includes a type of HH\AnyArray but has no equivalent definition in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p11 must have a type of HH\dict as defined in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p11 includes a type of HH\AnyArray but has no equivalent definition in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p12 must have a type of HH\keyset as defined in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p12 includes a type of HH\AnyArray but has no equivalent definition in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p13 must have a type of HH\vec_or_dict as defined in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p13 includes a type of HH\vec but has no equivalent definition in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p14 must have a type of HH\AnyArray as defined in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p14 includes a type of HH\vec but has no equivalent definition in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p15 must have a type of HH\varray as defined in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p15 includes a type of HH\AnyArray but has no equivalent definition in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p16 must have a type of HH\darray as defined in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p16 includes a type of HH\AnyArray but has no equivalent definition in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p17 must have a type of HH\varray_or_darray as defined in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p17 includes a type of HH\AnyArray but has no equivalent definition in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p18 must have a type of this as defined in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p18 includes a type of C but has no equivalent definition in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p19 must have a type of Cls1 as defined in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p19 includes a type of Cls2 but has no equivalent definition in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p20 must have a type of Cls2 as defined in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p20 includes a type of Cls1 but has no equivalent definition in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p21 must have a type of Enum1 as defined in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p21 includes a type of Enum2 but has no equivalent definition in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p22 must have a type of Enum2 as defined in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p22 includes a type of Enum1 but has no equivalent definition in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p23 must have a type of Alias1 as defined in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p23 includes a type of Alias2 but has no equivalent definition in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p24 must have a type of Alias2 as defined in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p24 includes a type of Alias1 but has no equivalent definition in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p25 must have a type of Alias3 as defined in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p25 includes a type of Alias5 but has no equivalent definition in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p27 must have a type of Alias5 as defined in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p27 includes a type of Alias3 but has no equivalent definition in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p28 must have a type of HH\Traversable as defined in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p28 includes a type of HH\KeyedTraversable but has no equivalent definition in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p29 includes a type of int but has no equivalent definition in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p30 includes a type of string but has no equivalent definition in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p31 must have a type of Enum3 as defined in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p31 includes a type of int but has no equivalent definition in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p32 must have a type of Alias6 as defined in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p32 includes a type of string but has no equivalent definition in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p33 must have a type of Alias1 as defined in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p33 includes a type of Alias2 but has no equivalent definition in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p34 must have a type of Alias7 as defined in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p34 includes a type of Enum2 but has no equivalent definition in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p35 must have a type of Enum4 as defined in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p35 includes a type of int but has no equivalent definition in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p36 must have a type of Alias9 as defined in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p36 includes a type of string but has no equivalent definition in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p37 must have a type of Enum4 as defined in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p37 includes a type of ?Enum4 but has no equivalent definition in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p38 must have a type of HH\varray_or_darray as defined in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p38 includes a type of HH\vec but has no equivalent definition in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p41 includes a type of nonnull but has no equivalent definition in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p42 includes a type of ?nonnull but has no equivalent definition in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p43 must have a type of Alias10 as defined in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p43 includes a type of Alias5 but has no equivalent definition in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p44 must have a type of ?Alias10 as defined in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p44 includes a type of ?Alias5 but has no equivalent definition in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p45 must have a type of Alias8 as defined in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p45 includes a type of Alias3 but has no equivalent definition in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p46 must have a type of ?Alias8 as defined in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p46 includes a type of ?Alias3 but has no equivalent definition in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p47 must have a type of Alias11 as defined in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p47 includes a type of ?Alias1 but has no equivalent definition in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p48 must have a type of ?Alias11 as defined in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p48 includes a type of Alias1 but has no equivalent definition in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p49 must have a type of ?int as defined in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p49 includes a type of int but has no equivalent definition in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p50 must have a type of ?int as defined in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p50 includes a type of ?num but has no equivalent definition in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p51 must have a type of Alias12 as defined in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p51 includes a type of Alias6 but has no equivalent definition in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p52 must have a type of ?Alias12 as defined in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p52 includes a type of ?Alias3 but has no equivalent definition in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p53 must have a type of ?Alias1 as defined in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p53 includes a type of Alias1 but has no equivalent definition in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p54 must have a type of Alias12 as defined in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p54 includes a type of ?Alias2 but has no equivalent definition in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p55 must have a type of ?Alias12 as defined in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p55 includes a type of Alias2 but has no equivalent definition in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p56 must have a type of ?int as defined in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p56 includes a type of int but has no equivalent definition in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p63 must have a type of ?Enum2 as defined in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p63 includes a type of Enum2 but has no equivalent definition in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p64 must have a type of ?Enum2 as defined in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p64 includes a type of Enum2 but has no equivalent definition in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p65 must have a type of ?int as defined in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p65 includes a type of ?arraykey but has no equivalent definition in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p66 must have a type of Alias13 as defined in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p66 includes a type of ?Enum3 but has no equivalent definition in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p67 must have a type of ?Alias13 as defined in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p67 includes a type of Enum3 but has no equivalent definition in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p68 must have a type of ?int as defined in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p68 includes a type of int but has no equivalent definition in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p69 must have a type of ?Cls1 as defined in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p69 includes a type of Cls1 but has no equivalent definition in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p70 must have a type of ?Cls1 as defined in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p70 includes a type of ?Cls2 but has no equivalent definition in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p71 must have a type of Alias14 as defined in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p71 includes a type of Cls1 but has no equivalent definition in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p73 must have a type of ?Alias14 as defined in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p73 includes a type of ?Cls2 but has no equivalent definition in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p74 must have a type of Alias14 as defined in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p74 includes a type of bool but has no equivalent definition in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p75 must have a type of ?Alias14 as defined in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p75 includes a type of Alias4 but has no equivalent definition in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p76 must have a type of ?Alias4 as defined in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p76 includes a type of ?Alias3 but has no equivalent definition in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p77 must have a type of ?Alias4 as defined in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p77 includes a type of Alias3 but has no equivalent definition in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p78 must have a type of @int as defined in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p78 includes a type of int but has no equivalent definition in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p79 must have a type of @?int as defined in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p79 includes a type of ?int but has no equivalent definition in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p80 must have a type of int as defined in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p80 includes a type of ?int but has no equivalent definition in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p81 must have a type of CondEnum1 as defined in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p81 includes a type of ?CondEnum1 but has no equivalent definition in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p82 must have a type of CondAlias as defined in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p82 includes a type of ?CondAlias but has no equivalent definition in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p83 must have a type of int as defined in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p83 includes a type of @int but has no equivalent definition in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p84 must have a type of CondEnum1 as defined in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p84 includes a type of @?CondEnum1 but has no equivalent definition in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p85 must have a type of CondAlias as defined in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+
+Warning: C::p85 includes a type of @?CondAlias but has no equivalent definition in A in %shphp/test/slow/prop-type-hints/redefine-bad.php on line 553
+DONE

@@ -1,3 +1,7 @@
-<?php
-require('require_env.inc');
+<?hh
+
+<<__EntryPoint>> function skip(): void {
+  require('require_env.inc');
+  skip_if_not_configured();
+}
 

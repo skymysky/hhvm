@@ -1,0 +1,17 @@
+error: Typing[4305] Invalid reified hint [1]
+-> This is a wildcard, it cannot be used as a reified type argument [1]
+-> `T2` is reified [2]
+
+reified_targs_missing3.php:7:17
+1 | <?hh
+2 | 
+3 | function foo<reify T, reify T2>(T $a): void {
+  |                             ^^ [2]
+4 | }
+5 | 
+6 | function test(): void {
+7 |   $x = foo<int, _>;
+  |                 ^ [1]
+8 | }
+
+1 error found

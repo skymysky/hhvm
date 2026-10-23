@@ -1,12 +1,11 @@
-A::__set_state(array(
+A::__set_state(darray[
   'b' => 'b',
   'c' => 'c',
   'd' => 'd',
   'e' => 
-  array (
-    0 => 
-    array (
-      0 => 'e',
-    ),
-  ),
-))
+  vec [
+    vec [
+      'e',
+    ],
+  ],
+])

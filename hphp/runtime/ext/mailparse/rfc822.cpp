@@ -56,7 +56,7 @@
    are counted, allowing the caller to allocate enough room */
 static void tokenize(const char *header, php_rfc822_token_t *tokens,
                      int *ntokens, int report_errors) {
-  register const char *p, *q, *start;
+  const char *p, *q, *start;
   int in_bracket = 0;
 
 /* NB: parser assumes that the header has two bytes of NUL terminator */
@@ -446,6 +446,7 @@ address:  /* mailbox / group */
     *naddrs = iaddr;
     return;
   }
+  if (addrs && iaddr >= addrs->naddrs) return;
 
   /* look ahead to determine if we are dealing with a group */
   for (i = start_tok; i < toks->ntokens; i++)
@@ -469,6 +470,7 @@ address:  /* mailbox / group */
     *naddrs = iaddr;
     return;
   }
+  if (addrs && iaddr >= addrs->naddrs) return;
 
   /* skip spurious commas */
   while (start_tok < toks->ntokens && (toks->tokens[start_tok].token == ','
@@ -526,7 +528,7 @@ address:  /* mailbox / group */
     if (addrs) {
       a_start = i;
       a_count = j-i;
-      /* if an address is enclosed in <>, leave them out of the the
+      /* if an address is enclosed in <>, leave them out of the
        * address value that we return */
       if (toks->tokens[a_start].token == '<') {
         a_start++;
@@ -545,7 +547,7 @@ address:  /* mailbox / group */
     if (addrs) {
       a_start = start_tok;
       a_count = i - start_tok;
-      /* if an address is enclosed in <>, leave them out of the the
+      /* if an address is enclosed in <>, leave them out of the
        * address value that we return */
       if (toks->tokens[a_start].token == '<') {
         a_start++;

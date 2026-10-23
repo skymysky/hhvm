@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 // Copyright 2004-present Facebook. All Rights Reserved.
 
 interface I1<-T> {
@@ -37,5 +37,6 @@ function BreakIt(): void {
   $c2->f(42);
 }
 
-/* HH_FIXME[1002] */
-BreakIt();
+function main(): void {
+  BreakIt();
+}

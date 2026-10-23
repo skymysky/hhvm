@@ -1,9 +1,16 @@
-File "test_consts15.php", line 7, characters 16-16:
-Class D does not correctly implement all required methods  (Typing[4142])
-File "test_consts15.php", line 7, characters 26-26:
-Some methods are incompatible with those declared in type C
-Read the following to see why:
-File "test_consts15.php", line 8, characters 18-20:
-Cannot re-declare this constant as abstract
-File "test_consts15.php", line 4, characters 13-13:
-Previously defined here
+error: Typing[4142] Cannot re-declare this constant as abstract [1]
+-> Previously defined here [2]
+
+test_consts15.php:8:22
+2 | 
+3 | class C {
+4 |   const X = 4;
+  |         ^ [2]
+5 | }
+6 | 
+7 | abstract class D extends C {
+8 |   abstract const int X;
+  |                      ^ [1]
+9 | }
+
+1 error found

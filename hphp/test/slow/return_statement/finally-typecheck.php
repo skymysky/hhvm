@@ -11,4 +11,8 @@ function foo(): A {
   }
 }
 
+
+<<__EntryPoint>>
+function main_finally_typecheck() :mixed{
 var_dump(foo());
+}

@@ -16,15 +16,12 @@
 #include "hphp/runtime/base/emulate-zend.h"
 #include "hphp/runtime/base/ini-setting.h"
 
-#include <assert.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 
 #include <vector>
 #include <string>
 #include <iostream>
-#include <sstream>
 
 #include <folly/portability/Fcntl.h>
 #include <folly/portability/Stdlib.h>
@@ -36,13 +33,7 @@ int execute_program(int argc, char **argv);
 
 static int get_tempfile_if_not_exists(int ini_fd, char ini_path[]) {
   if (ini_fd == -1) {
-#ifdef _MSC_VER
-    // MSVC doesn't require the characters to be the last
-    // 6 in the string.
-    ini_fd = open(mktemp(ini_path), O_RDWR | O_EXCL);
-#else
     ini_fd = mkstemps(ini_path, 4); // keep the .ini suffix
-#endif
     if (ini_fd == -1) {
       fprintf(stderr, "Error: unable to open temporary file");
       exit(EXIT_FAILURE);
@@ -61,8 +52,9 @@ int emulate_zend(int argc, char** argv) {
   bool need_file = true;
   int ini_fd = -1;
   char ini_path[] = "/tmp/php-ini-XXXXXX.ini";
-  std::string ini_section = "";
-  const char* program = nullptr;
+  std::string ini_section;
+
+  const char* posArg = nullptr;
 
   int cnt = 1;
   bool ignore_default_configs = ::getenv("HHVM_NO_DEFAULT_CONFIGS") != nullptr;
@@ -72,13 +64,6 @@ int emulate_zend(int argc, char** argv) {
       need_file = false;
       newargv.push_back("-a");
       cnt++;
-      continue;
-    }
-    if (strcmp(argv[cnt], "-z") == 0) {
-      std::string arg = "-vDynamicExtensions.0=";
-      arg.append(argv[cnt+1]);
-      newargv.push_back(arg.c_str());
-      cnt += 2;
       continue;
     }
     if (strcmp(argv[cnt], "-l") == 0 || strcmp(argv[cnt], "--lint") == 0) {
@@ -93,16 +78,20 @@ int emulate_zend(int argc, char** argv) {
         newargv.push_back(argv[cnt++]);
         continue;
       }
-      assertx(cnt + 1 < argc);
-      program = argv[cnt + 1];
-      need_file = true;
+      assert(cnt + 1 < argc);
+      newargv.push_back("-m");
+      newargv.push_back("eval");
+      posArg = argv[cnt + 1];
+      need_file = false;
       cnt += 2;
       continue;
     }
     if (strcmp(argv[cnt], "-i") == 0 || strcmp(argv[cnt], "--info") == 0) {
       // Pretend they did "-r 'phpinfo();'"
-      program = "phpinfo();";
-      need_file = true;
+      newargv.push_back("-m");
+      newargv.push_back("eval");
+      posArg = "phpinfo();";
+      need_file = false;
       cnt = argc; // no need to check the rest of options and arguments
       break;
     }
@@ -180,6 +169,8 @@ int emulate_zend(int argc, char** argv) {
       } else {
         newargv.push_back(lint ? "-l" : "-f");
       }
+      if (posArg) newargv.push_back(posArg);
+      posArg = nullptr;
       newargv.push_back(argv[cnt++]);
       need_file = false;
       break;
@@ -197,18 +188,12 @@ int emulate_zend(int argc, char** argv) {
       fprintf(stderr, "Error: unable to open temporary file");
       exit(EXIT_FAILURE);
     }
-    if (program == nullptr) {
-      // If the program wasn't specified on the command-line, ala' -r,
-      // is no command-line parameter, read the PHP file from stdin.
-      std::string line;
-      while (std::getline(std::cin, line)) {
-        write(tmp_fd, line.c_str(), line.length());
-        write(tmp_fd, "\n", 1);
-      }
-    } else {
-      // -r omits the braces
-      write(tmp_fd, "<?\n", 3);
-      write(tmp_fd, program, strlen(program));
+    // If the program wasn't specified on the command-line, ala' -r,
+    // is no command-line parameter, read the PHP file from stdin.
+    std::string line;
+    while (std::getline(std::cin, line)) {
+      write(tmp_fd, line.c_str(), line.length());
+      write(tmp_fd, "\n", 1);
     }
     close(tmp_fd);
 
@@ -246,6 +231,7 @@ int emulate_zend(int argc, char** argv) {
     add_default_config_files_globbed(DEFAULT_CONFIG_DIR "/config*.hdf", cb);
   }
 
+  if (posArg) newargv.push_back(posArg);
   if (cnt < argc && strcmp(argv[cnt], "--") == 0) cnt++;
   if (cnt < argc) {
     // There are arguments following the filename, so copy them.
@@ -257,7 +243,6 @@ int emulate_zend(int argc, char** argv) {
 
   char** newargv_array = (char**)alloca(sizeof(char*) * (newargv.size() + 1));
   for (unsigned i = 0; i < newargv.size(); i++) {
-    // printf("%s\n", newargv[i].data());
     newargv_array[i] = (char *)newargv[i].data();
   }
   // NULL-terminate the argument array.

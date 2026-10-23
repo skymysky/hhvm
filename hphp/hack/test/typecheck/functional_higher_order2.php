@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 /**
  * Copyright (c) 2014, Facebook, Inc.
  * All rights reserved.
@@ -9,7 +9,7 @@
  *
  */
 
-function build(T $x): (function(T): T) {
+function build<T>(T $x): (function(T): T) {
   return function(T $y): T use ($x) {
     return $y;
   };

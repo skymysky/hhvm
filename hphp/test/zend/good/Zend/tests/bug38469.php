@@ -1,18 +1,20 @@
-<?php
-$a = array();
-$a[0] = $a;
-var_dump($a);
-$b = array(array());
-$b[0][0] = $b;
-var_dump($b);
+<?hh
 
-function f() {
-	$a = array();
+function f() :mixed{
+	$a = dict[];
 	$a[0] = $a;
 	var_dump($a);
-	$b = array(array());
+	$b = vec[dict[]];
 	$b[0][0] = $b;
 	var_dump($b);
 }
-f();
-?>
+<<__EntryPoint>>
+function main_entry(): void {
+  $a = dict[];
+  $a[0] = $a;
+  var_dump($a);
+  $b = vec[dict[]];
+  $b[0][0] = $b;
+  var_dump($b);
+  f();
+}

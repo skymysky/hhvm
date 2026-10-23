@@ -16,18 +16,14 @@
 
 #include "hphp/compiler/option.h"
 
+#include <algorithm>
 #include <map>
 #include <set>
 #include <string>
 #include <vector>
 
-#include "hphp/compiler/analysis/analysis_result.h"
-#include "hphp/compiler/analysis/class_scope.h"
-#include "hphp/compiler/analysis/file_scope.h"
-
-#include "hphp/parser/scanner.h"
-
 #include "hphp/runtime/base/config.h"
+#include "hphp/runtime/base/configs/configs.h"
 #include "hphp/runtime/base/ini-setting.h"
 #include "hphp/runtime/base/preg.h"
 #include "hphp/runtime/base/variable-unserializer.h"
@@ -35,72 +31,62 @@
 #include "hphp/util/hdf.h"
 #include "hphp/util/logger.h"
 #include "hphp/util/process.h"
-#include "hphp/util/text-util.h"
-
-#include "hphp/hhbbc/hhbbc.h"
 
 namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
 
-std::string Option::RootDirectory;
-std::set<std::string> Option::PackageDirectories;
-std::set<std::string> Option::PackageFiles;
-std::set<std::string> Option::PackageExcludeDirs;
-std::set<std::string> Option::PackageExcludeFiles;
-std::set<std::string> Option::PackageExcludePatterns;
-std::set<std::string> Option::PackageExcludeStaticDirs;
-std::set<std::string> Option::PackageExcludeStaticFiles;
-std::set<std::string> Option::PackageExcludeStaticPatterns;
+hphp_fast_string_set Option::PackageExcludeDirs;
+hphp_fast_string_set Option::PackageExcludeFiles;
+hphp_fast_string_set Option::PackageExcludePatterns;
+hphp_fast_string_set Option::PackageExcludeStaticDirs;
+hphp_fast_string_set Option::PackageExcludeStaticFiles;
+hphp_fast_string_set Option::PackageExcludeStaticPatterns;
+
 bool Option::CachePHPFile = false;
 
-std::vector<std::string> Option::ParseOnDemandDirs;
-
-std::vector<std::string> Option::IncludeSearchPaths;
-
-std::set<std::string> Option::VolatileClasses;
-std::map<std::string,std::string,stdltistr> Option::AutoloadClassMap;
-std::map<std::string,std::string,stdltistr> Option::AutoloadFuncMap;
-std::map<std::string,std::string> Option::AutoloadConstMap;
-std::string Option::AutoloadRoot;
-
-std::vector<std::string> Option::APCProfile;
+bool Option::ConstFoldFileBC = false;
 
 bool Option::GenerateTextHHBC = false;
 bool Option::GenerateHhasHHBC = false;
 bool Option::GenerateBinaryHHBC = false;
-std::string Option::RepoCentralPath;
+bool Option::NoOutputHHBC = false;
 
-std::string Option::IdPrefix = "$$";
-
-std::string Option::LambdaPrefix = "df_";
-std::string Option::Tab = "  ";
-
-const char *Option::UserFilePrefix = "php/";
-
-bool Option::KeepStatementsWithNoEffect = false;
-
-std::string Option::ProgramName;
-
-bool Option::ParseTimeOpts = true;
-bool Option::EnableHipHopExperimentalSyntax = false;
-bool Option::EnableShortTags = true;
-bool Option::EnableAspTags = false;
 int Option::ParserThreadCount = 0;
 
-int Option::GetScannerType() {
-  int type = 0;
-  if (EnableShortTags) type |= Scanner::AllowShortTags;
-  if (EnableAspTags) type |= Scanner::AllowAspTags;
-  if (RuntimeOption::EnableXHP) type |= Scanner::AllowXHPSyntax;
-  if (RuntimeOption::EnableHipHopSyntax) type |= Scanner::AllowHipHopSyntax;
-  return type;
-}
+// These default sizes were selected by experimentation
+const int Option::kDefaultParserGroupSize = 500;
+const int Option::kDefaultParserDirGroupSizeLimit = 50000;
 
-bool Option::DumpAst = false;
-bool Option::WholeProgram = true;
-bool Option::RecordErrors = true;
+int Option::ParserGroupSize = kDefaultParserGroupSize;
+int Option::ParserDirGroupSizeLimit = kDefaultParserDirGroupSizeLimit;
+bool Option::ParserAsyncCleanup = true;
+bool Option::ParserOptimisticStore = true;
 
-bool Option::AllVolatile = false;
+bool Option::ForceEnableSymbolRefs = false;
+bool Option::UseExternWorkerForFullAnalysis = false;
+bool Option::UseLocalHHBBC = false;
+
+std::string Option::ExternWorkerUseCase;
+std::string Option::ExternWorkerPlatform;
+std::string Option::ExternWorkerFeaturesFile;
+std::string Option::ExternWorkerPath;
+int Option::ExternWorkerTimeoutSecs = 0;
+bool Option::ExternWorkerUseExecCache = true;
+bool Option::ExternWorkerCleanup = true;
+bool Option::ExternWorkerUseRichClient = true;
+bool Option::ExternWorkerUseP2P = false;
+int Option::ExternWorkerCasConnectionCount = 16;
+int Option::ExternWorkerEngineConnectionCount = 6;
+int Option::ExternWorkerExecutionConcurrencyLimit = 6000;
+int Option::ExternWorkerAcConnectionCount = 16;
+bool Option::ExternWorkerVerboseLogging = false;
+std::string Option::ExternWorkerWorkingDir;
+
+int Option::ExternWorkerThrottleRetries = -1;
+int Option::ExternWorkerThrottleBaseWaitMSecs = -1;
+bool Option::ExternWorkerUseSubprocessScheduler = true;
+size_t Option::ExternWorkerMaxSubprocessMemory = 0;
+std::string Option::ExternWorkerZstdDictionaryPath;
 
 ///////////////////////////////////////////////////////////////////////////////
 // load from HDF file
@@ -119,11 +105,10 @@ void Option::LoadRootHdf(const IniSetting::Map& ini,
 
 void Option::Load(const IniSetting::Map& ini, Hdf &config) {
   LoadRootHdf(ini, config, "IncludeRoots", RuntimeOption::IncludeRoots);
-  LoadRootHdf(ini, config, "AutoloadRoots", RuntimeOption::AutoloadRoots);
 
-  Config::Bind(PackageFiles, ini, config, "PackageFiles", PackageFiles);
-  Config::Bind(IncludeSearchPaths, ini, config, "IncludeSearchPaths");
-  Config::Bind(PackageDirectories, ini, config, "PackageDirectories");
+  // Add this here too to avoid lint errors about unvisited node when RuntimeOption::Load() only loads config["Runtime"].
+  Config::Bind(RuntimeOption::GetMetadata(), ini, config, "Metadata");
+
   Config::Bind(PackageExcludeDirs, ini, config, "PackageExcludeDirs");
   Config::Bind(PackageExcludeFiles, ini, config, "PackageExcludeFiles");
   Config::Bind(PackageExcludePatterns, ini, config, "PackageExcludePatterns");
@@ -135,23 +120,6 @@ void Option::Load(const IniSetting::Map& ini, Hdf &config) {
                config, "PackageExcludeStaticPatterns");
   Config::Bind(CachePHPFile, ini, config, "CachePHPFile");
 
-  Config::Bind(RuntimeOption::EvalDisableReturnByReference,
-               ini, config, "DisableReturnByReference",
-               RuntimeOption::EvalDisableReturnByReference);
-
-  Config::Bind(ParseOnDemandDirs, ini, config, "ParseOnDemandDirs");
-
-  Config::Bind(IdPrefix, ini, config, "CodeGeneration.IdPrefix", IdPrefix);
-  Config::Bind(LambdaPrefix, ini, config,
-               "CodeGeneration.LambdaPrefix", LambdaPrefix);
-
-  Config::Bind(RuntimeOption::DynamicInvokeFunctions,
-               ini, config, "DynamicInvokeFunctions",
-               RuntimeOption::DynamicInvokeFunctions);
-  Config::Bind(VolatileClasses, ini, config, "VolatileClasses");
-
-  Config::GetBool(ini, config, "FlattenTraits");
-
   for (auto& str : Config::GetStrVector(ini, config, "ConstantFunctions")) {
     std::string func;
     std::string value;
@@ -159,191 +127,118 @@ void Option::Load(const IniSetting::Map& ini, Hdf &config) {
       VariableUnserializer uns{
         value.data(), value.size(),
         VariableUnserializer::Type::Internal,
-        false, empty_array()
+        /* allowUnknownSerializableClass = */ false,
+        empty_dict_array()
       };
       try {
         auto v = uns.unserialize();
         v.setEvalScalar();
-        RuntimeOption::ConstantFunctions[func] = *v.asCell();
+        RuntimeOption::ConstantFunctions[func] = *v.asTypedValue();
         continue;
-      } catch (const Exception& e) {
+      } catch (const Exception&) {
         // fall through and log
       }
     }
     Logger::FError("Invalid ConstantFunction: '{}'\n", str);
   }
 
-  {
-    // Repo
-    {
-      // Repo Central
-      Config::Bind(RepoCentralPath, ini, config, "Repo.Central.Path");
-    }
-    Config::Bind(RuntimeOption::RepoDebugInfo,
-                 ini, config, "Repo.DebugInfo",
-                 RuntimeOption::RepoDebugInfo);
-  }
-
-  {
-    // AutoloadMap
-    Config::Bind(AutoloadClassMap, ini, config, "AutoloadMap.class");
-    Config::Bind(AutoloadFuncMap, ini, config, "AutoloadMap.function");
-    Config::Bind(AutoloadConstMap, ini, config, "AutoloadMap.constant");
-    Config::Bind(AutoloadRoot, ini, config, "AutoloadMap.root");
-  }
-
-  Config::Bind(RuntimeOption::EvalHardTypeHints, ini, config,
-               "HardTypeHints", RuntimeOption::EvalHardTypeHints);
-
-  static bool HardReturnTypeHints;
-  Config::Bind(HardReturnTypeHints, ini, config, "HardReturnTypeHints", true);
-
-  // This option takes precedence over RuntimeOption. We test to see if the
-  // option has been set (by the user) or not.
-  auto is_set = [&](const std::string& key) {
-    auto a = Config::GetBool(ini, config, key, true);
-    auto b = Config::GetBool(ini, config, key, false);
-    return a == b;
-  };
-
-  if (!is_set("CheckReturnTypeHints") || is_set("HardReturnTypeHints")) {
-    // Note that the actual value does not matter, since HHBBC only cares about
-    // whether the value is 3 or not.
-    RuntimeOption::EvalCheckReturnTypeHints = HardReturnTypeHints ? 3 : 2;
-  }
-
-  Config::Bind(HHBBC::options.HardConstProp, ini, config,
-               "HardConstProp", HHBBC::options.HardConstProp);
-  Config::Bind(HHBBC::options.ElideAutoloadInvokes, ini, config,
-               "ElideAutoloadInvokes", HHBBC::options.ElideAutoloadInvokes);
-
-  Config::Bind(APCProfile, ini, config, "APCProfile");
-
-  Config::Bind(RuntimeOption::EvalThisTypeHintLevel, ini, config,
-               "ThisTypeHintLevel", RuntimeOption::EvalThisTypeHintLevel);
-
-  Config::Bind(RuntimeOption::EnableHipHopSyntax,
-               ini, config, "EnableHipHopSyntax",
-               RuntimeOption::EnableHipHopSyntax);
-  Config::Bind(RuntimeOption::EvalPromoteEmptyObject,
-               ini, config, "PromoteEmptyObject",
-               RuntimeOption::EvalPromoteEmptyObject);
-  Config::Bind(RuntimeOption::EvalJitEnableRenameFunction,
-               ini, config, "JitEnableRenameFunction",
-               RuntimeOption::EvalJitEnableRenameFunction);
-  Config::Bind(EnableHipHopExperimentalSyntax, ini,
-               config, "EnableHipHopExperimentalSyntax");
-  Config::Bind(EnableShortTags, ini, config, "EnableShortTags", true);
-
-#define BIND_HAC_OPTION(Name, Def)                      \
-  Config::Bind(RuntimeOption::EvalHackArrCompat##Name,  \
-               ini, config, "HackArrCompat" #Name,      \
-               RuntimeOption::EvalHackArrCompat##Def);
-
-#define BIND_HAC_OPTION_SELF(Name)  BIND_HAC_OPTION(Name, Name)
-
-  BIND_HAC_OPTION_SELF(Notices)
-  BIND_HAC_OPTION(CheckIntishCast, Notices)
-  BIND_HAC_OPTION(CheckRefBind, Notices)
-  BIND_HAC_OPTION(CheckFalseyPromote, Notices)
-  BIND_HAC_OPTION(CheckCompare, Notices)
-  BIND_HAC_OPTION(CheckMisc, Notices)
-  BIND_HAC_OPTION_SELF(IsArrayNotices)
-  BIND_HAC_OPTION_SELF(PromoteNotices)
-  BIND_HAC_OPTION_SELF(TypeHintNotices)
-  BIND_HAC_OPTION_SELF(DVCmpNotices)
-  BIND_HAC_OPTION_SELF(SerializeNotices)
-
-#undef BIND_HAC_OPTION_SELF
-#undef BIND_HAC_OPTION
-
-  Config::Bind(RuntimeOption::EvalHackArrDVArrs,
-               ini, config, "HackArrDVArrs",
-               RuntimeOption::EvalHackArrDVArrs);
-
-  Config::Bind(RuntimeOption::EvalForbidDynamicCalls,
-               ini, config, "ForbidDynamicCalls",
-               RuntimeOption::EvalForbidDynamicCalls);
-  Config::Bind(RuntimeOption::EvalNoticeOnBuiltinDynamicCalls,
-               ini, config, "NoticeOnBuiltinDynamicCalls",
-               RuntimeOption::EvalNoticeOnBuiltinDynamicCalls);
-  Config::Bind(RuntimeOption::EvalUseMSRVForInOut,
-               ini, config, "UseMSRVForInOut",
-               RuntimeOption::EvalUseMSRVForInOut);
-  Config::Bind(RuntimeOption::EvalAllowObjectDestructors,
-               ini, config, "AllowObjectDestructors",
-               RuntimeOption::EvalAllowObjectDestructors);
-
-  {
-    // Hack
-    Config::Bind(RuntimeOption::IntsOverflowToInts, ini, config,
-                 "Hack.Lang.IntsOverflowToInts",
-                 RuntimeOption::IntsOverflowToInts);
-    Config::Bind(RuntimeOption::StrictArrayFillKeys, ini, config,
-                 "Hack.Lang.StrictArrayFillKeys",
-                 RuntimeOption::StrictArrayFillKeys);
-    Config::Bind(RuntimeOption::DisallowDynamicVarEnvFuncs, ini, config,
-                 "Hack.Lang.DisallowDynamicVarEnvFuncs",
-                 RuntimeOption::DisallowDynamicVarEnvFuncs);
-  }
-
-  Config::Bind(EnableAspTags, ini, config, "EnableAspTags");
-
-  Config::Bind(RuntimeOption::EnableXHP, ini, config, "EnableXHP",
-               RuntimeOption::EnableXHP);
-
-  if (RuntimeOption::EnableHipHopSyntax) {
-    // If EnableHipHopSyntax is true, it forces EnableXHP to true
-    // regardless of how it was set in the config
-    RuntimeOption::EnableXHP = true;
-  }
+  Cfg::LoadForCompiler(ini, config);
 
   Config::Bind(ParserThreadCount, ini, config, "ParserThreadCount", 0);
   if (ParserThreadCount <= 0) {
     ParserThreadCount = Process::GetCPUCount();
   }
 
-  // Just to silence warnings until we remove them from various config files
-  (void)Config::GetByte(ini, config, "EnableEval", 0);
-  (void)Config::GetBool(ini, config, "AllDynamic", true);
+  Config::Bind(ForceEnableSymbolRefs, ini, config,
+               "ForceEnableSymbolRefs", false);
 
-  Config::Bind(AllVolatile, ini, config, "AllVolatile");
+  Config::Bind(UseExternWorkerForFullAnalysis, ini, config,
+               "UseExternWorkerForFullAnalysis", false);
+  Config::Bind(UseLocalHHBBC, ini, config,
+               "UseLocalHHBBC", false);
+  if (UseExternWorkerForFullAnalysis) UseLocalHHBBC = false;
 
-  Config::Bind(RuntimeOption::EvalGenerateDocComments, ini, config,
-               "GenerateDocComments", RuntimeOption::EvalGenerateDocComments);
-  Config::Bind(DumpAst, ini, config, "DumpAst", false);
-  Config::Bind(WholeProgram, ini, config, "WholeProgram", true);
-  Config::Bind(RuntimeOption::EvalUseHHBBC, ini, config, "UseHHBBC",
-               RuntimeOption::EvalUseHHBBC);
+  Config::Bind(ParserGroupSize, ini, config,
+               "ParserGroupSize", kDefaultParserGroupSize);
+  Config::Bind(ParserDirGroupSizeLimit, ini, config,
+               "ParserDirGroupSizeLimit", kDefaultParserDirGroupSizeLimit);
+  if (ParserGroupSize <= 0) ParserGroupSize = kDefaultParserGroupSize;
+  if (ParserDirGroupSizeLimit <= 0) {
+    ParserDirGroupSizeLimit = kDefaultParserDirGroupSizeLimit;
+  }
 
-  // Temporary, during file-cache migration.
-  Config::Bind(FileCache::UseNewCache, ini, config, "UseNewCache", false);
-}
+  Config::Bind(ConstFoldFileBC, ini, config,
+               "ConstFoldFileBC", ConstFoldFileBC);
 
-void Option::Load() {
+  Config::Bind(ParserAsyncCleanup, ini, config,
+               "ParserAsyncCleanup", ParserAsyncCleanup);
+  Config::Bind(ParserOptimisticStore, ini, config,
+               "ParserOptimisticStore", ParserOptimisticStore);
+
+  // Use case id for remote extern worker implementation.
+  // If empty, use the builtin Subprocess impl.
+  Config::Bind(ExternWorkerUseCase, ini, config, "ExternWorker.UseCase",
+               ExternWorkerUseCase);
+  Config::Bind(ExternWorkerPlatform, ini, config, "ExternWorker.Platform",
+               ExternWorkerPlatform);
+  Config::Bind(ExternWorkerFeaturesFile, ini, config,
+               "ExternWorker.FeaturesFile", ExternWorkerFeaturesFile);
+  // If not set or empty, default to current_executable_path()
+  Config::Bind(ExternWorkerPath, ini, config, "ExternWorker.Path",
+               ExternWorkerPath);
+  Config::Bind(ExternWorkerTimeoutSecs, ini, config, "ExternWorker.TimeoutSecs",
+               ExternWorkerTimeoutSecs);
+  Config::Bind(ExternWorkerUseExecCache, ini, config,
+               "ExternWorker.UseExecCache", ExternWorkerUseExecCache);
+  Config::Bind(ExternWorkerCleanup, ini, config, "ExternWorker.Cleanup",
+               ExternWorkerCleanup);
+  Config::Bind(ExternWorkerWorkingDir, ini, config, "ExternWorker.WorkingDir",
+               ExternWorkerWorkingDir);
+  Config::Bind(ExternWorkerUseRichClient, ini, config,
+               "ExternWorker.UseRichClient", ExternWorkerUseRichClient);
+  Config::Bind(ExternWorkerUseP2P, ini, config, "ExternWorker.UseP2P",
+               ExternWorkerUseP2P);
+  Config::Bind(ExternWorkerCasConnectionCount, ini, config,
+               "ExternWorker.CasConnectionCount",
+               ExternWorkerCasConnectionCount);
+  Config::Bind(ExternWorkerEngineConnectionCount, ini, config,
+               "ExternWorker.EngineConnectionCount",
+               ExternWorkerEngineConnectionCount);
+  Config::Bind(ExternWorkerExecutionConcurrencyLimit, ini, config,
+               "ExternWorker.ExecutionConcurrencyLimit",
+               ExternWorkerExecutionConcurrencyLimit);
+  Config::Bind(ExternWorkerAcConnectionCount, ini, config,
+               "ExternWorker.AcConnectionCount",
+               ExternWorkerAcConnectionCount);
+  Config::Bind(ExternWorkerVerboseLogging, ini, config,
+               "ExternWorker.VerboseLogging",
+               ExternWorkerVerboseLogging);
+  Config::Bind(ExternWorkerThrottleRetries, ini, config,
+               "ExternWorker.ThrottleRetries",
+               ExternWorkerThrottleRetries);
+  Config::Bind(ExternWorkerThrottleBaseWaitMSecs, ini, config,
+               "ExternWorker.ThrottleBaseWaitMSecs",
+               ExternWorkerThrottleBaseWaitMSecs);
+  Config::Bind(ExternWorkerMaxSubprocessMemory, ini, config,
+               "ExternWorker.MaxSubprocessMemory",
+               ExternWorkerMaxSubprocessMemory);
+  Config::Bind(ExternWorkerUseSubprocessScheduler, ini, config,
+               "ExternWorker.UseSubprocessScheduler",
+               ExternWorkerUseSubprocessScheduler);
+  Config::Bind(ExternWorkerZstdDictionaryPath, ini, config,
+               "ExternWorker.ZstdDictionaryPath",
+               ExternWorkerZstdDictionaryPath);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 
-std::string Option::MangleFilename(const std::string &name, bool id) {
-  std::string ret = UserFilePrefix;
-  ret += name;
-
-  if (id) {
-    replaceAll(ret, "/", "$");
-    replaceAll(ret, "-", "_");
-    replaceAll(ret, ".", "_");
-  }
-  return ret;
-}
-
-bool Option::IsFileExcluded(const std::string &file,
-                            const std::set<std::string> &patterns) {
-  String sfile(file.c_str(), file.size(), CopyString);
+bool Option::IsFileExcluded(const std::string& file,
+                            const hphp_fast_string_set& patterns) {
+  OptString sfile(file.c_str(), file.size(), CopyString);
   for (auto const& pattern : patterns) {
     Variant matches;
-    Variant ret = preg_match(String(pattern.c_str(), pattern.size(),
-                                    CopyString), sfile, &matches);
+    Variant ret = preg_match(OptString(pattern.c_str(), pattern.size(),
+                                       CopyString), sfile, &matches);
     if (ret.toInt64() > 0) {
       return true;
     }
@@ -351,8 +246,8 @@ bool Option::IsFileExcluded(const std::string &file,
   return false;
 }
 
-void Option::FilterFiles(std::vector<std::string> &files,
-                         const std::set<std::string> &patterns) {
+void Option::FilterFiles(std::vector<std::string>& files,
+                         const hphp_fast_string_set& patterns) {
   auto const it = std::remove_if(
     files.begin(),
     files.end(),

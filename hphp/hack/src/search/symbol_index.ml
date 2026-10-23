@@ -1,0 +1,173 @@
+(*
+ * Copyright (c) 2019, Facebook, Inc.
+ * All rights reserved.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the "hack" directory of this source tree.
+ *
+ *)
+
+open Hh_prelude
+open Search_utils
+open Search_types
+
+(* Set the currently selected search provider *)
+let initialize
+    ~(gleanopt : Glean_options.t)
+    ~(namespace_map : (string * string) list)
+    ~(provider_name : string)
+    ~(quiet : bool) : si_env =
+  (* Create the object *)
+  let sienv =
+    {
+      Search_utils.default_si_env with
+      sie_provider = Search_utils.provider_of_string provider_name;
+      sie_quiet_mode = quiet;
+      sie_namespace_map = namespace_map;
+      glean_reponame = Glean_options.reponame gleanopt;
+    }
+  in
+  (* Basic initialization *)
+  let sienv =
+    match sienv.sie_provider with
+    | CustomIndex -> Custom_search_service.initialize ~sienv
+    | NoIndex
+    | MockIndex _
+    | LocalIndex ->
+      sienv
+  in
+
+  (* Here's the initialized environment *)
+  if not sienv.sie_quiet_mode then
+    Hh_logger.log
+      "Search provider set to [%s] based on configuration value [%s]"
+      (Search_utils.descriptive_name_of_provider sienv.sie_provider)
+      provider_name;
+  sienv
+
+let mock ~on_find =
+  {
+    Search_utils.default_si_env with
+    sie_provider = Search_utils.MockIndex { mock_on_find = on_find };
+    sie_quiet_mode = true;
+  }
+
+(*
+ * Core search function
+ * - Uses both global and local indexes
+ * - Can search for specific kinds or all kinds
+ * - Goal is to route ALL searches through one function for consistency
+ *)
+let find_matching_symbols
+    ~(sienv_ref : si_env ref)
+    ~(query_text : string)
+    ~(max_results : int)
+    ~(context : autocomplete_type)
+    ~(kind_filter : File_info.si_kind option) :
+    Search_types.si_item list * Search_types.si_complete =
+  let is_complete = ref Search_types.Complete in
+  (*
+   * Nuclide often sends this exact request to verify that HH is working.
+   * Let's capture it and avoid doing unnecessary work.
+   *)
+  if String.equal query_text "this_is_just_to_check_liveness_of_hh_server" then
+    ( [
+        {
+          si_name = "Yes_hh_server_is_alive";
+          si_kind = File_info.SI_Unknown;
+          si_file = SI_Filehash "0";
+          si_fullname = "";
+        };
+      ],
+      !is_complete )
+  else
+    (* Namespace aliases. For instance, if File is an alias for \FlibSL\File,
+       then "Fi|" will definitely show File. *)
+    let namespace_results =
+      match context with
+      | Ac_workspace_symbol -> []
+      | Acid
+      | Acnew
+      | Acclassish
+      | Actype
+      | Actrait_only ->
+        List.filter_map !sienv_ref.sie_namespace_map ~f:(fun (alias, map) ->
+            if String.is_prefix alias ~prefix:query_text then
+              Some
+                {
+                  si_name = alias;
+                  si_kind = File_info.SI_Namespace;
+                  si_file = SI_Filehash "0";
+                  si_fullname = map;
+                }
+            else
+              None)
+    in
+    (* The local index captures symbols in files that have been changed on disk.
+     * Search it first for matches, then search global and add any elements
+     * that we haven't seen before *)
+    let local_results =
+      match !sienv_ref.sie_provider with
+      | NoIndex
+      | MockIndex _ ->
+        []
+      | CustomIndex
+      | LocalIndex ->
+        Local_search_service.search_local_symbols
+          ~sienv:!sienv_ref
+          ~query_text
+          ~max_results
+          ~context
+          ~kind_filter
+    in
+    (* Next search globals *)
+    let global_results =
+      match !sienv_ref.sie_provider with
+      | CustomIndex ->
+        let (r, custom_is_complete) =
+          Custom_search_service.search_symbols
+            ~sienv_ref
+            ~query_text
+            ~max_results
+            ~context
+            ~kind_filter
+        in
+        is_complete := custom_is_complete;
+        Local_search_service.extract_dead_results ~sienv:!sienv_ref ~results:r
+      | MockIndex { mock_on_find } ->
+        mock_on_find ~query_text ~context ~kind_filter
+      | LocalIndex
+      | NoIndex ->
+        []
+    in
+    (* Merge and deduplicate results *)
+    let all_results = List.append local_results global_results in
+    let dedup_results =
+      List.sort
+        ~compare:(fun a b -> String.compare b.si_name a.si_name)
+        all_results
+    in
+    (* Strip namespace already typed from the results *)
+    let (ns, _) = Utils.split_ns_from_name query_text in
+    let results =
+      if String.equal ns "" || String.equal ns "\\" then
+        dedup_results
+      else
+        List.map dedup_results ~f:(fun s ->
+            { s with si_name = String_utils.lstrip s.si_name ns })
+    in
+    (* Namespaces should always appear first *)
+    let results = List.append namespace_results results in
+    (List.take results max_results, !is_complete)
+
+let find_refs
+    ~(sienv_ref : si_env ref)
+    ~(action : Search_types.Find_refs.action)
+    ~(max_results : int) : Relative_path.t list option =
+  match !sienv_ref.sie_provider with
+  | NoIndex
+  | LocalIndex
+  | MockIndex _ ->
+    None
+  | CustomIndex ->
+    Custom_search_service.find_refs ~sienv_ref ~action ~max_results

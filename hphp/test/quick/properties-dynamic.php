@@ -2,23 +2,22 @@
 
 class c {
   public $prop = 'old value';
-  public function __get($n) {
-    return "You asked for property $n";
-  }
-  public function __set($n, $v) {
-    echo "Pretending to set $n to $v\n";
+}
+
+function propget($o, $p) :mixed{
+  try {
+    return $o->$p;
+  } catch (UndefinedPropertyException $e) {
+    var_dump($e->getMessage());
   }
 }
 
-function propget($o, $p) {
-  return $o->$p;
-}
-
-function propset($o, $p, $v) {
+function propset($o, $p, $v) :mixed{
   $o->$p = $v;
 }
 
-function main() {
+<<__EntryPoint>>
+function main(): void {
   $c = new c();
   var_dump(propget($c, 'prop'));
   propset($c, 'prop', 'new value');
@@ -27,4 +26,3 @@ function main() {
   var_dump(propget($c, 'fakeprop'));
   propset($c, 'fakeprop2', 'blah');
 }
-main();

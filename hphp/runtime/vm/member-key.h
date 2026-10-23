@@ -14,12 +14,13 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_VM_MEMBER_KEY_H_
-#define incl_HPHP_VM_MEMBER_KEY_H_
+#pragma once
+
+#include "hphp/runtime/base/types.h"
+#include "hphp/runtime/vm/hhbc-shared.h"
 
 #include "hphp/util/hash.h"
-
-#include <folly/Optional.h>
+#include "hphp/util/optional.h"
 
 #include <cstdint>
 #include <string>
@@ -64,9 +65,9 @@ constexpr size_t NumMemberCodes = MW + 1;
 const char* memberCodeString(MemberCode mc);
 
 /*
- * Try to parse the input as a MemberCode, returning folly::none on failure.
+ * Try to parse the input as a MemberCode, returning std::nullopt on failure.
  */
-folly::Optional<MemberCode> parseMemberCode(const char*);
+Optional<MemberCode> parseMemberCode(const char*);
 
 constexpr bool mcodeIsProp(MemberCode mcode) {
   return mcode == MPC || mcode == MPL || mcode == MPT || mcode == MQT;
@@ -83,46 +84,51 @@ constexpr bool mcodeIsElem(MemberCode mcode) {
 struct MemberKey {
   MemberKey()
     : mcode{MW}
-    , iva{0}
+    , rop{ReadonlyOp::Any}
+    , int64{0}
   {}
 
-  MemberKey(MemberCode mcode, uint32_t iva)
+  MemberKey(MemberCode mcode, NamedLocal loc, ReadonlyOp rop)
     : mcode{mcode}
+    , rop{rop}
+    , local{loc}
+  {}
+
+  MemberKey(MemberCode mcode, int32_t iva, ReadonlyOp rop)
+    : mcode{mcode}
+    , rop{rop}
     , iva{iva}
   {}
 
-  MemberKey(MemberCode mcode, int32_t int64)
+  MemberKey(MemberCode mcode, int64_t int64, ReadonlyOp rop)
     : mcode{mcode}
+    , rop{rop}
     , int64{int64}
   {}
 
-  MemberKey(MemberCode mcode, int64_t int64)
+  MemberKey(MemberCode mcode, const StringData* litstr, ReadonlyOp rop)
     : mcode{mcode}
-    , int64{int64}
-  {}
-
-  MemberKey(MemberCode mcode, const StringData* litstr)
-    : mcode{mcode}
+    , rop{rop}
     , litstr{litstr}
   {}
 
   MemberCode mcode;
+  ReadonlyOp rop;
   union {
-    int64_t iva;
+    NamedLocal local;
+    int32_t iva;
     int64_t int64;
     const StringData* litstr;
   };
 };
 
 inline bool operator==(MemberKey a, MemberKey b) {
-  return a.mcode == b.mcode && a.int64 == b.int64;
+  return a.mcode == b.mcode && a.int64 == b.int64 && a.rop == b.rop;
 }
 inline bool operator!=(MemberKey a, MemberKey b) {
   return !(a == b);
 }
 
-std::string show(MemberKey);
+std::string show(const MemberKey&);
 
 }
-
-#endif

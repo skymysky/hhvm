@@ -1,14 +1,15 @@
-<?php
+<?hh
 
 class Test {
-    public function getGenFactory() {
+    public function getGenFactory() :mixed{
         return function() {
             yield $this;
         };
     }
 }
-
+<<__EntryPoint>> function main(): void {
 $genFactory = (new Test)->getGenFactory();
-var_dump($genFactory()->current());
-
-?>
+$gen = $genFactory();
+$gen->next();
+var_dump($gen->current());
+}

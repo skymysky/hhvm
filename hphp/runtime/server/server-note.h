@@ -13,18 +13,18 @@
    | license@php.net so we can mail you a copy immediately.               |
    +----------------------------------------------------------------------+
 */
-#ifndef incl_HPHP_SERVER_NOTE_H_
-#define incl_HPHP_SERVER_NOTE_H_
+#pragma once
 
 #include "hphp/runtime/ext/extension.h"
 
 namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
 
-struct ServerNote  {
-  static void Add(const String& name, const String& value);
-  static String Get(const String& name);
-  static void Delete(const String& name);
+struct ServerNote final {
+  static void Add(const OptString& name, const OptString& value);
+  static void AddNotes(const Array& notes);
+  static OptString Get(const OptString& name);
+  static void Delete(const OptString& name);
   static void Reset();
 private:
   Array m_notes;
@@ -35,4 +35,3 @@ ServerNote* get_server_note();
 ///////////////////////////////////////////////////////////////////////////////
 }
 
-#endif // incl_HPHP_SERVER_NOTE_H_

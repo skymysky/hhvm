@@ -14,41 +14,41 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_PROGRAM_FUNCTIONS_H_
-#define incl_HPHP_PROGRAM_FUNCTIONS_H_
+#pragma once
 
+#include "hphp/runtime/base/request-id.h"
 #include "hphp/runtime/base/types.h"
 #include "hphp/runtime/vm/treadmill.h"
+#include "hphp/util/optional.h"
+
 #include <boost/program_options/parsers.hpp>
 
 namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
 
 struct Transport;
-
-#if defined(__APPLE__) || defined(_MSC_VER)
-extern const void* __hot_start;
-extern const void* __hot_end;
-#else
-extern "C" {
-void __attribute__((__weak__)) __hot_start();
-void __attribute__((__weak__)) __hot_end();
-}
-#endif
+struct Unit;
 
 /**
  * Main entry point of the entire program.
  */
 int execute_program(int argc, char **argv);
-void execute_command_line_begin(int argc, char **argv, int xhprof);
-void execute_command_line_end(int xhprof, bool coverage, const char *program);
+void execute_command_line_begin(int argc, char **argv);
+void execute_command_line_end(bool coverage, const char *program,
+                              bool runCleanup = true);
 
 void init_command_line_session(int arc, char** argv);
-void
-init_command_line_globals(int argc, char** argv, char** envp,
-                          int xhprof,
-                          std::map<std::string, std::string>& serverVariables,
-                          std::map<std::string, std::string>& envVariables);
+void init_command_line_globals(
+  int argc, char** argv, char** envp,
+  const std::map<std::string, std::string>& serverVariables,
+  const std::map<std::string, std::string>& envVariables
+);
+
+/**
+ * Set up REQUEST_TIME_NS field in $_SERVER.
+ */
+void init_server_request_time(Array& server);
+
 /**
  * Setting up environment variables.
  */
@@ -69,7 +69,7 @@ void register_variable(Array& variables,
                        const Variant& value,
                        bool overwrite = true);
 
-String canonicalize_path(const String& path, const char* root, int rootLen);
+OptString canonicalize_path(const OptString& path, const char* root, int rootLen);
 
 /**
  * Translate hex encode stack into both C++ and PHP frames.
@@ -79,32 +79,34 @@ std::string translate_stack(const char *hexencoded,
 
 time_t start_time();
 
-// Boost 1.54 has a bug where it doesn't handle options with - in them as
-// it only gives us the string after the last -
-// https://github.com/facebook/hhvm/issues/2864
-// This won't fix the problem in 100% of cases (e.g. two options are
-// used that both end in the same substring. How do you choose?) But
-// that should be very rare.
-#if defined(BOOST_VERSION) && BOOST_VERSION <= 105400
-std::string get_right_option_name(
-  const boost::program_options::basic_parsed_options<char>& opts,
-  std::string& wrong_name);
-#endif
-
 ///////////////////////////////////////////////////////////////////////////////
 
 struct ExecutionContext;
 
-void hphp_process_init();
+/*
+ * If `initAsWorker` is set, JIT data structure and extensions will not be
+ * initialized as they're expensive to set up and unused by workers.
+ */
+void hphp_process_init(bool initForWorkerProcess = false,
+                       bool skipRDSInit = false);
+void cli_client_init();
+void cli_client_thread_init();
+void cli_client_thread_exit();
 void hphp_session_init(Treadmill::SessionKind session_kind,
-                       Transport* transport = nullptr);
+                       Transport* transport = nullptr,
+                       RequestId id = RequestId(),
+                       RequestId root_req_id = RequestId());
 
+void invoke_prelude_script(
+     const char* currentDir,
+     const std::string& document,
+     const std::string& prelude);
 bool hphp_invoke_simple(const std::string& filename, bool warmupOnly);
 bool hphp_invoke(ExecutionContext *context,
                  const std::string &cmd,
                  bool func,
                  const Array& funcParams,
-                 VRefParam funcRet,
+                 Variant* funcRet,
                  const std::string &reqInitFunc,
                  const std::string &reqInitDoc,
                  bool &error,
@@ -112,30 +114,62 @@ bool hphp_invoke(ExecutionContext *context,
                  bool once,
                  bool warmupOnly,
                  bool richErrorMsg,
-                 const std::string& prelude);
-void hphp_context_shutdown();
-void hphp_context_exit(bool shutdown = true);
+                 const std::string& prelude,
+                 bool allowDynCallNoPointer = false);
+void hphp_context_exit();
 
-void hphp_thread_init();
-void hphp_thread_exit();
+void hphp_thread_init(bool skipExtensions = false,
+                      bool skipRDSInit = false);
+void hphp_thread_exit(bool skipExtensions = false);
+
+void init_current_pthread_stack_limits();
 
 void hphp_memory_cleanup();
 /*
- * Tear down various internal state at the very end of a session. If transport
- * is provided, various statistics about resources consumed by the request will
- * be logged to ServiceData.
+ * Tear down various internal state at the very end of a session.
  */
-void hphp_session_exit(const Transport* transport = nullptr);
+void hphp_session_exit();
 void hphp_process_exit() noexcept;
 bool is_hphp_session_initialized();
-std::string get_systemlib(std::string* hhas = nullptr,
-                          const std::string &section = "systemlib",
-                          const std::string &filename = "");
+
+std::string get_embedded_section(const std::string& section_name);
 
 // Helper function for stats tracking with exceptions.
-void bump_counter_and_rethrow(bool isPsp);
+void bump_counter_and_rethrow(bool isPsp, ExecutionContext* context);
+
+std::vector<int> get_executable_lines(const Unit*);
+
+struct HphpSession {
+  explicit HphpSession(Treadmill::SessionKind sk) {
+    hphp_session_init(sk);
+  }
+  ~HphpSession() {
+    hphp_context_exit();
+    hphp_session_exit();
+  }
+  HphpSession(const HphpSession&) = delete;
+  HphpSession& operator=(const HphpSession&) = delete;
+};
+
+struct HphpSessionAndThread {
+  explicit HphpSessionAndThread(Treadmill::SessionKind sk) {
+    hphp_thread_init();
+    session.emplace(sk);
+  }
+  ~HphpSessionAndThread() {
+    session.reset();
+    hphp_thread_exit();
+  }
+  HphpSessionAndThread(const HphpSessionAndThread&) = delete;
+  HphpSessionAndThread& operator=(const HphpSessionAndThread&) = delete;
+ private:
+  Optional<HphpSession> session;
+};
 
 ///////////////////////////////////////////////////////////////////////////////
 }
 
-#endif // incl_HPHP_PROGRAM_FUNCTIONS_H_
+extern "C" {
+void __attribute__((__weak__)) __hot_start();
+void __attribute__((__weak__)) __hot_end();
+}

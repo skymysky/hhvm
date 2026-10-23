@@ -1,0 +1,22 @@
+error: Typing[4053] No instance method `camelcase` in `C` [1]
+-> Did you mean `camel~~C~~ase` instead (which only differs by case)? [2]
+-> This is why I think it is an object of type C [3]
+-> Declaration of `C` is here [4]
+
+capitalization7.php:9:7
+ 1 | <?hh
+ 2 | 
+ 3 | class C {
+   |       ^ [4]
+ 4 |   public function camelCase(): void {}
+   |                   ^^^^^^^^^ [2]
+ 5 | }
+ 6 | 
+ 7 | function foo(): void {
+ 8 |   $c = new C();
+   |            ^ [3]
+ 9 |   $c->camelcase();
+   |       ^^^^^^^^^ [1]
+10 | }
+
+1 error found

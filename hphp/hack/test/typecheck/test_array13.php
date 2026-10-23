@@ -10,6 +10,6 @@
  */
 
 function test(): void {
-  $v = array('f' => array(1, 2), 'b' => 0);
+  $v = dict['f' => vec[1, 2], 'b' => 0];
   $v['f'][0] = 1;
 }

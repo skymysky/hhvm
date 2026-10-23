@@ -1,7 +1,6 @@
-<?php 
-
+<?hh
+<<__EntryPoint>> function main(): void {
 $a = new stdClass;
 
-$a::$a();
-
-?>
+HH\dynamic_class_meth(HH\get_class_from_object($a), $a)();
+}

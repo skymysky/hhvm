@@ -13,7 +13,7 @@ int(2)
 int(3)
 
 values...
-object(HH\ImmVector)#4 (3) {
+object(HH\ImmVector) (3) {
   [0]=>
   int(1)
   [1]=>
@@ -21,7 +21,7 @@ object(HH\ImmVector)#4 (3) {
   [2]=>
   int(3)
 }
-object(HH\ImmVector)#4 (0) {
+object(HH\ImmVector) (0) {
 }
 
 lazy...
@@ -34,8 +34,36 @@ bool(true)
 bool(false)
 bool(false)
 
-toArray...
-array(3) {
+map...
+bool(true)
+----
+int(2)
+int(4)
+int(6)
+----
+
+mapWithKey...
+bool(true)
+----
+int(1)
+int(4)
+int(9)
+----
+
+filter...
+bool(true)
+----
+int(2)
+----
+
+filterWithKey...
+bool(true)
+----
+int(3)
+----
+
+toDArray...
+dict(3) {
   [1]=>
   int(1)
   [2]=>
@@ -45,27 +73,21 @@ array(3) {
 }
 
 toKeysArray...
-array(3) {
-  [0]=>
+vec(3) {
   int(1)
-  [1]=>
   int(2)
-  [2]=>
   int(3)
 }
 
 toValuesArray...
-array(3) {
-  [0]=>
+vec(3) {
   int(1)
-  [1]=>
   int(2)
-  [2]=>
   int(3)
 }
 
 toVector...
-object(HH\Vector)#6 (3) {
+object(HH\Vector) (3) {
   [0]=>
   int(1)
   [1]=>
@@ -75,7 +97,7 @@ object(HH\Vector)#6 (3) {
 }
 
 toImmVector...
-object(HH\ImmVector)#6 (3) {
+object(HH\ImmVector) (3) {
   [0]=>
   int(1)
   [1]=>
@@ -85,14 +107,11 @@ object(HH\ImmVector)#6 (3) {
 }
 
 toSet...
-object(HH\Set)#6 (3) {
+object(HH\Set) (3) {
   int(1)
   int(2)
   int(3)
 }
-
-__toString...
-ImmSet
 
 __get...
 Cannot access a property on a collection
@@ -102,9 +121,6 @@ Cannot access a property on a collection
 
 __isSet...
 bool(false)
-
-__unset...
-Cannot access a property on a collection
 
 fromItems...
 ----
@@ -144,6 +160,14 @@ int(6)
 ----
 
 fromArrays...
+----
+int(1)
+int(2)
+int(3)
+int(4)
+int(5)
+int(6)
+----
 ----
 int(1)
 int(2)

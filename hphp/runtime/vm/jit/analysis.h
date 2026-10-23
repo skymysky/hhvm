@@ -13,16 +13,25 @@
    | license@php.net so we can mail you a copy immediately.               |
    +----------------------------------------------------------------------+
 */
-#ifndef incl_HPHP_ANALYSIS_H_
-#define incl_HPHP_ANALYSIS_H_
+#pragma once
 
-#include "hphp/runtime/vm/jit/cfg.h"
+#include "hphp/runtime/vm/jit/containers.h"
+#include "hphp/runtime/vm/jit/stack-offsets.h"
+#include "hphp/util/optional.h"
 
-namespace HPHP { namespace jit {
+namespace HPHP {
 
-struct SSATmp;
-struct IRInstruction;
+struct Func;
+
+namespace jit {
+
 struct Block;
+struct IRInstruction;
+struct SSATmp;
+
+template<typename T1, typename T2>
+struct StateVector;
+using IdomVector = StateVector<Block,Block*>;
 
 //////////////////////////////////////////////////////////////////////
 
@@ -39,9 +48,18 @@ struct Block;
 /*
  * Returns the canonical version of the given value by tracing through any
  * passthrough instructions (Mov, CheckType, etc...).
+ *
+ * Note that in general its not safe to replace a value with its canonical
+ * version. This should only be used for analyzing the origin of a particular
+ * value.
  */
 const SSATmp* canonical(const SSATmp*);
 SSATmp* canonical(SSATmp*);
+
+/*
+ * Returns the ultimate destination, skipping over trivial jumps.
+ */
+Block* ultimateDst(Block*);
 
 /*
  * Given a non-const SSATmp `t', return the earliest block B such that `t' is
@@ -85,9 +103,50 @@ bool is_tmp_usable(const IdomVector&, const SSATmp* tmp, const Block* where);
  */
 SSATmp* least_common_ancestor(SSATmp*, SSATmp*);
 
+/*
+ * Return the func owning the frame pointed to by fp.
+ */
+const Func* funcFromFP(const SSATmp* fp);
+
+/*
+ * Return the frame depth of the frame pointed to by fp.
+ */
+uint32_t frameDepthIndex(const SSATmp* fp);
+
+/*
+ * If a frame specified by its frame pointer lives on the stack and its offset
+ * is known, return its offset relative to SP.
+ */
+Optional<IRSPRelOffset> offsetOfFrame(const SSATmp *fp);
+
+//////////////////////////////////////////////////////////////////////
+
+struct EveryDefiningInstVisitor {
+  explicit EveryDefiningInstVisitor(const SSATmp* t) : m_stack({t}) {}
+  std::pair<const IRInstruction*, const SSATmp*> next();
+private:
+  jit::vector<const SSATmp*> m_stack;
+  jit::fast_set<const IRInstruction*> m_visited;
+};
+
+/*
+ * Visit all instructions responsible for defining the given SSATmp,
+ * skipping through passthrough instructions and DefLabels.
+ *
+ * The given callable is called with the instruction, and the SSATmp
+ * it defines (but before any canonicalization). If the callable
+ * returns false, visitation stops.
+ */
+template <typename V>
+void visitEveryDefiningInst(const SSATmp* t, V v) {
+  EveryDefiningInstVisitor visitor{t};
+
+  while (true) {
+    auto const [inst, tmp] = visitor.next();
+    if (tmp == nullptr) break;
+    if (!v(inst, tmp)) break;
+  }
+}
 //////////////////////////////////////////////////////////////////////
 
 }}
-
-
-#endif

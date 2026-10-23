@@ -1,14 +1,21 @@
-<?php
+<?hh
 
 class C {
- }
-function foo($p) {
+}
+function foo($p) :mixed{
   if ($p) {
     $obj = new C;
+  } else {
+    $a = vec[1];
   }
- else {
-    $a = array(1);
+  try {
+    var_dump($obj == $a);
+  } catch (UndefinedVariableException $e) {
+    var_dump($e->getMessage());
   }
-  var_dump($obj == $a);
 }
-foo(false);
+
+<<__EntryPoint>>
+function main_1053() :mixed{
+  foo(false);
+}

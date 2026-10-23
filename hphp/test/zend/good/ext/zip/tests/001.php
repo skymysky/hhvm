@@ -1,11 +1,13 @@
-<?php
-parse_str("", $_GET);
-$_REQUEST = array_merge($_REQUEST, $_GET);
-_filter_snapshot_globals();
+<?hh
+<<__EntryPoint>> function main(): void {
+$get = \HH\global_get('_GET');
+parse_str("", inout $get);
+\HH\global_set('_GET', $get);
 
-parse_str("", $_POST);
-$_REQUEST = array_merge($_REQUEST, $_POST);
-_filter_snapshot_globals();
- 
+$post = \HH\global_get('_POST');
+parse_str("", inout $post);
+\HH\global_set('_POST', $post);
+
+// what exactly is this testing?
 echo "zip extension is available";
-?>
+}

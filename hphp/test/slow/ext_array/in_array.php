@@ -1,24 +1,28 @@
-<?php
+<?hh
 
-function a() {
-  $os = array("Mac", "NT", "Irix", "Linux");
+function a() :mixed{
+  $os = vec["Mac", "NT", "Irix", "Linux"];
   var_dump(in_array("Irix", $os));
   var_dump(!in_array("mac", $os));
 }
 
-function b() {
-  $a = array("1.10", 12.4, 1.13);
+function b() :mixed{
+  $a = vec["1.10", 12.4, 1.13];
   var_dump(!in_array("12.4", $a, true));
   var_dump(in_array(1.13, $a, true));
 }
 
-function c() {
-  $a = array(array("p", "h"), array("p", "r"), "o");
-  var_dump(in_array(array("p", "h"), $a));
-  var_dump(!in_array(array("f", "i"), $a));
+function c() :mixed{
+  $a = vec[vec["p", "h"], vec["p", "r"], "o"];
+  var_dump(in_array(vec["p", "h"], $a));
+  var_dump(!in_array(vec["f", "i"], $a));
   var_dump(in_array("o", $a));
 }
 
+
+<<__EntryPoint>>
+function main_in_array() :mixed{
 a();
 b();
 c();
+}

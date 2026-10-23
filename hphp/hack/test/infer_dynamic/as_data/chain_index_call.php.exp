@@ -1,0 +1,11 @@
+{ "function": "\\takes_int", "solutions": [] }
+{
+  "function": "\\test_chain",
+  "solutions": [
+    {
+      "name": "$d",
+      "pos": "File \"chain_index_call.php\", line 5, characters 29-30:",
+      "type": "shape('key' => int, ...)"
+    }
+  ]
+}

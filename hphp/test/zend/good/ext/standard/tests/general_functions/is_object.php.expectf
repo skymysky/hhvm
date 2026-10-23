@@ -57,16 +57,10 @@ bool(false)
 bool(false)
 -- Iteration 17 --
 bool(false)
--- Iteration 18 --
-bool(false)
--- Iteration 19 --
-bool(false)
 
 *** Testing error conditions ***
 
-Warning: %s
-bool(false)
+Warning: is_object() expects exactly 1 positional parameter, 0 given in %s/is_object.php on line %d
 
-Warning: %s
-bool(false)
+Warning: is_object() expects exactly 1 positional parameter, 2 given in %s/is_object.php on line %d
 Done

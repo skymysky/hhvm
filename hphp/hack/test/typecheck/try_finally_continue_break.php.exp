@@ -1,0 +1,21 @@
+error: Parsing[1002] `continue;` is not allowed as a top-level statement in a `finally` block [1]
+
+try_finally_continue_break.php:8:7
+ 6 |     try {
+ 7 |     } finally {
+ 8 |       continue;
+   |       ^^^^^^^^^ [1]
+ 9 |       break;
+10 |     }
+
+error: Parsing[1002] `break;` is not allowed as a top-level statement in a `finally` block [1]
+
+try_finally_continue_break.php:9:7
+ 7 |     } finally {
+ 8 |       continue;
+ 9 |       break;
+   |       ^^^^^^ [1]
+10 |     }
+11 |   }
+
+2 errors found

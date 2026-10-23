@@ -12,10 +12,12 @@ HHVM_DEFINE_EXTENSION("vsdebug"
     ext_vsdebug.cpp
     fdtransport.cpp
     hook.cpp
+    info_command.cpp
     initialize_command.cpp
     launch_attach_command.cpp
     logging.cpp
     pause_command.cpp
+    php_executor.cpp
     resolve_bps_command.cpp
     run_to_location_command.cpp
     scopes_command.cpp
@@ -39,6 +41,7 @@ HHVM_DEFINE_EXTENSION("vsdebug"
     fdtransport.h
     hook.h
     logging.h
+    php_executor.h
     server_object.h
     session.h
     socket_transport.h

@@ -1,1 +1,3 @@
---parser ffp --no-fallback-in-namespaces
+--allowed-fixme-codes-strict 4016,4045,4135
+--allowed-decl-fixme-codes 4045
+--error-format plain_highlighted

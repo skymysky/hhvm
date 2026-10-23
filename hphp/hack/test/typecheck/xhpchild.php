@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 /**
  * Copyright (c) 2014, Facebook, Inc.
  * All rights reserved.
@@ -9,12 +9,12 @@
  *
  */
 
-class :x implements XHPChild {}
+class :x extends XHPTest implements XHPChild {}
 
 function f1(XHPChild $x): void {}
 
 function f2(): void {
   f1("hello");
-  f1(array("hello", "world"));
+  f1(vec["hello", "world"]);
   f1(<x>hi</x>);
 }

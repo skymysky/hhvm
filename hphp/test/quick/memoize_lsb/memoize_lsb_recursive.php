@@ -22,18 +22,18 @@ class B extends A {
 }
 
 
-function doA(int $n) {
+function doA(int $n) :void{
   A::$side_effects = vec[];
   var_dump(A::fibonacci($n));
   var_dump(A::$side_effects);
 }
 
-function doB(int $n) {
+function doB(int $n) :void{
   B::$side_effects = vec[];
   var_dump(B::fibonacci($n));
   var_dump(B::$side_effects);
 }
-
+<<__EntryPoint>> function main(): void {
 doA(10);
 doA(5);
 doA(15);
@@ -42,3 +42,4 @@ doA(15);
 doB(10);
 doB(5);
 doB(15);
+}

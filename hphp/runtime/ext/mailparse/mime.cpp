@@ -18,6 +18,7 @@
 #include "hphp/runtime/ext/mailparse/mime.h"
 #include "hphp/runtime/ext/stream/ext_stream.h"
 #include "hphp/runtime/base/array-init.h"
+#include "hphp/runtime/base/array-iterator.h"
 #include "hphp/runtime/base/builtin-functions.h"
 #include "hphp/runtime/base/mem-file.h"
 #include "hphp/runtime/base/runtime-error.h"
@@ -35,21 +36,21 @@ MimePart::MimeHeader::MimeHeader()
 MimePart::MimeHeader::MimeHeader(const char *value)
   : m_empty(false) {
   assertx(value);
-  m_attributes = Array::Create();
-  m_value = String(value, CopyString);
+  m_attributes = Array::CreateDict();
+  m_value = OptString(value, CopyString);
 }
 
 MimePart::MimeHeader::MimeHeader(php_rfc822_tokenized_t *toks)
   : m_empty(false) {
   int i, first_semi, next_semi, comments_before_semi, netscape_bug = 0;
-  String name_buf;
+  OptString name_buf;
   StringBuffer value_buf;
   bool is_rfc2231_name = false;
   char *check_name;
   int charset_p = 0, prevcharset_p = 0;
   bool namechanged = false, currentencoded = false;
 
-  m_attributes = Array::Create();
+  m_attributes = Array::CreateDict();
 
   /* php_rfc822_print_tokens(toks); */
   /* look for optional ; which separates optional attributes from the main
@@ -57,8 +58,8 @@ MimePart::MimeHeader::MimeHeader(php_rfc822_tokenized_t *toks)
   for (first_semi = 2; first_semi < toks->ntokens; first_semi++)
     if (toks->tokens[first_semi].token == ';') break;
 
-  m_value = String(php_rfc822_recombine_tokens
-                   (toks, 2, first_semi - 2,
+  m_value = OptString(php_rfc822_recombine_tokens
+                      (toks, 2, first_semi - 2,
                     PHP_RFC822_RECOMBINE_STRTOLOWER |
                     PHP_RFC822_RECOMBINE_IGNORE_COMMENTS), AttachString);
 
@@ -99,12 +100,12 @@ MimePart::MimeHeader::MimeHeader(php_rfc822_tokenized_t *toks)
           netscape_bug = 1;
         }
 
-        String name(php_rfc822_recombine_tokens
-                    (toks, first_semi, 1,
+        OptString name(php_rfc822_recombine_tokens
+                       (toks, first_semi, 1,
                      PHP_RFC822_RECOMBINE_STRTOLOWER|
                      PHP_RFC822_RECOMBINE_IGNORE_COMMENTS), AttachString);
-        String value(php_rfc822_recombine_tokens
-                     (toks, i, next_semi - i,
+        OptString value(php_rfc822_recombine_tokens
+                        (toks, i, next_semi - i,
                       PHP_RFC822_RECOMBINE_IGNORE_COMMENTS), AttachString);
 
         /* support rfc2231 mime parameter value
@@ -164,7 +165,10 @@ MimePart::MimeHeader::MimeHeader(php_rfc822_tokenized_t *toks)
             /* Finalize packet */
             rfc2231_to_mime(value_buf, NULL, 0, prevcharset_p);
 
-            m_attributes.set(name_buf, value_buf.detach());
+            auto const name_key =
+              m_attributes.convertKey<IntishCast::Cast>(name_buf);
+            auto str = value_buf.detach();
+            m_attributes.set(name_key, make_tv<KindOfString>(str.get()));
             value_buf.clear();
 
             prevcharset_p = 0;
@@ -174,7 +178,10 @@ MimePart::MimeHeader::MimeHeader(php_rfc822_tokenized_t *toks)
             /* New non encoded name*/
             if (!currentencoded) {
               /* Add string*/
-              m_attributes.set(name, value);
+              auto const updated_name_key =
+                m_attributes.convertKey<IntishCast::Cast>(name);
+              m_attributes.set(updated_name_key,
+                               make_tv<KindOfString>(value.get()));
             } else {    /* Encoded name changed*/
               if (namechanged) {
                 /* Append string to buffer - check if to be encoded...  */
@@ -191,7 +198,9 @@ MimePart::MimeHeader::MimeHeader(php_rfc822_tokenized_t *toks)
             namechanged = false;
           }
         } else {
-          m_attributes.set(name, value);
+          auto const name_key =
+            m_attributes.convertKey<IntishCast::Cast>(name);
+          m_attributes.set(name_key, make_tv<KindOfString>(value.get()));
         }
       }
     }
@@ -207,7 +216,10 @@ MimePart::MimeHeader::MimeHeader(php_rfc822_tokenized_t *toks)
   if (is_rfc2231_name) {
     /* Finalize packet */
     rfc2231_to_mime(value_buf, NULL, 0, prevcharset_p);
-    m_attributes.set(name_buf, value_buf.detach());
+    auto const name_key =
+      m_attributes.convertKey<IntishCast::Cast>(name_buf);
+    auto str = value_buf.detach();
+    m_attributes.set(name_key, make_tv<KindOfString>(str.get()));
   }
 }
 
@@ -217,14 +229,18 @@ void MimePart::MimeHeader::clear() {
   m_attributes.reset();
 }
 
-Variant MimePart::MimeHeader::get(const String& attrname) {
-  return m_attributes[attrname];
+Variant MimePart::MimeHeader::get(const OptString& attrname) {
+  auto const arrkey =
+    m_attributes.convertKey<IntishCast::Cast>(attrname);
+  return m_attributes[arrkey];
 }
 
-void MimePart::MimeHeader::getAll(Array &ret, const String& valuelabel,
-                                  const String& attrprefix) {
+void MimePart::MimeHeader::getAll(Array &ret, const OptString& valuelabel,
+                                  const OptString& attrprefix) {
   for (ArrayIter iter(m_attributes); iter; ++iter) {
-    ret.set(attrprefix + iter.first().toString(), iter.second());
+    OptString s = attrprefix + iter.first().toString();
+    auto const arrkey = ret.convertKey<IntishCast::Cast>(s);
+    ret.set(arrkey, iter.secondVal());
   }
 
   /* do this last so that a bogus set of headers like this:
@@ -235,7 +251,8 @@ void MimePart::MimeHeader::getAll(Array &ret, const String& valuelabel,
    * doesn't overwrite content-type with the type="text/html"
    * value.
    * */
-  ret.set(valuelabel, m_value);
+  auto const arrkey = ret.convertKey<IntishCast::Cast>(valuelabel);
+  ret.set(arrkey, make_tv<KindOfString>(m_value.get()));
 }
 
 void MimePart::MimeHeader::rfc2231_to_mime(StringBuffer &value_buf,
@@ -301,7 +318,7 @@ void MimePart::MimeHeader::rfc2231_to_mime(StringBuffer &value_buf,
 MimePart::MimePart()
   : m_startpos(0), m_endpos(0), m_bodystart(0), m_bodyend(0),
     m_nlines(0), m_nbodylines(0) {
-  m_headers = Array::Create();
+  m_headers = Array::CreateDict();
 
   /* begin in header parsing mode */
   m_parsedata.in_header = true;
@@ -354,7 +371,7 @@ bool MimePart::getStructure(Enumerator *id, void *ptr) {
   char *buf = (char*)malloc(buf_size);
   buf[0] = '\0';
   while (id && i < buf_size) {
-    sprintf(intbuf, "%d", id->id);
+    snprintf(intbuf, 16, "%d", id->id);
     len = strlen(intbuf);
     if (len > (buf_size-i)) {
       raise_warning("too many nested sections in message");
@@ -366,22 +383,22 @@ bool MimePart::getStructure(Enumerator *id, void *ptr) {
       buf = (char*)realloc(buf, buf_size);
       if (!buf) {
         raise_fatal_error(
-          folly::sformat("The structure buffer has been exceeded "
+          fmt::format("The structure buffer has been exceeded "
                           "({}).  Please try decreasing the nesting "
                           "depth of messages and report this to the "
                           "developers.", buf_size).c_str());
       }
     }
-    sprintf(&buf[i], "%s%c", intbuf, id->next ? '.' : '\0');
+    snprintf(&buf[i], buf_size-i, "%s%c", intbuf, id->next ? '.' : '\0');
     i += len + (id->next ? 1 : 0);
     id = id->next;
   }
-  ((Array*)ptr)->append(String(buf, AttachString));
+  ((Array*)ptr)->append(OptString(buf, AttachString));
   return true;
 }
 
 Array MimePart::getStructure() {
-  Array ret = Array::Create();
+  Array ret = Array::CreateDict();
   enumerateParts(&MimePart::getStructure, &ret);
   return ret;
 }
@@ -407,12 +424,12 @@ bool MimePart::findPart(Enumerator *id, void *ptr) {
   return true;
 }
 
-Resource MimePart::findByName(const char *name) {
+OptResource MimePart::findByName(const char *name) {
   struct find_part_struct find;
   find.searchfor = name;
   find.foundpart = NULL;
   enumerateParts(&MimePart::findPart, &find);
-  return Resource{find.foundpart};
+  return OptResource{find.foundpart};
 }
 
 static int filter_into_work_buffer(int c, void *dat) {
@@ -469,7 +486,7 @@ void MimePart::decoderFinish() {
   }
 }
 
-void MimePart::decoderFeed(const String& str) {
+void MimePart::decoderFeed(const OptString& str) {
   if (!str.empty()) {
     if (m_extract_filter) {
       for (int i = 0; i < str.size(); i++) {
@@ -519,8 +536,8 @@ const StaticString
   s_mime_version("mime-version"),
   s_content_transfer_encoding("content-transfer-encoding");
 
-Variant MimePart::getPartData() {
-  Array ret = Array::Create();
+Array MimePart::getPartData() {
+  Array ret = Array::CreateDict();
 
   ret.set(s_headers, m_headers);
 
@@ -580,7 +597,7 @@ Variant MimePart::getPartData() {
     php_rfc822_addresses_t *addrs =
       php_rfc822_parse_address_tokens(toks);
     if (addrs->naddrs > 0) {
-      ret.set(s_content_id, String(addrs->addrs[0].address, CopyString));
+      ret.set(s_content_id, OptString(addrs->addrs[0].address, CopyString));
     }
     php_rfc822_free_addresses(addrs);
     php_rfc822_tokenize_free(toks);
@@ -604,11 +621,18 @@ bool MimePart::parse(const char *buf, int bufsize) {
     }
     if (len < bufsize && buf[len] == '\n') {
       ++len;
-      m_parsedata.workbuf += String(buf, len, CopyString);
-      ProcessLine(req::ptr<MimePart>(this), m_parsedata.workbuf);
+      m_parsedata.workbuf += OptString(buf, len, CopyString);
+      if (!ProcessLine(req::ptr<MimePart>(this), m_parsedata.workbuf)) {
+        // ProcessLine() only returns FAILURE in case the count of children
+        // have exceeded MAXPARTS at the very beginning, without doing any work.
+        // Short-circuit since the exceeded state won't change on subsequent
+        // calls.
+        return false;
+      }
+
       m_parsedata.workbuf.clear();
     } else {
-      m_parsedata.workbuf += String(buf, len, CopyString);
+      m_parsedata.workbuf += OptString(buf, len, CopyString);
     }
 
     buf += len;
@@ -622,7 +646,7 @@ req::ptr<MimePart> MimePart::createChild(int startpos, bool inherit) {
   m_parsedata.lastpart = child;
   child->m_parent = this;
 
-  m_children.append(Resource(child));
+  m_children.append(OptResource(child));
   child->m_startpos = child->m_endpos = child->m_bodystart =
     child->m_bodyend = startpos;
 
@@ -652,14 +676,14 @@ bool MimePart::processHeader() {
   }
 
   /* get a lower-case version of the first token */
-  String header_key(php_rfc822_recombine_tokens
-                    (toks, 0, 1,
+  OptString header_key(php_rfc822_recombine_tokens
+                       (toks, 0, 1,
                      PHP_RFC822_RECOMBINE_IGNORE_COMMENTS|
                      PHP_RFC822_RECOMBINE_STRTOLOWER), AttachString);
 
   const char *header_val = strchr(m_parsedata.headerbuf.data(), ':');
-  String header_val_stripped(php_rfc822_recombine_tokens
-                             (toks, 2, toks->ntokens-2,
+  OptString header_val_stripped(php_rfc822_recombine_tokens
+                                (toks, 2, toks->ntokens-2,
                               PHP_RFC822_RECOMBINE_IGNORE_COMMENTS|
                               PHP_RFC822_RECOMBINE_STRTOLOWER), AttachString);
 
@@ -669,28 +693,31 @@ bool MimePart::processHeader() {
       header_val++;
     }
 
+    auto const header_arrkey =
+      m_headers.convertKey<IntishCast::Cast>(header_key);
     /* add the header to the hash.
      * join multiple To: or Cc: lines together */
     if ((header_key == s_to || header_key == s_cc) &&
-        m_headers.exists(header_key)) {
-      String newstr = m_headers[header_key].toString();
+        m_headers.exists(header_arrkey)) {
+      OptString newstr = m_headers[header_arrkey].toString();
       newstr += ", ";
       newstr += header_val;
-      m_headers.set(header_key, newstr);
+      m_headers.set(header_arrkey, make_tv<KindOfString>(newstr.get()));
     } else {
-      if (m_headers.exists(header_key)) {
-        auto const zheaderval = m_headers.lvalAt(header_key).unboxed();
+      if (m_headers.exists(header_arrkey)) {
+        auto const zheaderval = m_headers.lval(header_arrkey);
         if (isArrayLikeType(zheaderval.type())) {
-          asArrRef(zheaderval).append(String(header_val, CopyString));
+          asArrRef(zheaderval).append(OptString(header_val, CopyString));
         } else {
           // Create a nested array if there is more than one of the same header
-          Array zarr = Array::Create();
+          Array zarr = Array::CreateVec();
           zarr.append(zheaderval.tv());
-          zarr.append(String(header_val, CopyString));
-          m_headers.set(header_key, zarr);
+          zarr.append(OptString(header_val, CopyString));
+          m_headers.set(header_arrkey, make_array_like_tv(zarr.get()));
         }
       } else {
-        m_headers.set(header_key, String(header_val, CopyString));
+        OptString str(header_val, CopyString);
+        m_headers.set(header_arrkey, make_tv<KindOfString>(str.get()));
       }
     }
 
@@ -699,13 +726,13 @@ bool MimePart::processHeader() {
       m_mime_version = header_val_stripped;
     } else if (header_key == s_content_location) {
       m_content_location =
-        String(php_rfc822_recombine_tokens
-               (toks, 2, toks->ntokens-2,
+        OptString(php_rfc822_recombine_tokens
+                  (toks, 2, toks->ntokens-2,
                 PHP_RFC822_RECOMBINE_IGNORE_COMMENTS), AttachString);
     } else if (header_key == s_content_base) {
       m_content_base =
-        String(php_rfc822_recombine_tokens
-               (toks, 2, toks->ntokens-2,
+        OptString(php_rfc822_recombine_tokens
+                  (toks, 2, toks->ntokens-2,
                 PHP_RFC822_RECOMBINE_IGNORE_COMMENTS), AttachString);
     } else if (header_key == s_content_transfer_encoding) {
       m_content_transfer_encoding = header_val_stripped;
@@ -729,7 +756,7 @@ bool MimePart::processHeader() {
   return true;
 }
 
-bool MimePart::ProcessLine(req::ptr<MimePart> workpart, const String& line) {
+bool MimePart::ProcessLine(req::ptr<MimePart> workpart, const OptString& line) {
   /* sanity check */
   if (workpart->m_children.size() > MAXPARTS) {
     raise_warning("MIME message too complex");
@@ -816,7 +843,7 @@ bool MimePart::ProcessLine(req::ptr<MimePart> workpart, const String& line) {
         workpart->processHeader();
       }
       /* save header for possible continuation */
-      workpart->m_parsedata.headerbuf += String(c, linelen, CopyString);
+      workpart->m_parsedata.headerbuf += OptString(c, linelen, CopyString);
 
     } else {
       /* end of headers */
@@ -910,7 +937,7 @@ Variant MimePart::extract(const Variant& filename, const Variant& callbackfunc, 
     file = File::Open(filename.toString(), "rb");
   } else {
     /* filename is the actual data */
-    String data = filename.toString();
+    OptString data = filename.toString();
     file = req::make<MemFile>(data.data(), data.size());
   }
 
@@ -960,7 +987,7 @@ int MimePart::extractImpl(int decode, req::ptr<File> src) {
   while (start_pos < end) {
     int n = 4095;
     if (n > end - start_pos) n = end - start_pos;
-    String str = src->read(n);
+    OptString str = src->read(n);
     if (str.empty()) {
       raise_warning("error reading from file at offset %d", start_pos);
       decoderFinish();
@@ -973,19 +1000,19 @@ int MimePart::extractImpl(int decode, req::ptr<File> src) {
   return true;
 }
 
-void MimePart::callUserFunc(const String& s) {
-  vm_call_user_func(m_extract_context, make_packed_array(s));
+void MimePart::callUserFunc(const OptString& s) {
+  vm_call_user_func(m_extract_context, make_vec_array(s));
 }
 
-void MimePart::outputToStdout(const String& s) {
+void MimePart::outputToStdout(const OptString& s) {
   g_context->write(s);
 }
 
-void MimePart::outputToFile(const String& s) {
+void MimePart::outputToFile(const OptString& s) {
   cast<File>(m_extract_context)->write(s);
 }
 
-void MimePart::outputToString(const String& s) {
+void MimePart::outputToString(const OptString& s) {
   m_extract_context = m_extract_context.toString() + s;
 }
 

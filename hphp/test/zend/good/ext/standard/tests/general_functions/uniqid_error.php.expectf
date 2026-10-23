@@ -2,14 +2,5 @@
 
 -- Testing uniqid() function with more than expected no. of arguments --
 
-Warning: %s
-NULL
-
--- Testing uniqid() function with invalid values for $prefix --
-
-Warning: %s
-
-Warning: %s
-
-Warning: %s
+Warning: uniqid() expects at most 2 positional parameters, 3 given in %s/test/zend/good/ext/standard/tests/general_functions/uniqid_error.php on line 12
 ===DONE===

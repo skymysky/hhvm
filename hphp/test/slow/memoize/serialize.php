@@ -4,63 +4,81 @@
 class C1 {
   const PURPOSE = 'Base';
 
+  private static $fY = 0;
+
   <<__Memoize>>
   public function f(int $x): int {
-    static $y = 0;
-    return $x + 1 + ($y++);
+    $__lval_tmp_0 = self::$fY;
+    self::$fY++;
+    return $x + 1 + ($__lval_tmp_0);
   }
 }
 
 class C2 {
   const PURPOSE = 'WithoutMemoize';
 
+  private static $fY = 0;
+
   public function f(int $x): int {
-    static $y = 0;
-    return $x + 5 + ($y++);
+    $__lval_tmp_1 = self::$fY;
+    self::$fY++;
+    return $x + 5 + ($__lval_tmp_1);
   }
 }
 
 class C3 {
   const PURPOSE = 'WithDifferentCode';
 
+  private static $fY = 0;
+
   <<__Memoize>>
   public function f(int $x): int {
-    static $y = 0;
-    return $x + 5 + ($y++);
+    $__lval_tmp_2 = self::$fY;
+    self::$fY++;
+    return $x + 5 + ($__lval_tmp_2);
   }
 }
 
 class C4 {
   const PURPOSE = 'WithDifferentParam';
 
+  private static $fY = 0;
+
   <<__Memoize>>
   public function f($x): int {
-    static $y = 0;
-    return (int)$x + 1 + ($y++);
+    $__lval_tmp_3 = self::$fY;
+    self::$fY++;
+   return (int)$x + 1 + ($__lval_tmp_3);
   }
 }
 
 class C5 {
   const PURPOSE = 'WithMoreParams';
 
+  private static $fY = 0;
+
   <<__Memoize>>
   public function f(int $x, int $incr = 1): int {
-    static $y = 0;
-    return $x + $incr + ($y++);
+    $__lval_tmp_4 = self::$fY;
+    self::$fY++;
+    return $x + $incr + ($__lval_tmp_4);
   }
 }
 
 class C6 {
   const PURPOSE = 'WithNoParams';
 
+  private static $fY = 0;
+
   <<__Memoize>>
   public function f(): int {
-    static $y = 0;
-    return ($y++);
+    $__lval_tmp_5 = self::$fY;
+    self::$fY++;
+    return ($__lval_tmp_5);
   }
 }
 
-function test_unserialize($class, $s) {
+function test_unserialize($class, $s) :mixed{
   invariant(strlen($class) === strlen(C1::class),
             'string lengths must match');
 
@@ -69,7 +87,7 @@ function test_unserialize($class, $s) {
 
   // changing the class in the string to simulate deserialization into a
   // PHP with a different implementation of C1
-  $s = strtr($s, array( C1::class => $class));
+  $s = strtr($s, dict[ C1::class => $class]);
   var_dump($s);
 
   $un = unserialize($s);
@@ -82,7 +100,7 @@ function test_unserialize($class, $s) {
 }
 
 
-function main() {
+function main() :mixed{
   echo '== no serialization ==', "\n";
   $inst = new C1();
   var_dump($inst->f(10));
@@ -101,4 +119,8 @@ function main() {
   test_unserialize(C6::class, $s);
 }
 
+
+<<__EntryPoint>>
+function main_serialize() :mixed{
 main();
+}

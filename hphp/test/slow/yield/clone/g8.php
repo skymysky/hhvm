@@ -1,13 +1,16 @@
-<?php
-function foo() {
-  static $x = 1;
-  $x += 10;
-  yield $x;
-  $x += 100;
-  yield $x;
-  $x += 1000;
-  yield $x;
+<?hh
+class State { public static $x = 1; }
+function foo() :AsyncGenerator<mixed,mixed,void>{
+  State::$x += 10;
+  yield State::$x;
+  State::$x += 100;
+  yield State::$x;
+  State::$x += 1000;
+  yield State::$x;
 }
+
+<<__EntryPoint>>
+function main_g8() :mixed{
 $x = foo();
 $x->rewind();
 $y1 = clone $x;
@@ -22,4 +25,5 @@ for ($y1->next(); $y1->valid(); $y1->next()) {
 echo "========\n";
 for ($y2->next(); $y2->valid(); $y2->next()) {
   echo $y2->current() . "\n";
+}
 }

@@ -1,0 +1,109 @@
+error: Parsing[1002] You cannot nest a `shape` or `tuple` inside a `list` [1]
+
+nesting_bad.php:4:8
+2 | 
+3 | function f(): void {
+4 |   list(shape('a' => $a), $b) = tuple(shape('a' => 1), 2);
+  |        ^^^^^^^^^^^^^^^^ [1]
+5 |   shape('a' => list($a, $b)) = shape('a' => tuple(1, 2));
+6 |   list(tuple($a), $b) = tuple(tuple(1), 2);
+
+error: Parsing[1002] Cannot use unstable feature: `shape_and_tuple_destructuring` [1]
+
+nesting_bad.php:5:3
+3 | function f(): void {
+4 |   list(shape('a' => $a), $b) = tuple(shape('a' => 1), 2);
+5 |   shape('a' => list($a, $b)) = shape('a' => tuple(1, 2));
+  |   ^^^^^^^^^^^^^^^^^^^^^^^^^^ [1]
+6 |   list(tuple($a), $b) = tuple(tuple(1), 2);
+7 |   tuple(list($a, $b)) = tuple(tuple(1, 2));
+
+error: Parsing[1002] Only variables, wildcards, and nested shape/tuple patterns are allowed in destructuring patterns [1]
+
+nesting_bad.php:5:16
+3 | function f(): void {
+4 |   list(shape('a' => $a), $b) = tuple(shape('a' => 1), 2);
+5 |   shape('a' => list($a, $b)) = shape('a' => tuple(1, 2));
+  |                ^^^^^^^^^^^^ [1]
+6 |   list(tuple($a), $b) = tuple(tuple(1), 2);
+7 |   tuple(list($a, $b)) = tuple(tuple(1, 2));
+
+error: Parsing[1002] You cannot nest a `list` inside a `tuple` or `shape` [1]
+
+nesting_bad.php:5:16
+3 | function f(): void {
+4 |   list(shape('a' => $a), $b) = tuple(shape('a' => 1), 2);
+5 |   shape('a' => list($a, $b)) = shape('a' => tuple(1, 2));
+  |                ^^^^^^^^^^^^ [1]
+6 |   list(tuple($a), $b) = tuple(tuple(1), 2);
+7 |   tuple(list($a, $b)) = tuple(tuple(1, 2));
+
+error: Parsing[1002] You cannot nest a `shape` or `tuple` inside a `list` [1]
+
+nesting_bad.php:6:8
+4 |   list(shape('a' => $a), $b) = tuple(shape('a' => 1), 2);
+5 |   shape('a' => list($a, $b)) = shape('a' => tuple(1, 2));
+6 |   list(tuple($a), $b) = tuple(tuple(1), 2);
+  |        ^^^^^^^^^ [1]
+7 |   tuple(list($a, $b)) = tuple(tuple(1, 2));
+8 | 
+
+error: Parsing[1002] Cannot use unstable feature: `shape_and_tuple_destructuring` [1]
+
+nesting_bad.php:7:3
+5 |   shape('a' => list($a, $b)) = shape('a' => tuple(1, 2));
+6 |   list(tuple($a), $b) = tuple(tuple(1), 2);
+7 |   tuple(list($a, $b)) = tuple(tuple(1, 2));
+  |   ^^^^^^^^^^^^^^^^^^^ [1]
+8 | 
+9 | }
+
+error: Parsing[1002] Only variables, wildcards, and nested shape/tuple patterns are allowed in destructuring patterns [1]
+
+nesting_bad.php:7:9
+5 |   shape('a' => list($a, $b)) = shape('a' => tuple(1, 2));
+6 |   list(tuple($a), $b) = tuple(tuple(1), 2);
+7 |   tuple(list($a, $b)) = tuple(tuple(1, 2));
+  |         ^^^^^^^^^^^^ [1]
+8 | 
+9 | }
+
+error: Parsing[1002] You cannot nest a `list` inside a `tuple` or `shape` [1]
+
+nesting_bad.php:7:9
+5 |   shape('a' => list($a, $b)) = shape('a' => tuple(1, 2));
+6 |   list(tuple($a), $b) = tuple(tuple(1), 2);
+7 |   tuple(list($a, $b)) = tuple(tuple(1, 2));
+  |         ^^^^^^^^^^^^ [1]
+8 | 
+9 | }
+
+error: Typing[4110] Invalid assignment [1]
+-> Expected `nothing` [2]
+-> But got `int` [3]
+
+nesting_bad.php:4:3
+2 | 
+3 | function f(): void {
+4 |   list(shape('a' => $a), $b) = tuple(shape('a' => 1), 2);
+  |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ [1]
+  |                     ^^ [2]
+  |                                                   ^ [3]
+5 |   shape('a' => list($a, $b)) = shape('a' => tuple(1, 2));
+6 |   list(tuple($a), $b) = tuple(tuple(1), 2);
+
+error: Typing[4110] Invalid assignment [1]
+-> Expected `nothing` [2]
+-> But got `int` [3]
+
+nesting_bad.php:6:3
+4 |   list(shape('a' => $a), $b) = tuple(shape('a' => 1), 2);
+5 |   shape('a' => list($a, $b)) = shape('a' => tuple(1, 2));
+6 |   list(tuple($a), $b) = tuple(tuple(1), 2);
+  |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ [1]
+  |              ^^ [2]
+  |                                     ^ [3]
+7 |   tuple(list($a, $b)) = tuple(tuple(1, 2));
+8 | 
+
+10 errors found

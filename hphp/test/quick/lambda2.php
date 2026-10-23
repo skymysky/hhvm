@@ -1,32 +1,28 @@
-<?php
+<?hh
 
 // lambdas in class bodies
 
 class bar {
   private $x = "asd";
 
-  public function __destruct() {
-    echo "~bar()\n";
-  }
-
-  public function foo() {
+  public function foo() :mixed{
     return array_map(
       $y ==> $this->x,
-      array(1,2,3,4)
+      vec[1,2,3,4]
     );
   }
 
-  public function getClos() {
+  public function getClos() :mixed{
     // Doesn't capture $this
     return $x ==> $x;
   }
 
-  public function grabThis() {
+  public function grabThis() :mixed{
     return () ==> $this->x;
   }
 }
 
-function main() {
+<<__EntryPoint>> function main(): void {
   var_dump((new bar)->foo());
   $k = (new bar)->getClos();
   // dtor prints here
@@ -35,8 +31,6 @@ function main() {
   echo "holding this:\n";
   $k = (new bar)->grabThis();
   echo $k() . "\n";
-  unset($k);
+  $k = null;
   echo "Done\n";
 }
-
-main();

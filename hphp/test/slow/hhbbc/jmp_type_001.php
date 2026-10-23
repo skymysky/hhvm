@@ -1,9 +1,9 @@
-<?php
+<?hh
 
 class Foo {}
 class Bar {}
 
-function main($x) {
+function main($x) :mixed{
   if (is_int($x)) {
     echo is_int($x);
     echo "\n";
@@ -16,5 +16,9 @@ function main($x) {
   }
 }
 
+
+<<__EntryPoint>>
+function main_jmp_type_001() :mixed{
 main(12);
-main(array(1,2,3));
+main(vec[1,2,3]);
+}

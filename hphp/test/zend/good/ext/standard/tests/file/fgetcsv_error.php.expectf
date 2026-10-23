@@ -1,53 +1,8 @@
 *** Testing error conditions ***
 -- Testing fgetcsv() with zero argument --
 
-Warning: %s
-NULL
+Warning: fgetcsv() expects at least 1 positional parameter, 0 given in %s/test/zend/good/ext/standard/tests/file/fgetcsv_error.php on line 10
 -- Testing fgetcsv() with more than expected number of arguments --
 
-Warning: %s
-NULL
--- Testing fgetcsv() with invalid arguments --
--- Iteration 1 --
-
-Warning: %s
-NULL
-
-Warning: %s
-NULL
--- Iteration 2 --
-
-Warning: %s
-NULL
-
-Warning: %s
-NULL
--- Iteration 3 --
-
-Warning: %s
-NULL
-
-Warning: %s
-NULL
--- Iteration 4 --
-
-Warning: %s
-NULL
-
-Warning: %s
-NULL
--- Iteration 5 --
-
-Warning: %s
-NULL
-
-Warning: %s
-NULL
--- Iteration 6 --
-
-Warning: %s
-NULL
-
-Warning: %s
-NULL
+Warning: fgetcsv() expects at most 5 positional parameters, 6 given in %s/test/zend/good/ext/standard/tests/file/fgetcsv_error.php on line 19
 Done

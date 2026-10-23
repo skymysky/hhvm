@@ -1,6 +1,6 @@
-<?php
+<?hh
 
-function test($a,$b = 0) {
+function test($a,$b = 0) :mixed{
   if ($a == 2) {
     if ($b == 1) {
       return;
@@ -11,4 +11,8 @@ function test($a,$b = 0) {
     var_dump($a);
   }
 }
+
+<<__EntryPoint>>
+function main_1414() :mixed{
 test(3);
+}

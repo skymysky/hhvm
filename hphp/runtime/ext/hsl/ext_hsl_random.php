@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 /*
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
@@ -26,16 +26,16 @@ namespace HH\Lib\_Private\Native {
  * Generates pseudorandom integers using the Marsenne Twister algorithm. The
  * result is NOT suitable for cryptographic purposes.
  *
+ * Undefined behavior if $min > $max.
+ *
  * @param int $min - The lowest value to be returned down to PHP_INT_MIN.
  * @param int $max - The highest value to be returned up to PHP_INT_MAX.
  *
  * @return int - The pseudo-random integer.
  *
- * @throws InvalidArgumentException - If $min > $max.
- *
  */
 <<__Native>>
-function pseudorandom_int(int $min = \PHP_INT_MIN, int $max = \PHP_INT_MAX): int;
+function pseudorandom_int(int $min = \PHP_INT_MIN, int $max = \PHP_INT_MAX)[leak_safe]: int;
 
 /**
  * Seeds the pseudorandom number generator used by `pseudorandom_int`. This
@@ -63,6 +63,6 @@ function pseudorandom_seed(int $seed): void;
  *
  */
 <<__Native>>
-function random_int(int $min = \PHP_INT_MIN, int $max = \PHP_INT_MAX): int;
+function random_int(int $min = \PHP_INT_MIN, int $max = \PHP_INT_MAX)[leak_safe]: int;
 
 }

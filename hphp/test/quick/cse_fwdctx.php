@@ -1,21 +1,21 @@
 <?hh
 
 final class HijriBirthday {
-  public function convertSolarToLunar($year, $month, $date) {
+  public function convertSolarToLunar($year, $month, $date) :mixed{
     return HijriConverter::gregorianToHijri($year, $month, $date);
   }
 }
 
 
 class HijriConverter {
-  public function intPart($float) {
+  public static function intPart($float) :mixed{
     if ($float < -0.0000001) {
       return ceil($float - 0.0000001);
     }
     return floor($float + 0.0000001);
   }
 
-  public function gregorianToHijri($y, $m, $d) {
+  public static function gregorianToHijri($y, $m, $d) :mixed{
     if ($y > 1700) {
       if (($y > 1582) || (($y == 1582) && ($m > 10)) ||
           (($y == 1582) && ($m == 10) && ($d > 14))) {
@@ -51,17 +51,18 @@ class HijriConverter {
       if ($m < 10)
         $m = "0".$m;
 
-      return array($y, $m, $d);
+      return vec[$y, $m, $d];
     }
-    return array();
+    return vec[];
   }
 }
 
-function main() {
-  var_dump((new HijriBirthday)->convertSolarToLunar(1983, (double)31, 7));
-  var_dump((new HijriBirthday)->convertSolarToLunar(1983, (double)31, 7));
-  var_dump((new HijriBirthday)->convertSolarToLunar(1983, (double)31, 7));
+function main() :mixed{
+  var_dump((new HijriBirthday)->convertSolarToLunar(1983, (float)31, 7));
+  var_dump((new HijriBirthday)->convertSolarToLunar(1983, (float)31, 7));
+  var_dump((new HijriBirthday)->convertSolarToLunar(1983, (float)31, 7));
 }
-
+<<__EntryPoint>> function main_entry(): void {
 main();
 echo "done\n";
+}

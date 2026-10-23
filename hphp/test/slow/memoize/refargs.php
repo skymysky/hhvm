@@ -1,7 +1,5 @@
 <?hh
 class A {
   <<__Memoize>>
-  public function testArgs(int &$a) { return $a; }
+  public function testArgs(inout int $a) :mixed{ return $a; }
 }
-
-echo (new A())->testArgs(1);

@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 
 
 interface T {
@@ -7,7 +7,7 @@ interface T {
 }
 
 abstract class P {
-  const type Z as arraykey = arraykey;
+  const type Z = arraykey;
 }
 
 final class C extends P implements T {
@@ -24,8 +24,12 @@ final class D {
   const C::Cint type = 200;
 }
 
-define('type', 123);
+const type = 123;
+
+<<__EntryPoint>>
+function main_type_constant() :mixed{
 var_dump(type + 123);
 var_dump(type - 123);
 var_dump(C::type + D::type);
 var_dump(C::type - D::type);
+}

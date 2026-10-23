@@ -1,0 +1,15 @@
+error: Typing[4110] Invalid return type [1]
+-> Expected `B` [2]
+-> But got `A` [3]
+
+extends.php:15:10
+12 |   return $t;
+13 | }
+14 | function h(class<A> $t): class<B> {
+   |                  ^ [3]
+   |                                ^ [2]
+15 |   return $t;
+   |          ^^ [1]
+16 | }
+
+1 error found

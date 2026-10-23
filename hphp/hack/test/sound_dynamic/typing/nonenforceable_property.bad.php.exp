@@ -1,0 +1,20 @@
+error: Typing[4110] Invalid assignment [1]
+-> Expected `vec<int>` [2]
+-> But got `dynamic` [3]
+
+nonenforceable_property.bad.php:10:16
+ 3 | 
+ 4 | class C {
+ 5 |   private ?vec<int> $v;
+   |            ^^^^^^^^ [2]
+ 6 | 
+ 7 |   public function foo<T as supportdyn<mixed>>(~T $x) : ~T { return $x; }
+   |                                                        ^^ [3]
+ 8 | 
+ 9 |   public function bar(?vec<int> $v): void {
+10 |     $this->v = $this->foo($v);
+   |                ^^^^^^^^^^^^^^ [1]
+11 |   }
+12 | }
+
+1 error found

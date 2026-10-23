@@ -1,0 +1,11 @@
+error: Typing[4115] Interfaces can only extend other interfaces. [1]
+-> This is an enum. [2]
+
+interface_extends_enum_bad.php:13:11
+11 | 
+12 | enum A: int {}
+13 | interface B extends A {}
+   |           ^ [1]
+   |                     ^ [2]
+
+1 error found

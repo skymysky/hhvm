@@ -14,8 +14,7 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_APC_HANDLE_H_
-#define incl_HPHP_APC_HANDLE_H_
+#pragma once
 
 #include <atomic>
 
@@ -31,31 +30,36 @@ namespace HPHP {
 
 enum class APCHandleLevel {
   Outer, // directly referenced by the apc store
-  Inner // referenced by some other Inner or Outer handle
+  Inner, // referenced by some other Inner or Outer handle
+  OuterAcyclic // Caller guarantees no cycles, otherwise the same as Outer
 };
 
 // handle kind, instead of overloading DataType
 enum class APCKind: uint8_t {
   Uninit, Null, Bool,  // see APCHandle::isSingletonKind before updating
   Int, Double,
-  UncountedString,
-  UncountedArray,
-  UncountedVec,
-  UncountedDict,
-  UncountedKeyset,
-  StaticString,
+  PersistentFunc,
+  PersistentClass,
+  LazyClass,
+  PersistentClsMeth,
+  SharedArray,
+  SharedBespoke,
+  SharedString,
   StaticArray,
-  StaticVec,
-  StaticDict,
-  StaticKeyset,
-  SharedString, SharedArray,
-  SharedPackedArray, SharedVec,
-  SharedDict, SharedKeyset,
-  SharedVArray, SharedDArray,
-  SharedObject, SharedCollection,
-  SerializedArray, SerializedVec,
-  SerializedDict, SerializedKeyset,
-  SerializedObject
+  StaticBespoke,
+  StaticString,
+  CopiedVec, CopiedLegacyVec,
+  CopiedDict, CopiedLegacyDict,
+  CopiedKeyset,
+  CopiedObject, CopiedCollection,
+  SerializedVec,
+  SerializedDict,
+  SerializedKeyset,
+  SerializedObject,
+  FuncEntity,
+  ClsMeth,
+  RFunc,
+  RClsMeth
 };
 
 /*
@@ -100,31 +104,26 @@ enum class APCKind: uint8_t {
  *  Bool              APCTypedValue   KindOfBool
  *  Int               APCTypedValue   KindOfInt64
  *  Double            APCTypedValue   KindOfDouble
+ *  StaticArray       APCTypedValue   (a persistent array type)
+ *  StaticBespoke     APCTypedValue   (a persistent array type)
  *  StaticString      APCTypedValue   KindOfPersistentString
- *  UncountedString   APCTypedValue   KindOfPersistentString
- *  StaticArray       APCTypedValue   KindOfPersistentArray
- *  UncountedArray    APCTypedValue   KindOfPersistentArray
- *  StaticVec         APCTypedValue   KindOfPersistentVec
- *  UncountedVec      APCTypedValue   KindOfPersistentVec
- *  StaticDict        APCTypedValue   KindOfPersistentDict
- *  UncountedDict     APCTypedValue   KindOfPersistentDict
- *  StaticKeyset      APCTypedValue   KindOfPersistentKeyset
- *  UncountedKeyset   APCTypedValue   KindOfPersistentKeyset
- *  SharedString      APCString       kInvalidDataType
- *  SharedArray       APCArray        kInvalidDataType
- *  SharedPackedArray APCArray        kInvalidDataType
- *  SharedVec         APCArray        kInvalidDataType
- *  SharedDict        APCArray        kInvalidDataType
- *  SharedKeyset      APCArray        kInvalidDataType
- *  SharedDArray      APCArray        kInvalidDataType
- *  SharedVArray      APCArray        kInvalidDataType
- *  SharedObject      APCObject       kInvalidDataType
- *  SharedCollection  APCObject       kInvalidDataType
+ *  SharedArray       APCTypedValue   (a persistent array type)
+ *  SharedBespoke     APCTypedValue   (a persistent array type)
+ *  SharedString      APCTypedValue   KindOfPersistentString
+ *  CopiedVec         APCArray        kInvalidDataType
+ *  CopiedLegacyVec   APCArray        kInvalidDataType
+ *  CopiedDict        APCArray        kInvalidDataType
+ *  CopiedLegacyDict  APCArray        kInvalidDataType
+ *  CopiedKeyset      APCArray        kInvalidDataType
+ *  CopiedObject      APCObject       kInvalidDataType
+ *  CopiedCollection  APCObject       kInvalidDataType
  *  SerializedArray   APCString       kInvalidDataType
  *  SerializedVec     APCString       kInvalidDataType
  *  SerializedDict    APCString       kInvalidDataType
  *  SerializedKeyset  APCString       kInvalidDataType
  *  SerializedObject  APCString       kInvalidDataType
+ *  RClsMeth          APCRClsMeth     kInvalidDataType
+ *  RFunc             APCRFunc        kInvalidDataType
  *
  * Thread safety:
  *
@@ -152,10 +151,12 @@ struct APCHandle {
    * Create an instance of an APC object according to the type of source and
    * the various flags. This is the only entry point to create APC entities.
    */
-  static Pair Create(const Variant& source,
-                     bool serialized,
-                     APCHandleLevel level,
-                     bool unserializeObj);
+  static Pair Create(const_variant_ref source, APCHandleLevel level,
+                     bool unserializeObj, bool pure);
+  static Pair Create(const Variant& var, APCHandleLevel level,
+                     bool unserializeObj, bool pure) {
+    return Create(const_variant_ref{var}, level, unserializeObj, pure);
+  }
 
   /*
    * Memory management API.
@@ -195,8 +196,10 @@ struct APCHandle {
    * instance returned will be local to the request/thread that performed
    * the call.
    */
-  Variant toLocalHelper() const;
-  Variant toLocal() const;
+  TypedValue toLazyProp() const;
+  Variant toLocalHelper(bool pure) const;
+  Variant toLocal(bool pure) const;
+  bool toLocalMayRaise() const;
 
   /*
    * Return the APCKind represented by this APCHandle.
@@ -220,36 +223,25 @@ struct APCHandle {
    */
   bool objAttempted() const {
     assertx(m_kind == APCKind::SerializedObject ||
-           m_kind == APCKind::SharedObject ||
-           m_kind == APCKind::SharedCollection);
-    return m_obj_attempted.load(std::memory_order_relaxed);
+           m_kind == APCKind::CopiedObject ||
+           m_kind == APCKind::CopiedCollection);
+    return m_obj_attempted.load(std::memory_order_acquire);
   }
   void setObjAttempted() {
     assertx(m_kind == APCKind::SerializedObject ||
-           m_kind == APCKind::SharedObject ||
-           m_kind == APCKind::SharedCollection);
-    m_obj_attempted.store(true, std::memory_order_relaxed);
+           m_kind == APCKind::CopiedObject ||
+           m_kind == APCKind::CopiedCollection);
+    m_obj_attempted.store(true, std::memory_order_release);
   }
 
   /*
-   * If true, this APCHandle is an APCTypedValue holding an "uncounted"
-   * string or array; (not static or refcounted).
+   * If true, this APCHandle is an APCTypedValue holding a "shared"
+   * array-like or string (not a static or refcounted value).
    */
-  bool isUncounted() const {
-    static_assert(APCKind::UncountedString < APCKind::UncountedArray &&
-                  APCKind::UncountedArray < APCKind::UncountedVec &&
-                  APCKind::UncountedVec < APCKind::UncountedDict &&
-                  APCKind::UncountedDict < APCKind::UncountedKeyset &&
-                  static_cast<int>(APCKind::UncountedKeyset) -
-                  static_cast<int>(APCKind::UncountedString) == 4,
-                  "The Uncounted APCKinds must be consecutive, and "
-                  "in the following order so that gcc can optimize "
-                  "this to a range check.");
-    return m_kind == APCKind::UncountedString ||
-           m_kind == APCKind::UncountedArray ||
-           m_kind == APCKind::UncountedVec ||
-           m_kind == APCKind::UncountedDict ||
-           m_kind == APCKind::UncountedKeyset;
+  bool isShared() const {
+    return m_kind == APCKind::SharedArray ||
+           m_kind == APCKind::SharedBespoke ||
+           m_kind == APCKind::SharedString;
   }
 
   bool isTypedValue() const {
@@ -273,7 +265,7 @@ struct APCHandle {
 private:
   void atomicIncRef() const;
   void atomicDecRef() const;
-  void deleteShared();
+  void deleteCopied();
 
 private:
   const DataType m_type;
@@ -286,5 +278,3 @@ private:
 //////////////////////////////////////////////////////////////////////
 
 }
-
-#endif

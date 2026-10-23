@@ -15,12 +15,82 @@
 */
 #include "hphp/runtime/base/apc-typed-value.h"
 
-#include "hphp/runtime/base/mixed-array.h"
-#include "hphp/runtime/base/packed-array.h"
-#include "hphp/runtime/base/set-array.h"
+#include "hphp/runtime/base/apc-bespoke.h"
+#include "hphp/runtime/base/tv-shared.h"
 #include "hphp/runtime/ext/apc/ext_apc.h"
 
 namespace HPHP {
+
+//////////////////////////////////////////////////////////////////////
+
+struct HandleHazardPointer {
+  const APCHandle* raw;
+  TYPE_SCAN_IGNORE_ALL;
+};
+struct StringHazardPointer {
+  StringData* raw;
+  TYPE_SCAN_IGNORE_ALL;
+};
+
+RDS_LOCAL(std::vector<HandleHazardPointer>, s_handle_hazard_pointers);
+RDS_LOCAL(std::vector<StringHazardPointer>, s_string_hazard_pointers);
+
+void APCTypedValue::FreeHazardPointers() {
+  for (auto const hp : *s_handle_hazard_pointers) {
+    hp.raw->unreferenceNonRoot();
+  }
+  s_handle_hazard_pointers->clear();
+
+  if (!UseStringHazardPointers()) return;
+  for (auto const hp : *s_string_hazard_pointers) {
+    DecRefSharedString(hp.raw);
+  }
+  s_string_hazard_pointers->clear();
+}
+
+void APCTypedValue::PushHazardPointer(const APCHandle* handle) {
+  s_handle_hazard_pointers->push_back({handle});
+}
+
+bool APCTypedValue::UseStringHazardPointers() {
+  return false;
+}
+
+//////////////////////////////////////////////////////////////////////
+
+APCTypedValue* APCTypedValue::ForArray(ArrayData* ad) {
+  assertx(!ad->isRefCounted());
+  auto const dt = ad->toPersistentDataType();
+  auto const result = initAPCBespoke(ad);
+  ad = result.ad;
+
+  // If we made an APCBespoke, it'll always be part of a joint allocation.
+  if (result.tv) {
+    auto const kind = ad->isStatic() ? APCKind::StaticBespoke
+                                     : APCKind::SharedBespoke;
+    return new (result.tv) APCTypedValue(ad, kind, dt);
+  }
+
+  // We didn't make an APCBespoke. Just use a regular persistent array.
+  auto const kind = ad->isStatic() ? APCKind::StaticArray
+                                   : APCKind::SharedArray;
+
+  // Check if the "co-allocate array and APCTypedValue" optimization hit.
+  // It hit if we a) made a new shared array and b) its flag is set.
+  if (ad->sharedCowCheck() || !ad->hasApcTv()) {
+    return new APCTypedValue(ad, kind, dt);
+  }
+
+  auto const mem = reinterpret_cast<APCTypedValue*>(ad) - 1;
+  return new (mem) APCTypedValue(ad, kind, dt);
+}
+
+APCTypedValue::APCTypedValue(ArrayData* ad, APCKind kind, DataType dt)
+    : m_handle(kind, dt) {
+  assertx(!ad->isRefCounted());
+  m_data.arr.store(ad, std::memory_order_release);
+  assertx(checkInvariants());
+}
 
 APCTypedValue* APCTypedValue::tvUninit() {
   static APCTypedValue* value = new APCTypedValue(KindOfUninit);
@@ -50,51 +120,41 @@ bool APCTypedValue::checkInvariants() const {
     case APCKind::Bool:
     case APCKind::Int:
     case APCKind::Double: break;
+    case APCKind::PersistentFunc: assertx(m_data.func->isPersistent()); break;
+    case APCKind::PersistentClass: assertx(m_data.cls->isPersistent()); break;
+    case APCKind::PersistentClsMeth:
+      assertx(m_data.pclsmeth->getCls()->isPersistent()); break;
     case APCKind::StaticString: assertx(m_data.str->isStatic()); break;
-    case APCKind::UncountedString: assertx(m_data.str->isUncounted()); break;
+    case APCKind::SharedString: assertx(m_data.str->isShared()); break;
+    case APCKind::LazyClass: assertx(m_data.str->isStatic()); break;
+
     case APCKind::StaticArray:
-      assertx(m_data.arr->isPHPArray());
-      assertx(m_data.arr->isStatic());
+    case APCKind::StaticBespoke: {
+      DEBUG_ONLY auto const ad = m_data.arr.load(std::memory_order_acquire);
+      assertx(ad->isStatic());
+      assertx(ad->toPersistentDataType() == m_handle.type());
       break;
-    case APCKind::StaticVec:
-      assertx(m_data.vec->isVecArray());
-      assertx(m_data.vec->isStatic());
-      break;
-    case APCKind::StaticDict:
-      assertx(m_data.dict->isDict());
-      assertx(m_data.dict->isStatic());
-      break;
-    case APCKind::StaticKeyset:
-      assertx(m_data.keyset->isKeyset());
-      assertx(m_data.keyset->isStatic());
-      break;
-    case APCKind::UncountedArray:
-      assertx(m_data.arr->isPHPArray());
-      assertx(m_data.arr->isUncounted());
-      break;
-    case APCKind::UncountedVec:
-      assertx(m_data.vec->isVecArray());
-      assertx(m_data.vec->isUncounted());
-      break;
-    case APCKind::UncountedDict:
-      assertx(m_data.dict->isDict());
-      assertx(m_data.dict->isUncounted());
-      break;
-    case APCKind::UncountedKeyset:
-      assertx(m_data.keyset->isKeyset());
-      assertx(m_data.keyset->isUncounted());
-      break;
-    case APCKind::SharedString:
+    }
+
     case APCKind::SharedArray:
-    case APCKind::SharedPackedArray:
-    case APCKind::SharedObject:
-    case APCKind::SharedCollection:
-    case APCKind::SharedVec:
-    case APCKind::SharedDict:
-    case APCKind::SharedKeyset:
-    case APCKind::SharedVArray:
-    case APCKind::SharedDArray:
-    case APCKind::SerializedArray:
+    case APCKind::SharedBespoke: {
+      DEBUG_ONLY auto const ad = m_data.arr.load(std::memory_order_acquire);
+      assertx(ad->isShared());
+      assertx(ad->toPersistentDataType() == m_handle.type());
+      break;
+    }
+
+    case APCKind::FuncEntity:
+    case APCKind::ClsMeth:
+    case APCKind::RFunc:
+    case APCKind::RClsMeth:
+    case APCKind::CopiedObject:
+    case APCKind::CopiedCollection:
+    case APCKind::CopiedVec:
+    case APCKind::CopiedLegacyVec:
+    case APCKind::CopiedDict:
+    case APCKind::CopiedLegacyDict:
+    case APCKind::CopiedKeyset:
     case APCKind::SerializedObject:
     case APCKind::SerializedVec:
     case APCKind::SerializedDict:
@@ -107,58 +167,62 @@ bool APCTypedValue::checkInvariants() const {
 
 //////////////////////////////////////////////////////////////////////
 
-void APCTypedValue::deleteUncounted() {
-  assertx(m_handle.isUncounted());
-  auto kind = m_handle.kind();
-  assertx(kind == APCKind::UncountedString ||
-         kind == APCKind::UncountedArray ||
-         kind == APCKind::UncountedVec ||
-         kind == APCKind::UncountedDict ||
-         kind == APCKind::UncountedKeyset);
-
+void APCTypedValue::deleteShared() {
+  assertx(m_handle.isShared());
   static_assert(std::is_trivially_destructible<APCTypedValue>::value,
                 "APCTypedValue must be trivially destructible - "
-                "*Array::ReleaseUncounted() frees the memory without "
+                "*Array::ReleaseShared() frees the memory without "
                 "destroying it");
 
-  if (kind == APCKind::UncountedString) {
-    StringData::ReleaseUncounted(m_data.str);
-  } else {
-    auto const arr = [&] {
-      if (kind == APCKind::UncountedArray) {
-        auto const parr = m_data.arr;
-        assertx(parr->isPHPArray());
-        if (parr->hasPackedLayout()) {
-          PackedArray::ReleaseUncounted(parr);
-        } else {
-          MixedArray::ReleaseUncounted(parr);
-        }
-        return parr;
+  switch (m_handle.kind()) {
+    case APCKind::SharedArray: {
+      auto const ad = m_data.arr.load(std::memory_order_acquire);
+      DecRefSharedArray(ad);
+      if (ad != static_cast<void*>(this + 1)) {
+        delete this;
       }
-      if (kind == APCKind::UncountedVec) {
-        auto const vec = m_data.vec;
-        assertx(vec->isVecArray());
-        PackedArray::ReleaseUncounted(vec);
-        return vec;
-      }
-      if (kind == APCKind::UncountedDict) {
-        auto const dict = m_data.dict;
-        assertx(dict->isDict());
-        MixedArray::ReleaseUncounted(dict);
-        return dict;
-      }
-      assertx(kind == APCKind::UncountedKeyset);
-      auto const keyset = m_data.keyset;
-      assertx(keyset->isKeyset());
-      SetArray::ReleaseUncounted(keyset);
-      return keyset;
-    }();
-    if (arr == static_cast<void*>(this + 1)) {
-      return;  // *::ReleaseUncounted freed the joint allocation.
+      return;
     }
-  }
 
-  delete this;
+    case APCKind::SharedBespoke:
+      freeAPCBespoke(this);
+      return;
+
+    case APCKind::SharedString:
+      DecRefSharedString(m_data.str);
+      delete this;
+      return;
+
+    default:
+      always_assert(false);
+  }
+}
+
+ArrayData* APCTypedValue::getArrayData() const {
+  assertx(checkInvariants());
+  return m_data.arr.load(std::memory_order_acquire);
+}
+
+void APCTypedValue::setArrayData(ArrayData* ad) {
+  m_data.arr.store(ad, std::memory_order_release);
+  assertx(checkInvariants());
+}
+
+TypedValue APCTypedValue::toTypedValue() const {
+  assertx(m_handle.isTypedValue());
+  TypedValue tv;
+  tv.m_type = m_handle.type();
+  auto const kind = m_handle.kind();
+  if (UseStringHazardPointers() && kind == APCKind::SharedString) {
+    s_string_hazard_pointers->push_back({m_data.str});
+    m_data.str->sharedIncRef();
+    tv.m_data.pstr = m_data.str;
+  } else if (kind == APCKind::SharedBespoke) {
+    tv.m_data.parr = readAPCBespoke(this);
+  } else {
+    tv.m_data.num = m_data.num;
+  }
+  return tv;
 }
 
 //////////////////////////////////////////////////////////////////////

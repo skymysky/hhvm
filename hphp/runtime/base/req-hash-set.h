@@ -14,13 +14,12 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_RUNTIME_BASE_REQ_HASH_SET_H_
-#define incl_HPHP_RUNTIME_BASE_REQ_HASH_SET_H_
+#pragma once
 
 #include "hphp/runtime/base/req-malloc.h"
 #include <folly/container/F14Set.h>
 
-namespace HPHP { namespace req {
+namespace HPHP::req {
 
 /*
  * hash_set wraps F14NodeSet, which allocates values indirectly,
@@ -51,11 +50,15 @@ template <class T,
           class W = std::equal_to<T>>
 struct value_set : folly::F14ValueSet<T,V,W,ConservativeAllocator<T>> {
   using Base = folly::F14ValueSet<T,V,W,ConservativeAllocator<T>>;
+  using value_type = typename Base::value_type;
   value_set() : Base() {}
 
   TYPE_SCAN_IGNORE_BASES(Base);
   TYPE_SCAN_CUSTOM(T) {
-    for (const auto& key : *this) scanner.scan(key);
+    Base::visitContiguousRanges(
+      [&](value_type const* start, value_type const* end) {
+        scanner.scan(*start, (const char*)end - (const char*)start);
+      });
   }
 };
 
@@ -79,14 +82,17 @@ template <class T,
           class W = std::equal_to<T>>
 struct vector_set : folly::F14VectorSet<T,V,W,ConservativeAllocator<T>> {
   using Base = folly::F14VectorSet<T,V,W,ConservativeAllocator<T>>;
+  using const_reference = typename Base::const_reference;
+  using const_iterator = typename Base::const_iterator;
+  using value_type = typename Base::value_type;
   vector_set() : Base() {}
 
   TYPE_SCAN_IGNORE_BASES(Base);
   TYPE_SCAN_CUSTOM(T) {
-    // use rbegin/rend to visit entries in address order within the container
-    // (see the iteration order for F14ValueSet in F14Set.h)
-    const auto it = Base::rbegin();
-    scanner.scan(*it, Base::size() * sizeof(*it));
+    Base::visitContiguousRanges(
+      [&](value_type const* start, value_type const* end) {
+        scanner.scan(*start, (const char*)end - (const char*)start);
+      });
   }
 };
 
@@ -114,5 +120,4 @@ struct fast_set : std::conditional_t<
   fast_set() : Super() {}
 };
 
-}}
-#endif
+}

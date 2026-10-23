@@ -1,0 +1,2 @@
+Fatal: An unexpected exception was thrown while emitting: More than one symbol with the name Something. In %s and %s
+hphp failed

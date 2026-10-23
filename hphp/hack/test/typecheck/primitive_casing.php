@@ -1,5 +1,5 @@
 <?hh
 
-function f(Array $arr): String {
+function f(Vec $arr): String {
   return 's';
 }

@@ -1,0 +1,10 @@
+
+ReflectionMethod:
+string(7) "HH\null"
+string(7) "HH\null"
+string(6) "HH\int"
+string(6) "Foo::T"
+
+ReflectionFunction:
+string(7) "HH\null"
+string(15) "HH\vec<HH\null>"

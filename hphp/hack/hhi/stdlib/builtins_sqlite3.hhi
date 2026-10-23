@@ -1,4 +1,4 @@
-<?hh     /* -*- php -*- */
+<?hh /* -*- php -*- */
 /**
  * Copyright (c) 2014, Facebook, Inc.
  * All rights reserved.
@@ -8,53 +8,93 @@
  *
  */
 
-define('SQLITE3_ASSOC', 0);
-define('SQLITE3_NUM', 0);
-define('SQLITE3_BOTH', 0);
-define('SQLITE3_INTEGER', 0);
-define('SQLITE3_FLOAT', 0);
-define('SQLITE3_TEXT', 0);
-define('SQLITE3_BLOB', 0);
-define('SQLITE3_NULL', 0);
-define('SQLITE3_OPEN_READONLY', 0);
-define('SQLITE3_OPEN_READWRITE', 0);
-define('SQLITE3_OPEN_CREATE', 0);
+const int SQLITE3_ASSOC;
+const int SQLITE3_NUM;
+const int SQLITE3_BOTH;
+const int SQLITE3_INTEGER;
+const int SQLITE3_FLOAT;
+const int SQLITE3_TEXT;
+const int SQLITE3_BLOB;
+const int SQLITE3_NULL;
+const int SQLITE3_OPEN_READONLY;
+const int SQLITE3_OPEN_READWRITE;
+const int SQLITE3_OPEN_CREATE;
+
 class SQLite3 {
-  public function __construct($filename, $flags = null, $encryption_key = null) { }
-  public function open($filename, $flags = null, $encryption_key = null) { }
-  public function busytimeout($msecs) { }
-  public function close() { }
-  public function exec($sql) { }
-  public static function version() { }
-  public function lastinsertrowid() { }
-  public function lasterrorcode() { }
-  public function lasterrormsg() { }
-  public function loadextension($extension) { }
-  public function changes() { }
-  public static function escapestring($sql) { }
-  public function prepare($sql) { }
-  public function query($sql) { }
-  public function querysingle($sql, $entire_row = false) { }
-  public function createfunction($name, $callback, $argcount = -1) { }
-  public function createaggregate($name, $step, $final, $argcount = -1) { }
-  public function openblob($table, $column, $rowid, $dbname = null) { }
+  public function __construct(
+    string $filename,
+    int $flags = SQLITE3_OPEN_READWRITE | SQLITE3_OPEN_CREATE,
+    HH\FIXME\MISSING_PARAM_TYPE $encryption_key = null,
+  );
+  public function open(
+    string $filename,
+    int $flags = SQLITE3_OPEN_READWRITE | SQLITE3_OPEN_CREATE,
+    HH\FIXME\MISSING_PARAM_TYPE $encryption_key = null,
+  ): HH\FIXME\MISSING_RETURN_TYPE;
+  public function busytimeout(int $msecs): bool;
+  public function close(): bool;
+  public function exec(string $sql): bool;
+  public static function version(): HH\FIXME\MISSING_RETURN_TYPE;
+  public function lastinsertrowid(): int;
+  public function lasterrorcode(): int;
+  public function lasterrormsg(): HH\FIXME\MISSING_RETURN_TYPE;
+  public function loadExtension(
+    string $extension,
+  ): bool;
+  public function changes(): int;
+  public static function escapestring(
+    string $sql,
+  ): HH\FIXME\MISSING_RETURN_TYPE;
+  public function prepare(string $sql): HH\FIXME\MISSING_RETURN_TYPE;
+  public function query(string $sql): HH\FIXME\MISSING_RETURN_TYPE;
+  public function querysingle(
+    string $sql,
+    bool $entire_row = false,
+  ): HH\FIXME\MISSING_RETURN_TYPE;
+  public function createfunction(
+    string $name,
+    HH\FIXME\MISSING_PARAM_TYPE $callback,
+    int $argcount = -1,
+  ): bool;
+  public function createaggregate(
+    string $name,
+    HH\FIXME\MISSING_PARAM_TYPE $step,
+    HH\FIXME\MISSING_PARAM_TYPE $final,
+    int $argcount = -1,
+  ): bool;
+  public function openblob(
+    string $table,
+    string $column,
+    int $rowid,
+    HH\FIXME\MISSING_PARAM_TYPE $dbname = null,
+  ): bool;
 }
+
 class SQLite3Stmt {
-  public function __construct($dbobject, $statement) { }
-  public function paramcount() { }
-  public function close() { }
-  public function reset() { }
-  public function clear() { }
-  public function bindparam($name, &$parameter, $type = SQLITE3_TEXT) { }
-  public function bindvalue($name, $parameter, $type = SQLITE3_TEXT) { }
-  public function execute() { }
+  public function __construct(
+    HH\FIXME\MISSING_PARAM_TYPE $dbobject,
+    string $statement,
+  );
+  public function paramcount(): int;
+  public function close(): bool;
+  public function reset(): bool;
+  public function clear(): bool;
+  public function bindvalue(
+    HH\FIXME\MISSING_PARAM_TYPE $name,
+    HH\FIXME\MISSING_PARAM_TYPE $parameter,
+    int $type = SQLITE3_TEXT,
+  ): bool;
+  public function execute(): HH\FIXME\MISSING_RETURN_TYPE;
 }
+
 class SQLite3Result {
-  public function __construct() { }
-  public function numcolumns() { }
-  public function columnname($column) { }
-  public function columntype($column) { }
-  public function fetcharray($mode = SQLITE3_BOTH) { }
-  public function reset() { }
-  public function finalize() { }
+  public function __construct();
+  public function numcolumns(): int;
+  public function columnname(int $column): HH\FIXME\MISSING_RETURN_TYPE;
+  public function columntype(int $column): int;
+  public function fetcharray(
+    int $mode = SQLITE3_BOTH,
+  ): HH\FIXME\MISSING_RETURN_TYPE;
+  public function reset(): bool;
+  public function finalize(): bool;
 }

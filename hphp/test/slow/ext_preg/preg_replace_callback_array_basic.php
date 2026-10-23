@@ -1,33 +1,39 @@
-<?php
+<?hh
 class Rep {
-  public function __invoke() {
+  public function __invoke() :mixed{
     return "d";
   }
 }
 class Foo {
-  public static function rep($rep) {
+  public static function rep($rep) :mixed{
     return "ok";
   }
 }
-function b() {
+<<__DynamicallyCallable>> function b() :mixed{
   return "b";
 }
+
+<<__EntryPoint>>
+function main_preg_replace_callback_array_basic() :mixed{
+$count = -1;
 var_dump(preg_replace_callback_array(
-  array(
-    "/a/" => 'b',
+  dict[
+    "/a/" => HH\dynamic_fun('b'),
     "/b/" => function () { return "c"; },
     "/c/" => new Rep,
-    '/d/' => array("Foo", "rep")), 'a'));
+    '/d/' => vec["Foo", "rep"]], 'a', -1, inout $count));
 var_dump(preg_replace_callback_array(
-  array(
-    "/a/" => 'b',
+  dict[
+    "/a/" => HH\dynamic_fun('b'),
     "/c/" => new Rep,
     "/b/" => function () { return "ok"; },
-    '/d/' => array("Foo", "rep")), 'a'));
+    '/d/' => vec["Foo", "rep"]], 'a', -1, inout $count));
 var_dump(preg_replace_callback_array(
-  array(
-    '/d/' => array("Foo", "rep"),
+  dict[
+    '/d/' => vec["Foo", "rep"],
     "/c/" => new Rep,
-    "/a/" => 'b',
-    "/b/" => create_function('$a', 'return "ok";')), 'a', -1, $count));
+    "/a/" => HH\dynamic_fun('b'),
+    "/b/" => $_ ==> 'ok',
+  ], 'a', -1, inout $count));
 var_dump($count);
+}

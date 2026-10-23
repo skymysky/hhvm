@@ -14,15 +14,14 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_EVAL_DEBUGGER_SERVER_H_
-#define incl_HPHP_EVAL_DEBUGGER_SERVER_H_
+#pragma once
 
 #include <vector>
 
 #include "hphp/runtime/base/socket.h"
 #include "hphp/util/async-func.h"
 
-namespace HPHP { namespace Eval {
+namespace HPHP::Eval {
 ///////////////////////////////////////////////////////////////////////////////
 
 /*
@@ -59,6 +58,5 @@ private:
 };
 
 ///////////////////////////////////////////////////////////////////////////////
-}}
+}
 
-#endif // incl_HPHP_EVAL_DEBUGGER_SERVER_H_

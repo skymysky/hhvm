@@ -14,12 +14,10 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_RUNTIME_SERVER_FASTCGI_FASTCGI_WORKER_H_
-#define incl_HPHP_RUNTIME_SERVER_FASTCGI_FASTCGI_WORKER_H_
+#pragma once
 
 #include "hphp/runtime/server/fastcgi/fastcgi-transport.h"
 #include "hphp/runtime/server/server-worker.h"
-#include "hphp/runtime/server/job-queue-vm-stack.h"
 
 namespace HPHP {
 
@@ -67,5 +65,4 @@ using FastCGIWorker = ServerWorker<std::shared_ptr<FastCGIJob>,
 ///////////////////////////////////////////////////////////////////////////////
 }
 
-#endif // incl_HPHP_HTTP_SERVER_FASTCGI_FASTCGI_WORKER_H_
 

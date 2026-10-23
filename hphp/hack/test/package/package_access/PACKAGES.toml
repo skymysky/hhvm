@@ -1,0 +1,45 @@
+[packages]
+
+[packages.pkg1]
+include_paths=["//"]
+allow_deployed_packages_checking = true
+
+[packages.pkg2]
+include_paths=[
+    "//cross_package_access_internal1_foo.php",
+    "//cross_package_basic_foo.php",
+    "//pkg2/",
+]
+includes = ["pkg1"]
+soft_includes=["pkg2_soft"]
+allow_deployed_packages_checking = true
+
+[packages.pkg2_soft]
+includes=["pkg2", "pkg1"]
+allow_deployed_packages_checking = true
+
+[packages.pkg3]
+include_paths=["//pkg3/"]
+includes = ["pkg2", "pkg2_soft", "pkg1"]
+allow_deployed_packages_checking = true
+
+[packages.pkg4]
+include_paths=["//pkg4/"]
+
+[packages.pkg5]
+include_paths=["//pkg5/"]
+
+[packages.pkg6]
+include_paths=["//pkg6/"]
+includes = ["pkg1"]
+
+[packages.pkg7]
+include_paths=["//pkg7/"]
+includes = ["pkg3", "pkg2", "pkg2_soft", "pkg1"]
+allow_deployed_packages_checking = true
+
+[packages.pkg8]
+include_paths=["//pkg8/"]
+includes = ["pkg3", "pkg2", "pkg2_soft", "pkg1"]
+allow_deployed_packages_checking = true
+

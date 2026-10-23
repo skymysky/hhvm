@@ -1,19 +1,44 @@
-<?php
+<?hh
 
-function evil($x) {
-	global $txt;
-	$txt[3] = "\xFF";
-	var_dump($x);
-	return $x[0];
+function evil($x) :mixed{
+  ZendGoodExtPcreTests007::$txt[3] = "\xFF";
+  var_dump($x);
+  return $x[0];
 }
 
-$txt = "ola123";
-var_dump(preg_replace_callback('#.#u', 'evil', $txt));
-var_dump($txt);
-var_dump(preg_last_error() == PREG_NO_ERROR);
+abstract final class ZendGoodExtPcreTests007 {
+  public static $txt;
+}
 
-var_dump(preg_replace_callback('#.#u', 'evil', $txt));
-var_dump(preg_last_error() == PREG_BAD_UTF8_ERROR);
+<<__EntryPoint>>
+function main(): void {
+  ZendGoodExtPcreTests007::$txt = "ola123";
+  $count = -1;
+  $error = null;
+  $result = preg_replace_callback_with_error(
+    '#.#u',
+    evil<>,
+    ZendGoodExtPcreTests007::$txt,
+    -1,
+    inout $count,
+    inout $error,
+  );
+  var_dump($result);
+  var_dump(ZendGoodExtPcreTests007::$txt);
+  var_dump($error === null);
 
-echo "Done!\n";
-?>
+  $count = -1;
+  $error = null;
+  $result = preg_replace_callback_with_error(
+    '#.#u',
+    evil<>,
+    ZendGoodExtPcreTests007::$txt,
+    -1,
+    inout $count,
+    inout $error,
+  );
+  var_dump($result);
+  var_dump($error === PREG_BAD_UTF8_ERROR);
+
+  echo "Done!\n";
+}

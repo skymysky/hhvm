@@ -14,12 +14,11 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_EVAL_DEBUGGER_CMD_CONFIG_H_
-#define incl_HPHP_EVAL_DEBUGGER_CMD_CONFIG_H_
+#pragma once
 
 #include "hphp/runtime/debugger/debugger_command.h"
 
-namespace HPHP { namespace Eval {
+namespace HPHP::Eval {
 ///////////////////////////////////////////////////////////////////////////////
 
 struct CmdConfig : DebuggerCommand {
@@ -28,11 +27,12 @@ struct CmdConfig : DebuggerCommand {
   void help(DebuggerClient&) override;
   void onClient(DebuggerClient&) override;
 
+  std::string name() const override { return "config"; }
+
 private:
   void listVars(DebuggerClient&);
 };
 
 ///////////////////////////////////////////////////////////////////////////////
-}}
+}
 
-#endif // incl_HPHP_EVAL_DEBUGGER_CMD_CONFIG_H_

@@ -22,20 +22,39 @@ namespace HPHP {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-bool enumHasValue(const Class* cls, const Cell* cell) {
+bool enumHasValue(const Class* cls, const TypedValue* cell) {
   assertx(isEnum(cls));
   auto const type = cell->m_type;
-  if (UNLIKELY(type != KindOfInt64 && !isStringType(type))) {
+  if (UNLIKELY(type != KindOfInt64 && !isStringType(type) &&
+               !isClassType(type) && !isLazyClassType(type))) {
     return false;
   }
   auto const values = EnumCache::getValuesBuiltin(cls);
   // Manually perform int-like key conversion even if names is a dict, for
   // backwards compatibility.
   int64_t num;
-  if (isStringType(type) && cell->m_data.pstr->isStrictlyInteger(num)) {
-   return values->names.exists(num);
+  if (isCoercibleToInteger(cell, num, "enumHasValue")) {
+    return values->names.exists(num);
   }
-  return values->names.exists(*cell);
+  auto const val = tvClassToString(*cell);
+
+  return values->names.exists(val);
+}
+
+bool isCoercibleToInteger(const TypedValue *cell, int64_t &num, const char* callsite) {
+  if (!tvIsString(cell) || !cell->m_data.pstr->isStrictlyInteger(num)) {
+    return false;
+  }
+
+  switch (Cfg::Eval::WarnOnImplicitCoercionOfEnumValue) {
+    case 0:
+      return true;
+    case 1:
+      raise_warning("Implicitly coercing string to int in callsite: %s", callsite);
+      return true;
+    default:
+      return false;
+    }
 }
 
 ///////////////////////////////////////////////////////////////////////////////

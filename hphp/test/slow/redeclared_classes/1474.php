@@ -1,30 +1,27 @@
-<?php
+<?hh
 
-function nop($en,$es){
-}
-;
-set_error_handler('nop');
+function nop($en,$es) :mixed{}
+
 class X {
-  function bar() {
+  function bar() :mixed{
     var_dump($this);
   }
 }
-if (1) {
-  class U {
-  }
-}
- else {
-  class U extends X {
-  }
-}
 
-class V extends U {
-}
+<<__EntryPoint>>
+function test() :mixed{
+  if (__hhvm_intrinsics\launder_value(1)) {
+    include '1474-1.inc';
+  } else {
+    include '1474-2.inc';
+  }
 
-function test() {
+  include '1474-classes.inc';
+
+  set_error_handler(nop<>);
+
   $x = new X;
   $x->bar();
   $x = new V;
   $x->bar();
 }
-test();

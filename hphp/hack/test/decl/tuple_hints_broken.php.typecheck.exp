@@ -1,0 +1,17 @@
+error: Naming[2049] Unbound name: `tuple` [1]
+
+tuple_hints_broken.php:3:10
+1 | <?hh
+2 | 
+3 | type A = tuple<int>;
+  |          ^^^^^ [1]
+
+error: Typing[4100] Did you want a *tuple*? Try `(X,Y)`, not `tuple<X,Y>` [1]
+
+tuple_hints_broken.php:3:10
+1 | <?hh
+2 | 
+3 | type A = tuple<int>;
+  |          ^^^^^ [1]
+
+2 errors found

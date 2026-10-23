@@ -1,1 +1,3 @@
---parser ffp
+--allowed-fixme-codes-strict 4030
+--allowed-decl-fixme-codes 4030
+--error-format plain_highlighted

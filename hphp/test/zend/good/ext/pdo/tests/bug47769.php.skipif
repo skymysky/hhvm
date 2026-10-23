@@ -1,4 +1,0 @@
-<?php
-if (!extension_loaded("pdo_sqlite"))
-	die("skip: PDO_SQLite not available");
-?>

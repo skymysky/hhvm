@@ -1,0 +1,1 @@
+Catchable fatal error: Sub::x must have a type of num as defined by the upper-bound in Sup in %s/prop-redefine.php on line 12

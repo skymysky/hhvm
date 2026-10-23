@@ -3,22 +3,26 @@
 
 class A {
   public static function foo($a, $b): darray {
-    $res = darray[];
+    $res = dict[];
     foreach ($a as $key => $value) {
       if (is_array($value)) {
         $new_value = self::foo($value, $b);
         if ($new_value) $res[$key] = $new_value;
       } else {
-        $res[$key] = varray[$value];
+        $res[$key] = vec[$value];
       }
     }
     return $res;
   }
 }
 
+
+<<__EntryPoint>>
+function main_hhbbc3() :mixed{
 var_dump(
   A::foo(
-    __hhvm_intrinsics\launder_value(['a', 'b', 'c']),
-    __hhvm_intrinsics\launder_value([])
+    __hhvm_intrinsics\launder_value(vec['a', 'b', 'c']),
+    __hhvm_intrinsics\launder_value(vec[])
   )
 );
+}

@@ -1,0 +1,12 @@
+{ "function": "\\takes_int", "solutions": [] }
+{ "function": "\\takes_string", "solutions": [] }
+{
+  "function": "\\test_array_read",
+  "solutions": [
+    {
+      "name": "$d",
+      "pos": "File \"array_read.php\", line 6, characters 34-35:",
+      "type": "shape('key1' => int, 'key2' => string, ...)"
+    }
+  ]
+}

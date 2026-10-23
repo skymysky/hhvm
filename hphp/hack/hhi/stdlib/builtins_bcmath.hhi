@@ -1,4 +1,4 @@
-<?hh     /* -*- php -*- */
+<?hh /* -*- php -*- */
 /**
  * Copyright (c) 2014, Facebook, Inc.
  * All rights reserved.
@@ -9,22 +9,51 @@
  */
 
 <<__PHPStdLib>>
-function bcscale($scale) { }
+function bcscale(int $scale): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function bcadd($left, $right, $scale = -1) { }
+function bcadd(
+  string $left,
+  string $right,
+  int $scale = -1,
+): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function bcsub($left, $right, $scale = -1) { }
+function bcsub(
+  string $left,
+  string $right,
+  int $scale = -1,
+): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function bccomp($left, $right, $scale = -1) { }
+function bccomp(
+  string $left,
+  string $right,
+  int $scale = -1,
+): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function bcmul($left, $right, $scale = -1) { }
+function bcmul(
+  string $left,
+  string $right,
+  int $scale = -1,
+): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function bcdiv($left, $right, $scale = -1) { }
+function bcdiv(
+  string $left,
+  string $right,
+  int $scale = -1,
+): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function bcmod($left, $right) { }
+function bcmod(string $left, string $right): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function bcpow($left, $right, $scale = -1) { }
+function bcpow(
+  string $left,
+  string $right,
+  int $scale = -1,
+): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function bcpowmod($left, $right, $modulus, $scale = -1) { }
+function bcpowmod(
+  string $left,
+  string $right,
+  string $modulus,
+  int $scale = -1,
+): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function bcsqrt($operand, $scale = -1) { }
+function bcsqrt(string $operand, int $scale = -1): HH\FIXME\MISSING_RETURN_TYPE;

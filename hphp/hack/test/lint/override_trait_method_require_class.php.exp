@@ -1,0 +1,24 @@
+warning: Lint[5642] Method `overridden` in trait `T` is overridden in class `C` and trait `T` has `require class C`. This method is never used.
+   --> override_trait_method_require_class.php
+ 12 |   public function overridden(): void {}
+    |                   ^^^^^^^^^^
+
+
+warning: Lint[5642] Method `hasAttribute1` in trait `T` is overridden in class `C` and trait `T` has `require class C`. This method is never used.
+   --> override_trait_method_require_class.php
+ 15 |   public function hasAttribute1(): void {}
+    |                   ^^^^^^^^^^^^^
+
+
+warning: Lint[5642] Method `hasAttribute2` in trait `T` is overridden in class `C` and trait `T` has `require class C`. This method is never used.
+   --> override_trait_method_require_class.php
+ 17 |   public function hasAttribute2(): void {}
+    |                   ^^^^^^^^^^^^^
+
+
+warning: Lint[5642] Method `hasBuiltInAttribute` in trait `T` is overridden in class `C` and trait `T` has `require class C`. This method is never used.
+   --> override_trait_method_require_class.php
+ 23 |   public function hasBuiltInAttribute(): void {}
+    |                   ^^^^^^^^^^^^^^^^^^^
+
+

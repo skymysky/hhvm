@@ -1,0 +1,21 @@
+error: Typing[4047] This class was declared as `final`. It must provide an implementation for the abstract constant `NUM` [1]
+-> `Bar` uses `Foo` [2]
+-> The constant is defined here [3]
+
+abstract_type_in_concrete_class_with_trait.php:11:13
+ 2 | 
+ 3 | abstract class Foo {
+ 4 |   abstract const int NUM;
+   |                      ^^^ [3]
+ 5 | }
+ 6 | 
+   :
+ 9 | }
+10 | 
+11 | final class Bar extends Foo {
+   |             ^^^ [1]
+   |                         ^^^ [2]
+12 |   use TFoo;
+13 |   final public static function get(): int {
+
+1 error found

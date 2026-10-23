@@ -1,0 +1,26 @@
+error: Typing[4110] Invalid return type [1]
+-> Expected `nothing` [2]
+-> But got `ExampleExpression<int>` [3]
+
+lambda_escape.php:15:10
+  9 | 
+ 10 | // This should throw an error, but it was not
+ 11 | function test_error(): (function(): nothing) {
+    |                                     ^^^^^^^ [2]
+ 12 |   $x = () ==> {
+ 13 |     return ExampleDsl`1`;
+ 14 |   };
+ 15 |   return $x;
+    |          ^^ [1]
+ 16 | }
+ 17 | 
+
+expr_tree.php:109:8
+107 |     ) $metadata,
+108 |     ~(function(ExampleDsl): ExampleDsl::TAst) $ast,
+109 |   )[]: ExampleExpression<TInfer> {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^ [3]
+110 |     return new ExprTree($pos, $metadata, $ast);
+111 |   }
+
+1 error found

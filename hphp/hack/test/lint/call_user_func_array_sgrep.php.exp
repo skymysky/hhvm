@@ -1,0 +1,12 @@
+warning: Lint[5564] test is the only function declared in call_user_func_array_sgrep.php, so that file should be named test.php instead.
+   --> call_user_func_array_sgrep.php
+  3 | function test() {
+    |          ^^^^
+
+
+warning: Lint[5542] Use argument unpacking instead. See https://www.facebook.com/groups/hackforhiphop/permalink/762166013832016/
+   --> call_user_func_array_sgrep.php
+  4 |   call_user_func_array();
+    |   ^^^^^^^^^^^^^^^^^^^^
+
+

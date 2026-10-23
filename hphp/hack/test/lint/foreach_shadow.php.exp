@@ -1,0 +1,70 @@
+warning: Lint[5568] Loop variable `$x` shadows a local variable defined or last assigned here:
+File "foreach_shadow.php", line 4, characters 3-4:
+   --> foreach_shadow.php
+  5 |   foreach ($xs as $x) {
+    |                   ^^
+
+
+warning: Lint[5568] Loop variable `$x` shadows a local variable defined or last assigned here:
+File "foreach_shadow.php", line 13, characters 3-4:
+   --> foreach_shadow.php
+ 14 |   foreach ($xs as $x) {
+    |                   ^^
+
+
+warning: Lint[5568] Loop variable `$x` shadows a local variable defined or last assigned here:
+File "foreach_shadow.php", line 21, characters 3-4:
+   --> foreach_shadow.php
+ 22 |   foreach ($xs as $x => $_) {
+    |                   ^^
+
+
+warning: Lint[5568] Loop variable `$x` shadows a local variable defined or last assigned here:
+File "foreach_shadow.php", line 29, characters 3-4:
+   --> foreach_shadow.php
+ 30 |   foreach ($xs as $_ => $x) {
+    |                         ^^
+
+
+warning: Lint[5568] Loop variable `$x` shadows a local variable defined or last assigned here:
+File "foreach_shadow.php", line 37, characters 3-4:
+   --> foreach_shadow.php
+ 38 |   foreach ($xs as $_ => list($x, $_)) {
+    |                              ^^
+
+
+warning: Lint[5568] Loop variable `$x` shadows a local variable defined or last assigned here:
+File "foreach_shadow.php", line 45, characters 3-4:
+   --> foreach_shadow.php
+ 47 |     foreach ($xs as $x) {
+    |                     ^^
+
+
+warning: Lint[5568] Loop variable `$x` shadows a local variable defined or last assigned here:
+File "foreach_shadow.php", line 57, characters 5-6:
+   --> foreach_shadow.php
+ 58 |     foreach ($xs as $x) {
+    |                     ^^
+
+
+warning: Lint[5568] Loop variable `$x` shadows a local variable defined or last assigned here:
+File "foreach_shadow.php", line 68, characters 19-20:
+   --> foreach_shadow.php
+ 70 |     foreach ($xs as $x) {
+    |                     ^^
+
+
+warning: Lint[5568] Loop variable `$x` shadows a local variable defined or last assigned here:
+File "foreach_shadow.php", line 79, characters 8-9:
+   --> foreach_shadow.php
+ 80 |   foreach ($xs as $x) {
+    |                   ^^
+
+
+warning: Lint[5568] Loop variable `$x` shadows a local variable defined or last assigned here:
+File "foreach_shadow.php", line 90, characters 22-23:
+   --> foreach_shadow.php
+ 92 |     foreach ($xs as $x) {
+    |                     ^^
+
+

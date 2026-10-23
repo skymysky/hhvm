@@ -1,41 +1,35 @@
-array(3) {
-  [0]=>
-  array(2) {
+vec(3) {
+  dict(2) {
     [0]=>
     string(1) "a"
     [1]=>
     string(1) "b"
   }
-  [1]=>
-  array(2) {
+  dict(2) {
     [0]=>
     string(1) "c"
     [1]=>
     string(1) "d"
   }
-  [2]=>
-  array(1) {
+  dict(1) {
     [0]=>
     string(1) "e"
   }
 }
-array(3) {
-  [0]=>
-  array(2) {
+vec(3) {
+  dict(2) {
     [0]=>
     string(1) "a"
     [1]=>
     string(1) "b"
   }
-  [1]=>
-  array(2) {
+  dict(2) {
     [2]=>
     string(1) "c"
     [3]=>
     string(1) "d"
   }
-  [2]=>
-  array(1) {
+  dict(1) {
     [4]=>
     string(1) "e"
   }

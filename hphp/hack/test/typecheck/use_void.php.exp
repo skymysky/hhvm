@@ -1,0 +1,12 @@
+error: Typing[4119] You are using the return value of a `void` function [1]
+-> A `void` function doesn't return a value. because this function does not always return a value [2]
+
+use_void.php:12:8
+10 | 
+11 | function test2(): void {
+12 |   test(() ==> {}());
+   |        ^^^^^^^^^^^ [1]
+   |        ^^^^^^^^^ [2]
+13 | }
+
+1 error found

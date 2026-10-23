@@ -16,13 +16,14 @@
 
 //////////////////////////////////////////////////////////////////////
 
-#ifndef incl_HPHP_FILE_UTIL_DEFS_H_
-#define incl_HPHP_FILE_UTIL_DEFS_H_
+#pragma once
 
 #include "hphp/runtime/base/file-util.h"
 #include "hphp/runtime/base/stream-wrapper-registry.h"
 #include "hphp/runtime/base/unit-cache.h"
 #include "hphp/runtime/ext/std/ext_std_file.h"
+#include "hphp/runtime/server/cli-server.h"
+#include "hphp/util/configs/eval.h"
 #include "hphp/util/logger.h"
 
 #include <string>
@@ -33,8 +34,8 @@ namespace HPHP { namespace FileUtil {
 ///////////////////////////////////////////////////////////////////////////////
 
 template <typename F>
-void find(const std::string &root, const std::string& path, bool php,
-          const F& callback) {
+void find(const std::string &root, const std::string& path,
+          bool php, bool failHard, const F& callback) {
   auto spath = path.empty() || !isDirSeparator(path[0]) ?
     path : path.substr(1);
 
@@ -45,12 +46,17 @@ void find(const std::string &root, const std::string& path, bool php,
   if (fullPath.empty()) {
     return;
   }
-  if (!callback(spath, true)) {
+  if (!callback(spath, true, 0)) {
     return;
   }
 
   DIR *dir = opendir(fullPath.c_str());
   if (dir == nullptr) {
+    if (failHard) {
+      throw std::runtime_error(
+        "FileUtil::find(): unable to open directory " + fullPath
+      );
+    }
     Logger::Error("FileUtil::find(): unable to open directory %s",
                   fullPath.c_str());
     return;
@@ -67,12 +73,15 @@ void find(const std::string &root, const std::string& path, bool php,
     auto fe = fullPath + ename;
     struct stat se;
     if (stat(fe.c_str(), &se)) {
+      if (failHard) {
+        throw std::runtime_error("FileUtil::find(): unable to stat " + fe);
+      }
       Logger::Error("FileUtil::find(): unable to stat %s", fe.c_str());
       continue;
     }
 
     if ((se.st_mode & S_IFMT) == S_IFDIR) {
-      find(root, spath + ename, php, callback);
+      find(root, spath + ename, php, failHard, callback);
       continue;
     }
 
@@ -90,24 +99,12 @@ void find(const std::string &root, const std::string& path, bool php,
     bool isPHP = false;
     const char *p = strrchr(ename, '.');
     if (p) {
-      isPHP = (strncmp(p + 1, "php", 3) == 0);
-    } else {
-      try {
-        std::string line;
-        std::ifstream fin(fe.c_str());
-        if (std::getline(fin, line)) {
-          if (line[0] == '#' && line[1] == '!' &&
-              line.find("php") != std::string::npos) {
-            isPHP = true;
-          }
-        }
-      } catch (...) {
-        Logger::Error("FileUtil::find(): unable to read %s", fe.c_str());
-      }
+      isPHP = (strcmp(p + 1, "php") == 0) ||
+        (strcmp(p + 1, "hack") == 0) || ((strcmp(p + 1, "hackpartial") == 0) || strcmp(p + 1, "hh") == 0);
     }
 
     if (isPHP == php) {
-      callback(spath + ename, false);
+      callback(spath + ename, false, se.st_size);
     }
   }
 
@@ -117,19 +114,25 @@ void find(const std::string &root, const std::string& path, bool php,
 const StaticString s_slash("/");
 
 template <class Action>
-bool runRelative(std::string suffix, String cmd,
+bool runRelative(std::string suffix, OptString cmd,
                  const char* currentDir, Action action) {
   suffix = "/" + suffix;
   auto cwd = resolve_include(
     cmd,
     currentDir,
-    [] (const String& f, void*) { return access(f.data(), R_OK) == 0; },
+    [] (const OptString& f, void*) {
+      if (!is_cli_server_mode()) {
+        return access(f.data(), R_OK) == 0;
+      }
+      auto const w = Stream::getWrapperFromURI(f, nullptr, false);
+      return w->access(f, R_OK) == 0;
+    },
     nullptr
   );
   if (cwd.isNull()) return false;
   do {
-    cwd = f_dirname(cwd);
-    auto const f = String::attach(
+    cwd = HHVM_FN(dirname)(cwd);
+    auto const f = OptString::attach(
       StringData::Make(cwd.data(), suffix.data())
     );
     if (action(f)) return true;
@@ -140,5 +143,3 @@ bool runRelative(std::string suffix, String cmd,
 ///////////////////////////////////////////////////////////////////////////////
 }
 }
-
-#endif

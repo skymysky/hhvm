@@ -1,0 +1,14 @@
+(include_subdirs no)
+
+(library
+ (name code_actions_cli_lib)
+ (wrapped true)
+ (libraries
+  full_fidelity
+  lsp
+  pos
+  code_actions_services
+  utils_core
+  yojson)
+ (preprocess
+  (pps lwt_ppx ppx_deriving.std)))

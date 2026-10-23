@@ -1,5 +1,7 @@
 <?hh
 
+namespace SealedClass9;
+
 class SomeclassWithConstant {
   const CONSTANT = 'woogity boogity';
 }
@@ -8,3 +10,4 @@ class SomeclassWithConstant {
 // that other kinds of resolution expressions still fail.
 <<__Sealed(SomeclassWithConstant::CONSTANT)>>
 class SomeSealedClass {}
+

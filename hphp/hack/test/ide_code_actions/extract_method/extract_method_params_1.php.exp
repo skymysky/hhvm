@@ -1,0 +1,59 @@
+Code actions available:
+------------------------------------------
+slog variable (CodeActionKind: "refactor")
+Extract into method (CodeActionKind: "refactor") SELECTED
+
+JSON for selected code action:
+------------------------------------------
+{
+  "title": "Extract into method",
+  "kind": "refactor",
+  "diagnostics": [],
+  "edit": {
+    "changes": {
+      "FILE.php": [
+        {
+          "range": {
+            "start": { "line": 7, "character": 0 },
+            "end": { "line": 7, "character": 0 }
+          },
+          "newText": "  private function ${0:method0}(int $param1, Foo<string> $param2): void {\n    $param1 = $param1;\n    $z = $param2;\n  }\n\n"
+        },
+        {
+          "range": {
+            "start": { "line": 13, "character": 4 },
+            "end": { "line": 14, "character": 17 }
+          },
+          "newText": "$this->${0:method0}($param1, $param2);"
+        }
+      ]
+    }
+  }
+}
+
+Applied edit for code action:
+------------------------------------------
+<?hh
+
+class Foo<T> {
+  public function __construct(public T $x) {}
+}
+
+class Klass {
+  private function ${0:method0}(int $param1, Foo<string> $param2): void {
+    $param1 = $param1;
+    $z = $param2;
+  }
+
+  public function foo(): void {
+    $ignore1 = 1;
+    $param1 = 1;
+    $param2 = "";
+    $param2 = new Foo($param2);
+    /*range-start*/
+    $this->${0:method0}($param1, $param2);
+    /*range-end*/
+    $ignore2 = 1;
+  }
+}
+

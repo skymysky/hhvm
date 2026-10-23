@@ -1,0 +1,23 @@
+error: Typing[4393] `B` inherited two versions of the method `FOO` whose names differ only by case. [1]
+-> It inherited `FOO` from A here. [2]
+-> And `foO` from T here. Please rename these methods to the same casing. [3]
+
+case_sensitive_inheritance9.php:16:7
+ 6 | 
+ 7 | class A {
+ 8 |   public function FOO(): void {}
+   |                   ^^^ [2]
+ 9 | }
+10 | trait T {
+11 |   public static function foO(): void {}
+   |                          ^^^ [3]
+12 |   public function bar(): int {
+13 |     return 0;
+14 |   }
+15 | }
+16 | class B extends A {
+   |       ^ [1]
+17 |   use T;
+18 | }
+
+1 error found

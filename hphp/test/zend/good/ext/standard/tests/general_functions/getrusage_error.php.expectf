@@ -2,21 +2,5 @@
 
 -- Testing getrusage() function with more than expected no. of arguments --
 
-Warning: %s
-
--- Testing getrusage() function with invalid argument - non-numeric STRING--
-
-Warning: %s
-
--- Testing getrusage() function with invalid argument - ARRAY--
-
-Warning: %s
-
--- Testing getrusage() function with invalid argument - OBJECT --
-
-Warning: %s
-
--- Testing getrusage() function with invalid argument - RESOURCE --
-
-Warning: %s
+Warning: getrusage() expects at most 1 positional parameter, 2 given in %s/test/zend/good/ext/standard/tests/general_functions/getrusage_error.php on line 16
 ===DONE===

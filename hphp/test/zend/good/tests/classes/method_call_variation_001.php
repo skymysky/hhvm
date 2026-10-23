@@ -1,29 +1,29 @@
-<?php
-  class C
-  {
-      function foo($a, $b)
-      {
-          echo "Called C::foo($a, $b)\n";
-      }
-  }
-  
-  $c = new C;
-  
-  $functions[0] = 'foo';
-  $functions[1][2][3][4] = 'foo';
-  
-  $c->$functions[0](1, 2);
-  $c->$functions[1][2][3][4](3, 4);
-  
-  
-  function foo($a, $b)
-  {
-      echo "Called global foo($a, $b)\n";
-  }
-  
-  $c->functions[0] = 'foo';
-  $c->functions[1][2][3][4] = 'foo';
-  
-  $c->functions[0](5, 6);
-  $c->functions[1][2][3][4](7, 8);
-?>
+<?hh
+class C
+{
+    function foo($a, $b)
+:mixed    {
+        echo "Called C::foo($a, $b)\n";
+    }
+}
+
+<<__DynamicallyCallable>> function foo($a, $b)
+:mixed{
+    echo "Called global foo($a, $b)\n";
+}
+
+<<__EntryPoint>> function main(): void {
+$c = new C;
+
+$functions = vec['foo', dict[2 => dict[3 => dict[]]]];
+$functions[1][2][3][4] = 'foo';
+
+$c->$functions[0](1, 2);
+$c->$functions[1][2][3][4](3, 4);
+
+$c->functions = vec['foo', dict[2 => dict[3 => dict[]]]];
+$c->functions[1][2][3][4] = 'foo';
+
+HH\dynamic_fun($c->functions[0])(5, 6);
+HH\dynamic_fun($c->functions[1][2][3][4])(7, 8);
+}

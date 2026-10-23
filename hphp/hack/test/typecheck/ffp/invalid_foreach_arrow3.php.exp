@@ -1,2 +1,30 @@
-File "invalid_foreach_arrow3.php", line 4, characters 24-25:
-Undefined variable: $v (Naming[2050])
+error: Naming[2050] Variable `$k` is undefined, or not always defined. [1]
+-> Did you mean `$t` instead? [2]
+
+invalid_foreach_arrow3.php:5:16
+1 | <?hh
+2 | 
+3 | function f(KeyedTraversable<int, string> $t): void {
+  |                                          ^^ [2]
+4 |   foreach ($t as $k -> $v) {
+5 |     expect_int($k);
+  |                ^^ [1]
+6 |     expect_string($v);
+7 |   }
+
+error: Naming[2050] Variable `$v` is undefined, or not always defined. [1]
+-> Did you mean `$t` instead? [2]
+
+invalid_foreach_arrow3.php:6:19
+1 | <?hh
+2 | 
+3 | function f(KeyedTraversable<int, string> $t): void {
+  |                                          ^^ [2]
+4 |   foreach ($t as $k -> $v) {
+5 |     expect_int($k);
+6 |     expect_string($v);
+  |                   ^^ [1]
+7 |   }
+8 | }
+
+2 errors found

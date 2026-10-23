@@ -1,7 +1,7 @@
-<?php
+<?hh
 
-class books extends domDocument {
-  function addBook($title, $author) {
+class books extends DOMDocument {
+  function addBook($title, $author) :mixed{
     $titleElement = $this->createElement('title');
     $titleElement->appendChild($this->createTextNode($title));
     $authorElement = $this->createElement('author');
@@ -13,6 +13,9 @@ class books extends domDocument {
   }
 }
 
+
+<<__EntryPoint>>
+function main_1675() :mixed{
 $dom = new books;
 
 $xml = <<<EOM
@@ -29,3 +32,4 @@ EOM;
 $dom->loadXML($xml);
 $dom->addBook('PHP de Luxe', 'Richard Samar, Christian Stocker');
 print $dom->saveXML();
+}

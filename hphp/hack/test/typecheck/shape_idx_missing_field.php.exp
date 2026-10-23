@@ -1,6 +1,25 @@
-File "shape_idx_missing_field.php", line 4, characters 10-29:
-Invalid return type (Typing[4110])
-File "shape_idx_missing_field.php", line 3, characters 40-40:
-This is a value of generic type T
-File "shape_idx_missing_field.php", line 3, characters 23-32:
-It is incompatible with a nonnull value because the field 'x' may be set to any type in this shape
+error: Typing[4366] This generic parameter is redundant because it only appears in a covariant (output) position. Consider replacing uses of generic parameter with `nothing` or specifying `<<__Explicit>>` on the generic parameter [1]
+
+shape_idx_missing_field.php:3:20
+1 | <?hh
+2 | 
+3 | function type_hole<T>(shape(...) $s): ?T {
+  |                    ^ [1]
+4 |   return Shapes::idx($s, 'x');
+5 | }
+
+error: Typing[4110] Invalid argument [1]
+-> Expected `T` [2]
+-> But got `nonnull` [3]
+
+shape_idx_missing_field.php:4:22
+1 | <?hh
+2 | 
+3 | function type_hole<T>(shape(...) $s): ?T {
+  |                       ^^^^^^^^^^ [3]
+  |                                        ^ [2]
+4 |   return Shapes::idx($s, 'x');
+  |                      ^^ [1]
+5 | }
+
+2 errors found

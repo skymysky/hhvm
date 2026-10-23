@@ -1,4 +1,4 @@
-(**
+(*
  * Copyright (c) 2017, Facebook, Inc.
  * All rights reserved.
  *
@@ -7,117 +7,348 @@
  *
  *)
 
+include Aast_defs
+
+[@@@warning "-33"]
+
+open Hh_prelude
+
+[@@@warning "+33"]
+
 (* This is the current notion of type in the typed AST.
  * In future we might want to reconsider this and define a new representation
  * that omits type inference artefacts such as type variables and lambda
  * identifiers.
  *)
-type ty = Typing_defs.locl Typing_defs.ty
+type ty = Typing_defs.locl_ty [@@deriving hash, show]
+
+type decl_ty = Typing_defs.decl_ty [@@deriving show]
+
+type val_kind = Typing_defs.val_kind
+
+(* Contains information about a specific function that we
+    a) want to make available to TAST checks
+    b) isn't otherwise (space-efficiently) present in the saved typing env *)
+type dynamic_local_info = {
+  dl_name: string;
+  dl_pos: Pos.t;
+  dl_shadow_tvid: Tvid.t;
+}
+[@@deriving hash, show]
+
+type fun_tast_info = {
+  has_implicit_return: bool;
+  has_readonly: bool;
+      (** True if there are leaves of the function's imaginary CFG without a return statement *)
+  dynamic_locals: dynamic_local_info list;
+      (** Locals with type dynamic and their shadow tyvars *)
+}
+[@@deriving hash, show]
+
+let is_under_dynamic_assumptions = function
+  | COnce
+  | CUnderNormalAssumptions ->
+    false
+  | CUnderDynamicAssumptions -> true
 
 type saved_env = {
-  tcopt : TypecheckerOptions.t;
-  tenv : ty IMap.t;
-  subst : int IMap.t;
-  tpenv : Type_parameter_env.t;
+  tcopt: Typechecker_options.t; [@opaque] [@hash.ignore]
+  inference_env: Typing_inference_env.t; [@opaque] [@hash.ignore]
+  tpenv: Type_parameter_env.t;
+  fun_tast_info: fun_tast_info option;
+  checked: check_status;
+      (** Indicates how many types the callable was checked and under what
+          assumptions. *)
+}
+[@@deriving hash, show]
+
+type program = (ty, saved_env) Aast.program [@@deriving show]
+
+type def = (ty, saved_env) Aast.def [@@deriving hash, show]
+
+type def_with_dynamic = def Tast_with_dynamic.t [@@deriving hash, show]
+
+type expr = (ty, saved_env) Aast.expr
+
+type expr_ = (ty, saved_env) Aast.expr_
+
+type argument = (ty, saved_env) Aast.argument
+
+type stmt = (ty, saved_env) Aast.stmt
+
+type stmt_ = (ty, saved_env) Aast.stmt_
+
+type case = (ty, saved_env) Aast.case
+
+type block = (ty, saved_env) Aast.block
+
+type class_ = (ty, saved_env) Aast.class_
+
+type class_id = (ty, saved_env) Aast.class_id
+
+type type_hint = ty Aast.type_hint
+
+type targ = ty Aast.targ
+
+type class_typeconst_def = (ty, saved_env) Aast.class_typeconst_def
+
+type user_attribute = (ty, saved_env) Aast.user_attribute
+
+type capture_lid = ty Aast.capture_lid
+
+type fun_ = (ty, saved_env) Aast.fun_
+
+type efun = (ty, saved_env) Aast.efun
+
+type file_attribute = (ty, saved_env) Aast.file_attribute
+
+type fun_def = (ty, saved_env) Aast.fun_def
+
+type fun_param = (ty, saved_env) Aast.fun_param
+
+type func_body = (ty, saved_env) Aast.func_body
+
+type method_ = (ty, saved_env) Aast.method_
+
+type class_var = (ty, saved_env) Aast.class_var
+
+type class_const = (ty, saved_env) Aast.class_const
+
+type tparam = (ty, saved_env) Aast.tparam
+
+type typedef = (ty, saved_env) Aast.typedef
+
+type gconst = (ty, saved_env) Aast.gconst
+
+type module_def = (ty, saved_env) Aast.module_def
+
+type call_expr = (ty, saved_env) Aast.call_expr
+
+type destructure_shape = (ty, saved_env) Aast.destructure_shape
+
+type destructure_shape_field = (ty, saved_env) Aast.destructure_shape_field
+
+type destructure_tuple = (ty, saved_env) Aast.destructure_tuple
+
+type destructure_tuple_entry = (ty, saved_env) Aast.destructure_tuple_entry
+
+type destructure_target = (ty, saved_env) Aast.destructure_target
+
+type by_names = {
+  fun_tasts: def Tast_with_dynamic.t S_map.t;
+  class_tasts: def Tast_with_dynamic.t S_map.t;
+  typedef_tasts: def S_map.t;
+  gconst_tasts: def S_map.t;
+  module_tasts: def S_map.t;
 }
 
-let pp_saved_env fmt env =
-  Format.fprintf fmt "@[<hv 2>{ ";
+let empty_by_names =
+  {
+    fun_tasts = S_map.empty;
+    class_tasts = S_map.empty;
+    typedef_tasts = S_map.empty;
+    gconst_tasts = S_map.empty;
+    module_tasts = S_map.empty;
+  }
 
-  Format.fprintf fmt "@[%s =@ " "tcopt";
-  Format.fprintf fmt "<opaque>";
-  Format.fprintf fmt "@]";
-  Format.fprintf fmt ";@ ";
+let map_by_names (x : by_names) ~(f : def -> def) : by_names =
+  let { fun_tasts; class_tasts; typedef_tasts; gconst_tasts; module_tasts } =
+    x
+  in
+  {
+    fun_tasts = S_map.map (Tast_with_dynamic.map ~f) fun_tasts;
+    class_tasts = S_map.map (Tast_with_dynamic.map ~f) class_tasts;
+    typedef_tasts = S_map.map f typedef_tasts;
+    gconst_tasts = S_map.map f gconst_tasts;
+    module_tasts = S_map.map f module_tasts;
+  }
 
-  Format.fprintf fmt "@[%s =@ " "tenv";
-  IMap.pp Pp_type.pp_ty fmt env.tenv;
-  Format.fprintf fmt "@]";
-  Format.fprintf fmt ";@ ";
+let program_by_names (program : program Tast_with_dynamic.t) : by_names =
+  let add
+      ~(under_normal_assumptions : bool)
+      name
+      (def : def)
+      (map : def Tast_with_dynamic.t S_map.t) : def Tast_with_dynamic.t S_map.t
+      =
+    let entry =
+      match S_map.find_opt name map with
+      | None -> Tast_with_dynamic.mk_without_dynamic def
+      | Some entry -> entry
+    in
+    let entry =
+      if under_normal_assumptions then
+        { entry with Tast_with_dynamic.under_normal_assumptions = def }
+      else
+        { entry with Tast_with_dynamic.under_dynamic_assumptions = Some def }
+    in
+    S_map.add name entry map
+  in
+  let program_by_names
+      ~under_normal_assumptions (by_names : by_names) (program : program) :
+      by_names =
+    Hh_prelude.List.fold program ~init:by_names ~f:(fun acc def ->
+        match def with
+        | Fun f ->
+          {
+            acc with
+            fun_tasts =
+              add ~under_normal_assumptions (snd f.fd_name) def acc.fun_tasts;
+          }
+        | Class c ->
+          {
+            acc with
+            class_tasts =
+              add ~under_normal_assumptions (snd c.c_name) def acc.class_tasts;
+          }
+        | Typedef td ->
+          {
+            acc with
+            typedef_tasts = S_map.add (snd td.t_name) def acc.typedef_tasts;
+          }
+        | Constant c ->
+          {
+            acc with
+            gconst_tasts = S_map.add (snd c.cst_name) def acc.gconst_tasts;
+          }
+        | Module m ->
+          {
+            acc with
+            module_tasts = S_map.add (snd m.md_name) def acc.module_tasts;
+          }
+        | ClassAlias _
+        | Stmt _
+        | Namespace _
+        | NamespaceUse _
+        | SetNamespaceEnv _
+        | FileAttributes _
+        | SetModule _ ->
+          acc)
+  in
+  let { Tast_with_dynamic.under_normal_assumptions; under_dynamic_assumptions }
+      =
+    program
+  in
+  let by_names = empty_by_names in
+  let by_names =
+    program_by_names
+      ~under_normal_assumptions:true
+      by_names
+      under_normal_assumptions
+  in
+  let by_names =
+    Option.fold
+      under_dynamic_assumptions
+      ~init:by_names
+      ~f:(program_by_names ~under_normal_assumptions:false)
+  in
+  by_names
 
-  Format.fprintf fmt "@[%s =@ " "subst";
-  IMap.pp Format.pp_print_int fmt env.subst;
-  Format.fprintf fmt "@]";
-  Format.fprintf fmt ";@ ";
+let tasts_as_list
+    ({ fun_tasts; class_tasts; typedef_tasts; gconst_tasts; module_tasts } :
+      by_names) : def Tast_with_dynamic.t list =
+  S_map.values fun_tasts
+  @ S_map.values class_tasts
+  @ List.map
+      ~f:Tast_with_dynamic.mk_without_dynamic
+      (S_map.values typedef_tasts)
+  @ List.map ~f:Tast_with_dynamic.mk_without_dynamic (S_map.values gconst_tasts)
+  @ List.map ~f:Tast_with_dynamic.mk_without_dynamic (S_map.values module_tasts)
 
-  Format.fprintf fmt "@[%s =@ " "tpenv";
-  Type_parameter_env.pp fmt env.tpenv;
-  Format.fprintf fmt "@]";
+let empty_saved_env tcopt : saved_env =
+  {
+    tcopt;
+    inference_env = Typing_inference_env.empty_inference_env;
+    tpenv = Type_parameter_env.empty;
+    fun_tast_info = None;
+    checked = COnce;
+  }
 
-  Format.fprintf fmt " }@]"
-
-(* Typed AST.
- *
- * We re-use the NAST, but annotate expressions with position *and* type, not
- * just position.
- *
- * Going forward, we will need further annotations
- * such as type arguments to generic methods and `new`, annotations on locals
- * at merge points to make flow typing explicit, bound type parameters for
- * `instanceof` refinements, and possibly other features.
- *
- * Ideally we should record anything that is computed by the type inference
- * algorithm that can't be deduced again cheaply from the embedded type.
- *
+(* Used when an env is needed in codegen.
+ * TODO: (arkumar,wilfred,thomasjiang) T42509373 Fix when when needed
  *)
-module Annotations = struct
-  module ExprAnnotation = struct
-    type t = Pos.t * ty
-    let pp fmt (pos, ty) =
-      Format.fprintf fmt "(@[";
-      Pos.pp fmt pos;
-      Format.fprintf fmt ",@ ";
-      Pp_type.pp_ty fmt ty;
-      Format.fprintf fmt "@])"
-  end
+let dummy_saved_env = empty_saved_env Global_options.default
 
-  module EnvAnnotation = struct
-    type t = saved_env
-    let pp = pp_saved_env
-  end
-
-  module ClassIdAnnotation = struct
-    type t = ty
-    let pp = Pp_type.pp_ty
-  end
-end
-
-module TypeAndPosAnnotatedAST = Nast.AnnotatedAST(Annotations)
-
-include TypeAndPosAnnotatedAST
+let dummy_type_hint (hint : hint option) : ty * hint option =
+  (Typing_defs.mk (Typing_reason.none, Typing_defs.Tdynamic None), hint)
 
 (* Helper function to create an annotation for a typed and positioned expression.
  * Do not construct this tuple directly - at some point we will build
  * some abstraction in so that we can change the representation (e.g. put
  * further annotations on the expression) as we see fit.
  *)
-let make_expr_annotation p ty : Annotations.ExprAnnotation.t = (p, ty)
+let make_expr_annotation _p ty : ty = ty
 
 (* Helper function to create a typed and positioned expression.
  * Do not construct this triple directly - at some point we will build
  * some abstraction in so that we can change the representation (e.g. put
  * further annotations on the expression) as we see fit.
  *)
-let make_typed_expr p ty te : expr = (make_expr_annotation p ty, te)
+let make_typed_expr p ty te : expr = (make_expr_annotation p ty, p, te)
 
 (* Get the position of an expression *)
-let get_position (((p, _), _) : expr) = p
+let get_position ((_, p, _) : expr) = p
 
 (* Get the type of an expression *)
-let get_type (((_, ty), _) : expr) = ty
+let get_type ((ty, _, _) : expr) = ty
 
-module NastMapper = Aast_mapper.MapAnnotatedAST(Annotations)(Nast.Annotations)
+let make_nast_converter () =
+  object
+    inherit [_] Aast.map as super
 
-let nast_mapping_env env =
-  NastMapper.{
-    env;
-    map_env_annotation = (fun _ -> ());
-    map_expr_annotation = (fun _ (pos, _) -> pos);
-    map_class_id_annotation = (fun _ _ -> ());
+    method on_'ex _ _ = ()
+
+    method on_'en _ _ = ()
+
+    method! on_Hole _ ex _ _ src =
+      let ((_, pos, ex_) as ex) = super#on_expr () ex in
+      let mk_call hints name =
+        let targs =
+          List.map ~f:(fun hint -> ((), super#on_hint () hint)) hints
+        in
+        let func = ((), pos, Aast.Id (pos, name)) in
+        let args = [Aast.Anormal ex] in
+        Aast.Call { func; targs; args; unpacked_arg = None }
+      in
+      match src with
+      | Aast.UnsafeCast hints ->
+        mk_call hints Naming_special_names.PseudoFunctions.unsafe_cast
+      | Aast.UnsafeNonnullCast ->
+        mk_call [] Naming_special_names.PseudoFunctions.unsafe_nonnull_cast
+      | Aast.EnforcedCast hints ->
+        mk_call hints Naming_special_names.PseudoFunctions.enforced_cast
+      | _ -> ex_
+  end
+
+let nast_converter = lazy (make_nast_converter ())
+
+let to_nast p = (Lazy.force nast_converter)#on_program () p
+
+let to_nast_expr (tast : expr) : Nast.expr =
+  (Lazy.force nast_converter)#on_expr () tast
+
+let to_nast_class_id_ cid = (Lazy.force nast_converter)#on_class_id_ () cid
+
+let force_lazy_values_saved_env (saved_env : saved_env) : saved_env =
+  let { tcopt; inference_env; tpenv; fun_tast_info; checked } = saved_env in
+  {
+    tcopt;
+    inference_env = Typing_inference_env.force_lazy_values inference_env;
+    tpenv = Type_parameter_env.force_lazy_values tpenv;
+    fun_tast_info;
+    checked;
   }
 
-let to_nast program =
-  NastMapper.map_program
-    ~map_env_annotation:(fun _ -> ())
-    ~map_expr_annotation:(fun _ (pos, _) -> pos)
-    ~map_class_id_annotation:(fun _ _ -> ())
-    program
+(** Force any lazy value in the TAST. This is useful to serialize the TAST,
+  for example prior to returning over RPC or storing in the shared heap. *)
+let force_lazy_values (program : program) =
+  let visitor =
+    object
+      inherit [_] Aast.map
+
+      method on_'ex _env ty = Type_force_lazy_values.locl_ty ty
+
+      method on_'en _env (saved_env : saved_env) =
+        force_lazy_values_saved_env saved_env
+    end
+  in
+  visitor#on_program () program

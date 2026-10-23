@@ -15,8 +15,7 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_EXT_MISC_H_
-#define incl_HPHP_EXT_MISC_H_
+#pragma once
 
 #include "hphp/runtime/ext/extension.h"
 #include "hphp/runtime/ext/std/ext_std.h"
@@ -29,32 +28,11 @@ constexpr int64_t k_PHP_INT_MAX = std::numeric_limits<int64_t>::max();
 
 StaticString get_PHP_VERSION();
 
-int64_t HHVM_FUNCTION(connection_aborted);
-int64_t HHVM_FUNCTION(connection_status);
-int64_t HHVM_FUNCTION(connection_timeout);
-Variant HHVM_FUNCTION(constant, const String& name);
-bool HHVM_FUNCTION(define, const String& name, const Variant& value,
-                   bool case_insensitive = false);
-bool HHVM_FUNCTION(defined, const String& name, bool autoload = true);
-int64_t HHVM_FUNCTION(ignore_user_abort, bool setting = false);
-Variant HHVM_FUNCTION(pack, const String& format, const Array& argv);
-int64_t HHVM_FUNCTION(sleep, int seconds);
-void HHVM_FUNCTION(usleep, int micro_seconds);
-Variant HHVM_FUNCTION(time_nanosleep, int seconds, int nanoseconds);
-bool HHVM_FUNCTION(time_sleep_until, double timestamp);
-String HHVM_FUNCTION(uniqid, const String& prefix = null_string,
-                     bool more_entropy = false);
-Variant HHVM_FUNCTION(unpack, const String& format, const String& data);
-Array HHVM_FUNCTION(sys_getloadavg);
-Array HHVM_FUNCTION(token_get_all, const String& source);
-String HHVM_FUNCTION(token_name, int64_t token);
-String HHVM_FUNCTION(hphp_to_string, const Variant& v);
-Variant HHVM_FUNCTION(SystemLib_max2, const Variant& arg1, const Variant& arg2);
-Variant HHVM_FUNCTION(SystemLib_min2, const Variant& arg1, const Variant& arg2);
+Variant HHVM_FUNCTION(constant, const OptString& name);
+bool HHVM_FUNCTION(defined, const OptString& name, bool autoload = true);
+
 extern const double k_INF;
 extern const double k_NAN;
 
 ///////////////////////////////////////////////////////////////////////////////
 }
-
-#endif // incl_HPHP_EXT_MISC_H_

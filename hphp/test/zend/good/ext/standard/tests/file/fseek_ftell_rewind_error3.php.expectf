@@ -1,41 +1,11 @@
 *** Testing rewind() : error conditions ***
 -- Testing rewind() with zero argument --
 
-Warning: %s
-bool(false)
+Warning: rewind() expects exactly 1 positional parameter, 0 given in %s/test/zend/good/ext/standard/tests/file/fseek_ftell_rewind_error3.php on line 16
 -- Testing rewind() with more than expected number of arguments --
 
-Warning: %s
-bool(false)
--- Testing rewind() with invalid arguments --
--- Iteration 1 --
-
-Warning: %s
-bool(false)
--- Iteration 2 --
-
-Warning: %s
-bool(false)
--- Iteration 3 --
-
-Warning: %s
-bool(false)
--- Iteration 4 --
-
-Warning: %s
-bool(false)
--- Iteration 5 --
-
-Warning: %s
-bool(false)
--- Iteration 6 --
-
-Warning: %s
-bool(false)
--- Testing rewind() with closed/unset file handle --
-Warning: %s
-bool(false)
-
-Warning: %s
+Warning: rewind() expects exactly 1 positional parameter, 2 given in %s/test/zend/good/ext/standard/tests/file/fseek_ftell_rewind_error3.php on line 21
+-- Testing rewind() with closed file handle --
+Warning: Not a valid stream resource in %s/test/zend/good/ext/standard/tests/file/fseek_ftell_rewind_error3.php on line 26
 bool(false)
 Done

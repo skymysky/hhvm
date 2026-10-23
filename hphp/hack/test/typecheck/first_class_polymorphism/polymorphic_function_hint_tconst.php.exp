@@ -1,0 +1,71 @@
+error: NastCheck[3027] A type constant cannot use type parameters [1]
+-> `T` was declared as a type parameter here [2]
+
+polymorphic_function_hint_tconst.php:6:33
+4 | 
+5 | class D {
+6 |   const type TC1 = (function<T>(T): T);
+  |                              ^ [2]
+  |                                 ^ [1]
+7 |   const type TC2 = (function((function<T>(T): T)): void);
+8 |   const type TC3 = (function(): (function<T>(T): T));
+
+error: NastCheck[3027] A type constant cannot use type parameters [1]
+-> `T` was declared as a type parameter here [2]
+
+polymorphic_function_hint_tconst.php:6:37
+4 | 
+5 | class D {
+6 |   const type TC1 = (function<T>(T): T);
+  |                              ^ [2]
+  |                                     ^ [1]
+7 |   const type TC2 = (function((function<T>(T): T)): void);
+8 |   const type TC3 = (function(): (function<T>(T): T));
+
+error: NastCheck[3027] A type constant cannot use type parameters [1]
+-> `T` was declared as a type parameter here [2]
+
+polymorphic_function_hint_tconst.php:7:43
+5 | class D {
+6 |   const type TC1 = (function<T>(T): T);
+7 |   const type TC2 = (function((function<T>(T): T)): void);
+  |                                        ^ [2]
+  |                                           ^ [1]
+8 |   const type TC3 = (function(): (function<T>(T): T));
+9 | }
+
+error: NastCheck[3027] A type constant cannot use type parameters [1]
+-> `T` was declared as a type parameter here [2]
+
+polymorphic_function_hint_tconst.php:7:47
+5 | class D {
+6 |   const type TC1 = (function<T>(T): T);
+7 |   const type TC2 = (function((function<T>(T): T)): void);
+  |                                        ^ [2]
+  |                                               ^ [1]
+8 |   const type TC3 = (function(): (function<T>(T): T));
+9 | }
+
+error: NastCheck[3027] A type constant cannot use type parameters [1]
+-> `T` was declared as a type parameter here [2]
+
+polymorphic_function_hint_tconst.php:8:46
+6 |   const type TC1 = (function<T>(T): T);
+7 |   const type TC2 = (function((function<T>(T): T)): void);
+8 |   const type TC3 = (function(): (function<T>(T): T));
+  |                                           ^ [2]
+  |                                              ^ [1]
+9 | }
+
+error: NastCheck[3027] A type constant cannot use type parameters [1]
+-> `T` was declared as a type parameter here [2]
+
+polymorphic_function_hint_tconst.php:8:50
+6 |   const type TC1 = (function<T>(T): T);
+7 |   const type TC2 = (function((function<T>(T): T)): void);
+8 |   const type TC3 = (function(): (function<T>(T): T));
+  |                                           ^ [2]
+  |                                                  ^ [1]
+9 | }
+
+6 errors found

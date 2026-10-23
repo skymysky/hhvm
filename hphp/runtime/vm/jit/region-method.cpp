@@ -23,16 +23,16 @@
 
 #include "hphp/util/arena.h"
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 
-TRACE_SET_MOD(region);
+TRACE_SET_MOD(region)
 
 //////////////////////////////////////////////////////////////////////
 
 namespace {
 
-bool isFuncEntry(const Func* func, Offset off) {
-  return off == func->base();
+bool isFuncEntry(Offset off) {
+  return off == 0;
 }
 
 int numInstrs(PC start, PC end) {
@@ -63,18 +63,16 @@ RegionDescPtr selectMethod(const RegionContext& context) {
   using namespace HPHP::Verifier;
   using HPHP::Verifier::Block;
 
-  if (!isFuncEntry(context.func, context.bcOffset)) return nullptr;
-  if (context.func->isPseudoMain()) return nullptr;
+  auto const func = context.sk.func();
+  if (!isFuncEntry(context.sk.offset())) return nullptr;
   FTRACE(1, "function entry for {}: using selectMethod\n",
-         context.func->fullName()->data());
+         func->fullName()->data());
 
   auto ret = std::make_shared<RegionDesc>();
 
   Arena arena;
-  GraphBuilder gb(arena, context.func);
+  GraphBuilder gb(arena, func);
   auto const graph = gb.build();
-  auto const unit = context.func->unit();
-
   jit::hash_map<Block*,RegionDesc::BlockId> blockMap;
 
   /*
@@ -87,21 +85,20 @@ RegionDescPtr selectMethod(const RegionContext& context) {
   {
     auto spOffset = context.spOffset;
     for (Block* b = graph->first_linear; b != nullptr; b = b->next_rpo) {
-      auto const start  = unit->offsetOf(b->start);
+      auto const start  = func->offsetOf(b->start);
       auto const length = numInstrs(b->start, b->end);
-      SrcKey sk{context.func, start, context.resumeMode, context.hasThis};
+      SrcKey sk{context.sk, start};
       auto const rblock = ret->addBlock(sk, length, spOffset);
       blockMap[b] = rblock->id();
       // flag SP offset as unknown for all but the first block
-      spOffset = FPInvOffset::invalid();
+      spOffset = SBInvOffset::invalid();
     }
   }
 
   // Add all the ARCs.
   for (Block* b = graph->first_linear; b != nullptr; b = b->next_rpo) {
     auto const myId = blockMap[b];
-    auto const numSuccs = numSuccBlocks(b);
-    for (auto i = uint32_t{0}; i < numSuccs; ++i) {
+    for (auto i = uint32_t{0}; i < b->succ_count; ++i) {
       auto const succIt = blockMap.find(b->succs[i]);
       if (succIt != end(blockMap)) {
         ret->addArc(myId, succIt->second);
@@ -123,18 +120,10 @@ RegionDescPtr selectMethod(const RegionContext& context) {
 
     for (InstrRange inst = blockInstrs(b); !inst.empty();) {
       auto const pc   = inst.popFront();
-      auto const info = instrStackTransInfo(pc);
-      switch (info.kind) {
-      case StackTransInfo::Kind::InsertMid:
-        ++sp;
-        break;
-      case StackTransInfo::Kind::PushPop:
-        sp += info.numPushes - info.numPops;
-        break;
-      }
+      sp += instrNumPushes(pc) - instrNumPops(pc);
     }
 
-    for (auto idx = uint32_t{0}; idx < numSuccBlocks(b); ++idx) {
+    for (auto idx = uint32_t{0}; idx < b->succ_count; ++idx) {
       if (!b->succs[idx]) continue;
       auto const succ = ret->block(blockMap[b->succs[idx]]);
       if (succ->initialSpOffset().isValid()) {
@@ -142,9 +131,9 @@ RegionDescPtr selectMethod(const RegionContext& context) {
           succ->initialSpOffset() == sp,
           "Stack depth mismatch in region method on {}\n"
           "  srcblkoff={}, dstblkoff={}, src={}, target={}",
-          context.func->fullName()->data(),
-          context.func->unit()->offsetOf(b->start),
-          context.func->unit()->offsetOf(b->succs[idx]->start),
+          func->fullName()->data(),
+          func->offsetOf(b->start),
+          func->offsetOf(b->succs[idx]->start),
           sp.offset,
           succ->initialSpOffset().offset
         );
@@ -153,7 +142,7 @@ RegionDescPtr selectMethod(const RegionContext& context) {
       succ->setInitialSpOffset(sp);
       FTRACE(2,
         "spOff for {} -> {}\n",
-        context.func->unit()->offsetOf(b->succs[idx]->start),
+        func->offsetOf(b->succs[idx]->start),
         sp.offset
       );
     }
@@ -164,7 +153,7 @@ RegionDescPtr selectMethod(const RegionContext& context) {
   for (auto& lt : context.liveTypes) {
     switch (lt.location.tag()) {
       case LTag::Local:
-        if (lt.location.localId() < context.func->numParams()) {
+        if (lt.location.localId() < func->numParams()) {
           // Only predict objectness, not the specific class type.
           auto const type = lt.type < TObj ? TObj : lt.type;
           ret->entry()->addPreCondition({lt.location, type, DataTypeSpecific});
@@ -172,9 +161,6 @@ RegionDescPtr selectMethod(const RegionContext& context) {
         break;
       case LTag::Stack:
       case LTag::MBase:
-        break;
-      case LTag::CSlot:
-        assertx("Class-ref slot live-type" && false);
         break;
     }
   }
@@ -184,4 +170,4 @@ RegionDescPtr selectMethod(const RegionContext& context) {
 
 //////////////////////////////////////////////////////////////////////
 
-}}
+}

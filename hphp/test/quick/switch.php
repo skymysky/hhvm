@@ -1,9 +1,15 @@
 <?hh
 
-function main() {
+// Pre-increments by reference so case labels keep the old `case ++$a` semantics.
+function preinc(inout $x) :mixed{
+  ++$x;
+  return $x;
+}
+
+function main() :mixed{
   $a = 2;
   switch ($a) {
-    case ++$a:
+    case preinc(inout $a):
       echo "correct!\n";
       break;
     case 2:
@@ -14,9 +20,9 @@ function main() {
       break;
   }
 
-  $a = array(2);
+  $a = vec[2];
   switch ($a[0]) {
-    case ++$a[0]:
+    case preinc(inout $a[0]):
       echo "nope: pre-inc\n";
       break;
     case 2:
@@ -27,7 +33,7 @@ function main() {
       break;
   }
 
-  $a = array(10);
+  $a = vec[10];
   $ten = 10;
   switch ($a[0]) {
     case $ten:
@@ -38,10 +44,8 @@ function main() {
       break;
   }
 }
-main();
-main();
 
-function strswitch() {
+function strswitch() :mixed{
   $a = 'luke';
   switch ($a) {
     case 'leia':
@@ -56,7 +60,11 @@ function strswitch() {
   }
 
   $x = '123';
-  switch ($x) {
+  switch (HH\Lib\Legacy_FIXME\string_cast_for_switch($x, '123.0', null, null, dict[
+  '123.0' => 123,
+  '123' => 123,
+], dict[
+])) {
     case '123.0':
       echo "right\n";
       break;
@@ -77,5 +85,10 @@ function strswitch() {
 
   return true;
 }
-var_dump(strswitch());
-var_dump(strswitch());
+<<__EntryPoint>>
+function main_entry(): void {
+  main();
+  main();
+  var_dump(strswitch());
+  var_dump(strswitch());
+}

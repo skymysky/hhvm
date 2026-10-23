@@ -1,0 +1,40 @@
+(*
+ * Copyright (c) Facebook, Inc. and its affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the "hack" directory of this source tree.
+ *
+ *)
+
+open Core
+open Oxidized_module
+
+let output = ref Oxidized_module.empty
+
+let with_output_context ~module_name ~mli_signature f =
+  State.with_module_name module_name ~mli_signature (fun () ->
+      output := Oxidized_module.empty;
+      let () = f () in
+      let oxidized_module = !output in
+      output := Oxidized_module.empty;
+      oxidized_module)
+
+let add_extern_use ty =
+  output := { !output with extern_uses = S_set.add ty !output.extern_uses }
+
+let add_glob_use mod_name =
+  output := { !output with glob_uses = S_set.add mod_name !output.glob_uses }
+
+let add_alias mod_name alias =
+  output := { !output with aliases = (mod_name, alias) :: !output.aliases }
+
+let add_include mod_name =
+  output := { !output with includes = S_set.add mod_name !output.includes }
+
+let add_ty_reexport ty =
+  output := { !output with ty_reexports = ty :: !output.ty_reexports }
+
+let add_decl name decl =
+  output := { !output with decls = (name, decl) :: !output.decls }
+
+let glob_uses () = S_set.elements !output.glob_uses

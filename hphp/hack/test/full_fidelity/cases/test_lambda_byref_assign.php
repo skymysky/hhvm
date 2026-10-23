@@ -1,14 +1,17 @@
-<?hh // strict
+<?hh
 
-$f = &() ==> { static $x; return $x; }; // error
-$f = &$x; // legal
-$f = &my_func(); // legal
-$f = &$x->member; // legal
-$f = &$x->method(); // legal
-$f = &$xs[$x]; // legal
-$f = &${name}; // legal
-$f = &self::$mySelfThing; // legal
-$f = &$$s; // legal
-$f = &new C(); // legal
-$y = &$$$$$$x; // legal
-$x = &$foo->bar?->baz; // legal
+$f = &() ==> { $x = 5; return $x; }; // error
+$x = &$foo->bar?->baz; // error
+$f = &$x; // error
+$f = &my_func(); // error
+$f = &$x->member; // error
+$f = &$x->method(); // error
+$f = &$xs[$x]; // error
+$f = &${name}; // error
+$f = &self::$mySelfThing; // error
+$f = &$$s; // error
+$f = &new C(); // error
+$y = &$$$$$$x; // error
+$x = &($foo->bar()); // error
+$x = &(Arrays::slice(self::NORMALIZED_REQUIRED_COLUMN_NAMES, 0)); // error
+$x = &(PHP\array_slice($app_alerts_array, -1)); // error

@@ -1,46 +1,54 @@
 <?hh
 
-function f() {
-  $n = "x";
-  $g = "y";
-  global $$g;
+abstract final class quickIsset {
+  public static $y;
+}
 
-  print ":".isset($x).":\n";
-  print ":".isset($$n).":\n";
-  print ":".isset($$g).":\n";
+function f() :mixed{
+
+
+  print ":".(string)(isset($x)).":\n";
+  print ":".(string)(\HH\global_isset('y')).":\n";
+  print ":".(string)(isset(quickIsset::$y)).":\n";
 
   $x = 0;
-  $$g = 0;
-  print ":".isset($x).":\n";
-  print ":".isset($$n).":\n";
-  print ":".isset($$g).":\n";
+  \HH\global_set('y', 0);
+  quickIsset::$y = 0;
+  print ":".(string)(isset($x)).":\n";
+  print ":".(string)(\HH\global_isset('y')).":\n";
+  print ":".(string)(isset(quickIsset::$y)).":\n";
 
-  unset($x);
-  unset($$g);
-  print ":".isset($x).":\n";
-  print ":".isset($$n).":\n";
-  print ":".isset($$g).":\n";
+  $x = null;
+  \HH\global_unset('y');
+  quickIsset::$y = null;
+  print ":".(string)(isset($x)).":\n";
+  print ":".(string)(\HH\global_isset('y')).":\n";
+  print ":".(string)(isset(quickIsset::$y)).":\n";
 
-  $a = array();
+  $a = dict[];
   $a["foo"] = null;
-  var_dump(isset($a["foo"]));
-  $q =& $a["foo"];
-  var_dump(isset($a["foo"]));
-  unset($q);
   var_dump(isset($a["foo"]));
 }
 
-f();
-
-/*********/
-
-function get_index() {
+function get_index() :mixed{
   echo "I've made a huge mistake\n";
   return 0;
 }
 
+function g($dontTake, inout $toFillIn, $id, $key, $value) :mixed{
+  $toFillIn = dict[];
+  if (isset($toFillIn[$id])) {
+    $cur = $toFillIn[$id];
+  }
+  $toFillIn[$id] = $value;
+}
+
+/*********/
+<<__EntryPoint>> function main(): void {
+f();
+
 $a = 4;
-$arr = array("get_index should not be called");
+$arr = vec["get_index should not be called"];
 var_dump(isset($a, $b, $arr[get_index()]));
 
 /**
@@ -49,15 +57,7 @@ var_dump(isset($a, $b, $arr[get_index()]));
  * local to morph into a cell.
  */
 
-function g($dontTake, &$toFillIn, $id, $key, $value) {
-  $toFillIn = array();
-  if (isset($toFillIn[$id])) {
-    $cur = $toFillIn[$id];
-  }
-  $toFillIn[$id] = $value;
-}
-
 $a = null;
-g(null, &$a, "127.0.0.1", null, null );
+g(null, inout $a, "127.0.0.1", null, null );
 var_dump($a);
-
+}

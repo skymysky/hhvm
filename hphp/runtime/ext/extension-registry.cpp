@@ -1,12 +1,12 @@
 #include "hphp/runtime/ext/extension-registry.h"
 
+#include <cstring>
+#include <optional>
 #include <sstream>
 
-#include "hphp/runtime/base/file-util.h"
-#include "hphp/runtime/base/runtime-option.h"
-#include "hphp/runtime/vm/litstr-table.h"
-#include "hphp/runtime/version.h"
-#include "hphp/system/systemlib.h"
+#include "hphp/runtime/base/array-init.h"
+#include "hphp/runtime/vm/jit/prof-data-serialize.h"
+#include "hphp/util/timer.h"
 
 #ifdef HAVE_LIBDL
 # include <dlfcn.h>
@@ -23,14 +23,14 @@
 # endif
 #endif
 
-namespace HPHP { namespace ExtensionRegistry {
+namespace HPHP::ExtensionRegistry {
 /////////////////////////////////////////////////////////////////////////////
 
 // s_exts isn't necessarily initialized by the time Extensions
 // start registering themselves, so we have to be explicit about
 // allocating/initializing/destroying this rather than just
 // putting it global and letting the compiler deal with it. :(
-typedef std::map<std::string, Extension*, stdltistr> ExtensionMap;
+using ExtensionMap = std::map<std::string, Extension*, stdltistr>;
 static ExtensionMap *s_exts = nullptr;
 
 // just to make valgrind cleaner
@@ -41,13 +41,13 @@ struct ExtensionRegistryUninitializer {
 };
 static ExtensionRegistryUninitializer s_extension_registry_uninitializer;
 
-typedef std::vector<Extension*> OrderedExtensionVector;
+using OrderedExtensionVector = std::vector<Extension*>;
 static OrderedExtensionVector s_ordered;
 
 static bool s_sorted = false;
 static bool s_initialized = false;
 
-static void sortDependencies();
+static OrderedExtensionVector sortDependencies(const ExtensionMap& map);
 
 ///////////////////////////////////////////////////////////////////////////////
 // dlfcn wrappers
@@ -97,145 +97,106 @@ void registerExtension(Extension* ext) {
   (*s_exts)[name] = ext;
 }
 
-void unregisterExtension(const char* name) {
-  assertx(s_exts);
-  assertx(s_exts->find(name) != s_exts->end());
-  s_exts->erase(name);
-}
-
-bool isLoaded(const char* name, bool enabled_only /*= true */) {
+bool isLoaded(const char* name) {
   assertx(s_exts);
   auto it = s_exts->find(name);
-  return (it != s_exts->end()) &&
-         (!enabled_only || it->second->moduleEnabled());
+  return (it != s_exts->end()) && it->second->moduleEnabled();
 }
 
-Extension* get(const char* name, bool enabled_only /*= true */) {
+Extension* get(const char* name, bool onlyEnabled) {
   assertx(s_exts);
   auto it = s_exts->find(name);
   if ((it != s_exts->end()) &&
-      (!enabled_only || it->second->moduleEnabled())) {
+      (!onlyEnabled || it->second->moduleEnabled())) {
     return it->second;
   }
   return nullptr;
 }
 
-Array getLoaded(bool enabled_only /*= true */) {
+Array getLoaded() {
   assertx(s_exts);
-  Array ret = Array::Create();
+  // Overestimate.
+  VecInit ret(s_exts->size());
   for (auto& kv : (*s_exts)) {
-    if (!enabled_only || kv.second->moduleEnabled()) {
-      ret.append(String(kv.second->getName()));
+    if (kv.second->moduleEnabled()) {
+      ret.append(OptString(kv.second->getName()));
     }
   }
-  return ret;
+  return ret.toArray();
+}
+
+const std::vector<const Extension*> getExtensions() {
+  std::vector<const Extension*> all;
+  for (auto& kv : (*s_exts)) {
+    all.push_back(kv.second);
+  }
+  return all;
 }
 
 /////////////////////////////////////////////////////////////////////////////
 // Lifecycle delegators
 
-static void moduleLoad(const std::string& extpath) {
-  // Extensions are self-registering,
-  // so we bring in the SO then
-  // throw away its handle.
-  void *ptr = dlopen(extpath.c_str());
-  if (!ptr) {
-    throw Exception("Could not open extension %s: %s",
-                    extpath.c_str(), dlerror());
-  }
-  auto getModuleBuildInfo =
-    (ExtensionBuildInfo *(*)())dlsym(ptr, "getModuleBuildInfo");
-  if (!getModuleBuildInfo) {
-    throw Exception("Could not load extension %s: %s (%s)",
-                    extpath.c_str(),
-                    "getModuleBuildInfo() symbol not defined.",
-                    dlerror());
-  }
-  auto info = getModuleBuildInfo();
-  if (info->dso_version != HHVM_DSO_VERSION) {
-    throw Exception("%s was built with an incompatible DSO API. "
-                    "Expected %ld, got %ld",
-                    extpath.c_str(),
-                    (long)HHVM_DSO_VERSION,
-                    (long)info->dso_version);
-  }
-  if (info->branch_id != HHVM_VERSION_BRANCH) {
-    throw Exception("%s was built for HHVM %d.%d, "
-                    "and cannot be loaded with HHVM %d.%d",
-                    extpath.c_str(),
-                    (int)(info->branch_id >> 16),
-                    (int)((info->branch_id >> 8) & 0xFF),
-                    (int)HHVM_VERSION_MAJOR,
-                    (int)HHVM_VERSION_MINOR);
-  }
-  auto getModule = (Extension *(*)())dlsym(ptr, "getModule");
-  if (!getModule) {
-    throw Exception("Could not load extension %s: %s (%s)",
-                    extpath.c_str(),
-                    "getModule() symbol not defined.",
-                    dlerror());
-  }
-  getModule()->setDSOName(extpath);
-}
-
 void moduleLoad(const IniSetting::Map& ini, Hdf hdf) {
-  std::set<std::string> extFiles;
-
-  // Load up any dynamic extensions from extension_dir
-  std::string extDir = RuntimeOption::ExtensionDir;
-  for (auto& extLoc : RuntimeOption::Extensions) {
-    if (extLoc.empty()) {
-      continue;
-    }
-    if (!FileUtil::isAbsolutePath(extLoc)) {
-      if (extDir == "") {
-        continue;
-      }
-      extLoc = extDir + "/" + extLoc;
-    }
-
-    extFiles.insert(extLoc);
+  for (auto& it : (*s_exts)) {
+    it.second->moduleLoad(ini, hdf);
   }
 
-  // Load up any dynamic extensions from dynamic extensions options
-  for (auto& extLoc : RuntimeOption::DynamicExtensions) {
-    if (extLoc.empty()) {
-      continue;
-    }
-    if (!FileUtil::isAbsolutePath(extLoc)) {
-      extLoc = RuntimeOption::DynamicExtensionPath + "/" + extLoc;
-    }
-
-    extFiles.insert(extLoc);
-  }
-
-  for (std::string extFile : extFiles) {
-    moduleLoad(extFile);
-  }
-
-  // Invoke Extension::moduleLoad() callbacks
-  if (extFiles.size() > 0 || !s_sorted) {
-    sortDependencies();
-  }
-  assertx(s_sorted);
-
-  for (auto& ext : s_ordered) {
-    ext->moduleLoad(ini, hdf);
-  }
+  s_ordered = sortDependencies(*s_exts);
+  s_sorted = true;
 }
 
 void moduleInit() {
-  bool wasInited = SystemLib::s_inited;
-  auto const wasDB = RuntimeOption::EvalDumpBytecode;
-  RuntimeOption::EvalDumpBytecode &= ~1;
+  auto db = Cfg::Eval::DumpBytecode;
+  auto rp = Cfg::Server::AlwaysUseRelativePath;
+  auto sf = Cfg::Server::SafeFileAccess;
+  auto ah = Cfg::Eval::AllowHhas;
+
+  Cfg::Eval::DumpBytecode &= ~1;
+  Cfg::Server::AlwaysUseRelativePath = false;
+  Cfg::Server::SafeFileAccess = false;
+  Cfg::Eval::AllowHhas = true;
+
   SCOPE_EXIT {
-    SystemLib::s_inited = wasInited;
-    RuntimeOption::EvalDumpBytecode = wasDB;
+    Cfg::Eval::DumpBytecode = db;
+    Cfg::Server::AlwaysUseRelativePath = rp;
+    Cfg::Server::SafeFileAccess = sf;
+    Cfg::Eval::AllowHhas = ah;
   };
-  SystemLib::s_inited = false;
+
   assertx(s_sorted);
   for (auto& ext : s_ordered) {
+    std::optional<Timer> timer;
+    if (Cfg::Server::Mode) {
+      timer.emplace(Timer::WallTime,
+                    (std::string("moduleInit:") + ext->getName()).c_str());
+    }
     ext->moduleInit();
+    assertx(ext->nativeFuncs().empty());
+    ext->moduleRegisterNative();
+    ext->loadEmitters();
+  }
+  s_initialized = true;
+}
+
+void moduleRegisterNative() {
+  for (auto& it : *s_exts) {
+    auto &ext = it.second;
+    assertx(ext->nativeFuncs().empty());
+    ext->moduleRegisterNative();
+  }
+}
+
+void moduleDeclInit() {
+  assertx(s_sorted);
+  for (auto& ext : s_ordered) {
+    ext->loadDecls();
+  }
+}
+
+void cliClientInit() {
+  assertx(s_sorted);
+  for (auto& ext : s_ordered) {
+    ext->cliClientInit();
   }
   s_initialized = true;
 }
@@ -254,8 +215,6 @@ void moduleShutdown() {
 }
 
 void threadInit() {
-  // This can actually happen both before and after LoadModules()
-  if (!s_sorted) sortDependencies();
   assertx(s_sorted);
   for (auto& ext : s_ordered) {
     ext->threadInit();
@@ -287,6 +246,39 @@ void requestShutdown() {
 
 bool modulesInitialised() { return s_initialized; }
 
+void serialize(jit::ProfDataSerializer& ser, const char* onlyExtension) {
+  std::vector<std::pair<Extension*, BlobEncoder>> extData;
+  for (auto& ext : s_ordered) {
+    if (onlyExtension && strcmp(ext->getName(), onlyExtension)) continue;
+    BlobEncoder sd;
+    ext->serialize(sd);
+    if (!sd.size()) continue;
+    extData.push_back({ext, std::move(sd)});
+  }
+  uint32_t len = extData.size();
+  jit::write_raw<uint32_t>(ser, len);
+  for (const auto& ext : extData) {
+    jit::write_string(ser, ext.first->getName());
+    jit::write_raw(ser, safe_cast<uint32_t>(ext.second.size()));
+    jit::write_raw(ser, ext.second.data(), ext.second.size());
+  }
+}
+
+void deserialize(jit::ProfDataDeserializer& des) {
+  auto const nExts = jit::read_raw<uint32_t>(des);
+  for (uint32_t i = 0; i < nExts; ++i) {
+    std::string name = jit::read_cpp_string(des);
+    auto const size = jit::read_raw<uint32_t>(des);
+    std::string data;
+    data.resize(size);
+    jit::read_raw(des, data.data(), size);
+    auto ext = get(name.data());
+    if (!ext) continue;
+    BlobDecoder sd(data.data(), data.size());
+    ext->deserialize(sd);
+  }
+}
+
 /////////////////////////////////////////////////////////////////////////////
 
 static
@@ -308,21 +300,40 @@ Extension* findResolvedExt(const Extension::DependencySetMap& unresolved,
   return nullptr;
 }
 
-static void sortDependencies() {
-  assertx(s_exts);
-  s_ordered.clear();
+static OrderedExtensionVector sortDependencies(const ExtensionMap& exts) {
+  OrderedExtensionVector ordered;
 
   Extension::DependencySet resolved;
   Extension::DependencySetMap unresolved;
 
+  // First put core at the beginning of the list
+  {
+    auto kv = exts.find("core");
+    // core has to exist
+    always_assert(kv != exts.end());
+    auto ext = kv->second;
+    // code has to be enabled
+    always_assert(ext->moduleEnabled());
+    // core can not have dependencies
+    always_assert(ext->getDeps().empty());
+    ordered.push_back(ext);
+    resolved.insert(kv->first);
+  }
+
   // First pass, identify the easy(common) case of modules
-  // with no dependencies and put that at the front of the list
+  // with no dependencies and put that at the front of the list but skip core
   // defer all other for slower resolution
-  for (auto& kv : (*s_exts)) {
+  for (auto& kv : exts) {
     auto ext = kv.second;
+    if (kv.first.compare("core") == 0) {
+      continue;
+    }
+    if (!ext->moduleEnabled()) {
+      continue;
+    }
     auto deps = ext->getDeps();
     if (deps.empty()) {
-      s_ordered.push_back(ext);
+      ordered.push_back(ext);
       resolved.insert(kv.first);
       continue;
     }
@@ -332,7 +343,7 @@ static void sortDependencies() {
   // Second pass, check each remaining extension against
   // their dependency list until they have all been loaded
   while (auto ext = findResolvedExt(unresolved, resolved)) {
-    s_ordered.push_back(ext);
+    ordered.push_back(ext);
     resolved.insert(ext->getName());
     unresolved.erase(ext);
   }
@@ -354,9 +365,9 @@ static void sortDependencies() {
     throw Exception(ss.str());
   }
 
-  assertx(s_ordered.size() == s_exts->size());
-  s_sorted = true;
+  assertx(ordered.size() <= exts.size());
+  return ordered;
 }
 
 /////////////////////////////////////////////////////////////////////////////
-}} // namespace HPHP::ExtensionRegistry
+} // namespace HPHP::ExtensionRegistry

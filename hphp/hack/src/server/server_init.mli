@@ -1,0 +1,37 @@
+(*
+ * Copyright (c) 2015, Facebook, Inc.
+ * All rights reserved.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the "hack" directory of this source tree.
+ *
+ *)
+
+type load_state_approach =
+  | Precomputed of Server_args.saved_state_target_info
+  (* Load a saved state using Ocaml implementation of saved state loader. *)
+  | Load_state_natively
+
+type init_approach =
+  | Full_init
+  | Parse_only_init
+  | Saved_state_init of load_state_approach
+  | Write_symbol_info
+  | Write_symbol_info_with_state of load_state_approach
+
+type init_result =
+  (* Loaded a saved saved state of this distance. Note: for older load scripts
+   * distance is unknown, thus None. *)
+  | Load_state_succeeded of Server_env.saved_state_revs_info
+  (* Loading error *)
+  | Load_state_failed of string * Telemetry.t
+  (* This option means we didn't even try to load a saved state *)
+  | Load_state_declined of string
+
+(** Parse, name, typecheck the next set of files,
+    refresh the environment and update the many shared heaps *)
+val init :
+  init_approach:init_approach ->
+  Server_env.genv ->
+  Server_env.env ->
+  Server_env.env * (* If the script failed, the error message *) init_result

@@ -1,4 +1,3 @@
-array(1) {
-  [0]=>
-  %string|unicode%(%d)%s
+vec(1) {
+  string(%d) "%s/get_required_files.php"
 }

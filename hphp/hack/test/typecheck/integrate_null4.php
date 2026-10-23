@@ -9,9 +9,9 @@
  *
  */
 
-function f() {
-  $x = array();
-  foreach (array(1, 2, 3) as $y) {
+function f(): void {
+  $x = dict[];
+  foreach (vec[1, 2, 3] as $y) {
     $z = $x['test'];
     if (true) {
       $x = null;

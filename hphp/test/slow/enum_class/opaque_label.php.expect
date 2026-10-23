@@ -1,0 +1,14 @@
+WRAPPED
+enum class label (#A)
+EnumClassLabel
+
+UNWRAPPED
+string(1) "A"
+A
+
+VALUEOF
+int(42)
+
+NAMEOF
+string(1) "A"
+A

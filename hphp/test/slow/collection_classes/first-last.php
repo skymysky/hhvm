@@ -1,13 +1,13 @@
 <?hh
-function dump($x, $str = null) {
+function dump($x, $str = null) :mixed{
   echo ($str ?: get_class($x)) . "\n";
   var_dump($x->firstValue(), $x->firstKey(), $x->lastValue(), $x->lastKey());
 }
-function dump_set($x, $str = null) {
+function dump_set($x, $str = null) :mixed{
   echo ($str ?: get_class($x)) . "\n";
   var_dump($x->firstValue(), $x->lastValue());
 }
-function main() {
+function main() :mixed{
   dump(Vector {});
   dump(Vector {11, 22});
   dump(ImmVector {});
@@ -27,4 +27,8 @@ function main() {
   dump_set((Set {11, 22})->lazy(), "Set lazy()");
   dump_set((Set {11, 22})->lazy()->map($v ==> $v), "Set lazy()->map()");
 }
+
+<<__EntryPoint>>
+function main_first_last() :mixed{
 main();
+}

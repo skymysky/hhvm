@@ -1,14 +1,14 @@
 #include "hphp/runtime/ext/icu/CodePointBreakIterator.h"
 
-namespace HPHP { namespace Intl {
+namespace HPHP::Intl {
 /////////////////////////////////////////////////////////////////////////////
-UOBJECT_DEFINE_RTTI_IMPLEMENTATION(CodePointBreakIterator);
+UOBJECT_DEFINE_RTTI_IMPLEMENTATION(CodePointBreakIterator)
 
-typedef union {
+union UAlignedMemory {
   long    t1;
   double  t2;
   void   *t3;
-} UAlignedMemory;
+};
 
 inline ptrdiff_t pointerMaskLSB(void *ptr, ptrdiff_t mask) {
   return (ptrdiff_t)ptr & mask;
@@ -88,4 +88,4 @@ CodePointBreakIterator::refreshInputText(UText *input,
 #endif
 
 /////////////////////////////////////////////////////////////////////////////
-}} // namespace HPHP::Intl
+} // namespace HPHP::Intl

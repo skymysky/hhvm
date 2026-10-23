@@ -14,8 +14,7 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_UTIL_RADIX_MAP_H_
-#define incl_HPHP_UTIL_RADIX_MAP_H_
+#pragma once
 
 #include "hphp/util/compilation-flags.h"
 #include "hphp/util/assertions.h"
@@ -25,7 +24,7 @@ namespace HPHP {
 /*
  * RadixMap stores blocks of memory represented by [ptr,size), where both
  * ptr and size have at least LgAlign zeroed low-bits. It supports
- * insert, erase, get, iterate, and find. find(addr) retreives
+ * insert, erase, get, iterate, and find. find(addr) retrieves
  * the [ptr,size) block that contains addr.
  *
  * Internally, the tree consists of nodes with Radix = 2^LgRadix slots each;
@@ -265,7 +264,7 @@ struct RadixMap {
    */
   template<class Fn> void iterate(Fn fn) const {
     if (!m_root) return;
-    for (auto k = m_root_prefix, e = k + slot_size(m_root_scale + LgRadix);
+    for (size_t k = m_root_prefix, e = k + slot_size(m_root_scale + LgRadix);
          k < e;) {
       auto n = m_root;
       auto scale = m_root_scale;
@@ -363,4 +362,3 @@ private:
 
 }
 
-#endif

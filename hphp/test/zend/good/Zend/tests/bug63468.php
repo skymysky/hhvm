@@ -1,24 +1,21 @@
-<?php
-class Foo
-{
-	public function run()
-	{
-		return call_user_func(array('Bar', 'getValue'));
-	}
+<?hh
+class Foo {
+  public function run() :mixed{
+    return call_user_func(vec['Bar', 'getValue']);
+  }
 
-	private static function getValue()
-	{
-		return 'Foo';
-	}
+  <<__DynamicallyCallable>> private static function getValue() :mixed{
+    return 'Foo';
+  }
 }
 
-class Bar extends Foo
-{
-	public static function getValue()
-	{
-		return 'Bar';
-	}
+class Bar extends Foo {
+  <<__DynamicallyCallable>> public static function getValue() :mixed{
+    return 'Bar';
+  }
 }
 
-$x = new Bar;
-var_dump($x->run());
+<<__EntryPoint>> function main(): void {
+  $x = new Bar;
+  var_dump($x->run());
+}

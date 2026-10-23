@@ -1,34 +1,122 @@
-File "inferred_variadic_type.php", line 37, characters 14-26:
-Typing error (Typing[4110])
-  File "inferred_variadic_type.php", line 37, characters 14-18:
-  This is a num (int/float) because this is used in an arithmetic operation
-  File "inferred_variadic_type.php", line 15, characters 36-36:
-  It is incompatible with an object of type D
-File "inferred_variadic_type.php", line 37, characters 14-26:
-Typing error (Typing[4110])
-  File "inferred_variadic_type.php", line 37, characters 22-26:
-  This is a num (int/float) because this is used in an arithmetic operation
-  File "inferred_variadic_type.php", line 15, characters 36-36:
-  It is incompatible with an object of type D
-File "inferred_variadic_type.php", line 37, characters 14-26:
-Invalid return type (Typing[4110])
-  File "inferred_variadic_type.php", line 15, characters 48-50:
-  This is an int
-  File "inferred_variadic_type.php", line 15, characters 36-36:
-  It is incompatible with an object of type D
-File "inferred_variadic_type.php", line 41, characters 38-40:
-You are trying to access the member foo but this is not an object, it is an int (Typing[4062])
-  File "inferred_variadic_type.php", line 15, characters 42-44:
-  Check this out
-File "inferred_variadic_type.php", line 44, characters 19-25:
-Invalid argument (Typing[4062])
-  File "inferred_variadic_type.php", line 43, characters 32-34:
-  You are trying to access the member foo but this is not an object, it is an int
-  File "inferred_variadic_type.php", line 15, characters 42-44:
-  Check this out
-File "inferred_variadic_type.php", line 47, characters 19-26:
-Invalid argument (Typing[4110])
-  File "inferred_variadic_type.php", line 46, characters 20-21:
-  This is an object of type C (variadic argument)
-  File "inferred_variadic_type.php", line 15, characters 42-44:
-  It is incompatible with an int
+warning: Warn[12009] This `is` check is always `true`. The expression on the left has type `int` which is a subtype of `int`. [1]
+
+inferred_variadic_type.php:27:11
+25 |         return $x->foo();
+26 |       }
+27 |       if ($x is int) {
+   |           ^^^^^^^^^ [1]
+28 |         return $x;
+29 |       }
+
+error: Typing[4429] Typing error [1]
+-> Expected `num` because this is used in an arithmetic operation [2]
+-> But got `C` [3]
+
+inferred_variadic_type.php:37:14
+13 | }
+14 | 
+15 | function expect_variadic((function(D, C, int): int) $f): void {
+   |                                       ^ [3]
+16 |   $f(new D(), new C(), 1);
+17 | }
+   :
+35 |   expect_variadic(
+36 |     (...$y) ==> {
+37 |       return $y[0] + $y[1];
+   |              ^^^^^ [1]
+   |              ^^^^^^^^^^^^^ [2]
+38 |     },
+39 |   );
+
+error: Typing[4110] Invalid return type [1]
+-> Expected `int` [2]
+-> But got `num` because this is the result of an arithmetic operation with a `num` as the first argument, and no `float`s. [1]
+-> Here is why I think the argument is a `num`: this is a `num` because a type could not be determined here [3]
+
+inferred_variadic_type.php:37:14
+13 | }
+14 | 
+15 | function expect_variadic((function(D, C, int): int) $f): void {
+   |                                                ^^^ [2]
+16 |   $f(new D(), new C(), 1);
+17 | }
+   :
+35 |   expect_variadic(
+36 |     (...$y) ==> {
+37 |       return $y[0] + $y[1];
+   |              ^^^^^^^^^^^^^ [1]
+   |              ^^^^^ [3]
+38 |     },
+39 |   );
+
+error: Typing[4429] Typing error [1]
+-> Expected `num` because this is used in an arithmetic operation [2]
+-> But got `C` [3]
+
+inferred_variadic_type.php:37:22
+13 | }
+14 | 
+15 | function expect_variadic((function(D, C, int): int) $f): void {
+   |                                       ^ [3]
+16 |   $f(new D(), new C(), 1);
+17 | }
+   :
+35 |   expect_variadic(
+36 |     (...$y) ==> {
+37 |       return $y[0] + $y[1];
+   |              ^^^^^^^^^^^^^ [2]
+   |                      ^^^^^ [1]
+38 |     },
+39 |   );
+
+error: Typing[4062] You are trying to access the method `foo` but this is an int [1]
+-> Definition is here [2]
+
+inferred_variadic_type.php:41:38
+13 | }
+14 | 
+15 | function expect_variadic((function(D, C, int): int) $f): void {
+   |                                          ^^^ [2]
+16 |   $f(new D(), new C(), 1);
+17 | }
+   :
+39 |   );
+40 | 
+41 |   expect_variadic((...$y) ==> $y[0]->foo()); //Error, no foo() on int.
+   |                                      ^^^ [1]
+42 | 
+43 |   $lambda = (...$y) ==> $y[0]->foo();
+
+error: Typing[4297] Was expecting an object but type is unknown [1]
+-> It is unknown because a type could not be determined here [2]
+
+inferred_variadic_type.php:43:25
+41 |   expect_variadic((...$y) ==> $y[0]->foo()); //Error, no foo() on int.
+42 | 
+43 |   $lambda = (...$y) ==> $y[0]->foo();
+   |                 ^^ [2]
+   |                         ^^^^^ [1]
+44 |   expect_variadic($lambda); //Error, no foo() on int.
+45 | 
+
+error: Typing[4110] Invalid argument [1]
+-> Expected `C` (variadic argument) [2]
+-> But got `int` [3]
+
+inferred_variadic_type.php:47:19
+13 | }
+14 | 
+15 | function expect_variadic((function(D, C, int): int) $f): void {
+   |                                          ^^^ [3]
+16 |   $f(new D(), new C(), 1);
+17 | }
+   :
+44 |   expect_variadic($lambda); //Error, no foo() on int.
+45 | 
+46 |   $lambda2 = (C ...$y) ==> $y[0]->foo();
+   |                    ^^ [2]
+47 |   expect_variadic($lambda2); //Error, incorrect variadic type
+   |                   ^^^^^^^^ [1]
+48 | }
+
+7 errors found

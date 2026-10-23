@@ -45,9 +45,9 @@ struct ResourceUsage {
   int64_t rssMb() const { return m_rssMb; }
   std::string toString() const;
 
-private:
+ private:
   ResourceUsage(TimeUnit wall, TimeUnit cpu, int64_t rssMb)
-      : m_wall{wall}, m_cpu{cpu}, m_rssMb(rssMb) {}
+    : m_wall{wall}, m_cpu{cpu}, m_rssMb(rssMb) {}
   TimeUnit m_wall;
   TimeUnit m_cpu;
   int64_t m_rssMb;
@@ -65,6 +65,12 @@ private:
  *   start or from the last call to mark();
  * - using an instance of the BootStats::Block class during startup
  *   automatically collects a sample.
+ *
+ * mark() logs only on phase *completion*, so the last line in the log names the
+ * last *finished* phase, never the one currently running. To make a stuck phase
+ * visible, call BootStats::markStart('foo') just before the work whose
+ * completion mark('foo') records; it emits an entry line symmetric with the
+ * BootStats::Block ctor, so on a hang the last log line names the running phase.
  */
 struct BootStats {
   // Creates a new instance and starts the timer
@@ -75,21 +81,36 @@ struct BootStats {
     return s.count();
   }
   // Stops the timer and logs information
-  static void done();
+  static void done(bool log);
+  // Logs an entry line ("BootStats: starting <name>") for the phase whose
+  // completion will be recorded by mark(name). Pure logging: it does not record
+  // a sample or alter the elapsed time mark() measures, so it leaves the
+  // hhvm_boot_timer columns unchanged. Symmetric with the BootStats::Block
+  // ctor, so the last log line names the running (and possibly stuck) phase.
+  static void markStart(const std::string& name);
   // Computes the time elapsed from start or from the previous call to this
   // method and stores it as a sample with the given name
   static void mark(const std::string& name);
+  // Compute the time and resoruce used from start
+  static void markFromStart(const std::string& name);
+
+  // Add a column with name and string value.
+  static void set(const std::string& name, const std::string& value);
+  // Add a column with name and int value.
+  static void set(const std::string& name, int64_t value);
 
   struct Block {
-    explicit Block(const std::string& name);
+    explicit Block(const std::string& name, bool enabled, bool publishWallTime = false);
     ~Block();
 
-  private:
+   private:
     std::string m_name;
+    bool m_enabled{false};
+    bool m_publishWallTime{false};
     ResourceUsage m_start;
   };
 
-private:
+ private:
   static void add(const std::string& name, const ResourceUsage value);
 
   struct Impl;

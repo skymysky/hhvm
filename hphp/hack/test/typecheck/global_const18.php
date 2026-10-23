@@ -1,3 +1,3 @@
 <?hh
 
-const X = "$x";
+const mixed X = "$x";

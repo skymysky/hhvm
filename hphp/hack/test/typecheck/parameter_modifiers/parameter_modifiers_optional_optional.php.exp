@@ -1,0 +1,9 @@
+error: Parsing[1002] Duplicate parameter modifier `optional`. [1]
+
+parameter_modifiers_optional_optional.php:4:32
+2 | // Repeating the optional modifier is invalid.
+3 | 
+4 | function f1((function(optional optional bool): void) $_): void {}
+  |                                ^^^^^^^^ [1]
+
+1 error found

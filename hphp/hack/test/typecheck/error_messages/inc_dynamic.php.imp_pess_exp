@@ -1,0 +1,10 @@
+error: Parsing[1002] Assignments can no longer be used as expressions. Pull the assignment out into a separate statement. [1]
+
+inc_dynamic.php:4:12
+2 | 
+3 | function foo(dynamic $d): string {
+4 |   return ++$d;
+  |            ^^ [1]
+5 | }
+
+1 error found

@@ -1,3 +1,4 @@
+
 /*
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
@@ -17,28 +18,16 @@
 #include "hphp/runtime/vm/jit/irlower-internal.h"
 
 #include "hphp/runtime/base/autoload-handler.h"
-#include "hphp/runtime/base/builtin-functions.h"
-#include "hphp/runtime/base/object-data.h"
-#include "hphp/runtime/base/packed-array.h"
-#include "hphp/runtime/base/rds.h"
 #include "hphp/runtime/base/runtime-error.h"
 #include "hphp/runtime/base/string-data.h"
-#include "hphp/runtime/base/strings.h"
-#include "hphp/runtime/base/tv-mutate.h"
-#include "hphp/runtime/base/tv-variant.h"
 #include "hphp/runtime/base/type-string.h"
 #include "hphp/runtime/base/typed-value.h"
 
-#include "hphp/runtime/vm/act-rec.h"
 #include "hphp/runtime/vm/class.h"
 #include "hphp/runtime/vm/func.h"
 #include "hphp/runtime/vm/method-lookup.h"
 #include "hphp/runtime/vm/named-entity.h"
-#include "hphp/runtime/vm/unit.h"
-#include "hphp/runtime/vm/unit-util.h"
 #include "hphp/runtime/vm/vm-regs.h"
-
-#include "hphp/system/systemlib.h"
 
 #include "hphp/runtime/vm/jit/types.h"
 #include "hphp/runtime/vm/jit/abi.h"
@@ -52,8 +41,6 @@
 #include "hphp/runtime/vm/jit/ir-opcode.h"
 #include "hphp/runtime/vm/jit/ssa-tmp.h"
 #include "hphp/runtime/vm/jit/target-cache.h"
-#include "hphp/runtime/vm/jit/translator-inline.h"
-#include "hphp/runtime/vm/jit/translator-runtime.h"
 #include "hphp/runtime/vm/jit/type.h"
 #include "hphp/runtime/vm/jit/vasm-gen.h"
 #include "hphp/runtime/vm/jit/vasm-instr.h"
@@ -62,36 +49,45 @@
 #include "hphp/util/asm-x64.h"
 #include "hphp/util/trace.h"
 
-#include <type_traits>
+namespace HPHP::jit::irlower {
 
-namespace HPHP { namespace jit { namespace irlower {
-
-TRACE_SET_MOD(irlower);
+TRACE_SET_MOD(irlower)
 
 ///////////////////////////////////////////////////////////////////////////////
 
 namespace {
 
-template<class TargetCache>
-void implLdMeta(IRLS& env, const IRInstruction* inst) {
-  auto const is_func = std::is_same<TargetCache,FuncCache>::value;
+void implLdClass(IRLS& env, const IRInstruction* inst, Vout& v, Vreg dst,
+                 const LdClsFallback fallback) {
+  auto const ch = ClassCache::alloc();
+  rds::recordRds(ch, sizeof(ClassCache), "ClassCache",
+                 inst->marker().func()->fullName()->slice());
 
-  auto const ch = TargetCache::alloc();
-  rds::recordRds(ch, sizeof(TargetCache), is_func ? "FuncCache" : "ClassCache",
+  auto args = argGroup(env, inst)
+                .imm(ch)
+                .ssa(0 /* name */)
+                .imm(static_cast<uint8_t>(fallback));
+  cgCallHelper(
+    v,
+    env,
+    CallSpec::direct(ClassCache::lookup),
+    callDest(dst),
+    SyncOptions::Sync,
+    args
+  );
+}
+
+void implLdFunc(IRLS& env, const IRInstruction* inst, Vout& v, Vreg dst) {
+  auto const ch = FuncCache::alloc();
+  rds::recordRds(ch, sizeof(FuncCache), "FuncCache",
                  inst->marker().func()->fullName()->slice());
 
   auto args = argGroup(env, inst).imm(ch).ssa(0 /* name */);
-  if (is_func) {
-    args
-      .addr(srcLoc(env, inst, 1).reg(),
-            cellsToBytes(inst->extra<LdFunc>()->offset.offset))
-      .ssa(2);
-  }
   cgCallHelper(
-    vmain(env),
+    v,
     env,
-    CallSpec::direct(TargetCache::lookup),
-    callDest(env, inst),
+    CallSpec::direct(FuncCache::lookup),
+    callDest(dst),
     SyncOptions::Sync,
     args
   );
@@ -101,54 +97,107 @@ const Func* loadUnknownFuncHelper(const StringData* name,
                                   void (*raiser)(const StringData*,
                                                  const Class*)) {
   VMRegAnchor _;
-  auto const func = Unit::loadFunc(name);
+  CoeffectsAutoGuard _2;
+  auto const func = Func::load(name);
   if (UNLIKELY(!func)) raiser(name, nullptr);
   return func;
 }
 
+const Class* lookupCls(const StringData* sd) {
+  return Class::lookup(sd);
 }
 
-void cgDefCls(IRLS& env, const IRInstruction* inst) {
-  auto unit = inst->marker().func()->unit();
-  auto args = argGroup(env, inst)
-    .immPtr(unit->lookupPreClassId(inst->src(0)->intVal())).
-    imm(true);
+void implLdOrLookupCls(IRLS& env, const IRInstruction* inst, bool lookup,
+                       const LdClsFallback loadFallback) {
+  auto const src = srcLoc(env, inst, 0).reg();
+  auto const dst = dstLoc(env, inst, 0).reg();
 
-  cgCallHelper(
-    vmain(env),
-    env,
-    CallSpec::direct(&Unit::defClass),
-    callDest(env, inst),
-    SyncOptions::Sync,
-    args
-  );
+  auto const fallback = [&](Vout& v, Vreg out) {
+    if (!lookup) return implLdClass(env, inst, v, out, loadFallback);
+    auto const args = argGroup(env, inst).ssa(0);
+    cgCallHelper(v, env, CallSpec::direct(lookupCls),
+                 callDest(out), SyncOptions::None, args);
+  };
+
+  if (!Cfg::Repo::Authoritative) return fallback(vmain(env), dst);
+
+  auto& v = vmain(env);
+  auto& vc = vcold(env);
+  auto done = v.makeBlock();
+  auto then = vc.makeBlock();
+
+  auto const sf1 = v.makeReg();
+  auto const sf2 = v.makeReg();
+  auto const cls1 = v.makeReg();
+  auto const cls2 = v.makeReg();
+
+  auto const mask = static_cast<int8_t>(StringData::kIsSymbolMask);
+  v << testbim{mask, src[StringData::isSymbolOffset()], sf1};
+  fwdJcc(v, env, CC_E, sf1, then);
+
+  emitLdPackedPtr(v, src[StringData::cachedClassOffset()], cls1);
+  v << testq{cls1, cls1, sf2};
+  fwdJcc(v, env, CC_E, sf2, then);
+  v << phijmp{done, v.makeTuple({cls1})};
+
+  vc = then;
+  fallback(vc, cls2);
+  vc << phijmp{done, vc.makeTuple({cls2})};
+
+  v = done;
+  v << phidef{v.makeTuple({dst})};
+}
+
 }
 
 void cgLdCls(IRLS& env, const IRInstruction* inst) {
-  implLdMeta<ClassCache>(env, inst);
+  auto const extra = inst->extra<LdClsFallbackData>();
+  implLdOrLookupCls(env, inst, false, extra->fallback);
+}
+
+void cgLookupCls(IRLS& env, const IRInstruction* inst) {
+  implLdOrLookupCls(env, inst, true, LdClsFallback::Fatal /* unused */);
 }
 
 void cgLdFunc(IRLS& env, const IRInstruction* inst) {
-  implLdMeta<FuncCache>(env, inst);
+  auto const dst = dstLoc(env, inst, 0).reg();
+  implLdFunc(env, inst, vmain(env), dst);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 
-const Class* lookupKnownClass(rds::Handle cache_handle,
-                              const StringData* name) {
+const Class* autoloadKnownPersistentType(rds::Handle h,
+                                         const StringData* name,
+                                         const LdClsFallback fallback) {
+  assertx(rds::isPersistentHandle(h));
+  AutoloadHandler::s_instance->autoloadType(
+    StrNR(const_cast<StringData*>(name))
+  );
+  auto const ptr =
+    rds::handleToRef<PackedPtr<Class>, rds::Mode::Persistent>(h).get();
+  // Autoloader should have inited it as a side-effect.
+  if (UNLIKELY(!ptr)) {
+    ClassCache::loadFail(name, fallback);
+  }
+  return ptr;
+}
+
+const Class* lookupKnownType(rds::Handle cache_handle,
+                             const StringData* name,
+                             const LdClsFallback fallback) {
   assertx(rds::isNormalHandle(cache_handle));
   // The caller should already have checked.
   assertx(!rds::isHandleInit(cache_handle));
 
-  AutoloadHandler::s_instance->autoloadClass(
+  AutoloadHandler::s_instance->autoloadType(
     StrNR(const_cast<StringData*>(name))
   );
 
   // Autoloader should have inited it as a side-effect.
   if (UNLIKELY(!rds::isHandleInit(cache_handle, rds::NormalTag{}))) {
-    raise_error(Strings::UNKNOWN_CLASS, name->data());
+    ClassCache::loadFail(name, fallback);
   }
-  return rds::handleToRef<LowPtr<Class>, rds::Mode::Normal>(cache_handle).get();
+  return rds::handleToRef<PackedPtr<Class>, rds::Mode::Normal>(cache_handle).get();
 }
 
 const Func* loadUnknownFunc(const StringData* name) {
@@ -156,46 +205,32 @@ const Func* loadUnknownFunc(const StringData* name) {
 }
 
 const Func* lookupUnknownFunc(const StringData* name) {
-  return loadUnknownFuncHelper(name, raise_resolve_undefined);
-}
-
-const Func* lookupFallbackFunc(const StringData* name,
-                               const StringData* fallback) {
-  VMRegAnchor _;
-
-  // Try to load the first function.
-  auto func = Unit::loadFunc(name);
-  if (LIKELY(!func)) {
-    // Then try to load the fallback function.
-    func = Unit::loadFunc(fallback);
-    if (UNLIKELY(!func)) {
-      raise_error("Call to undefined function %s()",
-                  stripInOutSuffix(name)->data());
-    }
-  }
-  return func;
+  return loadUnknownFuncHelper(name, raise_resolve_func_undefined);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 
 namespace {
 
-template<class T> rds::Handle handleFrom(const NamedEntity* ne);
+template<class T> rds::Handle handleFrom(const StringData* name);
 
 template<>
-rds::Handle handleFrom<Func>(const NamedEntity* ne) {
-  return ne->getFuncHandle();
+rds::Handle handleFrom<Func>(const StringData* name) {
+  auto ne = NamedFunc::getOrCreate(name);
+  return ne->getFuncHandle(name);
 }
+
 template<>
-rds::Handle handleFrom<Class>(const NamedEntity* ne) {
-  return ne->getClassHandle();
+rds::Handle handleFrom<Class>(const StringData* name) {
+  auto ne = NamedType::getOrCreate(name);
+  return ne->getClassHandle(name);
 }
 
 template<class T, class SlowPath>
 void implLdCached(IRLS& env, const IRInstruction* inst,
                   const StringData* name, SlowPath fill_cache) {
   auto const dst = dstLoc(env, inst, 0).reg();
-  auto const ch = handleFrom<T>(NamedEntity::get(name));
+  auto const ch = handleFrom<T>(name);
   auto& v = vmain(env);
 
   if (rds::isNormalHandle(ch)) {
@@ -204,15 +239,18 @@ void implLdCached(IRLS& env, const IRInstruction* inst,
       v, vcold(env), CC_NE, sf, dst,
       [&] (Vout& v) { return fill_cache(v, ch); },
       [&] (Vout& v) {
+        markRDSAccess(v, ch);
         auto const ptr = v.makeReg();
-        emitLdLowPtr(v, rvmtl()[ch], ptr, sizeof(LowPtr<T>));
+        emitLdPackedPtr(v, rvmtl()[ch], ptr);
         return ptr;
       }
     );
   } else {
-    auto const pptr = rds::handleToPtr<LowPtr<T>, rds::Mode::Persistent>(ch);
+    assertx(rds::isPersistentHandle(ch));
+    auto const pptr = rds::handleToPtr<PackedPtr<T>, rds::Mode::Persistent>(ch);
+    markRDSAccess(v, ch);
     auto const ptr = v.makeReg();
-    emitLdLowPtr(v, *v.cns(pptr), ptr, sizeof(LowPtr<T>));
+    emitLdPackedPtr(v, *v.cns(pptr), ptr);
 
     auto const sf = v.makeReg();
     v << testq{ptr, ptr, sf};
@@ -222,32 +260,14 @@ void implLdCached(IRLS& env, const IRInstruction* inst,
   }
 }
 
-template<class T>
-void implLdCachedSafe(IRLS& env, const IRInstruction* inst,
-                      const StringData* name) {
-  auto const dst = dstLoc(env, inst, 0).reg();
-  auto const ch = handleFrom<T>(NamedEntity::get(name));
-  auto& v = vmain(env);
-
-  if (rds::isNormalHandle(ch)) {
-    auto const sf = checkRDSHandleInitialized(v, ch);
-    fwdJcc(v, env, CC_NE, sf, inst->taken());
-    emitLdLowPtr(v, rvmtl()[ch], dst, sizeof(LowPtr<T>));
-  } else {
-    assertx(rds::isPersistentHandle(ch));
-    auto const pptr = rds::handleToPtr<LowPtr<T>, rds::Mode::Persistent>(ch);
-    emitLdLowPtr(v, *v.cns(pptr), dst, sizeof(LowPtr<T>));
-  }
-}
-
 template<Opcode opc>
 void ldFuncCachedHelper(IRLS& env, const IRInstruction* inst,
                         const CallSpec& call) {
-  auto const extra = inst->extra<opc>();
+  auto const funcName = inst->extra<opc>()->name;
 
-  implLdCached<Func>(env, inst, extra->name, [&] (Vout& v, rds::Handle) {
+  implLdCached<Func>(env, inst, funcName, [&] (Vout& v, rds::Handle) {
     auto const ptr = v.makeReg();
-    auto const args = argGroup(env, inst).immPtr(extra->name);
+    auto const args = argGroup(env, inst).immPtr(funcName);
     cgCallHelper(v, env, call, callDest(ptr), SyncOptions::Sync, args);
     return ptr;
   });
@@ -259,13 +279,27 @@ void ldFuncCachedHelper(IRLS& env, const IRInstruction* inst,
 
 void cgLdClsCached(IRLS& env, const IRInstruction* inst) {
   auto const name = inst->src(0)->strVal();
+  auto const extra = inst->extra<LdClsFallbackData>();
 
   implLdCached<Class>(env, inst, name, [&] (Vout& v, rds::Handle ch) {
     auto const ptr = v.makeReg();
-    auto const args = argGroup(env, inst).imm(ch).ssa(0);
-    cgCallHelper(v, env, CallSpec::direct(lookupKnownClass),
+    auto const target = rds::isPersistentHandle(ch)
+                        ? autoloadKnownPersistentType
+                        : lookupKnownType;
+    auto const args = argGroup(env, inst)
+                        .imm(ch)
+                        .ssa(0)
+                        .imm(static_cast<uint8_t>(extra->fallback));
+    cgCallHelper(v, env, CallSpec::direct(target),
                  callDest(ptr), SyncOptions::Sync, args);
     return ptr;
+  });
+}
+
+void cgLookupClsCached(IRLS& env, const IRInstruction* inst) {
+  auto const name = inst->src(0)->strVal();
+  implLdCached<Class>(env, inst, name, [&] (Vout& v, rds::Handle) {
+    return v.cns(nullptr);
   });
 }
 
@@ -281,88 +315,51 @@ void cgLookupFuncCached(IRLS& env, const IRInstruction* inst) {
   );
 }
 
-void cgLdFuncCachedU(IRLS& env, const IRInstruction* inst) {
-  auto const extra = inst->extra<LdFuncCachedU>();
+void cgEqClassId(IRLS& env, const IRInstruction* inst) {
+  auto const extra = inst->extra<EqClassId>();
+  auto const classPtr = extra->cls;
+  auto const classId = classPtr->classId().id();
+  auto const handle = classPtr->classIdHandle();
+  auto const dst = dstLoc(env, inst, 0).reg();
 
-  implLdCached<Func>(env, inst, extra->name, [&] (Vout& v, rds::Handle) {
-    // If we get here, things are going to be slow anyway, so shunt all the
-    // autoloading logic to lookupFallbackFunc().
-    auto const ptr = v.makeReg();
-    auto const args = argGroup(env, inst)
-      .immPtr(extra->name)
-      .immPtr(extra->fallback);
-
-    cgCallHelper(v, env, CallSpec::direct(lookupFallbackFunc),
-                 callDest(ptr), SyncOptions::Sync, args);
-    return ptr;
-  });
+  auto& v = vmain(env);
+  auto const sf = v.makeReg();
+  v << cmplim{safe_cast<int32_t>(classId), rvmtl()[handle], sf};
+  v << setcc{CC_E, sf, dst};
 }
 
-void cgLdClsCachedSafe(IRLS& env, const IRInstruction* inst) {
-  auto const name = inst->src(0)->strVal();
-  implLdCachedSafe<Class>(env, inst, name);
+static void logClsSpeculation(
+  const StringData* clsName,
+  const StringData* ctxName,
+  const StringData* methName,
+  const char* op,
+  ClassId::Id clsId,
+  bool success) {
+  StructuredLogEntry entry;
+  entry.setStr("cls", clsName ? clsName->data(): "no cls");
+  entry.setStr("method", methName ? methName->data() : "no method");
+  entry.setStr("ctx", ctxName ? ctxName->data() : "no context");
+  entry.setStr("op", op);
+  entry.setInt("expected clsId", clsId);
+  entry.setInt("success", success);
+  StructuredLog::log("hhvm_speculate", entry);
 }
 
-IMPL_OPCODE_CALL(LookupClsRDS)
-
-///////////////////////////////////////////////////////////////////////////////
-
-void loadFuncContextImpl(ArrayData* arr, ActRec* preLiveAR, ActRec* fp) {
-  ObjectData* inst = nullptr;
-  Class* cls = nullptr;
-  StringData* invName = nullptr;
-  bool dynamic = false;
-
-  auto func = vm_decode_function(
-    VarNR(arr).operator const Variant&(),
-    fp,
-    false, // forward
-    inst,
-    cls,
-    invName,
-    dynamic,
-    DecodeFlags::NoWarn
+void cgLogClsSpeculation(IRLS& env, const IRInstruction* inst) {
+  auto& v = vmain(env);
+  auto const extra = inst->extra<LoggingSpeculateData>();
+  auto const target = CallSpec::direct(logClsSpeculation);
+  cgCallHelper(v, env, target, callDest(env, inst), SyncOptions::None,
+               argGroup(env, inst)
+               .immPtr(extra->clsName)
+               .immPtr(extra->ctxName)
+               .immPtr(extra->methName)
+               .immPtr(opcodeToName(extra->opcode))
+               .imm(extra->expectedId)
+               .imm(extra->success)
   );
-  assertx(dynamic);
-  if (UNLIKELY(func == nullptr)) {
-    raise_error("Invalid callable (array)");
-  }
-
-  preLiveAR->m_func = func;
-  if (inst) {
-    inst->incRefCount();
-    preLiveAR->setThis(inst);
-  } else if (cls) {
-    preLiveAR->setClass(cls);
-  } else {
-    preLiveAR->trashThis();
-  }
-  if (UNLIKELY(invName != nullptr)) {
-    preLiveAR->setMagicDispatch(invName);
-  }
 }
 
-void loadArrayFunctionContext(ArrayData* arr, ActRec* preLiveAR, ActRec* fp) {
-  try {
-    loadFuncContextImpl(arr, preLiveAR, fp);
-  } catch (...) {
-    *arPreliveOverwriteCells(preLiveAR) = make_array_like_tv(arr);
-    throw;
-  }
-}
-
-///////////////////////////////////////////////////////////////////////////////
-
-void cgLdArrFuncCtx(IRLS& env, const IRInstruction* inst) {
-  auto const args = argGroup(env, inst)
-    .ssa(0)
-    .addr(srcLoc(env, inst, 1).reg(),
-          cellsToBytes(inst->extra<LdArrFuncCtx>()->offset.offset))
-    .ssa(2);
-
-  cgCallHelper(vmain(env), env, CallSpec::direct(loadArrayFunctionContext),
-               callDest(env, inst), SyncOptions::Sync, args);
-}
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -370,4 +367,4 @@ IMPL_OPCODE_CALL(OODeclExists)
 
 ///////////////////////////////////////////////////////////////////////////////
 
-}}}
+}

@@ -1,6 +1,9 @@
-<?php
+<?hh
 
-$tempfile = tempnam('/tmp', 'vmextfiletest');
+
+<<__EntryPoint>>
+function main_ftell() :mixed{
+$tempfile = tempnam(sys_get_temp_dir(), 'vmextfiletest');
 
 $f = fopen($tempfile, 'w');
 fputs($f, "testing fseek");
@@ -11,3 +14,4 @@ fseek($f, -5, SEEK_END);
 var_dump(ftell($f));
 
 unlink($tempfile);
+}

@@ -1,6 +1,6 @@
-<?hh // strict
+<?hh
 
-class :foo {
+class :foo extends XHPTest {
   attribute
     Stringish xlink:href,
     float opacity;

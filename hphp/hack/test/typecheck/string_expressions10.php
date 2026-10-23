@@ -30,4 +30,6 @@ class Meh {
   }
 }
 
-Meh::foo(null);
+function main(): void {
+  Meh::foo(null);
+}

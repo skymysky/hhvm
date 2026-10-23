@@ -12,11 +12,11 @@
 interface IParent {
   const FOO = 'bar';
 
-  public abstract function whatevs();
+  public function whatevs(): string;
 }
 
 abstract class ParentClass implements IParent {
-  protected function bar() {}
+  protected function bar(): string { return ""; }
 }
 
 abstract class Kid extends ParentClass {
@@ -25,13 +25,13 @@ abstract class Kid extends ParentClass {
 class Grandkid extends Kid {
   use KidTrait;
 
-  public function whatevs() {}
+  public function whatevs(): string { return ""; }
 }
 
 trait KidTrait {
   require extends Kid;
 
-  protected function foo() {
+  protected function foo(): void {
     $this->bar().self::FOO.$this->whatevs();
   }
 }
@@ -39,7 +39,7 @@ trait KidTrait {
 trait KidTraitChild {
   use KidTrait;
 
-  protected function another_foo() {
+  protected function another_foo(): void {
     $this->bar().self::FOO.$this->whatevs();
   }
 }

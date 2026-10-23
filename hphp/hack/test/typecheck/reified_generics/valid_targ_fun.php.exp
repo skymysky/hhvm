@@ -1,0 +1,29 @@
+error: Typing[4305] Invalid reified hint [1]
+-> This is a function type, it cannot be used as a reified type argument [1]
+-> `T` is reified [2]
+
+valid_targ_fun.php:5:13
+1 | <?hh
+2 | 
+3 | class C<reify T> {}
+  |               ^ [2]
+4 | 
+5 | type Ta = C<(function (int, bool): string)>;
+  |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ [1]
+6 | type Tc = C<(function (int, bool, float...): string)>;
+
+error: Typing[4305] Invalid reified hint [1]
+-> This is a function type, it cannot be used as a reified type argument [1]
+-> `T` is reified [2]
+
+valid_targ_fun.php:6:13
+1 | <?hh
+2 | 
+3 | class C<reify T> {}
+  |               ^ [2]
+4 | 
+5 | type Ta = C<(function (int, bool): string)>;
+6 | type Tc = C<(function (int, bool, float...): string)>;
+  |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ [1]
+
+2 errors found

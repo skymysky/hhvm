@@ -14,8 +14,7 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_JIT_ASM_INFO_H_
-#define incl_HPHP_JIT_ASM_INFO_H_
+#pragma once
 
 #include "hphp/runtime/vm/jit/block.h"
 #include "hphp/runtime/vm/jit/ir-unit.h"
@@ -24,7 +23,7 @@
 #include "hphp/runtime/vm/jit/types.h"
 #include <algorithm>
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 
 // Information about where code was generated, for pretty-printing.
 struct AsmInfo {
@@ -39,9 +38,9 @@ struct AsmInfo {
     // the offset between logical and physical addresses.
     ptrdiff_t offset{0};
   };
-  typedef StateMultiMap<Block, TcaRange> BlockRanges;
+  using BlockRanges = StateMultiMap<Block, TcaRange>;
   // Map from IRInstruction to Block id.
-  typedef StateVector<IRInstruction, uint32_t> InstBlockMap;
+  using InstBlockMap = StateVector<IRInstruction, uint32_t>;
 
   OffsetInstRanges mainInstRanges;
   OffsetInstRanges coldInstRanges;
@@ -103,6 +102,8 @@ struct AsmInfo {
                             AreaIndex area,
                             TCA start,
                             TCA end) {
+    if (inst == nullptr) return;
+
     if (start != end) {
       auto newRange = updateRange(instRangesForArea(area),
                                   inst->id(),
@@ -325,6 +326,4 @@ struct AsmInfo {
   }
 };
 
-}}
-
-#endif
+}

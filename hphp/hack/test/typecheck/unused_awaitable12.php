@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 
 class NonAwaitable<T> {}
 
@@ -8,6 +8,6 @@ async function f(): Awaitable<int> {
 
 function g(): void {
   $f = f();
-  if ($f instanceof NonAwaitable) {
+  if ($f is NonAwaitable<_>) {
   }
 }

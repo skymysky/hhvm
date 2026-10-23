@@ -1,0 +1,80 @@
+error: Naming[2105] `HH\classname_to_class` cannot be used as a function pointer [1]
+
+special_functions.php:4:8
+2 | 
+3 | function f<reify T>(): void {
+4 |   $_ = HH\classname_to_class<>;
+  |        ^^^^^^^^^^^^^^^^^^^^^ [1]
+5 |   $_ = exit<>;
+6 |   $_ = HH\ReifiedGenerics\get_class_from_type<T>;
+
+error: Naming[2105] `exit` cannot be used as a function pointer [1]
+
+special_functions.php:5:8
+3 | function f<reify T>(): void {
+4 |   $_ = HH\classname_to_class<>;
+5 |   $_ = exit<>;
+  |        ^^^^ [1]
+6 |   $_ = HH\ReifiedGenerics\get_class_from_type<T>;
+7 |   $_ = HH\global_get<>;
+
+error: Naming[2105] `HH\ReifiedGenerics\get_class_from_type` cannot be used as a function pointer [1]
+
+special_functions.php:6:8
+4 |   $_ = HH\classname_to_class<>;
+5 |   $_ = exit<>;
+6 |   $_ = HH\ReifiedGenerics\get_class_from_type<T>;
+  |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ [1]
+7 |   $_ = HH\global_get<>;
+8 |   $_ = HH\global_set<>;
+
+error: Naming[2105] `HH\global_get` cannot be used as a function pointer [1]
+
+special_functions.php:7:8
+5 |   $_ = exit<>;
+6 |   $_ = HH\ReifiedGenerics\get_class_from_type<T>;
+7 |   $_ = HH\global_get<>;
+  |        ^^^^^^^^^^^^^ [1]
+8 |   $_ = HH\global_set<>;
+9 |   $_ = HH\global_unset<>;
+
+error: Naming[2105] `HH\global_set` cannot be used as a function pointer [1]
+
+special_functions.php:8:8
+ 6 |   $_ = HH\ReifiedGenerics\get_class_from_type<T>;
+ 7 |   $_ = HH\global_get<>;
+ 8 |   $_ = HH\global_set<>;
+   |        ^^^^^^^^^^^^^ [1]
+ 9 |   $_ = HH\global_unset<>;
+10 |   $_ = HH\tag_provenance_here<>;
+
+error: Naming[2105] `HH\tag_provenance_here` cannot be used as a function pointer [1]
+
+special_functions.php:10:8
+ 8 |   $_ = HH\global_set<>;
+ 9 |   $_ = HH\global_unset<>;
+10 |   $_ = HH\tag_provenance_here<>;
+   |        ^^^^^^^^^^^^^^^^^^^^^^ [1]
+11 |   $_ = HH\FIXME\UNSAFE_CAST<int, string>;
+12 |   $_ = HH\FIXME\UNSAFE_NONNULL_CAST<>;
+
+error: Naming[2105] `HH\FIXME\UNSAFE_CAST` cannot be used as a function pointer [1]
+
+special_functions.php:11:8
+ 9 |   $_ = HH\global_unset<>;
+10 |   $_ = HH\tag_provenance_here<>;
+11 |   $_ = HH\FIXME\UNSAFE_CAST<int, string>;
+   |        ^^^^^^^^^^^^^^^^^^^^ [1]
+12 |   $_ = HH\FIXME\UNSAFE_NONNULL_CAST<>;
+13 | }
+
+error: Naming[2105] `HH\FIXME\UNSAFE_NONNULL_CAST` cannot be used as a function pointer [1]
+
+special_functions.php:12:8
+10 |   $_ = HH\tag_provenance_here<>;
+11 |   $_ = HH\FIXME\UNSAFE_CAST<int, string>;
+12 |   $_ = HH\FIXME\UNSAFE_NONNULL_CAST<>;
+   |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ [1]
+13 | }
+
+8 errors found

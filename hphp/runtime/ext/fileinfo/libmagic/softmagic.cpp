@@ -29,13 +29,14 @@
  * softmagic - interpret variable magic from MAGIC
  */
 
-#include "file.h"
+#include "hphp/runtime/ext/fileinfo/libmagic/file.h"
 
 #ifndef  lint
 FILE_RCSID("@(#)$File: softmagic.c,v 1.165 2013/03/07 02:22:24 christos Exp $")
 #endif  /* lint */
 
-#include "magic.h"
+#include "hphp/runtime/ext/fileinfo/libmagic/magic.h"
+#include <limits>
 #include <string.h>
 #include <ctype.h>
 #include <stdlib.h>
@@ -556,6 +557,13 @@ mprint(struct magic_set *ms, struct magic *m)
   case FILE_REGEX: {
     char *cp;
     int rval;
+
+    if (ms->search.s == NULL ||
+        ms->search.rm_len > ms->search.s_len ||
+        ms->search.rm_len == std::numeric_limits<size_t>::max()) {
+      file_magerror(ms, "invalid regex match bounds");
+      return -1;
+    }
 
     cp = (char*) emalloc(ms->search.rm_len + 1);
     if (cp == NULL) {
@@ -1816,7 +1824,7 @@ file_strncmp16(const char *a, const char *b, size_t len, uint32_t flags)
 }
 
 public void
-convert_libmagic_pattern(HPHP::String& pattern, int options)
+convert_libmagic_pattern(HPHP::OptString& pattern, int options)
 {
     int i, j=0;
     char *t;
@@ -1846,7 +1854,7 @@ convert_libmagic_pattern(HPHP::String& pattern, int options)
 
     t[j]='\0';
 
-    pattern = HPHP::String(t, j, HPHP::CopyString);
+    pattern = HPHP::OptString(t, j, HPHP::CopyString);
 }
 
 private int
@@ -2010,7 +2018,7 @@ magiccheck(struct magic_set *ms, struct magic *m)
   case FILE_REGEX: {
     int options = 0;
 
-    HPHP::String pattern((char *)m->value.s, m->vallen, HPHP::CopyString);
+    HPHP::OptString pattern((char *)m->value.s, m->vallen, HPHP::CopyString);
 
     options |= PCRE_MULTILINE;
     if (m->str_flags & STRING_IGNORE_CASE) {
@@ -2020,38 +2028,54 @@ magiccheck(struct magic_set *ms, struct magic *m)
     convert_libmagic_pattern(pattern, options);
     l = v = 0;
 
+    if (ms->search.s == NULL)
+      return 0;
+
     HPHP::Variant matches;
-    auto retval = preg_match_all(
+    auto const retval = preg_match(
       pattern,
-      HPHP::String(ms->search.s, ms->search.s_len, HPHP::CopyString),
+      HPHP::OptString(ms->search.s, ms->search.s_len, HPHP::CopyString),
       &matches,
       PREG_OFFSET_CAPTURE,
       0
     );
 
-    if (matches.isArray() && retval.isInteger() && retval.toInt64Val() > 0) {
-      auto subpats = matches.toArray();
-      auto global = subpats.lvalAt(0).unboxed();
-
-      for (HPHP::ArrayIter iter(global.tv()); iter; ++iter) {
-        auto pair = iter.second().toArray();
-        auto pattern_match = pair.lvalAt(0).unboxed();
-        auto pattern_offset = pair.lvalAt(1).unboxed();
-
-        if (!isNullType(pattern_match.type()) &&
-            !isNullType(pattern_offset.type())) {
-          auto const off = tvCastToInt64(pattern_offset.tv());
-          ms->search.s += off; /* this is where the match starts */
-          ms->search.offset += (size_t)off; /* this is where the match starts as size_t */
-          ms->search.rm_len = tvCastToString(pattern_match.tv()).size() /* This is the length of the matched pattern */;
-          v = 0;
-        } else {
-          return -1;
-        }
-      }
-    } else {
+    if (!retval.isInteger() || retval.asInt64Val() <= 0 || !matches.isArray()) {
       v = 1;
+      break;
     }
+
+    /* PREG_OFFSET_CAPTURE makes group 0 a (match, offset) pair. */
+    auto const group_zero = matches.asCArrRef()[0];
+    if (!group_zero.isArray()) {
+      return -1;
+    }
+
+    auto const& pair = group_zero.asCArrRef();
+    auto const match_str = pair[0];
+    auto const match_off = pair[1];
+    if (!match_str.isString() || !match_off.isInteger()) {
+      return -1;
+    }
+
+    auto const off = match_off.asInt64Val();
+    if (off < 0) {
+      return -1;
+    }
+
+    auto const match_offset = CAST(size_t, off);
+    auto const match_length = CAST(size_t, match_str.asCStrRef().size());
+
+    if (match_offset > ms->search.s_len ||
+        match_length > ms->search.s_len - match_offset) {
+      return -1;
+    }
+
+    ms->search.s += match_offset;
+    ms->search.s_len -= match_offset;
+    ms->search.offset += match_offset;
+    ms->search.rm_len = match_length;
+    v = 0;
     break;
   }
   case FILE_INDIRECT:

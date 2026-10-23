@@ -1,7 +1,7 @@
-<?php
+<?hh
 
-function main() {
-  $dom = new domDocument;
+function main() :mixed{
+  $dom = new DOMDocument;
   $string = <<<END
 <a>
   <b>c</b>
@@ -11,7 +11,11 @@ END;
   $dom->loadXML($string);
   $s = simplexml_import_dom($dom);
   $dom = null;
-  var_dump((string) $s->b);
+  var_dump($s->b->__toString());
 }
 
+
+<<__EntryPoint>>
+function main_simplexml_import_dom_refcount() :mixed{
 main();
+}

@@ -1,12 +1,18 @@
-<?php
+<?hh
 
-$tempfile = tempnam('/tmp', 'vmextfiletest');
+
+<<__EntryPoint>>
+function main_fstat() :mixed{
+$tempfile = tempnam(sys_get_temp_dir(), 'vmextfiletest');
 
 $f = fopen($tempfile, 'w');
 fputs($f, "testing fseek");
 fclose($f);
 
 $f = fopen($tempfile, "r");
-var_dump(fstat($f)['size']);
+$stats = fstat($f);
+var_dump($stats['size']);
+var_dump(is_darray($stats));
 
 unlink($tempfile);
+}

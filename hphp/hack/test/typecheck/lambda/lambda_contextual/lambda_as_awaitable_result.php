@@ -1,4 +1,4 @@
-<?hh //strict
+<?hh
 // Copyright 2004-present Facebook. All Rights Reserved.
 
 class C {
@@ -27,14 +27,15 @@ async function genBoo(): Awaitable<StringFun> {
     return "a";
   };
 }
+
 async function genv<Tv>(
   Traversable<Awaitable<Tv>> $awaitables,
 ): Awaitable<Vector<Tv>> {
-  //UNSAFE
+  return Vector {};
 }
 
 async function genNullable(arraykey $key): Awaitable<?C> {
-  // UNSAFE
+  return null;
 }
 async function moreComplexExample(varray<int> $property_ids): Awaitable<void> {
   $sss = array_map(

@@ -1,15 +1,22 @@
-<?php
+<?hh
 
-function foo() {
+function foo() :mixed{
   $var = 123;
-  $ref = 456;
   $abc = 789;
-  $a = function () use ($var, &$ref) {
-    var_dump($abc, $var, $ref);
-    $abc = $var = $ref = 333;
-  }
-;
+  $a = function() use ($var) {
+    try {
+      var_dump($abc, $var);
+    } catch (UndefinedVariableException $e) {
+      var_dump($e->getMessage());
+    }
+    $var = 333;
+    $abc = $var;
+  };
   var_dump($a());
-  var_dump($abc, $var, $ref);
+  var_dump($abc, $var);
 }
-foo();
+
+<<__EntryPoint>>
+function main_1921() :mixed{
+  foo();
+}

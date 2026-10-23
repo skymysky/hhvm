@@ -22,23 +22,19 @@
 #include <memory>
 #include <mutex>
 #include <string>
-#include <unordered_map>
 
-#ifdef _MSC_VER
-# include <windows.h>
-# include <dbghelp.h>
-#else
-# include <cxxabi.h>
-# include <execinfo.h>
-#endif
+#include <cxxabi.h>
+#include <execinfo.h>
 
-#include <folly/Format.h>
+#include <folly/Demangle.h>
+#include <fmt/core.h>
 
 #include "hphp/util/functional.h"
 #include "hphp/util/compatibility.h"
+#include "hphp/util/hash-map.h"
 
-#ifdef FACEBOOK
-#include <folly/experimental/symbolizer/Symbolizer.h>
+#ifdef HHVM_FACEBOOK
+#include <folly/debugging/symbolizer/Symbolizer.h>
 #endif
 
 namespace HPHP {
@@ -47,13 +43,18 @@ namespace HPHP {
 
 namespace {
 
-typedef std::lock_guard<std::mutex> G;
+using G = std::lock_guard<std::mutex>;
 std::mutex nameCacheLock;
-std::unordered_map<void*, std::string, pointer_hash<void>> nameCache;
+hphp_fast_map<void*, std::string, pointer_hash<void>> nameCache;
 
 }
 
 //////////////////////////////////////////////////////////////////////
+
+void registerNativeFunctionName(void* codeAddr, const std::string& name) {
+  G g(nameCacheLock);
+  nameCache[codeAddr] = name;
+}
 
 std::string getNativeFunctionName(void* codeAddr) {
   {
@@ -94,7 +95,7 @@ std::string getNativeFunctionName(void* codeAddr) {
   folly::symbolizer::Symbolizer symbolizer;
   folly::symbolizer::SymbolizedFrame frame;
   if (symbolizer.symbolize(uintptr_t(codeAddr), frame)) {
-    functionName = frame.demangledName().toStdString();
+    functionName = folly::demangle(frame.name).toStdString();
   }
 
 #else
@@ -109,11 +110,11 @@ std::string getNativeFunctionName(void* codeAddr) {
     // we first want to extract the mangled name from it to get this:
     // _ZN4HPHP2VM6Transl17interpOneIterInitEv
     //
-    // and then pass this to abi::__cxa_demangle to get the demanged name:
+    // and then pass this to abi::__cxa_demangle to get the demangled name:
     // HPHP::jit::interpOneIterInit()
     //
     // Sometimes, though, backtrace_symbols can't find the function name
-    // and ends up giving us a blank managled name, like this:
+    // and ends up giving us a blank mangled name, like this:
     // ../path/hhvm/hhvm() [0x17e4d01]
     // or this: [0x7fffca800130]
     //
@@ -137,7 +138,7 @@ std::string getNativeFunctionName(void* codeAddr) {
   free(symbols);
 #endif
 
-  if (functionName.empty()) functionName = folly::format("{}", codeAddr).str();
+  if (functionName.empty()) functionName = fmt::format("{}", codeAddr);
 
   G g(nameCacheLock);
   return nameCache[codeAddr] = functionName;

@@ -1,6 +1,4 @@
-<?php
-
-error_reporting(E_ALL);
+<?hh
 
 trait THello1 {
   public $hello = "hello";
@@ -13,15 +11,18 @@ trait THello2 {
 class TraitsTest {
 	use THello1;
 	use THello2;
-	function test() {
+	function test() :mixed{
 	    echo $this->hello . ' ' . $this->world;
 	}
 }
+<<__EntryPoint>>
+function main_entry(): void {
 
-var_dump(property_exists('TraitsTest', 'hello'));
-var_dump(property_exists('TraitsTest', 'world'));
+  error_reporting(E_ALL);
 
-$t = new TraitsTest;
-$t->test();
-?>
+  var_dump(property_exists('TraitsTest', 'hello'));
+  var_dump(property_exists('TraitsTest', 'world'));
 
+  $t = new TraitsTest;
+  $t->test();
+}

@@ -1,0 +1,65 @@
+(rule
+ (alias tast)
+ (deps
+  %{exe:../../src/hh_single_type_check.exe}
+  %{project_root}/hack/test/verify.py
+  %{project_root}/hack/test/review.sh
+  (glob_files %{project_root}/hack/test/hhi/XHPTest.hhi)
+  (glob_files %{project_root}/hack/test/tast/HH_FLAGS)
+  (glob_files %{project_root}/hack/test/tast/*.php)
+  (glob_files %{project_root}/hack/test/tast/*.exp)
+  (glob_files %{project_root}/hack/test/tast/class_level_where_clauses/HH_FLAGS)
+  (glob_files %{project_root}/hack/test/tast/class_level_where_clauses/*.php)
+  (glob_files %{project_root}/hack/test/tast/class_level_where_clauses/*.exp)
+  (glob_files %{project_root}/hack/test/tast/control_flow/HH_FLAGS)
+  (glob_files %{project_root}/hack/test/tast/control_flow/*.php)
+  (glob_files %{project_root}/hack/test/tast/control_flow/*.exp)
+  (glob_files %{project_root}/hack/test/tast/re_prefixed_string/HH_FLAGS)
+  (glob_files %{project_root}/hack/test/tast/re_prefixed_string/*.php)
+  (glob_files %{project_root}/hack/test/tast/re_prefixed_string/*.exp)
+  (glob_files %{project_root}/hack/test/tast/xhp_modifier/HH_FLAGS)
+  (glob_files %{project_root}/hack/test/tast/xhp_modifier/*.php)
+  (glob_files %{project_root}/hack/test/tast/xhp_modifier/*.exp))
+ (action
+  (run
+   %{project_root}/hack/test/verify.py
+   %{project_root}/hack/test/tast
+   --program
+   %{exe:../../src/hh_single_type_check.exe}
+   )))
+
+(rule
+ (alias tast_ordered_solving)
+ (deps
+  %{exe:../../src/hh_single_type_check.exe}
+  %{project_root}/hack/test/verify.py
+  %{project_root}/hack/test/review.sh
+  (glob_files %{project_root}/hack/test/hhi/XHPTest.hhi)
+  (glob_files %{project_root}/hack/test/tast/HH_FLAGS)
+  (glob_files %{project_root}/hack/test/tast/*.php)
+  (glob_files %{project_root}/hack/test/tast/*.exp)
+  (glob_files %{project_root}/hack/test/tast/class_level_where_clauses/HH_FLAGS)
+  (glob_files %{project_root}/hack/test/tast/class_level_where_clauses/*.php)
+  (glob_files %{project_root}/hack/test/tast/class_level_where_clauses/*.exp)
+  (glob_files %{project_root}/hack/test/tast/control_flow/HH_FLAGS)
+  (glob_files %{project_root}/hack/test/tast/control_flow/*.php)
+  (glob_files %{project_root}/hack/test/tast/control_flow/*.exp)
+  (glob_files %{project_root}/hack/test/tast/re_prefixed_string/HH_FLAGS)
+  (glob_files %{project_root}/hack/test/tast/re_prefixed_string/*.php)
+  (glob_files %{project_root}/hack/test/tast/re_prefixed_string/*.exp)
+  (glob_files %{project_root}/hack/test/tast/xhp_modifier/HH_FLAGS)
+  (glob_files %{project_root}/hack/test/tast/xhp_modifier/*.php)
+  (glob_files %{project_root}/hack/test/tast/xhp_modifier/*.exp))
+ (action
+  (run
+   %{project_root}/hack/test/verify.py
+   %{project_root}/hack/test/tast
+   --program
+   %{exe:../../src/hh_single_type_check.exe}
+   --flags
+   --ordered-solving)))
+
+(alias
+ (name runtest)
+ (deps
+  (alias tast)))

@@ -1,7 +1,11 @@
-<?php
-
-define('VALUE', 1);
-function func($params) {
+<?hh
+function func($params) :mixed{
  var_dump($params);
 }
-func(array('key' => @VALUE));
+
+
+const VALUE = 1;
+<<__EntryPoint>>
+function main_547() :mixed{
+func(dict['key' => VALUE]);
+}

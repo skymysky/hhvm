@@ -33,12 +33,12 @@ static bool getRandomBytes(void *bytes, size_t length) {
   return true;
 }
 
-String HHVM_FUNCTION(random_bytes, int64_t length) {
+OptString HHVM_FUNCTION(random_bytes, int64_t length) {
   if (length < 1) {
     SystemLib::throwErrorObject("Length must be greater than 0");
   }
 
-  String ret(length, ReserveString);
+  OptString ret(length, ReserveString);
   if (!getRandomBytes(ret.mutableData(), ret.capacity())) {
     SystemLib::throwErrorObject("Could not gather sufficient random data");
   }
@@ -92,16 +92,15 @@ int64_t HHVM_FUNCTION(random_int, int64_t min, int64_t max) {
   return getRandomInt(min, max);
 }
 
-static struct RandomExtension final : public Extension {
-  RandomExtension() : Extension("random") {}
-  void moduleInit() override {
+static struct RandomExtension final : Extension {
+  RandomExtension() : Extension("random", NO_EXTENSION_VERSION_YET, "hphp_hphpi") {}
+  void moduleRegisterNative() override {
     HHVM_FE(random_bytes);
     HHVM_FE(random_int);
-    loadSystemlib();
   }
 } s_random_extension;
 
-HHVM_GET_MODULE(random);
+HHVM_GET_MODULE(random)
 
 ///////////////////////////////////////////////////////////////////////////////
 }

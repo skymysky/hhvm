@@ -14,11 +14,16 @@
    +----------------------------------------------------------------------+
 */
 
+#ifndef incl_HPHP_VM_JIT_INSTRUCTION_INL_H_
+#error "ir-instruction-inl.h should only be included by ir-instruction.h"
+#endif
+
 #include "hphp/runtime/vm/jit/edge.h"
+#include "hphp/util/assertions.h"
 
 #include <utility>
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 ///////////////////////////////////////////////////////////////////////////////
 
 inline IRInstruction::IRInstruction(Opcode op,
@@ -54,11 +59,23 @@ inline bool IRInstruction::naryDst() const {
 }
 
 inline bool IRInstruction::consumesReferences() const {
-  return opcodeHasFlags(op(), ConsumesRC);
+  for (auto flag : g_opInfo[(uint16_t)op()].srcFlags) 
+    if ((flag & IRSrcFlag::Consume) == IRSrcFlag::Consume) 
+      return true;
+  return false;
 }
 
 inline bool IRInstruction::mayRaiseError() const {
   return opcodeMayRaise(op());
+}
+
+inline bool IRInstruction::mayRaiseErrorWithSources() const {
+  if (!mayRaiseError()) return false;
+  if (is(SameArrLike, NSameArrLike, EqArrLike, NeqArrLike)) {
+    // Keyset comparisons never re-enter or throw
+    return !(src(0)->type() <= TKeyset && src(1)->type() <= TKeyset);
+  }
+  return true;
 }
 
 inline bool IRInstruction::isTerminal() const {
@@ -73,14 +90,26 @@ inline bool IRInstruction::isPassthrough() const {
   return opcodeHasFlags(op(), Passthrough);
 }
 
+inline bool IRInstruction::isLayoutAgnostic() const {
+  return opcodeHasFlags(op(), LayoutAgnostic);
+}
+
+inline bool IRInstruction::isLayoutPreserving() const {
+  return opcodeHasFlags(op(), LayoutPreserving);
+}
+
 inline bool IRInstruction::producesReference() const {
   return opcodeHasFlags(op(), ProducesRC);
 }
 
+inline bool IRInstruction::producesNewReference() const {
+  return opcodeHasFlags(op(), ProducesNewRC);
+}
+
 inline SSATmp* IRInstruction::getPassthroughValue() const {
   assertx(isPassthrough());
-  assertx(is(CheckType, CheckVArray, CheckDArray,
-             AssertType, AssertNonNull, Mov));
+  assertx(is(CheckType, AssertType, CheckNonNull, AssertNonNull,
+             Mov, ConvPtrToLval, StructDictTypeBoundCheck));
   return src(0);
 }
 
@@ -161,13 +190,20 @@ inline uint32_t IRInstruction::numDsts() const {
 }
 
 inline SSATmp* IRInstruction::src(uint32_t i) const {
-  always_assert(i < numSrcs());
+  always_assert_flog(i < numSrcs(), "src {} out of range in {}", i, toString());
   return m_srcs[i];
 }
 
 inline SSATmp* IRInstruction::dst() const {
   assertx(!naryDst());
   return m_dest;
+}
+
+inline uint32_t IRInstruction::findDst(SSATmp* dst) const {
+  for (uint32_t i = 0; i < m_numDsts; ++i) {
+    if (m_dsts[i] == dst) return i;
+  }
+  return m_numDsts;
 }
 
 inline folly::Range<SSATmp**> IRInstruction::srcs() const {
@@ -178,6 +214,10 @@ inline folly::Range<SSATmp**> IRInstruction::dsts() {
   assertx(naryDst() || m_numDsts <= 1);
   if (hasDst()) return folly::Range<SSATmp**>(&m_dest, m_numDsts);
   return folly::Range<SSATmp**>(m_dsts, m_numDsts);
+}
+
+inline folly::Range<SSATmp* const *> IRInstruction::dsts() const {
+  return const_cast<IRInstruction*>(this)->dsts();
 }
 
 inline void IRInstruction::setSrc(uint32_t i, SSATmp* newSrc) {
@@ -200,6 +240,17 @@ inline void IRInstruction::setDst(SSATmp* newDst) {
   assertx(hasDst());
   m_dest = newDst;
   m_numDsts = newDst ? 1 : 0;
+}
+
+inline void IRInstruction::setDst(SSATmp* newDst, uint32_t i) {
+  assertx(i < numDsts());
+  assertx(newDst);
+  if (naryDst()) {
+    m_dsts[i] = newDst;
+  } else {
+    assertx(i == 0);
+    setDst(newDst);
+  }
 }
 
 inline void IRInstruction::setDsts(uint32_t numDsts, SSATmp** newDsts) {
@@ -234,14 +285,26 @@ typename IRExtraDataType<opc>::type* IRInstruction::extra() {
   return static_cast<typename IRExtraDataType<opc>::type*>(m_extra);
 }
 
-template<class T>
+template<typename T>
 const T* IRInstruction::extra() const {
   if (debug) assert_opcode_extra<T>(op());
   return static_cast<const T*>(m_extra);
 }
 
+template<typename T>
+T* IRInstruction::extra() {
+  if (debug) assert_opcode_extra<T>(op());
+  return static_cast<T*>(m_extra);
+}
+
 inline const IRExtraData* IRInstruction::rawExtra() const {
   return m_extra;
+}
+
+inline void IRInstruction:: updateStackOffsetsExtra(int32_t delta) {
+  if (m_extra) {
+    jit::updateStackOffsetsExtra(m_op, m_extra, delta);
+  }
 }
 
 inline void IRInstruction::setExtra(IRExtraData* data) {
@@ -320,6 +383,10 @@ inline void IRInstruction::clearEdges() {
   m_edges = nullptr;
 }
 
+inline bool IRInstruction::isNextEdgeUnreachable() const {
+  return hasDst() && !naryDst() && outputType(this) == TBottom;
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 
-}}
+}

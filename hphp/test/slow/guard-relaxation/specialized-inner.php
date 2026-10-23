@@ -1,14 +1,18 @@
-<?php
+<?hh
 
 
-function callee(HH\Map &$c) {
+function callee(inout HH\Map $c) :mixed{
 
 }
 
-function main() {
+function main() :mixed{
   $c = HH\Map {};
-  callee($c);
+  callee(inout $c);
   var_dump($c);
 }
 
+
+<<__EntryPoint>>
+function main_specialized_inner() :mixed{
 main();
+}

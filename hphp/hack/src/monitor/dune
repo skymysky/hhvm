@@ -1,0 +1,28 @@
+(library
+ (name server_monitor)
+ (wrapped false)
+ (libraries
+  collections
+  connection_tracker
+  core_kernel
+  exec_command
+  hg_states
+  libancillary
+  logging
+  marshal_tools
+  monitor_client_api
+  hh_server_monitor
+  messages
+  monitor_rpc
+  process
+  process_types
+  relative_path
+  server_args
+  server_command_types
+  server_files
+  socket
+  sys_utils
+  config_file
+  watchman)
+ (preprocess
+  (pps lwt_ppx ppx_deriving.std)))

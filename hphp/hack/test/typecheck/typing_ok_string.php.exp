@@ -1,1 +1,15 @@
-No errors
+error: Typing[4110] Only string and int values can be used in string interpolation [1]
+-> Expected `string` or `int` [1]
+-> But got `A` [2]
+
+typing_ok_string.php:21:11
+18 | function main(): void {
+19 |   $x = 4;
+20 |   $z = new A();
+   |            ^ [2]
+21 |   $y = "$x$z";
+   |           ^^ [1]
+22 |   echo $y;
+23 | }
+
+1 error found

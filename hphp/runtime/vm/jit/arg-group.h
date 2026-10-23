@@ -13,8 +13,7 @@
    | license@php.net so we can mail you a copy immediately.               |
    +----------------------------------------------------------------------+
 */
-#ifndef incl_HPHP_JIT_ARG_GROUP_H
-#define incl_HPHP_JIT_ARG_GROUP_H
+#pragma once
 
 #include "hphp/runtime/vm/jit/containers.h"
 #include "hphp/runtime/vm/jit/reg-alloc.h"
@@ -22,7 +21,7 @@
 
 #include "hphp/util/arch.h"
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 
 struct SSATmp;
 struct IRInstruction;
@@ -46,8 +45,7 @@ namespace NativeCalls { struct CallInfo; }
 enum class DestType : uint8_t {
   None,      // return void (no valid registers)
   Indirect,  // return struct/object to the address in the first arg
-  SSA,       // return a single-register value
-  SSAPair,   // return a pair of registers
+  SSA,       // return an SSA value in 1 or 2 integer registers
   Byte,      // return a single-byte register value
   TV,        // return a TypedValue packed in two registers
   Dbl,       // return scalar double in a single FP register
@@ -79,12 +77,11 @@ struct ArgDesc {
     Addr,    // Address (register plus 32-bit displacement)
     DataPtr, // Pointer to data section
     IndRet,  // Indirect Return Address (register plus 32-bit displacement)
+    SpilledTV, // Address of TypedValue pushed onto the stack
   };
 
-  PhysReg dstReg() const { return m_dstReg; }
   Vreg srcReg() const { return m_srcReg; }
   Kind kind() const { return m_kind; }
-  void setDstReg(PhysReg reg) { m_dstReg = reg; }
   Immed64 imm() const {
     assertx(m_kind == Kind::Imm || m_kind == Kind::DataPtr);
     return m_imm64;
@@ -98,9 +95,13 @@ struct ArgDesc {
             m_kind == Kind::IndRet);
     return m_disp32;
   }
+  Vreg srcReg2() const {
+    assertx(m_kind == Kind::SpilledTV);
+    return m_srcReg2;
+  }
+
   bool isZeroExtend() const { return m_zeroExtend; }
-  bool done() const { return m_done; }
-  void markDone() { m_done = true; }
+  Optional<AuxUnion> aux() const { return m_aux; }
 
 private: // These should be created using ArgGroup.
   friend struct ArgGroup;
@@ -120,19 +121,28 @@ private: // These should be created using ArgGroup.
     : m_kind(kind)
   {}
 
-  explicit ArgDesc(SSATmp* tmp, Vloc, bool val = true);
+  explicit ArgDesc(Kind kind, Vreg srcReg1, Vreg srcReg2)
+    : m_kind(kind)
+    , m_srcReg(srcReg1)
+    , m_srcReg2(srcReg2)
+  {}
+
+  explicit ArgDesc(SSATmp* tmp,
+                   Vloc,
+                   bool val = true,
+                   Optional<AuxUnion> aux = std::nullopt);
 
 private:
   Kind m_kind;
   Vreg m_srcReg;
-  PhysReg m_dstReg;
   union {
     Immed64 m_imm64; // 64-bit plain immediate
     Immed m_disp32;  // 32-bit displacement
     DataType m_typeImm;
+    Vreg m_srcReg2;
   };
+  Optional<AuxUnion> m_aux;
   bool m_zeroExtend{false};
-  bool m_done{false};
 };
 
 //////////////////////////////////////////////////////////////////////
@@ -150,7 +160,7 @@ private:
  *   assertx(args.size() == 3);
  */
 struct ArgGroup {
-  typedef jit::vector<ArgDesc> ArgVec;
+  using ArgVec = jit::vector<ArgDesc>;
 
   explicit ArgGroup(const IRInstruction* inst,
                     const StateVector<SSATmp,Vloc>& locs)
@@ -223,25 +233,13 @@ struct ArgGroup {
     return *this;
   }
 
-  ArgGroup& ssa(int i, bool allowFP = true) {
-    auto s = m_inst->src(i);
-    ArgDesc arg(s, m_locs[s]);
-    if (s->isA(TDbl) && allowFP) {
-      push_SIMDarg(arg, s->type());
-      if (arch() == Arch::PPC64) {
-        // PPC64 ABIv2 compliant: reserve the aligned GP if FP is used
-        push_arg(ArgDesc(ArgDesc::Kind::Imm, 0)); // Push a dummy parameter
-      }
-    } else {
-      push_arg(arg, s->type());
-    }
-    return *this;
-  }
+  ArgGroup& ssa(int i, bool allowFP = true);
+  ArgGroup& fp(int i);
 
   /*
    * Pass tmp as a TypedValue passed by value.
    */
-  ArgGroup& typedValue(int i);
+  ArgGroup& typedValue(int i, Optional<AuxUnion> aux = std::nullopt);
 
   ArgGroup& memberKeyIS(int i) {
     return memberKeyImpl(i, true);
@@ -249,6 +247,16 @@ struct ArgGroup {
 
   ArgGroup& memberKeyS(int i) {
     return memberKeyImpl(i, false);
+  }
+
+  /*
+   * Push a TypedValue onto the stack and pass its address. This is
+   * needed, for example, if you want to pass a tv_lval to a function
+   * expecting a const Variant&.
+   */
+  ArgGroup& constPtrToTV(Vreg type, Vreg data) {
+    push_arg(ArgDesc(ArgDesc::Kind::SpilledTV, type, data));
+    return *this;
   }
 
   const IRInstruction* inst() const {
@@ -262,9 +270,9 @@ private:
   /*
    * For passing the m_type field of a TypedValue.
    */
-  ArgGroup& type(int i) {
+  ArgGroup& type(int i, Optional<AuxUnion> aux) {
     auto s = m_inst->src(i);
-    push_arg(ArgDesc(s, m_locs[s], false));
+    push_arg(ArgDesc(s, m_locs[s], false, aux));
     return *this;
   }
 
@@ -284,12 +292,11 @@ private:
   ArgVec m_gpArgs; // INTEGER class args
   ArgVec m_simdArgs; // SSE class args
   ArgVec m_stkArgs; // Overflow
-  std::vector<Type> m_argTypes;
+  jit::vector<Type> m_argTypes;
 };
 
 ArgGroup toArgGroup(const NativeCalls::CallInfo&,
                     const StateVector<SSATmp,Vloc>& locs,
                     const IRInstruction*);
 
-}}
-#endif
+}

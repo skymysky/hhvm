@@ -1,4 +1,4 @@
-(**
+(*
  * Copyright (c) 2015, Facebook, Inc.
  * All rights reserved.
  *
@@ -7,8 +7,6 @@
  *
  *
  *)
-
-open Integration_test_base_types
 
 module Test = Integration_test_base
 
@@ -22,7 +20,8 @@ class C {
 }
 "
 
-let foo_contents_with_parse_error = "<?hh
+let foo_contents_with_parse_error =
+  "<?hh
 class C {
   public function bar() {PARSE_ERROR
 
@@ -38,34 +37,49 @@ function test() {
 }
 "
 
-let run_and_check_autocomplete env expected_rechecked =
-  (* Simulate time passing to trigger recheck *)
-  let env = Test.wait env in
-  let env, loop_output = Test.(run_loop_once env default_loop_input) in
+let test () =
+  Test.Client.with_env ~custom_config:None @@ fun env ->
+  (* Two unsaved files. Autocomplete doesn't respect other unsaved files. *)
+  let (env, _diagnostics) = Test.Client.edit_file env foo_name foo_contents in
+  let (env, _diagnostics) = Test.Client.edit_file env bar_name bar_contents in
+  let (env, response) =
+    Client_ide_daemon.Test.handle
+      env
+      Client_ide_message.(
+        Completion
+          ( Test.doc bar_name bar_contents,
+            File_content.Position.from_one_based 3 15,
+            { is_manually_invoked = true } ))
+  in
+  Test.assert_ide_completions response [];
 
-  if loop_output.rechecked_count != expected_rechecked then
-    Test.fail
-      (Printf.sprintf "Expected %d files to be rechecked" expected_rechecked);
+  (* save one file, so the other now will respect it *)
+  let env = Test.Client.setup_disk env [(foo_name, foo_contents)] in
+  let (env, response) =
+    Client_ide_daemon.Test.handle
+      env
+      Client_ide_message.(
+        Completion
+          ( Test.doc bar_name bar_contents,
+            File_content.Position.from_one_based 3 15,
+            { is_manually_invoked = true } ))
+  in
+  Test.assert_ide_completions response ["foo"];
 
-  let env, loop_output = Test.ide_autocomplete env (bar_name, 3, 15) in
-  Test.assert_ide_autocomplete loop_output ["foo"];
-  env, loop_output
+  (* even with parse errors, it is still respected *)
+  let env =
+    Test.Client.setup_disk env [(foo_name, foo_contents_with_parse_error)]
+  in
+  let (env, response) =
+    Client_ide_daemon.Test.handle
+      env
+      Client_ide_message.(
+        Completion
+          ( Test.doc bar_name bar_contents,
+            File_content.Position.from_one_based 3 15,
+            { is_manually_invoked = true } ))
+  in
+  Test.assert_ide_completions response ["bar"];
 
-let () =
-
-  let env = Test.setup_server () in
-  let env = Test.connect_persistent_client env in
-
-  (* Create and put content in two files *)
-  let env = Test.open_file env foo_name ~contents:foo_contents in
-  let env = Test.open_file env bar_name ~contents:bar_contents in
-
-  (* Check that autocompletions in one file are aware of definitions in
-   * another one*)
-  let env, _ = run_and_check_autocomplete env 2 in
-
-  let env, _ = Test.edit_file env foo_name foo_contents_with_parse_error in
-  (* If C had parse errors, we'll not update it's declarations, so
-   * the result will not change *)
-  let _ = run_and_check_autocomplete env 1 in
+  ignore env;
   ()

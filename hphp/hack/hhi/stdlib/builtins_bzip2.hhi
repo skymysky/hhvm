@@ -1,4 +1,4 @@
-<?hh     /* -*- php -*- */
+<?hh /* -*- php -*- */
 /**
  * Copyright (c) 2014, Facebook, Inc.
  * All rights reserved.
@@ -9,22 +9,36 @@
  */
 
 <<__PHPStdLib>>
-function bzclose($bz) { }
+function bzclose(resource $bz): bool;
 <<__PHPStdLib>>
-function bzopen($filename, $mode) { }
+function bzopen(
+  HH\FIXME\MISSING_PARAM_TYPE $filename,
+  string $mode,
+): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function bzread($bz, $length = 1024) { }
+function bzread(resource $bz, int $length = 1024): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function bzwrite($bz, $data, $length = 0) { }
+function bzwrite(
+  resource $bz,
+  string $data,
+  int $length = 0,
+): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function bzflush($bz) { }
+function bzflush(resource $bz): bool;
 <<__PHPStdLib>>
-function bzerrstr($bz) { }
+function bzerrstr(resource $bz): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function bzerror($bz) { }
+function bzerror(resource $bz): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function bzerrno($bz) { }
-<<__PHPStdLib, __Rx>>
-function bzcompress($source, $blocksize = 4, $workfactor = 0) { }
-<<__PHPStdLib, __Rx>>
-function bzdecompress($source, $small = 0) { }
+function bzerrno(resource $bz): HH\FIXME\MISSING_RETURN_TYPE;
+<<__PHPStdLib>>
+function bzcompress(
+  string $source,
+  int $blocksize = 4,
+  int $workfactor = 0,
+)[]: HH\FIXME\MISSING_RETURN_TYPE;
+<<__PHPStdLib>>
+function bzdecompress(
+  string $source,
+  int $small = 0,
+)[]: HH\FIXME\MISSING_RETURN_TYPE;

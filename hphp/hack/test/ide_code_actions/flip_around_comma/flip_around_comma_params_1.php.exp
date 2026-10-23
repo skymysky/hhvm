@@ -1,0 +1,37 @@
+Code actions available:
+------------------------------------------
+Flip around comma (CodeActionKind: "refactor") SELECTED
+
+JSON for selected code action:
+------------------------------------------
+{
+  "title": "Flip around comma",
+  "kind": "refactor",
+  "diagnostics": [],
+  "edit": {
+    "changes": {
+      "FILE.php": [
+        {
+          "range": {
+            "start": { "line": 7, "character": 22 },
+            "end": { "line": 7, "character": 69 }
+          },
+          "newText": "int $b, Box<int> $a"
+        }
+      ]
+    }
+  }
+}
+
+Applied edit for code action:
+------------------------------------------
+<?hh
+
+class Box<T> {
+  public function __construct(public T $val){}
+}
+
+class Klass {
+  public function foo(int $b, Box<int> $a): void {}
+}
+

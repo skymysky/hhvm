@@ -1,0 +1,18 @@
+error: Typing[4110] Invalid argument [1]
+-> Expected bool [2]
+-> But got int [1]
+
+builtin_call_bad_arg.php:4:25
+     2 | 
+     3 | function f(): void {
+[1]  4 |   fb_output_compression(3);
+     5 | }
+
+/tmp/XHJWdJQ3gj/builtins_fb.hhi:89:5
+    87 |   <<__PHPStdLib>>
+    88 |   function fb_output_compression(
+[2] 89 |     bool $new_value,
+    90 |   ): bool;
+    91 |   <<__PHPStdLib>>
+
+1 error found

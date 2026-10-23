@@ -1,0 +1,92 @@
+(library
+ (name client)
+ (wrapped false)
+ (modules
+  (:standard
+   \
+   client_log_command
+   client_get_definition
+   client_highlight_refs
+   outline_for_agents
+   server_progress_lwt))
+ (libraries
+  agent_session_id_stubs
+  connection_tracker
+  client_get_definition
+  client_highlight_refs
+  client_ide_service
+  clowder_paste
+  edenfs_watcher_stubs
+  flytrap
+  formatting_stubs
+  hh_server_monitor
+  ide_format
+  logging
+  lwt
+  lwt.unix
+  lwt_utils
+  messages
+  notebook_convert
+  nuclide_rpc_message_printer
+  outline_for_agents
+  pos
+  rage
+  redeclarations
+  sandcastle
+  server
+  server_command_types
+  server_local_config_qe_stubs
+  server_monitor
+  server_notifier_types
+  server_progress
+  server_progress_lwt
+  server_utils
+  state_loader
+  sys_utils
+  utils_config_file_lwt
+  watchman_lwt
+  yojson
+  version
+  hover_service
+  server_autocomplete_services)
+ (preprocess
+  (pps
+   lwt_ppx ppx_deriving.std
+   ppx_variants_conv
+   ppx_yojson_conv)))
+
+(library
+ (name client_get_definition)
+ (wrapped false)
+ (modules client_get_definition)
+ (libraries nuclide_rpc_message_printer server_file_outline sys_utils)
+ (preprocess
+  (pps lwt_ppx ppx_deriving.std)))
+
+(library
+ (name client_highlight_refs)
+ (wrapped false)
+ (modules client_highlight_refs)
+ (libraries pos nuclide_rpc_message_printer server sys_utils)
+ (preprocess
+  (pps lwt_ppx ppx_deriving.std)))
+
+(library
+ (name server_progress_lwt)
+ (wrapped false)
+ (modules server_progress_lwt)
+ (libraries
+   server_progress)
+ (preprocess
+  (pps lwt_ppx ppx_deriving.std)))
+
+(library
+ (name outline_for_agents)
+ (wrapped false)
+ (modules outline_for_agents)
+ (libraries
+  full_fidelity
+  relative_path
+  utils_core)
+ (preprocess
+  (pps lwt_ppx ppx_deriving.std)))

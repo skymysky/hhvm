@@ -14,13 +14,14 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_WARMUP_REQUEST_HANDLER_H_
-#define incl_HPHP_WARMUP_REQUEST_HANDLER_H_
+#pragma once
 
 #include <memory>
 
+#include "hphp/runtime/base/init-fini-node.h"
 #include "hphp/runtime/server/server.h"
 #include "hphp/runtime/server/http-request-handler.h"
+#include "hphp/util/job-queue.h"
 
 namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
@@ -72,7 +73,32 @@ private:
   Server *m_server;
 };
 
+struct WarmupJob {
+  const std::string hdfFile;
+  unsigned index;
+};
+
+struct InternalWarmupWorker : JobQueueWorker<WarmupJob> {
+  void doJob(WarmupJob job) override;
+};
+
+struct InternalWarmupRequestPlayer : JobQueueDispatcher<InternalWarmupWorker> {
+  explicit InternalWarmupRequestPlayer(int threadCount, bool dedup = false);
+  ~InternalWarmupRequestPlayer();
+
+  // Start running after an optional delay.
+  void runAfterDelay(const std::vector<std::string>& files,
+                     unsigned nTimes = 1,
+                     unsigned delaySeconds = 0);
+private:
+  // If set, duplicated files in the list will be ignored (but it is still
+  // possible to play each file multiple times by setting nTimes in
+  // runAfterDelay).
+  bool m_noDuplicate;
+};
+
+// Can run multiple times, e.g., upon code changes.
+void replayExtendedWarmupRequests();
+
 ///////////////////////////////////////////////////////////////////////////////
 }
-
-#endif // incl_HPHP_WARMUP_REQUEST_HANDLER_H_

@@ -1,4 +1,4 @@
-<?hh // decl /* -*- php -*- */
+<?hh /* -*- php -*- */
 /**
  * Copyright (c) 2014, Facebook, Inc.
  * All rights reserved.
@@ -8,69 +8,85 @@
  *
  */
 
-const XML_ATTRIBUTE_DECL_NODE = 16;
-const XML_ATTRIBUTE_NODE = 2;
-const XML_CDATA_SECTION_NODE = 4;
-const XML_COMMENT_NODE = 8;
-const XML_DOCUMENT_FRAG_NODE = 11;
-const XML_DOCUMENT_NODE = 9;
-const XML_DOCUMENT_TYPE_NODE = 10;
-const XML_DTD_NODE = 14;
-const XML_ELEMENT_DECL_NODE = 15;
-const XML_ELEMENT_NODE = 1;
-const XML_ENTITY_DECL_NODE = 17;
-const XML_ENTITY_NODE = 6;
-const XML_ENTITY_REF_NODE = 5;
-const XML_HTML_DOCUMENT_NODE = 13;
-const XML_NAMESPACE_DECL_NODE = 18;
-const XML_NOTATION_NODE = 12;
-const XML_PI_NODE = 7;
-const XML_TEXT_NODE = 3;
+const int XML_ATTRIBUTE_DECL_NODE;
+const int XML_ATTRIBUTE_NODE;
+const int XML_CDATA_SECTION_NODE;
+const int XML_COMMENT_NODE;
+const int XML_DOCUMENT_FRAG_NODE;
+const int XML_DOCUMENT_NODE;
+const int XML_DOCUMENT_TYPE_NODE;
+const int XML_DTD_NODE;
+const int XML_ELEMENT_DECL_NODE;
+const int XML_ELEMENT_NODE;
+const int XML_ENTITY_DECL_NODE;
+const int XML_ENTITY_NODE;
+const int XML_ENTITY_REF_NODE;
+const int XML_HTML_DOCUMENT_NODE;
+const int XML_NAMESPACE_DECL_NODE;
+const int XML_NOTATION_NODE;
+const int XML_PI_NODE;
+const int XML_TEXT_NODE;
 
-const XML_LOCAL_NAMESPACE = 18;
+const int XML_LOCAL_NAMESPACE;
 
-const XML_ATTRIBUTE_CDATA = 1;
-const XML_ATTRIBUTE_ENTITY = 6;
-const XML_ATTRIBUTE_ENUMERATION = 9;
-const XML_ATTRIBUTE_ID = 2;
-const XML_ATTRIBUTE_IDREF = 3;
-const XML_ATTRIBUTE_IDREFS = 4;
-const XML_ATTRIBUTE_NMTOKEN = 7;
-const XML_ATTRIBUTE_NMTOKENS = 8;
-const XML_ATTRIBUTE_NOTATION = 10;
+const int XML_ATTRIBUTE_CDATA;
+const int XML_ATTRIBUTE_ENTITY;
+const int XML_ATTRIBUTE_ENUMERATION;
+const int XML_ATTRIBUTE_ID;
+const int XML_ATTRIBUTE_IDREF;
+const int XML_ATTRIBUTE_IDREFS;
+const int XML_ATTRIBUTE_NMTOKEN;
+const int XML_ATTRIBUTE_NMTOKENS;
+const int XML_ATTRIBUTE_NOTATION;
 
-const int DOM_PHP_ERR = 0;
-const int DOM_INDEX_SIZE_ERR = 1;
-const int DOMSTRING_SIZE_ERR = 2;
-const int DOM_HIERARCHY_REQUEST_ERR = 3;
-const int DOM_WRONG_DOCUMENT_ERR = 4;
-const int DOM_INVALID_CHARACTER_ERR = 5;
-const int DOM_NO_DATA_ALLOWED_ERR = 6;
-const int DOM_NO_MODIFICATION_ALLOWED_ERR = 7;
-const int DOM_NOT_FOUND_ERR = 8;
-const int DOM_NOT_SUPPORTED_ERR = 9;
-const int DOM_INUSE_ATTRIBUTE_ERR = 10;
-const int DOM_INVALID_STATE_ERR = 11;
-const int DOM_SYNTAX_ERR = 12;
-const int DOM_INVALID_MODIFICATION_ERR = 13;
-const int DOM_NAMESPACE_ERR = 14;
-const int DOM_INVALID_ACCESS_ERR = 15;
-const int DOM_VALIDATION_ERR = 16;
+const int DOM_PHP_ERR;
+const int DOM_INDEX_SIZE_ERR;
+const int DOMSTRING_SIZE_ERR;
+const int DOM_HIERARCHY_REQUEST_ERR;
+const int DOM_WRONG_DOCUMENT_ERR;
+const int DOM_INVALID_CHARACTER_ERR;
+const int DOM_NO_DATA_ALLOWED_ERR;
+const int DOM_NO_MODIFICATION_ALLOWED_ERR;
+const int DOM_NOT_FOUND_ERR;
+const int DOM_NOT_SUPPORTED_ERR;
+const int DOM_INUSE_ATTRIBUTE_ERR;
+const int DOM_INVALID_STATE_ERR;
+const int DOM_SYNTAX_ERR;
+const int DOM_INVALID_MODIFICATION_ERR;
+const int DOM_NAMESPACE_ERR;
+const int DOM_INVALID_ACCESS_ERR;
+const int DOM_VALIDATION_ERR;
 
 class DOMXPath {
-  public function __construct($doc);
-  public function evaluate($expr, $context = null);
-  public function query($expr, $context = null);
-  public function registerNamespace($prefix, $uri);
-  public function registerPHPFunctions($funcs = null);
+  public function __construct(HH\FIXME\MISSING_PARAM_TYPE $doc);
+  public function evaluate(
+    string $expr,
+    HH\FIXME\MISSING_PARAM_TYPE $context = null,
+  ): HH\FIXME\MISSING_RETURN_TYPE;
+  public function query(
+    string $expr,
+    HH\FIXME\MISSING_PARAM_TYPE $context = null,
+  ): HH\FIXME\MISSING_RETURN_TYPE;
+  public function registerNamespace(
+    string $prefix,
+    string $uri,
+  ): bool;
+  public function registerPHPFunctions(
+    HH\FIXME\MISSING_PARAM_TYPE $funcs = null,
+  ): HH\FIXME\MISSING_RETURN_TYPE;
 }
 
-class DOMNodeList<Tnode as DOMNode> implements Traversable<Tnode> {
+class DOMNodeList<+Tnode as DOMNode> implements IteratorAggregate<Tnode> {
   /* Properties */
   /* readonly */ public int $length;
 
   // Methods
   public function item(int $index): Tnode;
+
+  /**
+   * Actually returns DOMNodeIterator which is not exposed as an HHI
+   */
+  public function getIterator(): Iterator<Tnode>;
 }
 
 class DOMNamedNodeMap<Tnode as DOMNode>
@@ -93,7 +109,7 @@ class DOMNode {
   /* readonly */ public string $nodeName;
   public string $nodeValue;
   /* readonly */ public int $nodeType;
-  /* readonly */ public $parentNode;
+  /* readonly */ public HH\FIXME\MISSING_PROP_TYPE $parentNode;
   /* readonly */ public DOMNodeList<DOMNode> $childNodes;
   /* readonly */ public ?DOMNode $firstChild;
   /* readonly */ public ?DOMNode $lastChild;
@@ -110,7 +126,7 @@ class DOMNode {
   // methods
   public function __construct();
   public function appendChild<T as DOMNode>(T $newnode): T;
-  public function cloneNode($deep = false): this;
+  public function cloneNode(bool $deep = false): this;
   public function getLineNo(): int;
   public function hasAttributes(): bool;
   public function hasChildNodes(): bool;
@@ -120,26 +136,29 @@ class DOMNode {
   ): T;
   public function isDefaultNamespace(string $namespaceuri): bool;
   public function isSameNode(DOMNode $node): bool;
-  public function isSupported($feature, $version): bool;
+  public function isSupported(string $feature, string $version): bool;
   public function lookupNamespaceUri(?string $prefix): string;
   public function lookupPrefix(string $namespaceURI): string;
   public function normalize(): void;
-  public function removeChild($node): DOMNode;
-  public function replaceChild<T as DOMNode>(DOMNode $newchildobj, T $oldchildobj): T;
-  public function C14N(bool $exclusive = false,
-                       bool $with_comments = false,
-                       /* HH_IGNORE_ERROR[2071] */
-                       ?darray $xpath = null,
-                       /* HH_IGNORE_ERROR[2071] */
-                       ?varray $ns_prefixes = null): string;
-  public function C14NFile(string $uri,
-                           bool $exclusive = false,
-                           bool $with_comments = false,
-                           /* HH_IGNORE_ERROR[2071] */
-                           ?darray $xpath = null,
-                           /* HH_IGNORE_ERROR[2071] */
-                           ?varray $ns_prefixes = null): int;
-  public function getNodePath();
+  public function removeChild(HH\FIXME\MISSING_PARAM_TYPE $node): DOMNode;
+  public function replaceChild<T as DOMNode>(
+    DOMNode $newchildobj,
+    T $oldchildobj,
+  ): T;
+  public function C14N(
+    bool $exclusive = false,
+    bool $with_comments = false,
+    ?darray<arraykey, mixed> $xpath = null,
+    ?varray<mixed> $ns_prefixes = null,
+  ): string;
+  public function C14Nfile(
+    string $uri,
+    bool $exclusive = false,
+    bool $with_comments = false,
+    ?darray<arraykey, mixed> $xpath = null,
+    ?varray<mixed> $ns_prefixes = null,
+  ): int;
+  public function getNodePath(): HH\FIXME\MISSING_RETURN_TYPE;
 }
 
 class DOMDocument extends DOMNode {
@@ -165,40 +184,105 @@ class DOMDocument extends DOMNode {
   public string $xmlVersion;
 
   // methods
-  public function __construct($version = null, $encoding = null);
-  public function createAttribute($name);
-  public function createAttributens($namespaceuri, $qualifiedname);
-  public function createCDATASection($data);
-  public function createComment($data);
-  public function createDocumentFragment();
-  public function createElement($name, $value = null);
-  public function createElementNS($namespaceuri, $qualifiedname, $value = null);
-  public function createEntityReference($name);
-  public function createProcessingInstruction($target, $data = null);
-  public function createTextNode($data);
-  public function getElementById($elementid);
-  public function getElementsByTagName($name): DOMNodeList<DOMElement>;
+  public function __construct(
+    HH\FIXME\MISSING_PARAM_TYPE $version = null,
+    HH\FIXME\MISSING_PARAM_TYPE $encoding = null,
+  );
+  public function createAttribute(string $name): HH\FIXME\MISSING_RETURN_TYPE;
+  public function createAttributeNS(
+    string $namespaceuri,
+    string $qualifiedname,
+  ): HH\FIXME\MISSING_RETURN_TYPE;
+  public function createCDATASection(
+    string $data,
+  ): HH\FIXME\MISSING_RETURN_TYPE;
+  public function createComment(string $data): HH\FIXME\MISSING_RETURN_TYPE;
+  public function createDocumentFragment(): HH\FIXME\MISSING_RETURN_TYPE;
+  public function createElement(
+    string $name,
+    HH\FIXME\MISSING_PARAM_TYPE $value = null,
+  ): HH\FIXME\MISSING_RETURN_TYPE;
+  public function createElementNS(
+    string $namespaceuri,
+    string $qualifiedname,
+    HH\FIXME\MISSING_PARAM_TYPE $value = null,
+  ): HH\FIXME\MISSING_RETURN_TYPE;
+  public function createElementTyped(
+    string $name,
+    ?string $value = null,
+  ): DOMElement;
+  public function createElementNSTyped(
+    string $namespaceuri,
+    string $qualifiedname,
+    ?string $value = null,
+  ): DOMElement;
+  public function createEntityReference(
+    string $name,
+  ): HH\FIXME\MISSING_RETURN_TYPE;
+  public function createProcessingInstruction(
+    string $target,
+    HH\FIXME\MISSING_PARAM_TYPE $data = null,
+  ): HH\FIXME\MISSING_RETURN_TYPE;
+  public function createTextNode(string $data): HH\FIXME\MISSING_RETURN_TYPE;
+  public function getElementById(
+    string $elementid,
+  ): HH\FIXME\MISSING_RETURN_TYPE;
+  public function getElementsByTagName(string $name): DOMNodeList<DOMElement>;
   public function getElementsByTagNameNS(
-    $namespaceuri,
-    $localname,
+    string $namespaceuri,
+    string $localname,
   ): DOMNodeList<DOMElement>;
-  public function importNode($importednode, $deep = false);
-  public function load($filename, $options = 0);
-  public function loadHTML($source, $options = 0);
-  public function loadHTMLFile($filename, $options = 0);
-  public function loadXML($source, $options = 0);
-  public function normalizeDocument();
-  public function registerNodeClass($baseclass, $extendedclass);
-  public function relaxNGValidate($filename);
-  public function relaxNGValidateSource($source);
-  public function save($file, $options = 0);
-  public function saveHTML($node = null);
-  public function saveHTMLFile($file);
-  public function saveXML($node = null, $options = 0);
-  public function schemaValidate($filename);
-  public function schemaValidateSource($source);
-  public function validate();
-  public function xinclude($options = 0);
+  public function importNode(
+    HH\FIXME\MISSING_PARAM_TYPE $importednode,
+    bool $deep = false,
+  ): HH\FIXME\MISSING_RETURN_TYPE;
+  public function load(
+    HH\FIXME\MISSING_PARAM_TYPE $filename,
+    HH\FIXME\MISSING_PARAM_TYPE $options = 0,
+  ): bool;
+  public function loadHTML(
+    HH\FIXME\MISSING_PARAM_TYPE $source,
+    HH\FIXME\MISSING_PARAM_TYPE $options = 0,
+  ): bool;
+  public function loadHTMLFile(
+    HH\FIXME\MISSING_PARAM_TYPE $filename,
+    HH\FIXME\MISSING_PARAM_TYPE $options = 0,
+  ): bool;
+  public function loadXML(
+    HH\FIXME\MISSING_PARAM_TYPE $source,
+    HH\FIXME\MISSING_PARAM_TYPE $options = 0,
+  ): bool;
+  public function normalizeDocument(): HH\FIXME\MISSING_RETURN_TYPE;
+  public function registerNodeClass(
+    string $baseclass,
+    string $extendedclass,
+  ): bool;
+  public function relaxNGValidate(
+    string $filename,
+  ): bool;
+  public function relaxNGValidateSource(
+    string $source,
+  ): bool;
+  public function save(
+    string $file,
+    int $options = 0,
+  ): HH\FIXME\MISSING_RETURN_TYPE;
+  public function saveHTML(
+    HH\FIXME\MISSING_PARAM_TYPE $node = null,
+  ): HH\FIXME\MISSING_RETURN_TYPE;
+  public function saveHTMLFile(string $file): HH\FIXME\MISSING_RETURN_TYPE;
+  public function saveXML(
+    HH\FIXME\MISSING_PARAM_TYPE $node = null,
+    int $options = 0,
+  ): HH\FIXME\MISSING_RETURN_TYPE;
+  public function schemaValidate(
+    string $filename,
+  ): bool;
+  public function schemaValidateSource(
+    string $source,
+  ): bool;
+  public function validate(): bool;
+  public function xinclude(int $options = 0): HH\FIXME\MISSING_RETURN_TYPE;
 }
 
 class DOMElement extends DOMNode {
@@ -206,29 +290,72 @@ class DOMElement extends DOMNode {
   /* readonly */ public string $tagName;
   /* readonly */ public bool $schemaTypeInfo;
 
-  /* HH_FIXME[4110]: $attributes is nullable in the parent but not here */
-  /* readonly */ public DOMNamedNodeMap<DOMAttr> $attributes;
+  // $attributes is nullable in the parent but not here, however this violates
+  // hierarchy rules so users must handle the nullability themselves
+  /* public DOMNamedNodeMap<DOMAttr> $attributes; */
 
   // methods
-  public function __construct($name, $value = null, $namespaceuri = null);
-  public function getAttribute($name);
-  public function getAttributeNode($name);
-  public function getAttributeNodeNS($namespaceuri, $localname);
-  public function getAttributeNS($namespaceuri, $localname);
-  public function getElementsByTagName($name);
-  public function getElementsByTagNameNS($namespaceuri, $localname);
-  public function hasAttribute($name);
-  public function hasAttributeNS($namespaceuri, $localname);
-  public function removeAttribute($name);
-  public function removeAttributeNode($oldattr);
-  public function removeAttributeNS($namespaceuri, $localname);
-  public function setAttribute($name, $value);
-  public function setAttributeNode($newattr);
-  public function setAttributeNodeNS($newattr);
-  public function setAttributeNS($namespaceuri, $name, $value);
-  public function setIDAttribute($name, $isid);
-  public function setIDAttributeNode($idattr, $isid);
-  public function setIDAttributeNS($namespaceuri, $localname, $isid);
+  public function __construct(
+    string $name,
+    HH\FIXME\MISSING_PARAM_TYPE $value = null,
+    HH\FIXME\MISSING_PARAM_TYPE $namespaceuri = null,
+  );
+  public function getAttribute(string $name): string;
+  public function getAttributeNode(string $name): HH\FIXME\MISSING_RETURN_TYPE;
+  public function getAttributeNodeNS(
+    string $namespaceuri,
+    string $localname,
+  ): HH\FIXME\MISSING_RETURN_TYPE;
+  public function getAttributeNS(
+    string $namespaceuri,
+    string $localname,
+  ): HH\FIXME\MISSING_RETURN_TYPE;
+  public function getElementsByTagName(string $name): DOMNodeList<DOMElement>;
+  public function getElementsByTagNameNS(
+    string $namespaceuri,
+    string $localname,
+  ): DOMNodeList<DOMElement>;
+  public function hasAttribute(string $name): bool;
+  public function hasAttributeNS(
+    string $namespaceuri,
+    string $localname,
+  ): bool;
+  public function removeAttribute(string $name): bool;
+  public function removeAttributeNode(
+    HH\FIXME\MISSING_PARAM_TYPE $oldattr,
+  ): HH\FIXME\MISSING_RETURN_TYPE;
+  public function removeAttributeNS(
+    string $namespaceuri,
+    string $localname,
+  ): HH\FIXME\MISSING_RETURN_TYPE;
+  public function setAttribute(
+    string $name,
+    string $value,
+  ): HH\FIXME\MISSING_RETURN_TYPE;
+  public function setAttributeNode(
+    HH\FIXME\MISSING_PARAM_TYPE $newattr,
+  ): HH\FIXME\MISSING_RETURN_TYPE;
+  public function setAttributeNodeNS(
+    HH\FIXME\MISSING_PARAM_TYPE $newattr,
+  ): HH\FIXME\MISSING_RETURN_TYPE;
+  public function setAttributeNS(
+    string $namespaceuri,
+    string $name,
+    string $value,
+  ): HH\FIXME\MISSING_RETURN_TYPE;
+  public function setIDAttribute(
+    string $name,
+    bool $isid,
+  ): HH\FIXME\MISSING_RETURN_TYPE;
+  public function setIDAttributeNode(
+    HH\FIXME\MISSING_PARAM_TYPE $idattr,
+    bool $isid,
+  ): HH\FIXME\MISSING_RETURN_TYPE;
+  public function setIDAttributeNS(
+    string $namespaceuri,
+    string $localname,
+    bool $isid,
+  ): HH\FIXME\MISSING_RETURN_TYPE;
 }
 
 class DOMAttr extends DOMNode {
@@ -244,7 +371,6 @@ class DOMAttr extends DOMNode {
   public function isId(): bool;
 }
 
-
 abstract class DOMCharacterData extends DOMNode {
 
   // Properties
@@ -252,7 +378,7 @@ abstract class DOMCharacterData extends DOMNode {
   /* readonly */ public int $length;
 
   // Methods
-  public function appendData(string $data ): void;
+  public function appendData(string $data): void;
   public function deleteData(int $offset, int $count): void;
   public function insertData(int $offset, string $data): void;
   public function replaceData(int $offset, int $count, string $data): void;
@@ -265,7 +391,7 @@ class DOMText extends DOMCharacterData {
   /* readonly */ public string $wholeText;
 
   // Methods
-  public function __construct(string $value='');
+  public function __construct(string $value = '');
   public function isWhitespaceInElementContent(): bool;
   public function splitText(int $offset): DOMText;
 }
@@ -280,7 +406,8 @@ class DOMDocumentType extends DOMNode {
   /* readonly */ public string $internalSubset;
 
   // Methods
-  <<__PHPStdLib>> public function __debuginfo(): array;
+  <<__PHPStdLib>>
+  public function __debugInfo(): darray<arraykey, mixed>;
 
 }
 
@@ -289,14 +416,14 @@ class DOMImplementation {
   // Methods
   public function __construct();
   public function createDocument(
-    $namespaceuri = null,
-    $qualifiedname = null,
-    $doctypeobj = null,
+    HH\FIXME\MISSING_PARAM_TYPE $namespaceuri = null,
+    HH\FIXME\MISSING_PARAM_TYPE $qualifiedname = null,
+    HH\FIXME\MISSING_PARAM_TYPE $doctypeobj = null,
   ): mixed; // DOMDocument or false
   public function createDocumentType(
-    $qualifiedname = null,
-    $publicid = null,
-    $systemid = null,
+    HH\FIXME\MISSING_PARAM_TYPE $qualifiedname = null,
+    HH\FIXME\MISSING_PARAM_TYPE $publicid = null,
+    HH\FIXME\MISSING_PARAM_TYPE $systemid = null,
   ): mixed; // DOMDocumentType or false
   public function hasFeature(string $feature, string $version): bool;
 
@@ -310,10 +437,20 @@ class DOMDocumentFragment extends DOMNode {
 
 }
 
+class DOMComment extends DOMCharacterData {
+  // Methods
+  public function __construct(?string $value = null);
+}
+
+class DOMCdataSection extends DOMText {
+  // Methods
+  public function __construct(string $value = '');
+}
+
 <<__PHPStdLib>>
 function dom_import_simplexml(SimpleXMLElement $node): ?DOMElement;
 <<__PHPStdLib>>
 function simplexml_import_dom(
   DOMNode $node,
-  ?string $class_name = 'SimpleXMLElement',
-);
+  string $class_name = 'SimpleXMLElement',
+): HH\FIXME\MISSING_RETURN_TYPE;

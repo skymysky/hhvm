@@ -13,12 +13,11 @@
    | license@php.net so we can mail you a copy immediately.               |
    +----------------------------------------------------------------------+
 */
-#ifndef incl_HPHP_VM_VTUNE_JIT_H
-#define incl_HPHP_VM_VTUNE_JIT_H
+#pragma once
 
-#include "translator.h"
+#include "hphp/runtime/vm/jit/translator.h"
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 
 void reportTraceletToVtune(const Unit* unit,
                            const Func* func,
@@ -27,6 +26,4 @@ void reportTraceletToVtune(const Unit* unit,
 void reportHelperToVtune(const char *name,
                          void *start,
                          void *end);
-}}
-
-#endif
+}

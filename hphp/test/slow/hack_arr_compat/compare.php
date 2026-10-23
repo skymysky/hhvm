@@ -1,86 +1,97 @@
 <?hh
-// Copyright 2004-present Facebook. All Rights Reserved.
 
-$got_notice = false;
-function handler($errno, $errstr, $errfile, $errline, $errcontext='',
-                 $errtrace = array()) {
-  global $got_notice;
-  if ($errstr === "Hack Array Compat: Comparing array with non-array") {
-    $got_notice = true;
+class Info { public static bool $sawHackArrNotice = false; }
+function handler($_errno, $errstr, ...$_rest):mixed{
+  if (
+    !Info::$sawHackArrNotice &&
+    $errstr === 'Hack Array Compat: Comparing PHP array with Hack array'
+  ) {
+    Info::$sawHackArrNotice = true;
+    return true;
   }
+  return false;
 }
 
-function do_compare($cmp) {
-  global $got_notice;
-  $got_notice = false;
-  $cmp();
-  return $got_notice;
+function do_compare_hack_array($cmp) :mixed{
+  Info::$sawHackArrNotice = false;
+  try {
+    $cmp();
+  } catch (InvalidOperationException $e) {
+    return '*';
+  }
+  return Info::$sawHackArrNotice ? 'T' : 'F';
 }
-
-function exn_wrap($cmp) {
-  try { $cmp(); } catch (Exception $e) {}
+function do_compare_non_any_array($cmp) :mixed{
+  try {
+    $cmp();
+  } catch (InvalidOperationException $e) {
+    return '*';
+  }
+  return 'F';
 }
-
-function do_compares($a, $b) {
+function do_compares($a, $b, $cmp) :mixed{
   echo "=========================== Notice Compare =======================\n";
   var_dump($a);
   var_dump($b);
-  echo (do_compare(() ==> exn_wrap(() ==> $a < $b)) ? 'T' : 'F');
-  echo " " . (do_compare(() ==> exn_wrap(() ==> $a <= $b)) ? 'T' : 'F');
-  echo " " . (do_compare(() ==> exn_wrap(() ==> $a > $b)) ? 'T' : 'F');
-  echo " " . (do_compare(() ==> exn_wrap(() ==> $a >= $b)) ? 'T' : 'F');
-  echo " " . (do_compare(() ==> exn_wrap(() ==> $a <=> $b)) ? 'T' : 'F');
-  echo " " . (do_compare(() ==> exn_wrap(() ==> $a == $b)) ? 'T' : 'F');
-  echo " " . (do_compare(() ==> exn_wrap(() ==> $a != $b)) ? 'T' : 'F');
-  echo " " . (do_compare(() ==> exn_wrap(() ==> $a === $b)) ? 'T' : 'F');
-  echo " " . (do_compare(() ==> exn_wrap(() ==> $a !== $b)) ? 'T' : 'F');
+  echo $cmp(() ==> $a < $b);
+  echo " ".$cmp(() ==> $a <= $b);
+  echo " ".$cmp(() ==> $a > $b);
+  echo " ".$cmp(() ==> $a >= $b);
+  echo " ".$cmp(() ==> $a <=> $b);
+  echo " ".$cmp(() ==> HH\Lib\Legacy_FIXME\eq($a, $b));
+  echo " ".$cmp(() ==> HH\Lib\Legacy_FIXME\neq($a, $b));
+  echo " ".$cmp(() ==> $a === $b);
+  echo " ".$cmp(() ==> $a !== $b);
   echo "\n==================================================================\n";
 }
 
-function main() {
-  set_error_handler('handler');
+<<__EntryPoint>>
+function main_compare() :mixed{
+  set_error_handler(handler<>);
 
-  $x1 = [
-    [],
-    [1, 2, [3, 4]],
-    ['a' => 'b', 'c' => 'd']
+  $x1 = vec[
+    vec[],
+    vec[1, 2, vec[3, 4]],
+    dict['a' => 'b', 'c' => 'd'],
   ];
-  $x2 = [
+  $x2_non_hack_arrays = vec[
     true,
     false,
     null,
     123,
     4.567,
     'abc',
+    new stdClass,
+    imagecreate(1, 1),
+    vec[1, vec[2, 5], vec[3, 4]],
+    dict['a' => vec[], 'c' => vec[1, 2]],
+  ];
+  $x2_hack_arrays = vec[
     vec[],
     vec[1, 2, 3],
     dict[],
     dict['a' => 'b', 'c' => 'd'],
     keyset[],
     keyset['a', 'b', 'c'],
-    new stdclass,
-    imagecreate(1, 1),
-    [1, [2, 5], [3, 4]],
-    [1, 2, vec[3, 4]],
-    ['a' => [], 'c' => [1, 2]]
+    vec[1, 2, vec[3, 4]],
   ];
 
-  foreach ($x1 as $b) {
-    foreach ($x2 as $a) {
-      do_compares($a, $b);
-      do_compares($b, $a);
-    }
-  }
-
   foreach ($x1 as $a) {
-    foreach ($x2 as $b) {
-      do_compares($a, $b);
+    foreach ($x2_non_hack_arrays as $b) {
+      do_compares($a, $b, do_compare_non_any_array<>);
+      do_compares($b, $a, do_compare_non_any_array<>);
+    }
+    foreach ($x2_hack_arrays as $b) {
+      do_compares($a, $b, do_compare_hack_array<>);
+      do_compares($b, $a, do_compare_hack_array<>);
     }
   }
 
-  do_compares(null, null);
-  do_compares(true, false);
-  do_compares(1, 2);
-}
+  do_compares(null, null, do_compare_non_any_array<>);
+  do_compares(true, false, do_compare_non_any_array<>);
+  do_compares(1, 2, do_compare_non_any_array<>);
 
-main();
+  do_compares(null, null, do_compare_hack_array<>);
+  do_compares(true, false, do_compare_hack_array<>);
+  do_compares(1, 2, do_compare_hack_array<>);
+}

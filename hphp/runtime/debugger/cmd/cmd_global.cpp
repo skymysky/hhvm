@@ -17,13 +17,14 @@
 #include "hphp/runtime/debugger/cmd/cmd_global.h"
 
 #include "hphp/runtime/base/array-init.h"
+#include "hphp/runtime/base/array-iterator.h"
 #include "hphp/runtime/debugger/debugger_client.h"
 #include "hphp/runtime/debugger/cmd/cmd_variable.h"
 
-namespace HPHP { namespace Eval {
+namespace HPHP::Eval {
 ///////////////////////////////////////////////////////////////////////////////
 
-TRACE_SET_MOD(debugger);
+TRACE_SET_MOD(debugger)
 
 void CmdGlobal::sendImpl(DebuggerThriftBuffer &thrift) {
   DebuggerCommand::sendImpl(thrift);
@@ -54,7 +55,7 @@ void CmdGlobal::help(DebuggerClient &client) {
 void CmdGlobal::onClient(DebuggerClient &client) {
   if (DebuggerCommand::displayedHelp(client)) return;
 
-  String text;
+  OptString text;
   if (client.argCount() == 1) {
     text = client.argValue(1);
   } else if (client.argCount() != 0) {
@@ -75,10 +76,10 @@ bool CmdGlobal::onServer(DebuggerProxy &proxy) {
   m_globals = CmdVariable::GetGlobalVariables();
   if (m_version == 2) {
     // Remove the values before sending to client.
-    ArrayInit ret(m_globals->size(), ArrayInit::Map{});
+    DictInit ret(m_globals->size());
     Variant v;
     for (ArrayIter iter(m_globals); iter; ++iter) {
-      ret.add(iter.first().toString(), v);
+      ret.set(iter.first().toString(), v);
     }
     m_globals = ret.toArray();
   }
@@ -86,4 +87,4 @@ bool CmdGlobal::onServer(DebuggerProxy &proxy) {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-}}
+}

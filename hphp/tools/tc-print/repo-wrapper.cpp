@@ -18,82 +18,104 @@
 #include <cstdio>
 
 #include "hphp/hhvm/process-init.h"
-#include "hphp/util/hdf.h"
 #include "hphp/util/build-info.h"
+#include "hphp/util/configs/repo.h"
+#include "hphp/util/hdf.h"
 #include "hphp/compiler/option.h"
-#include "hphp/runtime/base/rds.h"
 #include "hphp/runtime/base/program-functions.h"
-#include "hphp/runtime/base/config.h"
+#include "hphp/runtime/vm/native.h"
+#include "hphp/runtime/vm/repo-file.h"
+#include "hphp/runtime/vm/repo-global-data.h"
 #include "hphp/runtime/vm/runtime.h"
+#include "hphp/runtime/vm/unit-emitter.h"
 
 namespace HPHP { namespace jit {
 
 RepoWrapper::RepoWrapper(const char* repoSchema,
-                         const std::string& configFile) {
+                         const std::string& repoFileName,
+                         Hdf& config,
+                         const bool shouldPrint) {
   if (setenv("HHVM_RUNTIME_REPO_SCHEMA", repoSchema, 1 /* overwrite */)) {
     fprintf(stderr, "Could not set repo schema");
     exit(EXIT_FAILURE);
   }
 
-  printf("# Config file: %s\n", configFile.c_str());
-  printf("# Repo schema: %s\n", repoSchemaId().begin());
+  if (shouldPrint) {
+    printf("# Repo schema: %s\n", repoSchemaId().begin());
+  }
 
   register_process_init();
-  initialize_repo();
-  hphp_thread_init();
+  hphp_thread_init(true);
   g_context.getCheck();
+
   IniSetting::Map ini = IniSetting::Map::object;
-  Hdf config;
-  if (!configFile.empty()) {
-    Config::ParseConfigFile(configFile, ini, config);
-    // Disable logging to suppress harmless errors about setrlimit.
-    config["Log"]["Level"] = "None";
-  }
   RuntimeOption::Load(ini, config);
-  RuntimeOption::RepoCommit = false;
-  compile_file(nullptr, 0, MD5(), nullptr);
 
-  repo = &Repo::get();
+  m_hasRepo = !repoFileName.empty();
+  if (m_hasRepo) RepoFile::init(repoFileName);
 
-  RuntimeOption::AlwaysUseRelativePath = false;
-  RuntimeOption::SafeFileAccess = false;
-  RuntimeOption::EvalAllowHhas = true;
-  RuntimeOption::SandboxMode = true; // So we get Unit::m_funcTable
-  Option::WholeProgram = false;
+  Cfg::Server::AlwaysUseRelativePath = false;
+  Cfg::Server::SafeFileAccess = false;
+  Cfg::Eval::AllowHhas = true;
+  Cfg::Sandbox::Mode = true; // So we get Unit::m_funcTable
+  Cfg::Repo::Authoritative = true;
+  Cfg::Eval::LowStaticArrays = false; // save some low mem
+  Cfg::Eval::VerifySystemLibHasNativeImpl = false;
 
-  LitstrTable::init();
-  RuntimeOption::RepoAuthoritative = true;
-  repo->loadGlobalData(true /* allowFailure */);
-
-  std::string hhasLib;
-  auto const phpLib = get_systemlib(&hhasLib);
-  always_assert(!hhasLib.empty() && !phpLib.empty());
-  auto phpUnit = compile_string(phpLib.c_str(), phpLib.size(),
-                                "systemlib.php");
-  addUnit(phpUnit);
-  auto hhasUnit = compile_string(hhasLib.c_str(), hhasLib.size(),
-                                 "systemlib.hhas");
-  addUnit(hhasUnit);
-
-  SystemLib::s_inited = true;
+  if (m_hasRepo) {
+    RepoFile::loadGlobalTables();
+    RepoFile::globalData().load();
+  }
 }
 
 RepoWrapper::~RepoWrapper() {
   CacheType::const_iterator it;
   for (it = unitCache.begin(); it != unitCache.end(); it++) delete it->second;
+
+  hphp_thread_exit(true);
 }
 
 void RepoWrapper::addUnit(Unit* unit) {
-  unitCache.insert({unit->md5(), unit});
+  unitCache.insert({unit->sn(), unit});
 }
 
-Unit* RepoWrapper::getUnit(MD5 md5) {
-  CacheType::const_iterator it = unitCache.find(md5);
-  if (it != unitCache.end()) return it->second;
-  auto unit = repo->loadUnit("", md5).release();
+Unit* RepoWrapper::getUnit(int64_t sn) {
+  if (!hasRepo()) return nullptr;
 
-  if (unit) unitCache.insert({md5, unit});
+  CacheType::const_iterator it = unitCache.find(sn);
+  if (it != unitCache.end()) return it->second;
+
+  auto const unit = [&] () -> Unit* {
+    auto const path = RepoFile::findUnitPath(sn);
+    if (!path) return nullptr;
+    auto const ue =
+      RepoFile::loadUnitEmitter(path, nullptr, false);
+    if (!ue) return nullptr;
+    return ue->create().release();
+  }();
+
+  if (unit) unitCache.insert({sn, unit});
   return unit;
+}
+
+Func* RepoWrapper::getFunc(int64_t sn, Id funcSn) {
+  if (!hasRepo()) return nullptr;
+
+  auto const unit = getUnit(sn);
+  if (!unit) {
+    return nullptr;
+  }
+
+  Func* func = nullptr;
+  unit->forEachFunc([&](Func* f) {
+    if (f->sn() == funcSn) {
+      func = f;
+      return true;
+    }
+    return false;
+  });
+
+  return func;
 }
 
 } }

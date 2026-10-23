@@ -1,24 +1,28 @@
-<?php
-require(dirname(__FILE__) . '/data.inc');
+<?hh
 
-function cmp ($a, $b) {
-    is_array ($a)
-        and $a = array_sum ($a);
-    is_array ($b)
-        and $b = array_sum ($b);
-    return strcmp ($a, $b);
+function cmp($a, $b) :mixed{
+    if (is_array ($a)) {
+        $a = array_sum ($a);
+    }
+    if (is_array ($b)) {
+        $b = array_sum ($b);
+    }
+    return strcmp ((string)$a, (string)$b);
 }
 
-echo " -- Testing uasort() -- \n";
-uasort ($data, 'cmp');
-var_dump ($data);
+<<__EntryPoint>> function main(): void {
+require(dirname(__FILE__) . '/data.inc');
+$data = data();
 
+echo " -- Testing uasort() -- \n";
+uasort(inout $data, cmp<>);
+var_dump($data);
 
 echo "\n -- Testing uksort() -- \n";
-uksort ($data, 'cmp');
-var_dump ($data);
+uksort(inout $data, cmp<>);
+var_dump($data);
 
 echo "\n -- Testing usort() -- \n";
-usort ($data, 'cmp');
-var_dump ($data);
-?>
+usort(inout $data, cmp<>);
+var_dump($data);
+}

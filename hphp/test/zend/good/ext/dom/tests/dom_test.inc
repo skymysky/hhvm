@@ -1,5 +1,6 @@
-<?PHP
-$xmlstr = "<?xml version='1.0' standalone='yes'?>
+<?hh
+function getXmlStr() {
+return "<?xml version='1.0' standalone='yes'?>
 <!DOCTYPE chapter SYSTEM '/share/sgml/Norman_Walsh/db3xml10/db3xml10.dtd'
 [ <!ENTITY sp \"spanish\">
 ]>
@@ -19,6 +20,7 @@ $xmlstr = "<?xml version='1.0' standalone='yes'?>
 </informaltable>
 </para>
 </chapter> ";
+}
 
 function print_node($node)
 {
@@ -44,4 +46,3 @@ function print_node_list($nodelist)
   }
 }
 
-?>

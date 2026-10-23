@@ -1,16 +1,16 @@
-array(3) {
+dict(3) {
   ["kind"]=>
   int(14)
   ["fields"]=>
-  array(1) {
+  dict(1) {
     ["derp"]=>
-    array(2) {
+    dict(2) {
       ["kind"]=>
       int(14)
       ["fields"]=>
-      array(1) {
+      dict(1) {
         ["herp"]=>
-        array(1) {
+        dict(1) {
           ["kind"]=>
           int(4)
         }

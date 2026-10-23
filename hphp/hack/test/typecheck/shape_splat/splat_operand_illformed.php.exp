@@ -1,0 +1,131 @@
+error: Naming[2063] You can only use the `void` type as the return type of a function or method [1]
+
+splat_operand_illformed.php:14:27
+12 | 
+13 | type CTrait = shape(...MyTrait, 'a' => int);
+14 | type COptVoid = shape(...?void, 'b' => int);
+   |                           ^^^^ [1]
+15 | type CTuple = shape(...Tuple<int, string>, 'c' => int);
+
+error: Naming[2049] Unbound name: `Tuple` [1]
+
+splat_operand_illformed.php:15:24
+13 | type CTrait = shape(...MyTrait, 'a' => int);
+14 | type COptVoid = shape(...?void, 'b' => int);
+15 | type CTuple = shape(...Tuple<int, string>, 'c' => int);
+   |                        ^^^^^ [1]
+
+error: Typing[4419] Invalid type hint [1]
+-> Only shapes can be unpacked with `...` inside a shape type [2]
+
+splat_operand_illformed.php:13:15
+11 | trait MyTrait {}
+12 | 
+13 | type CTrait = shape(...MyTrait, 'a' => int);
+   |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ [1]
+   |                        ^^^^^^^ [2]
+14 | type COptVoid = shape(...?void, 'b' => int);
+15 | type CTuple = shape(...Tuple<int, string>, 'c' => int);
+
+error: Typing[4323] Some type arguments violate their constraints [1]
+-> Expected `shape(...)` [2]
+-> But got `MyTrait` [1]
+
+splat_operand_illformed.php:13:24
+11 | trait MyTrait {}
+12 | 
+13 | type CTrait = shape(...MyTrait, 'a' => int);
+   |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ [2]
+   |                        ^^^^^^^ [1]
+14 | type COptVoid = shape(...?void, 'b' => int);
+15 | type CTuple = shape(...Tuple<int, string>, 'c' => int);
+
+error: Typing[4002] `MyTrait` is uninstantiable [1]
+-> Declaration is here [2]
+
+splat_operand_illformed.php:13:24
+ 9 | // naming.)
+10 | 
+11 | trait MyTrait {}
+   |       ^^^^^^^ [2]
+12 | 
+13 | type CTrait = shape(...MyTrait, 'a' => int);
+   |                        ^^^^^^^ [1]
+14 | type COptVoid = shape(...?void, 'b' => int);
+15 | type CTuple = shape(...Tuple<int, string>, 'c' => int);
+
+error: Typing[4419] Invalid type hint [1]
+-> Only shapes can be unpacked with `...` inside a shape type [2]
+
+splat_operand_illformed.php:14:17
+12 | 
+13 | type CTrait = shape(...MyTrait, 'a' => int);
+14 | type COptVoid = shape(...?void, 'b' => int);
+   |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^ [1]
+   |                          ^^^^^ [2]
+15 | type CTuple = shape(...Tuple<int, string>, 'c' => int);
+
+error: Typing[4323] Some type arguments violate their constraints [1]
+-> Expected `shape(...)` [2]
+-> But got `void` [3]
+
+splat_operand_illformed.php:14:26
+12 | 
+13 | type CTrait = shape(...MyTrait, 'a' => int);
+14 | type COptVoid = shape(...?void, 'b' => int);
+   |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^ [2]
+   |                          ^^^^^ [1]
+   |                           ^^^^ [3]
+15 | type CTuple = shape(...Tuple<int, string>, 'c' => int);
+
+error: Typing[4323] Some type arguments violate their constraints [1]
+-> Expected `~shape(...)` [2]
+-> But got `?void` [1]
+
+splat_operand_illformed.php:14:26
+12 | 
+13 | type CTrait = shape(...MyTrait, 'a' => int);
+14 | type COptVoid = shape(...?void, 'b' => int);
+   |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^ [2]
+   |                          ^^^^^ [1]
+15 | type CTuple = shape(...Tuple<int, string>, 'c' => int);
+
+error: Typing[4066] `?void` is a nonsensical typehint; a function cannot both only return implicitly and return null. [1]
+
+splat_operand_illformed.php:14:26
+12 | 
+13 | type CTrait = shape(...MyTrait, 'a' => int);
+14 | type COptVoid = shape(...?void, 'b' => int);
+   |                          ^^^^^ [1]
+15 | type CTuple = shape(...Tuple<int, string>, 'c' => int);
+
+error: Typing[4419] Invalid type hint [1]
+-> Only shapes can be unpacked with `...` inside a shape type [2]
+
+splat_operand_illformed.php:15:15
+13 | type CTrait = shape(...MyTrait, 'a' => int);
+14 | type COptVoid = shape(...?void, 'b' => int);
+15 | type CTuple = shape(...Tuple<int, string>, 'c' => int);
+   |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ [1]
+   |                        ^^^^^^^^^^^^^^^^^^ [2]
+
+error: Typing[4100] Did you want a *tuple*? Try `(X,Y)`, not `tuple<X,Y>` [1]
+
+splat_operand_illformed.php:15:24
+13 | type CTrait = shape(...MyTrait, 'a' => int);
+14 | type COptVoid = shape(...?void, 'b' => int);
+15 | type CTuple = shape(...Tuple<int, string>, 'c' => int);
+   |                        ^^^^^ [1]
+
+error: Typing[4323] Some type arguments violate their constraints [1]
+-> Expected `shape(...)` [2]
+-> But got `Tuple<int, string>` [1]
+
+splat_operand_illformed.php:15:24
+13 | type CTrait = shape(...MyTrait, 'a' => int);
+14 | type COptVoid = shape(...?void, 'b' => int);
+15 | type CTuple = shape(...Tuple<int, string>, 'c' => int);
+   |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ [2]
+   |                        ^^^^^^^^^^^^^^^^^^ [1]
+
+12 errors found

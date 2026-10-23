@@ -1,10 +1,11 @@
-<?php
+<?hh
 class bomb {
-  static function go($n)	{
-   $backtrace = debug_backtrace(false);
-   $backtrace[1]['args'][1] = 'bomb';
+  <<__DynamicallyCallable>> static function go($n) :mixed{
+    $backtrace = debug_backtrace(0);
+    $backtrace[1]['args'][] = 'bomb';
   }
 }
-call_user_func_array(array('bomb', 'go'), array(0));
+<<__EntryPoint>> function main(): void {
+call_user_func_array(vec['bomb', 'go'], vec[0]);
 echo "ok\n";
-?>
+}

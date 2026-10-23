@@ -8,7 +8,7 @@
           "openClose": true,
           "change": 2,
           "willSave": false,
-          "willSaveWaitUntil": false,
+          "willSaveWaitUntil": true,
           "save": {
             "includeText": false
           }
@@ -21,7 +21,12 @@
             ">",
             "\\",
             ":",
-            "<"
+            "<",
+            "[",
+            "'",
+            "\"",
+            "{",
+            "#"
           ]
         },
         "signatureHelpProvider": {
@@ -31,11 +36,14 @@
           ]
         },
         "definitionProvider": true,
+        "typeDefinitionProvider": true,
         "referencesProvider": true,
         "documentHighlightProvider": true,
         "documentSymbolProvider": true,
         "workspaceSymbolProvider": true,
-        "codeActionProvider": false,
+        "codeActionProvider": {
+          "resolveProvider": true
+        },
         "documentFormattingProvider": true,
         "documentRangeFormattingProvider": true,
         "documentOnTypeFormattingProvider": {
@@ -45,8 +53,12 @@
           ]
         },
         "renameProvider": true,
-        "typeCoverageProvider": true,
-        "rageProvider": true
+        "implementationProvider": true,
+        "rageProvider": true,
+        "experimental": {
+          "snippetTextEdit": true,
+          "autoCloseJsx": true
+         }
       }
     }
   },
@@ -55,10 +67,7 @@
     "id": 2,
     "error": {
       "code": -32601,
-      "message": "not implemented: textDocument/nonExistingMethod",
-      "data": {
-        "stack": "[omitted for reproducibility]"
-      }
+      "message": "not implemented: request 2 textDocument/nonExistingMethod"
     }
   },
   {

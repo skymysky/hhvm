@@ -1,0 +1,9 @@
+error: Parsing[1002] Cannot use `nonnull` as a type name as it is reserved [1]
+
+nonnull_keyword.php:4:9
+2 | // Copyright 2004-present Facebook. All Rights Reserved.
+3 | 
+4 | newtype nonnull = int;
+  |         ^^^^^^^ [1]
+
+1 error found

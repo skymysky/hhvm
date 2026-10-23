@@ -9,7 +9,7 @@
  *
  */
 
-function main() {
-  $arr = array();
+function main(): void {
+  $arr = dict[];
   $arr[$arr->getLength()] = 1;
 }

@@ -1,0 +1,3 @@
+Defined in `Foo`
+---
+const int BAR = 1

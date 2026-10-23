@@ -2,7 +2,7 @@
 
 function f(inout int $i): void {}
 
-function launder(mixed $x) {
+function launder(C $x): C {
   return $x;
 }
 

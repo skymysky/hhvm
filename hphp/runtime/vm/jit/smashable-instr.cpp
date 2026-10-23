@@ -16,16 +16,18 @@
 
 #include "hphp/runtime/vm/jit/smashable-instr.h"
 
+#ifdef __aarch64__
 #include "hphp/runtime/vm/jit/smashable-instr-arm.h"
+#else
 #include "hphp/runtime/vm/jit/smashable-instr-x64.h"
-#include "hphp/runtime/vm/jit/smashable-instr-ppc64.h"
+#endif
 #include "hphp/runtime/vm/jit/tc.h"
 
 #include "hphp/util/arch.h"
 #include "hphp/util/asm-x64.h"
 #include "hphp/util/data-block.h"
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -45,61 +47,86 @@ size_t smashableJccLen() {
   return ARCH_SWITCH_CALL(smashableJccLen);
 }
 
-size_t smashableAlignTo() {
-  return ARCH_SWITCH_CALL(smashableAlignTo);
-}
-
 TCA emitSmashableMovq(CodeBlock& cb, CGMeta& fixups, uint64_t imm,
-                      PhysReg d) {
-  return ARCH_SWITCH_CALL(emitSmashableMovq, cb, fixups, imm, d);
-}
-TCA emitSmashableCmpq(CodeBlock& cb, CGMeta& fixups, int32_t imm,
-                      PhysReg r, int8_t disp) {
-  return ARCH_SWITCH_CALL(emitSmashableCmpq, cb, fixups, imm, r, disp);
+                      PhysReg d, bool emitFarLiteral) {
+  return ARCH_SWITCH_CALL(emitSmashableMovq,
+                          cb,
+                          fixups,
+                          imm,
+                          d,
+                          emitFarLiteral);
 }
 TCA emitSmashableCall(CodeBlock& cb, CGMeta& fixups, TCA target) {
+  always_assert(target);
   return ARCH_SWITCH_CALL(emitSmashableCall, cb, fixups, target);
 }
 TCA emitSmashableJmp(CodeBlock& cb, CGMeta& fixups, TCA target) {
+  always_assert(target);
   return ARCH_SWITCH_CALL(emitSmashableJmp, cb, fixups, target);
 }
 TCA emitSmashableJcc(CodeBlock& cb, CGMeta& fixups, TCA target,
                      ConditionCode cc) {
+  always_assert(target);
   return ARCH_SWITCH_CALL(emitSmashableJcc, cb, fixups, target, cc);
 }
 
 void smashMovq(TCA inst, uint64_t imm) {
+  always_assert(inst);
   return ARCH_SWITCH_CALL(smashMovq, inst, imm);
 }
 void smashCmpq(TCA inst, uint32_t imm) {
+  always_assert(inst);
   return ARCH_SWITCH_CALL(smashCmpq, inst, imm);
 }
 void smashCall(TCA inst, TCA target) {
+  always_assert(inst);
+  always_assert(target);
   return ARCH_SWITCH_CALL(smashCall, inst, target);
 }
 void smashJmp(TCA inst, TCA target) {
+  always_assert(inst);
+  always_assert(target);
   return ARCH_SWITCH_CALL(smashJmp, inst, target);
 }
 void smashJcc(TCA inst, TCA target) {
+  always_assert(inst);
+  always_assert(target);
   return ARCH_SWITCH_CALL(smashJcc, inst, target);
 }
-
+void smashInterceptJcc(TCA inst) {
+  always_assert(inst);
+  return ARCH_SWITCH_CALL(smashInterceptJcc, inst);
+}
+void smashInterceptJmp(TCA inst) {
+  always_assert(inst);
+  return ARCH_SWITCH_CALL(smashInterceptJmp, inst);
+}
 uint64_t smashableMovqImm(TCA inst) {
+  always_assert(inst);
   return ARCH_SWITCH_CALL(smashableMovqImm, inst);
 }
 uint32_t smashableCmpqImm(TCA inst) {
+  always_assert(inst);
   return ARCH_SWITCH_CALL(smashableCmpqImm, inst);
 }
 TCA smashableCallTarget(TCA inst) {
+  always_assert(inst);
   return ARCH_SWITCH_CALL(smashableCallTarget, inst);
 }
+TCA smashableCallLiteral(TCA inst) {
+  always_assert(inst);
+  return ARCH_SWITCH_CALL(smashableCallLiteral, inst);
+}
 TCA smashableJmpTarget(TCA inst) {
+  always_assert(inst);
   return ARCH_SWITCH_CALL(smashableJmpTarget, inst);
 }
 TCA smashableJccTarget(TCA inst) {
+  always_assert(inst);
   return ARCH_SWITCH_CALL(smashableJccTarget, inst);
 }
 ConditionCode smashableJccCond(TCA inst) {
+  always_assert(inst);
   return ARCH_SWITCH_CALL(smashableJccCond, inst);
 }
 
@@ -109,21 +136,25 @@ ConditionCode smashableJccCond(TCA inst) {
  * the sizeof* routine will probably need to take a TCA).
  */
 TCA smashableCallFromRet(TCA ret) {
+  always_assert(ret);
   return ret - smashableCallLen();
 }
 
 bool optimizeSmashedCall(TCA inst) {
+  always_assert(inst);
   return ARCH_SWITCH_CALL(optimizeSmashedCall, inst);
 }
 
 bool optimizeSmashedJmp(TCA inst) {
+  always_assert(inst);
   return ARCH_SWITCH_CALL(optimizeSmashedJmp, inst);
 }
 
 bool optimizeSmashedJcc(TCA inst) {
+  always_assert(inst);
   return ARCH_SWITCH_CALL(optimizeSmashedJcc, inst);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 
-}}
+}

@@ -1,9 +1,8 @@
 bool(true)
-array(1) {
-  [0]=>
+vec(1) {
   string(6) "qprint"
 }
-array(1) {
+dict(1) {
   [0]=>
   string(6) "qprint"
 }

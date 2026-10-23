@@ -1,0 +1,35 @@
+error: Naming[2012] Name already bound: `Foo` [1]
+-> Previous definition is here [2]
+
+duplicate_class_declaration.php:4:7
+1 | <?hh
+2 | 
+3 | class Foo { public function foo(): void {} }
+  |       ^^^ [2]
+4 | class Foo { public function bar(): void {} } // error
+  |       ^^^ [1]
+5 | 
+6 | function f(): void {
+
+error: Typing[4053] No instance method `bar` in `Foo` [1]
+-> Did you mean `foo` instead? [2]
+-> This is why I think it is an object of type Foo [3]
+-> Declaration of `Foo` is here [4]
+
+duplicate_class_declaration.php:9:9
+ 1 | <?hh
+ 2 | 
+ 3 | class Foo { public function foo(): void {} }
+   |       ^^^ [4]
+   |                             ^^^ [2]
+ 4 | class Foo { public function bar(): void {} } // error
+ 5 | 
+ 6 | function f(): void {
+ 7 |   $foo = new Foo();
+   |              ^^^ [3]
+ 8 |   $foo->foo(); // ok
+ 9 |   $foo->bar(); // error
+   |         ^^^ [1]
+10 | }
+
+2 errors found

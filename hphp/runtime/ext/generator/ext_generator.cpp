@@ -16,25 +16,19 @@
 */
 
 #include "hphp/runtime/ext/generator/ext_generator.h"
-#include "hphp/runtime/base/builtin-functions.h"
 #include "hphp/runtime/base/tv-refcount.h"
 #include "hphp/runtime/ext/std/ext_std_function.h"
-#include "hphp/runtime/ext/spl/ext_spl.h"
 #include "hphp/runtime/vm/func.h"
+#include "hphp/runtime/vm/resumable.h"
 #include "hphp/runtime/vm/runtime.h"
 #include "hphp/runtime/vm/jit/types.h"
-#include "hphp/runtime/base/stats.h"
 
 namespace HPHP {
-
-Class* Generator::s_class = nullptr;
-const StaticString Generator::s_className("Generator");
 
 Generator::Generator()
   : m_index(-1LL)
   , m_key(make_tv<KindOfInt64>(-1LL))
   , m_value(make_tv<KindOfNull>())
-  , m_delegate(make_tv<KindOfNull>())
 {
 }
 
@@ -46,7 +40,6 @@ Generator::~Generator() {
   assertx(getState() != State::Running);
   tvDecRefGen(m_key);
   tvDecRefGen(m_value);
-  tvDecRefGen(m_delegate);
 
   // Free locals, but don't trigger the EventHook for FunctionReturn since
   // the generator has already been exited. We don't want redundant calls.
@@ -66,30 +59,29 @@ Generator& Generator::operator=(const Generator& other) {
   node->arOff() = arOff;
   resumable()->initialize<true>(fp,
                                 other.resumable()->resumeAddr(),
-                                other.resumable()->resumeOffset(),
+                                other.resumable()->suspendOffset(),
                                 frameSz,
                                 genSz);
   copyVars(fp);
   setState(other.getState());
   m_index = other.m_index;
-  cellSet(other.m_key, m_key);
-  cellSet(other.m_value, m_value);
-  cellSet(other.m_delegate, m_delegate);
+  tvSet(other.m_key, m_key);
+  tvSet(other.m_value, m_value);
   return *this;
 }
 
 ObjectData* Generator::Create(const ActRec* fp, size_t numSlots,
-                              jit::TCA resumeAddr, Offset resumeOffset) {
+                              jit::TCA resumeAddr, Offset suspendOffset) {
   assertx(fp);
-  assertx(!fp->resumed());
+  assertx(!isResumed(fp));
   assertx(fp->func()->isNonAsyncGenerator());
   const size_t frameSz = Resumable::getFrameSize(numSlots);
   const size_t genSz = genSize(sizeof(Generator), frameSz);
-  auto const obj = BaseGenerator::Alloc<Generator>(s_class, genSz);
+  auto const obj = BaseGenerator::Alloc<Generator>(classof(), genSz);
   auto const genData = new (Native::data<Generator>(obj)) Generator();
   genData->resumable()->initialize<false>(fp,
                                           resumeAddr,
-                                          resumeOffset,
+                                          suspendOffset,
                                           frameSz,
                                           genSz);
   genData->setState(State::Created);
@@ -102,77 +94,53 @@ void Generator::copyVars(const ActRec* srcFp) {
   assertx(srcFp->func() == dstFp->func());
 
   for (Id i = 0; i < func->numLocals(); ++i) {
-    tvDupWithRef(*frame_local(srcFp, i), *frame_local(dstFp, i));
+    tvDup(*frame_local(srcFp, i), frame_local(dstFp, i));
   }
 
   if (func->cls() && dstFp->hasThis()) {
     dstFp->getThis()->incRefCount();
   }
-
-  if (LIKELY(!(srcFp->func()->attrs() & AttrMayUseVV))) return;
-  if (LIKELY(srcFp->m_varEnv == nullptr)) return;
-
-  if (srcFp->hasExtraArgs()) {
-    dstFp->setExtraArgs(srcFp->getExtraArgs()->clone(dstFp));
-  } else {
-    assertx(srcFp->hasVarEnv());
-    dstFp->setVarEnv(srcFp->getVarEnv()->clone(dstFp));
-  }
 }
 
-void Generator::yield(Offset resumeOffset,
-                      const Cell* key, const Cell value) {
+void Generator::yield(Offset suspendOffset,
+                      const TypedValue* key, const TypedValue value) {
   assertx(isRunning());
-  resumable()->setResumeAddr(nullptr, resumeOffset);
+  resumable()->setResumeAddr(nullptr, suspendOffset);
+  setState(State::Started);
 
   if (key) {
-    cellSet(*key, m_key);
+    tvSet(*key, m_key);
     tvDecRefGenNZ(*key);
     if (m_key.m_type == KindOfInt64) {
       int64_t new_index = m_key.m_data.num;
       m_index = new_index > m_index ? new_index : m_index;
     }
   } else {
-    cellSet(make_tv<KindOfInt64>(++m_index), m_key);
+    tvSet(make_tv<KindOfInt64>(++m_index), m_key);
   }
-  cellSet(value, m_value);
+  tvSet(value, m_value);
   tvDecRefGenNZ(value);
-
-  setState(State::Started);
 }
 
-void Generator::done(TypedValue tv) {
+void Generator::done() {
   assertx(isRunning());
-  cellSetNull(m_key);
-  cellSet(*tvToCell(&tv), m_value);
   setState(State::Done);
-}
 
-bool Generator::successfullyFinishedExecuting() {
-  // `getReturn` needs to know whether a generator finished successfully or
-  // whether an exception occurred during its execution. For every other use
-  // case a failed generator was identical to one that finished executing, but
-  // `getReturn` wants to throw an exception if the generator threw an
-  // exception. Since we use the same variable to store the yield result and
-  // the return value, and since we dont have a separate state to represent a
-  // failed generator, we use an unintialized value to flag that the generator
-  // failed (rather than NULL, which we use for a successful generator without
-  // a return value).
-  return getState() == State::Done &&
-         m_value.m_type != KindOfUninit;
+  tvSetNull(m_key);
+  tvSetNull(m_value);
 }
 
 const StaticString s__closure_("{closure}");
-String HHVM_METHOD(Generator, getOrigFuncName) {
+OptString HHVM_METHOD(Generator, getOrigFuncName) {
   Generator* gen = Native::data<Generator>(this_);
   const Func* origFunc = gen->actRec()->func();
   auto const origName = origFunc->isClosureBody() ? s__closure_.get()
                                                   : origFunc->name();
   assertx(origName->isStatic());
-  return String(const_cast<StringData*>(origName));
+  return OptString(const_cast<StringData*>(origName));
 }
 
-String HHVM_METHOD(Generator, getCalledClass) {
+OptString HHVM_METHOD(Generator, getCalledClass) {
   auto const gen = Native::data<Generator>(this_);
   auto const ar = gen->actRec();
 
@@ -183,23 +151,19 @@ String HHVM_METHOD(Generator, getCalledClass) {
     return cls->nameStr();
   }
 
-  return empty_string();
+  return String::Empty();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 
 struct GeneratorExtension final : Extension {
-  GeneratorExtension() : Extension("generator") {}
+  GeneratorExtension() : Extension("generator", NO_EXTENSION_VERSION_YET, "hphp_hphpi") {}
 
-  void moduleInit() override {
+  void moduleRegisterNative() override {
     HHVM_ME(Generator, getOrigFuncName);
     HHVM_ME(Generator, getCalledClass);
     Native::registerNativeDataInfo<Generator>(
-      Generator::s_className.get(),
-      Native::NDIFlags::NO_SWEEP);
-    loadSystemlib("generator");
-    Generator::s_class = Unit::lookupClass(Generator::s_className.get());
-    assertx(Generator::s_class);
+      Native::NDIFlags::NO_SWEEP | Native::NDIFlags::CTOR_THROWS);
   }
 };
 

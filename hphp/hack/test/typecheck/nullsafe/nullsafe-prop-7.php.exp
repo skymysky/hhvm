@@ -1,4 +1,10 @@
-File "nullsafe-prop-7.php", line 8, characters 3-10:
-You are using the ?-> operator but this object cannot be null.  (Typing[4117])
-  File "nullsafe-prop-7.php", line 7, characters 14-20:
-  This is what makes me believe it cannot be null
+warning: Warn[12029] You are using the `?->` operator but this object is of type MyClass which cannot be null. You can use the `->` operator instead. [1]
+
+nullsafe-prop-7.php:8:3
+6 | 
+7 | function foo(MyClass $bar): void {
+8 |   $bar?->x;
+  |   ^^^^^^^^ [1]
+9 | }
+
+1 error found

@@ -1,1 +1,0 @@
-<?php if (!extension_loaded("zip")) { echo "skip extension not available"; } ?>

@@ -14,8 +14,7 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_HTTP_SERVER_SERVER_H_
-#define incl_HPHP_HTTP_SERVER_SERVER_H_
+#pragma once
 
 #include <algorithm>
 #include <chrono>
@@ -24,10 +23,11 @@
 #include <memory>
 #include <string>
 
-#include "hphp/runtime/server/takeover-agent.h"
+#include "hphp/runtime/server/cli-server.h"
 #include "hphp/runtime/server/transport.h"
 #include "hphp/util/exception.h"
 #include "hphp/util/health-monitor-types.h"
+#include "hphp/util/job-queue.h"
 #include "hphp/util/lock.h"
 
 /**
@@ -85,6 +85,7 @@ using ServerFactoryPtr = std::shared_ptr<ServerFactory>;
  * requests.
  */
 struct RequestHandler {
+  explicit RequestHandler() {}
   explicit RequestHandler(int timeout) : m_timeout(timeout) {}
   virtual ~RequestHandler() {}
 
@@ -92,7 +93,7 @@ struct RequestHandler {
    * Called before and after request-handling work.
    */
   virtual void setupRequest(Transport* /*transport*/) {}
-  virtual void teardownRequest(Transport* /*transport*/) noexcept {}
+  virtual void teardownRequest(Transport* /*transport*/) = 0;
 
   /**
    * Sub-class handles a request by implementing this function.
@@ -119,6 +120,8 @@ struct RequestHandler {
    * Write an entry to the handler's access log.
    */
   virtual void logToAccessLog(Transport* /*transport*/) {}
+
+  virtual void setCliContext(CLIContext&& ctx) {}
 
   int getDefaultTimeout() const { return m_timeout; }
 
@@ -202,14 +205,6 @@ public:
   }
 
   /**
-   * Add or remove a TakeoverListener to this server.
-   *
-   * This is a no-op for servers that do not support socket takeover.
-   */
-  virtual void addTakeoverListener(TakeoverListener* /*listener*/) {}
-  virtual void removeTakeoverListener(TakeoverListener* /*listener*/) {}
-
-  /**
    * Add additional worker threads
    */
   virtual void saturateWorkers() = 0;
@@ -220,8 +215,13 @@ public:
   std::string getAddress() const { return m_address;}
   int getPort() const { return m_port;}
 
-  RunStatus getStatus() const { return m_status;}
-  void setStatus(RunStatus status) { m_status = status;}
+  RunStatus getStatus() const {
+    return m_status.load(std::memory_order_acquire);
+  }
+  void setStatus(RunStatus status) {
+    m_status.store(status, std::memory_order_release);
+  }
+
   /**
    * IHostHealthObserver interface.  Note that m_status doesn't
    * contain server health information.
@@ -262,9 +262,20 @@ public:
   virtual size_t getMaxThreadCount() = 0;
 
   /**
+   * Set the max threads that can be used for handling requests.
+   */
+  virtual void setMaxThreadCount(size_t count) = 0;
+
+  /**
    * How many threads are actively working on handling requests.
    */
   virtual int getActiveWorker() = 0;
+
+  /**
+   * Update the maximum number of threads allowed to handle requests at a
+   * time.
+   */
+  virtual void updateMaxActiveWorkers(int) = 0;
 
   /**
    * How many jobs are queued waiting to be handled.
@@ -293,12 +304,7 @@ public:
    */
   virtual bool enableSSL(int port) = 0;
 
-  /**
-   * To enable SSL in addition to plaintext of the current server.
-   */
-  virtual bool enableSSLWithPlainText() {
-    return false;
-  }
+  virtual DispatcherStats getDispatcherStats() = 0;
 
 protected:
   std::string m_address;
@@ -309,7 +315,7 @@ protected:
   std::list<ServerEventListener*> m_listeners;
 
 private:
-  RunStatus m_status{RunStatus::NOT_YET_STARTED};
+  std::atomic<RunStatus> m_status{RunStatus::NOT_YET_STARTED};
   HealthLevel m_healthLevel{HealthLevel::Bold};
 };
 
@@ -337,11 +343,11 @@ struct ServerOptions {
   int m_maxQueue;
   int m_serverFD{-1};
   int m_sslFD{-1};
-  std::string m_takeoverFilename;
   bool m_useFileSocket{false};
   int m_hugeThreads{0};
   unsigned m_hugeStackKb{0};
   unsigned m_extraKb{0};
+  uint32_t m_loop_sample_rate{0};
 };
 
 /**
@@ -429,5 +435,3 @@ struct InvalidHeaderException : ServerException {
 
 ///////////////////////////////////////////////////////////////////////////////
 }
-
-#endif // incl_HPHP_HTTP_SERVER_SERVER_H_

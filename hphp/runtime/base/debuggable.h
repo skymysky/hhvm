@@ -13,8 +13,7 @@
    | license@php.net so we can mail you a copy immediately.               |
    +----------------------------------------------------------------------+
 */
-#ifndef incl_HPHP_DEBUGGABLE_H_
-#define incl_HPHP_DEBUGGABLE_H_
+#pragma once
 
 #include "hphp/runtime/base/type-string.h"
 
@@ -36,8 +35,8 @@ struct IDebuggable {
     SupportVerb = 4,
   };
 
-  typedef std::pair<const char*, std::string> InfoEntry;
-  typedef std::vector<InfoEntry> InfoVec;
+  using InfoEntry = std::pair<const char*, std::string>;
+  using InfoVec = std::vector<InfoEntry>;
 
 public:
   static void Add(InfoVec& out, const char* name, const std::string& value);
@@ -67,20 +66,19 @@ public:
   /**
    * Dump detailed information to return string.
    */
-  virtual String debuggerDump() {
-    return String();
+  virtual OptString debuggerDump() {
+    return OptString();
   }
 
   /**
    * Execute a debugger action.
    */
-  virtual String debuggerVerb(const std::string& /*verb*/,
-                              const std::vector<std::string>& /*args*/) {
-    return String();
+  virtual OptString debuggerVerb(const std::string& /*verb*/,
+                                 const std::vector<std::string>& /*args*/) {
+    return OptString();
   }
 };
 
 ///////////////////////////////////////////////////////////////////////////////
 }
 
-#endif // incl_HPHP_DEBUGGABLE_H_

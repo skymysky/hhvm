@@ -1,0 +1,197 @@
+(data_only_dirs
+ api
+ cargo
+ core
+ ffi_bridge
+ lowerer
+ bench
+ js
+ smart_constructors
+ syntax_by_ref
+ rust_parser_errors_ffi)
+
+(library
+ (name positioned_by_ref_parser_ffi)
+ (modules)
+ (wrapped false)
+ (c_library_flags -lpthread)
+ (foreign_archives positioned_by_ref_parser_ffi))
+
+(rule
+ (targets libpositioned_by_ref_parser_ffi.a)
+ (deps
+  (source_tree %{workspace_root}/hack/src))
+ (locks /cargo)
+ (action
+  (run
+   %{workspace_root}/hack/scripts/invoke_cargo.sh
+   positioned_by_ref_parser_ffi
+   positioned_by_ref_parser_ffi)))
+
+(library
+ (name aast_parser_ffi)
+ (modules)
+ (wrapped false)
+ (c_library_flags -lpthread)
+ (foreign_archives aast_parser_ffi))
+
+(rule
+ (targets libaast_parser_ffi.a)
+ (deps
+  (source_tree %{workspace_root}/hack/src))
+ (locks /cargo)
+ (action
+  (run
+   %{workspace_root}/hack/scripts/invoke_cargo.sh
+   aast_parser_ffi
+   aast_parser_ffi)))
+
+(library
+ (name rust_parser_ffi)
+ (modules)
+ (wrapped false)
+ (c_library_flags -lpthread)
+ (foreign_archives rust_parser_ffi))
+
+(rule
+ (targets librust_parser_ffi.a)
+ (deps
+  (source_tree %{workspace_root}/hack/src))
+ (locks /cargo)
+ (action
+  (run
+   %{workspace_root}/hack/scripts/invoke_cargo.sh
+   rust_parser_ffi
+   rust_parser_ffi)))
+
+(library
+ (name rust_parser_errors_ffi)
+ (modules)
+ (wrapped false)
+ (c_library_flags -lpthread)
+ (foreign_archives rust_parser_errors_ffi))
+
+(rule
+ (targets librust_parser_errors_ffi.a)
+ (deps
+  (source_tree %{workspace_root}/hack/src))
+ (locks /cargo)
+ (action
+  (run
+   %{workspace_root}/hack/scripts/invoke_cargo.sh
+   rust_parser_errors_ffi
+   rust_parser_errors_ffi)))
+
+(copy_files
+ (files smart_constructors/*.ml))
+
+(library
+ (name full_fidelity)
+ (wrapped false)
+ (modules
+  full_fidelity_parser_env
+  full_fidelity_editable_positioned_original_source_data
+  full_fidelity_editable_positioned_syntax
+  full_fidelity_editable_positioned_token
+  full_fidelity_editable_syntax
+  full_fidelity_editable_token
+  full_fidelity_editable_trivia
+  full_fidelity_operator_generated
+  full_fidelity_operator
+  full_fidelity_parser
+  full_fidelity_parser_errors
+  full_fidelity_parser_profiling
+  full_fidelity_positioned_syntax
+  full_fidelity_positioned_token
+  full_fidelity_positioned_trivia
+  full_fidelity_rewriter
+  full_fidelity_source_text
+  full_fidelity_token_kind
+  full_fidelity_syntax
+  full_fidelity_syntax_error
+  full_fidelity_syntax_kind
+  full_fidelity_syntax_tree
+  full_fidelity_syntax_type
+  full_fidelity_trivia_kind
+  lexable_trivia_sig
+  lexable_token_sig
+  lexable_positioned_token_sig
+  positioned_parser
+  positioned_syntax_sig
+  syntax_sig
+  rust_pointer
+  rust_parser_ffi
+  rust_lazy_trivia_ffi
+  syntax_transforms
+  ; from smart_constructors
+  smart_constructors
+  smart_constructors_wrappers
+  syntax_smart_constructors)
+ (libraries
+  common
+  file_info
+  hh_autoimport
+  naming_special_names
+  parser_options
+  parser_schema
+  parser_schema_def
+  positioned_by_ref_parser_ffi
+  relative_path
+  rust_parser_errors_ffi
+  rust_parser_ffi
+  sexplib
+  yojson)
+ (preprocess
+  (pps ppx_sexp_conv visitors.ppx ppx_deriving.std)))
+
+(library
+ (name parsing_error)
+ (wrapped false)
+ (modules
+   parsing_error)
+ (libraries
+   error_codes
+   user_error
+   pos_or_decl))
+
+(library
+ (name parser)
+ (wrapped false)
+ (modules
+  docblock_finder
+  docblock_parser
+  full_fidelity_ast
+  scoured_comments
+  rust_aast_parser_types
+  ide_parser_cache
+  limited_width_pretty_printing_library
+  namespaces
+  parser_return
+  pretty_printing_library
+  pretty_printing_library_sig)
+ (preprocess
+  (pps visitors.ppx ppx_deriving.std))
+ (libraries
+  ast
+  direct_decl_parser
+  fixme_provider
+  full_fidelity
+  heap_shared_mem
+  hh_autoimport
+  logging
+  namespace_env
+  nast
+  aast_parser_ffi
+  rust_parser_ffi
+  parsing_error
+  typing_ast
+  utils_lint
+  utils_php_escape))
+
+(library
+ (name hh_autoimport)
+ (wrapped false)
+ (modules hh_autoimport)
+ (preprocess
+  (pps visitors.ppx ppx_deriving.std))
+ (libraries collections core_kernel naming_special_names))

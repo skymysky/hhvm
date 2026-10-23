@@ -1,0 +1,21 @@
+error: Parsing[1002] `<<__Memoize>>` cannot be used on functions with `inout` parameters [1]
+
+bad_inout_decl_memoize3.php:5:40
+3 | final class D {
+4 |   <<__Memoize>>
+5 |   public static function baz(mixed $x, inout mixed $y, mixed $z): void {}
+  |                                        ^^^^^ [1]
+6 | }
+
+error: NastCheck[3045] Functions with `inout` parameters cannot be memoized [1]
+-> This is an `inout` parameter [2]
+
+bad_inout_decl_memoize3.php:5:26
+3 | final class D {
+4 |   <<__Memoize>>
+5 |   public static function baz(mixed $x, inout mixed $y, mixed $z): void {}
+  |                          ^^^ [1]
+  |                                                    ^^ [2]
+6 | }
+
+2 errors found

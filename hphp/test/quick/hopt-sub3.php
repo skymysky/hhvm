@@ -1,13 +1,11 @@
 <?hh
-function foo($a, $b) {
+function foo($a, $b) :mixed{
   // reg - const
   $b = 7;
   return $a - $b;
 }
 
-function main() {
+<<__EntryPoint>> function main(): void {
   echo foo(5, 7);
   echo "\n";
 }
-
-main();

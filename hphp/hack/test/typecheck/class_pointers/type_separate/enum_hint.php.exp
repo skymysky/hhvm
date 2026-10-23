@@ -1,0 +1,58 @@
+error: Typing[4110] Invalid return type [1]
+-> Expected `classname<HH\BuiltinEnum<Opaque>>` [2]
+-> But got `class<HH\BuiltinEnum<Opaque>>` [3]
+
+enum_hint.php:11:10
+ 8 | }
+ 9 | 
+10 | function f(enum<Opaque> $o): HH\enumname<Opaque> {
+   |            ^^^^^^^^^^^^ [3]
+   |                              ^^^^^^^^^^^^^^^^^^^ [2]
+11 |   return $o;
+   |          ^^ [1]
+12 | }
+13 | function g(enum<Opaque> $o): enum<int> {
+
+error: Typing[4110] Invalid return type [1]
+-> Expected `int` [2]
+-> But got `arraykey` [3]
+->   by the definition of `Opaque` arising from an implicit `as arraykey` constraint on this type [3]
+
+enum_hint.php:14:10
+11 |   return $o;
+12 | }
+13 | function g(enum<Opaque> $o): enum<int> {
+   |                 ^^^^^^ [3]
+   |                                   ^^^ [2]
+14 |   return $o;
+   |          ^^ [1]
+15 | }
+16 | function h(HH\enumname<Opaque> $o): HH\enumname<int> {
+
+error: Typing[4110] Invalid return type [1]
+-> Expected `int` [2]
+->   via this generic `T` [3]
+-> But got `arraykey` [4]
+->   via this generic `T` [3]
+->   by the definition of `Opaque` arising from an implicit `as arraykey` constraint on this type [4]
+
+enum_hint.php:17:10
+14 |   return $o;
+15 | }
+16 | function h(HH\enumname<Opaque> $o): HH\enumname<int> {
+   |                        ^^^^^^ [4]
+   |                                                 ^^^ [2]
+17 |   return $o;
+   |          ^^ [1]
+18 | }
+19 | function j(enum<AsInt> $i): enum<int> {
+
+BuiltinEnum.hhi:78:44
+76 |   }
+77 | 
+78 |   type enumname<T> = classname<BuiltinEnum<T>>;
+   |                                            ^ [3]
+79 | 
+80 |   const enum<arraykey> BUILTIN_ENUM;
+
+3 errors found

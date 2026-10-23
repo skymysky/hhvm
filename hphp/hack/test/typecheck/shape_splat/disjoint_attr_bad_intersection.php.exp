@@ -1,0 +1,35 @@
+error: Typing[4419] Type alias marked `<<__DisjointShapeSplat>>` may contain overlapping shapes [1]
+-> Shape field `x` is defined here [2]
+-> Shape field `x` may also be provided by type parameter `TA` [3]
+-> Shape field `x` may also be provided by type parameter `TB` [4]
+
+disjoint_attr_bad_intersection.php:7:9
+ 5 | // `x` field is supplied by both the intersection splat and the explicit field.
+ 6 | <<__DisjointShapeSplat>>
+ 7 | newtype Bad<TA as shape(...), TB as shape(...)> =
+   |         ^^^ [1]
+ 8 |   shape(...(TA & TB), 'x' => int);
+   |             ^^ [3]
+   |                  ^^ [4]
+   |                       ^^^ [2]
+ 9 | 
+10 | type Witness = Bad<shape('x' => int), shape('x' => int)>;
+
+error: Typing[4419] Type alias marked `<<__DisjointShapeSplat>>` may contain overlapping shapes [1]
+-> Shape field `x` is defined here [2]
+-> Shape field `x` may also be provided by type parameter `TA` [3]
+-> Shape field `x` may also be provided by type parameter `TB` [4]
+
+disjoint_attr_bad_intersection.php:14:9
+12 | // An optional field is still possibly present and must be rejected.
+13 | <<__DisjointShapeSplat>>
+14 | newtype BadOptional<
+   |         ^^^^^^^^^^^ [1]
+15 |   TA as shape(?'x' => int),
+16 |   TB as shape(...),
+17 | > = shape(...(TA & TB), 'x' => bool);
+   |               ^^ [3]
+   |                    ^^ [4]
+   |                         ^^^ [2]
+
+2 errors found

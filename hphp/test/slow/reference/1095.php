@@ -1,10 +1,14 @@
-<?php
+<?hh
 
-function foo() {
-  $perms = array('x' => 1);
-  $t = &$perms;
+function foo(inout $perms, inout $t) :mixed{
+  $perms = dict['x' => 1];
   $t = $t['x'];
-  unset($t);
+  $t = null;
   return $perms;
 }
-var_dump(foo());
+
+<<__EntryPoint>>
+function main_1095() :mixed{
+  $a = null;
+  var_dump(foo(inout $a, inout $a));
+}

@@ -480,7 +480,7 @@ static bool schema_union(sdlPtr sdl, xmlAttrPtr tns, xmlNodePtr unionType,
     string type, ns;
     xmlNsPtr nsptr;
 
-    str = strdup((char*)memberTypes->children->content);
+    str = req::strdup((char*)memberTypes->children->content);
     whiteSpace_collapse(BAD_CAST(str));
     start = str;
     while (start && *start != '\0') {
@@ -504,7 +504,7 @@ static bool schema_union(sdlPtr sdl, xmlAttrPtr tns, xmlNodePtr unionType,
       }
       start = next;
     }
-    free(str);
+    req::free(str);
   }
 
   xmlNodePtr trav = unionType->children;
@@ -1905,7 +1905,7 @@ static void schema_content_model_fixup(sdlCtx *ctx, sdlContentModelPtr model) {
       model->min_occurs = 1;
       model->max_occurs = 1;
     }
-    // fall through
+    [[fallthrough]];
   case XSD_CONTENT_SEQUENCE:
   case XSD_CONTENT_ALL:
     for (unsigned int i = 0; i < model->u_content.size(); i++) {

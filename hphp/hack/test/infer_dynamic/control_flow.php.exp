@@ -1,0 +1,12 @@
+{ "function": "\\takes_int", "solutions": [] }
+{ "function": "\\takes_arraykey", "solutions": [] }
+{
+  "function": "\\test_if_else",
+  "solutions": [
+    {
+      "name": "$d",
+      "pos": "File \"control_flow.php\", line 6, characters 31-32:",
+      "type": "int"
+    }
+  ]
+}

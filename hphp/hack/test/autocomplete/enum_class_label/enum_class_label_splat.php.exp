@@ -1,0 +1,9 @@
+add
+  INSERT add
+  ~MyFunc<(int, int)>
+increment
+  INSERT increment
+  ~MyFunc<(int)>
+multiply
+  INSERT multiply
+  ~MyFunc<(int, int)>

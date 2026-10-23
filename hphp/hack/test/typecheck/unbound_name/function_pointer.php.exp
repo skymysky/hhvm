@@ -1,0 +1,19 @@
+error: Naming[2049] Unbound name: `not_found` (a global function) [1]
+
+function_pointer.php:10:8
+ 8 | 
+ 9 |   // Unbound name
+10 |   $y = not_found<>;
+   |        ^^^^^^^^^ [1]
+11 | }
+
+error: Typing[4107] Unbound name (typing): `not_found` [1]
+
+function_pointer.php:10:8
+ 8 | 
+ 9 |   // Unbound name
+10 |   $y = not_found<>;
+   |        ^^^^^^^^^ [1]
+11 | }
+
+2 errors found

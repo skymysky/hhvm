@@ -1,12 +1,12 @@
 <?hh
 
-function test($name, $a, $b) {
+function test($name, $a, $b) :mixed{
   echo "---- $name\n";
   var_dump($a->concat($b));
 }
 
-function main() {
-  $containers = array(
+function main() :mixed{
+  $containers = dict[
     'Vector'          => Vector {1},
     'empty Vector'    => Vector {},
     'ImmVector'       => ImmVector {2},
@@ -21,7 +21,7 @@ function main() {
     'empty Set'       => Set {},
     'ImmSet'          => ImmSet {8},
     'empty ImmSet'    => ImmSet {},
-  );
+  ];
   foreach ($containers as $name => $container) {
     foreach ($containers as $name2 => $container2) {
       test("$name to $name2", $container, $container2);
@@ -29,4 +29,8 @@ function main() {
   }
 }
 
+
+<<__EntryPoint>>
+function main_concat_empty() :mixed{
 main();
+}

@@ -1,0 +1,78 @@
+warning: Warn[12012] This `as` assertion will always fail and lead to an exception at runtime. The expression on the left has type `int` which shares no values with `(_, _)`. [1]
+
+wildcard_as_tuple.php:5:3
+3 | 
+4 | function f<<<__Enforceable>> reify T>(): void {
+5 |   3 as (_, _);
+  |   ^^^^^^^^^^^ [1]
+6 |   3 as (T, _);
+7 |   3 as (_, T);
+
+warning: Warn[12012] This `as` assertion will always fail and lead to an exception at runtime. The expression on the left has type `int` which shares no values with `(T, _)`. [1]
+
+wildcard_as_tuple.php:6:3
+4 | function f<<<__Enforceable>> reify T>(): void {
+5 |   3 as (_, _);
+6 |   3 as (T, _);
+  |   ^^^^^^^^^^^ [1]
+7 |   3 as (_, T);
+8 |   3 as (T, T);
+
+warning: Warn[12012] This `as` assertion will always fail and lead to an exception at runtime. The expression on the left has type `int` which shares no values with `(_, T)`. [1]
+
+wildcard_as_tuple.php:7:3
+5 |   3 as (_, _);
+6 |   3 as (T, _);
+7 |   3 as (_, T);
+  |   ^^^^^^^^^^^ [1]
+8 |   3 as (T, T);
+9 | }
+
+warning: Warn[12012] This `as` assertion will always fail and lead to an exception at runtime. The expression on the left has type `int` which shares no values with `(T, T)`. [1]
+
+wildcard_as_tuple.php:8:3
+6 |   3 as (T, _);
+7 |   3 as (_, T);
+8 |   3 as (T, T);
+  |   ^^^^^^^^^^^ [1]
+9 | }
+
+error: Typing[4195] Invalid `as` expression hint [1]
+-> The `as` operator cannot be used with _ in a tuple (use `mixed` instead) [2]
+-> The `as` operator cannot be used with _ in a tuple (use `mixed` instead) [3]
+
+wildcard_as_tuple.php:5:8
+3 | 
+4 | function f<<<__Enforceable>> reify T>(): void {
+5 |   3 as (_, _);
+  |        ^^^^^^ [1]
+  |         ^ [2]
+  |            ^ [3]
+6 |   3 as (T, _);
+7 |   3 as (_, T);
+
+error: Typing[4195] Invalid `as` expression hint [1]
+-> The `as` operator cannot be used with _ in a tuple (use `mixed` instead) [2]
+
+wildcard_as_tuple.php:6:8
+4 | function f<<<__Enforceable>> reify T>(): void {
+5 |   3 as (_, _);
+6 |   3 as (T, _);
+  |        ^^^^^^ [1]
+  |            ^ [2]
+7 |   3 as (_, T);
+8 |   3 as (T, T);
+
+error: Typing[4195] Invalid `as` expression hint [1]
+-> The `as` operator cannot be used with _ in a tuple (use `mixed` instead) [2]
+
+wildcard_as_tuple.php:7:8
+5 |   3 as (_, _);
+6 |   3 as (T, _);
+7 |   3 as (_, T);
+  |        ^^^^^^ [1]
+  |         ^ [2]
+8 |   3 as (T, T);
+9 | }
+
+7 errors found

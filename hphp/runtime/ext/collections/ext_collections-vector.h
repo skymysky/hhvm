@@ -1,10 +1,11 @@
-#ifndef incl_HPHP_EXT_COLLECTIONS_VECTOR_H
-#define incl_HPHP_EXT_COLLECTIONS_VECTOR_H
+#pragma once
 
 #include "hphp/runtime/ext/collections/ext_collections.h"
+#include "hphp/runtime/base/array-iterator.h"
 #include "hphp/runtime/base/builtin-functions.h"
-#include "hphp/runtime/base/packed-array-defs.h"
 #include "hphp/runtime/base/tv-refcount.h"
+#include "hphp/runtime/base/tv-val.h"
+#include "hphp/runtime/base/vanilla-vec-defs.h"
 #include "hphp/runtime/vm/native-data.h"
 
 namespace HPHP {
@@ -13,11 +14,10 @@ namespace HPHP {
 struct BaseMap;
 struct BaseSet;
 struct c_Pair;
-struct c_AwaitAllWaitHandle;
 
 namespace collections {
 void append(ObjectData*, TypedValue*);
-void deepCopy(TypedValue*);
+void deepCopy(tv_lval);
 struct VectorIterator;
 }
 
@@ -25,96 +25,47 @@ struct VectorIterator;
 //// class BaseVector: encapsulates functionality that is common to both
 //// c_Vector and c_ImmVector. It doesn't map to any PHP-land class.
 
-struct BaseVector : ObjectData {
+struct BaseVector : c_Collection {
 protected:
   // Make sure this one is inlined all the way
   explicit BaseVector(Class* cls, HeaderKind kind)
-    : ObjectData(cls, NoInit{}, collections::objectFlags, kind)
+    : c_Collection(cls, kind)
     , m_unusedAndSize(0)
-    , m_arr(staticEmptyVecArray())
-  {}
-  explicit BaseVector(Class* cls, HeaderKind kind, ArrayData* arr)
-    : ObjectData(cls, NoInit{}, collections::objectFlags, kind)
-    , m_unusedAndSize(arr->m_size)
-    , m_arr(arr)
   {
-    assertx(arr->isVecArray());
+    setArrayData(staticEmptyVec());
+  }
+  explicit BaseVector(Class* cls, HeaderKind kind, ArrayData* arr)
+    : c_Collection(cls, kind)
+    , m_unusedAndSize(arr->m_size)
+  {
+    setArrayData(arr);
   }
   explicit BaseVector(Class* cls, HeaderKind kind, uint32_t cap)
-    : ObjectData(cls, NoInit{}, collections::objectFlags, kind)
+    : c_Collection(cls, kind)
     , m_unusedAndSize(0)
-    , m_arr(PackedArray::MakeReserveVec(cap))
-  {}
+  {
+    setArrayData(VanillaVec::MakeReserveVec(cap));
+  }
   ~BaseVector();
 
 public:
-  Variant firstValue() const {
-    if (!m_size) return init_null_variant;
-    return tvAsCVarRef(&data()[0]);
+  ArrayData* arrayData() { return m_arr; }
+  const ArrayData* arrayData() const { return m_arr; }
+  void setArrayData(ArrayData* arr) {
+    assertx(arr->isVanillaVec());
+    assertx(!arr->isLegacyArray());
+    m_arr = arr;
   }
 
-  Variant lastValue() const {
-    if (!m_size) return init_null_variant;
-    return tvAsCVarRef(&data()[m_size-1]);
-  }
-
-  template<class TVector, bool useKey>
-  typename std::enable_if<
-    std::is_base_of<BaseVector, TVector>::value, Object>::type
-  php_map(const Variant& callback);
-
-  template<class TVector, bool useKey>
-  typename std::enable_if<
-    std::is_base_of<BaseVector, TVector>::value, Object>::type
-  php_filter(const Variant& callback);
-
-  template<class TVector>
-  typename std::enable_if<
-    std::is_base_of<BaseVector, TVector>::value, Object>::type
-  php_take(const Variant& n);
-
-  template<class TVector>
-  typename std::enable_if<
-    std::is_base_of<BaseVector, TVector>::value, Object>::type
-  php_takeWhile(const Variant& fn);
-
-  template<class TVector>
-  typename std::enable_if<
-    std::is_base_of<BaseVector, TVector>::value, Object>::type
-  php_skip(const Variant& n);
-
-  template<class TVector>
-  typename std::enable_if<
-    std::is_base_of<BaseVector, TVector>::value, Object>::type
-  php_skipWhile(const Variant& fn);
-
-  template<class TVector>
-  typename std::enable_if<
-    std::is_base_of<BaseVector, TVector>::value, Object>::type
-  php_slice(const Variant& start, const Variant& len);
-
-  template<class TVector>
-  typename std::enable_if<
-    std::is_base_of<BaseVector, TVector>::value, Object>::type
-  php_concat(const Variant& iterable);
-
-  ArrayData* arrayData() {
-    assertx(m_arr->isVecArray());
-    return m_arr;
-  }
-  const ArrayData* arrayData() const {
-    assertx(m_arr->isVecArray());
-    return m_arr;
-  }
   void setSize(uint32_t sz) {
     assertx(canMutateBuffer());
-    assertx(sz <= PackedArray::capacity(arrayData()));
+    assertx(sz <= VanillaVec::capacity(arrayData()));
     m_size = sz;
     arrayData()->m_size = sz;
   }
   void incSize() {
     assertx(canMutateBuffer());
-    assertx(m_size < PackedArray::capacity(arrayData()));
+    assertx(m_size < VanillaVec::capacity(arrayData()));
     ++m_size;
     arrayData()->m_size = m_size;
   }
@@ -124,17 +75,18 @@ public:
     --m_size;
     arrayData()->m_size = m_size;
   }
-  TypedValue* appendForUnserialize(int64_t k) {
+  tv_lval appendForUnserialize(int64_t k) {
     assertx(k == m_size);
     incSize();
-    return &data()[k];
+    return lvalAt(k);
   }
 
+  template <IntishCast intishCast = IntishCast::None>
   static Array ToArray(const ObjectData* obj) {
     check_collection_cast_to_array();
     return const_cast<BaseVector*>(
       static_cast<const BaseVector*>(obj)
-    )->toArray();
+    )->toPHPArrayImpl();
   }
 
   static bool ToBool(const ObjectData* obj) {
@@ -142,8 +94,7 @@ public:
   }
 
   template <bool throwOnMiss>
-  static TypedValue* OffsetAt(ObjectData* obj, const TypedValue* key) {
-    assertx(!isRefType(key->m_type));
+  static tv_lval OffsetAt(ObjectData* obj, const TypedValue* key) {
     auto vec = static_cast<BaseVector*>(obj);
     if (key->m_type == KindOfInt64) {
       return throwOnMiss ? vec->at(key->m_data.num)
@@ -153,21 +104,19 @@ public:
     return nullptr;
   }
   static bool OffsetIsset(ObjectData* obj, const TypedValue* key);
-  static bool OffsetEmpty(ObjectData* obj, const TypedValue* key);
   static bool OffsetContains(ObjectData* obj, const TypedValue* key);
   static bool Equals(const ObjectData* obj1, const ObjectData* obj2);
 
   template<typename T> typename
-    std::enable_if<std::is_integral<T>::value, TypedValue*>::type
+    std::enable_if<std::is_integral<T>::value, tv_lval>::type
   at(T key) {
     if (UNLIKELY((uint64_t)key >= (uint64_t)m_size)) {
       collections::throwOOB(key);
       return nullptr;
     }
-    return &data()[key];
+    return lvalAt(key);
   }
-  TypedValue* at(const TypedValue* key) {
-    assertx(!isRefType(key->m_type));
+  tv_lval at(const TypedValue* key) {
     if (LIKELY(key->m_type == KindOfInt64)) {
       return at(key->m_data.num);
     }
@@ -175,15 +124,14 @@ public:
   }
 
   template<typename T> typename
-    std::enable_if<std::is_integral<T>::value, TypedValue*>::type
+    std::enable_if<std::is_integral<T>::value, tv_lval>::type
   get(T key) {
     if ((uint64_t)key >= (uint64_t)m_size) {
       return nullptr;
     }
-    return &data()[key];
+    return lvalAt(key);
   }
-  TypedValue* get(const TypedValue* key) {
-    assertx(!isRefType(key->m_type));
+  tv_lval get(const TypedValue* key) {
     if (LIKELY(key->m_type == KindOfInt64)) {
       return get(key->m_data.num);
     }
@@ -199,7 +147,6 @@ public:
     addAllImpl(it);
   }
 
-  int64_t linearSearch(const Variant& search_value);
   void zip(BaseVector* bvec, const Variant& iterable);
   void addFront(TypedValue v);
   Variant popFront();
@@ -214,19 +161,11 @@ public:
    * sz items in the Vector.
    */
   void reserve(uint32_t sz);
-  Array toArray() {
-    if (!m_size) return empty_array();
-    return Array::attach(const_cast<ArrayData*>(arrayData()->toPHPArray(true)));
-  }
 
-  Array toVArray() {
-    if (!m_size) return Array::attach(staticEmptyVArray());
-    return Array::attach(arrayData()->toVArray(true));
-  }
-
-  Array toDArray() {
-    if (!m_size) return Array::attach(staticEmptyDArray());
-    return Array::attach(arrayData()->toDArray(true));
+  Array toPHPArrayImpl() {
+    if (!m_size) return empty_dict_array();
+    auto ad = arrayData()->toDict(true);
+    return ad != arrayData() ? Array::attach(ad) : Array{ad};
   }
 
   static constexpr size_t sizeOffset() { return offsetof(BaseVector, m_size); }
@@ -236,33 +175,42 @@ public:
    * Append `v' to the Vector and incref it if it's refcounted.
    */
   void add(TypedValue v) { addImpl<false>(v); }
-  void add(const Variant& v) { add(*v.asCell()); }
+  void add(const Variant& v) { add(*v.asTypedValue()); }
 
   /*
    * Add `k' => `v' to the Vector, increffing `v' if it's refcounted.
    */
+  void set(int64_t key, TypedValue val) {
+    tvIncRefGen(val);
+    setMove(key, val);
+  }
   void set(int64_t key, const TypedValue* val) {
-    mutate();
-    setRaw(key, val);
+    set(key, *val);
   }
   void set(int64_t key, const Variant& val) {
-    set(key, val.asCell());
+    set(key, val.asTypedValue());
   }
   void set(const TypedValue* key, const TypedValue* val) {
-    assertx(!isRefType(key->m_type));
     if (key->m_type != KindOfInt64) {
       throwBadKeyType();
     }
     set(key->m_data.num, val);
   }
   void set(const Variant& key, const Variant& val) {
-    set(key.asCell(), val.asCell());
+    set(key.asTypedValue(), val.asTypedValue());
   }
 
-  template<class TVector>
-  static typename
-    std::enable_if<std::is_base_of<BaseVector, TVector>::value, Object>::type
-  fromKeysOf(const TypedValue& container);
+  /*
+   * Set a particular value in a vector without inc-ref-ing the value.
+   */
+  void setMove(int64_t key, TypedValue val) {
+    mutate();
+    // Cast to unsigned to check "0 <= key && key < m_size" in one comparison.
+    if (UNLIKELY((uint64_t)key >= (uint64_t)m_size)) {
+      collections::throwOOB(key);
+    }
+    tvMove(val, lvalAt(key));
+  }
 
   /**
    * canMutateBuffer() indicates whether it is currently safe to directly
@@ -301,7 +249,7 @@ public:
   [[noreturn]] static void throwBadKeyType();
 
   static constexpr uint64_t MaxCapacity() {
-    return MixedArray::MaxSize;
+    return VanillaDict::MaxSize;
   }
 
   void scan(type_scan::Scanner& scanner) const {
@@ -315,24 +263,34 @@ protected:
     std::is_base_of<BaseVector, TVector>::value, TVector*>::type
   static Clone(ObjectData* obj);
 
-  Cell* data() const { return packedData(m_arr); }
+  // Get a (mutable or const) ref to the value. `index` must be a valid index.
+  tv_lval lvalAt(int64_t index) {
+    return VanillaVec::LvalUncheckedInt(arrayData(), index);
+  }
+  tv_rval rvalAt(int64_t index) const {
+    return const_cast<BaseVector*>(this)->lvalAt(index);
+  }
+
+  // Returns the value at k, with no refcount change. Requires contains(k).
+  TypedValue removeKeyImpl(int64_t k);
+
   void reserveImpl(uint32_t newCap);
 
   void addAllImpl(const Variant& t);
 
   template<bool raw> ALWAYS_INLINE
   void addImpl(TypedValue tv) {
-    assertx(!isRefType(tv.m_type));
     auto oldAd = arrayData();
     if (raw) {
       assertx(canMutateBuffer());
-      m_arr = PackedArray::AppendVec(oldAd, tv, false);
+      setArrayData(VanillaVec::AppendInPlace(oldAd, tv));
+      if (arrayData() != oldAd) {
+        decRefArr(oldAd);
+      }
     } else {
       dropImmCopy();
-      m_arr = PackedArray::AppendVec(oldAd, tv, oldAd->cowCheck());
-    }
-    if (m_arr != oldAd) {
-      decRefArr(oldAd);
+      setArrayData(VanillaVec::AppendMove(oldAd, tv));
+      tvIncRefGen(tv);
     }
     m_size = arrayData()->m_size;
   }
@@ -341,36 +299,7 @@ protected:
   // immutable buffer, so it's only safe to use in some cases. If you're not
   // sure, use add() instead.
   void addRaw(TypedValue v) { addImpl<true>(v); }
-  void addRaw(const Variant& v) { addRaw(*v.asCell()); }
-
-  // setRaw() assigns a value to the specified key in this Vector but doesn't
-  // check for an immutable buffer, so it's only safe to use in some cases.
-  // If you're not sure, use set() instead.
-  void setRaw(int64_t key, const TypedValue* val) {
-    assertx(!isRefType(val->m_type));
-    assertx(canMutateBuffer());
-    if (UNLIKELY((uint64_t)key >= (uint64_t)m_size)) {
-      collections::throwOOB(key);
-      return;
-    }
-    TypedValue* tv = &data()[key];
-    auto const oldTV = *tv;
-    cellDup(*val, *tv);
-    tvDecRefGen(oldTV);
-  }
-  void setRaw(int64_t key, const Variant& val) {
-    setRaw(key, val.asCell());
-  }
-  void setRaw(const TypedValue* key, const TypedValue* val) {
-    assertx(!isRefType(key->m_type));
-    if (key->m_type != KindOfInt64) {
-      throwBadKeyType();
-    }
-    setRaw(key->m_data.num, val);
-  }
-  void setRaw(const Variant& key, const Variant& val) {
-    setRaw(key.asCell(), val.asCell());
-  }
+  void addRaw(const Variant& v) { addRaw(*v.asTypedValue()); }
 
   /**
    * Copy the buffer and reset the immutable copy.
@@ -378,23 +307,6 @@ protected:
   void mutateImpl();
 
   Object getIterator();
-  Variant php_at(const Variant& key) {
-    return tvAsCVarRef(at(key.asCell()));
-  }
-  Variant php_get(const Variant& key) {
-    if (auto tv = get(key.asCell())) {
-      return tvAsCVarRef(tv);
-    }
-    return init_null_variant;
-  }
-
-  template<class TVector> typename
-    std::enable_if<std::is_base_of<BaseVector, TVector>::value, Object>::type
-  php_keys();
-
-  template<class TVector> typename
-    std::enable_if<std::is_base_of<BaseVector, TVector>::value, Object>::type
-  php_zip(const Variant& it);
 
   /////////////////////////////////////////////////////////////////////////////
 
@@ -407,10 +319,8 @@ protected:
     int64_t m_unusedAndSize;
   };
 
-
-  // The ArrayData's element area can be computed from m_arr via the
-  // packedData() helper function. When capacity is non-zero, m_arr points
-  // to a VecArray.
+  // The vec backing this collection. See setArrayData() for a list of the
+  // invariants that this vec must satisfy.
   ArrayData* m_arr;
 
   // m_immCopy is a smart pointer to an ImmVector that is an up-to-date
@@ -436,9 +346,8 @@ private:
   friend struct BaseMap;
   friend struct BaseSet;
   friend struct c_Pair;
-  friend struct c_AwaitAllWaitHandle;
 
-  friend void collections::deepCopy(TypedValue*);
+  friend void collections::deepCopy(tv_lval);
 
   friend void collectionReserve(ObjectData* obj, int64_t sz);
   friend void collectionInitAppend(ObjectData* obj, TypedValue* val);
@@ -447,8 +356,8 @@ private:
 /////////////////////////////////////////////////////////////////////////////
 // c_Vector
 
-struct c_Vector : BaseVector {
-  DECLARE_COLLECTIONS_CLASS(Vector);
+struct c_Vector : BaseVector, SystemLib::ClassLoader<"HH\\Vector"> {
+  DECLARE_COLLECTIONS_CLASS(Vector)
 
   explicit c_Vector()
     : BaseVector(c_Vector::classof(), HeaderKind::Vector) { }
@@ -463,10 +372,9 @@ struct c_Vector : BaseVector {
 
   static c_Vector* Clone(ObjectData* obj);
 
-  void addAllKeysOf(const Variant& val);
   void clear();
   Variant pop();
-  void resize(uint32_t sz, const Cell* val);
+  void resize(uint32_t sz, const TypedValue* val);
   void removeKey(int64_t k);
   void reverse();
   void shuffle();
@@ -474,13 +382,32 @@ struct c_Vector : BaseVector {
   void splice(int64_t startPos) {
     splice(startPos, m_size - 1);
   }
-  void sort(int sort_flags, bool ascending);
-  bool usort(const Variant& cmp_function);
 
   static void OffsetSet(ObjectData* obj, const TypedValue* key,
                         const TypedValue* val);
   static void OffsetUnset(ObjectData* obj, const TypedValue* key);
   static Object fromArray(const Class*, const Variant&);
+
+  struct SortTmp {
+    SortTmp(c_Vector* v, SortFunction sf) : m_v(v) {
+      if (hasUserDefinedCmp(sf)) {
+        m_ad = VanillaVec::Copy(m_v->arrayData());
+      } else {
+        m_v->mutate();
+        m_ad = m_v->arrayData();
+      }
+    }
+    ~SortTmp() {
+      if (m_v->arrayData() != m_ad) {
+        Array tmp = Array::attach(m_v->arrayData());
+        m_v->setArrayData(m_ad);
+      }
+    }
+    ArrayData* operator->() { return m_ad; }
+   private:
+    c_Vector* m_v;
+    ArrayData* m_ad;
+  };
 
  protected:
   uint32_t checkRequestedSize(const Variant& sz) {
@@ -490,70 +417,37 @@ struct c_Vector : BaseVector {
         "Parameter sz must be a non-negative integer");
     }
     if (intSz > BaseVector::MaxCapacity()) {
-      auto msg = folly::format(
+      auto msg = fmt::format(
         "Parameter sz must be at most {}; {} passed",
         BaseVector::MaxCapacity(),
         intSz
-      ).str();
+      );
       SystemLib::throwInvalidArgumentExceptionObject(msg);
     }
     return intSz;
   }
 
-  Object php_add(const Variant& value) {
-    add(value);
-    return Object{this};
-  }
-  Object php_addAll(const Variant& it) {
-    addAll(it);
-    return Object{this};
-  }
-  Object php_addAllKeysOf(const Variant& it) {
-    addAllKeysOf(it);
-    return Object{this};
-  }
-  Object php_clear() {
-    clear();
-    return Object{this};
-  }
-  Object php_removeKey(const Variant& key) {
+  void php_removeKey(const Variant& key) {
     if (UNLIKELY(!key.isInteger())) {
       throwBadKeyType();
     }
     removeKey(key.toInt64());
-    return Object{this};
   }
+
   void php_reserve(const Variant& sz) {
     return reserve(checkRequestedSize(sz));
   }
   void php_resize(const Variant& sz, const Variant& value) {
-    return resize(checkRequestedSize(sz), value.asCell());
-  }
-  Object php_set(const Variant& key, const Variant& value) {
-    set(key, value);
-    return Object{this};
-  }
-  Object php_setAll(const Variant& it) {
-    if (it.isNull()) return Object{this};
-    size_t sz;
-    ArrayIter iter = getArrayIterHelper(it, sz);
-    for (; iter; ++iter) {
-      set(iter.first(), iter.second());
-    }
-    return Object{this};
+    return resize(checkRequestedSize(sz), value.asTypedValue());
   }
   void php_splice(const Variant& offset,
                   const Variant& len = uninit_variant,
                   const Variant& replacement = uninit_variant);
 
 private:
-  template <typename AccessorT>
-  SortFlavor preSort(const AccessorT& acc);
-
   // Friends
   friend struct collections::CollectionsExtension;
   friend void collections::append(ObjectData* obj, TypedValue* val);
-  friend void triggerCow(c_Vector* vec);
 
   friend struct BaseMap;
   friend struct c_Pair;
@@ -562,7 +456,7 @@ private:
 /////////////////////////////////////////////////////////////////////////////
 // c_ImmVector
 
-struct c_ImmVector : BaseVector {
+struct c_ImmVector : BaseVector, SystemLib::ClassLoader<"HH\\ImmVector"> {
   DECLARE_COLLECTIONS_CLASS(ImmVector)
 
   explicit c_ImmVector()
@@ -579,10 +473,7 @@ namespace collections {
 /////////////////////////////////////////////////////////////////////////////
 // VectorIterator
 
-extern const StaticString
-  s_VectorIterator;
-
-struct VectorIterator {
+struct VectorIterator : SystemLib::ClassLoader<"VectorIterator"> {
   VectorIterator() {}
   VectorIterator(const VectorIterator& src) = delete;
   VectorIterator& operator=(const VectorIterator& src) {
@@ -593,9 +484,7 @@ struct VectorIterator {
   ~VectorIterator() {}
 
   static Object newInstance() {
-    static Class* cls = Unit::lookupClass(s_VectorIterator.get());
-    assertx(cls);
-    return Object{cls};
+    return Object{classof()};
   }
 
   void setVector(BaseVector* vec) {
@@ -608,7 +497,8 @@ struct VectorIterator {
     if (m_pos >= vec->m_size) {
       throw_iterator_not_valid();
     }
-    return tvAsCVarRef(&vec->data()[m_pos]);
+    const auto tv = *vec->rvalAt(m_pos);
+    return Variant(tvAsCVarRef(&tv));
   }
 
   int64_t key() const {
@@ -634,4 +524,3 @@ struct VectorIterator {
 
 /////////////////////////////////////////////////////////////////////////////
 }}
-#endif

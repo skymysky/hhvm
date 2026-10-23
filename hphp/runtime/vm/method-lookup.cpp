@@ -18,6 +18,11 @@
 
 #include "hphp/runtime/vm/func.h"
 #include "hphp/runtime/vm/class.h"
+#include "hphp/runtime/vm/module.h"
+#include "hphp/runtime/vm/runtime.h"
+#include "hphp/runtime/vm/vm-regs.h"
+
+#include "hphp/system/systemlib.h"
 
 #include "hphp/runtime/base/execution-context.h"
 #include "hphp/runtime/base/string-data.h"
@@ -25,12 +30,61 @@
 #include "hphp/runtime/base/object-data.h"
 
 #include "hphp/util/assertions.h"
+#include "hphp/util/configs/hacklang.h"
+#include "hphp/util/configs/repo.h"
 
 namespace HPHP {
 
-const StaticString s___construct("__construct");
-const StaticString s___call("__call");
-const StaticString s___callStatic("__callStatic");
+const StaticString s_TestsBypassVisibility("__TestsBypassVisibility");
+
+bool canTestsBypassVisibility(const UserAttributeMap& attrs, const Class* ctx) {
+  if (Cfg::Repo::Authoritative) return false;
+  if (!attrs.count(s_TestsBypassVisibility.get())) return false;
+  auto curr = ctx;
+  auto& classes = Cfg::HackLang::TestsBypassVisibilityClasses;
+  while (curr) {
+    if (std::find(classes.begin(), classes.end(),
+                  curr->name()->toCppString()) != classes.end()) {
+      return true;
+    }
+    curr = curr->parent();
+  }
+  return false;
+}
+
+namespace {
+
+inline bool shouldRaise(MethodLookupErrorOptions raise) {
+  return int(raise) & int(MethodLookupErrorOptions::RaiseOnNotFound);
+}
+
+/*
+ * Looks for a Func named methodName in any of the interfaces cls implements,
+ * including cls if it is an interface. Returns nullptr if none was found,
+ * or if its interface's vtableSlot is kInvalidSlot.
+ */
+const Func* lookupIfaceMethod(const Class* cls, const StringData* methodName) {
+
+  auto checkOneInterface = [methodName](const Class* iface) -> const Func* {
+    if (iface->preClass()->ifaceVtableSlot() == kInvalidSlot) return nullptr;
+
+    const Func* func = iface->lookupMethod(methodName);
+    always_assert(!func || func->cls() == iface);
+    return func;
+  };
+
+  if (isInterface(cls)) {
+    if (auto const func = checkOneInterface(cls)) return func;
+  }
+
+  for (auto pface : cls->allInterfaces().range()) {
+    if (auto const func = checkOneInterface(pface)) return func;
+  }
+
+  return nullptr;
+}
+
+} // namespace
 
 // Look up the method specified by methodName from the class specified by cls
 // and enforce accessibility. Accessibility checks depend on the relationship
@@ -55,9 +109,10 @@ const StaticString s___callStatic("__callStatic");
 
 const Func* lookupMethodCtx(const Class* cls,
                             const StringData* methodName,
-                            const Class* ctx,
+                            const MemberLookupContext& callCtx,
                             CallType callType,
-                            bool raise) {
+                            MethodLookupErrorOptions raise) {
+  auto const ctx = callCtx.cls();
   const Func* method;
   if (callType == CallType::CtorMethod) {
     assertx(methodName == nullptr);
@@ -66,16 +121,10 @@ const Func* lookupMethodCtx(const Class* cls,
     assertx(callType == CallType::ObjMethod || callType == CallType::ClsMethod);
     assertx(methodName != nullptr);
     method = cls->lookupMethod(methodName);
-    while (!method) {
-      if (UNLIKELY(methodName->isame(s___construct.get()))) {
-        // We were looking up __construct and failed to find it. Fall back
-        // to old-style constructor: same as class name.
-        method = cls->getCtor();
-        if (!Func::isSpecial(method->name())) break;
-      }
+    if (!method) {
       // We didn't find any methods with the specified name in cls's method
       // table, handle the failure as appropriate.
-      if (raise) {
+      if (shouldRaise(raise)) {
         raise_call_to_undefined(methodName, cls);
       }
       return nullptr;
@@ -83,6 +132,33 @@ const Func* lookupMethodCtx(const Class* cls,
   }
   assertx(method);
   bool accessible = true;
+
+  auto const checkPrivateMethod = [&]() -> const Func* {
+    // If this is an ObjMethod call ("$obj->foo()") AND there is an ancestor
+    // of cls that declares a private method with this name AND ctx is an
+    // ancestor of cls, we need to check if ctx declares a private method with
+    // this name.
+    if (method->hasPrivateAncestor() && callType == CallType::ObjMethod &&
+        ctx && cls->classof(ctx)) {
+      const Func* ctxMethod = ctx->lookupMethod(methodName);
+      if (ctxMethod && ctxMethod->cls() == ctx &&
+          (ctxMethod->attrs() & AttrPrivate)) {
+        // For ObjMethod calls, a private method declared by ctx trumps
+        // any other method we may have found.
+        return ctxMethod;
+      }
+    }
+    return nullptr;
+  };
+
+  // Check module boundary
+  if (Cfg::Eval::EnforceModules &&
+      raise != MethodLookupErrorOptions::NoErrorOnModule &&
+      will_symbol_raise_module_boundary_violation(method, &callCtx)) {
+    if (!shouldRaise(raise)) return nullptr;
+    raiseModuleBoundaryViolation(cls, method, callCtx.moduleName());
+  }
+
   // If we found a protected or private method, we need to do some
   // accessibility checks.
   if ((method->attrs() & (AttrProtected|AttrPrivate)) &&
@@ -94,10 +170,27 @@ const Func* lookupMethodCtx(const Class* cls,
     if (ctx == baseClass) {
       return method;
     }
+
+    if (canTestsBypassVisibility(method->userAttributes(), ctx)) {
+      if (auto const f = checkPrivateMethod()) return f;
+      return method;
+    }
+    // meth_caller() dispatches through MethCallerHelper, so ctx is the helper
+    // class rather than the actual test class.  Walk one frame back to find the
+    // real caller and check whether *its* class qualifies for the bypass.
+    if (!Cfg::Repo::Authoritative && ctx == SystemLib::getMethCallerHelperClass()) {
+      VMRegAnchor _;
+      auto const prev = g_context->getPrevVMState(vmfp());
+      if (prev &&
+          canTestsBypassVisibility(method->userAttributes(),
+                                   prev->func()->cls())) {
+        return method;
+      }
+    }
     // The invalid context cannot access protected or private methods,
     // so we can fail fast here.
     if (ctx == nullptr) {
-      if (raise) {
+      if (shouldRaise(raise)) {
         raise_error("Call to %s %s::%s() from invalid context",
                     (method->attrs() & AttrPrivate) ? "private" : "protected",
                     cls->name()->data(),
@@ -126,7 +219,7 @@ const Func* lookupMethodCtx(const Class* cls,
         // we know that ctx not the same or an ancestor of cls, and therefore
         // we don't need to check if ctx declares a private method with this
         // name, so we can fail fast here.
-        if (raise) {
+        if (shouldRaise(raise)) {
           raise_error("Call to protected method %s::%s() from context '%s'",
                       cls->name()->data(),
                       method->name()->data(),
@@ -139,27 +232,15 @@ const Func* lookupMethodCtx(const Class* cls,
       assertx(accessible && baseClass->classof(ctx));
     }
   }
-  // If this is an ObjMethod call ("$obj->foo()") AND there is an ancestor
-  // of cls that declares a private method with this name AND ctx is an
-  // ancestor of cls, we need to check if ctx declares a private method with
-  // this name.
-  if (method->hasPrivateAncestor() && callType == CallType::ObjMethod &&
-      ctx && cls->classof(ctx)) {
-    const Func* ctxMethod = ctx->lookupMethod(methodName);
-    if (ctxMethod && ctxMethod->cls() == ctx &&
-        (ctxMethod->attrs() & AttrPrivate)) {
-      // For ObjMethod calls, a private method declared by ctx trumps
-      // any other method we may have found.
-      return ctxMethod;
-    }
-  }
+  if (auto const f = checkPrivateMethod()) return f;
+
   // If we found an accessible method in cls's method table, return it.
   if (accessible) {
     return method;
   }
   // If we reach here it means we've found an inaccessible private method
   // in cls's method table, handle the failure as appropriate.
-  if (raise) {
+  if (shouldRaise(raise)) {
     raise_error("Call to private method %s::%s() from %s'%s'",
                 method->baseCls()->name()->data(),
                 method->name()->data(),
@@ -172,57 +253,69 @@ const Func* lookupMethodCtx(const Class* cls,
 LookupResult lookupObjMethod(const Func*& f,
                              const Class* cls,
                              const StringData* methodName,
-                             const Class* ctx,
-                             bool raise) {
-  f = lookupMethodCtx(cls, methodName, ctx, CallType::ObjMethod, false);
-  if (!f) {
-    f = cls->lookupMethod(s___call.get());
-    if (!f) {
-      if (raise) {
-        // Throw a fatal error
-        lookupMethodCtx(cls, methodName, ctx, CallType::ObjMethod, true);
-      }
-      return LookupResult::MethodNotFound;
-    }
-    return LookupResult::MagicCallFound;
-  }
+                             const MemberLookupContext& callCtx,
+                             MethodLookupErrorOptions raise) {
+  f = lookupMethodCtx(cls, methodName, callCtx,
+                      CallType::ObjMethod, raise);
+  if (!f) return LookupResult::MethodNotFound;
   if (f->isStaticInPrologue()) {
     return LookupResult::MethodFoundNoThis;
   }
   return LookupResult::MethodFoundWithThis;
 }
 
+ImmutableObjMethodLookup
+lookupImmutableObjMethod(const Class* cls,
+                         const StringData* name,
+                         const MemberLookupContext& callCtx,
+                         bool exactClass) {
+  auto constexpr notFound = ImmutableObjMethodLookup {
+    ImmutableObjMethodLookup::Type::NotFound,
+    nullptr
+  };
+  if (!cls) return notFound;
+  exactClass |= cls->attrs() & AttrNoOverrideRegular;
+
+  if (isInterface(cls)) {
+    if (auto const func = lookupIfaceMethod(cls, name)) {
+      return { ImmutableObjMethodLookup::Type::Interface, func };
+    }
+    return notFound;
+  }
+
+  const Func* func;
+  LookupResult res = lookupObjMethod(func, cls, name, callCtx,
+                                     MethodLookupErrorOptions::None);
+  if (res == LookupResult::MethodNotFound) {
+    if (exactClass) return notFound;
+    if (auto const func = lookupIfaceMethod(cls, name)) {
+      return { ImmutableObjMethodLookup::Type::Interface, func };
+    }
+    return notFound;
+  }
+
+  if (func->isAbstract() && exactClass) return notFound;
+
+  assertx(res == LookupResult::MethodFoundWithThis ||
+          res == LookupResult::MethodFoundNoThis);
+
+  if (exactClass || func->attrs() & AttrPrivate || func->isImmutableFrom(cls)) {
+    return { ImmutableObjMethodLookup::Type::Func, func };
+  }
+
+  return { ImmutableObjMethodLookup::Type::Class, func };
+}
+
 LookupResult lookupClsMethod(const Func*& f,
                              const Class* cls,
                              const StringData* methodName,
                              ObjectData* obj,
-                             const Class* ctx,
-                             bool raise) {
-  f = lookupMethodCtx(cls, methodName, ctx, CallType::ClsMethod, false);
+                             const MemberLookupContext& callCtx,
+                             MethodLookupErrorOptions raise) {
+  f = lookupMethodCtx(cls, methodName, callCtx, CallType::ClsMethod, raise);
   if (!f) {
-    if (obj && obj->instanceof(cls)) {
-      f = obj->getVMClass()->lookupMethod(s___call.get());
-    }
-    if (!f) {
-      f = cls->lookupMethod(s___callStatic.get());
-      if (!f) {
-        if (raise) {
-          // Throw a fatal error
-          lookupMethodCtx(cls, methodName, ctx, CallType::ClsMethod, true);
-        }
-        return LookupResult::MethodNotFound;
-      }
-      f->validate();
-      assertx(f);
-      assertx(f->attrs() & AttrStatic);
-      return LookupResult::MagicCallStaticFound;
-    }
-    assertx(f);
-    assertx(obj);
-    // __call cannot be static, this should be enforced by semantic
-    // checks defClass time or earlier
-    assertx(!(f->attrs() & AttrStatic));
-    return LookupResult::MagicCallFound;
+    assertx(!shouldRaise(raise));
+    return LookupResult::MethodNotFound;
   }
   if (obj && !(f->attrs() & AttrStatic) && obj->instanceof(cls)) {
     return LookupResult::MethodFoundWithThis;
@@ -230,21 +323,58 @@ LookupResult lookupClsMethod(const Func*& f,
   return LookupResult::MethodFoundNoThis;
 }
 
+const Func* lookupImmutableClsMethod(const Class* cls,
+                                     const StringData* name,
+                                     const MemberLookupContext& callCtx,
+                                     bool exactClass) {
+  if (!cls) return nullptr;
+  if (cls->attrs() & AttrInterface) return nullptr;
+  const Func* func;
+  LookupResult res = lookupClsMethod(func, cls, name, nullptr, callCtx,
+                                     MethodLookupErrorOptions::None);
+  if (res == LookupResult::MethodNotFound) return nullptr;
+  if (func->isAbstract() && exactClass) return nullptr;
+
+  assertx(res == LookupResult::MethodFoundWithThis ||
+          res == LookupResult::MethodFoundNoThis);
+  return func;
+}
+
 LookupResult lookupCtorMethod(const Func*& f,
                               const Class* cls,
-                              const Class* ctx,
-                              bool raise) {
+                              const MemberLookupContext& callCtx,
+                              MethodLookupErrorOptions raise) {
   f = cls->getCtor();
   if (!(f->attrs() & AttrPublic)) {
-    f = lookupMethodCtx(cls, nullptr, ctx, CallType::CtorMethod, raise);
+    f = lookupMethodCtx(cls, nullptr, callCtx,
+                        CallType::CtorMethod, raise);
     if (!f) {
       // If raise was true than lookupMethodCtx should have thrown,
       // so we should only be able to get here if raise was false
-      assertx(!raise);
+      assertx(!shouldRaise(raise));
       return LookupResult::MethodNotFound;
     }
   }
   return LookupResult::MethodFoundWithThis;
 }
 
+const Func* lookupImmutableCtor(const Class* cls,
+                                const MemberLookupContext& callCtx) {
+  if (!cls) return nullptr;
+
+  auto const ctx = callCtx.cls();
+  auto const func = cls->getCtor();
+  if (func && !(func->attrs() & AttrPublic)) {
+    auto fcls = func->cls();
+    if (fcls != ctx) {
+      if (!ctx) return nullptr;
+      if ((func->attrs() & AttrPrivate) ||
+          !(ctx->classof(fcls) || fcls->classof(ctx))) {
+        return nullptr;
+      }
+    }
+  }
+
+  return func;
+}
 }

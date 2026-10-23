@@ -20,17 +20,17 @@
 
 namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
-TRACE_SET_MOD(debugger);
+TRACE_SET_MOD(debugger)
 
-String DebuggerThriftBuffer::readImpl() {
+OptString DebuggerThriftBuffer::readImpl() {
   TRACE(7, "DebuggerThriftBuffer::readImpl\n");
   assertx(m_size <= BUFFER_SIZE);
   int nread = getSocket()->readImpl(m_buffer, m_size);
   m_buffer[nread] = '\0';
-  return String(m_buffer, nread, CopyString);
+  return OptString(m_buffer, nread, CopyString);
 }
 
-void DebuggerThriftBuffer::flushImpl(const String& data) {
+void DebuggerThriftBuffer::flushImpl(const OptString& data) {
   TRACE(7, "DebuggerThriftBuffer::flushImpl\n");
   getSocket()->write(data);
 }
@@ -49,12 +49,12 @@ const StaticString
   s_message("message");
 
 template<typename T>
-static inline int serializeImpl(T data, String& sdata) {
+static inline int serializeImpl(T data, OptString& sdata) {
   TRACE(7, "DebuggerWireHelpers::serializeImpl\n");
   VariableSerializer vs(VariableSerializer::Type::DebuggerSerialize);
   try {
-    sdata = vs.serialize(data, true);
-  } catch (StringBufferLimitException& e) {
+    sdata = vs.serialize(VarNR{data}, true);
+  } catch (StringBufferLimitException& ) {
     sdata = s_hit_limit;
     return DebuggerWireHelpers::HitLimit;
   } catch (...) {
@@ -64,7 +64,7 @@ static inline int serializeImpl(T data, String& sdata) {
   return DebuggerWireHelpers::NoError;
 }
 
-static inline int unserializeImpl(const String& sdata, Variant& data) {
+static inline int unserializeImpl(const OptString& sdata, Variant& data) {
   TRACE(7, "DebuggerWireHelpers::unserializeImpl(CStrRef sdata,\n");
   if (sdata.same(s_hit_limit)) {
     return DebuggerWireHelpers::HitLimit;
@@ -77,48 +77,50 @@ static inline int unserializeImpl(const String& sdata, Variant& data) {
   try {
     data = vu.unserialize();
   } catch (const std::exception& e) {
-    data = folly::sformat("unserialize() threw '{}'", e.what());
+    data = fmt::format("unserialize() threw '{}'", e.what());
     return DebuggerWireHelpers::ErrorMsg;
   } catch (const Object& o) {
     // Get the message property from the Exception if we can. Otherwise, use
     // the class name.
-    assertx(o->instanceof(SystemLib::s_ExceptionClass));
+    assertx(o->instanceof(SystemLib::getExceptionClass()));
 
-    auto const info = o->getProp(SystemLib::s_ExceptionClass, s_message.get());
+    auto const info = o->getProp(
+      MemberLookupContext(SystemLib::getExceptionClass(),
+                          SystemLib::getExceptionClass()->moduleName()),
+      s_message.get());
     if (info) {
-      auto const inner = info.unboxed();
-      if (isStringType(inner.type())) {
-        data = folly::sformat(
+      if (isStringType(info.type())) {
+        data = fmt::format(
           "unserialize() threw '{}' with message '{}'",
-          o->getVMClass()->name(), inner.val().pstr
+          o->getVMClass()->name()->data(), info.val().pstr->data()
         );
         return DebuggerWireHelpers::ErrorMsg;
       }
     }
 
-    data = folly::sformat("unserialize() threw '{}'", o->getVMClass()->name());
+    data = fmt::format("unserialize() threw '{}'", o->getVMClass()->name()->data());
     return DebuggerWireHelpers::ErrorMsg;
   }
 
   return DebuggerWireHelpers::NoError;
 }
 
-int DebuggerWireHelpers::WireSerialize(const Array& data, String& sdata) {
+int DebuggerWireHelpers::WireSerialize(const Array& data, OptString& sdata) {
   TRACE(7, "DebuggerWireHelpers::WireSerialize(const Array& data,\n");
   return serializeImpl(data, sdata);
 }
 
-int DebuggerWireHelpers::WireSerialize(const Object& data, String& sdata) {
+int DebuggerWireHelpers::WireSerialize(const Object& data, OptString& sdata) {
   TRACE(7, "DebuggerWireHelpers::WireSerialize(const Object& data,\n");
   return serializeImpl(data, sdata);
 }
 
-int DebuggerWireHelpers::WireSerialize(const Variant& data, String& sdata) {
+int DebuggerWireHelpers::WireSerialize(const Variant& data, OptString& sdata) {
   TRACE(7, "DebuggerWireHelpers::WireSerialize(const Variant& data,\n");
   return serializeImpl(data, sdata);
 }
 
-int DebuggerWireHelpers::WireUnserialize(String& sdata, Array& data) {
+int DebuggerWireHelpers::WireUnserialize(OptString& sdata, Array& data) {
   TRACE(7, "DebuggerWireHelpers::WireUnserialize, Array& data)\n");
   Variant v;
   int ret = unserializeImpl(sdata, v);
@@ -133,7 +135,7 @@ int DebuggerWireHelpers::WireUnserialize(String& sdata, Array& data) {
   return NoError;
 }
 
-int DebuggerWireHelpers::WireUnserialize(String& sdata, Object& data) {
+int DebuggerWireHelpers::WireUnserialize(OptString& sdata, Object& data) {
   TRACE(7, "DebuggerWireHelpers::WireUnserialize, Object& data\n");
   Variant v;
   int ret = unserializeImpl(sdata, v);
@@ -148,7 +150,7 @@ int DebuggerWireHelpers::WireUnserialize(String& sdata, Object& data) {
   return NoError;
 }
 
-int DebuggerWireHelpers::WireUnserialize(String& sdata, Variant& data) {
+int DebuggerWireHelpers::WireUnserialize(OptString& sdata, Variant& data) {
   TRACE(7, "DebuggerWireHelpers::WireUnserialize\n");
   return unserializeImpl(sdata, data);
 }

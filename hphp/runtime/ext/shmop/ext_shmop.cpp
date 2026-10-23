@@ -16,7 +16,7 @@
 */
 
 #include "hphp/runtime/ext/extension-registry.h"
-#include "hphp/runtime/base/request-local.h"
+#include "hphp/util/rds-local.h"
 
 #include <sys/shm.h>
 
@@ -130,14 +130,14 @@ struct ShmRec {
       return Variant(false);
     }
 
-    return Variant(String(&m_addr[start], count, CopyString));
+    return Variant(OptString(&m_addr[start], count, CopyString));
   }
 
   int64_t size() {
     return m_size;
   }
 
-  Variant write(const String& data, int64_t offset) {
+  Variant write(const OptString& data, int64_t offset) {
     if (m_readonly) {
       raise_warning("shmop_write(): trying to write to a read only segment");
       return Variant(false);
@@ -162,11 +162,11 @@ private:
 };
 
 struct ShmopRequestLocal final : RequestEventHandler {
-  virtual void requestInit() override {
+  void requestInit() override {
     // no-op
   }
 
-  virtual void requestShutdown() override {
+  void requestShutdown() override {
     m_records.clear();
   }
 
@@ -215,7 +215,7 @@ bool HHVM_FUNCTION(shmop_delete, int64_t shmid) {
 
 Variant HHVM_FUNCTION(shmop_open,
                              int64_t key,
-                             const String& flags,
+                             const OptString& flags,
                              int64_t mode,
                              int64_t size) {
 
@@ -244,7 +244,7 @@ int64_t HHVM_FUNCTION(shmop_size, int64_t shmid) {
 
 Variant HHVM_FUNCTION(shmop_write,
                              int64_t shmid,
-                             const String& data,
+                             const OptString& data,
                              int64_t offset) {
   auto shm = s_data->findShm("shmop_write", shmid);
   if (!shm) return false;
@@ -252,18 +252,15 @@ Variant HHVM_FUNCTION(shmop_write,
 }
 
 struct ShmopExtension final : Extension {
-  ShmopExtension() : Extension("shmop", NO_EXTENSION_VERSION_YET) { }
+  ShmopExtension() : Extension("shmop", NO_EXTENSION_VERSION_YET, "hphp_hphpi") { }
 
-  void moduleInit() override {
-
+  void moduleRegisterNative() override {
     HHVM_FE(shmop_close);
     HHVM_FE(shmop_delete);
     HHVM_FE(shmop_open);
     HHVM_FE(shmop_read);
     HHVM_FE(shmop_size);
     HHVM_FE(shmop_write);
-
-    loadSystemlib();
   }
 
 } s_shmop_extension;

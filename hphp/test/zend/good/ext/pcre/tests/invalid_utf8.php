@@ -1,9 +1,17 @@
-<?php
+<?hh
 
-$string = urldecode("search%e4"); 
-$result = preg_replace("#(&\#x*)([0-9A-F]+);*#iu","$1$2;",$string); 
-var_dump($result); 
-var_dump(preg_last_error());
+<<__EntryPoint>>
+function main(): void {
+  $string = urldecode("search%e4");
+  $error = null;
+  $result = preg_replace_with_error(
+    "#(&\#x*)([0-9A-F]+);*#iu",
+    "$1$2;",
+    $string,
+    inout $error,
+  );
+  var_dump($result);
+  var_dump($error);
 
-echo "Done\n";
-?>
+  echo "Done\n";
+}

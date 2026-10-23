@@ -14,12 +14,11 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_EVAL_DEBUGGER_CMD_MACRO_H_
-#define incl_HPHP_EVAL_DEBUGGER_CMD_MACRO_H_
+#pragma once
 
 #include "hphp/runtime/debugger/debugger_command.h"
 
-namespace HPHP { namespace Eval {
+namespace HPHP::Eval {
 ///////////////////////////////////////////////////////////////////////////////
 
 struct CmdMacro : DebuggerCommand {
@@ -29,11 +28,12 @@ struct CmdMacro : DebuggerCommand {
   void help(DebuggerClient&) override;
   void onClient(DebuggerClient&) override;
 
+  std::string name() const override { return "macro"; }
+
 private:
   void processList(DebuggerClient&);
 };
 
 ///////////////////////////////////////////////////////////////////////////////
-}}
+}
 
-#endif // incl_HPHP_EVAL_DEBUGGER_CMD_MACRO_H_

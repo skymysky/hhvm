@@ -1,3 +1,4 @@
-<?hh // strict
+<?hh
 
 type ShapeWithOptionalField = shape(?);
+

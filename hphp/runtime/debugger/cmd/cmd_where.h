@@ -14,13 +14,13 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_EVAL_DEBUGGER_CMD_WHERE_H_
-#define incl_HPHP_EVAL_DEBUGGER_CMD_WHERE_H_
+#pragma once
 
 #include "hphp/runtime/debugger/debugger_command.h"
+#include "hphp/runtime/base/type-array.h"
 #include "hphp/runtime/base/req-root.h"
 
-namespace HPHP { namespace Eval {
+namespace HPHP::Eval {
 ///////////////////////////////////////////////////////////////////////////////
 
 struct CmdWhere : DebuggerCommand {
@@ -33,9 +33,11 @@ struct CmdWhere : DebuggerCommand {
 
   Array fetchStackTrace(DebuggerClient &client); // client side
 
+  std::string name() const override { return "where"; }
+
 protected:
- void sendImpl(DebuggerThriftBuffer& thrift) override;
- void recvImpl(DebuggerThriftBuffer& thrift) override;
+  void sendImpl(DebuggerThriftBuffer& thrift) override;
+  void recvImpl(DebuggerThriftBuffer& thrift) override;
 
 private:
   req::root<Array> m_stacktrace;
@@ -43,6 +45,5 @@ private:
 };
 
 ///////////////////////////////////////////////////////////////////////////////
-}}
+}
 
-#endif // incl_HPHP_EVAL_DEBUGGER_CMD_WHERE_H_

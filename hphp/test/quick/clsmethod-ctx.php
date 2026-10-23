@@ -1,17 +1,16 @@
 <?hh
 
 class a {
-  private static function priv() {
+  private static function priv() :mixed{
     echo "Private in a\n";
   }
 
-  public static function pub() {
+  public static function pub() :mixed{
     a::priv();
   }
 }
 
-function main() {
+<<__EntryPoint>> function main(): void {
   a::pub();
   a::priv();
 }
-main();

@@ -1,7 +1,10 @@
 <?hh
-function foo(string $a, int $b, float $c, bool $d, Exception &$e,
-             callable $f = null, resource $g = null, $noType = 'whatever') {}
+function foo(string $a, int $b, float $c, bool $d, inout Exception $e,
+             ?callable $f = null, ?resource $g = null, $noType = 'whatever') :mixed{}
 
+
+<<__EntryPoint>>
+function main_reflection_parameter_basic() :mixed{
 $reflectionFunction = new ReflectionFunction('foo');
 foreach ($reflectionFunction->getParameters() as $parameter) {
   echo 'name: ';
@@ -12,6 +15,8 @@ foreach ($reflectionFunction->getParameters() as $parameter) {
   var_dump($parameter->canBePassedByValue());
   echo 'isPassedByReference: ';
   var_dump($parameter->isPassedByReference());
+  echo 'isInOut: ';
+  var_dump($parameter->isInOut());
   echo 'hasType: ';
   var_dump($parameter->hasType());
   echo 'getType: ';
@@ -22,8 +27,6 @@ foreach ($reflectionFunction->getParameters() as $parameter) {
   var_dump($parameter->hasType() ? $parameter->getType()->allowsNull() : false);
   echo 'type hint: ';
   var_dump($parameter->hasType() ? $parameter->getType()->__toString() : false);
-  echo 'isArray: ';
-  var_dump($parameter->isArray());
   echo 'isCallable: ';
   var_dump($parameter->isCallable());
   echo 'isOptional: ';
@@ -46,4 +49,5 @@ foreach ($reflectionFunction->getParameters() as $parameter) {
            ? $parameter->getDefaultValueConstantName()
            : 'no default value');
   echo PHP_EOL, PHP_EOL;
+}
 }

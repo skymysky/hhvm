@@ -13,8 +13,7 @@
    | license@php.net so we can mail you a copy immediately.               |
    +----------------------------------------------------------------------+
 */
-#ifndef incl_INSERTION_ORDERED_MAP_H_
-#define incl_INSERTION_ORDERED_MAP_H_
+#pragma once
 
 #include <boost/multi_index/hashed_index.hpp>
 #include <boost/multi_index/member.hpp>
@@ -31,6 +30,8 @@ namespace HPHP {
 template <class K, class V, class Hash, class Equal>
 struct InsertionOrderedMap {
   using value_type = std::pair<K, V>;
+  using key_type = K;
+  using mapped_type = V;
 private:
   using extractor = boost::multi_index::member<
     value_type, K, &value_type::first>;
@@ -48,6 +49,11 @@ private:
  public:
   using iterator = typename list_index::iterator;
   using const_iterator = typename list_index::const_iterator;
+
+  InsertionOrderedMap() = default;
+  InsertionOrderedMap(std::initializer_list<value_type> il) {
+    for (auto const& kv : il) emplace_back(kv.first, kv.second);
+  }
 
   iterator find(const K& k) {
     return m_map.template project<0>(getUnordered().find(k));
@@ -83,6 +89,12 @@ private:
   std::pair<iterator, bool> emplace_front(const K& k, const V& v) {
     return getList().push_front({k, v});
   }
+
+  std::pair<iterator, bool> emplace(const K& k, const V& v) {
+    return emplace_back(k, v);
+  }
+
+  void erase(iterator it) { getList().erase(it); }
 
   iterator begin() { return getList().begin(); }
   iterator end()   { return getList().end(); }
@@ -122,5 +134,3 @@ private:
 };
 
 }
-
-#endif

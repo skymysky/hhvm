@@ -17,33 +17,20 @@
 
 #include <limits>
 #include <algorithm>
-#include <bitset>
 
-#include <folly/Hash.h>
+#include <fmt/format.h>
 #include <folly/Format.h>
-
-#include "hphp/util/safe-cast.h"
 
 #include "hphp/runtime/base/string-data.h"
 #include "hphp/runtime/vm/jit/ir-instruction.h"
 #include "hphp/runtime/vm/jit/ssa-tmp.h"
 #include "hphp/runtime/vm/jit/analysis.h"
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 
 namespace {
 
 //////////////////////////////////////////////////////////////////////
-
-// Helper for returning the lowest index of an AStack range, non inclusive.
-// I.e. a AStack class affects stack slots in [sp+offset,lowest_offset).
-int32_t lowest_offset(AStack stk) {
-  auto const off    = int64_t{stk.offset.offset};
-  auto const sz     = int64_t{stk.size};
-  auto const low    = off - sz;
-  auto const i32min = int64_t{std::numeric_limits<int32_t>::min()};
-  return safe_cast<int32_t>(std::max(low, i32min));
-}
 
 std::string bit_str(AliasClass::rep bits, AliasClass::rep skip) {
   using A = AliasClass;
@@ -54,29 +41,30 @@ std::string bit_str(AliasClass::rep bits, AliasClass::rep skip) {
   case A::BUnknownTV:      return "UnkTV";
   case A::BUnknown:        return "Unk";
   case A::BElem:           return "Elem";
-  case A::BMIStateTV:      return "MisTV";
   case A::BMIState:        return "Mis";
-  case A::BIter:           return "Iter";
-  case A::BCufIter:        return "CufIter";
-  case A::BIterSlot:       return "IterSlot";
-  case A::BFrame:          break;
-  case A::BIterPos:        break;
-  case A::BIterBase:       break;
-  case A::BCufIterFunc:    break;
-  case A::BCufIterCtx:     break;
-  case A::BCufIterInvName: break;
-  case A::BCufIterDynamic: break;
+  case A::BActRec:         return "ActRec";
+  case A::BVMReg:          return "VmRegAny";
+  case A::BLocal:          break;
+  case A::BIter:           break;
+  case A::BClosureArg:     break;
   case A::BProp:           break;
   case A::BElemI:          break;
   case A::BElemS:          break;
   case A::BStack:          break;
   case A::BMITempBase:     break;
-  case A::BMITvRef:        break;
-  case A::BMITvRef2:       break;
   case A::BMIBase:         break;
-  case A::BRef:            break;
-  case A::BClsRefSlot:     break;
+  case A::BMIROProp:       break;
   case A::BRds:            break;
+  case A::BFContext:       break;
+  case A::BFFunc:          break;
+  case A::BFMeta:          break;
+  case A::BFBasePtr:       break;
+  case A::BVMRegState:     break;
+  case A::BVMFP:           break;
+  case A::BVMSP:           break;
+  case A::BVMPC:           break;
+  case A::BVMRetAddr:      break;
+  case A::BOther:          break;
   }
 
   auto ret = std::string{};
@@ -90,30 +78,30 @@ std::string bit_str(AliasClass::rep bits, AliasClass::rep skip) {
     case A::BUnknown:
     case A::BUnknownTV:
     case A::BElem:
-    case A::BMIStateTV:
     case A::BMIState:
-    case A::BIter:
-    case A::BCufIter:
-    case A::BIterSlot:
+    case A::BActRec:
       always_assert(0);
-    case A::BFrame:          ret += "Fr"; break;
-    case A::BIterPos:        ret += "ItP"; break;
-    case A::BIterBase:       ret += "ItB"; break;
-    case A::BCufIterFunc:    ret += "CItF"; break;
-    case A::BCufIterCtx:     ret += "CItC"; break;
-    case A::BCufIterInvName: ret += "CItN"; break;
-    case A::BCufIterDynamic: ret += "CItD"; break;
+    case A::BLocal:          ret += "Lv"; break;
+    case A::BIter:           ret += "It"; break;
+    case A::BClosureArg:     ret += "ClArg"; break;
     case A::BProp:           ret += "Pr"; break;
     case A::BElemI:          ret += "Ei"; break;
     case A::BElemS:          ret += "Es"; break;
     case A::BStack:          ret += "St"; break;
     case A::BMITempBase:     ret += "MiTB"; break;
-    case A::BMITvRef:        ret += "MiT1"; break;
-    case A::BMITvRef2:       ret += "MiT2"; break;
     case A::BMIBase:         ret += "MiB"; break;
-    case A::BRef:            ret += "Ref"; break;
-    case A::BClsRefSlot:     ret += "Cls"; break;
+    case A::BMIROProp:       ret += "MiROP"; break;
     case A::BRds:            ret += "Rds"; break;
+    case A::BFContext:       ret += "Fc"; break;
+    case A::BFFunc:          ret += "Ff"; break;
+    case A::BFMeta:          ret += "Fm"; break;
+    case A::BFBasePtr:       ret += "FrBase"; break;
+    case A::BVMRegState:     ret += "VmState"; break;
+    case A::BVMFP:           ret += "Vmfp"; break;
+    case A::BVMSP:           ret += "Vmsp"; break;
+    case A::BVMPC:           ret += "Vmpc"; break;
+    case A::BVMRetAddr:      ret += "VmRetAddr"; break;
+    case A::BOther:          ret += "Other"; break;
     }
   }
   return ret;
@@ -121,89 +109,76 @@ std::string bit_str(AliasClass::rep bits, AliasClass::rep skip) {
 
 //////////////////////////////////////////////////////////////////////
 
-template<class T>
+template<typename T>
 size_t framelike_hash(size_t hash, T t) {
-  return folly::hash::hash_combine(hash, t.fp, t.id);
+  return folly::hash::hash_combine(hash, t.frameIdx, t.ids.raw());
 }
 
-template<class T>
+template<typename T>
 void framelike_checkInvariants(T t) {
-  assertx(t.fp->type() <= TFramePtr);
+  assertx(!t.ids.empty());
 }
 
-template<class T, class U>
-bool framelike_equal(T a, U b) {
-  return a.fp == b.fp && a.id == b.id;
+template<typename T>
+bool framelike_equal(T a, T b) {
+  return a.frameIdx == b.frameIdx && a.ids == b.ids;
+}
+
+template<typename T>
+bool framelike_subclass(T a, T b) {
+  return a.frameIdx == b.frameIdx && a.ids <= b.ids;
+}
+
+template<typename T>
+bool framelike_maybe(T a, T b) {
+  return a.frameIdx == b.frameIdx && a.ids.maybe(b.ids);
 }
 
 //////////////////////////////////////////////////////////////////////
 
 }
 
-AStack::AStack(SSATmp* fp, FPRelOffset o, int32_t s)
-  : offset(o)
-  , size(s)
-{
-  always_assert(fp->isA(TFramePtr));
+template<typename T>
+AliasClass AliasClass::framelike_union(rep newBits, rep frm, T a, T b) {
+  auto ret = AliasClass{newBits};
+  auto const frmA = a;
+  auto const frmB = b;
+  if (frmA.frameIdx != frmB.frameIdx) return ret;
 
-  auto const defInlineFP = fp->inst();
-  if (!defInlineFP->is(DefInlineFP)) return;
-  auto const sp = defInlineFP->src(0)->inst();
-
-  // FP-relative offset of the inlined frame.
-  auto const innerFPRel =
-    defInlineFP->extra<DefInlineFP>()->spOffset.to<FPRelOffset>(
-      sp->extra<DefSP>()->offset);
-
-  // Offset from the outermost FP is simply the sum of (inner frame relative to
-  // outer) and (offset relative to inner frame).
-  offset += innerFPRel.offset;
-
-  always_assert_flog(sp->src(0)->inst()->is(DefFP),
-                     "failed to canonicalize to outermost FramePtr: {}\n",
-                     sp->src(0)->toString());
+  auto const newIds = frmA.ids | frmB.ids;
+  // Even when newIds.isAny(), we still know it won't alias things in
+  // other frames, so keep the specialization tag.
+  ret.framelike_union_set(T { frmA.frameIdx, newIds });
+  ret.m_stagBits = static_cast<rep>(ret.m_stagBits | frm);
+  assertx(ret.checkInvariants());
+  assertx(AliasClass{ a } <= ret && AliasClass { b } <= ret);
+  return ret;
 }
 
-AStack::AStack(SSATmp* sp, IRSPRelOffset spRel, int32_t s)
-  : offset()
-  , size(s)
-{
-  always_assert(sp->isA(TStkPtr));
-
-  auto const defSP = sp->inst();
-  always_assert_flog(defSP->is(DefSP),
-                     "unexpected StkPtr: {}\n", sp->toString());
-  offset = spRel.to<FPRelOffset>(defSP->extra<DefSP>()->offset);
+void AliasClass::framelike_union_set(ALocal cls) {
+  m_stagBits = BLocal;
+  m_local = cls;
+}
+void AliasClass::framelike_union_set(AIter cls) {
+  m_stagBits = BIter;
+  m_iter = cls;
 }
 
 //////////////////////////////////////////////////////////////////////
 
 size_t AliasClass::Hash::operator()(AliasClass acls) const {
-  auto const hash = folly::hash::twang_mix64(
-    acls.m_bits | static_cast<uint32_t>(acls.m_stag)
-  );
-  switch (acls.m_stag) {
+  auto const hash = folly::hash::twang_mix64(acls.m_bits | acls.m_stagBits);
+  switch (stagFor(acls.m_stagBits)) {
   case STag::None:
     return hash;
 
-  case STag::IterPos:  return framelike_hash(hash, acls.m_iterPos);
-  case STag::IterBase: return framelike_hash(hash, acls.m_iterBase);
-  case STag::IterBoth: return framelike_hash(hash, acls.m_iterBoth);
+  case STag::Iter:  return framelike_hash(hash, acls.m_iter);
+  case STag::Local: return framelike_hash(hash, acls.m_local);
 
-  case STag::CufIterFunc:    return framelike_hash(hash, acls.m_cufIterFunc);
-  case STag::CufIterCtx:     return framelike_hash(hash, acls.m_cufIterCtx);
-  case STag::CufIterInvName: return framelike_hash(hash, acls.m_cufIterInvName);
-  case STag::CufIterDynamic: return framelike_hash(hash, acls.m_cufIterDynamic);
-  case STag::CufIterAll:     return framelike_hash(hash, acls.m_cufIterAll);
-
-  case STag::Frame:
+  case STag::ClosureArg:
     return folly::hash::hash_combine(hash,
-                                     acls.m_frame.fp,
-                                     acls.m_frame.ids.raw());
-  case STag::ClsRefSlot:
-    return folly::hash::hash_combine(hash,
-                                     acls.m_clsRefSlot.fp,
-                                     acls.m_clsRefSlot.ids.raw());
+                                     acls.m_closureArg.closure,
+                                     acls.m_closureArg.offset); 
   case STag::Prop:
     return folly::hash::hash_combine(hash,
                                      acls.m_prop.obj,
@@ -218,10 +193,10 @@ size_t AliasClass::Hash::operator()(AliasClass acls) const {
                                      acls.m_elemS.key->hash());
   case STag::Stack:
     return folly::hash::hash_combine(hash,
-                                     acls.m_stack.offset.offset,
-                                     acls.m_stack.size);
-  case STag::Ref:
-    return folly::hash::hash_combine(hash, acls.m_ref.boxed);
+                                     acls.m_stack.low.offset,
+                                     acls.m_stack.high.offset);
+  case STag::FrameAll:
+    return folly::hash::hash_combine(hash, acls.m_frameAll.frameIdx);
 
   case STag::Rds:
     return folly::hash::hash_combine(hash, acls.m_rds.handle);
@@ -234,257 +209,227 @@ size_t AliasClass::Hash::operator()(AliasClass acls) const {
 #define X(What, what)                                       \
   AliasClass::AliasClass(A##What x)                         \
     : m_bits(B##What)                                       \
-    , m_stag(STag::What)                                    \
+    , m_stagBits(B##What)                                   \
     , m_##what(x)                                           \
   {                                                         \
     assertx(checkInvariants());                             \
   }                                                         \
                                                             \
-  folly::Optional<A##What> AliasClass::is_##what() const {  \
+  Optional<A##What> AliasClass::is_##what() const {  \
     if (*this <= A##What##Any) return what();               \
-    return folly::none;                                     \
+    return std::nullopt;                                     \
   }
 
-X(Frame, frame)
-X(IterPos, iterPos)
-X(IterBase, iterBase)
-X(CufIterFunc, cufIterFunc)
-X(CufIterCtx, cufIterCtx)
-X(CufIterInvName, cufIterInvName)
-X(CufIterDynamic, cufIterDynamic)
+X(Local, local)
+X(Iter, iter)
+X(ClosureArg, closureArg)
 X(Prop, prop)
 X(ElemI, elemI)
 X(ElemS, elemS)
 X(Stack, stack)
-X(Ref, ref)
-X(ClsRefSlot, clsRefSlot)
 X(Rds, rds)
 
 #undef X
 
 #define X(What, what)                                       \
-  folly::Optional<A##What> AliasClass::what() const {       \
-    if (m_stag == STag::What) return m_##what;              \
-    return folly::none;                                     \
+  Optional<A##What> AliasClass::what() const {       \
+    if (m_stagBits & B##What) return m_##what;              \
+    return std::nullopt;                                     \
   }
 
-X(Frame, frame)
+X(Local, local)
+X(Iter, iter)
+X(ClosureArg, closureArg)
 X(Prop, prop)
 X(ElemI, elemI)
 X(ElemS, elemS)
 X(Stack, stack)
-X(Ref, ref)
-X(ClsRefSlot, clsRefSlot)
 X(Rds, rds)
 
 #undef X
 
 #define X(What, what)                                       \
-  folly::Optional<A##What> AliasClass::what() const {       \
-    if (m_stag == STag::What) return m_##what;              \
-    if (m_stag == STag::IterBoth) {                         \
-      auto const ui = asUIter();                            \
-      assertx(ui.hasValue());                               \
-      return A##What { ui->fp, ui->id };                    \
+  AliasClass::AliasClass(A##What x)                         \
+    : m_bits(B##What)                                       \
+    , m_stagBits(B##What)                                   \
+    , m_frameAll(x)                                         \
+  {                                                         \
+    assertx(checkInvariants());                             \
+  }                                                         \
+                                                            \
+  Optional<A##What> AliasClass::is_##what() const {  \
+    if (*this <= A##What##Any) return what();               \
+    return std::nullopt;                                     \
+  }                                                         \
+  Optional<A##What> AliasClass::what() const {       \
+    if (m_stagBits & B##What) {                             \
+      return A##What { m_frameAll.frameIdx };               \
     }                                                       \
-    return folly::none;                                     \
+    return std::nullopt;                                     \
   }
 
-X(IterPos, iterPos)
-X(IterBase, iterBase)
+X(FContext, fcontext)
+X(FFunc, ffunc)
+X(FMeta, fmeta)
+X(ActRec, actrec)
 
 #undef X
+#undef Y
 
-#define X(What, what)                                       \
-  folly::Optional<A##What> AliasClass::what() const {       \
-    if (m_stag == STag::What) return m_##what;              \
-    if (m_stag == STag::CufIterAll) {                       \
-      auto const ui = asUCufIter();                         \
-      assertx(ui.hasValue());                               \
-      return A##What { ui->fp, ui->id };                    \
-    }                                                       \
-    return folly::none;                                     \
-  }
-
-X(CufIterFunc, cufIterFunc)
-X(CufIterCtx, cufIterCtx)
-X(CufIterInvName, cufIterInvName)
-X(CufIterDynamic, cufIterDynamic)
-
-#undef X
-
-folly::Optional<AliasClass> AliasClass::mis() const {
+Optional<AliasClass> AliasClass::mis() const {
   auto const bits = static_cast<rep>(m_bits & BMIState);
 
   if (bits != BEmpty) return AliasClass{bits};
-  return folly::none;
+  return std::nullopt;
 }
 
-folly::Optional<AliasClass> AliasClass::is_mis() const {
+Optional<AliasClass> AliasClass::is_mis() const {
   if (*this <= AMIStateAny) return mis();
-  return folly::none;
+  return std::nullopt;
 }
 
-AliasClass::rep AliasClass::stagBits(STag tag) {
-  switch (tag) {
-  case STag::None:           return BEmpty;
-  case STag::Frame:          return BFrame;
-  case STag::IterPos:        return BIterPos;
-  case STag::IterBase:       return BIterBase;
-  case STag::CufIterFunc:    return BCufIterFunc;
-  case STag::CufIterCtx:     return BCufIterCtx;
-  case STag::CufIterInvName: return BCufIterInvName;
-  case STag::CufIterDynamic: return BCufIterDynamic;
-  case STag::Prop:           return BProp;
-  case STag::ElemI:          return BElemI;
-  case STag::ElemS:          return BElemS;
-  case STag::Stack:          return BStack;
-  case STag::Ref:            return BRef;
-  case STag::Rds:            return BRds;
-  case STag::ClsRefSlot:     return BClsRefSlot;
-  case STag::IterBoth:       return static_cast<rep>(BIterPos | BIterBase);
-  case STag::CufIterAll:     return static_cast<rep>(BCufIterFunc |
-                                                     BCufIterCtx  |
-                                                     BCufIterInvName |
-                                                     BCufIterDynamic);
+Optional<AliasClass> AliasClass::frame_base() const {
+  auto const bits = static_cast<rep>(m_bits & BFBasePtr);
+
+  if (bits != BEmpty) return AliasClass{bits};
+  return std::nullopt;
+}
+
+Optional<AliasClass> AliasClass::is_frame_base() const {
+  if (*this <= AFBasePtr) return frame_base();
+  return std::nullopt;
+}
+
+Optional<AliasClass> AliasClass::vm_reg_state() const {
+  auto const bits = static_cast<rep>(m_bits & BVMRegState);
+
+  if (bits != BEmpty) return AliasClass{bits};
+  return std::nullopt;
+}
+
+Optional<AliasClass> AliasClass::is_vm_reg_state() const {
+  if (*this <= AVMRegState) return vm_reg_state();
+  return std::nullopt;
+}
+
+Optional<AliasClass> AliasClass::vm_reg() const {
+  auto const bits = static_cast<rep>(m_bits & BVMReg);
+
+  if (bits != BEmpty) return AliasClass{bits};
+  return std::nullopt;
+}
+
+Optional<AliasClass> AliasClass::is_vm_reg() const {
+  if (*this <= AVMRegAny) return vm_reg();
+  return std::nullopt;
+}
+
+Optional<AliasClass> AliasClass::exclude_vm_reg() const {
+  auto const bits = static_cast<rep>(m_bits & ~BVMReg);
+
+  if (bits != BEmpty) {
+    auto ret = AliasClass{bits};
+    ret.m_stagBits = m_stagBits;
+
+    switch (stagFor(m_stagBits)) {
+    case STag::None:
+      break;
+    case STag::Iter:       new (&ret.m_iter) AIter(m_iter); break;
+    case STag::FrameAll:   new (&ret.m_frameAll) UFrameBase(m_frameAll);break;
+    case STag::Local:      new (&ret.m_local) ALocal(m_local); break;
+    case STag::ClosureArg: new (&ret.m_closureArg) AClosureArg(m_closureArg); break;
+    case STag::Prop:       new (&ret.m_prop) AProp(m_prop); break;
+    case STag::ElemI:      new (&ret.m_elemI) AElemI(m_elemI); break;
+    case STag::ElemS:      new (&ret.m_elemS) AElemS(m_elemS); break;
+    case STag::Stack:      new (&ret.m_stack) AStack(m_stack); break;
+    case STag::Rds:        new (&ret.m_rds) ARds(m_rds); break;
+    }
+
+    return ret;
   }
-  always_assert(0);
+  return std::nullopt;
+}
+
+AliasClass::STag AliasClass::stagFor(rep bits) {
+  if (bits == BEmpty) return STag::None;
+  STag ret{STag::None};
+#define O(tag, mask) if ((bits & mask) == bits) ret = STag::tag;
+  ALIAS_CLASS_SPEC
+#undef O
+  //assertx(ret != STag::None);
+  always_assert_flog(ret != STag::None, "Bad bits: {}", (uint32_t)bits);
+  return ret;
 }
 
 bool AliasClass::checkInvariants() const {
-  switch (m_stag) {
+  switch (stagFor(m_stagBits)) {
   case STag::None:           break;
-  case STag::IterPos:        framelike_checkInvariants(m_iterPos);        break;
-  case STag::IterBase:       framelike_checkInvariants(m_iterBase);       break;
-  case STag::IterBoth:       framelike_checkInvariants(m_iterBoth);       break;
-  case STag::CufIterFunc:    framelike_checkInvariants(m_cufIterFunc);    break;
-  case STag::CufIterCtx:     framelike_checkInvariants(m_cufIterCtx);     break;
-  case STag::CufIterInvName: framelike_checkInvariants(m_cufIterInvName); break;
-  case STag::CufIterDynamic: framelike_checkInvariants(m_cufIterDynamic); break;
-  case STag::CufIterAll:     framelike_checkInvariants(m_cufIterAll);     break;
+  case STag::Iter:           framelike_checkInvariants(m_iter);  break;
+  case STag::Local:          framelike_checkInvariants(m_local); break;
+  case STag::FrameAll:       break;
+  case STag::ClosureArg:     break;
   case STag::Prop:           break;
   case STag::ElemI:          break;
-  case STag::Frame:
-    assertx(m_frame.fp->isA(TFramePtr));
-    assertx(!m_frame.ids.empty());
-    break;
-  case STag::ClsRefSlot:
-    assertx(m_clsRefSlot.fp->isA(TFramePtr));
-    assertx(!m_clsRefSlot.ids.empty());
-    break;
   case STag::Stack:
-    assertx(m_stack.size > 0);          // use AEmpty if you want that
+    assertx(m_stack.size() > 0);          // use AEmpty if you want that
     break;
   case STag::ElemS:
     assertx(m_elemS.key->isStatic());
-    break;
-  case STag::Ref:
-    assertx(m_ref.boxed->isA(TBoxedCell));
     break;
   case STag::Rds:
     assertx(rds::isValidHandle(m_rds.handle));
     break;
   }
 
-  assertx(IMPLIES(stagBits(m_stag) != 0, (m_bits & stagBits(m_stag))));
+  assertx((m_bits & m_stagBits) == m_stagBits);
 
   return true;
 }
 
 bool AliasClass::equivData(AliasClass o) const {
-  assertx(m_stag == o.m_stag);
-  switch (m_stag) {
-  case STag::None:     return true;
-  case STag::Frame:    return m_frame.fp == o.m_frame.fp &&
-                              m_frame.ids == o.m_frame.ids;
-  case STag::ClsRefSlot: return m_clsRefSlot.fp == o.m_clsRefSlot.fp &&
-                                m_clsRefSlot.ids == o.m_clsRefSlot.ids;
-  case STag::IterPos:  return framelike_equal(m_iterPos, o.m_iterPos);
-  case STag::IterBase: return framelike_equal(m_iterBase, o.m_iterBase);
-  case STag::IterBoth: return framelike_equal(m_iterBoth, o.m_iterBoth);
-  case STag::CufIterFunc:
-    return framelike_equal(m_cufIterFunc, o.m_cufIterFunc);
-  case STag::CufIterCtx:
-    return framelike_equal(m_cufIterCtx, o.m_cufIterCtx);
-  case STag::CufIterInvName:
-    return framelike_equal(m_cufIterInvName, o.m_cufIterInvName);
-  case STag::CufIterDynamic:
-    return framelike_equal(m_cufIterDynamic, o.m_cufIterDynamic);
-  case STag::CufIterAll:
-    return framelike_equal(m_cufIterAll, o.m_cufIterAll);
-  case STag::Prop:     return m_prop.obj == o.m_prop.obj &&
+  assertx(stagFor(m_stagBits) == stagFor(o.m_stagBits));
+  switch (stagFor(m_stagBits)) {
+  case STag::None:       return true;
+  case STag::Local:      return framelike_equal(m_local, o.m_local);
+  case STag::Iter:       return framelike_equal(m_iter, o.m_iter);
+  case STag::FrameAll:   return m_frameAll.frameIdx == o.m_frameAll.frameIdx;
+  case STag::ClosureArg: return m_closureArg.closure == o.m_closureArg.closure &&
+                               m_closureArg.offset == o.m_closureArg.offset;
+  case STag::Prop:       return m_prop.obj == o.m_prop.obj &&
                               m_prop.offset == o.m_prop.offset;
-  case STag::ElemI:    return m_elemI.arr == o.m_elemI.arr &&
+  case STag::ElemI:      return m_elemI.arr == o.m_elemI.arr &&
                               m_elemI.idx == o.m_elemI.idx;
-  case STag::ElemS:    return m_elemS.arr == o.m_elemS.arr &&
+  case STag::ElemS:      return m_elemS.arr == o.m_elemS.arr &&
                               m_elemS.key == o.m_elemS.key;
-  case STag::Stack:    return m_stack.offset == o.m_stack.offset &&
-                              m_stack.size == o.m_stack.size;
-  case STag::Ref:      return m_ref.boxed == o.m_ref.boxed;
-  case STag::Rds:      return m_rds.handle == o.m_rds.handle;
+  case STag::Stack:      return m_stack.low == o.m_stack.low &&
+                              m_stack.high == o.m_stack.high;
+  case STag::Rds:        return m_rds.handle == o.m_rds.handle;
   }
   not_reached();
 }
 
 bool AliasClass::operator==(AliasClass o) const {
   return m_bits == o.m_bits &&
-         m_stag == o.m_stag &&
+         m_stagBits == o.m_stagBits &&
          equivData(o);
 }
 
 AliasClass AliasClass::unionData(rep newBits, AliasClass a, AliasClass b) {
-  assertx(a.m_stag == b.m_stag);
-  switch (a.m_stag) {
+  assertx(stagFor(a.m_stagBits) == stagFor(b.m_stagBits));
+  auto const frm = static_cast<rep>((a.m_stagBits | b.m_stagBits) & BActRec);
+  switch (stagFor(a.m_stagBits)) {
   case STag::None:
     break;
-  case STag::IterPos:
-  case STag::IterBase:
-  case STag::CufIterFunc:
-  case STag::CufIterCtx:
-  case STag::CufIterInvName:
-  case STag::CufIterDynamic:
+  case STag::ClosureArg:
   case STag::Prop:
   case STag::ElemI:
   case STag::ElemS:
-  case STag::Ref:
   case STag::Rds:
-  case STag::IterBoth:
-  case STag::CufIterAll:
+  case STag::FrameAll:
     assertx(!a.equivData(b));
     break;
-  case STag::Frame:
-    {
-      auto ret = AliasClass{newBits};
-      auto const frmA = a.m_frame;
-      auto const frmB = b.m_frame;
-      if (frmA.fp != frmB.fp) return ret;
-
-      auto const newIds = frmA.ids | frmB.ids;
-      // Even when newIds.isAny(), we still know it won't alias locals in other
-      // frames, so keep the specialization tag.
-      ret.m_stag = STag::Frame;
-      ret.m_frame = AFrame { frmA.fp, newIds };
-      assertx(ret.checkInvariants());
-      assertx(a <= ret && b <= ret);
-      return ret;
-    }
-
-  case STag::ClsRefSlot:
-    {
-      auto ret = AliasClass{newBits};
-      auto const slotA = a.m_clsRefSlot;
-      auto const slotB = b.m_clsRefSlot;
-      if (slotA.fp != slotB.fp) return ret;
-
-      auto const newIds = slotA.ids | slotB.ids;
-      // Even when newIds.isAny(), we still know it won't alias class-ref slots
-      // in other frames, so keep the specialization tag.
-      ret.m_stag = STag::ClsRefSlot;
-      ret.m_clsRefSlot = AClsRefSlot { slotA.fp, newIds };
-      assertx(ret.checkInvariants());
-      assertx(a <= ret && b <= ret);
-      return ret;
-    }
+  case STag::Iter:  return framelike_union(newBits, frm, a.m_iter, b.m_iter);
+  case STag::Local: return framelike_union(newBits, frm, a.m_local, b.m_local);
 
   case STag::Stack:
     {
@@ -492,12 +437,12 @@ AliasClass AliasClass::unionData(rep newBits, AliasClass a, AliasClass b) {
       auto const stkB = b.m_stack;
 
       // Make a stack range big enough to contain both of them.
-      auto const highest = std::max(stkA.offset, stkB.offset);
-      auto const lowest = std::min(lowest_offset(stkA), lowest_offset(stkB));
-      auto const newStack = AStack { highest, highest.offset - lowest };
+      auto const highest = std::max(stkA.high, stkB.high);
+      auto const lowest = std::min(stkA.low, stkB.low);
+      auto const newStack = AStack::range(lowest, highest);
       auto ret = AliasClass{newBits};
       new (&ret.m_stack) AStack(newStack);
-      ret.m_stag = STag::Stack;
+      ret.m_stagBits = BStack;
       assertx(ret.checkInvariants());
       assertx(a <= ret && b <= ret);
       return ret;
@@ -507,37 +452,7 @@ AliasClass AliasClass::unionData(rep newBits, AliasClass a, AliasClass b) {
   return AliasClass{newBits};
 }
 
-folly::Optional<AliasClass>
-AliasClass::precise_diffSTag_unionData(rep newBits,
-                                       AliasClass a,
-                                       AliasClass b) {
-  assertx(a.m_stag != b.m_stag &&
-          a.m_stag != STag::None &&
-          b.m_stag != STag::None);
-  // The only precise union with different stags we support so far is iterator
-  // stuff.  If that works, return it, otherwise none.
-  auto const u1 = a.asUIter();
-  auto const u2 = b.asUIter();
-  if (u1 && u2 && framelike_equal(*u1, *u2)) {
-    auto ret = AliasClass{newBits};
-    new (&ret.m_iterBoth) UIterBoth(*u1);
-    ret.m_stag = STag::IterBoth;
-    return ret;
-  }
-
-  auto const c1 = a.asUCufIter();
-  auto const c2 = b.asUCufIter();
-  if (c1 && c2 && framelike_equal(*c1, *c2)) {
-    auto ret = AliasClass{newBits};
-    new (&ret.m_cufIterAll) UCufIterAll(*c1);
-    ret.m_stag = STag::CufIterAll;
-    return ret;
-  }
-
-  return folly::none;
-}
-
-folly::Optional<AliasClass> AliasClass::precise_union(AliasClass o) const {
+Optional<AliasClass> AliasClass::precise_union(AliasClass o) const {
   if (o <= *this) return *this;
   if (*this <= o) return o;
 
@@ -547,30 +462,33 @@ folly::Optional<AliasClass> AliasClass::precise_union(AliasClass o) const {
   // bigger than it should be.  This means we can't deal with situations where
   // we have different stags, and right now we also don't try to deal with
   // situations that have the same stag in a combinable way.  (E.g. two
-  // adjacent AStack ranges, multiple AFrame locals.)
-  auto const stag1 = m_stag;
-  auto const stag2 = o.m_stag;
+  // adjacent AStack ranges, multiple ALocal locals.)
+  auto const stag1 = stagFor(m_stagBits);
+  auto const stag2 = stagFor(o.m_stagBits);
   if (stag1 == STag::None && stag2 == STag::None) {
     return AliasClass{unioned};
   }
   if (stag1 == STag::None && stag2 != STag::None) {
     return o.precise_union(*this); // flip args
   }
-  assertx(stag1 != STag::None);
-  if (stag2 != STag::None) {
-    if (stag1 == stag2) {
-      // We would've had o <= *this or vice versa if there was an easy precise
-      // union.
-      return folly::none;
+  if (stag1 == STag::FrameAll || stag2 == STag::FrameAll) {
+    auto const uf1 = asUFrameBase();
+    auto const uf2 = o.asUFrameBase();
+    if (uf1 && uf2 && uf1->frameIdx == uf2->frameIdx) {
+      auto ret = stag1 == STag::FrameAll ? o : *this;
+      ret.m_bits = unioned;
+      ret.m_stagBits = static_cast<rep>(o.m_stagBits | m_stagBits);
+      return ret;
     }
-    return precise_diffSTag_unionData(unioned, *this, o);
   }
-  if (o.m_bits & stagBits(stag1)) return folly::none;
+  assertx(stag1 != STag::None);
+  if (stag2 != STag::None) return std::nullopt;
+  if (o.m_bits & m_stagBits) return std::nullopt;
 
   // Keep the data and stag from this, but change its bits.
   auto ret = *this;
   ret.m_bits = unioned;
-  assertx(ret.m_stag == stag1);
+  assertx(stagFor(ret.m_stagBits) == stag1);
   return ret;
 }
 
@@ -580,14 +498,25 @@ AliasClass AliasClass::operator|(AliasClass o) const {
   auto const unioned = static_cast<rep>(m_bits | o.m_bits);
 
   // If they have the same stag, try to merge them with unionData.
-  auto stag1 = m_stag;
-  auto stag2 = o.m_stag;
+  auto stag1 = stagFor(m_stagBits);
+  auto stag2 = stagFor(o.m_stagBits);
   if (stag1 == stag2) return unionData(unioned, *this, o);
+
+  auto const frame1 = asUFrameBase();
+  auto const frame2 = o.asUFrameBase();
+  if (frame1 && frame2 && frame1->frameIdx == frame2->frameIdx) {
+    if (stag1 == STag::FrameAll || stag2 == STag::FrameAll) {
+      auto ret = stag1 == STag::FrameAll ? o : *this;
+      ret.m_bits = unioned;
+      ret.m_stagBits = static_cast<rep>(m_stagBits | o.m_stagBits);
+      return ret;
+    }
+  }
 
   // If one of the alias classes have a non-None stag, we can only keep it if
   // the other doesn't have any of the corresponding bits set.
-  if (stag1 != STag::None && (o.m_bits & stagBits(stag1))) stag1 = STag::None;
-  if (stag2 != STag::None && (m_bits & stagBits(stag2))) stag2 = STag::None;
+  if (stag1 != STag::None && (o.m_bits & m_stagBits)) stag1 = STag::None;
+  if (stag2 != STag::None && (m_bits & o.m_stagBits)) stag2 = STag::None;
 
   auto ret = AliasClass{unioned};
   if (stag1 == stag2) return ret;       // both None.
@@ -602,169 +531,101 @@ AliasClass AliasClass::operator|(AliasClass o) const {
    * precise_diffSTag_unionData supported, and that neither *this nor `o' are
    * subtypes of each other, because we already tried both of those things.
    *
-   * Note also that we might be in a situation where one of the STags is
-   * representing a union of more primitive STags.  For example we could have
-   * an IterPos and an IterBoth.  But for this case, we've already thrown away
-   * the overlap by setting stags to None above.
+   * Note also that we might be in a situation where one of the STags
+   * is representing a union of more primitive STags. But for this
+   * case, we've already thrown away the overlap by setting stags to
+   * None above.
    */
-  const AliasClass* chosen = &o;
+  const AliasClass* best = &o;
   auto const stag = [&] () -> STag {
     if (stag1 != STag::None) {
-      if (stag2 == STag::None || stagBits(stag1) < stagBits(stag2)) {
-        chosen = this;
+      if (stag2 == STag::None || m_stagBits < o.m_stagBits) {
+        best = this;
+        ret.m_stagBits = m_stagBits;
         return stag1;
       }
     }
+    ret.m_stagBits = o.m_stagBits;
     return stag2;
   }();
 
   switch (stag) {
   case STag::None:
     break;
-  case STag::IterPos:  new (&ret.m_iterPos) AIterPos(chosen->m_iterPos); break;
-  case STag::IterBase: new (&ret.m_iterBase) AIterBase(chosen->m_iterBase);
-                       break;
-  case STag::IterBoth: new (&ret.m_iterBoth) UIterBoth(chosen->m_iterBoth);
-                       break;
-  case STag::CufIterFunc:
-    new (&ret.m_cufIterFunc) ACufIterFunc(chosen->m_cufIterFunc);
-    break;
-  case STag::CufIterCtx:
-    new (&ret.m_cufIterCtx) ACufIterCtx(chosen->m_cufIterCtx);
-    break;
-  case STag::CufIterInvName:
-    new (&ret.m_cufIterInvName) ACufIterInvName(chosen->m_cufIterInvName);
-    break;
-  case STag::CufIterDynamic:
-    new (&ret.m_cufIterDynamic) ACufIterDynamic(chosen->m_cufIterDynamic);
-    break;
-  case STag::CufIterAll:
-    new (&ret.m_cufIterAll) UCufIterAll(chosen->m_cufIterAll);
-    break;
-  case STag::Frame:    new (&ret.m_frame) AFrame(chosen->m_frame); break;
-  case STag::ClsRefSlot:
-    new (&ret.m_clsRefSlot) AClsRefSlot(chosen->m_clsRefSlot);
-    break;
-  case STag::Prop:     new (&ret.m_prop) AProp(chosen->m_prop); break;
-  case STag::ElemI:    new (&ret.m_elemI) AElemI(chosen->m_elemI); break;
-  case STag::ElemS:    new (&ret.m_elemS) AElemS(chosen->m_elemS); break;
-  case STag::Stack:    new (&ret.m_stack) AStack(chosen->m_stack); break;
-  case STag::Ref:      new (&ret.m_ref) ARef(chosen->m_ref); break;
-  case STag::Rds:      new (&ret.m_rds) ARds(chosen->m_rds); break;
+  case STag::Iter:       new (&ret.m_iter) AIter(best->m_iter); break;
+  case STag::FrameAll:   new (&ret.m_frameAll) UFrameBase(best->m_frameAll);break;
+  case STag::Local:      new (&ret.m_local) ALocal(best->m_local); break;
+  case STag::ClosureArg: new (&ret.m_closureArg) AClosureArg(best->m_closureArg); break;
+  case STag::Prop:       new (&ret.m_prop) AProp(best->m_prop); break;
+  case STag::ElemI:      new (&ret.m_elemI) AElemI(best->m_elemI); break;
+  case STag::ElemS:      new (&ret.m_elemS) AElemS(best->m_elemS); break;
+  case STag::Stack:      new (&ret.m_stack) AStack(best->m_stack); break;
+  case STag::Rds:        new (&ret.m_rds) ARds(best->m_rds); break;
   }
-  ret.m_stag = stag;
+
+  // If both alias classes have compatible frames we can merge their frame
+  // specific specializations.
+  if (frame1 && frame2 && frame1->frameIdx == frame2->frameIdx) {
+    auto const frameBits = (m_stagBits | o.m_stagBits) & BActRec;
+    ret.m_stagBits = static_cast<rep>(ret.m_stagBits | frameBits);
+  }
+
   return ret;
 }
 
 bool AliasClass::subclassData(AliasClass o) const {
-  assertx(m_stag == o.m_stag);
-  switch (m_stag) {
+  assertx(stagFor(m_stagBits) == stagFor(o.m_stagBits));
+  switch (stagFor(m_stagBits)) {
   case STag::None:
-  case STag::IterPos:
-  case STag::IterBase:
-  case STag::IterBoth:
-  case STag::CufIterFunc:
-  case STag::CufIterCtx:
-  case STag::CufIterInvName:
-  case STag::CufIterDynamic:
-  case STag::CufIterAll:
+  case STag::ClosureArg:
   case STag::Prop:
   case STag::ElemI:
   case STag::ElemS:
-  case STag::Ref:
   case STag::Rds:
     return equivData(o);
-  case STag::Frame:
-    return m_frame.fp == o.m_frame.fp && m_frame.ids <= o.m_frame.ids;
-  case STag::ClsRefSlot:
-    return m_clsRefSlot.fp == o.m_clsRefSlot.fp &&
-           m_clsRefSlot.ids <= o.m_clsRefSlot.ids;
+  case STag::Iter:
+    return framelike_subclass(m_iter, o.m_iter);
+  case STag::Local:
+    return framelike_subclass(m_local, o.m_local);
   case STag::Stack:
-    return m_stack.offset <= o.m_stack.offset &&
-           lowest_offset(m_stack) >= lowest_offset(o.m_stack);
+    return m_stack.high <= o.m_stack.high && m_stack.low >= o.m_stack.low;
+  case STag::FrameAll: return m_frameAll.frameIdx == o.m_frameAll.frameIdx;
   }
   not_reached();
 }
 
-folly::Optional<AliasClass::UIterBoth> AliasClass::asUIter() const {
-  switch (m_stag) {
+Optional<UFrameBase> AliasClass::asUFrameBase() const {
+  switch (stagFor(m_stagBits)) {
   case STag::None:
-  case STag::Frame:
+  case STag::ClosureArg:
   case STag::Prop:
   case STag::ElemI:
   case STag::ElemS:
-  case STag::Ref:
   case STag::Rds:
   case STag::Stack:
-  case STag::ClsRefSlot:
-  case STag::CufIterFunc:
-  case STag::CufIterCtx:
-  case STag::CufIterInvName:
-  case STag::CufIterDynamic:
-  case STag::CufIterAll:
-    return folly::none;
-  case STag::IterPos:   return UIterBoth { m_iterPos.fp, m_iterPos.id };
-  case STag::IterBase:  return UIterBoth { m_iterBase.fp, m_iterBase.id };
-  case STag::IterBoth:  return m_iterBoth;
+    return std::nullopt;
+  case STag::Local:     return m_local;
+  case STag::Iter:      return m_iter;
+  case STag::FrameAll:  return m_frameAll;
   }
   not_reached();
-}
-
-folly::Optional<AliasClass::UCufIterAll> AliasClass::asUCufIter() const {
-  switch (m_stag) {
-  case STag::None:
-  case STag::Frame:
-  case STag::Prop:
-  case STag::ElemI:
-  case STag::ElemS:
-  case STag::Ref:
-  case STag::Rds:
-  case STag::Stack:
-  case STag::ClsRefSlot:
-  case STag::IterPos:
-  case STag::IterBase:
-  case STag::IterBoth:
-    return folly::none;
-  case STag::CufIterFunc:
-    return UCufIterAll { m_cufIterFunc.fp, m_cufIterFunc.id };
-  case STag::CufIterCtx:
-    return UCufIterAll { m_cufIterCtx.fp, m_cufIterCtx.id };
-  case STag::CufIterInvName:
-    return UCufIterAll { m_cufIterInvName.fp, m_cufIterInvName.id };
-  case STag::CufIterDynamic:
-    return UCufIterAll { m_cufIterDynamic.fp, m_cufIterDynamic.id };
-  case STag::CufIterAll: return m_cufIterAll;
-  }
-  not_reached();
-}
-
-bool AliasClass::refersToSameIterHelper(AliasClass o) const {
-  assertx(stagBits(m_stag) & stagBits(o.m_stag));
-  assertx(m_stag == STag::IterBoth || o.m_stag == STag::IterBoth);
-  return framelike_equal(*asUIter(), *o.asUIter());
-}
-
-bool AliasClass::refersToSameCufIterHelper(AliasClass o) const {
-  assertx(stagBits(m_stag) & stagBits(o.m_stag));
-  assertx(m_stag == STag::CufIterAll || o.m_stag == STag::CufIterAll);
-  return framelike_equal(*asUCufIter(), *o.asUCufIter());
 }
 
 /*
  * Should return true if this's specialized data is entirely contained in o's
  * specialized data, for only the portion of the data relevant for
- * "relevant_bits", with the precondition that m_stag != o.m_stag.
+ * "relevant_bits", with the precondition that m_stagBits != o.m_stagBits.
  *
  * We know the only case this can happen is if at least one of them is an
  * iterator, and they are only going to have a subclass relationship inside of
  * relevant_bits only if they refer to the same iterator.
  */
-bool AliasClass::diffSTagSubclassData(rep /*relevant_bits*/,
-                                      AliasClass o) const {
-  if (m_stag == STag::IterBoth || o.m_stag == STag::IterBoth) {
-    return refersToSameIterHelper(o);
-  } else if (m_stag == STag::CufIterAll || o.m_stag == STag::CufIterAll) {
-    return refersToSameCufIterHelper(o);
+bool AliasClass::diffSTagSubclassData(rep relevant_bits, AliasClass o) const {
+  if ((relevant_bits & BActRec) == relevant_bits) {
+    if ((o.m_stagBits & m_bits) == relevant_bits) {
+      return asUFrameBase()->frameIdx == o.asUFrameBase()->frameIdx;
+    }
+    return false;
   } else {
     return false;
   }
@@ -779,11 +640,9 @@ bool AliasClass::diffSTagSubclassData(rep /*relevant_bits*/,
  * information, and we know it only intersects if they are the same iterator
  * id.
  */
-bool AliasClass::diffSTagMaybeData(rep /*relevant_bits*/, AliasClass o) const {
-  if (m_stag == STag::IterBoth || o.m_stag == STag::IterBoth) {
-    return refersToSameIterHelper(o);
-  } else if (m_stag == STag::CufIterAll || o.m_stag == STag::CufIterAll) {
-    return refersToSameCufIterHelper(o);
+bool AliasClass::diffSTagMaybeData(rep relevant_bits, AliasClass o) const {
+  if (relevant_bits & BActRec) {
+    return asUFrameBase()->frameIdx == o.asUFrameBase()->frameIdx;
   } else {
     return false;
   }
@@ -799,14 +658,22 @@ bool AliasClass::operator<=(AliasClass o) const {
   // m_bits, the stagBits must be part of the intersection or be BEmpty.  This
   // means they can only be in a subclass relationship if that specialized data
   // is.
-  if (m_stag == o.m_stag) return subclassData(o);
+  if (stagFor(m_stagBits) == stagFor(o.m_stagBits)) {
+    auto const frame = m_stagBits & BActRec;
+    auto const oframe = o.m_stagBits & BActRec;
+    // If they have any frame specializations we should have those bits as well.
+    if ((frame & oframe) == (oframe & isect)) {
+      return subclassData(o);
+    }
+    return false;
+  }
 
-  auto const sbits  = stagBits(m_stag);
-  auto const osbits = stagBits(o.m_stag);
+  auto const sbits  = m_stagBits;
+  auto const osbits = o.m_stagBits;
 
   /*
    * If the stag bits for the two classes overlap, but the stags were
-   * different, we're dealing with a union-style STag (like IterBoth).
+   * different, we're dealing with a union-style STag (like IterAll).
    */
   if (auto const inner_bits = (sbits & osbits /*& isect is redundant*/)) {
     return diffSTagSubclassData(static_cast<rep>(inner_bits), o);
@@ -822,8 +689,8 @@ bool AliasClass::operator<=(AliasClass o) const {
    * set in isect.  If the osbits was BEmpty, osbits & isect is zero, which
    * avoids this case.
    *
-   * The remaining situations are that m_stag is STag::None, in which case it
-   * is a subclass since osbits wasn't in the intersection.  Or that m_stag has
+   * The remaining situations are that stag is STag::None, in which case it
+   * is a subclass since osbits wasn't in the intersection.  Or that stag has
    * a bit that is in the isect (since m_bits == isect), and that bit is set in
    * o.m_bits.  In either case this is a subclass, so we can just return true.
    */
@@ -832,38 +699,33 @@ bool AliasClass::operator<=(AliasClass o) const {
 }
 
 bool AliasClass::maybeData(AliasClass o) const {
-  assertx(m_stag == o.m_stag);
-  switch (m_stag) {
+  assertx(stagFor(m_stagBits) == stagFor(o.m_stagBits));
+  if (m_stagBits & o.m_stagBits & BActRec) {
+    auto const uframe1 = asUFrameBase();
+    auto const uframe2 = o.asUFrameBase();
+    if (uframe1 && uframe2 && uframe1->frameIdx == uframe2->frameIdx) {
+      return true;
+    }
+  }
+  switch (stagFor(m_stagBits)) {
   case STag::None:
     not_reached();  // handled outside
-  case STag::IterPos:  return framelike_equal(m_iterPos, o.m_iterPos);
-  case STag::IterBase: return framelike_equal(m_iterBase, o.m_iterBase);
-  case STag::IterBoth: return framelike_equal(m_iterBoth, o.m_iterBoth);
-  case STag::CufIterFunc:
-    return framelike_equal(m_cufIterFunc, o.m_cufIterFunc);
-  case STag::CufIterCtx:
-    return framelike_equal(m_cufIterCtx, o.m_cufIterCtx);
-  case STag::CufIterInvName:
-    return framelike_equal(m_cufIterInvName, o.m_cufIterInvName);
-  case STag::CufIterDynamic:
-    return framelike_equal(m_cufIterDynamic, o.m_cufIterDynamic);
-  case STag::CufIterAll:
-    return framelike_equal(m_cufIterAll, o.m_cufIterAll);
-  case STag::Frame:
-    return m_frame.fp == o.m_frame.fp && m_frame.ids.maybe(o.m_frame.ids);
-  case STag::ClsRefSlot:
-    return m_clsRefSlot.fp == o.m_clsRefSlot.fp &&
-           m_clsRefSlot.ids.maybe(o.m_clsRefSlot.ids);
+  case STag::Iter:   return framelike_maybe(m_iter, o.m_iter);
+  case STag::Local:  return framelike_maybe(m_local, o.m_local);
+  case STag::FrameAll: return m_frameAll.frameIdx == o.m_frameAll.frameIdx;
+  case STag::ClosureArg:
+    if (m_closureArg.offset != o.m_closureArg.offset) return false;
+    if (!m_closureArg.closure->type().maybe(o.m_closureArg.closure->type())) return false;
+    return true;
+
   case STag::Prop:
     /*
      * We can't tell if two objects could be the same from here in general, but
      * we can rule out simple cases based on type.  The props can't be the same
      * if they are at different offsets, though.
-     *
-     * For now we're ignoring the type information, and only using offset.
-     * TODO(#2939547) TODO(#2884927)
      */
     if (m_prop.offset != o.m_prop.offset) return false;
+    if (!m_prop.obj->type().maybe(o.m_prop.obj->type())) return false;
     return true;
 
   /*
@@ -873,28 +735,21 @@ bool AliasClass::maybeData(AliasClass o) const {
    */
   case STag::ElemI:
     if (m_elemI.idx != o.m_elemI.idx) return false;
+    if (!m_elemI.arr->type().maybe(o.m_elemI.arr->type())) return false;
     return true;
   case STag::ElemS:
     if (m_elemS.key != o.m_elemS.key) return false;
+    if (!m_elemS.arr->type().maybe(o.m_elemS.arr->type())) return false;
     return true;
 
   case STag::Stack:
     {
       // True if there's a non-empty intersection of the two stack slot
       // intervals.
-      auto const lowest_upper = std::min(m_stack.offset, o.m_stack.offset);
-      auto const highest_lower = std::max(
-        lowest_offset(m_stack),
-        lowest_offset(o.m_stack)
-      );
-      return lowest_upper.offset > highest_lower;
+      auto const lowest_upper = std::min(m_stack.high, o.m_stack.high);
+      auto const highest_lower = std::max(m_stack.low, o.m_stack.low);
+      return lowest_upper > highest_lower;
     }
-
-  /*
-   * Two boxed cells can generally refer to the same RefData.
-   */
-  case STag::Ref:
-    return true;
 
   case STag::Rds:
     return m_rds.handle == o.m_rds.handle;
@@ -912,8 +767,8 @@ bool AliasClass::maybe(AliasClass o) const {
   auto const isect = static_cast<rep>(m_bits & o.m_bits);
   if (isect == 0) return false;
 
-  auto const sbits = stagBits(m_stag);
-  auto const osbits = stagBits(o.m_stag);
+  auto const sbits = m_stagBits;
+  auto const osbits = o.m_stagBits;
 
   /*
    * If a shared portion of the specialized information is in the intersection,
@@ -922,7 +777,7 @@ bool AliasClass::maybe(AliasClass o) const {
    */
   if (auto const inner_bits = (sbits & osbits & isect)) {
     if ((inner_bits & isect) == isect) {
-      if (m_stag == o.m_stag) return maybeData(o);
+      if (stagFor(sbits) == stagFor(osbits)) return maybeData(o);
       return diffSTagMaybeData(static_cast<rep>(inner_bits), o);
     }
   }
@@ -937,19 +792,21 @@ bool AliasClass::isSingleLocation() const {
   // Either BEmpty or more than one bit set in rep.
   if (m_bits == 0 || (m_bits & (m_bits - 1))) return false;
 
-  // Only MIState is allowed to have no specialization and be a valid single
-  // location.
-  if (m_stag == STag::None) return *this <= AMIStateAny;
+  // Only MIState, FBasePtr, VMReg, and VMRegState are allowed to have no
+  // specialization and be a valid single location.
+  if (m_stagBits == BEmpty) {
+    return *this <= (AMIStateAny | AFBasePtr | AVMRegAny | AVMRegState);
+  }
 
-  // AFrame, AClsRefSlot, and AStack can contain multiple locations.
-  if (auto const frame = is_frame()) {
+  // ALocal, AStack, and AIter can contain multiple locations.
+  if (auto const frame = is_local()) {
     return frame->ids.hasSingleValue();
   }
-  if (auto const slot = is_clsRefSlot()) {
-    return slot->ids.hasSingleValue();
+  if (auto const iter = is_iter()) {
+    return iter->ids.hasSingleValue();
   }
   if (auto const stk = is_stack()) {
-    return stk->size == 1;
+    return stk->size() == 1;
   }
   // All other specializations currently have exactly one location.
   return true;
@@ -957,46 +814,26 @@ bool AliasClass::isSingleLocation() const {
 
 //////////////////////////////////////////////////////////////////////
 
-AliasClass mis_from_offset(size_t offset) {
-  if (offset == offsetof(MInstrState, tvTempBase)) {
-    return AliasClass{AliasClass::BMITempBase};
-  }
-  if (offset == offsetof(MInstrState, tvRef)) {
-    return AliasClass{AliasClass::BMITvRef};
-  }
-  if (offset == offsetof(MInstrState, tvRef2)) {
-    return AliasClass{AliasClass::BMITvRef2};
-  }
-  if (offset == offsetof(MInstrState, base)) {
-    return AliasClass{AliasClass::BMIBase};
-  }
-  always_assert(false);
-}
-
-//////////////////////////////////////////////////////////////////////
-
 AliasClass canonicalize(AliasClass a) {
   using T = AliasClass::STag;
-  switch (a.m_stag) {
+  switch (AliasClass::stagFor(a.m_stagBits)) {
   case T::None:           return a;
-  case T::Frame:          return a;
-  case T::IterPos:        return a;
-  case T::IterBase:       return a;
-  case T::IterBoth:       return a;
-  case T::CufIterFunc:    return a;
-  case T::CufIterCtx:     return a;
-  case T::CufIterInvName: return a;
-  case T::CufIterDynamic: return a;
-  case T::CufIterAll:     return a;
+  case T::Local:          return a;
+  case T::Iter:           return a;
   case T::Stack:          return a;
-  case T::Ref:            return a;
   case T::Rds:            return a;
-  case T::ClsRefSlot:     return a;
-  case T::Prop:     a.m_prop.obj = canonical(a.m_prop.obj);   return a;
-  case T::ElemI:    a.m_elemI.arr = canonical(a.m_elemI.arr); return a;
-  case T::ElemS:    a.m_elemS.arr = canonical(a.m_elemS.arr); return a;
+  case T::FrameAll:       return a;
+  case T::ClosureArg:     a.m_closureArg.closure = canonical(a.m_closureArg.closure); return a;
+  case T::Prop:           a.m_prop.obj = canonical(a.m_prop.obj);                     return a;
+  case T::ElemI:          a.m_elemI.arr = canonical(a.m_elemI.arr);                   return a;
+  case T::ElemS:          a.m_elemS.arr = canonical(a.m_elemS.arr);                   return a;
   }
   not_reached();
+}
+
+jit::vector<AliasClass> canonicalize(jit::vector<AliasClass> as) {
+  for (auto& a : as) a = canonicalize(a);
+  return as;
 }
 
 //////////////////////////////////////////////////////////////////////
@@ -1004,53 +841,26 @@ AliasClass canonicalize(AliasClass a) {
 std::string show(AliasClass acls) {
   using A  = AliasClass;
 
-  auto ret = bit_str(acls.m_bits, A::stagBits(acls.m_stag));
-  if (!ret.empty() && acls.m_stag != A::STag::None) {
+  auto ret = bit_str(acls.m_bits, acls.m_stagBits);
+  if (!ret.empty() && acls.m_stagBits != A::BEmpty) {
     ret += ' ';
   }
 
-  switch (acls.m_stag) {
+  switch (A::stagFor(acls.m_stagBits)) {
   case A::STag::None:
     break;
-  case A::STag::Frame:
-    folly::format(&ret, "Fr t{}:{}", acls.m_frame.fp->id(),
-                  show(acls.m_frame.ids));
+  case A::STag::Local:
+    folly::format(&ret, "Lv {}:{}", acls.m_local.frameIdx,
+                  show(acls.m_local.ids));
     break;
-  case A::STag::ClsRefSlot:
-    folly::format(&ret, "Cls t{}:{}", acls.m_clsRefSlot.fp->id(),
-                  show(acls.m_clsRefSlot.ids));
+  case A::STag::Iter:
+    folly::format(&ret, "It {}:{}", acls.m_iter.frameIdx,
+                  show(acls.m_iter.ids));
     break;
-  case A::STag::IterPos:
-    folly::format(&ret, "ItP t{}:{}", acls.m_iterPos.fp->id(),
-      acls.m_iterPos.id);
+  case A::STag::FrameAll:
     break;
-  case A::STag::IterBase:
-    folly::format(&ret, "ItB t{}:{}", acls.m_iterBase.fp->id(),
-      acls.m_iterBase.id);
-    break;
-  case A::STag::IterBoth:
-    folly::format(&ret, "It* t{}:{}", acls.m_iterBoth.fp->id(),
-      acls.m_iterBoth.id);
-    break;
-  case A::STag::CufIterFunc:
-    folly::format(&ret, "CItF t{}:{}", acls.m_cufIterFunc.fp->id(),
-                  acls.m_cufIterFunc.id);
-    break;
-  case A::STag::CufIterCtx:
-    folly::format(&ret, "CItC t{}:{}", acls.m_cufIterCtx.fp->id(),
-                  acls.m_cufIterCtx.id);
-    break;
-  case A::STag::CufIterInvName:
-    folly::format(&ret, "CItN t{}:{}", acls.m_cufIterInvName.fp->id(),
-                  acls.m_cufIterInvName.id);
-    break;
-  case A::STag::CufIterDynamic:
-    folly::format(&ret, "CItD t{}:{}", acls.m_cufIterDynamic.fp->id(),
-                  acls.m_cufIterDynamic.id);
-    break;
-  case A::STag::CufIterAll:
-    folly::format(&ret, "CIt* t{}:{}", acls.m_cufIterAll.fp->id(),
-                  acls.m_cufIterAll.id);
+  case A::STag::ClosureArg:
+    folly::format(&ret, "ClArg t{}:{}", acls.m_closureArg.closure->id(), acls.m_closureArg.offset);
     break;
   case A::STag::Prop:
     folly::format(&ret, "Pr t{}:{}", acls.m_prop.obj->id(), acls.m_prop.offset);
@@ -1064,23 +874,42 @@ std::string show(AliasClass acls) {
     break;
   case A::STag::Stack:
     folly::format(&ret, "St {}{}",
-      acls.m_stack.offset.offset,
-      acls.m_stack.size == std::numeric_limits<int32_t>::max()
+      acls.m_stack.low.offset == std::numeric_limits<int32_t>::min()
         ? "<"
-        : folly::sformat(";{}", acls.m_stack.size)
+        : fmt::format("{}:", acls.m_stack.low.offset),
+      acls.m_stack.high.offset
     );
-    break;
-  case A::STag::Ref:
-    folly::format(&ret, "Ref {}", acls.m_ref.boxed->id());
     break;
   case A::STag::Rds:
     folly::format(&ret, "Rds {}", acls.m_rds.handle);
     break;
   }
 
+  if (acls.m_stagBits & A::BActRec) {
+    if (A::stagFor(acls.m_stagBits) != A::STag::FrameAll) ret += "+";
+    if (acls.m_stagBits & A::BFMeta)    ret += "Fm";
+    if (acls.m_stagBits & A::BFContext) ret += "Fc";
+    if (acls.m_stagBits & A::BFFunc)    ret += "Ff";
+    if (A::stagFor(acls.m_stagBits) == A::STag::FrameAll) {
+      folly::format(&ret, "@{}", acls.asUFrameBase()->frameIdx);
+    }
+  }
+
+  return ret;
+}
+
+std::string show(const jit::vector<AliasClass>& as) {
+  std::string ret = "[";
+  auto first = true;
+  for (auto const& a : as) {
+    if (!first) ret += ", ";
+    first = false;
+    ret += show(a);
+  }
+  ret += "]";
   return ret;
 }
 
 //////////////////////////////////////////////////////////////////////
 
-}}
+}

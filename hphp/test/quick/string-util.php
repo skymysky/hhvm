@@ -1,7 +1,7 @@
 <?hh
 
 
-function strtobin($str) {
+function strtobin(string $str) :mixed{
   $ret = '';
   $sep = '';
   for ($i = 0; $i < strlen($str); ++$i) {
@@ -12,16 +12,15 @@ function strtobin($str) {
   return $ret;
 }
 
-function do_string($str) {
+function do_string(string $str) :void{
   var_dump(strtobin($str),
            strtobin(stripcslashes($str)));
 }
 
-function main() {
+<<__EntryPoint>> function main(): void {
   do_string("12345\\:2\\");
   do_string("12345\\:2\\4");
   do_string("12345\\:a");
   do_string("12345\\123");
   do_string("12345\\12345");
 }
-main();

@@ -1,33 +1,42 @@
 <?hh
 
-function eq($x, $y) {
-  var_dump($x == $y);
+function eq(mixed $x, mixed $y) :void{
+  var_dump(HH\Lib\Legacy_FIXME\eq($x, $y));
 }
 
-function lt($x, $y) {
-  var_dump($x < $y);
+function lt(mixed $x, mixed $y) :void{
+  try {
+    var_dump(HH\Lib\Legacy_FIXME\lt($x, $y));
+  } catch (Exception $e) {
+    echo "Caught: ".$e->getMessage()."\n";
+  }
 }
 
-function gt($x, $y) {
-  var_dump($x > $y);
+function gt(mixed $x, mixed $y) :void{
+  try {
+    var_dump(HH\Lib\Legacy_FIXME\gt($x, $y));
+  } catch (Exception $e) {
+    echo "Caught: ".$e->getMessage()."\n";
+  }
 }
 
+<<__EntryPoint>> function main(): void {
 echo "======\n";
 
-eq('Array', array(1,2));
-eq('Array', array());
-eq(array(), 'Array');
-eq(array('a', 'b'), 'Array');
+eq('Array', vec[1,2]);
+eq('Array', vec[]);
+eq(vec[], 'Array');
+eq(vec['a', 'b'], 'Array');
 echo "\n";
-lt('Array', array(1,2));
-lt('Array', array());
-lt(array(), 'Array');
-lt(array('a', 'b'), 'Array');
+lt('Array', vec[1,2]);
+lt('Array', vec[]);
+lt(vec[], 'Array');
+lt(vec['a', 'b'], 'Array');
 echo "\n";
-gt('Array', array(1,2));
-gt('Array', array());
-gt(array(), 'Array');
-gt(array('a', 'b'), 'Array');
+gt('Array', vec[1,2]);
+gt('Array', vec[]);
+gt(vec[], 'Array');
+gt(vec['a', 'b'], 'Array');
 
 echo "======\n";
 
@@ -56,3 +65,4 @@ lt(null, -1.0);
 echo "\n";
 gt(-1.0, null);
 gt(null, -1.0);
+}

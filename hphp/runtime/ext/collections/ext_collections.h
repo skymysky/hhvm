@@ -1,32 +1,27 @@
-#ifndef incl_HPHP_EXT_COLLECTIONS_H
-#define incl_HPHP_EXT_COLLECTIONS_H
+#pragma once
 
 #include "hphp/runtime/ext/extension.h"
 #include "hphp/runtime/base/header-kind.h"
 #include "hphp/system/systemlib.h"
+#include "hphp/runtime/vm/class.h"
+#include "hphp/runtime/vm/native-prop-handler.h"
 
 namespace HPHP {
 /////////////////////////////////////////////////////////////////////////////
 
-struct c_Vector;
-void triggerCow(c_Vector* vec);
 ArrayIter getArrayIterHelper(const Variant& v, size_t& sz);
 
+struct c_Collection : ObjectData {
+  explicit c_Collection(Class* cls, HeaderKind kind) noexcept :
+    ObjectData(cls, NoInit{}, ObjectData::NoAttrs, kind) {}
+};
+
 namespace collections {
+
 /////////////////////////////////////////////////////////////////////////////
 
-extern const StaticString
-  s_HH_Pair, s_HH_Vector, s_HH_ImmVector,
-  s_HH_Map, s_HH_ImmMap, s_HH_Set, s_HH_ImmSet;
 
 #define DECLARE_COLLECTIONS_CLASS_NOCTOR(name)              \
-  static Class* s_cls;                                      \
-                                                            \
-  static Class* classof() {                                 \
-    assertx(s_cls);                                         \
-    return s_cls;                                           \
-  }                                                         \
-                                                            \
   static void instanceDtor(ObjectData* obj, const Class*) { \
     assertx(obj->getVMClass() == c_##name::classof());      \
     auto coll = static_cast<c_##name*>(obj);                \
@@ -40,8 +35,6 @@ extern const StaticString
     assertx(cls == classof());                              \
     return req::make<c_##name>().detach();                  \
   }
-
-constexpr ObjectData::Attribute objectFlags = ObjectData::NoDestructor;
 
 /**
  * The "materialization" methods have the form "to[CollectionName]()" and
@@ -59,7 +52,7 @@ Object materialize(ObjectData* obj) {
  * All native collection class have their m_size field at the same
  * offset in the object.
  */
-constexpr ptrdiff_t FAST_SIZE_OFFSET = use_lowptr ? 16 : 24;
+constexpr ptrdiff_t FAST_SIZE_OFFSET = 16;
 inline size_t getSize(const ObjectData* od) {
   assertx(od->isCollection());
   return *reinterpret_cast<const uint32_t*>(
@@ -74,44 +67,64 @@ inline size_t getSize(const ObjectData* od) {
 /////////////////////////////////////////////////////////////////////////////
 
 struct CollectionsExtension : Extension {
-  CollectionsExtension(): Extension("collections") {}
+  CollectionsExtension(): Extension("collections", NO_EXTENSION_VERSION_YET, "hphp_hphpi") {}
 
-  void moduleInit() override {
-    initPair();
-    initVector();
-    initMap();
-    initSet();
+  void moduleRegisterNative() override {
+    registerNativePair();
+    registerNativeVector();
+    registerNativeMap();
+    registerNativeSet();
+  }
+
+  std::vector<std::string> hackFiles() const override {
+    return {
+      "ext_collections-pair.php",
+      "ext_collections-vector.php",
+      "ext_collections-map.php",
+      "ext_collections-set.php",
+    };
   }
 
  private:
-  void initPair();
-  void initVector();
-  void initMap();
-  void initSet();
+  void registerNativePair();
+  void registerNativeVector();
+  void registerNativeMap();
+  void registerNativeSet();
+};
 
-  template<class T>
-  void finishClass() {
-    auto const cls = const_cast<Class*>(T::classof());
-    assertx(cls);
-    assertx(cls->isCollectionClass());
-    assertx(cls->attrs() & AttrFinal);
-    assertx(!cls->getNativeDataInfo());
-    assertx(!cls->instanceCtor());
-    assertx(!cls->instanceDtor());
-    assertx(!cls->hasMemoSlots());
-    cls->allocExtraData();
-    cls->m_extra.raw()->m_instanceCtor = T::instanceCtor;
-    cls->m_extra.raw()->m_instanceDtor = T::instanceDtor;
-    cls->initRTAttributes(
-        Class::UseGet |
-        Class::UseSet |
-        Class::UseIsset |
-        Class::UseUnset |
-        Class::CallToImpl
-    );
+extern const StaticString s_isset;
+
+struct CollectionPropHandler: Native::BasePropHandler {
+  static Variant issetProp(const Object&, const OptString&) {
+    return false;
+  }
+  static bool isPropSupported(const OptString&, const OptString& op) {
+    if (op.same(s_isset)) return true;
+    SystemLib::throwInvalidOperationExceptionObject(
+      "Cannot access a property on a collection");
   }
 };
 
 /////////////////////////////////////////////////////////////////////////////
-}}
-#endif
+}
+
+template<class T> typename
+  std::enable_if<std::is_base_of<c_Collection, T>::value, void>::type
+finish_class(Class* cls) {
+  assertx(cls);
+  assertx(cls->isCollectionClass());
+  assertx(cls->attrs() & AttrFinal);
+  assertx(!cls->getNativeDataInfo());
+  assertx(!cls->instanceCtor<false>());
+  assertx(!cls->instanceCtor<true>());
+  assertx(!cls->instanceDtor());
+  assertx(!cls->hasMemoSlots());
+  cls->allocExtraData();
+  cls->m_extra.raw()->m_instanceCtor = T::instanceCtor;
+  cls->m_extra.raw()->m_instanceCtorUnlocked = T::instanceCtor;
+  cls->m_extra.raw()->m_instanceDtor = T::instanceDtor;
+  cls->m_releaseFunc = T::instanceDtor;
+  cls->initRTAttributes(Class::CallToImpl);
+}
+
+}

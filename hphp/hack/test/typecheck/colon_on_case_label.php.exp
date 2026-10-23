@@ -1,0 +1,11 @@
+error: Parsing[1002] A colon `:` is expected here. [1]
+
+colon_on_case_label.php:6:11
+4 | 
+5 |   switch ($x) {
+6 |     case 1;
+  |           ^ [1]
+7 |       echo "hi";
+8 |       break;
+
+1 error found

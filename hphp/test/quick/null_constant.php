@@ -1,2 +1,3 @@
 <?hh
-define('FOO', null);
+const null FOO = null;
+<<__EntryPoint>> function main(): void { echo "Done.\n"; }

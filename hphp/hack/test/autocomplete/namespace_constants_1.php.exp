@@ -1,0 +1,6 @@
+foo_a
+  INSERT foo_a
+  constant
+foo_b
+  INSERT foo_b
+  constant

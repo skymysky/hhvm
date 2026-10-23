@@ -1,0 +1,36 @@
+error: Typing[4047] This class must be declared `abstract`, or provide an implementation for the abstract property `$l` [1]
+-> `B` uses `A` [2]
+-> The property is defined here [3]
+
+abstract_parent_concrete_class.php:9:7
+ 4 | abstract class A {
+ 5 |   <<__Const>> abstract public static int $p;
+ 6 |   abstract public static int $l;
+   |                          ^^^ [3]
+ 7 | }
+ 8 | 
+ 9 | class B extends A {
+   |       ^ [1]
+   |                 ^ [2]
+10 | 
+11 | }
+
+error: Typing[4047] This class must be declared `abstract`, or provide an implementation for the abstract property `$p` [1]
+-> `B` uses `A` [2]
+-> The property is defined here [3]
+
+abstract_parent_concrete_class.php:9:7
+ 3 | 
+ 4 | abstract class A {
+ 5 |   <<__Const>> abstract public static int $p;
+   |                                      ^^^ [3]
+ 6 |   abstract public static int $l;
+ 7 | }
+ 8 | 
+ 9 | class B extends A {
+   |       ^ [1]
+   |                 ^ [2]
+10 | 
+11 | }
+
+2 errors found

@@ -1,4 +1,6 @@
-<?php
+<?hh
 
-var_dump(mysql_fetch_array(null, 0));
-var_dump(mysql_fetch_object(null, 'stdClass'));
+<<__EntryPoint>>
+function main_1380(): mixed {
+  var_dump(mysql_fetch_object(null, 'stdClass'));
+}

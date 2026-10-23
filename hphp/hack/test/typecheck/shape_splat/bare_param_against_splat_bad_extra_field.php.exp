@@ -1,0 +1,19 @@
+error: Typing[4523] Invalid return type [1]
+-> The field `a` here is not compatible with every instantiation of `T` [2]
+-> `T` may provide `a` with a type of its own [3]
+-> Expected `nothing` [4]
+-> But got `int` [5]
+
+bare_param_against_splat_bad_extra_field.php:6:10
+3 | 
+4 | // The row adds a field the bare parameter need not admit.
+5 | function extra<T as shape(...)>(shape(...T, 'a' => int) $s): T {
+  |                                 ^^^^^^^^^^^^^^^^^^^^^^^ [2]
+  |                                                    ^^^ [5]
+  |                                                              ^ [3]
+6 |   return $s;
+  |   ^^^^^^^^^^ [4]
+  |          ^^ [1]
+7 | }
+
+1 error found

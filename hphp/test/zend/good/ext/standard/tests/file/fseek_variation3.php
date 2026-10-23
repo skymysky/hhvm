@@ -1,13 +1,13 @@
-<?php
+<?hh
 /* Prototype  : proto int fseek(resource fp, int offset [, int whence])
  * Description: Seek on a file pointer 
  * Source code: ext/standard/file.c
  * Alias to functions: gzseek
  */
-
+<<__EntryPoint>> function main(): void {
 echo "*** Testing fseek() : variation - beyond file boundaries ***\n";
 
-$outputfile = __FILE__.".tmp";
+$outputfile = sys_get_temp_dir().'/'.'fseek_variation3.tmp';
 
 $h = fopen($outputfile, "wb+");
 for ($i = 1; $i < 10; $i++) {
@@ -24,7 +24,7 @@ echo "after seek back 20: ".bin2hex(fread($h,1))."\n";
 
 echo "--- fseek beyond end of file ---\n";
 var_dump(fseek($h, 16, SEEK_SET));
-fwrite($h, b"end");
+fwrite($h, "end");
 fseek($h ,0, SEEK_SET);
 $data = fread($h, 4096);
 echo bin2hex($data)."\n";
@@ -33,4 +33,4 @@ fclose($h);
 unlink($outputfile);
 
 echo "Done";
-?>
+}

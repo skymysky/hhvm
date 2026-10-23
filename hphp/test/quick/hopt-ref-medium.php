@@ -1,15 +1,13 @@
 <?hh
 
-function run() {
-  $a = 5;
-  $b =& $a;
-  $c =& $b;
-
+function run(inout mixed $a, inout mixed $b, inout mixed $c) :mixed{
   $a = 1;
   $b = 2;
   $c = 3;
 
   return $a;
 }
-
-var_dump(run());
+<<__EntryPoint>> function main(): void {
+$a = 5;
+var_dump(run(inout $a, inout $a, inout $a));
+}

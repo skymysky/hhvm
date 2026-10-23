@@ -1,6 +1,6 @@
-<?php // strict
+<?hh
 
 // constants are case sensitive.
-define("FOO", 4);
+const int FOO = 4;
 
-define("foo", 7);
+const int foo = 7;

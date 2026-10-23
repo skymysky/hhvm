@@ -18,13 +18,12 @@
 
 #ifndef NDEBUG
 
-#include "hphp/runtime/base/rds.h"
 #include "hphp/runtime/vm/vm-regs.h"
 
 #include <folly/portability/SysMman.h>
 #include <folly/portability/Unistd.h>
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 
 namespace {
 
@@ -35,9 +34,10 @@ __thread const VMProtect* tl_active_prot{nullptr};
 void protect() {
   if (UNLIKELY(!s_fakeRdsBase.load(std::memory_order_acquire))) {
     std::lock_guard<std::mutex> guard(s_lock);
-    if (!s_fakeRdsBase.load(std::memory_order_relaxed)) {
+    if (!s_fakeRdsBase.load(std::memory_order_acquire)) {
       rds::tl_base = nullptr;
       rds::threadInit(false /* shouldRegister */);
+      regState() = VMRegState::DIRTY;
 
       // The current thread may attempt to read the Gen numbers of the normal
       // portion of rds. These will all be invalid. No writes to non-persistent
@@ -56,14 +56,12 @@ void protect() {
   }
   rds::tl_base = s_fakeRdsBase.load(std::memory_order_acquire);
 
-  tl_regState = VMRegState::DIRTY;
   VMProtect::is_protected = true;
 }
 
-void unprotect(void* base, VMRegState state) {
-  assertx(rds::tl_base == s_fakeRdsBase.load(std::memory_order_relaxed));
+void unprotect(void* base) {
+  assertx(rds::tl_base == s_fakeRdsBase.load(std::memory_order_acquire));
   rds::tl_base = base;
-  tl_regState = state;
   VMProtect::is_protected = false;
 }
 
@@ -73,7 +71,6 @@ __thread bool VMProtect::is_protected{false};
 
 VMProtect::VMProtect()
   : m_oldBase(rds::tl_base)
-  , m_oldState(tl_regState)
 {
   if (is_protected) return;
 
@@ -85,20 +82,25 @@ VMProtect::VMProtect()
 VMProtect::~VMProtect() {
   if (tl_active_prot != this) return;
 
-  unprotect(m_oldBase, m_oldState);
+  unprotect(m_oldBase);
   tl_active_prot = nullptr;
 }
 
 VMProtect::Pause::Pause() {
+  if (!VMProtect::is_protected) {
+    m_active = false;
+    return;
+  }
   if (auto const prot = tl_active_prot) {
-    unprotect(prot->m_oldBase, prot->m_oldState);
+    unprotect(prot->m_oldBase);
   }
 }
 
 VMProtect::Pause::~Pause() {
+  if (!m_active) return;
   if (tl_active_prot) protect();
 }
 
-}}
+}
 
 #endif

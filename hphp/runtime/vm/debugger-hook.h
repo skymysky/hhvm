@@ -14,16 +14,21 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_DEBUGGER_HOOK_H_
-#define incl_HPHP_DEBUGGER_HOOK_H_
+#pragma once
 
 #include <functional>
 
-#include "hphp/runtime/base/thread-info.h"
+#include "hphp/runtime/base/request-info.h"
+#include "hphp/runtime/base/request-injection-data.h"
 #include "hphp/runtime/base/surprise-flags.h"
+#include "hphp/runtime/server/cli-server.h"
 #include "hphp/runtime/vm/event-hook.h"
 #include "hphp/runtime/vm/hhbc.h"
 #include "hphp/runtime/vm/unit.h"  // OffsetRangeVec
+
+#include "hphp/runtime/ext/vsdebug/break_mode.h"
+
+#include "hphp/util/configs/jit.h"
 
 ///////////////////////////////////////////////////////////////////////////////
 // This is a set of functions which are primarily called from the VM to notify
@@ -41,9 +46,18 @@ struct Func;
 struct ObjectData;
 
 // Is this thread being debugged?
-inline bool isDebuggerAttached(ThreadInfo* ti = nullptr) {
-  ti = (ti != nullptr) ? ti : &TI();
+inline bool isDebuggerAttached(RequestInfo* ti = nullptr) {
+  ti = (ti != nullptr) ? ti : &RI();
   return ti->m_reqInjectionData.getDebuggerAttached();
+}
+
+inline bool disableJitAtAttach(RequestInjectionData& rid) {
+  return Cfg::Jit::DisabledByVSDebug &&
+    !rid.m_breakPointFilter.isNull();
+}
+
+inline bool disableJitForDebuggerCli() {
+  return Cfg::Jit::DisabledByVSDebug && is_any_cli_mode();
 }
 
 // Executes the passed code only if there is a debugger attached to the current
@@ -58,6 +72,10 @@ inline bool isDebuggerAttached(ThreadInfo* ti = nullptr) {
 // out of JIT code. Second, that phpDebuggerOpcodeHook will continue to allow
 // debugger interrupts for every opcode executed (modulo filters.)
 #define DEBUGGER_FORCE_INTR (RID().getDebuggerForceIntr())
+
+// Initialize a RDS handle indicating function f needs to run in the interpreter
+// so that the debugger hooks are run.
+void markFunctionWithDebuggerIntr(const Func* f);
 
 enum class StackDepthDisposition {
   Equal,        // Same.
@@ -79,8 +97,8 @@ struct DebuggerHook {
   // success, false on failure (for instance, if another debugger hook is
   // already attached).
   template<class HookClass>
-  static bool attach(ThreadInfo* ti = nullptr) {
-    ti = (ti != nullptr) ? ti : &TI();
+  static bool attach(RequestInfo* ti = nullptr) {
+    ti = (ti != nullptr) ? ti : &RI();
 
     if (isDebuggerAttached(ti)) {
       // Check if this debugger hook is already attached.
@@ -110,6 +128,13 @@ struct DebuggerHook {
 
       s_numAttached++;
       ti->m_reqInjectionData.setDebuggerAttached(true);
+      if (disableJitAtAttach(ti->m_reqInjectionData) ||
+          disableJitForDebuggerCli()) {
+        ti->m_reqInjectionData.setJittingDisabled(true);
+        rl_typeProfileLocals->forceInterpret = true;
+        ti->m_reqInjectionData.updateJit();
+      }
+
     }
 
     // Event hooks need to be enabled to receive function entry and exit events.
@@ -146,7 +171,7 @@ struct DebuggerHook {
   }
 
   // If a hook is attached to the thread, detaches it.
-  static void detach(ThreadInfo* ti = nullptr);
+  static void detach(RequestInfo* ti = nullptr);
 
   // Debugger events. Subclasses can override these methods to receive
   // events.
@@ -158,7 +183,7 @@ struct DebuggerHook {
   virtual void onFileLoad(Unit* /*efile*/) {}
   virtual void onDefClass(const Class* /*cls*/) {}
   virtual void onDefFunc(const Func* /*func*/) {}
-  virtual void onRegisterFuncIntercept(const String& /*name*/) {}
+  virtual void onRegisterFuncIntercept(const OptString& /*name*/) {}
 
   // Called whenever the program counter is at a location that could be
   // interesting to a debugger. Such as when have hit a registered breakpoint
@@ -166,11 +191,10 @@ struct DebuggerHook {
   // over an active line breakpoint
   virtual void onOpcode(const unsigned char* /*pc*/) {}
 
-  // Called right before top-level pseudo-main enters and right after it
-  // exits. This is useful for debuggers to initialize and shutdown separate
-  // from an extension as they can assume other extensions are initialized.
+  // Called right before top-level pseudo-main enters. This may be useful for
+  // debuggers to initialize separate from an extension as they can assume
+  // other extensions are initialized.
   virtual void onRequestInit() {}
-  virtual void onRequestShutdown() {}
 
   // Called whenever we are breaking due to completion of a step in or step out
   virtual void onStepInBreak(const Unit* /*unit*/, int /*line*/) {}
@@ -193,11 +217,12 @@ struct DebuggerHook {
   static Mutex s_lock;
   static int s_numAttached;
   static DebuggerHook* s_activeHook;
+  static rds::Link<bool, rds::Mode::Normal> s_exceptionBreakpointIntr;
 };
 
 // Returns the current hook.
 inline DebuggerHook* getDebuggerHook() {
-  return TI().m_debuggerHook;
+  return RI().m_debuggerHook;
 }
 
 // Is this process being debugged? Since this is across all threads, this cannot
@@ -213,9 +238,8 @@ inline bool isDebuggerAttachedProcess() {
 // execution indefinitely within one of these hooks.
 void phpDebuggerOpcodeHook(const unsigned char* pc);
 void phpDebuggerRequestInitHook();
-void phpDebuggerRequestShutdownHook();
-void phpDebuggerFuncEntryHook(const ActRec* ar);
-void phpDebuggerFuncExitHook(const ActRec* ar);
+void phpDebuggerFuncEntryHook(const ActRec* ar, bool isResume);
+void phpDebuggerFuncExitHook(const ActRec* ar, bool isSuspend);
 void phpDebuggerExceptionThrownHook(ObjectData* exception);
 void phpDebuggerExceptionHandlerHook() noexcept;
 void phpDebuggerErrorHook(const ExtendedException& ee,
@@ -225,7 +249,7 @@ void phpDebuggerEvalHook(const Func* f);
 void phpDebuggerFileLoadHook(Unit* efile);
 void phpDebuggerDefClassHook(const Class* cls);
 void phpDebuggerDefFuncHook(const Func* func);
-void phpDebuggerInterceptRegisterHook(const String& name);
+void phpDebuggerInterceptRegisterHook(const OptString& name);
 
 ////////////////////////////////////////////////////////////////////////////////
 // Flow commands
@@ -251,11 +275,13 @@ void phpDebuggerNext();
 // Breakpoint manipulation
 
 // Add breakpoints of various types
-void phpAddBreakPoint(const Unit* unit, Offset offset);
+void phpAddBreakPoint(const Func* f, Offset offset);
 void phpAddBreakPointFuncEntry(const Func* f);
 void phpAddBreakPointFuncExit(const Func* f);
 // Returns false if the line is invalid
-bool phpAddBreakPointLine(const Unit* unit, int line);
+bool phpAddBreakPointLine(const Unit* u, int line);
+
+void phpSetExceptionBreakpoint(VSDEBUG::ExceptionBreakMode mode);
 
 // Breakpoint removal functions.
 // FIXME Note that internally there is a global PCFilter for all breakpoints.
@@ -269,20 +295,18 @@ bool phpAddBreakPointLine(const Unit* unit, int line);
 // This means once added, we will always interrupt on that breakpoint until the
 // hook is detached.  This isn't a huge deal as it just means we can't jit those
 // opcodes, but it should be fixed since it's just a design issue.
-void phpRemoveBreakPoint(const Unit* unit, Offset offset);
+void phpRemoveBreakPoint(const Func* f, Offset offset);
 void phpRemoveBreakPointFuncEntry(const Func* f);
 void phpRemoveBreakPointFuncExit(const Func* f);
-void phpRemoveBreakPointLine(const Unit* unit, int line);
+void phpRemoveBreakPointLine(const Unit* u, int line);
 
-bool phpHasBreakpoint(const Unit* unit, Offset offset);
+bool phpHasBreakpoint(const Func* f, Offset offset);
 
 StackDepthDisposition getStackDisposition(int baseline);
 
 PCFilter* getBreakPointFilter();
 PCFilter* getFlowFilter();
 
-String getCurrentFilePath(int* pLine);
+OptString getCurrentFilePath(int* pLine);
 
 }
-
-#endif

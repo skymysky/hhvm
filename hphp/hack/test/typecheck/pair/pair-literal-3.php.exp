@@ -1,0 +1,46 @@
+error: Typing[4101] Wrong number of type arguments (expected 2, got 3) [1]
+-> Definition is here [2]
+
+pair-literal-3.php:11:15
+ 9 |  *
+10 |  */
+11 | function f(): Pair<string, int, string> {
+   |               ^^^^^^^^^^^^^^^^^^^^^^^^^ [1]
+12 |   return Pair { 1, 'foo' };
+13 | }
+
+collections/Pair.hhi:47:15
+45 |    * @guide /hack/collections/classes
+46 |    */
+47 |   final class Pair<+Tv1, +Tv2>
+   |               ^^^^ [2]
+48 |     implements \ConstVector<(Tv1 | Tv2)> {
+49 |     /**
+
+error: Typing[4110] Incompatible pair values [1]
+-> Expected `string` [2]
+-> But got `int` [1]
+
+pair-literal-3.php:12:17
+ 9 |  *
+10 |  */
+11 | function f(): Pair<string, int, string> {
+   |                    ^^^^^^ [2]
+12 |   return Pair { 1, 'foo' };
+   |                 ^ [1]
+13 | }
+
+error: Typing[4110] Incompatible pair values [1]
+-> Expected `int` [2]
+-> But got `string` [1]
+
+pair-literal-3.php:12:20
+ 9 |  *
+10 |  */
+11 | function f(): Pair<string, int, string> {
+   |                            ^^^ [2]
+12 |   return Pair { 1, 'foo' };
+   |                    ^^^^^ [1]
+13 | }
+
+3 errors found

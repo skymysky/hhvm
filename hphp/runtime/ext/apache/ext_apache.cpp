@@ -18,28 +18,29 @@
 #include "hphp/runtime/ext/apache/ext_apache.h"
 #include "hphp/runtime/base/array-init.h"
 #include "hphp/runtime/ext/extension.h"
-#include "hphp/runtime/base/config.h"
 #include "hphp/runtime/base/execution-context.h"
-#include "hphp/runtime/base/runtime-option.h"
 #include "hphp/runtime/server/http-server.h"
 #include "hphp/runtime/server/server-note.h"
 #include "hphp/runtime/server/transport.h"
 #include "hphp/util/health-monitor-types.h"
-#include "hphp/util/text-util.h"
 
 namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
 
-Variant HHVM_FUNCTION(apache_note, const String& note_name,
+void HHVM_FUNCTION(apache_notes, const Array& notes) {
+  ServerNote::AddNotes(notes);
+}
+
+Variant HHVM_FUNCTION(apache_note, const OptString& note_name,
                       const Variant& note_value /* = empty_string */) {
-  String prev = ServerNote::Get(note_name);
+  OptString prev = ServerNote::Get(note_name);
   if (note_value.isNull()) {
     ServerNote::Delete(note_name);
   } else if (!note_value.isString()) {
     raise_warning("apache_note() expects parameter 2 to be a nullable string");
     return false;
   } else {
-    auto const& value = note_value.toCStrRef();
+    auto const& value = note_value.asCStrRef();
     if (!value.empty()) {
       ServerNote::Add(note_name, value);
     }
@@ -50,33 +51,24 @@ Variant HHVM_FUNCTION(apache_note, const String& note_name,
   return false;
 }
 
-static Array get_headers(const HeaderMap& headers, bool allHeaders = false) {
-  ArrayInit ret(headers.size(), ArrayInit::Mixed{});
-  for (auto& iter : headers) {
-    const auto& values = iter.second;
-    if (auto size = values.size()) {
-      if (!allHeaders) {
-        ret.set(String(iter.first), String(values.back()));
-      } else {
-        PackedArrayInit dups(size);
-        for (auto& dup : values) {
-          dups.append(String(dup));
-        }
-        ret.set(String(toLower(iter.first)), dups.toArray());
-      }
-    }
-  }
+static Array get_raw_headers(const proxygen::HTTPHeaders &headers) {
+  VecInit ret(headers.size());
+  headers.forEach([&] (const std::string &header, const std::string &val) {
+    auto headerValPair = make_vec_array(header.c_str(), val.c_str());
+    ret.append(headerValPair);
+  });
   return ret.toArray();
 }
 
-Array HHVM_FUNCTION(apache_request_headers) {
+Array HHVM_FUNCTION(get_proxygen_headers) {
   Transport *transport = g_context->getTransport();
   if (transport) {
-    HeaderMap headers;
-    transport->getHeaders(headers);
-    return get_headers(headers);
+    auto const headers = transport->getProxygenHeaders();
+    if (headers) {
+      return get_raw_headers(*headers);
+    }
   }
-  return empty_array();
+  return empty_vec_array();
 }
 
 Array HHVM_FUNCTION(apache_response_headers) {
@@ -86,11 +78,11 @@ Array HHVM_FUNCTION(apache_response_headers) {
     transport->getResponseHeaders(headers);
     return get_headers(headers);
   }
-  return empty_array();
+  return empty_dict_array();
 }
 
-bool HHVM_FUNCTION(apache_setenv, const String& /*variable*/,
-                   const String& /*value*/,
+bool HHVM_FUNCTION(apache_setenv, const OptString& /*variable*/,
+                   const OptString& /*value*/,
                    bool /*walk_to_top*/ /* = false */) {
   return false;
 }
@@ -110,15 +102,15 @@ Array HHVM_FUNCTION(apache_get_config) {
   if (HttpServer::Server) {
     workers = HttpServer::Server->getPageServer()->getActiveWorker();
     queued = HttpServer::Server->getPageServer()->getQueuedJobs();
-    queued -= HttpServer::QueueDiscount.load(std::memory_order_relaxed);
+    queued -= HttpServer::QueueDiscount.load(std::memory_order_acquire);
     if (queued < 0)
       queued = 0;
     health_level = (int)(ApacheExtension::GetHealthLevel());
   }
 
-  return make_map_array(
+  return make_dict_array(
     s_restart_time, HttpServer::StartTime,
-    s_max_clients, RuntimeOption::ServerThreadCount,
+    s_max_clients, Cfg::Server::ThreadCount,
     s_active_clients, workers,
     s_queued_requests, queued,
     s_health_level, health_level
@@ -128,42 +120,26 @@ Array HHVM_FUNCTION(apache_get_config) {
 Array HHVM_FUNCTION(get_headers_secure) {
   Transport *transport = g_context->getTransport();
   if (transport) {
-    HeaderMap headers;
-    transport->getHeaders(headers);
+    auto const& headers = transport->getHeaders();
     return get_headers(headers, true);
   }
-  return empty_array();
+  return empty_dict_array();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 
-bool ApacheExtension::Enable(true);
-
-ApacheExtension::ApacheExtension() : Extension("apache") {}
+ApacheExtension::ApacheExtension() : Extension("apache", NO_EXTENSION_VERSION_YET, "hphp_hphpi") {}
 
 ApacheExtension::~ApacheExtension() {}
 
-void ApacheExtension::moduleInit() {
-  if (Enable) {
-    HHVM_FE(apache_note);
-    HHVM_FE(apache_request_headers);
-    HHVM_FE(apache_response_headers);
-    HHVM_FE(apache_setenv);
-    HHVM_FALIAS(getallheaders, apache_request_headers);
-    HHVM_FE(apache_get_config);
-    HHVM_FALIAS(HH\\get_headers_secure, get_headers_secure);
-
-    HHVM_RC_INT(APACHE_MAP, 200);
-
-    loadSystemlib();
-  }
-}
-
-void ApacheExtension::moduleLoad(const IniSetting::Map& ini, Hdf config) {
-  Enable = RuntimeOption::ServerExecutionMode() ||
-           Config::GetBool(ini,
-                           config, "Apache.EnableInCLI",
-                           RuntimeOption::EnableHipHopSyntax);
+void ApacheExtension::moduleRegisterNative() {
+  HHVM_FE(apache_note);
+  HHVM_FE(apache_notes);
+  HHVM_FE(apache_response_headers);
+  HHVM_FE(apache_setenv);
+  HHVM_FE(apache_get_config);
+  HHVM_FALIAS(HH\\get_headers_secure, get_headers_secure);
+  HHVM_FALIAS(HH\\get_proxygen_headers, get_proxygen_headers);
 }
 
 static ApacheExtension s_apache_extension;

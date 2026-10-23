@@ -14,15 +14,14 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_JIT_STATE_MULTIMAP_H_
-#define incl_HPHP_JIT_STATE_MULTIMAP_H_
+#pragma once
 
 #include <type_traits>
 #include <map>
 
 #include "hphp/runtime/vm/jit/ir-unit.h"
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 
 //////////////////////////////////////////////////////////////////////
 
@@ -88,6 +87,5 @@ private:
 
 //////////////////////////////////////////////////////////////////////
 
-}}
+}
 
-#endif

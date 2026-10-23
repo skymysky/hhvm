@@ -15,13 +15,15 @@
 */
 #include "hphp/util/light-process.h"
 
+#include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
-#include <boost/scoped_array.hpp>
 #include <boost/thread/barrier.hpp>
 
 #include <folly/portability/SysMman.h>
+#include <fmt/core.h>
 #include <folly/portability/SysResource.h>
 #include <folly/portability/Sockets.h>
 #include <sys/types.h>
@@ -40,11 +42,15 @@
 
 #include "hphp/util/afdt-util.h"
 #include "hphp/util/compatibility.h"
+#include "hphp/util/configs/server.h"
 #include "hphp/util/hardware-counter.h"
+#include "hphp/util/hash.h"
 #include "hphp/util/hugetlb.h"
 #include "hphp/util/logger.h"
 #include "hphp/util/process.h"
+#include "hphp/util/struct-log.h"
 #include "hphp/util/timer.h"
+#include "hphp/util/user-info.h"
 
 namespace HPHP {
 
@@ -60,18 +66,18 @@ Mutex s_mutex;
 using afdt::send_fd;
 using afdt::recv_fd;
 
-char **build_envp(const std::vector<std::string> &env) {
-  char **envp = nullptr;
-  int size = env.size();
+char **build_cstrarr(const std::vector<std::string> &vec) {
+  char **cstrarr = nullptr;
+  int size = vec.size();
   if (size) {
-    envp = (char **)malloc((size + 1) * sizeof(char *));
+    cstrarr = (char **)malloc((size + 1) * sizeof(char *));
     int j = 0;
-    for (unsigned int i = 0; i < env.size(); i++, j++) {
-      *(envp + j) = (char *)env[i].c_str();
+    for (unsigned int i = 0; i < vec.size(); i++, j++) {
+      *(cstrarr + j) = (char *)vec[i].c_str();
     }
-    *(envp + j) = nullptr;
+    *(cstrarr + j) = nullptr;
   }
-  return envp;
+  return cstrarr;
 }
 
 void close_fds(const std::vector<int> &fds) {
@@ -82,17 +88,19 @@ void close_fds(const std::vector<int> &fds) {
 
 template<class Head, class... Tail>
 void lwp_write(int afdt_fd, const Head& h, Tail&&... args) {
-  if (afdt::sendRaw(afdt_fd, h, std::forward<Tail>(args)...)) {
-    throw Exception("Failed in afdt::sendRaw: %s",
-                    folly::errnoStr(errno).c_str());
+  try {
+    afdt::sendx(afdt_fd, h, std::forward<Tail>(args)...);
+  } catch (const std::runtime_error& ex) {
+    throw Exception("Failed in afdt::sendx: %s", ex.what());
   }
 }
 
 template<class Head, class... Tail>
 void lwp_read(int afdt_fd, Head& h, Tail&... args) {
-  if (afdt::recvRaw(afdt_fd, h, args...)) {
-    throw Exception("Failed in afdt::recvRaw: %s",
-                    folly::errnoStr(errno).c_str());
+  try {
+    afdt::recvx(afdt_fd, h, args...);
+  } catch (const std::runtime_error& ex) {
+    throw Exception("Failed in afdt::recvx: %s", ex.what());
   }
 }
 
@@ -136,7 +144,7 @@ int popen_impl(const char* cmd, const char* mode, pid_t* out_pid) {
     sigprocmask(SIG_SETMASK, &eset, nullptr);
     execl("/bin/sh", "sh", "-c", cmd, nullptr);
     Logger::Warning("Failed to exec: `%s'", cmd);
-    _Exit(1);
+    _Exit(HPHP_EXIT_FAILURE);
   }
   // parent
 
@@ -286,6 +294,38 @@ void do_popen(int afdt_fd) {
   hardwareCounterWrapperHelper(do_popen_helper, afdt_fd);
 }
 
+pid_t do_fork_and_execve_helper(int afdt_fd) {
+  std::string path, cwd;
+  std::vector<std::string> argv, envp;
+  int flags, pgid;
+  size_t fd_count;
+
+  lwp_read(afdt_fd, path, cwd, argv, envp, flags, pgid, fd_count);
+  std::map<int, int> fds;
+  for (size_t i = 0; i < fd_count; ++i) {
+    int target_fd;
+    lwp_read(afdt_fd, target_fd);
+    int current_fd = recv_fd(afdt_fd);
+    fds[target_fd] = current_fd;
+  }
+
+  pid_t pid = Process::ForkAndExecve(path, argv, envp, cwd, fds, flags, pgid);
+  if (pid> 0) {
+    lwp_write(afdt_fd, "success", pid);
+  } else {
+    lwp_write(afdt_fd, "error", (int) pid, (int) errno);
+  }
+
+  for (auto [_target, fd] : fds) {
+    close(fd);
+  }
+  return pid;
+}
+
+void do_fork_and_execve(int afdt_fd) {
+  hardwareCounterWrapperHelper(do_fork_and_execve_helper, afdt_fd);
+}
+
 pid_t do_proc_open_helper(int afdt_fd) {
   std::string cmd, cwd;
   std::vector<std::string> env;
@@ -314,15 +354,18 @@ pid_t do_proc_open_helper(int afdt_fd) {
   if (child == 0) {
     mprotect_1g_pages(PROT_READ);
     Process::OOMScoreAdj(1000);
+    std::map<int, int> dup_fds;
     for (int i = 0; i < pvals.size(); i++) {
-      dup2(pkeys[i], pvals[i]);
+      dup_fds[pvals[i]] = pkeys[i];
     }
+    Process::RemapFDsPreExec(dup_fds);
+
     if (!cwd.empty() && chdir(cwd.c_str())) {
       // non-zero for error
       // chdir failed, the working directory remains unchanged
     }
     if (!env.empty()) {
-      char **envp = build_envp(env);
+      char **envp = build_cstrarr(env);
       execle("/bin/sh", "sh", "-c", cmd.c_str(), nullptr, envp);
       free(envp);
     } else {
@@ -396,24 +439,84 @@ void do_waitpid(int afdt_fd) {
 void do_change_user(int afdt_fd) {
   std::string uname;
   lwp_read(afdt_fd, uname);
-  if (uname.length() > 0) {
-    struct passwd *pw = getpwnam(uname.c_str());
-    if (pw) {
-      if (pw->pw_gid) {
-        initgroups(pw->pw_name, pw->pw_gid);
-        setgid(pw->pw_gid);
+  if (!uname.length()) return;
+
+  StructuredLogEntry* log = nullptr;
+  int err = 0;
+  SCOPE_EXIT {
+    if (log) {
+      log->setInt("errno", err);
+      log->setStr("new_user", uname);
+      StructuredLog::log("hhvm_lightprocess_error", *log);
+      delete log;
+    }
+  };
+  auto buf = PasswdBuffer{};
+  struct passwd *pw;
+  if (getpwnam_r(uname.c_str(), &buf.ent, buf.data.get(), buf.size, &pw)) {
+    err = errno;
+    log = new StructuredLogEntry();
+    log->setStr("function", "getpwnam_r");
+    if (Cfg::Server::LightProcessStrictUser) {
+      throw std::runtime_error{"getpwnam_r(): " + folly::errnoStr(err)};
+    }
+    return;
+  }
+  if (!pw) {
+    log = new StructuredLogEntry();
+    log->setStr("function", "getpwnam_r");
+    if (Cfg::Server::LightProcessStrictUser) {
+      throw std::runtime_error{"getpwnam_r(): not found"};
+    }
+    return;
+  }
+  if (pw->pw_gid) {
+    if (initgroups(pw->pw_name, pw->pw_gid)) {
+      err = errno;
+      log = new StructuredLogEntry();
+      log->setStr("function", "initgroups");
+    }
+    if (setgid(pw->pw_gid)) {
+      if (!log) {
+        err = errno;
+        log = new StructuredLogEntry();
+        log->setStr("function", "setgid");
+        if (Cfg::Server::LightProcessStrictUser) {
+          throw std::runtime_error{"setgid():" + folly::errnoStr(err)};
+        }
       }
-      if (pw->pw_uid) {
-        setuid(pw->pw_uid);
+    }
+  }
+  if (pw->pw_uid) {
+    if (setuid(pw->pw_uid)) {
+      if (!log) {
+        err = errno;
+        log = new StructuredLogEntry();
+        log->setStr("function", "setuid");
+        if (Cfg::Server::LightProcessStrictUser) {
+          throw std::runtime_error{"setuid():" + folly::errnoStr(err)};
+        }
       }
     }
   }
 }
 
+
+void do_clone_delegate(int afdt_fd) {
+  auto const d = LightProcess::createDelegate();
+  if (d < 0) {
+    lwp_write(afdt_fd, "error");
+    return;
+  }
+  lwp_write(afdt_fd, "success");
+  send_fd(afdt_fd, d);
+  close(d);
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 // light-weight process
 
-boost::scoped_array<LightProcess> g_procs;
+std::unique_ptr<LightProcess[]> g_procs;
 int g_procsCount = 0;
 bool s_handlerInited = false;
 LightProcess::LostChildHandler s_lostChildHandler;
@@ -461,7 +564,7 @@ void LightProcess::Initialize(const std::string &prefix, int count,
   g_procs.reset(new LightProcess[count]);
   g_procsCount = count;
 
-  auto afdt_filename = folly::sformat("{}.{}", prefix, getpid());
+  auto afdt_filename = fmt::format("{}.{}", prefix, getpid());
 
   // remove the possible leftover
   remove(afdt_filename.c_str());
@@ -567,6 +670,8 @@ bool LightProcess::initShadow(int afdt_lid,
 void LightProcess::runShadow(int afdt_fd) {
   std::string buf;
 
+  auto error = false;
+
   pollfd pfd[1];
   pfd[0].fd = afdt_fd;
   pfd[0].events = POLLIN;
@@ -590,29 +695,35 @@ void LightProcess::runShadow(int afdt_fd) {
           do_popen(afdt_fd);
         } else if (buf == "proc_open") {
           do_proc_open(afdt_fd);
+        } else if (buf == "execve") {
+          do_fork_and_execve(afdt_fd);
         } else if (buf == "waitpid") {
           do_waitpid(afdt_fd);
         } else if (buf == "change_user") {
           do_change_user(afdt_fd);
+        } else if (buf == "clone_delegate") {
+          do_clone_delegate(afdt_fd);
         } else if (buf[0]) {
           Logger::Info("LightProcess got invalid command: %.20s", buf.c_str());
         }
       }
     }
   } catch (const std::exception& e) {
+    error = true;
     Logger::Error("LightProcess exiting due to exception: %s", e.what());
   } catch (...) {
+    error = true;
     Logger::Error("LightProcess exiting due to unknown exception");
   }
 
   ::close(afdt_fd);
-  _Exit(0);
+  _Exit(error ? HPHP_EXIT_FAILURE : 0);
 }
 
 namespace {
 
 int GetId() {
-  return (long)pthread_self() % g_procsCount;
+  return hash_int64((long)pthread_self()) % g_procsCount;
 }
 
 NEVER_INLINE
@@ -644,7 +755,7 @@ R runLight(const char* call, F1 body, R failureResult) {
 }
 
 void LightProcess::Close() {
-  boost::scoped_array<LightProcess> procs;
+  std::unique_ptr<LightProcess[]> procs;
   procs.swap(g_procs);
   int count = g_procsCount;
   g_procs.reset();
@@ -793,6 +904,40 @@ int LightProcess::pclose(FILE *f) {
   return status;
 }
 
+pid_t LightProcess::ForkAndExecve(const std::string& path,
+                                  const std::vector<std::string>& argv,
+                                  const std::vector<std::string>& envp,
+                                  const std::string& cwd,
+                                  const std::map<int, int>& fds,
+                                  int options,
+                                  pid_t pgid) {
+  return runLight("execve", [&] (LightProcess* proc) -> pid_t {
+      auto fin = proc->m_afdt_fd;
+      auto fout = proc->m_afdt_fd;
+
+      lwp_write(fout, "execve", path, cwd, argv, envp, options, pgid, (size_t) fds.size());
+      for (const auto& [target_fd, current_fd]: fds) {
+        lwp_write(fout, target_fd);
+        send_fd(fout, current_fd);
+      }
+
+      std::string buf;
+      lwp_read(fin, buf);
+      if (buf == "success") {
+        pid_t pid;
+        lwp_read(fin, pid);
+        return pid;
+      }
+      assert(buf == "error");
+
+      int ret;
+      int saved_errno;
+      lwp_read(fin, ret, saved_errno);
+      errno = saved_errno;
+      return (pid_t) ret;
+  }, static_cast<pid_t>(-1));
+}
+
 pid_t LightProcess::proc_open(const char *cmd, const std::vector<int> &created,
                               const std::vector<int> &desired,
                               const char *cwd,
@@ -872,15 +1017,6 @@ pid_t LightProcess::waitpid(pid_t pid, int *stat_loc, int options,
     }, static_cast<pid_t>(-1));
 }
 
-pid_t LightProcess::pcntl_waitpid(pid_t pid, int *stat_loc, int options) {
-  rusage ru;
-  const auto ret = wait4(pid, stat_loc, options, &ru);
-  if (ret > 0 && s_trackProcessTimes) {
-    s_extra_request_nanoseconds += ru2microseconds(ru) * 1000;
-  }
-  return ret;
-}
-
 void LightProcess::ChangeUser(int afdt, const std::string& username) {
   if (!username.empty()) lwp_write(afdt, "change_user", username);
 }
@@ -910,6 +1046,28 @@ std::unique_ptr<LightProcess> LightProcess::setThreadLocalAfdtOverride(int fd) {
   tl_proc = new LightProcess;
   tl_proc->m_afdt_fd = fd;
   return ret;
+}
+
+int LightProcess::cloneDelegate() {
+  always_assert(tl_proc != nullptr);
+  return runLight("clone_delegate", [&] (LightProcess* proc) {
+    auto const afdt_fd = proc->m_afdt_fd;
+    lwp_write(afdt_fd, "clone_delegate");
+
+    std::string buf;
+    lwp_read(afdt_fd, buf);
+    if (buf == "error") return -1;
+    return recv_fd(afdt_fd);
+  }, -1);
+}
+
+void LightProcess::shutdownDelegate() {
+  always_assert(tl_proc != nullptr);
+  runLight("shutdown_delegate", [&] (LightProcess* proc) {
+    auto const afdt_fd = proc->m_afdt_fd;
+    lwp_write(afdt_fd, "exit");
+    return 0;
+  }, 0);
 }
 
 int LightProcess::createDelegate() {
@@ -948,14 +1106,6 @@ int LightProcess::createDelegate() {
     }
 
     close(pair[0]);
-#ifdef __APPLE__
-    {
-      int newfd = dup2(pair[1], 0);
-      always_assert(newfd == 0);
-    }
-    close(pair[1]);
-    pair[1] = 0;
-#endif
     runShadow(pair[1]);
   }
 

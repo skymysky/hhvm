@@ -1,4 +1,4 @@
-<?hh //strict
+<?hh
 
 type my_shape = shape(
   'x' => int,
@@ -10,12 +10,14 @@ class C {
   const int KEY2 = 2;
 }
 
+function expect<T>(T $x):void { }
+
 function test(my_shape $s): void {
-  hh_show(Shapes::toArray($s));
-  hh_show(Shapes::toArray(shape()));
-  hh_show(Shapes::toArray(shape('x' => 4, 'y' => 'aaa')));
-  hh_show(Shapes::toArray(shape(C::KEY1 => 4, C::KEY2 => 'aaa')));
+  expect<darray<arraykey,mixed>>(Shapes::toArray($s));
+  expect<darray<int,bool>>(Shapes::toArray(shape()));
+  expect<darray<string,arraykey>>(Shapes::toArray(shape('x' => 4, 'y' => 'aaa')));
+  expect<darray<int,arraykey>>(Shapes::toArray(shape(C::KEY1 => 4, C::KEY2 => 'aaa')));
   $s = shape();
   $s['x'] = 3;
-  hh_show(Shapes::toArray($s));
+  expect<darray<string,int>>(Shapes::toArray($s));
 }

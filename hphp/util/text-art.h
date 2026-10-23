@@ -14,10 +14,9 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_UTIL_TEXT_ART_H_
-#define incl_HPHP_UTIL_TEXT_ART_H_
+#pragma once
 
-namespace HPHP { namespace TextArt {
+namespace HPHP::TextArt {
 ///////////////////////////////////////////////////////////////////////////////
 // comment only change
 #define BOX_H  get_box_drawing_char(LightHorizontal)
@@ -45,6 +44,5 @@ const char *get_box_drawing_char(BoxDrawing name);
 extern bool s_use_utf8;
 
 ///////////////////////////////////////////////////////////////////////////////
-}}
+}
 
-#endif // incl_HPHP_UTIL_TEXT_ART_H_

@@ -14,17 +14,22 @@
    +----------------------------------------------------------------------+
 */
 
+#include "hphp/runtime/ext/vsdebug/debugger.h"
+
 #include "hphp/runtime/base/file.h"
 #include "hphp/runtime/base/exceptions.h"
-#include "hphp/runtime/base/intercept.h"
 #include "hphp/runtime/base/stat-cache.h"
 #include "hphp/runtime/base/unit-cache.h"
+#include "hphp/runtime/base/watchman-connection.h"
+#include "hphp/runtime/debugger/debugger.h"
 #include "hphp/runtime/ext/vsdebug/ext_vsdebug.h"
-#include "hphp/runtime/ext/vsdebug/debugger.h"
+#include "hphp/runtime/ext/vsdebug/debugger-request-info.h"
 #include "hphp/runtime/ext/vsdebug/command.h"
+#include "hphp/util/configs/debugger.h"
 #include "hphp/util/process.h"
+#include "hphp/util/timer.h"
 
-#include <boost/filesystem.hpp>
+#include <folly/json/dynamic.h>
 
 namespace HPHP {
 namespace VSDEBUG {
@@ -41,6 +46,145 @@ void Debugger::setTransport(DebugTransport* transport) {
   setClientConnected(m_transport->clientConnected());
 }
 
+bool Debugger::getDebuggerOption(const HPHP::OptString& option) {
+  std::string optionStr = option.toCppString();
+
+  // It's easier for the user if this routine is not case-sensitive.
+  std::transform(optionStr.begin(), optionStr.end(), optionStr.begin(),
+    [](unsigned char c){ return std::tolower(c); });
+
+  DebuggerOptions options = getDebuggerOptions();
+
+  if (optionStr == "showdummyonasyncpause") {
+    return options.showDummyOnAsyncPause;
+  } else if (optionStr == "warnoninterceptedfunctions") {
+    return options.warnOnInterceptedFunctions;
+  } else if (optionStr == "notifyonbpcalibration") {
+    return options.notifyOnBpCalibration;
+  } else if (optionStr == "disableuniquevarref") {
+    return options.disableUniqueVarRef;
+  } else if (optionStr == "disablepostdummyevalhelper") {
+    return options.disablePostDummyEvalHelper;
+  } else if (optionStr == "disableStdoutRedirection") {
+    return options.disableStdoutRedirection;
+  } else if (optionStr == "disablejit") {
+    return options.disableJit;
+  } else if (optionStr == "warnonfilechange") {
+    return options.warnOnFileChange;
+  } else {
+    raise_error("getDebuggerOption: Unknown option specified");
+  }
+}
+
+void Debugger::setDebuggerOption(const HPHP::OptString& option, bool value) {
+  std::string optionStr = option.toCppString();
+
+  // It's easier for the user if this routine is not case-sensitive.
+  std::transform(optionStr.begin(), optionStr.end(), optionStr.begin(),
+    [](unsigned char c){ return std::tolower(c); });
+
+  DebuggerOptions options = getDebuggerOptions();
+
+  if (optionStr == "showdummyonasyncpause") {
+    options.showDummyOnAsyncPause = value;
+  } else if (optionStr == "warnoninterceptedfunctions") {
+    options.warnOnInterceptedFunctions = value;
+  } else if (optionStr == "notifyonbpcalibration") {
+    options.notifyOnBpCalibration = value;
+  } else if (optionStr == "disableuniquevarref") {
+    options.disableUniqueVarRef = value;
+  } else if (optionStr == "disablepostdummyevalhelper") {
+    options.disablePostDummyEvalHelper = value;
+  } else if (optionStr == "disablestdoutredirection") {
+    options.disableStdoutRedirection = value;
+  } else if (optionStr == "disablejit") {
+    options.disableJit = value;
+  } else if (optionStr == "warnonfilechange") {
+    options.warnOnFileChange = value;
+  } else {
+    raise_error("setDebuggerOption: Unknown option specified");
+  }
+
+  setDebuggerOptions(options);
+}
+
+void Debugger::setDebuggerOptions(DebuggerOptions options) {
+  Lock lock(m_lock);
+  m_debuggerOptions = options;
+
+  VSDebugLogger::Log(
+    VSDebugLogger::LogLevelInfo,
+    "Client options set:\n"
+      "showDummyOnAsyncPause: %s\n"
+      "warnOnInterceptedFunctions: %s\n"
+      "notifyOnBpCalibration: %s\n"
+      "disableUniqueVarRef: %s\n"
+      "disablePostDummyEvalHelper: %s\n"
+      "maxReturnedStringLength: %d\n"
+      "disableStdoutRedirection: %s\n"
+      "disableJit: %s\n"
+      "warnOnFileChange: %s\n",
+    options.showDummyOnAsyncPause ? "YES" : "NO",
+    options.warnOnInterceptedFunctions ? "YES" : "NO",
+    options.notifyOnBpCalibration ? "YES" : "NO",
+    options.disableUniqueVarRef ? "YES" : "NO",
+    options.disablePostDummyEvalHelper ? "YES" : "NO",
+    options.maxReturnedStringLength,
+    options.disableStdoutRedirection ? "YES" : "NO",
+    options.disableJit ? "YES" : "NO",
+    options.warnOnFileChange ? "YES" : "NO"
+  );
+}
+
+void Debugger::initWatchmanClient() {
+  assertx(getDebuggerOptions().warnOnFileChange);
+  m_watchmanClient =
+    get_watchman_client(SourceRootInfo::GetCurrentSourceRoot());
+}
+
+std::shared_ptr<Watchman> Debugger::getWatchmanClient() const {
+  return m_watchmanClient;
+}
+
+void Debugger::checkForFileChanges(DebuggerRequestInfo* ri) {
+  if (!m_watchmanClient || !getDebuggerOptions().warnOnFileChange) return;
+  const auto& loadedFiles = g_context->m_loadedUnits;
+  if (!ri->m_lastClock || loadedFiles.empty()) {
+    auto clock = m_watchmanClient->getClock().getTry();
+    if (clock.hasException()) return;
+    ri->m_lastClock = *clock;
+  } else {
+    folly::dynamic queryObj =
+      folly::dynamic::object("fields",  folly::dynamic::array("name"));
+    queryObj["since"] = *ri->m_lastClock;
+    auto const& res = m_watchmanClient->query(queryObj).getTry();
+    if (res.hasException()) return;
+    folly::dynamic validRes = *res;
+    ri->m_lastClock = validRes["clock"].asString();
+    std::vector<std::string> changedFiles;
+    for (auto const& file : validRes["files"]) {
+      auto fullPath =
+        SourceRootInfo::GetCurrentSourceRoot().native() + file.getString();
+      auto staticPath = makeStaticString(fullPath);
+      if (loadedFiles.find(staticPath) != loadedFiles.end()) {
+        changedFiles.push_back(staticPath->data());
+      }
+    }
+    if (!changedFiles.empty()) {
+      std::string msg =
+        "Following files have changed since last loaded by the REPL:\n";
+      for (auto s : changedFiles) {
+        msg += s + '\n';
+      }
+      msg += "Restart to reload the modified files.\n";
+      msg += "Run hphp_debugger_set_option('warnOnFileChange', false) "
+             "to disable this message.\n";
+
+      sendUserMessage(msg.c_str(), DebugTransport::OutputLevelInfo);
+    }
+  }
+}
+
 void Debugger::runSessionCleanupThread() {
   bool terminating = false;
   std::unordered_set<DebuggerSession*> sessionsToDelete;
@@ -48,9 +192,17 @@ void Debugger::runSessionCleanupThread() {
   while (true) {
     {
       std::unique_lock<std::mutex> lock(m_sessionCleanupLock);
-      m_sessionCleanupCondition.wait(lock);
 
+      // Read m_sessionCleanupTerminating while the lock is held.
       terminating = m_sessionCleanupTerminating;
+
+      if (!terminating) {
+        // Wait for signal
+        m_sessionCleanupCondition.wait(lock);
+
+        // Re-check terminating flag while the lock is still re-acquired.
+        terminating = m_sessionCleanupTerminating;
+      }
 
       // Make a local copy of the session pointers to delete and drop
       // the lock.
@@ -72,8 +224,12 @@ void Debugger::runSessionCleanupThread() {
 
 void Debugger::setClientConnected(
   bool connected,
-  bool synchronous /*= false*/
+  bool synchronous /* = false */,
+  ClientInfo* clientInfo /* = nullptr */
 ) {
+  always_assert_flog(
+    !connected || !m_clientConnected.load(std::memory_order_acquire),
+    "Trying to connect a client when another client is alreay connected");
   DebuggerSession* sessionToDelete = nullptr;
   SCOPE_EXIT {
     if (sessionToDelete != nullptr) {
@@ -120,6 +276,41 @@ void Debugger::setClientConnected(
     }
 
     if (connected) {
+      // Ensure usage logging is initialized if configured. Init is a no-op if
+      // the logger is already initialized.
+      auto logger = Eval::Debugger::GetUsageLogger();
+      if (logger != nullptr) {
+        logger->init();
+
+        if (clientInfo == nullptr) {
+          VSDebugLogger::Log(
+            VSDebugLogger::LogLevelInfo,
+            "Clearing client info. Connected client has no ID."
+          );
+          logger->clearClientInfo();
+        } else {
+          VSDebugLogger::Log(
+            VSDebugLogger::LogLevelInfo,
+            "Setting connected client info: user=%s,uid=%d,pid=%d",
+            clientInfo->clientUser.c_str(),
+            clientInfo->clientUid,
+            clientInfo->clientPid
+          );
+          logger->setClientInfo(
+            clientInfo->clientUser,
+            clientInfo->clientUid,
+            clientInfo->clientPid
+          );
+        }
+      } else {
+        VSDebugLogger::Log(
+          VSDebugLogger::LogLevelWarning,
+          "Not logging user: no usage logger configured."
+        );
+      }
+
+      VSDebugLogger::LogFlush();
+
       // Create a new debugger session.
       assertx(m_session == nullptr);
       m_session = new DebuggerSession(this);
@@ -129,6 +320,9 @@ void Debugger::setClientConnected(
           "Failed to allocate debugger session!"
         );
         m_clientConnected.store(false, std::memory_order_release);
+      }
+      if (clientInfo) {
+        m_session->setClientUser(clientInfo->clientUser);
       }
 
       // When the client connects, break the entire program to get it into a
@@ -146,16 +340,22 @@ void Debugger::setClientConnected(
       // in script mode: on initial startup the script request thread will have
       // been created already in HHVM main, but is not ready for us to attach
       // yet because extensions are still being initialized.
-      if (RuntimeOption::ServerExecutionMode() ||
+      if (Cfg::Server::Mode ||
           m_totalRequestCount.load() > 0) {
 
-        ThreadInfo::ExecutePerThread([this] (ThreadInfo* ti) {
+        RequestInfo::ExecutePerRequest([this] (RequestInfo* ti) {
           this->attachToRequest(ti);
+          if (ti->m_executing == RequestInfo::Executing::UserFunctions ||
+              ti->m_executing == RequestInfo::Executing::RuntimeFunctions) {
+            auto const it = m_requestInfoMap.find(ti);
+            assertx(it != m_requestInfoMap.end());
+            sendThreadEventMessage(it->second, ThreadEventType::ThreadStarted);
+          }
         });
       }
 
       executeForEachAttachedRequest(
-        [&](ThreadInfo* ti, RequestInfo* ri) {
+        [&](RequestInfo* ti, DebuggerRequestInfo* ri) {
           if (ri->m_breakpointInfo == nullptr) {
             ri->m_breakpointInfo = new RequestBreakpointInfo();
           }
@@ -177,14 +377,23 @@ void Debugger::setClientConnected(
         m_connectionNotifyCondition.notify_all();
       }
     } else {
+      // disconnected case
+      auto logger = Eval::Debugger::GetUsageLogger();
+      if (logger != nullptr) {
+        VSDebugLogger::Log(
+          VSDebugLogger::LogLevelInfo,
+          "Clearing client info - user disconnected."
+        );
+        logger->clearClientInfo();
+      }
 
       // The client has detached. Walk through any requests we are currently
       // attached to and release them if they are blocked in the debugger.
       executeForEachAttachedRequest(
-        [&](ThreadInfo* ti, RequestInfo* ri) {
+        [&](RequestInfo* ti, DebuggerRequestInfo* ri) {
           // Clear any undelivered client messages in the request's command
           // queue, since they apply to the debugger session that just ended.
-          // NOTE: The request's RequestInfo will be cleaned up and freed when
+          // NOTE: The request's DebuggerRequestInfo will be cleaned up and freed when
           // the request completes in requestShutdown. It is not safe to do that
           // from this thread.
           ri->m_commandQueue.clearPendingMessages();
@@ -239,11 +448,21 @@ void Debugger::setClientInitialized() {
   // the debugger client initializes communication so that they appear in the
   // client side thread list.
   for (auto it = m_requestIdMap.begin(); it != m_requestIdMap.end(); it++) {
-    if (it->second->m_executing == ThreadInfo::Executing::UserFunctions ||
-        it->second->m_executing == ThreadInfo::Executing::RuntimeFunctions) {
+    if (it->second->m_executing == RequestInfo::Executing::UserFunctions ||
+        it->second->m_executing == RequestInfo::Executing::RuntimeFunctions) {
       sendThreadEventMessage(it->first, ThreadEventType::ThreadStarted);
     }
   }
+}
+
+std::string Debugger::getDebuggerSessionAuth() {
+  Lock lock(m_lock);
+
+  if (!clientConnected() || getCurrentThreadId() != kDummyTheadId) {
+    return "";
+  }
+
+  return m_session->getDebuggerSessionAuth();
 }
 
 request_id_t Debugger::getCurrentThreadId() {
@@ -253,7 +472,7 @@ request_id_t Debugger::getCurrentThreadId() {
     return kDummyTheadId;
   }
 
-  ThreadInfo* const threadInfo = &TI();
+  RequestInfo* const threadInfo = &RI();
   const auto it = m_requestInfoMap.find(threadInfo);
   if (it == m_requestInfoMap.end()) {
     return -1;
@@ -262,7 +481,7 @@ request_id_t Debugger::getCurrentThreadId() {
   return it->second;
 }
 
-void Debugger::cleanupRequestInfo(ThreadInfo* ti, RequestInfo* ri) {
+void Debugger::cleanupRequestInfo(RequestInfo* ti, DebuggerRequestInfo* ri) {
   std::atomic_thread_fence(std::memory_order_acquire);
   if (ti != nullptr && isDebuggerAttached(ti)) {
     DebuggerHook::detach(ti);
@@ -280,7 +499,7 @@ void Debugger::cleanupRequestInfo(ThreadInfo* ti, RequestInfo* ri) {
   delete ri;
 }
 
-void Debugger::cleanupServerObjectsForRequest(RequestInfo* ri) {
+void Debugger::cleanupServerObjectsForRequest(DebuggerRequestInfo* ri) {
   m_lock.assertOwnedBySelf();
 
   std::unordered_map<unsigned int, ServerObject*>& objs = ri->m_serverObjects;
@@ -304,28 +523,46 @@ void Debugger::cleanupServerObjectsForRequest(RequestInfo* ri) {
 }
 
 void Debugger::executeForEachAttachedRequest(
-  std::function<void(ThreadInfo* ti, RequestInfo* ri)> callback,
+  std::function<void(RequestInfo* ti, DebuggerRequestInfo* ri)> callback,
   bool includeDummyRequest
 ) {
   m_lock.assertOwnedBySelf();
 
-  for (auto it = m_requests.begin(); it != m_requests.end(); it++) {
-    assertx(it->second != nullptr);
-    callback(it->first, it->second);
+  DebuggerRequestInfo* dummyRequestInfo = getDummyRequestInfo();
+  std::for_each(m_requests.begin(), m_requests.end(), [](auto &it) {
+    it.second->m_flags.alive = false;
+  });
+
+
+  RequestInfo::ExecutePerRequest([&] (RequestInfo* ti) {
+    auto ri = ti->m_reqInjectionData.getDebuggerRequestInfo();
+    if (ri && ri != dummyRequestInfo) {
+      ri->m_flags.alive = true;
+      callback(ti, ri);
+    }
+  });
+
+  // This is to catch requests that have fallen out of the list without a
+  // requestShutdown notification.
+  auto it = m_requests.begin();
+  while (it != m_requests.end()) {
+    if (it->second->m_flags.alive) {
+      it++;
+      continue;
+    }
+    it->first->m_reqInjectionData.setDebuggerRequestInfo(nullptr);
+    it = m_requests.erase(it);
   }
 
-  if (includeDummyRequest) {
-    RequestInfo* dummyRequestInfo = getDummyRequestInfo();
-    if (dummyRequestInfo != nullptr) {
-      callback(nullptr, dummyRequestInfo);
-    }
+  if (includeDummyRequest && dummyRequestInfo != nullptr) {
+    callback(nullptr, dummyRequestInfo);
   }
 }
 
 void Debugger::getAllThreadInfo(folly::dynamic& threads) {
   assertx(threads.isArray());
   executeForEachAttachedRequest(
-    [&](ThreadInfo* ti, RequestInfo* ri) {
+    [&](RequestInfo* ti, DebuggerRequestInfo* ri) {
       threads.push_back(folly::dynamic::object);
       folly::dynamic& threadInfo = threads[threads.size() - 1];
 
@@ -343,6 +580,12 @@ void Debugger::getAllThreadInfo(folly::dynamic& threads) {
     },
     false /* includeDummyRequest */
   );
+
+  // the dummy request isn't in the request map, so add info for it manually
+  threads.push_back(folly::dynamic::object);
+  folly::dynamic& threadInfo = threads[threads.size() - 1];
+  threadInfo["id"] = 0;
+  threadInfo["name"] = std::string("Console/REPL request");
 }
 
 void Debugger::shutdown() {
@@ -381,7 +624,8 @@ void Debugger::sendStoppedEvent(
   const char* reason,
   const char* displayReason,
   request_id_t threadId,
-  bool focusedThread
+  bool focusedThread,
+  int breakpointId
 ) {
   Lock lock(m_lock);
 
@@ -402,6 +646,10 @@ void Debugger::sendStoppedEvent(
 
   if (reason != nullptr) {
     event["reason"] = reason;
+  }
+
+  if (breakpointId >= 0) {
+    event["breakpointId"] = breakpointId;
   }
 
   if (displayReason == nullptr) {
@@ -433,7 +681,9 @@ void Debugger::sendUserMessage(const char* message, const char* level) {
   }
 
   if (m_transport != nullptr) {
-    m_transport->enqueueOutgoingUserMessage(message, level);
+    m_transport->enqueueOutgoingUserMessage(
+      getCurrentThreadId(), message, level
+    );
   }
 }
 
@@ -448,7 +698,7 @@ void Debugger::sendEventMessage(
   // request is sent, except in the case where we're hitting a nested breakpoint
   // during an evaluation: that we must send immediately because the evaluation
   // response won't happen until the client resumes from the inner breakpoint.
-  RequestInfo* ri = getRequestInfo();
+  DebuggerRequestInfo* ri = getRequestInfo();
   if (ri != nullptr &&
       (ri->m_evaluateCommandDepth > 0 || ri-> m_pauseRecurseCount > 0)) {
 
@@ -507,9 +757,9 @@ void Debugger::requestInit() {
     return;
   }
 
-  ThreadInfo* const threadInfo = &TI();
+  RequestInfo* const threadInfo = &RI();
   bool pauseRequest;
-  RequestInfo* requestInfo;
+  DebuggerRequestInfo* requestInfo;
 
   bool dummy = isDummyRequest();
 
@@ -530,12 +780,19 @@ void Debugger::requestInit() {
       requestInfo,
       "entry",
       nullptr,
-      false
+      false,
+      -1
     );
+  }
+  if (threadInfo->m_executing == RequestInfo::Executing::UserFunctions ||
+      threadInfo->m_executing == RequestInfo::Executing::RuntimeFunctions) {
+    auto const it = m_requestInfoMap.find(threadInfo);
+    assertx(it != m_requestInfoMap.end());
+    sendThreadEventMessage(it->second, ThreadEventType::ThreadStarted);
   }
 }
 
-void Debugger::enterDebuggerIfPaused(RequestInfo* requestInfo) {
+void Debugger::enterDebuggerIfPaused(DebuggerRequestInfo* requestInfo) {
   Lock lock(m_lock);
 
   if (!clientConnected() && VSDebugExtension::s_launchMode) {
@@ -564,7 +821,17 @@ void Debugger::enterDebuggerIfPaused(RequestInfo* requestInfo) {
         requestInfo,
         "step",
         requestInfo->m_stepReason,
-        true
+        true,
+        -1
+      );
+    } else if (m_state == ProgramState::AsyncPaused) {
+      processCommandQueue(
+        getCurrentThreadId(),
+        requestInfo,
+        "async-pause",
+        "async-pause",
+        true,
+        -1
       );
     } else {
       processCommandQueue(
@@ -572,7 +839,8 @@ void Debugger::enterDebuggerIfPaused(RequestInfo* requestInfo) {
         requestInfo,
         "pause",
         nullptr,
-        false
+        false,
+        -1
       );
     }
   }
@@ -580,10 +848,11 @@ void Debugger::enterDebuggerIfPaused(RequestInfo* requestInfo) {
 
 void Debugger::processCommandQueue(
   request_id_t threadId,
-  RequestInfo* requestInfo,
+  DebuggerRequestInfo* requestInfo,
   const char* reason,
   const char* displayReason,
-  bool focusedThread
+  bool focusedThread,
+  int bpId
 ) {
   m_lock.assertOwnedBySelf();
 
@@ -599,7 +868,7 @@ void Debugger::processCommandQueue(
   // should not be visible to the client.
   bool sendEvent = m_state != ProgramState::LoaderBreakpoint;
   if (sendEvent) {
-    sendStoppedEvent(reason, displayReason, threadId, focusedThread);
+    sendStoppedEvent(reason, displayReason, threadId, focusedThread, bpId);
   }
 
   VSDebugLogger::Log(
@@ -642,8 +911,8 @@ void Debugger::processCommandQueue(
   m_resumeCondition.notify_all();
 }
 
-RequestInfo* Debugger::createRequestInfo() {
-  RequestInfo* requestInfo = new RequestInfo();
+DebuggerRequestInfo* Debugger::createRequestInfo() {
+  DebuggerRequestInfo* requestInfo = new DebuggerRequestInfo();
   if (requestInfo == nullptr) {
     // Failed to allocate request info.
     VSDebugLogger::Log(
@@ -653,7 +922,7 @@ RequestInfo* Debugger::createRequestInfo() {
     return nullptr;
   }
 
-  assert(requestInfo->m_allFlags == 0);
+  assertx(requestInfo->m_allFlags == 0);
 
   requestInfo->m_breakpointInfo = new RequestBreakpointInfo();
   if (requestInfo->m_breakpointInfo == nullptr) {
@@ -686,10 +955,10 @@ request_id_t Debugger::nextThreadId() {
   return threadId;
 }
 
-RequestInfo* Debugger::attachToRequest(ThreadInfo* ti) {
+DebuggerRequestInfo* Debugger::attachToRequest(RequestInfo* ti) {
   m_lock.assertOwnedBySelf();
 
-  RequestInfo* requestInfo = nullptr;
+  DebuggerRequestInfo* requestInfo = nullptr;
 
   request_id_t threadId;
   auto it = m_requests.find(ti);
@@ -710,13 +979,17 @@ RequestInfo* Debugger::attachToRequest(ThreadInfo* ti) {
 
     VSDebugLogger::Log(
       VSDebugLogger::LogLevelInfo,
-      "Created new request info for thread %d, flags=%u",
-      getCurrentThreadId(),
+      "Created new request info for request %d (current thread=%d), flags=%u",
+      threadId,
+      (int64_t)Process::GetThreadId(),
       static_cast<unsigned int>(requestInfo->m_allFlags)
     );
 
   } else {
     requestInfo = it->second;
+    always_assert(
+      requestInfo == ti->m_reqInjectionData.getDebuggerRequestInfo()
+    );
     auto idIt = m_requestInfoMap.find(ti);
     assertx(idIt != m_requestInfoMap.end());
     threadId = idIt->second;
@@ -724,35 +997,34 @@ RequestInfo* Debugger::attachToRequest(ThreadInfo* ti) {
     VSDebugLogger::Log(
       VSDebugLogger::LogLevelInfo,
       "Found existing request info for thread %d, flags=%u",
-      getCurrentThreadId(),
+      threadId,
       static_cast<unsigned int>(requestInfo->m_allFlags)
     );
   }
 
   assertx(requestInfo != nullptr && requestInfo->m_breakpointInfo != nullptr);
 
-  // Have the debugger hook update the output hook on next interrupt.
+  // Have the debugger hook update the output hook when we enter the debugger.
   requestInfo->m_flags.outputHooked = false;
-  ti->m_reqInjectionData.setDebuggerIntr(true);
 
-  if (ti->m_executing == ThreadInfo::Executing::UserFunctions ||
-      ti->m_executing == ThreadInfo::Executing::RuntimeFunctions) {
-    sendThreadEventMessage(threadId, ThreadEventType::ThreadStarted);
-  }
+  ti->m_reqInjectionData.setDebuggerIntr(true);
 
   // Try to attach our debugger hook to the request.
   if (!isDebuggerAttached(ti)) {
     if (DebuggerHook::attach<VSDebugHook>(ti)) {
-      ti->m_reqInjectionData.setFlag(DebuggerSignalFlag);
-
       // Install all breakpoints as pending for this request.
       const std::unordered_set<int> breakpoints =
         m_session->getBreakpointManager()->getAllBreakpointIds();
       for (auto it = breakpoints.begin(); it != breakpoints.end(); it++) {
         requestInfo->m_breakpointInfo->m_pendingBreakpoints.emplace(*it);
       }
+      auto exceptionBpMode =
+        m_session->getBreakpointManager()->getExceptionBreakMode();
+      requestInfo->m_breakpointInfo->m_hasExceptionBreakpoint =
+        (exceptionBpMode != ExceptionBreakMode::BreakNone);
     } else {
       m_transport->enqueueOutgoingUserMessage(
+        kDummyTheadId,
         "Failed to attach to new HHVM request: another debugger is already "
           "attached.",
         DebugTransport::OutputLevelError
@@ -773,22 +1045,25 @@ RequestInfo* Debugger::attachToRequest(ThreadInfo* ti) {
   }
 
   updateUnresolvedBpFlag(requestInfo);
+  // This must be set last because request threads can access their own
+  // DebuggerRequestInfo without grabbing a lock.
+  ti->m_reqInjectionData.setDebuggerRequestInfo(requestInfo);
   return requestInfo;
 }
 
 void Debugger::requestShutdown() {
-  auto const threadInfo = &TI();
-  RequestInfo* requestInfo = nullptr;
+  auto const threadInfo = &RI();
+  DebuggerRequestInfo* requestInfo = nullptr;
   request_id_t threadId = -1;
+  bool shouldSendThreadExited = false;
 
   SCOPE_EXIT {
-    if (clientConnected() && threadId >= 0) {
+    if (clientConnected() && threadId >= 0 && shouldSendThreadExited) {
       sendThreadEventMessage(threadId, ThreadEventType::ThreadExited);
       m_session->getBreakpointManager()->onRequestShutdown(threadId);
     }
 
     if (requestInfo != nullptr) {
-      cleanupServerObjectsForRequest(requestInfo);
       cleanupRequestInfo(threadInfo, requestInfo);
     }
   };
@@ -802,6 +1077,7 @@ void Debugger::requestShutdown() {
 
     requestInfo = it->second;
     m_requests.erase(it);
+    threadInfo->m_reqInjectionData.setDebuggerRequestInfo(nullptr);
 
     auto infoItr = m_requestInfoMap.find(threadInfo);
     assertx(infoItr != m_requestInfoMap.end());
@@ -813,12 +1089,27 @@ void Debugger::requestShutdown() {
     m_requestIdMap.erase(idItr);
     m_requestInfoMap.erase(infoItr);
 
-    g_context->removeStdoutHook(getStdoutHook());
+    // When we send a threadStart event, we check to see if we're executing
+    // either user functions or runtime functions. If yes, we send the start.
+    // This was to ensure that we don't send new start events after the
+    // debugger should have paused execution. For parity, only send exit
+    // events under the same criteria.
+    if (threadInfo->m_executing == RequestInfo::Executing::UserFunctions ||
+        threadInfo->m_executing == RequestInfo::Executing::RuntimeFunctions) {
+      shouldSendThreadExited = true;
+    }
+
+    if (!g_context.isNull()) {
+      g_context->removeDebuggerStdoutHook();
+    }
     Logger::SetThreadHook(nullptr);
+
+    // Cleanup any server objects for this request before dropping the lock.
+    cleanupServerObjectsForRequest(requestInfo);
   }
 }
 
-RequestInfo* Debugger::getDummyRequestInfo() {
+DebuggerRequestInfo* Debugger::getDummyRequestInfo() {
   m_lock.assertOwnedBySelf();
   if (!clientConnected()) {
     return nullptr;
@@ -827,12 +1118,12 @@ RequestInfo* Debugger::getDummyRequestInfo() {
   return m_session->m_dummyRequestInfo;
 }
 
-RequestInfo* Debugger::getRequestInfo(request_id_t threadId /* = -1 */) {
-  Lock lock(m_lock);
+DebuggerRequestInfo* Debugger::getRequestInfo(request_id_t threadId /* = -1 */) {
 
-  if (threadId != -1) {
+  if (threadId != -1 || isDummyRequest()) {
+    Lock lock(m_lock);
     // Find the info for the requested thread ID.
-    if (threadId == kDummyTheadId) {
+    if (threadId == kDummyTheadId || isDummyRequest()) {
       return getDummyRequestInfo();
     }
 
@@ -845,14 +1136,7 @@ RequestInfo* Debugger::getRequestInfo(request_id_t threadId /* = -1 */) {
     }
   } else {
     // Find the request info for the current request thread.
-    if (isDummyRequest()) {
-      return getDummyRequestInfo();
-    }
-
-    auto it = m_requests.find(&TI());
-    if (it != m_requests.end()) {
-      return it->second;
-    }
+    return RID().getDebuggerRequestInfo();
   }
 
   return nullptr;
@@ -890,12 +1174,20 @@ bool Debugger::executeClientCommand(
       m_pendingEventMessages.clear();
     };
 
+    std::string cmd = command->commandName();
+    if (cmd == "InitializeCommand") {
+      setClientIdFromCommand(command);
+    }
+
+    // Log command if logging is enabled.
+    logClientCommand(command);
+
     bool resumeThread = callback(m_session, responseMsg);
     if (command->commandTarget() != CommandTarget::WorkItem) {
       sendCommandResponse(command, responseMsg);
     }
     return resumeThread;
-  } catch (DebuggerCommandException e) {
+  } catch (DebuggerCommandException &e) {
     reportClientMessageError(command->getMessage(), e.what());
   } catch (...) {
     reportClientMessageError(command->getMessage(), InternalErrorMsg);
@@ -938,8 +1230,7 @@ void Debugger::reportClientMessageError(
       DebugTransport::MessageTypeResponse
     );
 
-    // Print an error to the debugger console to inform the user as well.
-    sendUserMessage(errorMessage, DebugTransport::OutputLevelError);
+
   } catch (...) {
     // We tried.
     VSDebugLogger::Log(
@@ -972,7 +1263,7 @@ void Debugger::resumeTarget() {
   // Resume every paused request. Each request will send a thread continued
   // event when it exits its command loop.
   executeForEachAttachedRequest(
-    [&](ThreadInfo* ti, RequestInfo* ri) {
+    [&](RequestInfo* ti, DebuggerRequestInfo* ri) {
       ri->m_stepReason = nullptr;
 
       if (ri->m_pauseRecurseCount > 0) {
@@ -987,10 +1278,12 @@ void Debugger::resumeTarget() {
 }
 
 Debugger::PrepareToPauseResult
-Debugger::prepareToPauseTarget(RequestInfo* requestInfo) {
+Debugger::prepareToPauseTarget(DebuggerRequestInfo* requestInfo) {
   m_lock.assertOwnedBySelf();
 
-  if (m_state == ProgramState::Paused && isStepInProgress(requestInfo)) {
+  if ((m_state == ProgramState::Paused ||
+       m_state == ProgramState::AsyncPaused) &&
+      isStepInProgress(requestInfo)) {
     // A step operation for a single request is still in the middle of
     // handling whatever caused us to break execution of the other threads
     // in the first place. We don't need to wait for resume here.
@@ -1015,7 +1308,8 @@ Debugger::prepareToPauseTarget(RequestInfo* requestInfo) {
           requestInfo,
           "pause",
           nullptr,
-          false
+          false,
+          -1
         );
       } else {
         // This is true only in the case of async-break, which is not
@@ -1054,10 +1348,10 @@ Debugger::prepareToPauseTarget(RequestInfo* requestInfo) {
   return clientConnected() ? ReadyToPause : ErrorNoClient;
 }
 
-void Debugger::pauseTarget(RequestInfo* ri, const char* stopReason) {
+void Debugger::pauseTarget(DebuggerRequestInfo* ri, bool isAsyncPause) {
   m_lock.assertOwnedBySelf();
 
-  m_state = ProgramState::Paused;
+  m_state = isAsyncPause ? ProgramState::AsyncPaused : ProgramState::Paused;
 
   if (ri != nullptr) {
     clearStepOperation(ri);
@@ -1072,14 +1366,14 @@ void Debugger::dispatchCommandToRequest(
 ) {
   m_lock.assertOwnedBySelf();
 
-  RequestInfo* ri = nullptr;
+  DebuggerRequestInfo* ri = nullptr;
   if (requestId == kDummyTheadId) {
     ri = getDummyRequestInfo();
   } else {
     auto it = m_requestIdMap.find(requestId);
     if (it != m_requestIdMap.end()) {
       const auto request = m_requests.find(it->second);
-      assert(request != m_requests.end());
+      assertx(request != m_requests.end());
       ri = request->second;
     }
   }
@@ -1090,6 +1384,63 @@ void Debugger::dispatchCommandToRequest(
     delete command;
   } else {
     ri->m_commandQueue.dispatchCommand(command);
+  }
+}
+
+void Debugger::setClientIdFromCommand(VSCommand* command) {
+  always_assert(m_session);
+  const folly::dynamic& message = command->getMessage();
+  const folly::dynamic& args =
+    VSCommand::tryGetObject(message, "arguments", VSCommand::s_emptyArgs);
+  auto clientId = VSCommand::tryGetString(args, "clientID", "unknown");
+  m_session->setClientId(clientId);
+}
+
+void Debugger::logClientCommand(
+  VSCommand* command
+) {
+  auto logger = Eval::Debugger::GetUsageLogger();
+  if (logger == nullptr) {
+    return;
+  }
+
+  const std::string cmd(command->commandName());
+
+  // Don't bother logging certain very chatty commands. These can
+  // be sent frequently by the client UX and their arguments aren't
+  // interesting from a security perspective.
+  if (cmd == "CompletionsCommand" ||
+      cmd == "ContinueCommand" ||
+      cmd == "ResolveBreakpointsCommand" ||
+      cmd == "StackTraceCommand" ||
+      cmd == "ThreadsCommand") {
+    return;
+  }
+
+  try {
+    folly::json::serialization_opts jsonOptions;
+    jsonOptions.sort_keys = true;
+    jsonOptions.pretty_formatting = true;
+
+    const std::string sandboxId = g_context.isNull()
+      ? ""
+      : g_context->getSandboxId().toCppString();
+    const std::string data =
+      folly::json::serialize(command->getMessage(), jsonOptions);
+    const std::string mode = Cfg::Server::Mode
+      ? "vsdebug-webserver"
+      : "vsdebug-script";
+    logger->log(m_session->getClientId(), mode, sandboxId, cmd, data);
+    VSDebugLogger::Log(
+      VSDebugLogger::LogLevelVerbose,
+      "Logging client command: %s: %s\n",
+      cmd.c_str(), data.c_str()
+    );
+  } catch (...) {
+    VSDebugLogger::Log(
+      VSDebugLogger::LogLevelError,
+      "Error logging client command"
+    );
   }
 }
 
@@ -1123,7 +1474,7 @@ void Debugger::onClientMessage(folly::dynamic& message) {
       if (!type.isString() || type.getString().empty()) {
         throw DebuggerCommandException("Invalid command type.");
       }
-    } catch (std::out_of_range e) {
+    } catch (std::out_of_range &) {
       throw DebuggerCommandException(
         "Message is missing a required attribute."
       );
@@ -1141,7 +1492,7 @@ void Debugger::onClientMessage(folly::dynamic& message) {
           errorMsg += "\" was invalid or is not implemented in the debugger.";
           throw DebuggerCommandException(errorMsg.c_str());
         }
-      } catch (std::out_of_range e) {
+      } catch (std::out_of_range &) {
       }
 
       throw DebuggerCommandException(
@@ -1165,7 +1516,7 @@ void Debugger::onClientMessage(folly::dynamic& message) {
       case CommandTarget::Request:
         // Dispatch this command to the correct request.
         {
-          RequestInfo* ri = nullptr;
+          DebuggerRequestInfo* ri = nullptr;
           const auto threadId = command->targetThreadId(m_session);
           if (threadId == kDummyTheadId) {
             ri = getDummyRequestInfo();
@@ -1200,7 +1551,7 @@ void Debugger::onClientMessage(folly::dynamic& message) {
       default:
         assertx(false);
     }
-  } catch (DebuggerCommandException e) {
+  } catch (DebuggerCommandException &e) {
     reportClientMessageError(message, e.what());
   } catch (...) {
     reportClientMessageError(message, InternalErrorMsg);
@@ -1243,6 +1594,7 @@ void Debugger::startDummyRequest(
   const std::string& startupDoc,
   const std::string& sandboxUser,
   const std::string& sandboxName,
+  const std::string& debuggerSessionAuthToken,
   bool displayStartupMsg
 ) {
   Lock lock(m_lock);
@@ -1255,13 +1607,30 @@ void Debugger::startDummyRequest(
     startupDoc,
     sandboxUser,
     sandboxName,
+    debuggerSessionAuthToken,
     displayStartupMsg
   );
 }
 
 void Debugger::setDummyThreadId(int64_t threadId) {
+  m_dummyThreadId.store(threadId, std::memory_order_release);
+}
+
+void Debugger::onExceptionBreakpointChanged(bool isSet) {
   Lock lock(m_lock);
-  m_dummyThreadId = threadId;
+
+  assertx(m_session != nullptr);
+  executeForEachAttachedRequest(
+    [&](RequestInfo* ti, DebuggerRequestInfo* ri) {
+      ri->m_breakpointInfo->m_hasExceptionBreakpoint = isSet;
+      updateUnresolvedBpFlag(ri);
+      if (m_state != ProgramState::Running || ti == nullptr) {
+        const auto cmd = ResolveBreakpointsCommand::createInstance(this);
+        ri->m_commandQueue.dispatchCommand(cmd);
+      }
+    },
+    true /* includeDummyRequest */
+  );
 }
 
 void Debugger::onBreakpointAdded(int bpId) {
@@ -1278,7 +1647,7 @@ void Debugger::onBreakpointAdded(int bpId) {
   // request thread by interrupting it. It will install the bp when it
   // calls into the command hook on the next Hack opcode.
   executeForEachAttachedRequest(
-    [&](ThreadInfo* ti, RequestInfo* ri) {
+    [&](RequestInfo* ti, DebuggerRequestInfo* ri) {
       if (ti != nullptr) {
         ti->m_reqInjectionData.setDebuggerIntr(true);
       }
@@ -1292,7 +1661,7 @@ void Debugger::onBreakpointAdded(int bpId) {
       // opcode hook. Ask it to resolve the breakpoint.
       //
       // Per contract with executeForEachAttachedRequest, ti == nullptr if and
-      // only if RequestInfo points to the dummy's request info.
+      // only if DebuggerRequestInfo points to the dummy's request info.
       if (m_state != ProgramState::Running || ti == nullptr) {
         const auto cmd = ResolveBreakpointsCommand::createInstance(this);
         ri->m_commandQueue.dispatchCommand(cmd);
@@ -1302,31 +1671,29 @@ void Debugger::onBreakpointAdded(int bpId) {
   );
 }
 
-void Debugger::tryInstallBreakpoints(RequestInfo* ri) {
+void Debugger::tryInstallBreakpoints(DebuggerRequestInfo* ri) {
   Lock lock(m_lock);
 
   if (!clientConnected()) {
     return;
   }
 
+  BreakpointManager* bpMgr = m_session->getBreakpointManager();
+  phpSetExceptionBreakpoint(bpMgr->getExceptionBreakMode());
+  auto bpInfo = ri->m_breakpointInfo;
+  auto& pendingBps = bpInfo->m_pendingBreakpoints;
+  if (pendingBps.empty()) return;
+
   // Create a map of the normalized file paths of all compilation units that
   // have already been loaded by this request before the debugger attached to
   // it to allow for quick lookup when resolving breakpoints. Any units loaded
   // after this will be added to the map by onCompilationUnitLoaded().
-  if (!ri->m_flags.compilationUnitsMapped) {
-    ri->m_flags.compilationUnitsMapped = true;
-    const auto evaledFiles = g_context->m_evaledFiles;
-    for (auto it = evaledFiles.begin(); it != evaledFiles.end(); it++) {
-      const HPHP::Unit* compilationUnit = it->second.unit;
-      const std::string filePath = getFilePathForUnit(compilationUnit);
-      ri->m_breakpointInfo->m_loadedUnits[filePath] = compilationUnit;
-    }
+  for (auto p : g_context->m_loadedUnits) {
+    bpInfo->m_loadedUnits.emplace(p.first->data(), p.second);
   }
 
   // For any breakpoints that are pending for this request, try to resolve
   // and install them, or mark them as unresolved.
-  BreakpointManager* bpMgr = m_session->getBreakpointManager();
-  auto& pendingBps = ri->m_breakpointInfo->m_pendingBreakpoints;
 
   for (auto it = pendingBps.begin(); it != pendingBps.end();) {
     const int breakpointId = *it;
@@ -1343,69 +1710,50 @@ void Debugger::tryInstallBreakpoints(RequestInfo* ri) {
     }
 
     bool resolved = tryResolveBreakpoint(ri, breakpointId, bp);
-    if (!resolved) {
-      if (!RuntimeOption::RepoAuthoritative &&
-          bp->m_type == BreakpointType::Source) {
+    // This breakpoint could not be resolved yet. As new compilation units
+    // are loaded, we'll try again.
+    // In debugger clients that support multiple languages like Nuclide,
+    // users tend to leave breakpoints set in files that are for other
+    // debuggers. It's annoying to see warnings in those cases. Assume
+    // any file path that doesn't end in PHP is ok not to tell the user
+    // that the breakpoint failed to set.
+    const bool phpFile =
+      bp->m_path.size() >= 4 &&
+      std::equal(
+        bp->m_path.rbegin(),
+        bp->m_path.rend(),
+        std::string(".php").rbegin()
+      );
+    if (phpFile && !resolved) {
+      std::string resolveMsg = "Warning: request ";
+      resolveMsg += std::to_string(getCurrentThreadId());
+      resolveMsg += " could not resolve breakpoint #";
+      resolveMsg += std::to_string(breakpointId);
+      resolveMsg += ". The Hack/PHP file at ";
+      resolveMsg += bp->m_path;
+      resolveMsg += " is not yet loaded, or failed to compile.";
 
-        // It's possible this compilation unit just isn't loaded yet. Try
-        // to force a pre-load and compile of the unit and place the bp.
-        HPHP::String unitPath(bp->m_path.c_str());
-        const auto compilationUnit = lookupUnit(unitPath.get(), "", nullptr);
-
-        if (compilationUnit != nullptr) {
-          ri->m_breakpointInfo->m_loadedUnits[bp->m_path] = compilationUnit;
-          resolved = tryResolveBreakpoint(ri, breakpointId, bp);
-        }
-
-        // In debugger clients that support multiple languages like Nuclide,
-        // users tend to leave breakpoints set in files that are for other
-        // debuggers. It's annoying to see warnings in those cases. Assume
-        // any file path that doesn't end in PHP is ok not to tell the user
-        // that the breakpoint failed to set.
-        const bool phpFile =
-          bp->m_path.size() >= 4 &&
-          std::equal(
-            bp->m_path.rbegin(),
-            bp->m_path.rend(),
-            std::string(".php").rbegin()
-          );
-
-        if (phpFile && !resolved) {
-          std::string resolveMsg = "Warning: request ";
-          resolveMsg += std::to_string(getCurrentThreadId());
-          resolveMsg += " could not resolve breakpoint #";
-          resolveMsg += std::to_string(breakpointId);
-          resolveMsg += ". The Hack/PHP file at ";
-          resolveMsg += bp->m_path;
-
-          if (compilationUnit == nullptr) {
-            resolveMsg += " could not be loaded, or failed to compile.";
-          } else {
-            resolveMsg += " was loaded, but the breakpoint did not resolve "
-              "to any executable instruction.";
-          }
-
-          sendUserMessage(
-            resolveMsg.c_str(),
-            DebugTransport::OutputLevelWarning
-          );
-        }
-      }
-
-      // This breakpoint could not be resolved yet. As new compilation units
-      // are loaded, we'll try again.
-      if (!resolved) {
-        ri->m_breakpointInfo->m_unresolvedBreakpoints.emplace(breakpointId);
+      sendUserMessage(
+        resolveMsg.c_str(),
+        DebugTransport::OutputLevelWarning
+      );
+    }
+    if (!resolved || bp->isRelativeBp()) {
+      bpInfo->m_unresolvedBreakpoints.emplace(breakpointId);
+      if (bp->m_type == BreakpointType::Function) {
+        bpInfo->m_hasFuncBp = true;
+      } else {
+        bpInfo->m_filenamesWithBp.emplace(bp->m_filePath.filename().string());
       }
     }
   }
 
   updateUnresolvedBpFlag(ri);
-  assertx(ri->m_breakpointInfo->m_pendingBreakpoints.empty());
+  assertx(bpInfo->m_pendingBreakpoints.empty());
 }
 
 bool Debugger::tryResolveBreakpoint(
-  RequestInfo* ri,
+  DebuggerRequestInfo* ri,
   const int bpId,
   const Breakpoint* bp
 ) {
@@ -1420,10 +1768,10 @@ bool Debugger::tryResolveBreakpoint(
       }
     }
   } else {
-    assert(bp->m_type == BreakpointType::Function);
+    assertx(bp->m_type == BreakpointType::Function);
 
-    const HPHP::String functionName(bp->m_function);
-    Func* func = Unit::lookupFunc(functionName.get());
+    const HPHP::OptString functionName(bp->m_function);
+    Func* func = Func::lookup(functionName.get());
 
     if (func != nullptr) {
       BreakpointManager* bpMgr = m_session->getBreakpointManager();
@@ -1445,12 +1793,16 @@ bool Debugger::tryResolveBreakpoint(
   return false;
 }
 
-bool Debugger::tryResolveBreakpointInUnit(const RequestInfo* /*ri*/, int bpId,
+bool Debugger::tryResolveBreakpointInUnit(const DebuggerRequestInfo* /*ri*/, int bpId,
                                           const Breakpoint* bp,
                                           const std::string& unitFilePath,
                                           const HPHP::Unit* compilationUnit) {
 
-  if (bp->m_type != BreakpointType::Source || bp->m_path != unitFilePath) {
+  if (bp->m_type != BreakpointType::Source ||
+      !BreakpointManager::bpMatchesPath(
+        bp,
+        std::filesystem::path(unitFilePath))) {
+
     return false;
   }
 
@@ -1496,29 +1848,28 @@ bool Debugger::tryResolveBreakpointInUnit(const RequestInfo* /*ri*/, int bpId,
   // Warn the user if the breakpoint is going into a unit that has intercepted
   // functions or a memoized function. We can't be certain this breakpoint is
   // reachable in code anymore.
-  request_id_t requestId = getCurrentThreadId();
   BreakpointManager* bpMgr = m_session->getBreakpointManager();
 
-  std::string functionName = "";
+  std::string functionName;
   const HPHP::Func* function = nullptr;
   if (m_debuggerOptions.notifyOnBpCalibration &&
-      !bpMgr->warningSentForBp(requestId, bpId)) {
+      !bpMgr->warningSentForBp(bpId)) {
 
     compilationUnit->forEachFunc([&](const Func* func) {
-      if (functionName == "" &&
-          func != nullptr &&
+      if (func != nullptr &&
           func->name() != nullptr &&
           func->line1() <= lines.first &&
           func->line2() >= lines.second) {
-
-          std::string cls =
-            func->cls() != nullptr && func->cls()->name() != nullptr
-              ? std::string(func->cls()->name()->data()) + "::"
-              : "";
-          functionName = cls;
-          functionName += func->name()->data();
-          function = func;
+        std::string clsName =
+          func->preClass() != nullptr && func->preClass()->name() != nullptr
+            ? std::string(func->preClass()->name()->data()) + "::"
+            : "";
+        functionName = clsName;
+        functionName += func->name()->data();
+        function = func;
+        return true;
       }
+      return false;
     });
 
     if (function != nullptr &&
@@ -1528,7 +1879,7 @@ bool Debugger::tryResolveBreakpointInUnit(const RequestInfo* /*ri*/, int bpId,
         // the first time this routine executes, it might not execute again,
         // even if the code is invoked again. Warn the user because this can
         // cause confusion.
-        bpMgr->sendMemoizeWarning(requestId, bpId);
+        bpMgr->sendMemoizeWarning(bpId);
     }
   }
 
@@ -1566,25 +1917,28 @@ std::pair<int, int> Debugger::calibrateBreakpointLineInUnit(
   };
 
   std::set<SourceLoc, sourceLocCompare> candidateLocations;
-  const auto& table = getSourceLocTable(unit);
-  for (auto const& tableEntry : table) {
-    const SourceLoc& sourceLocation = tableEntry.val();
+  unit->forEachFunc([&](const Func* func) {
+    const auto& table = func->getLocTable();
+    for (auto const& tableEntry : table) {
+      const SourceLoc& sourceLocation = tableEntry.val();
 
-    // If this source location is invalid, ends before the line we are
-    // looking for, or starts before the line we are looking for there
-    // is no match. Exception: if it is a multi-line statement that begins
-    // before the target line and ends ON the target line, that is a match
-    // to allow, for example, setting a breakpoint on the line containing
-    // a closing paren for a multi-line function call.
-    if (!sourceLocation.valid() ||
-        sourceLocation.line1 < bpLine ||
-        (sourceLocation.line0 < bpLine && sourceLocation.line1 != bpLine)) {
+      // If this source location is invalid, ends before the line we are
+      // looking for, or starts before the line we are looking for there
+      // is no match. Exception: if it is a multi-line statement that begins
+      // before the target line and ends ON the target line, that is a match
+      // to allow, for example, setting a breakpoint on the line containing
+      // a closing paren for a multi-line function call.
+      if (!sourceLocation.valid() ||
+          sourceLocation.line1 < bpLine ||
+          (sourceLocation.line0 < bpLine && sourceLocation.line1 != bpLine)) {
 
-      continue;
+        continue;
+      }
+
+      candidateLocations.insert(sourceLocation);
     }
-
-    candidateLocations.insert(sourceLocation);
-  }
+    return false;
+  });
 
   if (candidateLocations.size() > 0) {
     const auto it = candidateLocations.begin();
@@ -1597,8 +1951,9 @@ std::pair<int, int> Debugger::calibrateBreakpointLineInUnit(
 }
 
 void Debugger::onFunctionDefined(
-  RequestInfo* ri,
-  const HPHP::Func* func
+  DebuggerRequestInfo* ri,
+  const Func* func,
+  const std::string& funcName
 ) {
   Lock lock(m_lock);
 
@@ -1612,11 +1967,19 @@ void Debugger::onFunctionDefined(
   for (auto it = unresolvedBps.begin(); it != unresolvedBps.end(); ) {
     const int bpId = *it;
     const Breakpoint* bp = bpMgr->getBreakpointById(bpId);
-    if (bp->m_type == BreakpointType::Function &&
-        tryResolveBreakpoint(ri, bpId, bp)) {
+    if (bp == nullptr) {
+        // Breakpoint has been removed by the client.
+        it = unresolvedBps.erase(it);
+        continue;
+    }
 
-      // Breakpoint is no longer unresolved!
-      it = unresolvedBps.erase(it);
+    if (bp->m_type == BreakpointType::Function && funcName == bp->m_function) {
+        // Found a matching function!
+        phpAddBreakPointFuncEntry(func);
+        bpMgr->onFuncBreakpointResolved(*const_cast<Breakpoint*>(bp), func);
+
+        // Breakpoint is no longer unresolved!
+        it = unresolvedBps.erase(it);
     } else {
       // Still no match, move on to the next unresolved function breakpoint.
       it++;
@@ -1627,7 +1990,7 @@ void Debugger::onFunctionDefined(
 }
 
 void Debugger::onCompilationUnitLoaded(
-  RequestInfo* ri,
+  DebuggerRequestInfo* ri,
   const HPHP::Unit* compilationUnit
 ) {
   Lock lock(m_lock);
@@ -1642,20 +2005,18 @@ void Debugger::onCompilationUnitLoaded(
   if (ri->m_breakpointInfo->m_loadedUnits[filePath] != nullptr &&
       ri->m_breakpointInfo->m_loadedUnits[filePath] != compilationUnit) {
 
-    const auto& bpsForUnit = bpMgr->getBreakpointIdsByFile(filePath);
+    const auto& bps = bpMgr->getBreakpointIdsForPath(filePath);
 
     VSDebugLogger::Log(
       VSDebugLogger::LogLevelInfo,
-      "Compilation unit for %s changed/reloaded in request %d. "
-        "Re-placing %d breakpoints.",
+      "Compilation unit for %s changed/reloaded in request %d. ",
       filePath.c_str(),
-      getCurrentThreadId(),
-      bpsForUnit.size()
+      getCurrentThreadId()
     );
 
     // The unit has been re-loaded from disk since the last time we saw it.
     // We must re-place any breakpoints in this file into the new unit.
-    for (const auto bpId : bpsForUnit) {
+    for (const auto bpId : bps) {
       auto it = ri->m_breakpointInfo->m_unresolvedBreakpoints.find(bpId);
       if (it == ri->m_breakpointInfo->m_unresolvedBreakpoints.end()) {
         ri->m_breakpointInfo->m_unresolvedBreakpoints.emplace(bpId);
@@ -1668,19 +2029,22 @@ void Debugger::onCompilationUnitLoaded(
   // See if any unresolved breakpoints for this request can be placed in the
   // compilation unit that just loaded.
   auto& unresolvedBps = ri->m_breakpointInfo->m_unresolvedBreakpoints;
+
   for (auto it = unresolvedBps.begin(); it != unresolvedBps.end();) {
     const int bpId = *it;
     const Breakpoint* bp = bpMgr->getBreakpointById(bpId);
     if (bp == nullptr ||
         tryResolveBreakpointInUnit(ri, bpId, bp, filePath, compilationUnit)) {
 
-      // If this breakpoint no longer exists (it was removed by the client),
-      // or it was successfully installed, then it is no longer unresolved.
-      it = unresolvedBps.erase(it);
-    } else {
-      // Otherwise, move on to the next unresolved breakpoint.
-      it++;
+      if (bp == nullptr || !bp->isRelativeBp()) {
+        // If this breakpoint no longer exists (it was removed by the client),
+        // or it was successfully installed, then it is no longer unresolved.
+        it = unresolvedBps.erase(it);
+        continue;
+      }
     }
+
+    it++;
   }
 
   updateUnresolvedBpFlag(ri);
@@ -1698,7 +2062,7 @@ void Debugger::onFuncIntercepted(std::string funcName) {
 }
 
 void Debugger::onFuncBreakpointHit(
-  RequestInfo* ri,
+  DebuggerRequestInfo* ri,
   const HPHP::Func* func
 ) {
   Lock lock(m_lock);
@@ -1709,7 +2073,7 @@ void Debugger::onFuncBreakpointHit(
 }
 
 void Debugger::onLineBreakpointHit(
-  RequestInfo* ri,
+  DebuggerRequestInfo* ri,
   const HPHP::Unit* compilationUnit,
   int line
 ) {
@@ -1718,13 +2082,12 @@ void Debugger::onLineBreakpointHit(
 }
 
 void Debugger::onBreakpointHit(
-  RequestInfo* ri,
+  DebuggerRequestInfo* ri,
   const HPHP::Unit* compilationUnit,
   const HPHP::Func* func,
   int line
 ) {
   std::string stopReason;
-  int matchingBpId = -1;
   const std::string filePath = getFilePathForUnit(compilationUnit);
 
   if (prepareToPauseTarget(ri) != PrepareToPauseResult::ReadyToPause) {
@@ -1736,42 +2099,69 @@ void Debugger::onBreakpointHit(
   }
 
   BreakpointManager* bpMgr = m_session->getBreakpointManager();
-  const auto fileBps = bpMgr->getBreakpointIdsByFile(filePath);
 
   const auto removeBreakpoint =
     [&](BreakpointType type) {
       if (type == BreakpointType::Source) {
         phpRemoveBreakPointLine(compilationUnit, line);
       } else {
-        assert(type == BreakpointType::Function);
-        assert(func != nullptr);
+        assertx(type == BreakpointType::Function);
+        assertx(func != nullptr);
         phpRemoveBreakPointFuncEntry(func);
       }
     };
 
-  for (auto it = fileBps.begin(); it != fileBps.end(); it++) {
+  const auto bps = bpMgr->getAllBreakpointIds();
+  for (auto it = bps.begin(); it != bps.end(); it++) {
     const int bpId = *it;
     Breakpoint* bp = bpMgr->getBreakpointById(bpId);
+    if (bp == nullptr) {
+      continue;
+    }
 
-    bool lineInRange = line >= bp->m_resolvedLocation.m_startLine &&
-        line <= bp->m_resolvedLocation.m_endLine;
+    const auto resolvedLocation = bpMgr->bpResolvedInfoForFile(bp, filePath);
+    bool lineInRange = line >= resolvedLocation.m_startLine &&
+        line <= resolvedLocation.m_endLine;
 
-    bool conditionSatisfied = bpMgr->isBreakConditionSatisified(ri, bp);
-    if (lineInRange) {
-      if (conditionSatisfied) {
-        matchingBpId = bpId;
+    if (resolvedLocation.m_path == filePath && lineInRange) {
+      if (bpMgr->isBreakConditionSatisified(ri, bp)) {
         stopReason = getStopReasonForBp(
-          matchingBpId,
-          !bp->m_resolvedLocation.m_path.empty()
-            ? bp->m_resolvedLocation.m_path
-            : bp->m_path,
-          bp->m_line
+          bp,
+          filePath,
+          line
         );
 
         // Breakpoint hit!
-        pauseTarget(ri, stopReason.c_str());
+        assertx(bp);
+        auto firstBpHit = ri->m_firstBpHit;
+        ri->m_firstBpHit = true;
+        if (Cfg::Debugger::LogBreakpointHitTime && StructuredLog::enabled() &&
+            !firstBpHit && bp->m_type == BreakpointType::Source &&
+            !isDummyRequest() && g_context->getTransport()) {
+          StructuredLogEntry ent;
+          ent.setStr("filename", bp->m_filePath.filename().c_str());
+          ent.setInt("line_number", bp->m_line);
+		    	struct timespec now;
+          Timer::GetMonotonicTime(now);
+          auto t =
+            gettime_diff_us(g_context->getTransport()->getWallTime(), now);
+          ent.setInt("time_to_hit", t);
+          StructuredLog::log("hhvm_time_till_bp", ent);
+        }
+
+        pauseTarget(ri, false);
         bpMgr->onBreakpointHit(bpId);
-        break;
+
+        processCommandQueue(
+          getCurrentThreadId(),
+          ri,
+          "breakpoint",
+          stopReason.c_str(),
+          true,
+          bpId
+        );
+
+        return;
       } else {
         VSDebugLogger::Log(
           VSDebugLogger::LogLevelInfo,
@@ -1783,17 +2173,8 @@ void Debugger::onBreakpointHit(
     }
   }
 
-  if (matchingBpId >= 0) {
-    // If an active breakpoint was found at this location, enter the debugger.
-    processCommandQueue(
-      getCurrentThreadId(),
-      ri,
-      "breakpoint",
-      stopReason.c_str(),
-      true
-    );
-  } else if (ri->m_runToLocationInfo.path == filePath &&
-             line == ri->m_runToLocationInfo.line) {
+  if (ri->m_runToLocationInfo.path == filePath &&
+      line == ri->m_runToLocationInfo.line) {
 
     // Hit our run to location destination!
     stopReason = "Run to location";
@@ -1804,10 +2185,10 @@ void Debugger::onBreakpointHit(
     // safe to remove this if there is no real bp at the line.
     bool realBp = false;
     BreakpointManager* bpMgr = m_session->getBreakpointManager();
-    const auto bpIds = bpMgr->getBreakpointIdsByFile(filePath);
+    const auto bpIds = bpMgr->getBreakpointIdsForPath(filePath);
     for (auto it = bpIds.begin(); it != bpIds.end(); it++) {
       Breakpoint* bp = bpMgr->getBreakpointById(*it);
-      if (bp->m_line == line) {
+      if (bp != nullptr && bp->m_line == line) {
         realBp = true;
         break;
       }
@@ -1817,32 +2198,20 @@ void Debugger::onBreakpointHit(
       removeBreakpoint(BreakpointType::Source);
     }
 
-    pauseTarget(ri, stopReason.c_str());
+    pauseTarget(ri, false);
     processCommandQueue(
       getCurrentThreadId(),
       ri,
       "step",
       stopReason.c_str(),
-      true
-    );
-  } else {
-    // This breakpoint no longer exists. Remove it from the VM.
-    VSDebugLogger::Log(
-      VSDebugLogger::LogLevelInfo,
-      "Request hit bp that no longer exists, removing from VM. %s:%d",
-      filePath.c_str(),
-      line
-    );
-    removeBreakpoint(
-      func != nullptr
-        ? BreakpointType::Function
-        : BreakpointType::Source
+      true,
+      -1
     );
   }
 }
 
 void Debugger::onExceptionBreakpointHit(
-  RequestInfo* ri,
+  DebuggerRequestInfo* ri,
   const std::string& exceptionName,
   const std::string& exceptionMsg
 ) {
@@ -1865,34 +2234,33 @@ void Debugger::onExceptionBreakpointHit(
   BreakpointManager* bpMgr = m_session->getBreakpointManager();
   ExceptionBreakMode breakMode = bpMgr->getExceptionBreakMode();
 
-  switch (breakMode) {
-    case BreakNone:
-      // Do not break on exceptions.
-      return;
-    case BreakUnhandled:
-    case BreakUserUnhandled:
-      // The PHP VM doesn't give us any way to distinguish between handled
-      // and unhandled exceptions. Print a message to the console but do
-      // not break.
-      sendUserMessage(userMsg.c_str(), DebugTransport::OutputLevelWarning);
-      return;
-    case BreakAll:
-      break;
-    default:
-      assertx(false);
+  if (breakMode == BreakNone) {
+    return;
   }
+
+  sendUserMessage(userMsg.c_str(), DebugTransport::OutputLevelWarning);
+
+  if (breakMode == BreakUnhandled || breakMode == BreakUserUnhandled) {
+    // The PHP VM doesn't give us any way to distinguish between handled
+    // and unhandled exceptions. A message was already printed indicating
+    // the exception, but we won't actually break in.
+    return;
+  }
+
+  assertx(breakMode == BreakAll);
 
   if (prepareToPauseTarget(ri) != PrepareToPauseResult::ReadyToPause) {
     return;
   }
 
-  pauseTarget(ri, stopReason.c_str());
+  pauseTarget(ri, false);
   processCommandQueue(
     getCurrentThreadId(),
     ri,
     "exception",
     stopReason.c_str(),
-    true
+    true,
+    -1
   );
 }
 
@@ -1901,7 +2269,7 @@ bool Debugger::onHardBreak() {
 
   Lock lock(m_lock);
   VMRegAnchor regAnchor;
-  RequestInfo* ri = getRequestInfo();
+  DebuggerRequestInfo* ri = getRequestInfo();
 
   if (ri == nullptr) {
     return false;
@@ -1921,13 +2289,14 @@ bool Debugger::onHardBreak() {
     return false;
   }
 
-  pauseTarget(ri, stopReason);
+  pauseTarget(ri, false);
   processCommandQueue(
     getCurrentThreadId(),
     ri,
     "breakpoint",
     stopReason,
-    true
+    true,
+    -1
   );
 
   // We actually need to step out here, because as far as the PC filter is
@@ -1938,10 +2307,34 @@ bool Debugger::onHardBreak() {
   return true;
 }
 
+bool Debugger::isStepInProgress(DebuggerRequestInfo* requestInfo) {
+  return requestInfo->m_stepReason != nullptr ||
+         (!requestInfo->m_runToLocationInfo.path.empty() &&
+          requestInfo->m_runToLocationInfo.line > 0) ||
+          requestInfo->m_evaluateCommandDepth > 0;
+}
+
+void Debugger::clearStepOperation(DebuggerRequestInfo* requestInfo) {
+  if (isStepInProgress(requestInfo)) {
+    phpDebuggerContinue();
+    requestInfo->m_stepReason = nullptr;
+    requestInfo->m_runToLocationInfo.path.clear();
+    requestInfo->m_nextFilterInfo.clear();
+  }
+}
+
+void Debugger::updateUnresolvedBpFlag(DebuggerRequestInfo* ri) {
+  ri->m_flags.unresolvedBps =
+    !ri->m_breakpointInfo->m_unresolvedBreakpoints.empty() ||
+    !ri->m_breakpointInfo->m_pendingBreakpoints.empty() ||
+    ri->m_breakpointInfo->m_hasExceptionBreakpoint;
+  std::atomic_thread_fence(std::memory_order_release);
+}
+
 void Debugger::onAsyncBreak() {
   Lock lock(m_lock);
 
-  if (m_state == ProgramState::Paused) {
+  if (m_state == ProgramState::Paused || m_state == ProgramState::AsyncPaused) {
     // Already paused.
     return;
   }
@@ -1955,16 +2348,16 @@ void Debugger::onAsyncBreak() {
     "Debugger paused due to async-break request from client."
   );
 
-  constexpr char* reason = "Async-break";
-  pauseTarget(nullptr, reason);
+  pauseTarget(nullptr, true);
 
   if (m_debuggerOptions.showDummyOnAsyncPause) {
     // Show the dummy request as stopped.
-    sendStoppedEvent(reason, reason, 0, false);
+    constexpr char* reason = "Async-break";
+    sendStoppedEvent(reason, reason, 0, false, -1);
   }
 }
 
-void Debugger::onError(RequestInfo* requestInfo,
+void Debugger::onError(DebuggerRequestInfo* requestInfo,
                        const ExtendedException& /*extendedException*/,
                        int errnum, const std::string& message) {
   const char* phpError;
@@ -2008,19 +2401,19 @@ void Debugger::onError(RequestInfo* requestInfo,
 
 std::string Debugger::getFilePathForUnit(const HPHP::Unit* compilationUnit) {
   const auto path =
-    HPHP::String(const_cast<StringData*>(compilationUnit->filepath()));
+    HPHP::OptString(const_cast<StringData*>(compilationUnit->filepath()));
   const auto translatedPath = File::TranslatePath(path).toCppString();
-  return StatCache::realpath(translatedPath.c_str());
+  return realpathLibc(translatedPath.c_str());
 }
 
 std::string Debugger::getStopReasonForBp(
-  const int id,
+  const Breakpoint* bp,
   const std::string& path,
   const int line
 ) {
-  std::string description("Breakpoint " + std::to_string(id));
+  std::string description("Breakpoint " + std::to_string(bp->m_id));
   if (!path.empty()) {
-    const char* name = boost::filesystem::path(path.c_str()).filename().c_str();
+    auto const name = std::filesystem::path(path).filename().string();
     description += " (";
     description += name;
     description += ":";
@@ -2028,23 +2421,26 @@ std::string Debugger::getStopReasonForBp(
     description += ")";
   }
 
+  if (bp->m_type == BreakpointType::Function) {
+    description += " - " + bp->m_functionFullName + "()";
+  }
+
   return description;
 }
 
 void Debugger::interruptAllThreads() {
   executeForEachAttachedRequest(
-    [&](ThreadInfo* ti, RequestInfo* ri) {
+    [&](RequestInfo* ti, DebuggerRequestInfo* ri) {
       assertx(ti != nullptr);
+      ti->m_reqInjectionData.setWasInterruptedByDebugger();
       ti->m_reqInjectionData.setDebuggerIntr(true);
+      ti->m_reqInjectionData.setFlag(DebuggerSignalFlag);
     },
     false /* includeDummyRequest */
   );
 }
 
 void DebuggerStdoutHook::operator()(const char* str, int len) {
-  fflush(stdout);
-  write(fileno(stdout), str, len);
-
   // Quickly no-op if there's no client.
   if (!m_debugger->clientConnected()) {
     return;
@@ -2067,9 +2463,23 @@ operator()(const char*, const char* msg, const char* /*ending*/
   m_debugger->sendUserMessage(msg, DebugTransport::OutputLevelStderr);
 }
 
+DebuggerEvaluationContext::DebuggerEvaluationContext(Debugger* debugger) {
+  // If a debugger stdout hook is already attached,
+  // either in non-server execution mode or because this is a
+  // nested DebuggerEvaluationContext,
+  // do not reset it in the destructor of this DebuggerEvaluationContext.
+  if (!debugger || g_context->debuggerStdoutHook()) return;
+  g_context->addDebuggerStdoutHook(debugger->getStdoutHook());
+  m_shouldReset = true;
+}
+
+DebuggerEvaluationContext::~DebuggerEvaluationContext() {
+  if (m_shouldReset) g_context->removeDebuggerStdoutHook();
+}
+
 SilentEvaluationContext::SilentEvaluationContext(
   Debugger* debugger,
-  RequestInfo* ri,
+  DebuggerRequestInfo* ri,
   bool suppressOutput /* = true */
 ) : m_ri(ri), m_suppressOutput(suppressOutput) {
   // Disable hitting breaks of any kind due to this eval.
@@ -2087,9 +2497,9 @@ SilentEvaluationContext::SilentEvaluationContext(
 
     // Disable all sorts of output during this eval.
     m_oldHook = debugger->getStdoutHook();
-    m_savedOutputBuffer = g_context->swapOutputBuffer(nullptr);
-    g_context->removeStdoutHook(m_oldHook);
+    m_savedOutputBuffer = g_context->swapOutputBuffer(&m_sb);
     g_context->addStdoutHook(&m_noOpHook);
+    g_context->removeDebuggerStdoutHook();
   }
 
   // Set aside the flow filters to disable all stepping and bp filtering.
@@ -2109,12 +2519,25 @@ SilentEvaluationContext::~SilentEvaluationContext() {
     rid.setErrorReportingLevel(m_errorLevel);
     g_context->swapOutputBuffer(m_savedOutputBuffer);
     g_context->removeStdoutHook(&m_noOpHook);
-    g_context->addStdoutHook(m_oldHook);
+    g_context->addDebuggerStdoutHook(m_oldHook);
   }
 
   m_savedFlowFilter.swap(rid.m_flowFilter);
   m_savedBpFilter.swap(rid.m_breakPointFilter);
+  m_sb.clear();
 }
 
+DebuggerNoBreakContext::DebuggerNoBreakContext(Debugger* debugger) {
+  m_requestInfo = debugger->getRequestInfo();
+  m_prevDoNotBreak = m_requestInfo->m_flags.doNotBreak;
+  m_requestInfo->m_flags.doNotBreak = true;
+  m_prevDbgNoBreak = g_context->m_dbgNoBreak;
+  g_context->m_dbgNoBreak = true;
+}
+
+DebuggerNoBreakContext::~DebuggerNoBreakContext() {
+  m_requestInfo->m_flags.doNotBreak = m_prevDoNotBreak;
+  g_context->m_dbgNoBreak = m_prevDbgNoBreak;
+}
 }
 }

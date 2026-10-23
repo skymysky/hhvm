@@ -14,8 +14,7 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_RUNTIME_BASE_REQ_MALLOC_H_
-#define incl_HPHP_RUNTIME_BASE_REQ_MALLOC_H_
+#pragma once
 
 #include "hphp/util/alloc.h"
 #include "hphp/util/type-scan.h"
@@ -37,7 +36,7 @@
  * pointer.
  */
 
-namespace HPHP { namespace req {
+namespace HPHP::req {
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -134,20 +133,55 @@ template<class T> T* calloc_raw_array(size_t count);
 
 template <class T, typename Action = type_scan::Action::Auto>
 struct Allocator {
-  typedef T              value_type;
-  typedef T*             pointer;
-  typedef const T*       const_pointer;
-  typedef T&             reference;
-  typedef const T&       const_reference;
-  typedef std::size_t    size_type;
-  typedef std::ptrdiff_t difference_type;
+  using value_type = T;
+  using pointer = T*;
+  using const_pointer = const T*;
+  using reference = T&;
+  using const_reference = const T&;
+  using size_type = std::size_t;
+  using difference_type = std::ptrdiff_t;
 
-  typedef std::true_type folly_has_default_object_construct;
-  typedef std::true_type folly_has_default_object_destroy;
+  using folly_has_default_object_construct = std::true_type;
+  using folly_has_default_object_destroy = std::true_type;
+
+  template<typename U, typename A> struct action_helper {
+    using type = A;
+  };
+
+  /*
+   * When rebinding, we want to downgrade to conservative scan if the
+   * rebound type is char, unsigned char, void, or a pointer to one of
+   * those, unless Action is Ignore.
+   */
+  template<typename A> struct action_helper<char, A> {
+    using type = typename std::conditional<
+      std::is_same<type_scan::Action::Ignore, A>::value,
+      A, type_scan::Action::Conservative<T>
+    >::type;
+  };
+
+  template<typename A> struct action_helper<unsigned char, A> {
+    using type = typename action_helper<char, A>::type;
+  };
+
+  template<typename A> struct action_helper<void, A> {
+    using type = typename action_helper<char, A>::type;
+  };
 
   template <class U>
   struct rebind {
-    typedef Allocator<U, Action> other;
+    using other = std::conditional_t<
+        std::is_same<U, T>::value,
+        Allocator<T, Action>,
+        Allocator<
+          U,
+          typename action_helper<
+            typename std::remove_const<
+              typename std::remove_pointer<U>::type
+            >::type, Action
+          >::type
+        >
+      >;
   };
 
   pointer address(reference value) {
@@ -244,6 +278,4 @@ template<class T> T* calloc_raw_array(size_t count) {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-}}
-
-#endif
+}

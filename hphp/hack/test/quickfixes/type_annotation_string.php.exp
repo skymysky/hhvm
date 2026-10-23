@@ -1,0 +1,6 @@
+Add string type annotation
+
+<?hh
+
+const string MY_CONST = "";
+

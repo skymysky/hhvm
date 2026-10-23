@@ -13,8 +13,10 @@
    | license@php.net so we can mail you a copy immediately.               |
    +----------------------------------------------------------------------+
 */
-#ifndef incl_HPHP_RUNTIME_BASE_STRING_DATA_INL_H_
-#define incl_HPHP_RUNTIME_BASE_STRING_DATA_INL_H_
+#pragma once
+#include "hphp/runtime/base/isame-log.h"
+#include "hphp/util/assertions.h"
+#include "hphp/util/configs/eval.h"
 
 namespace HPHP {
 
@@ -56,19 +58,18 @@ inline folly::StringPiece StringData::slice() const {
 }
 
 inline folly::MutableStringPiece StringData::bufferSlice() {
-  assertx(!isImmutable());
+  assertx(isRefCounted());
   return folly::MutableStringPiece{mutableData(), capacity()};
 }
 
 inline void StringData::invalidateHash() {
-  assertx(!isImmutable());
   assertx(!hasMultipleRefs());
   m_hash = 0;
   assertx(checkSane());
 }
 
-inline void StringData::setSize(int len) {
-  assertx(!isImmutable() && !hasMultipleRefs());
+inline void StringData::setSize(int64_t len) {
+  assertx(!hasMultipleRefs());
   assertx(len >= 0 && len <= capacity());
   mutableData()[len] = 0;
   m_lenAndHash = len;
@@ -83,30 +84,25 @@ inline void StringData::checkStack() const {
 inline const char* StringData::data() const {
   // TODO: t1800106: re-enable this assert
   // assertx(data()[size()] == 0); // all strings must be null-terminated
-#ifdef NO_M_DATA
   return reinterpret_cast<const char*>(this + 1);
-#else
-  return m_data;
-#endif
 }
 
 inline char* StringData::mutableData() const {
-  assertx(!isImmutable());
+  assertx(isRefCounted());
   return const_cast<char*>(data());
 }
 
-inline int StringData::size() const { return m_len; }
+inline int64_t StringData::size() const { return m_len; }
 inline bool StringData::empty() const { return size() == 0; }
 inline uint32_t StringData::capacity() const {
-  return kSizeIndex2StringCapacity[m_aux16];
+  assertx(isRefCounted());
+  return kSizeIndex2StringCapacity[m_aux16 & 0xff];
 }
 
 inline size_t StringData::heapSize() const {
-  return isFlat()
-    ? isRefCounted()
-      ? MemoryManager::sizeIndex2Size(m_aux16)
-      : size() + kStringOverhead
-    : sizeof(StringData) + sizeof(Proxy);
+  return isRefCounted()
+    ? MemoryManager::sizeIndex2Size(m_aux16)
+    : size() + kStringOverhead;
 }
 
 inline size_t StringData::estimateCap(size_t size) {
@@ -135,11 +131,9 @@ inline bool StringData::isZero() const  {
 inline StringData* StringData::modifyChar(int offset, char c) {
   assertx(offset >= 0 && offset < size());
   assertx(!hasMultipleRefs());
-
-  auto const sd = isProxy() ? escalate(size()) : this;
-  sd->mutableData()[offset] = c;
-  sd->m_hash = 0;
-  return sd;
+  mutableData()[offset] = c;
+  m_hash = 0;
+  return this;
 }
 
 inline strhash_t StringData::hash_unsafe(const char* s, size_t len) {
@@ -152,7 +146,22 @@ inline strhash_t StringData::hash(const char* s, size_t len) {
 
 inline strhash_t StringData::hash() const {
   strhash_t h = m_hash & STRHASH_MASK;
-  return h ? h : hashHelper();
+  if (h) return h;
+#ifdef AARCH64_HASH_HELPER
+  h = aarch64_hash_helper<true, false>(data(), m_len);
+#else
+  h = hash_string_i_unsafe(data(), m_len);
+#endif
+  assertx(h >= 0);
+  m_hash |= h;
+  return h;
+}
+
+inline strhash_t StringData::hashStatic() const {
+  assertx(isStatic());
+  const strhash_t h = m_hash & STRHASH_MASK;
+  assertx(h >= 0);
+  return h;
 }
 
 inline bool StringData::same(const StringData* s) const {
@@ -165,31 +174,23 @@ inline bool StringData::same(const StringData* s) const {
   return wordsame(data(), s->data(), m_len);
 }
 
-inline bool StringData::isame(const StringData* s) const {
+inline bool StringData::tsame(const StringData* s) const {
   assertx(s);
+  if (this == s || same(s)) return true;
+  if (m_len != s->m_len || Cfg::Eval::LogTsameCollisions >= 2) return false;
+  if (!bstrcaseeq(data(), s->data(), m_len)) return false;
+  return Cfg::Eval::LogTsameCollisions != 1 || tsame_log(this, s);
+}
+
+inline bool StringData::fsame(const StringData* s) const {
+  return same(s);
+}
+
+inline bool StringData::same_nocase(const StringData* s) const {
+  assertx(s);
+  if (this == s || same(s)) return true;
   if (m_len != s->m_len) return false;
   return bstrcaseeq(data(), s->data(), m_len);
-}
-
-//////////////////////////////////////////////////////////////////////
-
-inline const void* StringData::payload() const { return this + 1; }
-inline void* StringData::payload() { return this + 1; }
-
-inline const StringData::Proxy* StringData::proxy() const {
-  return static_cast<const Proxy*>(payload());
-}
-inline StringData::Proxy* StringData::proxy() {
-  return static_cast<Proxy*>(payload());
-}
-
-#ifndef NO_M_DATA
-inline bool StringData::isFlat() const { return m_data == payload(); }
-inline bool StringData::isProxy() const { return m_data != payload(); }
-#endif
-
-inline bool StringData::isImmutable() const {
-  return !isRefCounted() || isProxy();
 }
 
 //////////////////////////////////////////////////////////////////////
@@ -211,16 +212,24 @@ struct string_data_same {
   }
 };
 
-struct string_data_eq_same {
-  bool operator()(const StringData* a, const StringData* b) const {
-    return a == b || a->same(b);
+struct string_data_tsame {
+  bool operator()(const StringData *s1, const StringData *s2) const {
+    assertx(s1 && s2);
+    return s1->tsame(s2);
   }
 };
 
-struct string_data_isame {
+struct string_data_fsame {
   bool operator()(const StringData *s1, const StringData *s2) const {
     assertx(s1 && s2);
-    return s1->isame(s2);
+    return s1->fsame(s2);
+  }
+};
+
+struct string_data_same_nocase {
+  bool operator()(const StringData *s1, const StringData *s2) const {
+    assertx(s1 && s2);
+    return s1->same_nocase(s2);
   }
 };
 
@@ -238,14 +247,24 @@ struct string_data_lt {
   }
 };
 
-struct string_data_lti {
+// Compare type names
+struct string_data_lt_type {
   bool operator()(const StringData *s1, const StringData *s2) const {
-    return bstrcasecmp(s1->data(), s1->size(), s2->data(), s2->size()) < 0;
+    return tstrcmp_slice(s1->slice(), s2->slice()) < 0;
   }
 };
+
+struct string_data_hash_tsame {
+  bool equal(const StringData* s1, const StringData* s2) const {
+    return s1->tsame(s2);
+  }
+  size_t hash(const StringData* s) const { return s->hash(); }
+};
+
+// Compare function names
+using string_data_lt_func = string_data_lt;
+using string_data_hash_fsame = string_data_hash;
 
 //////////////////////////////////////////////////////////////////////
 
 }
-
-#endif

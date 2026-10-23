@@ -19,15 +19,14 @@ function foobar(dict<int, string> $x, dict<arraykey, Foo> $y): dict<int, int> {
   return dict[];
 }
 
-function dump($x) {
-  var_dump((string)$x->getReturnType());
+function dump($x) :mixed{
+  var_dump($x->getReturnType()->__toString());
   foreach ($x->getParameters() as $param) {
-    var_dump($param->isArray());
-    var_dump((string)$param->getType());
+    var_dump($param->getType()->__toString());
   }
 }
 
-function main() {
+function main() :mixed{
   echo("\nReflectionMethod:\n");
   dump(new ReflectionMethod('Foo::bar'));
 
@@ -44,5 +43,8 @@ function main() {
   echo("\nADictType type_structure:\n");
   var_dump(type_structure(ADictType::class));
 }
+<<__EntryPoint>>
+function main_entry(): void {
 
-main();
+  main();
+}

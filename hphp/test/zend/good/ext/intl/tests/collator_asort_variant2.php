@@ -1,17 +1,10 @@
-<?php
-
-/*
- * Sort associative arrays using various locales.
- */
-
-
-$test_num = 1;
+<?hh
 
 /*
  * Sort various arrays in specified locale.
  */
 function sort_arrays( $locale, $test_arrays, $sort_flag = Collator::SORT_REGULAR )
-{
+:mixed{
     $res_str = '';
 
     $coll = ut_coll_create( $locale );
@@ -19,7 +12,7 @@ function sort_arrays( $locale, $test_arrays, $sort_flag = Collator::SORT_REGULAR
     foreach( $test_arrays as $test_array )
     {
         // Try to sort test data.
-        $res_val = ut_coll_asort( $coll, $test_array, $sort_flag );
+        $res_val = ut_coll_asort( $coll, inout $test_array, $sort_flag );
 
         // Return output data.
         $res_dump = "\n" . dump( $test_array ) .
@@ -28,12 +21,11 @@ function sort_arrays( $locale, $test_arrays, $sort_flag = Collator::SORT_REGULAR
 		// Preppend test signature to output string
         $md5 = md5( $res_dump );
 
-        global $test_num;
-        
+
         $res_str .= "\n\n".
-                    "Test $test_num.$md5:" .
+                    "Test ".ZendGoodExtIntlTestsCollatorAsortVariant2::$test_num.".$md5:" .
                     $res_dump;
-        ++$test_num;
+        ++ZendGoodExtIntlTestsCollatorAsortVariant2::$test_num;
     }
 
     return $res_str;
@@ -43,89 +35,93 @@ function sort_arrays( $locale, $test_arrays, $sort_flag = Collator::SORT_REGULAR
  * Test main function.
  */
 function ut_main()
-{
-    global $test_num;
-    $test_num = 1;
+:mixed{
+
+    ZendGoodExtIntlTestsCollatorAsortVariant2::$test_num = 1;
     $res_str = '';
 
     // Sort an array in SORT_REGULAR mode using en_US locale.
-    $test_params = array(
-        array( 'd' => 'y'  ,
+    $test_params = vec[
+        dict[ 'd' => 'y'  ,
                'c' => 'i'  ,
-               'a' => 'k'  ),
+               'a' => 'k'  ],
 
-        array( 'a' => 'a'  ,
+        dict[ 'a' => 'a'  ,
                'b' => 'aaa',
-               'c' => 'aa' ),
+               'c' => 'aa' ],
 
-        array( 'a'  => 'a' ,
+        dict[ 'a'  => 'a' ,
                'aaa'=> 'a' ,
-               'aa' => 'a' ),
+               'aa' => 'a' ],
 
-        array( '1' => 'abc',
+        dict[ '1' => 'abc',
                '5' => '!'  ,
-               '2' => null ,
-               '7' => ''   ),
+               '7' => ''   ],
 
-        array( '1' => '100',
+        dict[ '1' => '100',
                '2' => '25' ,
-               '3' => '36' ),
-
-        array( '1' => 5    ,
-               '2' => '30' ,
-               '3' => 2    )
-    );
+               '3' => '36' ],
+    ];
 
     $res_str .= sort_arrays( 'en_US', $test_params );
 
     // Sort an array in SORT_STRING mode using en_US locale.
-    $test_params = array(
-        array( '1' => '100',
+    $test_params = vec[
+        dict[ '1' => '100',
                '2' => '25' ,
-               '3' => '36' ),
+               '3' => '36' ],
 
-        array( '1' => 5    ,
-               '2' => '30' ,
-               '3' => 2    ),
-
-        array( '1' => 'd'  ,
+        dict[ '1' => 'd'  ,
                '2' => ''   ,
-               '3' => ' a' ),
+               '3' => ' a' ],
 
-        array( '1' => 'y'  ,
+        dict[ '1' => 'y'  ,
                '2' => 'k'  ,
-               '3' => 'i'  )
-    );
+               '3' => 'i'  ]
+    ];
 
     $res_str .= sort_arrays( 'en_US', $test_params, Collator::SORT_STRING );
 
     // Sort a non-ASCII array using ru_RU locale.
-    $test_params = array(
-        array( 'п' => 'у',
-               'б' => 'в',
-               'е' => 'а' ),
+    $test_params = vec[
+        dict[ "\xd0\xbf" => "\xd1\x83",
+               "\xd0\xb1" => "\xd0\xb2",
+               "\xd0\xb5" => "\xd0\xb0" ],
 
-        array( '1' => 'п',
+        dict[ '1' => "\xd0\xbf",
                '4' => '',
                '7' => 'd',
-               '2' => 'пп' )
-    );
+               '2' => "\xd0\xbf\xd0\xbf" ]
+    ];
 
     $res_str .= sort_arrays( 'ru_RU', $test_params );
 
 
     // Sort an array using Lithuanian locale.
-    $test_params = array(
-        array( 'd' => 'y',
+    $test_params = vec[
+        dict[ 'd' => 'y',
                'c' => 'i',
-               'a' => 'k' )
-    );
+               'a' => 'k' ]
+    ];
 
     $res_str .= sort_arrays( 'lt_LT', $test_params );
 
     return $res_str . "\n";
 }
 
-include_once( 'ut_common.inc' );
-ut_run();
-?>
+abstract final class ZendGoodExtIntlTestsCollatorAsortVariant2 {
+  public static $test_num;
+}
+<<__EntryPoint>>
+function entrypoint_collator_asort_variant2(): void {
+
+  /*
+   * Sort associative arrays using various locales.
+   */
+
+
+  ZendGoodExtIntlTestsCollatorAsortVariant2::$test_num = 1;
+
+  include_once( 'ut_common.inc' );
+  ut_run();
+}

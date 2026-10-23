@@ -13,17 +13,15 @@
    | license@php.net so we can mail you a copy immediately.               |
    +----------------------------------------------------------------------+
 */
-#ifndef incl_HPHP_JIT_IRGEN_BASIC_H_
-#define incl_HPHP_JIT_IRGEN_BASIC_H_
+#pragma once
 
 #include <cstdint>
 
-namespace HPHP { namespace jit { namespace irgen {
+namespace HPHP::jit::irgen {
 
 struct IRGS;
 
 void implIncStat(IRGS& env, uint32_t counter);
 
-}}}
+}
 
-#endif

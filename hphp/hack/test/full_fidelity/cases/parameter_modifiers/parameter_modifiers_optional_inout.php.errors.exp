@@ -1,0 +1,2 @@
+(4,13)-(4,35) A parameter cannot be both `optional` and `inout`.
+(5,13)-(5,35) A parameter cannot be both `optional` and `inout`.

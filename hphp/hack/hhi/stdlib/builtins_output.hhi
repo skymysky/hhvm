@@ -1,4 +1,4 @@
-<?hh     /* -*- php -*- */
+<?hh /* -*- php -*- */
 /**
  * Copyright (c) 2014, Facebook, Inc.
  * All rights reserved.
@@ -9,73 +9,92 @@
  */
 
 <<__PHPStdLib>>
-function ob_start($output_callback = null, $chunk_size = 0, $erase = true) { }
+function ob_start(
+  HH\FIXME\MISSING_PARAM_TYPE $output_callback = null,
+  int $chunk_size = 0,
+  int $erase = PHP_OUTPUT_HANDLER_STDFLAGS,
+): bool {}
 <<__PHPStdLib>>
-function ob_clean() { }
+function ob_clean(): void {}
 <<__PHPStdLib>>
-function ob_flush() { }
+function ob_flush(): bool {}
 <<__PHPStdLib>>
-function ob_end_clean() { }
+function ob_end_clean(): bool {}
 <<__PHPStdLib>>
-function ob_end_flush() { }
+function ob_end_flush(): bool {}
 <<__PHPStdLib>>
-function flush() { }
+function flush(): void {}
 <<__PHPStdLib>>
-function ob_get_clean() { }
+function ob_get_clean(): HH\FIXME\MISSING_RETURN_TYPE {}
 <<__PHPStdLib>>
-function ob_get_contents() { }
+function ob_get_contents()[read_globals]: HH\FIXME\MISSING_RETURN_TYPE {}
 <<__PHPStdLib>>
-function ob_get_flush() { }
+function ob_get_flush(): HH\FIXME\MISSING_RETURN_TYPE {}
 <<__PHPStdLib>>
-function ob_get_length() { }
+function ob_get_length()[read_globals]: int {}
 <<__PHPStdLib>>
-function ob_get_level() { }
+function ob_get_level()[read_globals]: int {}
 <<__PHPStdLib>>
-function ob_get_status($full_status = false) { }
+function ob_get_status(
+  bool $full_status = false,
+)[read_globals]: HH\FIXME\MISSING_RETURN_TYPE {}
 <<__PHPStdLib>>
-function ob_gzhandler($buffer, $mode) { }
+function ob_gzhandler(
+  HH\FIXME\MISSING_PARAM_TYPE $buffer,
+  HH\FIXME\MISSING_PARAM_TYPE $mode,
+): HH\FIXME\MISSING_RETURN_TYPE {}
 <<__PHPStdLib>>
-function ob_implicit_flush($flag = true) { }
+function ob_implicit_flush(bool $flag = true): void {}
 <<__PHPStdLib>>
-function ob_list_handlers() { }
-<<__PHPStdLib>>
-function output_add_rewrite_var($name, $value) { }
-<<__PHPStdLib>>
-function output_reset_rewrite_vars() { }
-<<__PHPStdLib>>
-function hphp_crash_log($name, $value) { }
-<<__PHPStdLib>>
-function hphp_stats($name, $value) { }
-<<__PHPStdLib>>
-function hphp_get_stats($name) { }
-<<__PHPStdLib>>
-function hphp_get_status() { }
-<<__PHPStdLib>>
-function hphp_get_iostatus() { }
-<<__PHPStdLib>>
-function hphp_set_iostatus_address($name) { }
-<<__PHPStdLib>>
-function hphp_get_timers($get_as_float = true) { }
-<<__PHPStdLib>>
-function hphp_output_global_state($serialize = true) { }
-<<__PHPStdLib>>
-function hphp_instruction_counter() { }
-<<__PHPStdLib>>
-function hphp_get_hardware_counters() { }
-<<__PHPStdLib>>
-function hphp_set_hardware_events($events = null) { }
-<<__PHPStdLib>>
-function hphp_clear_hardware_events() { }
+function ob_list_handlers()[read_globals]: HH\FIXME\MISSING_RETURN_TYPE {}
 
-const int PHP_OUTPUT_HANDLER_START = 0;
-const int PHP_OUTPUT_HANDLER_WRITE = 0;
-const int PHP_OUTPUT_HANDLER_FLUSH = 0;
-const int PHP_OUTPUT_HANDLER_CLEAN = 0;
-const int PHP_OUTPUT_HANDLER_FINAL = 0;
-const int PHP_OUTPUT_HANDLER_CONT = 0;
-const int PHP_OUTPUT_HANDLER_END = 0;
+<<__PHPStdLib>>
+function hphp_crash_log(
+  string $name,
+  string $value,
+): void;
+<<__PHPStdLib>>
+function hphp_stats(string $name, int $value): void;
+<<__PHPStdLib>>
+function hphp_get_stats(
+  string $name,
+)[read_globals]: int;
+<<__PHPStdLib>>
+function hphp_get_status()[read_globals]: HH\FIXME\MISSING_RETURN_TYPE {}
+<<__PHPStdLib>>
+function hphp_get_iostatus()[read_globals]: HH\FIXME\MISSING_RETURN_TYPE {}
+<<__PHPStdLib>>
+function hphp_set_iostatus_address(string $name): void;
+<<__PHPStdLib>>
+function hphp_get_timers(
+  bool $get_as_float = true,
+)[read_globals]: HH\FIXME\MISSING_RETURN_TYPE;
+<<__PHPStdLib>>
+function hphp_output_global_state(
+  bool $serialize = true,
+): HH\FIXME\MISSING_RETURN_TYPE;
+<<__PHPStdLib>>
+function hphp_instruction_counter(
+)[read_globals]: int {}
+<<__PHPStdLib>>
+function hphp_get_hardware_counters(
+)[read_globals]: HH\FIXME\MISSING_RETURN_TYPE {}
+<<__PHPStdLib>>
+function hphp_set_hardware_events(
+  ?string $events = null,
+): bool {}
+<<__PHPStdLib>>
+function hphp_clear_hardware_events(): void {}
 
-const int PHP_OUTPUT_HANDLER_CLEANABLE = 0;
-const int PHP_OUTPUT_HANDLER_FLUSHABLE = 0;
-const int PHP_OUTPUT_HANDLER_REMOVABLE = 0;
-const int PHP_OUTPUT_HANDLER_STDFLAGS = 0;
+const int PHP_OUTPUT_HANDLER_START;
+const int PHP_OUTPUT_HANDLER_WRITE;
+const int PHP_OUTPUT_HANDLER_FLUSH;
+const int PHP_OUTPUT_HANDLER_CLEAN;
+const int PHP_OUTPUT_HANDLER_FINAL;
+const int PHP_OUTPUT_HANDLER_CONT;
+const int PHP_OUTPUT_HANDLER_END;
+
+const int PHP_OUTPUT_HANDLER_CLEANABLE;
+const int PHP_OUTPUT_HANDLER_FLUSHABLE;
+const int PHP_OUTPUT_HANDLER_REMOVABLE;
+const int PHP_OUTPUT_HANDLER_STDFLAGS;

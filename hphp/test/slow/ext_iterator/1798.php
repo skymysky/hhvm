@@ -1,26 +1,29 @@
-<?php
+<?hh
 
+
+<<__EntryPoint>>
+function main_1798() :mixed{
 $sample_dir = __DIR__.'/../../sample_dir';
 
-$files = array();
+$files = vec[];
 foreach (new DirectoryIterator($sample_dir.'/') as $file) {
   $files[] = $file;
 }
 var_dump(count($files));
 
 $dir = new DirectoryIterator($sample_dir.'/');
-$files = array();
+$files = vec[];
  // order changes per machine
 foreach ($dir as $fileinfo) {
   if (!$fileinfo->isDot()) {
     $files[] = $fileinfo->getFilename();
   }
 }
-asort($files);
+asort(inout $files);
 var_dump(array_values($files));
 
 $iterator = new DirectoryIterator($sample_dir);
-$files = array();
+$files = dict[];
  // order changes per machine
 foreach ($iterator as $fileinfo) {
   if ($fileinfo->isFile()) {
@@ -37,30 +40,30 @@ foreach ($iterator as $fileinfo) {
     $fileinfo->getPerms() . "\n";
     $fileinfo->getSize() . "\n";
     $fileinfo->getType() . "\n";
-    $fileinfo->isDir() . "\n";
-    $fileinfo->isDot() . "\n";
-    $fileinfo->isExecutable() . "\n";
-    $fileinfo->isLink() . "\n";
-    $fileinfo->isReadable() . "\n";
-    $fileinfo->isWritable() . "\n";
+    (string)($fileinfo->isDir()) . "\n";
+    (string)($fileinfo->isDot()) . "\n";
+    (string)($fileinfo->isExecutable()) . "\n";
+    (string)($fileinfo->isLink()) . "\n";
+    (string)($fileinfo->isReadable()) . "\n";
+    (string)($fileinfo->isWritable()) . "\n";
     $str .= "END\n";
     $files[$name] = $str;
   }
 }
-ksort($files);
+ksort(inout $files);
 foreach ($files as $str) {
   echo $str;
 }
 
 $iterator = new RecursiveDirectoryIterator($sample_dir);
-$files = array();
+$files = dict[];
  // order changes per machine
 foreach ($iterator as $fileinfo) {
   if ($fileinfo->isFile()) {
     $files[$fileinfo->getFilename()] = $fileinfo;
   }
 }
-ksort($files);
+ksort(inout $files);
 foreach ($files as $name => $fileinfo) {
   echo $fileinfo->getFilename() . "\n";
    $fileinfo->getCTime() . "\n";
@@ -74,9 +77,10 @@ foreach ($files as $name => $fileinfo) {
    $fileinfo->getPerms() . "\n";
    $fileinfo->getSize() . "\n";
    $fileinfo->getType() . "\n";
-   $fileinfo->isDir() . "\n";
-   $fileinfo->isExecutable() . "\n";
-   $fileinfo->isLink() . "\n";
-   $fileinfo->isReadable() . "\n";
-   $fileinfo->isWritable() . "\n";
+   (string)($fileinfo->isDir()) . "\n";
+   (string)($fileinfo->isExecutable()) . "\n";
+   (string)($fileinfo->isLink()) . "\n";
+   (string)($fileinfo->isReadable()) . "\n";
+   (string)($fileinfo->isWritable()) . "\n";
+}
 }

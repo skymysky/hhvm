@@ -14,46 +14,69 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_JIT_MCGEN_TRANSLATE_H_
-#define incl_HPHP_JIT_MCGEN_TRANSLATE_H_
+#pragma once
 
 #include "hphp/runtime/vm/jit/code-cache.h"
+#include "hphp/runtime/vm/jit/stack-offsets.h"
 #include "hphp/runtime/vm/jit/types.h"
+#include "hphp/runtime/vm/srckey.h"
 
-#include <folly/Optional.h>
+#include "hphp/util/trace.h"
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 
-struct FPInvOffset;
 struct ProfTransRec;
 struct TransArgs;
 
-namespace tc { struct TransMetaInfo; };
+struct ProfDataSerializer;
+struct ProfDataDeserializer;
+
+namespace tc { struct TransMetaInfo; }
 
 namespace mcgen {
-
-/*
- * Create a new translation based on args.
- *
- * The SrcKey and kind of this translation must be specified in args. The
- * TransID and region may optionally be specified as well. If the kind of region
- * requested is TransOptimize a TransID must be specified.
- *
- * Should the region be absent, an appropriate region for the designated kind
- * will be selected.
- */
-folly::Optional<tc::TransMetaInfo> translate(
-  TransArgs args,
-  FPInvOffset spOff,
-  folly::Optional<CodeCache::View> optView = folly::none
-);
 
 /*
  * True iff retranslateAll is enabled and supported by the current server
  * execution mode.
  */
 bool retranslateAllEnabled();
+/*
+ * Is still a pending call to retranslateAll()
+ */
+bool retranslateAllPending();
+/*
+ * Whether retranslateAll has been scheduled (and possibly already completed).
+ */
+bool retranslateAllScheduled();
 
-}}}
+/*
+ * Whether retranslateAll has been scheduled but has not complete.
+ */
+bool pendingRetranslateAllScheduled();
 
-#endif
+/*
+ * Is retranslateAll() finished.
+ */
+bool retranslateAllComplete();
+
+bool liveMaxSecondsExpired();
+
+int64_t liveSecondsElapsed();
+
+/*
+ * Undo the effects of bumpTraceFunctions() (so that we don't trace
+ * all the inlined functions we're because we're tracing the function
+ * they're inlined into).
+ */
+CompactVector<Trace::BumpRelease> unbumpFunctions();
+
+/* Return the VM stack offset at a bytecode SrcKey, or none if unreachable. */
+Optional<SBInvOffset> offsetAtLocation(SrcKey sk);
+
+/*
+ * Optimizes func. The caller is responsible for ensuring that the function can
+ * be optimized and updating the optimized flag in profData.
+ */
+void optimizeFunc(Func* func);
+
+}}

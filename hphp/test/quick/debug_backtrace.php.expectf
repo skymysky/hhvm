@@ -1,8 +1,7 @@
-array(6) {
-  [0]=>
-  array(6) {
+vec(7) {
+  dict(6) {
     ["file"]=>
-    string(%d) "%s"
+    string(%d) "%s/test/quick/debug_backtrace.php"
     ["line"]=>
     int(9)
     ["function"]=>
@@ -12,13 +11,12 @@ array(6) {
     ["type"]=>
     string(2) "::"
     ["args"]=>
-    array(0) {
+    vec(0) {
     }
   }
-  [1]=>
-  array(7) {
+  dict(7) {
     ["file"]=>
-    string(%d) "%s"
+    string(%d) "%s/test/quick/debug_backtrace.php"
     ["line"]=>
     int(15)
     ["function"]=>
@@ -26,79 +24,74 @@ array(6) {
     ["class"]=>
     string(1) "A"
     ["object"]=>
-    object(A)#1 (0) {
+    object(A) (0) {
     }
     ["type"]=>
     string(2) "->"
     ["args"]=>
-    array(3) {
-      [0]=>
+    vec(3) {
       int(1)
-      [1]=>
       string(3) "str"
-      [2]=>
-      array(3) {
-        [0]=>
+      vec(3) {
         int(1)
-        [1]=>
         int(2)
-        [2]=>
         int(3)
       }
     }
   }
-  [2]=>
-  array(2) {
+  dict(2) {
     ["function"]=>
     string(3) "bar"
     ["args"]=>
-    array(0) {
+    vec(0) {
     }
   }
-  [3]=>
-  array(4) {
+  dict(4) {
     ["file"]=>
-    string(%d) "%s"
+    string(%d) "%s/test/quick/debug_backtrace.php"
     ["line"]=>
     int(20)
     ["function"]=>
     string(14) "call_user_func"
     ["args"]=>
-    array(1) {
-      [0]=>
-      string(3) "bar"
+    vec(1) {
+      function(bar)
     }
   }
-  [4]=>
-  array(4) {
+  dict(4) {
     ["file"]=>
-    string(%d) "%s"
+    string(%d) "%s/test/quick/debug_backtrace.php"
     ["line"]=>
     int(29)
     ["function"]=>
     string(3) "foo"
     ["args"]=>
-    array(0) {
+    vec(0) {
     }
   }
-  [5]=>
-  array(4) {
+  dict(4) {
     ["file"]=>
-    string(%d) "%s"
+    string(%d) "%s/test/quick/debug_backtrace.php"
     ["line"]=>
-    int(34)
+    int(35)
     ["function"]=>
     string(4) "main"
     ["args"]=>
-    array(0) {
+    vec(0) {
+    }
+  }
+  dict(2) {
+    ["function"]=>
+    string(26) "entrypoint_debug_backtrace"
+    ["args"]=>
+    vec(0) {
     }
   }
 }
-array(6) {
-  [0]=>
-  array(6) {
+vec(7) {
+  dict(6) {
     ["file"]=>
-    string(%d) "%s"
+    string(%d) "%s/test/quick/debug_backtrace.php"
     ["line"]=>
     int(9)
     ["function"]=>
@@ -108,80 +101,79 @@ array(6) {
     ["type"]=>
     string(2) "::"
     ["args"]=>
-    array(0) {
+    vec(0) {
     }
   }
-  [1]=>
-  array(5) {
+  dict(5) {
     ["function"]=>
     string(3) "bar"
     ["class"]=>
     string(1) "A"
     ["object"]=>
-    object(A)#1 (0) {
+    object(A) (0) {
     }
     ["type"]=>
     string(2) "->"
     ["args"]=>
-    array(2) {
-      [0]=>
+    vec(3) {
       int(1)
-      [1]=>
       int(2)
+      NULL
     }
   }
-  [2]=>
-  array(2) {
+  dict(2) {
     ["function"]=>
     string(3) "bar"
     ["args"]=>
-    array(0) {
+    vec(0) {
     }
   }
-  [3]=>
-  array(4) {
+  dict(4) {
     ["file"]=>
-    string(%d) "%s"
+    string(%d) "%s/test/quick/debug_backtrace.php"
     ["line"]=>
     int(20)
     ["function"]=>
     string(14) "call_user_func"
     ["args"]=>
-    array(1) {
-      [0]=>
-      string(3) "bar"
+    vec(1) {
+      function(bar)
     }
   }
-  [4]=>
-  array(4) {
+  dict(4) {
     ["file"]=>
-    string(%d) "%s"
+    string(%d) "%s/test/quick/debug_backtrace.php"
     ["line"]=>
     int(29)
     ["function"]=>
     string(3) "foo"
     ["args"]=>
-    array(0) {
+    vec(0) {
     }
   }
-  [5]=>
-  array(4) {
+  dict(4) {
     ["file"]=>
-    string(%d) "%s"
+    string(%d) "%s/test/quick/debug_backtrace.php"
     ["line"]=>
-    int(34)
+    int(35)
     ["function"]=>
     string(4) "main"
     ["args"]=>
-    array(0) {
+    vec(0) {
+    }
+  }
+  dict(2) {
+    ["function"]=>
+    string(26) "entrypoint_debug_backtrace"
+    ["args"]=>
+    vec(0) {
     }
   }
 }
-array(6) {
-  [0]=>
-  array(6) {
+vec(7) {
+  dict(6) {
     ["file"]=>
-    string(%d) "%s"
+    string(%d) "%s/test/quick/debug_backtrace.php"
     ["line"]=>
     int(9)
     ["function"]=>
@@ -191,131 +183,72 @@ array(6) {
     ["type"]=>
     string(2) "::"
     ["args"]=>
-    array(0) {
+    vec(0) {
     }
   }
-  [1]=>
-  array(5) {
+  dict(5) {
     ["function"]=>
     string(3) "bar"
     ["class"]=>
     string(1) "A"
     ["object"]=>
-    object(A)#1 (0) {
+    object(A) (0) {
     }
     ["type"]=>
     string(2) "->"
     ["args"]=>
-    array(2) {
-      [0]=>
+    vec(3) {
       int(1)
-      [1]=>
       int(2)
+      NULL
     }
   }
-  [2]=>
-  array(2) {
+  dict(2) {
     ["function"]=>
     string(3) "bar"
     ["args"]=>
-    array(0) {
+    vec(0) {
     }
   }
-  [3]=>
-  array(4) {
+  dict(4) {
     ["file"]=>
-    string(%d) "%s"
+    string(%d) "%s/test/quick/debug_backtrace.php"
     ["line"]=>
     int(20)
     ["function"]=>
     string(14) "call_user_func"
     ["args"]=>
-    array(1) {
-      [0]=>
-      string(3) "bar"
+    vec(1) {
+      function(bar)
     }
   }
-  [4]=>
-  array(4) {
+  dict(4) {
     ["file"]=>
-    string(%d) "%s"
+    string(%d) "%s/test/quick/debug_backtrace.php"
     ["line"]=>
     int(29)
     ["function"]=>
     string(3) "foo"
     ["args"]=>
-    array(0) {
+    vec(0) {
     }
   }
-  [5]=>
-  array(4) {
+  dict(4) {
     ["file"]=>
-    string(%d) "%s"
+    string(%d) "%s/test/quick/debug_backtrace.php"
     ["line"]=>
-    int(34)
+    int(35)
     ["function"]=>
     string(4) "main"
     ["args"]=>
-    array(0) {
+    vec(0) {
     }
   }
-}
-array(2) {
-  [0]=>
-  array(4) {
-    ["file"]=>
-    string(%d) "%s"
-    ["line"]=>
-    int(32)
+  dict(2) {
     ["function"]=>
-    string(13) "error_handler"
+    string(26) "entrypoint_debug_backtrace"
     ["args"]=>
-    array(6) {
-      [0]=>
-      int(8)
-      [1]=>
-      string(63) "Use of undefined constant FakeConstant - assumed 'FakeConstant'"
-      [2]=>
-      string(%d) "%s"
-      [3]=>
-      int(32)
-      [4]=>
-      array(0) {
-      }
-      [5]=>
-      array(2) {
-        [0]=>
-        array(2) {
-          ["file"]=>
-          string(%d) "%s"
-          ["line"]=>
-          int(32)
-        }
-        [1]=>
-        array(4) {
-          ["file"]=>
-          string(%d) "%s"
-          ["line"]=>
-          int(34)
-          ["function"]=>
-          string(4) "main"
-          ["args"]=>
-          array(0) {
-          }
-        }
-      }
-    }
-  }
-  [1]=>
-  array(4) {
-    ["file"]=>
-    string(%d) "%s"
-    ["line"]=>
-    int(34)
-    ["function"]=>
-    string(4) "main"
-    ["args"]=>
-    array(0) {
+    vec(0) {
     }
   }
 }

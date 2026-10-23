@@ -1,25 +1,27 @@
 <?hh
 
 class blah {
-  private function breaker() {
-    static $x = 0;
-    return $x++ == 0 ? array() : null;
+
+  private static int $breakerX = 0;
+  private function breaker(): ?vec<nothing>{
+    $__lval_tmp_0 = self::$breakerX;
+    self::$breakerX++;
+    return $__lval_tmp_0== 0 ? vec[] : null;
   }
 
-  public function foo() {
+  public function foo() :void{
     $x = 0;
     $y = 0;
 
-    if (($top_var_ref =& $this->breaker()) === NULL) {
+    if ($this->breaker() === NULL) {
       echo "hi\n";
     }
     echo "ok\n";
   }
 }
 
-function main() {
+<<__EntryPoint>> function main(): void {
   $x = new blah();
   $x->foo();
   $x->foo();
 }
-main();

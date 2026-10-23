@@ -13,24 +13,28 @@
    | license@php.net so we can mail you a copy immediately.               |
    +----------------------------------------------------------------------+
 */
-#ifndef incl_HHBBC_PARSE_H_
-#define incl_HHBBC_PARSE_H_
+#pragma once
 
-#include <vector>
 #include <memory>
 
+#include "hphp/hhbbc/representation.h"
+
 namespace HPHP { struct UnitEmitter; }
-namespace HPHP { namespace HHBBC {
+
+namespace HPHP::HHBBC {
 
 //////////////////////////////////////////////////////////////////////
 
-namespace php { struct Unit; struct Program; }
-
-std::unique_ptr<php::Unit> parse_unit(php::Program& prog,
-                                      std::unique_ptr<UnitEmitter> ue);
+struct ParsedUnit {
+  std::unique_ptr<php::Unit> unit;
+  std::vector<std::unique_ptr<php::Func>> funcs;
+  std::vector<std::unique_ptr<php::Class>> classes;
+  // Identifiers this unit might access (not exhaustive).
+  SStringSet cinitPredeps;
+  SStringSet predeps;
+};
+ParsedUnit parse_unit(const UnitEmitter& ue);
 
 //////////////////////////////////////////////////////////////////////
 
-}}
-
-#endif
+}

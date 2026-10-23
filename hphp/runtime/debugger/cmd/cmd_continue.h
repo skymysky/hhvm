@@ -14,12 +14,11 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_EVAL_DEBUGGER_CMD_CONTINUE_H_
-#define incl_HPHP_EVAL_DEBUGGER_CMD_CONTINUE_H_
+#pragma once
 
 #include "hphp/runtime/debugger/cmd/cmd_flow_control.h"
 
-namespace HPHP { namespace Eval {
+namespace HPHP::Eval {
 ///////////////////////////////////////////////////////////////////////////////
 
 struct CmdContinue : CmdFlowControl {
@@ -28,9 +27,10 @@ struct CmdContinue : CmdFlowControl {
   void help(DebuggerClient&) override;
   void onSetup(DebuggerProxy&, CmdInterrupt&) override;
   void onBeginInterrupt(DebuggerProxy&, CmdInterrupt&) override;
+
+  std::string name() const override { return "continue"; }
 };
 
 ///////////////////////////////////////////////////////////////////////////////
-}}
+}
 
-#endif // incl_HPHP_EVAL_DEBUGGER_CMD_CONTINUE_H_

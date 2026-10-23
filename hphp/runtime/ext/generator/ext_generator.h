@@ -15,8 +15,7 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_EXT_GENERATOR_H_
-#define incl_HPHP_EXT_GENERATOR_H_
+#pragma once
 
 
 #include "hphp/runtime/base/builtin-functions.h"
@@ -35,9 +34,8 @@ struct BaseGenerator {
   enum class State : uint8_t {
     Created = 0,  // generator was created but never iterated
     Started = 1,  // generator was iterated but not currently running
-    Priming = 2,  // generator is advancing to the first yield
-    Running = 3,  // generator is currently being iterated
-    Done    = 4   // generator has finished its execution
+    Running = 2,  // generator is currently being iterated
+    Done    = 3   // generator has finished its execution
   };
 
   static constexpr ptrdiff_t resumableOff() {
@@ -49,9 +47,6 @@ struct BaseGenerator {
   static constexpr ptrdiff_t resumeAddrOff() {
     return resumableOff() + Resumable::resumeAddrOff();
   }
-  static constexpr ptrdiff_t resumeOffsetOff() {
-    return resumableOff() + Resumable::resumeOffsetOff();
-  }
   static constexpr ptrdiff_t stateOff() {
     return offsetof(BaseGenerator, m_state);
   }
@@ -62,14 +57,13 @@ struct BaseGenerator {
    */
   static Offset userBase(const Func* func) {
     assertx(func->isGenerator());
-    auto base = func->base();
 
-    // Skip past VerifyParamType and EntryNoop bytecodes
-    auto pc = func->unit()->at(base);
-    auto past = func->unit()->at(func->past());
+    // Skip past function initialization bytecodes
+    auto pc = func->entry();
+    auto end = func->at(func->bclen());
     while (peek_op(pc) != OpCreateCont) {
       pc += instrLen(pc);
-      always_assert(pc < past);
+      always_assert(pc < end);
     }
 
     auto DEBUG_ONLY op1 = decode_op(pc);
@@ -77,7 +71,7 @@ struct BaseGenerator {
     assertx(op1 == OpCreateCont);
     assertx(op2 == OpPopC);
 
-    return func->unit()->offsetOf(pc);
+    return func->offsetOf(pc);
   }
 
   static size_t genSize(size_t ndSize, size_t frameSz) {
@@ -100,7 +94,6 @@ struct BaseGenerator {
     auto const obj = new (objmem) ObjectData(cls, 0, HeaderKind::NativeObject);
     assertx((void*)obj == (void*)objmem);
     assertx(obj->hasExactlyOneRef());
-    assertx(obj->noDestruct());
     return obj;
   }
 
@@ -121,7 +114,11 @@ struct BaseGenerator {
   }
 
   bool isRunning() const {
-    return getState() == State::Priming || getState() == State::Running;
+    return getState() == State::Running;
+  }
+
+  bool isDone() const {
+    return getState() == State::Done;
   }
 
   void startedCheck() {
@@ -132,19 +129,14 @@ struct BaseGenerator {
     }
   }
 
-  void preNext(bool checkStarted) {
+  void checkNext(bool checkStarted) {
     if (checkStarted) {
       startedCheck();
     }
     switch (getState()) {
       case State::Created:
-        setState(State::Priming);
-        break;
       case State::Started:
-        setState(State::Running);
         break;
-      // For our purposes priming is basically running.
-      case State::Priming:
       case State::Running:
         throw_exception(
           SystemLib::AllocExceptionObject("Generator is already running")
@@ -168,17 +160,13 @@ static_assert(offsetof(BaseGenerator, m_resumable) == 0,
 
 ///////////////////////////////////////////////////////////////////////////////
 // class Generator
-struct Generator final : BaseGenerator {
+struct Generator final : BaseGenerator, SystemLib::ClassLoader<"Generator"> {
   explicit Generator();
   ~Generator();
   Generator& operator=(const Generator& other);
 
   static ObjectData* Create(const ActRec* fp, size_t numSlots,
-                            jit::TCA resumeAddr, Offset resumeOffset);
-  static Class* getClass() {
-    assertx(s_class);
-    return s_class;
-  }
+                            jit::TCA resumeAddr, Offset suspendOffset);
   static constexpr ptrdiff_t objectOff() {
     return -(Native::dataOffset<Generator>());
   }
@@ -186,29 +174,23 @@ struct Generator final : BaseGenerator {
     return Native::data<Generator>(obj);
   }
 
-  void yield(Offset resumeOffset, const Cell* key, Cell value);
+  void yield(Offset suspendOffset, const TypedValue* key, TypedValue value);
   void copyVars(const ActRec *fp);
-  void ret(TypedValue tv) { done(tv); }
-  void fail() { done(make_tv<KindOfUninit>()); }
-  bool successfullyFinishedExecuting();
+  void ret() { done(); }
+  void fail() { done(); }
   ObjectData* toObject() {
     return Native::object<Generator>(this);
   }
 
 private:
-  void done(TypedValue tv);
+  void done();
 
 public:
   int64_t m_index;
-  Cell m_key;
-  Cell m_value;
-  TypedValue m_delegate;
-
-  static Class* s_class;
-  static const StaticString s_className;
+  TypedValue m_key;
+  TypedValue m_value;
 };
 
 ///////////////////////////////////////////////////////////////////////////////
 }
 
-#endif // incl_HPHP_EXT_GENERATOR_H_

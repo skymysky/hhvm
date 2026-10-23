@@ -26,7 +26,7 @@ namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
 // statics
 
-IMPLEMENT_REQUEST_LOCAL(DateTime::LastErrors, DateTime::s_lastErrors);
+RDS_LOCAL(DateTime::LastErrors, DateTime::s_lastErrors);
 
 const char *DateTime::DateFormatRFC822     = "D, d M y H:i:s O";
 const char *DateTime::DateFormatRFC850     = "l, d-M-y H:i:s T";
@@ -85,7 +85,8 @@ const char *DateTime::OrdinalSuffix(int number) {
 }
 
 bool DateTime::IsLeap(int year) {
-  return timelib_is_leap(year);
+  // Aka "timelib_is_leap(year)" (from "timelib_private.h").
+  return (year % 4 == 0 && (year % 100 != 0 || year % 400 == 0));
 }
 
 int DateTime::DaysInMonth(int y, int m) {
@@ -146,16 +147,17 @@ const StaticString
     ret.set(name, (int)parsed_time->elem);              \
   }
 
-Array DateTime::Parse(const String& datetime) {
-  struct timelib_error_container* error;
+Array DateTime::Parse(const OptString& datetime) {
+
+  timelib_error_container* error;
   timelib_time* parsed_time =
     timelib_strtotime((char *)datetime.data(), datetime.size(), &error,
                       TimeZone::GetDatabase(), TimeZone::GetTimeZoneInfoRaw);
   return DateTime::ParseTime(parsed_time, error);
 }
 
-Array DateTime::Parse(const String& format, const String& date) {
-  struct timelib_error_container* error;
+Array DateTime::Parse(const OptString& format, const OptString& date) {
+  timelib_error_container* error;
   timelib_time* parsed_time =
     timelib_parse_from_format((char *)format.data(), (char *)date.data(),
                               date.size(), &error, TimeZone::GetDatabase(),
@@ -163,7 +165,7 @@ Array DateTime::Parse(const String& format, const String& date) {
   return DateTime::ParseTime(parsed_time, error);
 }
 
-Array DateTime::ParseAsStrptime(const String& format, const String& date) {
+Array DateTime::ParseAsStrptime(const OptString& format, const OptString& date) {
   struct tm parsed_time;
   memset(&parsed_time, 0, sizeof(parsed_time));
   char* unparsed_part = strptime(date.data(), format.data(), &parsed_time);
@@ -171,7 +173,7 @@ Array DateTime::ParseAsStrptime(const String& format, const String& date) {
     return Array();
   }
 
-  return make_map_array(
+  return make_dict_array(
     s_tm_sec,  parsed_time.tm_sec,
     s_tm_min,  parsed_time.tm_min,
     s_tm_hour, parsed_time.tm_hour,
@@ -180,13 +182,13 @@ Array DateTime::ParseAsStrptime(const String& format, const String& date) {
     s_tm_year, parsed_time.tm_year,
     s_tm_wday, parsed_time.tm_wday,
     s_tm_yday, parsed_time.tm_yday,
-    s_unparsed, String(unparsed_part, CopyString)
+    s_unparsed, OptString(unparsed_part, CopyString)
   );
 }
 
-Array DateTime::ParseTime(timelib_time* parsed_time,
-                          struct timelib_error_container* error) {
-  Array ret;
+  Array DateTime::ParseTime(timelib_time* parsed_time,
+                          timelib_error_container* error) {
+  auto ret = Array::CreateDict();
   PHP_DATE_PARSE_DATE_SET_TIME_ELEMENT(s_year,      y);
   PHP_DATE_PARSE_DATE_SET_TIME_ELEMENT(s_month,     m);
   PHP_DATE_PARSE_DATE_SET_TIME_ELEMENT(s_day,       d);
@@ -194,11 +196,19 @@ Array DateTime::ParseTime(timelib_time* parsed_time,
   PHP_DATE_PARSE_DATE_SET_TIME_ELEMENT(s_minute,    i);
   PHP_DATE_PARSE_DATE_SET_TIME_ELEMENT(s_second,    s);
 
+#if TIMELIB_VERSION >= TIMELIB_MODERN
+  if (parsed_time->us == TIMELIB_UNSET) {
+    ret.set(s_fraction, false);
+  } else {
+    ret.set(s_fraction, (double) parsed_time->us / 1000000.0);
+  }
+#else
   if (parsed_time->f == -99999) {
     ret.set(s_fraction, false);
   } else {
     ret.set(s_fraction, parsed_time->f);
   }
+#endif
 
   setLastErrors(error);
   {
@@ -222,38 +232,39 @@ Array DateTime::ParseTime(timelib_time* parsed_time,
       break;
     case TIMELIB_ZONETYPE_ID:
       if (parsed_time->tz_abbr) {
-        ret.set(s_tz_abbr, String(parsed_time->tz_abbr, CopyString));
+        ret.set(s_tz_abbr, OptString(parsed_time->tz_abbr, CopyString));
       }
       if (parsed_time->tz_info) {
-        ret.set(s_tz_id, String(parsed_time->tz_info->name, CopyString));
+        ret.set(s_tz_id, OptString(parsed_time->tz_info->name, CopyString));
       }
       break;
     case TIMELIB_ZONETYPE_ABBR:
       PHP_DATE_PARSE_DATE_SET_TIME_ELEMENT(s_zone, z);
       ret.set(s_is_dst, (bool)parsed_time->dst);
-      ret.set(s_tz_abbr, String(parsed_time->tz_abbr, CopyString));
+      ret.set(s_tz_abbr, OptString(parsed_time->tz_abbr, CopyString));
       break;
     }
   }
 
-  {
-    Array element;
-    if (parsed_time->have_relative) {
-      element.set(s_year,   parsed_time->relative.y);
-      element.set(s_month,  parsed_time->relative.m);
-      element.set(s_day,    parsed_time->relative.d);
-      element.set(s_hour,   parsed_time->relative.h);
-      element.set(s_minute, parsed_time->relative.i);
-      element.set(s_second, parsed_time->relative.s);
+  if (parsed_time->have_relative) {
+    auto element = make_dict_array(
+      s_year,   parsed_time->relative.y,
+      s_month,  parsed_time->relative.m,
+      s_day,    parsed_time->relative.d,
+      s_hour,   parsed_time->relative.h,
+      s_minute, parsed_time->relative.i,
+      s_second, parsed_time->relative.s
+    );
+    if (
 #if defined(TIMELIB_VERSION)
-      if (parsed_time->relative.have_weekday_relative) {
+        parsed_time->relative.have_weekday_relative
 #else
-      if (parsed_time->have_weekday_relative) {
+        parsed_time->have_weekday_relative
 #endif
-        element.set(s_weekday, parsed_time->relative.weekday);
-      }
-      ret.set(s_relative, element);
+    ) {
+      element.set(s_weekday, parsed_time->relative.weekday);
     }
+    ret.set(s_relative, element);
   }
 
   timelib_time_dtor(parsed_time);
@@ -373,7 +384,13 @@ int DateTime::offset() const {
     switch (m_time->zone_type) {
     case TIMELIB_ZONETYPE_ABBR:
     case TIMELIB_ZONETYPE_OFFSET:
+
+#if TIMELIB_VERSION >= TIMELIB_MODERN
+      return m_time->z + m_time->dst * 3600;
+#else
       return (m_time->z - (m_time->dst * 60)) * -60;
+#endif
+
     default:
       {
         bool error;
@@ -456,6 +473,9 @@ void DateTime::setTime(int hour, int minute, int second) {
   m_time->i = minute;
   m_time->s = second;
   update();
+#if TIMELIB_VERSION >= TIMELIB_MODERN
+  timelib_update_from_sse(m_time.get());
+#endif
 }
 
 void DateTime::setTimezone(req::ptr<TimeZone> timezone) {
@@ -469,7 +489,7 @@ void DateTime::setTimezone(req::ptr<TimeZone> timezone) {
     return;
   }
 
-  assert(m_tz->isValid());
+  assertx(m_tz->isValid());
 
   switch (m_tz->type()) {
     case TIMELIB_ZONETYPE_ID:
@@ -490,7 +510,7 @@ void DateTime::setTimezone(req::ptr<TimeZone> timezone) {
   timelib_unixtime2local(m_time.get(), m_time->sse);
 }
 
-bool DateTime::modify(const String& diff) {
+bool DateTime::modify(const OptString& diff) {
   timelib_error_container* error = nullptr;
   timelib_time *tmp_time = timelib_strtotime((char*)diff.data(), diff.size(),
                                              &error, TimeZone::GetDatabase(),
@@ -535,6 +555,11 @@ void DateTime::internalModify(timelib_time *t) {
       }
     }
   }
+#if TIMELIB_VERSION >= TIMELIB_MODERN
+  if (t->us != TIMELIB_UNSET) {
+    m_time->us = t->us;
+  }
+#endif
   internalModifyRelative(&(t->relative), t->have_relative, 1);
 }
 
@@ -546,6 +571,9 @@ void DateTime::internalModifyRelative(timelib_rel_time *rel,
   m_time->relative.h = rel->h * bias;
   m_time->relative.i = rel->i * bias;
   m_time->relative.s = rel->s * bias;
+#if TIMELIB_VERSION >= TIMELIB_MODERN
+  m_time->relative.us = rel->us * bias;
+#endif
   m_time->relative.weekday = rel->weekday;
   m_time->have_relative = have_relative;
   m_time->relative.special = rel->special;
@@ -565,7 +593,15 @@ void DateTime::add(const req::ptr<DateInterval>& interval) {
 
 void DateTime::sub(const req::ptr<DateInterval>& interval) {
   timelib_rel_time *rel = interval->get();
+#if TIMELIB_VERSION >= TIMELIB_MODERN
+  timelib_time* new_time;
+  new_time = timelib_sub(m_time.get(), rel);
+  m_timestamp = 0;
+  m_timestampSet = false;
+  m_time = TimePtr(new_time, time_deleter());
+#else
   internalModifyRelative(rel, true, rel->invert ?  1 : -1);
+#endif
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -583,18 +619,14 @@ void DateTime::toTm(struct tm &ta) const {
   ta.tm_yday = doy();
   if (utc()) {
     ta.tm_isdst = 0;
-#ifndef _MSC_VER
     ta.tm_gmtoff = 0;
     ta.tm_zone = "GMT";
-#endif
   } else {
     timelib_time_offset *offset =
       timelib_get_time_zone_info(m_time->sse, m_time->tz_info);
     ta.tm_isdst = offset->is_dst;
-#ifndef _MSC_VER
     ta.tm_gmtoff = offset->offset;
     ta.tm_zone = offset->abbr;
-#endif
     timelib_time_offset_dtor(offset);
   }
 }
@@ -638,16 +670,16 @@ int64_t DateTime::toInteger(char format) const {
   case 'Z': return utc() ? 0 : m_tz->offset(toTimeStamp(error));
   case 'U': return toTimeStamp(error);
   }
-  throw_invalid_argument("unknown format char: %d", (int)format);
+  raise_invalid_argument_warning("unknown format char: %d", (int)format);
   return -1;
 }
 
-String DateTime::toString(const String& format, bool stdc /* = false */) const {
-  if (format.empty()) return String();
+OptString DateTime::toString(const OptString& format, bool stdc /* = false */) const {
+  if (format.empty()) return OptString();
   return stdc ? stdcFormat(format) : rfcFormat(format);
 }
 
-String DateTime::toString(DateFormat format) const {
+OptString DateTime::toString(DateFormat format) const {
   switch (format) {
   case DateFormat::RFC822:     return rfcFormat(DateFormatRFC822);
   case DateFormat::RFC850:     return rfcFormat(DateFormatRFC850);
@@ -661,11 +693,11 @@ String DateTime::toString(DateFormat format) const {
   default:
     assertx(false);
   }
-  throw_invalid_argument("format: %d", static_cast<int>(format));
-  return String();
+  raise_invalid_argument_warning("format: %d", static_cast<int>(format));
+  return OptString();
 }
 
-String DateTime::rfcFormat(const String& format) const {
+OptString DateTime::rfcFormat(const OptString& format) const {
   StringBuffer s;
   bool rfc_colon = false;
   bool error;
@@ -699,11 +731,17 @@ String DateTime::rfcFormat(const String& format) const {
     case 'H': s.printf("%02d", (int)hour()); break;
     case 'i': s.printf("%02d", (int)minute()); break;
     case 's': s.printf("%02d", (int)second()); break;
+#if TIMELIB_VERSION >= TIMELIB_MODERN
+    case 'u': s.printf("%06d", (int)m_time->us); break;
+    case 'v': s.printf("%03d", (int)(m_time->us / 1000)); break;
+#else
     case 'u': s.printf("%06d", (int)floor(fraction() * 1000000)); break;
     case 'v': s.printf("%03d", (int)floor(fraction() * 1000)); break;
+#endif
     case 'I': s.append(!utc() && m_tz->dst(toTimeStamp(error)) ? 1 : 0);
       break;
-    case 'P': rfc_colon = true; /* break intentionally missing */
+    case 'P': rfc_colon = true;
+      [[fallthrough]];
     case 'O':
       if (utc()) {
         s.printf("+00%s00", rfc_colon ? ":" : "");
@@ -721,11 +759,16 @@ String DateTime::rfcFormat(const String& format) const {
         if (m_time->zone_type != TIMELIB_ZONETYPE_OFFSET) {
           s.append(m_time->tz_abbr);
         } else {
+#if TIMELIB_VERSION >= TIMELIB_MODERN
+          auto offset = m_time->z;
+#else
           auto offset = m_time->z * -60;
+#endif
+
           char abbr[9] = {0};
           snprintf(abbr, 9, "GMT%c%02d%02d",
             ((offset < 0) ? '-' : '+'),
-            abs(offset / 3600),
+            abs(offset / 3600) % 100, // % 100 to convince compiler we have 2 digits
             abs((offset % 3600) / 60));
           s.append(abbr);
         }
@@ -738,11 +781,15 @@ String DateTime::rfcFormat(const String& format) const {
         if (m_time->zone_type != TIMELIB_ZONETYPE_OFFSET) {
           s.append(m_tz->name());
         } else {
+#if TIMELIB_VERSION >= TIMELIB_MODERN
+          auto offset = m_time->z;
+#else
           auto offset = m_time->z * -60;
+#endif
           char abbr[7] = {0};
           snprintf(abbr, 7, "%c%02d:%02d",
             ((offset < 0) ? '-' : '+'),
-            abs(offset / 3600),
+            abs(offset / 3600) % 100, // % 100 to convince compiler we have 2 digits
             abs((offset % 3600) / 60));
           s.append(abbr);
         }
@@ -777,7 +824,8 @@ String DateTime::rfcFormat(const String& format) const {
       break;
     case 'U': s.printf("%" PRId64, toTimeStamp(error)); break;
     case '\\':
-      if (i < format.size()) i++; /* break intentionally missing */
+      if (i < format.size()) i++;
+      [[fallthrough]];
     default:
       s.append(format[i]);
       break;
@@ -786,7 +834,7 @@ String DateTime::rfcFormat(const String& format) const {
   return s.detach();
 }
 
-String DateTime::stdcFormat(const String& format) const {
+OptString DateTime::stdcFormat(const OptString& format) const {
   // TODO: Fixme under MSVC!
   struct tm ta;
   timelib_time_offset *offset = nullptr;
@@ -800,17 +848,13 @@ String DateTime::stdcFormat(const String& format) const {
   ta.tm_yday = doy();
   if (utc()) {
     ta.tm_isdst = 0;
-#ifndef _MSC_VER
     ta.tm_gmtoff = 0;
     ta.tm_zone = "GMT";
-#endif
   } else {
     offset = timelib_get_time_zone_info(m_time->sse, m_time->tz_info);
     ta.tm_isdst = offset->is_dst;
-#ifndef _MSC_VER
     ta.tm_gmtoff = offset->offset;
     ta.tm_zone = offset->abbr;
-#endif
   }
 
   if ((ta.tm_sec < 0 || ta.tm_sec > 60) ||
@@ -820,8 +864,8 @@ String DateTime::stdcFormat(const String& format) const {
       (ta.tm_mon < 0 || ta.tm_mon > 11) ||
       (ta.tm_wday < 0 || ta.tm_wday > 6) ||
       (ta.tm_yday < 0 || ta.tm_yday > 365)) {
-    throw_invalid_argument("argument: invalid time");
-    return String();
+    raise_invalid_argument_warning("argument: invalid time");
+    return OptString();
   }
 
   int max_reallocs = 5;
@@ -840,18 +884,18 @@ String DateTime::stdcFormat(const String& format) const {
     timelib_time_offset_dtor(offset);
   }
   if (real_len && real_len != buf_len) {
-    return String(buf, real_len, AttachString);
+    return OptString(buf, real_len, AttachString);
   }
   free(buf);
-  throw_invalid_argument("format: (over internal buffer)");
-  return String();
+  raise_invalid_argument_warning("format: (over internal buffer)");
+  return OptString();
 }
 
 Array DateTime::toArray(ArrayFormat format) const {
   bool error;
   switch (format) {
   case ArrayFormat::TimeMap:
-    return make_map_array(
+    return make_dict_array(
       s_seconds, second(),
       s_minutes, minute(),
       s_hours,   hour(),
@@ -868,7 +912,7 @@ Array DateTime::toArray(ArrayFormat format) const {
     {
       struct tm tm;
       toTm(tm);
-      return make_map_array(
+      return make_dict_array(
         s_tm_sec,   tm.tm_sec,
         s_tm_min,   tm.tm_min,
         s_tm_hour,  tm.tm_hour,
@@ -884,7 +928,7 @@ Array DateTime::toArray(ArrayFormat format) const {
     {
       struct tm tm;
       toTm(tm);
-      return make_packed_array(
+      return make_vec_array(
         tm.tm_sec,
         tm.tm_min,
         tm.tm_hour,
@@ -897,13 +941,13 @@ Array DateTime::toArray(ArrayFormat format) const {
       );
     }
   }
-  return empty_array();
+  return empty_vec_array();
 }
 
-bool DateTime::fromString(const String& input, req::ptr<TimeZone> tz,
+bool DateTime::fromString(const OptString& input, req::ptr<TimeZone> tz,
                           const char* format /*=NUL*/,
                           bool throw_on_error /*= true*/) {
-  struct timelib_error_container *error;
+  timelib_error_container *error;
   timelib_time *t;
   if (format) {
     t = timelib_parse_from_format((char*)format, (char*)input.data(),
@@ -941,11 +985,15 @@ bool DateTime::fromString(const String& input, req::ptr<TimeZone> tz,
     setTimezone(TimeZone::Current());
   }
 
-  // needed if any date part is missing
-  timelib_fill_holes(t, m_time.get(), TIMELIB_NO_CLONE);
+  int options = TIMELIB_NO_CLONE;
+#if TIMELIB_VERSION >= TIMELIB_MODERN
+	if (format != nullptr) {
+    	options |= TIMELIB_OVERRIDE_TIME;
+  }
+#endif
+  timelib_fill_holes(t, m_time.get(), options);
   timelib_update_ts(t, m_tz->getTZInfo());
   timelib_update_from_sse(t);
-
   int error2;
   m_timestamp = timelib_date_to_int(t, &error2);
   if (error1 || error2) {
@@ -996,7 +1044,7 @@ const StaticString
   s_astronomical_twilight_end("astronomical_twilight_end");
 
 Array DateTime::getSunInfo(double latitude, double longitude) const {
-  Array ret;
+  Array ret = Array::CreateDict();
   timelib_sll sunrise, sunset, transit;
   double ddummy;
 
@@ -1114,7 +1162,7 @@ Variant DateTime::getSunInfo(SunInfoFormat retformat,
     char retstr[6];
     snprintf(retstr, sizeof(retstr),
              "%02d:%02d", (int) N, (int) (60 * (N - (int) N)));
-    return String(retstr, CopyString);
+    return OptString(retstr, CopyString);
   }
 
   assertx(retformat == SunInfoFormat::ReturnDouble);

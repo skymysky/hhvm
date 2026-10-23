@@ -25,9 +25,11 @@
 #include <utility>
 
 #include <folly/DiscriminatedPtr.h>
-#include <folly/Optional.h>
 
 #include "hphp/util/match.h"
+#include "hphp/util/optional.h"
+
+#include <tbb/concurrent_hash_map.h>
 
 /*
  * Generic interfaces to query debug information in a platform-agnostic
@@ -313,7 +315,7 @@ struct RValueRefType {
 // represents an array of indeterminate size.
 struct ArrType {
   Type element;
-  folly::Optional<std::size_t> count;
+  HPHP::Optional<std::size_t> count;
 };
 
 // An object (a class, union, enum, or primitive), which has a name (see above)
@@ -414,7 +416,7 @@ struct Object {
     ObjectType type;
     // The offset within this object where this base class is placed. If the
     // offset isn't present, the base class is virtual.
-    folly::Optional<std::size_t> offset;
+    HPHP::Optional<std::size_t> offset;
   };
   std::vector<Base> bases;
 
@@ -424,13 +426,13 @@ struct Object {
     std::string name;
     // Offset of the member from the beginning of the object. If no offset is
     // present, the member is static.
-    folly::Optional<std::size_t> offset;
+    HPHP::Optional<std::size_t> offset;
     // Optional string for static members giving the symbol for this member.
     std::string linkage_name;
     // Optional address for static members giving the address for this
     // member. Whether this address is absolute or relocatable depends on the
     // file the information is being extracted from.
-    folly::Optional<std::uintptr_t> address;
+    HPHP::Optional<std::uintptr_t> address;
     Type type;
   };
   std::vector<Member> members;
@@ -454,9 +456,9 @@ struct Object {
     // Optional string for static functions giving the symbol for this function.
     std::string linkage_name;
     // Optional address for static functions giving the address for this
-    // function. Whether this addresss is absolute or relocatable depends on the
+    // function. Whether this address is absolute or relocatable depends on the
     // file the information is being extracted from.
-    folly::Optional<std::uintptr_t> address;
+    HPHP::Optional<std::uintptr_t> address;
   };
   std::vector<Function> functions;
 
@@ -481,7 +483,13 @@ struct TypeParser {
   // of the parser. Run the parser on the given filename, which may be an
   // executable or some form of object file. If the platform doesn't have a
   // supported debug info parser, this function will return null.
-  static std::unique_ptr<TypeParser> make(const std::string& filename);
+  // The number of threads controls parallelism when building up state if the
+  // implementation supports it. More isn't necessarily better, and the dwarf
+  // implementation will allocate memory proportional to the size of the input
+  // binary and the number of threads. If the binary is very large, it may
+  // exhaust memory resources in some systems.
+  static std::unique_ptr<TypeParser> make(const std::string& filename,
+                                          int num_threads);
 
   // Iterate over the list of all object types defined in the file. This is safe
   // to call from multiple threads concurrently.
@@ -531,9 +539,12 @@ struct Printer {
   virtual void operator()(
     std::ostream& os,
     std::size_t begin = 0,
-    std::size_t end = std::numeric_limits<std::size_t>::max()
+    std::size_t end = std::numeric_limits<std::size_t>::max(),
+    bool dwp = false
   ) const = 0;
 };
+
+const char* show(ObjectTypeName::Linkage);
 
 ////////////////////////////////////////////////////////////////////////////////
 

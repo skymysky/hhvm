@@ -1,19 +1,18 @@
 <?hh
 
 class one {
-  public function foo() { echo "foo\n"; }
+  public function foo() :mixed{ echo "foo\n"; }
 }
 class doer {
-  public function junk($x) {
+  public function junk($x) :mixed{
     $x->foo();
   }
 }
 
-function main() {
+<<__EntryPoint>> function main(): void {
   $x = new doer;
   $o = new one;
   $x->junk($o);
   $x->junk($o);
   $x->junk($o);
 }
-main();

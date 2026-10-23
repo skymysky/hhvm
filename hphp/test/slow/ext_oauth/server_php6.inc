@@ -1,12 +1,12 @@
-<?php
+<?hh
 
 require __DIR__."/random_port.inc";
 
 function http_server_skipif($socket_string) {
 
-	if (!function_exists('pcntl_fork')) die('skip pcntl_fork() not available');
-	if (!function_exists('posix_kill')) die('skip posix_kill() not available');
-	if (!stream_socket_server($socket_string)) die('skip stream_socket_server() failed');
+	if (!function_exists('pcntl_fork')) exit('skip pcntl_fork() not available');
+	if (!function_exists('posix_kill')) exit('skip posix_kill() not available');
+	if (!stream_socket_server($socket_string)) exit('skip stream_socket_server() failed');
 }
 
 /* Minimal HTTP server with predefined responses.
@@ -15,7 +15,7 @@ function http_server_skipif($socket_string) {
  * $files is an array of files containing N responses for N expected requests. Server dies after N requests.
  * $output is a stream on which everything sent by clients is written to
  */
-function http_server($socket_string, array $files, &$output = null)
+function http_server($socket_string, AnyArray $files, inout $output)
 {
 	ini_set('default_socket_timeout', 5);
 	pcntl_alarm(5);
@@ -33,7 +33,7 @@ function http_server($socket_string, array $files, &$output = null)
 
 	$pid = pcntl_fork();
 	if ($pid == -1) {
-		die('could not fork');
+		exit('could not fork');
 	} else if ($pid) {
 		return $pid;
 	}
@@ -78,5 +78,3 @@ function http_server_kill($pid) {
 	posix_kill($pid, SIGTERM);
 	pcntl_waitpid($pid, $status);
 }
-
-?>

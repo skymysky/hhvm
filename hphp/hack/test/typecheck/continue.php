@@ -9,10 +9,10 @@
  *
  */
 
-function without_arg() {
-  foreach (array(1, 2, 3) as $a) {
-    foreach (array(1, 2, 3, 4) as $b) {
-      foreach (array(1, 2, 3, 4) as $c) {
+function without_arg(): void {
+  foreach (vec[1, 2, 3] as $a) {
+    foreach (vec[1, 2, 3, 4] as $b) {
+      foreach (vec[1, 2, 3, 4] as $c) {
         continue;
       }
     }

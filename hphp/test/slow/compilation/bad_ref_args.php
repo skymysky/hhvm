@@ -1,9 +1,7 @@
-<?php
+<?hh
 
-function main() {
+<<__EntryPoint>>
+function main() :mixed{
   $a = "foo";
-  var_dump(socket_select($a, $a, $a, 42));
-  var_dump(sscanf("42", "%d", new stdclass));
+  var_dump(socket_select(inout $a, inout $a, inout $a, 42));
 }
-
-main();

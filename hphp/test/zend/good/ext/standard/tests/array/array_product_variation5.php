@@ -1,29 +1,26 @@
-<?php
+<?hh
 /* Prototype  : mixed array_product(array input)
- * Description: Returns the product of the array entries 
+ * Description: Returns the product of the array entries
  * Source code: ext/standard/array.c
- * Alias to functions: 
+ * Alias to functions:
  */
-
-echo "*** Testing array_product() : usage variation ***\n";
-
-// Initialise function arguments not being substituted (if any)
-
-//get an unset variable
-$unset_var = 10;
-unset ($unset_var);
 
 // define some classes
 class classWithToString
 {
-	public function __toString() {
-		return "Class A object";
-	}
+    public function __toString() :mixed{
+        return "Class A object";
+    }
 }
 
 class classWithoutToString
 {
 }
+<<__EntryPoint>> function main(): void {
+echo "*** Testing array_product() : usage variation ***\n";
+
+// Initialise function arguments not being substituted (if any)
+
 
 // heredoc string
 $heredoc = <<<EOT
@@ -31,11 +28,11 @@ hello world
 EOT;
 
 // add arrays
-$index_array = array (1, 2, 3);
-$assoc_array = array ('one' => 1, 'two' => 2);
+$index_array = vec[1, 2, 3];
+$assoc_array = dict['one' => 1, 'two' => 2];
 
 //array of values to iterate over
-$inputs = array(
+$inputs = dict[
 
       // int data
       'int 0' => 0,
@@ -74,12 +71,8 @@ $inputs = array(
       'instance of classWithToString' => new classWithToString(),
       'instance of classWithoutToString' => new classWithoutToString(),
 
-      // undefined data
-      'undefined var' => @$undefined_var,
 
-      // unset data
-      'unset var' => @$unset_var,
-);
+];
 
 // loop through each element of the array for input
 
@@ -88,5 +81,5 @@ foreach($inputs as $key =>$value) {
       var_dump( array_product($value) );
 };
 
-?>
-===DONE===
+echo "===DONE===\n";
+}

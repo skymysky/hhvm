@@ -1,6 +1,6 @@
-<?php
-
-$root = simplexml_load_string(b'<?xml version="1.0"?>
+<?hh
+<<__EntryPoint>> function main(): void {
+$root = simplexml_load_string('<?xml version="1.0"?>
 <root>
  <child>Hello</child>
  <child>World</child>
@@ -8,8 +8,7 @@ $root = simplexml_load_string(b'<?xml version="1.0"?>
 ');
 
 foreach (new IteratorIterator($root->child) as $child) {
-	echo $child."\n";
+	echo $child->__toString()."\n";
 }
-?>
-===DONE===
-<?php exit(0); ?>
+echo "===DONE===\n";
+}

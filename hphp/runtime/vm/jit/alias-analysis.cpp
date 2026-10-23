@@ -13,21 +13,23 @@
    | license@php.net so we can mail you a copy immediately.               |
    +----------------------------------------------------------------------+
 */
+#include <fmt/format.h>
+
 #include "hphp/runtime/vm/jit/alias-analysis.h"
 
 #include <utility>
 #include <sstream>
 
+#include "hphp/util/bitset-utils.h"
 #include "hphp/util/match.h"
 #include "hphp/runtime/base/perf-warning.h"
 #include "hphp/runtime/vm/jit/ir-unit.h"
-#include "hphp/runtime/vm/jit/cfg.h"
 #include "hphp/runtime/vm/jit/memory-effects.h"
 #include "hphp/runtime/vm/jit/alias-class.h"
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 
-TRACE_SET_MOD(hhir_alias);
+TRACE_SET_MOD(hhir_alias)
 
 namespace {
 
@@ -44,53 +46,66 @@ void visit_locations(const BlockList& blocks, Visit visit) {
     for (auto& inst : *blk) {
       auto const effects = canonicalize(memory_effects(inst));
       FTRACE(1, "  {: <30} -- {}\n", show(effects), inst.toString());
-      match<void>(
+      match(
         effects,
-        [&] (IrrelevantEffects)   {},
-        [&] (UnknownEffects)      {},
-        [&] (ReturnEffects x)     { visit(x.kills); },
-        [&] (CallEffects x)       { visit(x.kills);
-                                    visit(x.stack);
-                                    visit(x.locals);
-                                    visit(x.callee); },
-        [&] (GeneralEffects x)    { visit(x.loads);
-                                    visit(x.stores);
-                                    visit(x.moves);
-                                    visit(x.kills); },
-        [&] (PureLoad x)          { visit(x.src); },
-        [&] (PureStore x)         { visit(x.dst); },
-        [&] (PureSpillFrame x)    { visit(x.stk);
-                                    visit(x.ctx);
-                                    visit(x.callee); },
-        [&] (ExitEffects x)       { visit(x.live); visit(x.kills); }
+        [&] (const IrrelevantEffects&)   {},
+        [&] (const UnknownEffects&)      {},
+        [&] (const ReturnEffects& x)     { visit(x.kills); },
+        [&] (const CallEffects& x) {
+          visit(x.kills);
+          visit(x.uninits);
+          visit(x.inputs);
+          visit(x.actrec);
+          visit(x.outputs);
+          for (auto const& frame : x.backtrace) {
+            visit(frame);
+          }
+        },
+        [&] (const GeneralEffects& x) {
+          visit(x.loads);
+          visit(x.stores);
+          visit(x.inout);
+          visit(x.moves);
+          visit(x.kills);
+          for (auto const& frame : x.backtrace) {
+            visit(frame);
+          }
+        },
+        [&] (const PureLoad& x)          { visit(x.src); },
+        [&] (const PureStore& x)         { visit(x.dst); },
+        [&] (const ExitEffects& x)       { visit(x.live);
+                                           visit(x.kills);
+                                           visit(x.uninits); },
+        [&] (const PureInlineCall& x)    { visit(x.base);
+                                           visit(x.actrec); }
       );
     }
   }
 }
 
-folly::Optional<uint32_t> add_class(AliasAnalysis& ret, AliasClass acls) {
+Optional<uint32_t> add_class(AliasAnalysis& ret, AliasClass acls) {
   assertx(acls.isSingleLocation());
   auto const ins = ret.locations.insert(std::make_pair(acls, ALocMeta{}));
   if (!ins.second) return ins.first->second.index;
   if (ret.locations.size() > kMaxTrackedALocs) {
     always_assert(ret.locations.size() == kMaxTrackedALocs + 1);
     ret.locations.erase(acls);
-    return folly::none;
+    return std::nullopt;
   }
   FTRACE(1, "    new: {}\n", show(acls));
   auto& meta = ins.first->second;
   meta.index = ret.locations.size() - 1;
   always_assert(meta.index < kMaxTrackedALocs);
   return meta.index;
-};
+}
 
-// Expand a location into a set of locations that may alias it. This is for
-// locals and class-ref locations where the location may contain a discrete set
-// of local/class-ref slots.
+// Expand a location into a set of locations that may alias it. This
+// is for locals where the location may contain a discrete set of
+// locals.
 template<class T>
 ALocBits may_alias_component(const AliasAnalysis& aa,
                              AliasClass acls,
-                             folly::Optional<T> proj,
+                             Optional<T> proj,
                              const AliasAnalysis::LocationMap& sets,
                              AliasClass any,
                              ALocBits pessimistic) {
@@ -118,7 +133,7 @@ ALocBits may_alias_component(const AliasAnalysis& aa,
 template<class T>
 ALocBits may_alias_part(const AliasAnalysis& aa,
                         AliasClass acls,
-                        folly::Optional<T> proj,
+                        Optional<T> proj,
                         AliasClass any,
                         ALocBits pessimistic) {
   if (proj) {
@@ -131,13 +146,13 @@ ALocBits may_alias_part(const AliasAnalysis& aa,
   return acls.maybe(any) ? pessimistic : ALocBits{};
 }
 
-// Expand a location into a set of locations which definitely contain it. This
-// is for locals and class-ref locations where the location may contain a
-// discrete set of local/class-ref slots.
+// Expand a location into a set of locations which definitely contain
+// it. This is for locals where the location may contain a discrete
+// set of locals.
 template<class T>
 ALocBits expand_component(const AliasAnalysis& aa,
                           AliasClass acls,
-                          folly::Optional<T> loc,
+                          Optional<T> loc,
                           const AliasAnalysis::LocationMap& sets,
                           AliasClass any,
                           ALocBits all) {
@@ -163,7 +178,7 @@ ALocBits expand_component(const AliasAnalysis& aa,
 template<class T>
 ALocBits expand_part(const AliasAnalysis& aa,
                      AliasClass acls,
-                     folly::Optional<T> proj,
+                     Optional<T> proj,
                      AliasClass any,
                      ALocBits all) {
   auto ret = ALocBits{};
@@ -179,31 +194,41 @@ ALocBits expand_part(const AliasAnalysis& aa,
 
 template<class T>
 bool collect_component(AliasAnalysis& aa,
-                       folly::Optional<T> loc,
+                       Optional<T> loc,
                        AliasAnalysis::LocationMap& map) {
-  if (loc) {
-    assertx(!loc->ids.empty());
-    if (loc->ids.hasSingleValue()) {
-      add_class(aa, *loc);
-    } else {
-      auto complete = true;
-      auto range = ALocBits{};
-      if (loc->ids.size() <= kMaxExpandedSize) {
-        for (uint32_t id = 0; id < AliasIdSet::BitsetMax; ++id) {
-          if (loc->ids.test(id)) {
-            if (auto const index = add_class(aa, T { loc->fp, id })) {
-              range.set(*index);
-            } else {
-              complete = false;
-            }
-          }
-        }
+  if (!loc) return false;
+
+  assertx(!loc->ids.empty());
+  if (loc->ids.hasSingleValue()) {
+    add_class(aa, *loc);
+  } else {
+    auto const inserted = map.insert({*loc, {}}).second;
+    if (!inserted && loc->ids.size() <= kMaxExpandedSize) {
+      for (uint32_t id = 0; id < AliasIdSet::BitsetMax; ++id) {
+        if (!loc->ids.test(id)) continue;
+        add_class(aa, T { loc->frameIdx, id });
       }
-      if (complete) map[AliasClass { *loc }] = range;
     }
-    return true;
   }
-  return false;
+  return true;
+}
+
+bool collect_component(AliasAnalysis& aa,
+                       Optional<AStack> stk,
+                       AliasAnalysis::LocationMap& map) {
+  if (!stk) return false;
+
+  if (stk->size() == 1) {
+    add_class(aa, *stk);
+  } else {
+    auto const inserted = map.insert({*stk, {}}).second;
+    if (!inserted && stk->size() <= kMaxExpandedSize) {
+      for (auto stkidx = stk->low; stkidx < stk->high; ++stkidx) {
+        add_class(aa, AStack::at(stkidx));
+      }
+    }
+  }
+  return true;
 }
 
 //////////////////////////////////////////////////////////////////////
@@ -212,11 +237,26 @@ bool collect_component(AliasAnalysis& aa,
 
 AliasAnalysis::AliasAnalysis(const IRUnit& /*unit*/) {}
 
-folly::Optional<ALocMeta> AliasAnalysis::find(AliasClass acls) const {
+Optional<ALocMeta> AliasAnalysis::find(AliasClass acls) const {
   auto const it = locations.find(acls);
-  if (it == end(locations)) return folly::none;
+  if (it == end(locations)) return std::nullopt;
   return it->second;
 }
+
+#define SIMPLE_ALIAS_CLASSES(X)       \
+  X(Rds, rds, all_rds)                \
+  X(FContext, fcontext, all_fcontext) \
+  X(FFunc, ffunc, all_ffunc)          \
+  X(FMeta, fmeta, all_fmeta)          \
+/**/
+
+#define ALIAS_CLASSES(X)      \
+  X(ClosureArg, closureArg, all_closureArg) \
+  X(Prop, prop, all_props)    \
+  X(ElemI, elemI, all_elemIs) \
+  X(ElemS, elemS, all_elemSs) \
+  SIMPLE_ALIAS_CLASSES(X)     \
+/**/
 
 ALocBits AliasAnalysis::may_alias(AliasClass acls) const {
   if (auto meta = find(acls)) {
@@ -228,51 +268,55 @@ ALocBits AliasAnalysis::may_alias(AliasClass acls) const {
   // Handle stacks specially to be less pessimistic.  We can always use the
   // expand map to find stack locations that may alias our class.
   auto const stk = acls.stack();
-  if (stk && stk->size > 1) {
+  if (stk && stk->size() > 1) {
     auto const it = stk_expand_map.find(*stk);
     ret |= it != end(stk_expand_map) ? it->second : all_stack;
   } else {
     ret |= may_alias_part(*this, acls, acls.stack(), AStackAny, all_stack);
   }
 
-  ret |= may_alias_component(*this, acls, acls.frame(), local_sets,
-                             AFrameAny, all_frame);
-  ret |= may_alias_component(*this, acls, acls.clsRefSlot(), clsref_sets,
-                             AClsRefSlotAny, all_clsRefSlot);
+  ret |= may_alias_component(*this, acls, acls.local(), loc_expand_map,
+                             ALocalAny, all_local);
+  ret |= may_alias_component(*this, acls, acls.iter(), iter_expand_map,
+                             AIterAny, all_iter);
 
-  ret |= may_alias_part(*this, acls, acls.rds(), ARdsAny, all_rds);
+  auto const add_single = [&] (auto single, AliasClass cls) {
+    assertx(cls.isSingleLocation());
+    if (cls <= *single) {
+      if (auto meta = find(cls)) {
+        ret |= ALocBits{meta->conflicts}.set(meta->index);
+      }
+      // The location is untracked.
+    }
+  };
 
   if (auto const mis = acls.mis()) {
-    auto const add_mis = [&] (AliasClass cls) {
-      assertx(cls.isSingleLocation());
-      if (cls <= *mis) {
-        if (auto meta = find(cls)) {
-          ret |= ALocBits{meta->conflicts}.set(meta->index);
-        }
-        // The location is untracked.
-      }
-    };
-
-    add_mis(AMIStateTempBase);
-    add_mis(AMIStateTvRef);
-    add_mis(AMIStateTvRef2);
-    add_mis(AMIStateBase);
+    add_single(mis, AMIStateTempBase);
+    add_single(mis, AMIStateBase);
+    add_single(mis, AMIStateROProp);
   }
 
-  ret |= may_alias_part(*this, acls, acls.prop(), APropAny, all_props);
-  ret |= may_alias_part(*this, acls, acls.elemI(), AElemIAny, all_elemIs);
-  ret |= may_alias_part(*this, acls, acls.ref(), ARefAny, all_ref);
-  ret |= may_alias_part(*this, acls, acls.iterPos(), AIterPosAny, all_iterPos);
-  ret |= may_alias_part(*this, acls, acls.iterBase(), AIterBaseAny,
-                        all_iterBase);
-  ret |= may_alias_part(*this, acls, acls.cufIterFunc(), ACufIterFuncAny,
-                        all_cufIterFunc);
-  ret |= may_alias_part(*this, acls, acls.cufIterCtx(), ACufIterCtxAny,
-                        all_cufIterCtx);
-  ret |= may_alias_part(*this, acls, acls.cufIterInvName(), ACufIterInvNameAny,
-                        all_cufIterInvName);
-  ret |= may_alias_part(*this, acls, acls.cufIterDynamic(), ACufIterDynamicAny,
-                        all_cufIterDynamic);
+  if (auto const fbase = acls.frame_base()) {
+    add_single(fbase, AFBasePtr);
+  }
+
+  if (auto const vm_reg_state = acls.vm_reg_state()) {
+    add_single(vm_reg_state, AVMRegState);
+  }
+
+  if (auto const vm_reg = acls.vm_reg()) {
+    add_single(vm_reg, AVMFP);
+    add_single(vm_reg, AVMSP);
+    add_single(vm_reg, AVMPC);
+    add_single(vm_reg, AVMRetAddr);
+  }
+
+#define MAY_ALIAS(What, what, all) \
+  ret |= may_alias_part(*this, acls, acls.what(), A##What##Any, all);
+
+  ALIAS_CLASSES(MAY_ALIAS);
+
+#undef MAY_ALIAS
 
   return ret;
 }
@@ -285,8 +329,8 @@ ALocBits AliasAnalysis::expand(AliasClass acls) const {
   // We want to handle stacks partially specially, because they can be expanded
   // in some situations even if they don't have an ALocMeta.
   if (auto const stk = acls.stack()) {
-    auto const it = stk->size > 1 ? stk_expand_map.find(*stk)
-                                  : end(stk_expand_map);
+    auto const it = stk->size() > 1 ? stk_expand_map.find(*stk)
+                                    : end(stk_expand_map);
     if (it != end(stk_expand_map)) {
       ret |= it->second;
     } else {
@@ -296,42 +340,48 @@ ALocBits AliasAnalysis::expand(AliasClass acls) const {
     ret |= all_stack;
   }
 
-  ret |= expand_component(*this, acls, acls.frame(), local_sets,
-                          AFrameAny, all_frame);
-  ret |= expand_component(*this, acls, acls.clsRefSlot(), clsref_sets,
-                          AClsRefSlotAny, all_clsRefSlot);
+  ret |= expand_component(*this, acls, acls.local(), loc_expand_map,
+                          ALocalAny, all_local);
+  ret |= expand_component(*this, acls, acls.iter(), iter_expand_map,
+                          AIterAny, all_iter);
 
-  ret |= expand_part(*this, acls, acls.rds(), ARdsAny, all_rds);
+  auto const add_single = [&] (auto single, AliasClass cls) {
+    assertx(cls.isSingleLocation());
+    if (cls <= *single) {
+      if (auto const meta = find(cls)) {
+        ret.set(meta->index);
+      }
+    }
+  };
 
   if (auto const mis = acls.mis()) {
-    auto const add_mis = [&] (AliasClass cls) {
-      assertx(cls.isSingleLocation());
-      if (cls <= *mis) {
-        if (auto const meta = find(cls)) {
-          ret.set(meta->index);
-        }
-      }
-    };
-
+    auto const add_mis = [&] (AliasClass cls) { add_single(mis, cls); };
     add_mis(AMIStateTempBase);
-    add_mis(AMIStateTvRef);
-    add_mis(AMIStateTvRef2);
     add_mis(AMIStateBase);
+    add_mis(AMIStateROProp);
   }
 
-  ret |= expand_part(*this, acls, acls.prop(), APropAny, all_props);
-  ret |= expand_part(*this, acls, acls.elemI(), AElemIAny, all_elemIs);
-  ret |= expand_part(*this, acls, acls.ref(), ARefAny, all_ref);
-  ret |= expand_part(*this, acls, acls.iterPos(), AIterPosAny, all_iterPos);
-  ret |= expand_part(*this, acls, acls.iterBase(), AIterBaseAny, all_iterBase);
-  ret |= expand_part(*this, acls, acls.cufIterFunc(), ACufIterFuncAny,
-                     all_cufIterFunc);
-  ret |= expand_part(*this, acls, acls.cufIterCtx(), ACufIterCtxAny,
-                     all_cufIterCtx);
-  ret |= expand_part(*this, acls, acls.cufIterInvName(), ACufIterInvNameAny,
-                     all_cufIterInvName);
-  ret |= expand_part(*this, acls, acls.cufIterDynamic(), ACufIterDynamicAny,
-                     all_cufIterDynamic);
+  if (auto const fbase = acls.frame_base()) {
+    add_single(fbase, AFBasePtr);
+  }
+
+  if (auto const vm_reg_state = acls.vm_reg_state()) {
+    add_single(vm_reg_state, AVMRegState);
+  }
+
+  if (auto const vm_reg = acls.vm_reg()) {
+    add_single(vm_reg, AVMFP);
+    add_single(vm_reg, AVMSP);
+    add_single(vm_reg, AVMPC);
+    add_single(vm_reg, AVMRetAddr);
+  }
+
+#define EXPAND(What, what, all) \
+  ret |= expand_part(*this, acls, acls.what(), A##What##Any, all);
+
+  ALIAS_CLASSES(EXPAND);
+
+#undef EXPAND
 
   return ret;
 }
@@ -347,13 +397,26 @@ AliasAnalysis collect_aliases(const IRUnit& unit, const BlockList& blocks) {
    * object property offsets, and for arrays based only on index.  Everything
    * colliding in that regard is assumed to possibly alias.
    */
+  
+  auto conflict_closure_arg_offset = jit::fast_map<uint32_t,ALocBits>{};
   auto conflict_prop_offset = jit::fast_map<uint32_t,ALocBits>{};
   auto conflict_array_index = jit::fast_map<int64_t,ALocBits>{};
+  auto conflict_array_key = jit::fast_map<const StringData*,ALocBits>{};
+  auto prop_array_map = jit::fast_map<int64_t,AliasClass>{};
 
   visit_locations(blocks, [&] (AliasClass acls) {
+    if (auto const closure_arg = acls.is_closureArg()) {
+      if (auto const index = add_class(ret, acls)) {
+        conflict_closure_arg_offset[closure_arg->offset].set(*index);
+        prop_array_map.emplace(*index, acls);
+      }
+      return;
+    }
+
     if (auto const prop = acls.is_prop()) {
       if (auto const index = add_class(ret, acls)) {
         conflict_prop_offset[prop->offset].set(*index);
+        prop_array_map.emplace(*index, acls);
       }
       return;
     }
@@ -361,19 +424,21 @@ AliasAnalysis collect_aliases(const IRUnit& unit, const BlockList& blocks) {
     if (auto const elemI = acls.is_elemI()) {
       if (auto const index = add_class(ret, acls)) {
         conflict_array_index[elemI->idx].set(*index);
+        prop_array_map.emplace(*index, acls);
+      }
+      return;
+    }
+
+    if (auto const elemS = acls.is_elemS()) {
+      if (auto const index = add_class(ret, acls)) {
+        conflict_array_key[elemS->key].set(*index);
+        prop_array_map.emplace(*index, acls);
       }
       return;
     }
 
     if (acls.is_rds()) {
       add_class(ret, acls);
-      return;
-    }
-
-    if (acls.is_ref()) {
-      if (auto const index = add_class(ret, acls)) {
-        ret.all_ref.set(*index);
-      }
       return;
     }
 
@@ -382,61 +447,39 @@ AliasAnalysis collect_aliases(const IRUnit& unit, const BlockList& blocks) {
       return;
     }
 
-    if (acls.is_iterPos() || acls.is_iterBase()) {
+    if (auto const ar = acls.actrec()) {
+      auto const idx = ar->frameIdx;
+      if (acls.maybe(AFContext { idx })) add_class(ret, AFContext { idx });
+      if (acls.maybe(AFFunc { idx }))    add_class(ret, AFFunc { idx });
+      if (acls.maybe(AFMeta { idx }))    add_class(ret, AFMeta { idx });
+      // Fallthrough here: it's possible to share these specializations with
+      // ALocal and AIter specializations.
+    }
+
+    if (acls.is_frame_base() && acls.isSingleLocation()) {
       add_class(ret, acls);
       return;
     }
 
-    if (acls.is_cufIterFunc() ||
-        acls.is_cufIterCtx() ||
-        acls.is_cufIterInvName() ||
-        acls.is_cufIterDynamic()) {
+    if (acls.is_vm_reg_state() && acls.isSingleLocation()) {
       add_class(ret, acls);
       return;
     }
 
-    if (collect_component(ret, acls.frame(), ret.local_sets)) return;
-    if (collect_component(ret, acls.clsRefSlot(), ret.clsref_sets)) return;
-
-    /*
-     * Note that unlike the above we're going to assign location ids to the
-     * individual stack slots in AStack portions of AliasClasses that are
-     * unions of AStack ranges with other classes.  (I.e. basically we're using
-     * stack() instead of is_stack() here, so it will match things that are
-     * only partially stacks.)
-     *
-     * The reason for this is that many instructions can have effects like
-     * that, when they can re-enter and do things to the stack in some range
-     * (below the re-entry depth, for example), but also affect some other type
-     * of memory (CastStk, for example).  In particular this means we want that
-     * AliasClass to have an entry in the stack_ranges, so we'll populate
-     * it later.  Currently most of these situations should probably bail at
-     * kMaxExpandedStackRange, although there are some situations that won't
-     * (e.g. instructions like CoerceStk, which will have an AHeapAny (from
-     * re-entry) unioned with a single stack slot).
-     */
-    if (auto const stk = acls.stack()) {
-      if (stk->size > 1) {
-        ret.stk_expand_map[AliasClass { *stk }];
-      }
-      if (stk->size > kMaxExpandedSize) return;
-
-      auto complete = true;
-      auto range = ALocBits{};
-      for (auto stkidx = int32_t{0}; stkidx < stk->size; ++stkidx) {
-        AliasClass single = AStack { stk->offset - stkidx, 1 };
-        if (auto const index = add_class(ret, single)) {
-          range.set(*index);
-        } else {
-          complete = false;
-        }
-      }
-
-      if (stk->size > 1 && complete) {
-        FTRACE(2, "    range {}:  {}\n", show(acls), show(range));
-        ret.stack_ranges[acls] = range;
-      }
+    if (auto const vm_reg = acls.vm_reg()) {
+      if (acls.maybe(AVMFP))      add_class(ret, AVMFP);
+      if (acls.maybe(AVMSP))      add_class(ret, AVMSP);
+      if (acls.maybe(AVMPC))      add_class(ret, AVMPC);
+      if (acls.maybe(AVMRetAddr)) add_class(ret, AVMRetAddr);
     }
+
+    // Note that we're using iter() instead of is_iter(), etc. here. That's
+    // because we often union these types with other, unspecialized AliasClass
+    // types for pessimistic operations (e.g. a may-throw IR op will typically
+    // read (specialized) 86metadata locals, plus (unspecialized) heap data).
+    if (collect_component(ret, acls.iter(), ret.iter_expand_map)) return;
+    if (collect_component(ret, acls.local(), ret.loc_expand_map)) return;
+    if (collect_component(ret, acls.stack(), ret.stk_expand_map)) return;
   });
 
   always_assert(ret.locations.size() <= kMaxTrackedALocs);
@@ -445,37 +488,55 @@ AliasAnalysis collect_aliases(const IRUnit& unit, const BlockList& blocks) {
       "alias-analysis kMaxTrackedALocs",
       25000,
       [&](StructuredLogEntry& cols) {
-        auto const func = unit.context().func;
+        auto const func = unit.context().initSrcKey.func();
         cols.setStr("func", func->fullName()->slice());
-        cols.setStr("filename", func->unit()->filepath()->slice());
+        cols.setStr("filename", func->unit()->origFilepath()->slice());
         cols.setStr("hhir_unit", show(unit));
       }
     );
     FTRACE(1, "max locations limit was reached\n");
   }
 
+  auto const maybe_set_conflicts =
+    [&] (ALocBits conflicts, ALocMeta& meta, const AliasClass& acls) {
+      bitset_for_each_set(
+        conflicts,
+        [&] (size_t i) {
+          auto const other_acls = folly::get_ptr(prop_array_map, i);
+          assertx(other_acls);
+          if (i != meta.index && acls.maybe(*other_acls)) {
+            meta.conflicts.set(i);
+          }
+        }
+      );
+    };
+
   auto make_conflict_set = [&] (AliasClass acls, ALocMeta& meta) {
+    if (auto const closure_arg = acls.is_closureArg()) {
+      maybe_set_conflicts(conflict_closure_arg_offset[closure_arg->offset], meta, acls);
+      ret.all_closureArg.set(meta.index);
+      return;
+    }
     if (auto const prop = acls.is_prop()) {
-      meta.conflicts = conflict_prop_offset[prop->offset];
-      meta.conflicts.reset(meta.index);
+      maybe_set_conflicts(conflict_prop_offset[prop->offset], meta, acls);
       ret.all_props.set(meta.index);
       return;
     }
 
     if (auto const elemI = acls.is_elemI()) {
-      meta.conflicts = conflict_array_index[elemI->idx];
-      meta.conflicts.reset(meta.index);
+      maybe_set_conflicts(conflict_array_index[elemI->idx], meta, acls);
       ret.all_elemIs.set(meta.index);
       return;
     }
 
-    if (auto const frame = acls.is_frame()) {
-      ret.all_frame.set(meta.index);
+    if (auto const elemS = acls.is_elemS()) {
+      maybe_set_conflicts(conflict_array_key[elemS->key], meta, acls);
+      ret.all_elemSs.set(meta.index);
       return;
     }
 
-    if (auto const slot = acls.is_clsRefSlot()) {
-      ret.all_clsRefSlot.set(meta.index);
+    if (auto const frame = acls.is_local()) {
+      ret.all_local.set(meta.index);
       return;
     }
 
@@ -484,50 +545,38 @@ AliasAnalysis collect_aliases(const IRUnit& unit, const BlockList& blocks) {
       return;
     }
 
-    if (acls.is_iterPos()) {
-      ret.all_iterPos.set(meta.index);
+    if (acls.is_iter()) {
+      ret.all_iter.set(meta.index);
       return;
     }
 
-    if (acls.is_iterBase()) {
-      ret.all_iterBase.set(meta.index);
-      return;
-    }
+#define SET(What, what, all) \
+  if (acls.is_##what()) {    \
+    ret.all.set(meta.index); \
+    return;                  \
+  }
 
-    if (acls.is_cufIterFunc()) {
-      ret.all_cufIterFunc.set(meta.index);
-      return;
-    }
+    SIMPLE_ALIAS_CLASSES(SET)
 
-    if (acls.is_cufIterCtx()) {
-      ret.all_cufIterCtx.set(meta.index);
-      return;
-    }
-
-    if (acls.is_cufIterInvName()) {
-      ret.all_cufIterInvName.set(meta.index);
-      return;
-    }
-
-    if (acls.is_cufIterDynamic()) {
-      ret.all_cufIterDynamic.set(meta.index);
-      return;
-    }
-
-    if (acls.is_ref()) {
-      meta.conflicts = ret.all_ref;
-      meta.conflicts.reset(meta.index);
-      return;
-    }
-
-    if (acls.is_rds()) {
-      ret.all_rds.set(meta.index);
-      return;
-    }
+#undef SET
 
     if (acls.is_mis()) {
       // We don't maintain an all_mistate set so there's nothing to do here but
       // avoid hitting the assert below.
+      return;
+    }
+
+    if (acls.is_frame_base()) {
+      // There's a single frame base register and it cannot conflict with any
+      // other locations.
+      return;
+    }
+
+    if (acls.is_vm_reg_state()) {
+      return;
+    }
+
+    if (acls.is_vm_reg()) {
       return;
     }
 
@@ -537,6 +586,7 @@ AliasAnalysis collect_aliases(const IRUnit& unit, const BlockList& blocks) {
 
   ret.locations_inv.resize(ret.locations.size());
   for (auto& kv : ret.locations) {
+    assertx(kv.first.isSingleLocation());
     make_conflict_set(kv.first, kv.second);
     ret.locations_inv[kv.second.index] = kv.second;
 
@@ -558,8 +608,8 @@ AliasAnalysis collect_aliases(const IRUnit& unit, const BlockList& blocks) {
           ent.second.set(kv.second.index);
         }
       }
-    } else if (kv.first.is_frame()) {
-      for (auto& ent : ret.local_sets) {
+    } else if (kv.first.is_local()) {
+      for (auto& ent : ret.loc_expand_map) {
         if (kv.first <= ent.first) {
           FTRACE(2, "  ({}) {} <= {}\n",
             kv.second.index,
@@ -568,8 +618,8 @@ AliasAnalysis collect_aliases(const IRUnit& unit, const BlockList& blocks) {
           ent.second.set(kv.second.index);
         }
       }
-    } else if (kv.first.is_clsRefSlot()) {
-      for (auto& ent : ret.clsref_sets) {
+    } else if (kv.first.is_iter()) {
+      for (auto& ent : ret.iter_expand_map) {
         if (kv.first <= ent.first) {
           FTRACE(2, "  ({}) {} <= {}\n",
             kv.second.index,
@@ -618,48 +668,50 @@ std::string show(const AliasAnalysis& ainfo) {
       kv->second.index,
       show(conf));
   }
+
+#define FMT(...)  " {: <20}       : {}\n"
+#define SHOW(What, what, all) "all "#what, show(ainfo.all),
+
   folly::format(
       &ret,
-      " {: <20}       : {}\n"
-      " {: <20}       : {}\n"
-      " {: <20}       : {}\n"
-      " {: <20}       : {}\n"
-      " {: <20}       : {}\n"
-      " {: <20}       : {}\n"
-      " {: <20}       : {}\n"
-      " {: <20}       : {}\n"
-      " {: <20}       : {}\n"
-      " {: <20}       : {}\n"
+      ALIAS_CLASSES(FMT)
       " {: <20}       : {}\n",
 
-      "all props",          show(ainfo.all_props),
-      "all elemIs",         show(ainfo.all_elemIs),
-      "all refs",           show(ainfo.all_ref),
-      "all iterPos",        show(ainfo.all_iterPos),
-      "all iterBase",       show(ainfo.all_iterBase),
-      "all cufIterFunc",    show(ainfo.all_cufIterFunc),
-      "all cufIterCtx",     show(ainfo.all_cufIterCtx),
-      "all cufIterInvName", show(ainfo.all_cufIterInvName),
-      "all cufIterDynamic", show(ainfo.all_cufIterDynamic),
-      "all frame",          show(ainfo.all_frame),
-      "all clsRefSlot",     show(ainfo.all_clsRefSlot),
-      "all rds",            show(ainfo.all_rds)
+      ALIAS_CLASSES(SHOW)
+      "all local",          show(ainfo.all_local)
   );
-  for (auto& kv : ainfo.local_sets) {
-    folly::format(&ret, " ex {: <17}       : {}\n",
-      show(kv.first),
-      show(kv.second));
+  std::vector<std::string> tmp;
+  for (auto& kv : ainfo.loc_expand_map) {
+    tmp.push_back(fmt::format(" ex {: <17}       : {}\n",
+                                 show(kv.first),
+                                 show(kv.second)));
   }
+  std::sort(tmp.begin(), tmp.end());
+  for (auto& s : tmp) ret += s;
+  tmp.clear();
+  folly::format(&ret, " {: <20}       : {}\n",
+     "all iter",  show(ainfo.all_iter));
+  for (auto& kv : ainfo.iter_expand_map) {
+    tmp.push_back(fmt::format(" ex {: <17}       : {}\n",
+                                 show(kv.first),
+                                 show(kv.second)));
+  }
+  std::sort(tmp.begin(), tmp.end());
+  for (auto& s : tmp) ret += s;
+  tmp.clear();
   folly::format(&ret, " {: <20}       : {}\n",
      "all stack",  show(ainfo.all_stack));
-  for (auto& kv : ainfo.stack_ranges) {
-    folly::format(&ret, " ex {: <17}       : {}\n",
-      show(kv.first),
-      show(kv.second));
+  for (auto& kv : ainfo.stk_expand_map) {
+    tmp.push_back(fmt::format(" ex {: <17}       : {}\n",
+                                 show(kv.first),
+                                 show(kv.second)));
   }
+  std::sort(tmp.begin(), tmp.end());
+  for (auto& s : tmp) ret += s;
+  tmp.clear();
   return ret;
 }
 
 //////////////////////////////////////////////////////////////////////
 
-}}
+}

@@ -1,22 +1,18 @@
-<?php
-error_reporting(E_ALL);
+<?hh
 
 abstract class Base {
-   public abstract function sayHello(array $a);
+   public abstract function sayHello(varray $a):mixed;
 }
 
 class SubClass extends Base {
-   public function sayHello(array $a) {
+   public function sayHello(varray $a) :mixed{
      echo "World!\n";
    }
 }
 
-$s = new SubClass();
-$s->sayHello(array());
-
 
 trait SayWorld {
-   public function sayHello(Base $d) {
+   public function sayHello(Base $d) :mixed{
      echo 'World!';
    }
 }
@@ -25,7 +21,13 @@ class MyHelloWorld extends Base {
    use SayWorld;
 }
 
-$o = new MyHelloWorld();
-$o->sayHello(array());
+<<__EntryPoint>>
+function entrypoint_inheritance003(): void {
+  error_reporting(E_ALL);
 
-?>
+  $s = new SubClass();
+  $s->sayHello(vec[]);
+
+  $o = new MyHelloWorld();
+  $o->sayHello(vec[]);
+}

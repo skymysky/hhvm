@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 
 class LogExn extends Exception {
   function __construct($msg) {
@@ -6,29 +6,24 @@ class LogExn extends Exception {
     echo "Constructing\n";
   }
 
-  function __destruct() {
-    echo "Destructing\n";
-  }
 }
 
-function thrower() {
+function thrower() :mixed{
   try {
     throw new LogExn('inner');
   } finally {
     throw new Exception('finally');
   }
 }
-
-function main() {
+<<__EntryPoint>>
+function main() :mixed{
   try {
     echo "Calling thrower\n";
     thrower();
   } catch (Throwable $t) {
     echo "In catch\n";
     var_dump($t);
-    unset($t);
+    $t = null;
   }
   echo "Leaving main\n";
 }
-
-main();

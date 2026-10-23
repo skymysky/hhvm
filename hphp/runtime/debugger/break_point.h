@@ -14,8 +14,7 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_EVAL_DEBUGGER_BREAK_POINT_H_
-#define incl_HPHP_EVAL_DEBUGGER_BREAK_POINT_H_
+#pragma once
 
 #include <list>
 #include <memory>
@@ -24,6 +23,7 @@
 #include <vector>
 
 #include "hphp/runtime/base/type-variant.h"
+#include "hphp/runtime/vm/func.h"
 #include "hphp/runtime/vm/unit.h"
 
 namespace HPHP {
@@ -51,7 +51,7 @@ enum InterruptType : int8_t {
   // The server has finished all processing of a web request
   // also known as Post Send Processing has Ended.
   PSPEnded,
-  // The server has executed f_hphpd_break()
+  // The server has executed hphpd_break()
   HardBreakPoint,
   // The server has reached a point where it has been told to stop and wait
   // for the debugger to tell it to resume execution. For example,
@@ -100,7 +100,7 @@ struct InterruptSite {
 
   const SourceLoc* getSourceLoc() const { return &m_sourceLoc; }
   const Offset getCurOffset() const { return m_offset; }
-  const Unit* getUnit() const { return m_unit; }
+  const Func* getFunc() const { return m_func; }
 
   bool valid() const { return m_valid; }
   bool funcEntry() const { return m_funcEntry; }
@@ -119,7 +119,7 @@ private:
   mutable req::unique_ptr<const InterruptSite> m_callingSite;
   mutable const char *m_class;
   mutable std::string m_function;
-  mutable String m_file;
+  mutable OptString m_file;
   mutable std::string m_url;
 
   int32_t m_line0;
@@ -129,7 +129,7 @@ private:
 
   SourceLoc m_sourceLoc;
   Offset m_offset;
-  Unit* m_unit;
+  const Func* m_func;
   bool m_valid;
   bool m_funcEntry;
   bool m_builtin;
@@ -280,4 +280,3 @@ private:
 ///////////////////////////////////////////////////////////////////////////////
 }}
 
-#endif // incl_HPHP_EVAL_DEBUGGER_BREAK_POINT_H_

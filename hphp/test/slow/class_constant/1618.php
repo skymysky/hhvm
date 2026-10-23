@@ -1,34 +1,27 @@
-<?php
-
-if (isset($g)) {
-  interface I {
- const FOO = 1;
- }
-  class C {
- const FOO = 3;
- }
-}
- else {
-  interface I {
- const FOO = 2;
- }
-  class C {
- const FOO = 4;
- }
-}
+<?hh
 class X {
-  function foo($x = C::FOO, $y = I::FOO) {
+  function foo($x = C::FOO, $y = I::FOO) :mixed{
 }
 }
-function test() {
+function test() :mixed{
   $x = new ReflectionMethod('X', 'foo');
   foreach ($x->getParameters() as $p) {
     var_dump($p->getDefaultValue());
   }
 }
-function fiz($c) {
+function fiz($c) :mixed{
   var_dump($c::FOO);
+}
+
+
+<<__EntryPoint>>
+function main_1618() :mixed{
+if (isset($g)) {
+  include '1618-1.inc';
+} else {
+  include '1618-2.inc';
 }
 fiz('I');
 fiz('C');
 test();
+}

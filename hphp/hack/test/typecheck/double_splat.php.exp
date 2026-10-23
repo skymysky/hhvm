@@ -1,0 +1,69 @@
+error: Parsing[1002] An expression is expected here. [1]
+
+double_splat.php:12:11
+10 | 
+11 |   f(...$v);
+12 |   f(......$v);
+   |           ^ [1]
+13 |   f(... ...$v);
+14 |   f(...(...$v));
+
+error: Naming[2049] Unbound name: `...` (a global constant) [1]
+
+double_splat.php:12:8
+10 | 
+11 |   f(...$v);
+12 |   f(......$v);
+   |        ^^^ [1]
+13 |   f(... ...$v);
+14 |   f(...(...$v));
+
+error: Naming[2049] Unbound name: `...` (a global constant) [1]
+
+double_splat.php:13:9
+11 |   f(...$v);
+12 |   f(......$v);
+13 |   f(... ...$v);
+   |         ^^^ [1]
+14 |   f(...(...$v));
+15 | }
+
+error: Naming[2049] Unbound name: `...` (a global constant) [1]
+
+double_splat.php:14:9
+12 |   f(......$v);
+13 |   f(... ...$v);
+14 |   f(...(...$v));
+   |         ^^^ [1]
+15 | }
+
+error: Typing[4106] Unbound global constant (Typing) [1]
+
+double_splat.php:12:8
+10 | 
+11 |   f(...$v);
+12 |   f(......$v);
+   |        ^^^ [1]
+13 |   f(... ...$v);
+14 |   f(...(...$v));
+
+error: Typing[4106] Unbound global constant (Typing) [1]
+
+double_splat.php:13:9
+11 |   f(...$v);
+12 |   f(......$v);
+13 |   f(... ...$v);
+   |         ^^^ [1]
+14 |   f(...(...$v));
+15 | }
+
+error: Typing[4106] Unbound global constant (Typing) [1]
+
+double_splat.php:14:9
+12 |   f(......$v);
+13 |   f(... ...$v);
+14 |   f(...(...$v));
+   |         ^^^ [1]
+15 | }
+
+7 errors found

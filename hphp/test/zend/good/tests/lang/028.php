@@ -1,52 +1,55 @@
-<?php
-
-error_reporting(1023);
+<?hh
 
 function print_stuff($stuff)
-{
-	print $stuff;
+:mixed{
+    print $stuff;
 }
 
 
 function still_working()
-{
-	return "I'm still alive";
+:mixed{
+    return "I'm still alive";
+}
+
+abstract final class DafnaStatics {
+  public static $foo = 0;
 }
 
 function dafna()
-{
-	static $foo = 0;
-	
-	print "Dafna!\n";
-	print call_user_func("still_working")."\n";
-	$foo++;
-	return (string) $foo;
+:mixed{
+
+    print "Dafna!\n";
+    print call_user_func(still_working<>)."\n";
+    DafnaStatics::$foo++;
+    return (string) DafnaStatics::$foo;
 }
 
 
 class dafna_class {
-	function dafna_class() {
-		$this->myname = "Dafna";
-	}
-	function GetMyName() {
-		return $this->myname;
-	}
-	function SetMyName($name) {
-		$this->myname = $name;
-	}
-};
+    function __construct() {
+        $this->myname = "Dafna";
+    }
+    function GetMyName() :mixed{
+        return $this->myname;
+    }
+    function SetMyName($name) :mixed{
+        $this->myname = $name;
+    }
+}
 
-for ($i=0; $i<200; $i++):
-	print "$i\n";
-	call_user_func("dafna");
-	call_user_func("print_stuff","Hey there!!\n");
-	print "$i\n";
-endfor;
+<<__EntryPoint>> function main(): void {
+error_reporting(1023);
 
+for ($i=0; $i<200; $i++) {
+    print "$i\n";
+    call_user_func(dafna<>);
+    call_user_func(print_stuff<>,"Hey there!!\n");
+    print "$i\n";
+}
 
 $dafna = new dafna_class();
 
-print $name=call_user_func(array(&$dafna,"GetMyName"));
+$name=call_user_func(vec[$dafna,"GetMyName"]);
+print $name;
 print "\n";
-
-?>
+}

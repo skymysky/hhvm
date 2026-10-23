@@ -1,0 +1,35 @@
+error: Parsing[1002] Type aliases to type constants are not supported [1]
+
+type_const_in_type_alias.php:3:13
+1 | <?hh
+2 | 
+3 | newtype T = C::T;
+  |             ^^^^ [1]
+4 | type T2 = C::T;
+
+error: Parsing[1002] Type aliases to type constants are not supported [1]
+
+type_const_in_type_alias.php:4:11
+2 | 
+3 | newtype T = C::T;
+4 | type T2 = C::T;
+  |           ^^^^ [1]
+
+error: Naming[2049] Unbound name: `C` [1]
+
+type_const_in_type_alias.php:3:13
+1 | <?hh
+2 | 
+3 | newtype T = C::T;
+  |             ^ [1]
+4 | type T2 = C::T;
+
+error: Naming[2049] Unbound name: `C` [1]
+
+type_const_in_type_alias.php:4:11
+2 | 
+3 | newtype T = C::T;
+4 | type T2 = C::T;
+  |           ^ [1]
+
+4 errors found

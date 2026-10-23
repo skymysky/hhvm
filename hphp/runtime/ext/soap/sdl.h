@@ -15,8 +15,7 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_PHP_SDL_H
-#define incl_HPHP_PHP_SDL_H
+#pragma once
 
 #include "hphp/runtime/ext/soap/encoding.h"
 #include "hphp/runtime/base/http-client.h"
@@ -83,9 +82,9 @@ using sdlTypePtr = std::shared_ptr<sdlType>;
 using sdlTypePtrVec = std::vector<std::shared_ptr<sdlType>>;
 using sdlTypeMap = hphp_string_map<std::shared_ptr<sdlType>>;
 using sdlAttributePtr = std::shared_ptr<sdlAttribute>;
-using sdlAttributeMap = hphp_string_map<std::shared_ptr<sdlAttribute>>;
-using sdlExtraAttributeMap = hphp_string_map<
-  std::shared_ptr<sdlExtraAttribute>
+using sdlAttributeMap = hphp_vector_map<std::string, std::shared_ptr<sdlAttribute>>;
+using sdlExtraAttributeMap = hphp_vector_map<
+  std::string, std::shared_ptr<sdlExtraAttribute>
 >;
 
 struct sdlBinding;
@@ -355,4 +354,3 @@ void schema_pass2(sdlCtx *ctx);
 ///////////////////////////////////////////////////////////////////////////////
 }
 
-#endif

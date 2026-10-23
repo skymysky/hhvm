@@ -1,0 +1,18 @@
+Bar\bar_a
+  INSERT Bar\bar_a
+  constant
+Bar\bar_b
+  INSERT Bar\bar_b
+  constant
+Bar\foo_a
+  INSERT Bar\foo_a
+  constant
+bar_a
+  INSERT bar_a
+  constant
+foo_a
+  INSERT foo_a
+  constant
+foo_b
+  INSERT foo_b
+  constant

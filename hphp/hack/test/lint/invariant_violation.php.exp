@@ -1,0 +1,65 @@
+warning: Lint[5581] invariant('error message') will never or always crash. Did you mean invariant_violation()?
+   --> invariant_violation.php
+  5 |   invariant('false', 'This will never crash');
+    |             ^^^^^^^
+
+
+warning: Lint[5623] Sketchy condition: testing the falsiness of a string may not behave as expected.
+The values `""` and `"0"` are both considered falsy. To check for emptiness, use `Str\is_empty`.
+   --> invariant_violation.php
+  5 |   invariant('false', 'This will never crash');
+    |             ^^^^^^^
+
+
+warning: Lint[5581] invariant('error message') will never or always crash. Did you mean invariant_violation()?
+   --> invariant_violation.php
+  9 |   invariant(!'false', 'This will always crash');
+    |             ^^^^^^^^
+
+
+warning: Lint[5623] Sketchy condition: testing the falsiness of a string may not behave as expected.
+The values `""` and `"0"` are both considered falsy. To check for emptiness, use `Str\is_empty`.
+   --> invariant_violation.php
+  9 |   invariant(!'false', 'This will always crash');
+    |              ^^^^^^^
+
+
+warning: Lint[5581] Putting a string literal in the condition of an `if` statement guarantees it will always or never trigger.
+   --> invariant_violation.php
+ 13 |   if ('false') {
+    |       ^^^^^^^
+
+
+warning: Lint[5623] Sketchy condition: testing the truthiness of a string may not behave as expected.
+The values `""` and `"0"` are both considered falsy. To check for non-emptiness, use `!Str\is_empty`.
+   --> invariant_violation.php
+ 13 |   if ('false') {
+    |       ^^^^^^^
+
+
+warning: Lint[5581] Putting a string literal in the condition of an `if` statement guarantees it will always or never trigger.
+   --> invariant_violation.php
+ 19 |   if (!'false') {
+    |       ^^^^^^^^
+
+
+warning: Lint[5623] Sketchy condition: testing the falsiness of a string may not behave as expected.
+The values `""` and `"0"` are both considered falsy. To check for emptiness, use `Str\is_empty`.
+   --> invariant_violation.php
+ 19 |   if (!'false') {
+    |        ^^^^^^^
+
+
+warning: Lint[5581] Putting a string literal in the condition of an `if` statement guarantees it will always or never trigger.
+   --> invariant_violation.php
+ 25 |   if (!!'false') {
+    |       ^^^^^^^^^
+
+
+warning: Lint[5623] Sketchy condition: testing the falsiness of a string may not behave as expected.
+The values `""` and `"0"` are both considered falsy. To check for emptiness, use `Str\is_empty`.
+   --> invariant_violation.php
+ 25 |   if (!!'false') {
+    |         ^^^^^^^
+
+

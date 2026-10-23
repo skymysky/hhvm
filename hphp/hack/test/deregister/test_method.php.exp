@@ -1,6 +1,27 @@
-File "test_method.php", line 19, characters 7-9:
-Could not find method foo in an object of type Foo (Typing[4053])
-File "test_method.php", line 17, characters 8-16:
-This is why I think it is an object of type Foo
-File "test_method.php", line 4, characters 7-9:
-Declaration of Foo is here
+error: Typing[4090] No static method `getUnicodeVersion` in `IntlChar` [1]
+-> Did you mean `charAge` instead? [2]
+-> Declaration of `IntlChar` is here [3]
+
+test_method.php:4:13
+  2 | 
+  3 | function test() : void {
+  4 |   IntlChar::getUnicodeVersion();
+    |             ^^^^^^^^^^^^^^^^^ [1]
+  5 | }
+
+stdlib/builtins_icu_uchar.hhi:677:26
+  1 | <?hh
+  2 | 
+  3 | class IntlChar {
+    |       ^^^^^^^^ [3]
+  4 |   const string UNICODE_VERSION;
+  5 | 
+    :
+675 |     return 0;
+676 |   }
+677 |   static public function charAge(
+    |                          ^^^^^^^ [2]
+678 |     HH\FIXME\MISSING_PARAM_TYPE $cp,
+679 |   ): HH\FIXME\MISSING_RETURN_TYPE {}
+
+1 error found

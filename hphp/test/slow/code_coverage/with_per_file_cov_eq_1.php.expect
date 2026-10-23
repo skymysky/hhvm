@@ -1,0 +1,12 @@
+vec(3) {
+  int(1)
+  int(2)
+  int(3)
+}
+Coverage:
+dict(2) {
+  [5]=>
+  int(1)
+  [6]=>
+  int(1)
+}

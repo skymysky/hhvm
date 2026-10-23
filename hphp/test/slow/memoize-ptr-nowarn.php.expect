@@ -1,0 +1,24 @@
+function(foo)
+foo(1)
+function(foo)
+foo(2)
+classMeth{
+  class(A)
+  function(b)
+}
+A::b(3)
+classMeth{
+  class(A)
+  function(b)
+}
+A::b(4)
+vec(2) {
+  string(1) "A"
+  string(1) "b"
+}
+A::b(3)
+vec(2) {
+  string(1) "A"
+  string(1) "b"
+}
+A::b(4)

@@ -23,11 +23,11 @@
 #include <memory>
 #include <vector>
 #include "hphp/runtime/ext/soap/sdl.h"
-#include "hphp/runtime/base/request-local.h"
 #include "hphp/runtime/base/exceptions.h"
 #include "hphp/runtime/base/http-client.h"
-#include "hphp/util/lock.h"
 #include "hphp/runtime/base/request-event-handler.h"
+#include "hphp/util/lock.h"
+#include "hphp/util/rds-local.h"
 
 ///////////////////////////////////////////////////////////////////////////////
 // defines
@@ -118,7 +118,7 @@ public:
   int m_soap_version;
   sdl *m_sdl;
   xmlCharEncodingHandlerPtr m_encoding;
-  Array m_classmap; // typename => class name
+  Array m_soap_classmap; // typename => class name
   encodeMap *m_typemap;  // typename => encode
   int m_features;
 
@@ -130,7 +130,10 @@ public:
   // misc
   int m_cur_uniq_ns;
   int m_cur_uniq_ref;
-  Array m_ref_map; // reference handling
+
+  // reference handling
+  req::fast_map<xmlNodePtr, Variant> m_ref_map;
+  req::fast_map<HeapObject*, xmlNodePtr> m_node_map;
 
   int64_t m_cache;
 
@@ -151,27 +154,26 @@ DECLARE_EXTERN_REQUEST_LOCAL(SoapData, s_soap_data);
 // types used by SoapServer
 
 struct soapFunctions {
-  Array ft;
-  Array ftOriginal;
+  req::vector_set<OptString, hphp_string_hash, hphp_string_fsame> funcs;
   bool functions_all;
 };
 
 struct soapClass {
-  String name;
+  OptString name;
   Array argv;
   int persistance;
 };
 
 struct soapHeader : ResourceData {
-  DECLARE_RESOURCE_ALLOCATION_NO_SWEEP(soapHeader);
+  DECLARE_RESOURCE_ALLOCATION_NO_SWEEP(soapHeader)
 
   CLASSNAME_IS("soapHeader")
-  const String& o_getClassNameHook() const override {
+  const OptString& o_getClassNameHook() const override {
     return classnameof();
   }
 
   sdlFunction                      *function;
-  String                            function_name;
+  OptString                            function_name;
   bool                              mustUnderstand;
   Array                             parameters;
   Variant                           retval;

@@ -1,19 +1,21 @@
-<?php
+<?hh
 
-function test1(... $args) {
+function test1(... $args) :mixed{
     var_dump($args);
 }
 
-test1();
-test1(1);
-test1(1, 2, 3);
-
-function test2($arg1, $arg2, ...$args) {
+function test2($arg1, $arg2, ...$args) :mixed{
     var_dump($arg1, $arg2, $args);
 }
 
-test2(1, 2);
-test2(1, 2, 3);
-test2(1, 2, 3, 4, 5);
+<<__EntryPoint>>
+function main_entry(): void {
 
-?>
+  test1();
+  test1(1);
+  test1(1, 2, 3);
+
+  test2(1, 2);
+  test2(1, 2, 3);
+  test2(1, 2, 3, 4, 5);
+}

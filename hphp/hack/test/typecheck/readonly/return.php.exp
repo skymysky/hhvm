@@ -1,0 +1,10 @@
+error: Parsing[1002] This expression is readonly, but we expected a mutable value because this function does not return readonly. Please mark it to return readonly if needed. [1]
+
+return.php:14:10
+12 | 
+13 | function bad_return(): Foo {
+14 |   return readonly new Foo();
+   |          ^^^^^^^^^^^^^^^^^^ [1]
+15 | }
+
+1 error found

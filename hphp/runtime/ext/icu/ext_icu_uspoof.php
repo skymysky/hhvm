@@ -4,7 +4,7 @@
  * Unicode Security and Spoofing Detection
  * http://icu-project.org/apiref/icu4c/uspoof_8h.html
  */
-<<__NativeData("SpoofChecker")>>
+<<__NativeData>>
 class SpoofChecker {
   /**
    * Creates a spoof checker that checks for visually confusing
@@ -19,16 +19,19 @@ class SpoofChecker {
    *
    * @param string $text - A UTF-8 string to be checked for
    *                       possible security issues.
-   * @param mixed &$issuesFound - If passed, this will hold an integer
-   *                              value with bits set for any potential security
-   *                              or spoofing issues detected. Zero is returned
-   *                              if no issues are found with the input string.
+   * @param inout mixed $issuesFound - If passed, this will hold an integer
+   *                                   value with bits set for any potential
+   *                                   security or spoofing issues detected.
+   *                                   Zero is returned if no issues are found
+   *                                   with the input string.
    *
    * @return bool - Returns TRUE if the string has possible security or
    *                spoofing issues, FALSE otherwise.
    */
   <<__Native>>
-  public function isSuspicious(string $text, mixed &$issuesFound = null): bool;
+  public function isSuspicious(string $text,
+                               <<__OutOnly>>
+                               inout int $issuesFound): bool;
 
   /**
    * Check the whether two specified UTF-8 strings are visually confusable.
@@ -40,17 +43,19 @@ class SpoofChecker {
    *                     compared for confusability.
    * @param string $s2 - The second of the two UTF-8 strings to be
    *                     compared for confusability.
-   * @param mixed &$issuesFound - If passed, this will hold an integer
-   *                              value with bits set for any potential security
-   *                              or spoofing issues detected. Zero is returned
-   *                              if no issues are found with the input string.
+   * @param inout mixed $issuesFound - If passed, this will hold an integer
+   *                                   value with bits set for any potential
+   *                                   security or spoofing issues detected.
+   *                                   Zero is returned if no issues are found
+   *                                   with the input string.
    *
    * @return bool - Returns TRUE if the two strings are confusable,
    *                FALSE otherwise.
    */
   <<__Native>>
   public function areConfusable(string $s1, string $s2,
-                                mixed &$issuesFound = null): bool;
+                                <<__OutOnly>>
+                                inout int $issuesFound): bool;
 
   /**
    * Limit characters that are acceptable in identifiers being checked to those

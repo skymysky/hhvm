@@ -1,6 +1,10 @@
-<?php
+<?hh
 
-$socket = '/tmp/socktest'.rand();
+
+<<__EntryPoint>>
+function main_udg_sock() :mixed{
+$sockdir = getenv('HPHP_TEST_SOCKETDIR') ?? sys_get_temp_dir();
+$socket = $sockdir.'/socktest'.rand();
 $data = 'Data to be sent';
 
 // Create the server side
@@ -11,8 +15,10 @@ var_dump($ret);
 $ret = socket_bind($server, $socket , 0);
 var_dump($ret);
 
+$errno = null;
+$errstr = null;
 // Create the client and send/receive the data
-$client = stream_socket_client("udg://$socket");
+$client = stream_socket_client("udg://$socket", inout $errno, inout $errstr);
 var_dump($client);
 
 fwrite($client, $data);
@@ -22,3 +28,4 @@ var_dump($readed);
 
 socket_close($server);
 unlink($socket);
+}

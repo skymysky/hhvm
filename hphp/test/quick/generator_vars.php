@@ -1,56 +1,54 @@
-<?php
+<?hh
 
 class logger {
-  static $x = 0;
+  public static $x = 0;
   private $idx;
   function __construct() {
-    $this->idx = self::$x++;
+    $this->idx = self::$x;
+    self::$x++;
     printf("logger %d constructing\n", $this->idx);
-  }
-  function __destruct() {
-    printf("logger %d destructing\n", $this->idx);
   }
 }
 
-function create() {
+function create() :AsyncGenerator<mixed,mixed,void>{
   $x = 5;
   yield $x;
   $s = 'foo';
   yield $s;
-  $$s = 1234;
-  $z = $$s;
+  $foo = 1234;
+  $z = $foo;
   yield $z;
-  yield $$s;
+  yield $foo;
 }
 
-function unusedarg($x, $y) {
+function unusedarg($x, $y) :AsyncGenerator<mixed,mixed,void>{
   $z = 5;
-  yield compact('x', 'z');
+  yield dict['x' => $x, 'z' => $z];
   $s = 'foo';
   yield 'almost there';
-  $$s = 'inside foo';
-  yield compact('foo', 's');
-  yield compact('x', 'y', 'foo', 'z');
+  $foo = 'inside foo';
+  yield dict['foo' => $foo, 's' => $s];
+  yield dict['x' => $x, 'y' => $y, 'foo' => $foo, 'z' => $z];
 }
 
-function dumpgen($g) {
+function dumpgen($g) :mixed{
   foreach ($g as $v) {
     var_dump($v);
   }
 }
 
-function getargs($foo) {
+function getargs(...$args) :AsyncGenerator<mixed,mixed,void>{
   yield 0xdeadbeef;
-  yield func_get_args();
-  yield func_get_arg(3);
+  yield $args;
+  yield $args[3];
 }
 
-function genthrow() {
+function genthrow() :AsyncGenerator<mixed,mixed,void>{
   throw new Exception();
   yield 5;
 }
 
-function manylocals() {
+function manylocals() :AsyncGenerator<mixed,mixed,void>{
   $a = 1;
   $b = 2;
   $c = 3;
@@ -63,14 +61,15 @@ function manylocals() {
   $j = 10;
   $k = 11;
   $l = 12;
-  $a = yield get_defined_vars();
+  $a = yield dict['a' => $a, 'b' => $b, 'c' => $c, 'd' => $d, 'e' => $e, 'f' => $f, 'g' => $g, 'h' => $h, 'i' => $i, 'j' => $j, 'k' => $k, 'l' => $l];
   $b = 0xdeadbeef;
-  $c = yield get_defined_vars();
-  $d = $e = 0xba53b411;
-  yield get_defined_vars();
+  $c = yield dict['a' => $a, 'b' => $b, 'c' => $c, 'd' => $d, 'e' => $e, 'f' => $f, 'g' => $g, 'h' => $h, 'i' => $i, 'j' => $j, 'k' => $k, 'l' => $l];
+  $e = 0xba53b411;
+  $d = $e;
+  yield dict['a' => $a, 'b' => $b, 'c' => $c, 'd' => $d, 'e' => $e, 'f' => $f, 'g' => $g, 'h' => $h, 'i' => $i, 'j' => $j, 'k' => $k, 'l' => $l];
 }
 
-function main() {
+<<__EntryPoint>> function main(): void {
   dumpgen(create());
   dumpgen(unusedarg(new logger(), 5));
   dumpgen(getargs(1, 2, 3, 4, 5));
@@ -85,8 +84,9 @@ function main() {
   }
 
   $g = manylocals();
+  $g->next();
   var_dump($g->current());
-  $g->send(new stdclass);
+  $g->send(new stdClass);
   var_dump($g->current());
   $g->send($g);
   var_dump($g->current());
@@ -94,4 +94,3 @@ function main() {
   var_dump($g->current());
   var_dump($g->valid());
 }
-main();

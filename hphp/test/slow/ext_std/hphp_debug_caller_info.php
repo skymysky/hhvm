@@ -1,26 +1,25 @@
 <?hh
 
-function foo() {
+function foo() :mixed{
   return hphp_debug_caller_info();
 }
 
-function bar() {
+function bar() :mixed{
   return foo();
 }
 
 class Baz {
-  public static function smeth() {
+  public static function smeth() :mixed{
     return foo();
   }
 
-  public function imeth() {
+  public function imeth() :mixed{
     return foo();
   }
 }
-
+<<__EntryPoint>> function main(): void {
 $baz = new Baz();
 var_dump(bar());
 var_dump(Baz::smeth());
-var_dump(Baz::imeth());
-var_dump($baz->smeth());
 var_dump($baz->imeth());
+}

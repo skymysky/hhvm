@@ -1,20 +1,23 @@
-<?php
+<?hh
 
-function f() {
+function f() :mixed{
 	throw new Exception();
 }
 
-try {
-var_dump(preg_replace_callback('/\w/', 'f', 'z'));
-} catch(Exception $e) {}
-
-function g($x) {
-	return "'$x[0]'";
+function g($x) :mixed{
+	return "'".$x[0]."'";
 }
+<<__EntryPoint>>
+function main_entry(): void {
 
-var_dump(preg_replace_callback('@\b\w{1,2}\b@', 'g', array('a b3 bcd', 'v' => 'aksfjk', 12 => 'aa bb')));
+  $count = -1;
+  try {
+    var_dump(preg_replace_callback('/\w/', f<>, 'z', -1, inout $count));
+  } catch(Exception $e) {}
 
-var_dump(preg_replace_callback('~\A.~', 'g', array(array('xyz'))));
+  var_dump(preg_replace_callback('@\b\w{1,2}\b@', g<>, dict[0 => 'a b3 bcd', 'v' => 'aksfjk', 12 => 'aa bb'], -1, inout $count));
 
-var_dump(preg_replace_callback('~\A.~', create_function('$m', 'return strtolower($m[0]);'), 'ABC'));
-?>
+  var_dump(preg_replace_callback('~\A.~', g<>, vec['Array'], -1, inout $count));
+
+  var_dump(preg_replace_callback('~\A.~', $m ==> strtolower($m[0]), 'ABC', -1, inout $count));
+}

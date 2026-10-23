@@ -1,6 +1,6 @@
 <?hh
 
-function main() {
+function main() :mixed{
   echo "Entering main\n";
 
   echo "5\n";
@@ -12,18 +12,18 @@ function main() {
 
   echo "replace in using\n";
   try {
-    using ($x = new stdclass) {
+    using ($x = new stdClass) {
       $x = 12.0;
     }
   } catch (Exception $e) {
     var_dump($e->getMessage());
   }
 
-  echo "unset in using\n";
-  $x = new stdclass;
+  echo "null in using\n";
+  $x = new stdClass;
   try {
     using ($x) {
-      unset($x);
+      $x = null;
     }
   } catch (Exception $e) {
     var_dump($e->getMessage());
@@ -32,7 +32,7 @@ function main() {
   echo "Leaving main\n\n";
 }
 
-async function mainAsync() {
+async function mainAsync() :Awaitable<mixed>{
   echo "\nEntering mainAsync\n";
 
   try {
@@ -44,5 +44,9 @@ async function mainAsync() {
   echo "Leaving mainAsync\n";
 }
 
+
+<<__EntryPoint>>
+function main_bad_disposable() :mixed{
 main();
 HH\Asio\join(mainAsync());
+}

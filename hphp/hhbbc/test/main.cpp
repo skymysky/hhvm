@@ -16,7 +16,14 @@
 #include <gtest/gtest.h>
 #include "hphp/hhvm/process-init.h"
 
+#include "hphp/util/extern-worker.h"
+
 int main(int argc, char** argv) {
+  if (argc > 1 && !strcmp(argv[1], HPHP::extern_worker::s_option)) {
+    HPHP::StaticString::CreateAll();
+    return HPHP::extern_worker::main(argc, argv);
+  }
+
   testing::InitGoogleTest(&argc, argv);
 
   // If this is called with `--gtest_list_tests` then do only that, and bail
@@ -24,7 +31,8 @@ int main(int argc, char** argv) {
   if (::testing::FLAGS_gtest_list_tests) {
     return RUN_ALL_TESTS();
   }
-
+  HPHP::rds::local::init();
+  SCOPE_EXIT { HPHP::rds::local::fini(); };
   HPHP::init_for_unit_test();
   SCOPE_EXIT { HPHP::hphp_process_exit(); };
   return RUN_ALL_TESTS();

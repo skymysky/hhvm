@@ -1,4 +1,4 @@
-<?hh     /* -*- php -*- */
+<?hh /* -*- php -*- */
 /**
  * Copyright (c) 2014, Facebook, Inc.
  * All rights reserved.
@@ -9,66 +9,99 @@
  */
 
 class UConverter {
-  const REASON_UNASSIGNED = 0;
-  const REASON_ILLEGAL = 0;
-  const REASON_IRREGULAR = 0;
-  const REASON_RESET = 0;
-  const REASON_CLOSE = 0;
-  const REASON_CLONE = 0;
-  const UNSUPPORTED_CONVERTER = 0;
-  const SBCS = 0;
-  const DBCS = 0;
-  const MBCS = 0;
-  const LATIN_1 = 0;
-  const UTF8 = 0;
-  const UTF16_BigEndian = 0;
-  const UTF16_LittleEndian = 0;
-  const UTF32_BigEndian = 0;
-  const UTF32_LittleEndian = 0;
-  const EBCDIC_STATEFUL = 0;
-  const ISO_2022 = 0;
-  const LMBCS_1 = 0;
-  const LMBCS_2 = 0;
-  const LMBCS_3 = 0;
-  const LMBCS_4 = 0;
-  const LMBCS_5 = 0;
-  const LMBCS_6 = 0;
-  const LMBCS_8 = 0;
-  const LMBCS_11 = 0;
-  const LMBCS_16 = 0;
-  const LMBCS_17 = 0;
-  const LMBCS_18 = 0;
-  const LMBCS_19 = 0;
-  const LMBCS_LAST = 0;
-  const HZ = 0;
-  const SCSU = 0;
-  const ISCII = 0;
-  const US_ASCII = 0;
-  const UTF7 = 0;
-  const BOCU1 = 0;
-  const UTF16 = 0;
-  const UTF32 = 0;
-  const CESU8 = 0;
-  const IMAP_MAILBOX = 0;
-  public function __construct($toEncoding = "utf-8", $fromEncoding = "utf-8") { }
-  public function getSourceEncoding() { }
-  public function setSourceEncoding($encoding) { }
-  public function getDestinationEncoding() { }
-  public function setDestinationEncoding($encoding) { }
-  public function getSourceType() { }
-  public function getDestinationType() { }
-  public function getSubstChars() { }
-  public function setSubstChars($chars) { }
-  public function fromUCallback($reason, $source, $codepoint, &$error) { }
-  public function toUCallback($reason, $source, $codeunits, &$error) { }
-  public function convert($str, $reverse = false) { }
-  static public function transcode($str, $toEncoding, $fromEncoding, $options = null) { }
-  public function getErrorCode() { }
-  public function getErrorMessage() { }
-  static public function reasonText($reason) { }
-  static public function getAvailable() { }
-  static public function getAliases($encoding) { }
-  static public function getStandards() { }
-  static public function getStandardName($name, $standard) { }
-  static public function getMIMEName($name) { }
+  const int REASON_UNASSIGNED;
+  const int REASON_ILLEGAL;
+  const int REASON_IRREGULAR;
+  const int REASON_RESET;
+  const int REASON_CLOSE;
+  const int REASON_CLONE;
+  const int UNSUPPORTED_CONVERTER;
+  const int SBCS;
+  const int DBCS;
+  const int MBCS;
+  const int LATIN_1;
+  const int UTF8;
+  const int UTF16_BigEndian;
+  const int UTF16_LittleEndian;
+  const int UTF32_BigEndian;
+  const int UTF32_LittleEndian;
+  const int EBCDIC_STATEFUL;
+  const int ISO_2022;
+  const int LMBCS_1;
+  const int LMBCS_2;
+  const int LMBCS_3;
+  const int LMBCS_4;
+  const int LMBCS_5;
+  const int LMBCS_6;
+  const int LMBCS_8;
+  const int LMBCS_11;
+  const int LMBCS_16;
+  const int LMBCS_17;
+  const int LMBCS_18;
+  const int LMBCS_19;
+  const int LMBCS_LAST;
+  const int HZ;
+  const int SCSU;
+  const int ISCII;
+  const int US_ASCII;
+  const int UTF7;
+  const int BOCU1;
+  const int UTF16;
+  const int UTF32;
+  const int CESU8;
+  const int IMAP_MAILBOX;
+
+  public function __construct(
+    string $toEncoding = "utf-8",
+    string $fromEncoding = "utf-8",
+  );
+  public function getSourceEncoding(): ?string;
+  public function setSourceEncoding(
+    string $encoding,
+  ): bool;
+  public function getDestinationEncoding(): ?string;
+  public function setDestinationEncoding(
+    string $encoding,
+  ): bool;
+  public function getSourceType(): int;
+  public function getDestinationType(): int;
+  public function getSubstChars(): HH\FIXME\MISSING_RETURN_TYPE;
+  public function setSubstChars(string $chars): bool;
+  public function fromUCallback(
+    int $reason,
+    HH\FIXME\MISSING_PARAM_TYPE $source,
+    int $codepoint,
+    inout int $error,
+  ): HH\FIXME\MISSING_RETURN_TYPE;
+  public function toUCallback(
+    int $reason,
+    ?string $source,
+    ?string $codeunits,
+    inout int $error,
+  ): HH\FIXME\MISSING_RETURN_TYPE;
+  public function convert(
+    string $str,
+    bool $reverse = false,
+  ): HH\FIXME\MISSING_RETURN_TYPE;
+  static public function transcode(
+    string $str,
+    string $toEncoding,
+    string $fromEncoding,
+    HH\FIXME\MISSING_PARAM_TYPE $options = null,
+  ): HH\FIXME\MISSING_RETURN_TYPE;
+  public function getErrorCode(): int;
+  public function getErrorMessage(): string;
+  static public function reasonText(int $reason): HH\FIXME\MISSING_RETURN_TYPE;
+  static public function getAvailable(): HH\FIXME\MISSING_RETURN_TYPE;
+  static public function getAliases(
+    string $encoding,
+  ): HH\FIXME\MISSING_RETURN_TYPE;
+  static public function getStandards(): HH\FIXME\MISSING_RETURN_TYPE;
+  static public function getStandardName(
+    string $name,
+    string $standard,
+  ): HH\FIXME\MISSING_RETURN_TYPE;
+  static public function getMimeName(
+    string $name,
+  ): HH\FIXME\MISSING_RETURN_TYPE;
 }

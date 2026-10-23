@@ -3,7 +3,7 @@
 
 class Foo {}
 
-function test_is_a($a, $interfaces) {
+function test_is_a($a, $interfaces) :mixed{
   echo "====================================================\n";
   echo "Testing: ";
   var_dump($a);
@@ -32,8 +32,8 @@ function test_is_a($a, $interfaces) {
   echo "\tis_scalar: ";
   var_dump(is_scalar($a));
 
-  echo "\tis_array: ";
-  var_dump(is_array($a));
+  echo "\tis_php_array: ";
+  var_dump(HH\is_php_array($a));
 
   echo "\tis_vec: ";
   var_dump(is_vec($a));
@@ -50,43 +50,37 @@ function test_is_a($a, $interfaces) {
   echo "\tis_resource: ";
   var_dump(is_resource($a));
 
-  echo "instanceof Traversable: ";
-  var_dump($a instanceof Traversable);
+  echo "is Traversable: ";
+  var_dump($a is Traversable);
 
-  echo "instanceof KeyedTraversable: ";
-  var_dump($a instanceof KeyedTraversable);
+  echo "is KeyedTraversable: ";
+  var_dump($a is KeyedTraversable);
 
-  echo "instanceof Container: ";
-  var_dump($a instanceof Container);
+  echo "is Container: ";
+  var_dump($a is Container);
 
-  echo "instanceof KeyedContainer: ";
-  var_dump($a instanceof KeyedContainer);
+  echo "is KeyedContainer: ";
+  var_dump($a is KeyedContainer);
 
-  echo "instanceof Indexish: ";
-  var_dump($a instanceof Indexish);
+  echo "is XHPChild: ";
+  var_dump($a is XHPChild);
 
-  echo "instanceof XHPChild: ";
-  var_dump($a instanceof XHPChild);
+  echo "is Vector: ";
+  var_dump($a is Vector);
 
-  echo "instanceof ArrayAccess: ";
-  var_dump($a instanceof ArrayAccess);
+  echo "is Map: ";
+  var_dump($a is Map);
 
-  echo "instanceof Vector: ";
-  var_dump($a instanceof Vector);
-
-  echo "instanceof Map: ";
-  var_dump($a instanceof Map);
-
-  echo "instanceof Foo: ";
-  var_dump($a instanceof Foo);
+  echo "is Foo: ";
+  var_dump($a is Foo);
 
   foreach ($interfaces as $i) {
-    echo "instanceof (string) " . $i . ": ";
-    var_dump($a instanceof $i);
+    echo "is (string) " . $i . ": ";
+    var_dump(\is_a($a, $i));
   }
 }
 
-function test_is_dict($val) {
+function test_is_dict($val) :mixed{
   echo "====================================================\n";
   echo "Testing for is_dict: ";
   var_dump($val);
@@ -97,15 +91,13 @@ function test_is_dict($val) {
   }
 }
 
-function main() {
-  $interfaces = [
+<<__EntryPoint>> function main(): void {
+  $interfaces = vec[
     "HH\\Traversable",
     "HH\\KeyedTraversable",
     "HH\\Container",
     "HH\\KeyedContainer",
-    "Indexish",
     "XHPChild",
-    "ArrayAccess",
     "Vector",
     "Map",
     "Foo",
@@ -119,8 +111,8 @@ function main() {
   test_is_dict(7);
   test_is_dict(1.23);
   test_is_dict("abcd");
-  test_is_dict(new stdclass);
-  test_is_dict([1, 2, 3]);
+  test_is_dict(new stdClass);
+  test_is_dict(vec[1, 2, 3]);
   test_is_dict(Vector{'a', 'b', 'c'});
   test_is_dict(Map{100 => 'a', 'b' => 200});
   test_is_dict(Pair{123, 'abc'});
@@ -130,4 +122,3 @@ function main() {
   imagedestroy($resource);
 
 }
-main();

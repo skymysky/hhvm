@@ -1,10 +1,14 @@
-<?php
+<?hh
 
 class A {
 }
  class B extends A {
- static function foo() {
+ static function foo() :mixed{
  return new self();
 }
  }
- var_dump(B::foo());
+
+ <<__EntryPoint>>
+function main_776() :mixed{
+var_dump(B::foo());
+}

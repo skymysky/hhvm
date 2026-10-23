@@ -1,21 +1,29 @@
-<?php
+<?hh
 
-function f($arg0, $arg1) {
- var_dump($arg0, $arg1);
- }
-function g(&$arg0, $arg1) {
- var_dump($arg0, $arg1);
- }
-class A {
-  function f($f, $var) {
-    $f($this, $$var = 5);
-  }
-  function g($f, $var) {
-    $f($this, $var++);
+<<__DynamicallyCallable>>
+function f($arg0, $arg1) :mixed{
+  var_dump($arg0, $arg1);
+}
+<<__DynamicallyCallable>>
+function g(inout $arg0, $arg1) :mixed{
+  var_dump($arg0, $arg1);
+}
+class Af {
+  function g($f, $var) :mixed{
+    $t = $var; $var++; $f($this, $t);
   }
 }
-$a = new A;
-$a->f('f', 'this');
-$a->f('g', 'this');
-$a->g('f', 30);
-$a->g('g', 30);
+class Ag {
+  function g($f, $var) :mixed{
+    $thiz = $this;
+    $t = $var; $var++; $f(inout $thiz, $t);
+  }
+}
+
+<<__EntryPoint>>
+function main_1099() :mixed{
+$af = new Af;
+$ag = new Ag;
+$af->g(f<>, 30);
+$ag->g(g<>, 30);
+}

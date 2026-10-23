@@ -1,9 +1,10 @@
-<?php
+<?hh
 
 class A extends Exception {}
 class B extends Exception {}
 class C extends B {}
 
+<<__EntryPoint>> function main(): void {
 echo "1\n";
 try {
   echo "2\n";
@@ -32,11 +33,11 @@ try {
     }
     echo "ccc\n";
   } catch (A $ae) {
-    die("ddd\n");
+    exit("ddd\n");
   } catch (B $ab) {
     echo "11\n";
   } catch (Exception $e) {
-    die("eee\n");
+    exit("eee\n");
   } finally {
     echo "12\n";
     try {
@@ -55,4 +56,4 @@ try {
   echo "19\n";
 }
 echo "20\n";
-
+}

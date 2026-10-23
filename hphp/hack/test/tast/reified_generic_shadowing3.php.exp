@@ -1,0 +1,2 @@
+Errors:
+  [5:7-8] Erased generics can only be used in type hints because they do not exist at runtime

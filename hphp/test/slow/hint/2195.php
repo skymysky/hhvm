@@ -1,6 +1,6 @@
-<?php
+<?hh
 
-function f1() {
+function f1() :mixed{
   $a = Vector {
 }
 ;
@@ -11,7 +11,7 @@ function f1() {
   $a->setAll($b);
   var_dump($a);
 }
-function f2() {
+function f2() :mixed{
   $a = Vector {
 }
 ;
@@ -22,7 +22,7 @@ function f2() {
   $a->setAll($b);
   var_dump($a);
 }
-function f3() {
+function f3() :mixed{
   $a = Map {
 }
 ;
@@ -32,7 +32,7 @@ function f3() {
   $a->setAll($b);
   var_dump($a);
 }
-function f4() {
+function f4() :mixed{
   $a = Map {
 }
 ;
@@ -42,7 +42,11 @@ function f4() {
   $a->setAll($b);
   var_dump($a);
 }
+
+<<__EntryPoint>>
+function main_2195() :mixed{
 f1();
 f2();
 f3();
 f4();
+}

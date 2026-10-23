@@ -1,4 +1,4 @@
-<?php
+<?hh
 /*
  * Check if collator_sort() properly supports copy-on-write.
  */
@@ -9,7 +9,7 @@
  * Check if the second copy remains unsorted.
  */
 function test_COW( $locale, $test_array )
-{
+:mixed{
     $res_str = '';
 
     $coll = ut_coll_create( $locale );
@@ -19,8 +19,8 @@ function test_COW( $locale, $test_array )
     $copy2 = $test_array;
 
     // Sort given array and the first copy of it.
-    ut_coll_sort( $coll, $test_array );
-    ut_coll_sort( $coll, $copy1      );
+    ut_coll_sort( $coll, inout $test_array );
+    ut_coll_sort( $coll, inout $copy1      );
 
     // Return contents of all the arrays.
     // The second copy should remain unsorted.
@@ -32,18 +32,20 @@ function test_COW( $locale, $test_array )
 }
 
 function ut_main()
-{
+:mixed{
     $res_str = '';
 
-    $a1 = array( 'b', 'a', 'c' );
-    $a2 = array( 'в', 'а', 'б' );
+    $a1 = vec[ 'b', 'a', 'c' ];
+    $a2 = vec[ "\xd0\xb2", "\xd0\xb0", "\xd0\xb1" ];
 
     $res_str .= test_COW( 'en_US', $a1 );
     $res_str .= test_COW( 'ru_RU', $a2 );
 
     return $res_str;
 }
+<<__EntryPoint>>
+function main_entry(): void {
 
-require_once( 'ut_common.inc' );
-ut_run();
-?>
+  require_once( 'ut_common.inc' );
+  ut_run();
+}

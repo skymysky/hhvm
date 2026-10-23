@@ -16,10 +16,11 @@
 #include "hphp/runtime/base/data-walker.h"
 
 #include "hphp/runtime/base/array-data.h"
-#include "hphp/runtime/base/object-data.h"
-#include "hphp/runtime/base/type-variant.h"
 #include "hphp/runtime/base/array-iterator.h"
 #include "hphp/runtime/base/collections.h"
+#include "hphp/runtime/base/object-data.h"
+#include "hphp/runtime/base/object-iterator.h"
+#include "hphp/runtime/ext/collections/ext_collections-pair.h"
 
 namespace HPHP {
 
@@ -28,10 +29,9 @@ namespace HPHP {
 void DataWalker::traverseData(ArrayData* data,
                               DataFeature& features,
                               PointerSet& visited,
-                              PointerMap* seenArrs) const {
+                              ArrayMap* seenArrs) const {
   // Static and Uncounted arrays are never circular, never contain
-  // KindOfRef, and never contain objects or resources, so there's no
-  // need to traverse them.
+  // objects or resources, so there's no need to traverse them.
   if (!data->isRefCounted()) return;
 
   // At this point we're just using seenArrs to keep track of arrays
@@ -46,33 +46,9 @@ void DataWalker::traverseData(ArrayData* data,
     return;
   }
 
-  auto const fn = [&] (TypedValue rval) {
-    if (isRefType(rval.m_type)) {
-      if (rval.m_data.pref->isReferenced()) {
-        if (markVisited(rval.m_data.pref, features, visited)) {
-          // Don't recurse forever; we already went down this path, and
-          // stop the walk if we've already got everything we need.
-          return canStopWalk(features);
-        }
-        // Right now consider it circular even if the referenced variant
-        // only showed up in one spot.  This could be revisted later.
-        features.isCircular = true;
-        if (canStopWalk(features)) return true;
-      }
-      rval = *rval.m_data.pref->tv();
-    }
-
-    if (rval.m_type == KindOfObject) {
-      features.hasObjectOrResource = true;
-      traverseData(rval.m_data.pobj, features, visited);
-    } else if (isArrayLikeType(rval.m_type)) {
-      traverseData(rval.m_data.parr, features, visited, seenArrs);
-    } else if (rval.m_type == KindOfResource) {
-      features.hasObjectOrResource = true;
-    }
-    return canStopWalk(features);
-  };
-  IterateV<decltype(fn), false>(data, fn);
+  IterateV(data, [&](TypedValue rval) {
+    visitTypedValue(rval, features, visited, seenArrs);
+  });
 }
 
 void DataWalker::traverseData(
@@ -83,14 +59,59 @@ void DataWalker::traverseData(
   if (markVisited(data, features, visited)) {
     return; // avoid infinite recursion
   }
-  if (!canStopWalk(features)) {
-    // Use asArray to avoid int-like string key coercion (which can hide
-    // values).
-    auto const arr = data->isCollection()
-      ? collections::asArray(data)
-      : nullptr;
-    traverseData(arr ? arr : data->toArray().get(), features, visited);
+  if (canStopWalk(features)) return;
+
+  if (data->isCollection()) {
+    auto const arr = collections::asArray(data);
+    if (arr) {
+      traverseData(arr, features, visited);
+      return;
+    }
+    assertx(data->collectionType() == CollectionType::Pair);
+    auto const pair = static_cast<c_Pair*>(data);
+    visitTypedValue(*pair->get(0), features, visited);
+    visitTypedValue(*pair->get(1), features, visited);
+    return;
   }
+
+  IteratePropMemOrder(
+    data,
+    [&](Slot slot, const Class::Prop& prop, tv_rval val) {
+      visitTypedValue(val.tv(), features, visited);
+    },
+    [&](TypedValue key_tv, TypedValue val) {
+      visitTypedValue(val, features, visited);
+    }
+  );
+}
+
+ALWAYS_INLINE
+bool DataWalker::visitTypedValue(TypedValue rval,
+                                 DataFeature& features,
+                                 PointerSet& visited,
+                                 ArrayMap* seenArrs) const {
+  if (rval.m_type == KindOfObject) {
+    features.hasNonPersistable = true;
+    traverseData(rval.m_data.pobj, features, visited);
+  } else if (isArrayLikeType(rval.m_type)) {
+    traverseData(rval.m_data.parr, features, visited, seenArrs);
+  } else if (rval.m_type == KindOfResource) {
+    features.hasNonPersistable = true;
+  } else if (rval.m_type == KindOfRFunc) {
+    features.hasNonPersistable = true;
+  } else if (rval.m_type == KindOfFunc) {
+    if (rval.m_data.pfunc->isMethCaller()) features.hasNonPersistable = true;
+    if (!rval.m_data.pfunc->isPersistent()) features.hasNonPersistable = true;
+  } else if (rval.m_type == KindOfClass) {
+    if (!rval.m_data.pclass->isPersistent()) {
+      features.hasNonPersistable = true;
+    }
+  } else if (rval.m_type == KindOfClsMeth) {
+    if (!rval.m_data.pclsmeth->getCls()->isPersistent()) {
+      features.hasNonPersistable = true;
+    }
+  }
+  return canStopWalk(features);
 }
 
 inline bool DataWalker::markVisited(
@@ -107,18 +128,31 @@ inline bool DataWalker::markVisited(
 inline void DataWalker::objectFeature(ObjectData* pobj,
                                       DataFeature& features) const {
   if (pobj->isCollection()) return;
-  if ((m_features & LookupFeature::DetectSerializable) &&
-       pobj->instanceof(SystemLib::s_SerializableClass)) {
+  if (m_feature == LookupFeature::DetectSerializable &&
+      pobj->instanceof(SystemLib::getSerializableClass())) {
     features.hasSerializable = true;
   }
 }
 
 inline bool DataWalker::canStopWalk(DataFeature& features) const {
-  auto objectCheck =
-    features.hasObjectOrResource ||
-    !(m_features & LookupFeature::HasObjectOrResource);
+  /*
+   * This encodes some assumptions about our callers and our implementation:
+   *
+   * Those who pass DetectNonPersistable need to know if the data isCircular,
+   * and only if it's not do they care whether it hasNonPersistable; because of
+   * this we can only stop early if both are true for these callers.
+   *
+   * On the other hand, those that pass DetectSerializable react the same to
+   * a result of isCircular and hasSerializable, so for these callers we can
+   * stop if either is true (callers not passing DetectSerializable are not
+   * affected by this logic since we only do the check needed to set
+   * hasSerializable when passed DetectSerializable).
+   */
+  auto nonPersistableCheck =
+    features.hasNonPersistable ||
+    m_feature != LookupFeature::DetectNonPersistable;
   auto defaultChecks = features.isCircular || features.hasSerializable;
-  return objectCheck && defaultChecks;
+  return nonPersistableCheck && defaultChecks;
 }
 
 //////////////////////////////////////////////////////////////////////

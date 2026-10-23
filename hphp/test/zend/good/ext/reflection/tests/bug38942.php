@@ -1,9 +1,10 @@
-<?php
+<?hh
 class foo {
-    public function foo() {}
+    public function __construct() {}
 }
 
 class bar extends foo {
 }
-ReflectionClass::export("bar");
-?>
+<<__EntryPoint>> function main(): void {
+echo (new ReflectionClass("bar"))->__toString();
+}

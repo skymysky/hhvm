@@ -9,6 +9,6 @@
  *
  */
 
-function test() {
+function test(): void {
   $123 = 10;
 }

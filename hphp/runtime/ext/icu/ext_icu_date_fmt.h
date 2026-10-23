@@ -14,8 +14,7 @@
    | license@php.net so we can mail you a copy immediately.               |
    +----------------------------------------------------------------------+
 */
-#ifndef incl_HPHP_ICU_DATE_FMT_H
-#define incl_HPHP_ICU_DATE_FMT_H
+#pragma once
 
 #include "hphp/runtime/ext/extension.h"
 #include "hphp/runtime/ext/icu/icu.h"
@@ -23,11 +22,11 @@
 #include <unicode/udat.h>
 #include <unicode/datefmt.h>
 
-namespace HPHP { namespace Intl {
+namespace HPHP::Intl {
 /////////////////////////////////////////////////////////////////////////////
-extern const StaticString s_IntlDateFormatter;
 
-struct IntlDateFormatter : IntlError {
+struct IntlDateFormatter : IntlError,
+                           SystemLib::ClassLoader<"IntlDateFormatter"> {
   IntlDateFormatter() {}
   IntlDateFormatter(const IntlDateFormatter&) = delete;
   IntlDateFormatter& operator=(const IntlDateFormatter& src) {
@@ -41,10 +40,10 @@ struct IntlDateFormatter : IntlError {
     }
   }
 
-  void setDateFormatter(const String& locale,
+  void setDateFormatter(const OptString& locale,
                         int64_t datetype, int64_t timetype,
                         const Variant& timezone, const Variant& calendar,
-                        const String& pattern);
+                        const OptString& pattern);
   void setDateFormatter(const IntlDateFormatter *orig);
 
   bool isValid() const {
@@ -52,14 +51,10 @@ struct IntlDateFormatter : IntlError {
   }
 
   static Object newInstance() {
-    if (!c_IntlDateFormatter) {
-      c_IntlDateFormatter = Unit::lookupClass(s_IntlDateFormatter.get());
-      assertx(c_IntlDateFormatter);
-    }
-    return Object{c_IntlDateFormatter};
+    return Object{ classof() };
   }
   static IntlDateFormatter* Get(ObjectData* obj) {
-    return GetData<IntlDateFormatter>(obj, s_IntlDateFormatter);
+    return GetData<IntlDateFormatter>(obj, className());
   }
 
   // Zend seems to think casting UDateFormat* to icu::DateFormat*
@@ -79,10 +74,7 @@ struct IntlDateFormatter : IntlError {
   int64_t m_date_type;
   int64_t m_time_type;
   int64_t m_calendar;
-
-  static Class* c_IntlDateFormatter;
 };
 
 /////////////////////////////////////////////////////////////////////////////
-}} // namespace HPHP::Intl
-#endif // incl_HPHP_ICU_DATE_FMT_H
+} // namespace HPHP::Intl

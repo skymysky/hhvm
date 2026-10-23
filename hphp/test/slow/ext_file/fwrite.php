@@ -1,6 +1,9 @@
-<?php
+<?hh
 
-$tempfile = tempnam('/tmp', 'vmextfiletest');
+
+<<__EntryPoint>>
+function main_fwrite() :mixed{
+$tempfile = tempnam(sys_get_temp_dir(), 'vmextfiletest');
 
 $f = fopen($tempfile, 'w');
 fwrite($f, "testing fwrite", 7);
@@ -11,3 +14,4 @@ fpassthru($f);
 echo "\n";
 
 unlink($tempfile);
+}

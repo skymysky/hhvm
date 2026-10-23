@@ -13,8 +13,7 @@
    | license@php.net so we can mail you a copy immediately.               |
    +----------------------------------------------------------------------+
 */
-#ifndef incl_HPHP_SRCDB_H_
-#define incl_HPHP_SRCDB_H_
+#pragma once
 
 #include <algorithm>
 #include <atomic>
@@ -29,7 +28,7 @@
 #include "hphp/runtime/vm/srckey.h"
 #include "hphp/runtime/vm/tread-hash-map.h"
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 ////////////////////////////////////////////////////////////////////////////////
 
 struct CGMeta;
@@ -50,13 +49,18 @@ struct RelocationInfo;
  */
 struct IncomingBranch {
   enum class Tag : int16_t {
+    CALL,
     JMP,
     JCC,
     ADDR,
+    LDADDR,
   };
 
   using Opaque = CompactTaggedPtr<void>::Opaque;
 
+  static IncomingBranch callFrom(TCA from) {
+    return IncomingBranch(Tag::CALL, from);
+  }
   static IncomingBranch jmpFrom(TCA from) {
     return IncomingBranch(Tag::JMP, from);
   }
@@ -66,6 +70,9 @@ struct IncomingBranch {
   static IncomingBranch addr(TCA* from) {
     return IncomingBranch(Tag::ADDR, TCA(from));
   }
+  static IncomingBranch ldaddr(TCA from) {
+    return IncomingBranch(Tag::LDADDR, from);
+  }
 
   Opaque getOpaque() const {
     return m_ptr.getOpaque();
@@ -74,12 +81,13 @@ struct IncomingBranch {
 
   Tag type()        const { return m_ptr.tag(); }
   TCA toSmash()     const { return TCA(m_ptr.ptr()); }
-  void relocate(RelocationInfo& rel);
   void adjust(TCA addr) {
     m_ptr.set(m_ptr.tag(), addr);
   }
   void patch(TCA dest);
+  bool optimize();
   TCA target() const;
+  std::string show() const;
 private:
   explicit IncomingBranch(Tag type, TCA toSmash) {
     m_ptr.set(type, toSmash);
@@ -109,33 +117,49 @@ struct TransLoc {
     m_mainLen = (uint32_t)size;
   }
 
+  void setColdSize(size_t size) {
+    assertx(size < std::numeric_limits<uint32_t>::max());
+    m_coldLen = (uint32_t)size;
+  }
+
+  void setFrozenSize(size_t size) {
+    assertx(size < std::numeric_limits<uint32_t>::max());
+    m_frozenLen = (uint32_t)size;
+  }
+
+
   bool contains(TCA loc) {
     return (mainStart() <= loc && loc < mainEnd()) ||
       (coldStart() <= loc && loc < coldEnd()) ||
       (frozenStart() <= loc && loc < frozenEnd());
   }
 
+  // The entry may be in any area; entryRange is the range of code for this
+  // translation in the entry's area (it does not contain any colder code).
+  TCA entry() const;
+  TcaRange entryRange() const;
+
   TCA mainStart() const;
   TCA coldStart() const;
   TCA frozenStart() const;
 
-  TCA coldCodeStart()   const { return coldStart()   + sizeof(uint32_t); }
-  TCA frozenCodeStart() const { return frozenStart() + sizeof(uint32_t); }
+  TCA coldCodeStart()   const { return coldStart(); }
+  TCA frozenCodeStart() const { return frozenStart(); }
 
-  uint32_t coldCodeSize()   const { return coldSize()   - sizeof(uint32_t); }
-  uint32_t frozenCodeSize() const { return frozenSize() - sizeof(uint32_t); }
+  uint32_t coldCodeSize()   const { return coldSize(); }
+  uint32_t frozenCodeSize() const { return frozenSize(); }
 
   TCA mainEnd()   const { return mainStart() + m_mainLen; }
-  TCA coldEnd()   const { return coldStart() + coldSize(); }
-  TCA frozenEnd() const { return frozenStart() + frozenSize(); }
+  TCA coldEnd()   const { return coldStart() + m_coldLen; }
+  TCA frozenEnd() const { return frozenStart() + m_frozenLen; }
 
   uint32_t mainSize()   const { return m_mainLen; }
-  uint32_t coldSize()   const { return *(uint32_t*)coldStart(); }
-  uint32_t frozenSize() const { return *(uint32_t*)frozenStart(); }
+  uint32_t coldSize()   const { return m_coldLen; }
+  uint32_t frozenSize() const { return m_frozenLen; }
 
   bool empty() const {
-    return m_mainOff == kDefaultOff && m_mainLen == 0 &&
-      m_coldOff == kDefaultOff && m_frozenOff == kDefaultOff;
+    return m_mainOff == kDefaultOff && m_mainLen == 0 && m_coldLen == 0 &&
+      m_frozenLen == 0 && m_coldOff == kDefaultOff && m_frozenOff == kDefaultOff;
   }
 
 private:
@@ -143,20 +167,22 @@ private:
 
   uint32_t m_mainOff {kDefaultOff};
   uint32_t m_mainLen {0};
+  uint32_t m_coldLen {0};
+  uint32_t m_frozenLen {0};
+
 
   uint32_t m_coldOff   {kDefaultOff};
   uint32_t m_frozenOff {kDefaultOff};
 };
 
 // Prevent unintentional growth of the SrcDB
-static_assert(sizeof(TransLoc) == 16, "Don't add fields to TransLoc");
+static_assert(sizeof(TransLoc) == 24, "Don't add fields to TransLoc");
 
 /*
  * SrcRec: record of translator output for a given source location.
  */
 struct SrcRec final {
-  explicit SrcRec(TCA anchor) : m_anchorTranslation(anchor)
-  {}
+  SrcRec() = default;
 
   /*
    * The top translation is our first target, a translation whose type
@@ -170,30 +196,13 @@ struct SrcRec final {
     return m_topTranslation.get();
   }
 
-  /*
-   * Returns the VM stack offset the translations in the SrcRec have, in
-   * situations where we need to and can know.
-   *
-   * Pre: this SrcRec is for a non-resumed SrcKey
-   */
-  FPInvOffset nonResumedSPOff() const;
-
-  /*
-   * Get the anchor translation for this SrcRec. If another thread holds the
-   * code lock it may update this address via relocate().
-   */
-  TCA getFallbackTranslation() const;
-
   //////////////////////////////////////////////////////////////////////////////
 
   /*
-   * The following functions are used during creation of new
-   * translations or when inserting debug guards.  May only be called
-   * when holding the lock for this SrcRec.
+   * The following functions are used during creation of new translations.
+   * May only be called when holding the lock for this SrcRec.
    */
-  void chainFrom(IncomingBranch br);
-  void addDebuggerGuard(TCA dbgGuard, TCA m_dbgBranchGuardSrc);
-  bool hasDebuggerGuard() const { return m_dbgBranchGuardSrc != nullptr; }
+  void chainFrom(IncomingBranch br, TCA stub = nullptr);
 
   const GrowableVector<IncomingBranch>& incomingBranches() const {
     return m_incomingBranches;
@@ -213,27 +222,24 @@ struct SrcRec final {
    * The following functions will implicitly acquire the lock for this SrcRec
    */
   void removeIncomingBranch(TCA toSmash);
+  void removeIncomingBranchesInRange(TCA start, TCA frontier);
   void newTranslation(TransLoc newStart,
                       GrowableVector<IncomingBranch>& inProgressTailBranches);
-  void replaceOldTranslations();
+  void smashFallbacksToStub(TCA stub);
+  void replaceOldTranslations(TCA transStub);
   size_t numTrans() const {
     auto srLock = readlock();
     return translations().size();
   }
 
-  /*
-   * Relocate may override the anchor so the code lock must also be acquired
-   */
-  void relocate(RelocationInfo& rel);
-
   //////////////////////////////////////////////////////////////////////////////
 
-  folly::SharedMutex::WriteHolder writelock() const {
-    return folly::SharedMutex::WriteHolder(m_lock);
+  std::unique_lock<folly::SharedMutex> writelock() const {
+    return std::unique_lock(m_lock);
   }
 
-  folly::SharedMutex::ReadHolder readlock() const {
-    return folly::SharedMutex::ReadHolder(m_lock);
+  std::shared_lock<folly::SharedMutex> readlock() const {
+    return std::shared_lock(m_lock);
   }
 
 private:
@@ -252,14 +258,11 @@ private:
 
   // We chain new translations onto the end of the list, so we need to
   // track all the fallback jumps from the "tail" translation so we
-  // can rewrire them to new ones.
-  LowTCA m_anchorTranslation;
+  // can rewire them to new ones.
   GrowableVector<IncomingBranch> m_tailFallbackJumps;
 
   GrowableVector<TransLoc> m_translations;
   GrowableVector<IncomingBranch> m_incomingBranches;
-  // The branch src for the debug guard, if this has one.
-  LowTCA m_dbgBranchGuardSrc{nullptr};
 
   mutable folly::SharedMutex m_lock;
 };
@@ -271,8 +274,9 @@ struct SrcDB {
    * Maybe could be possible with a better hash function or lower max load
    * factor.  (See D450383.)
    */
-  using THM            = TreadHashMap<SrcKey::AtomicInt, SrcRec*,
-                                      int64_hash, VMAllocator<char>>;
+  using THM            = TreadHashMap<SrcKey::AtomicInt, std::atomic<SrcRec*>,
+                                      int_hash<SrcKey::AtomicInt>,
+                                      VMAllocator<char>>;
   using iterator       = THM::iterator;
   using const_iterator = THM::const_iterator;
 
@@ -294,13 +298,19 @@ struct SrcDB {
 
   SrcRec* find(SrcKey sk) const {
     auto const p = m_map.find(sk.toAtomicInt());
-    return p ? *p : 0;
+    return p ? p->load(std::memory_order_acquire) : 0;
   }
 
-  SrcRec* insert(SrcKey sk, TCA anchor) {
-    return *m_map.insert(
-      sk.toAtomicInt(), new SrcRec(anchor)
-    );
+  // Requires tc::lockMetadata() to be held.
+  // Only one thread can execute this function at a time.
+  SrcRec* insert(SrcKey sk);
+
+  // Requires tc::lockMetadata() to be held.
+  // Only one thread can execute this function at a time.
+  void erase(SrcKey sk) {
+    auto prev = m_map.insertOrUpdate(sk.toAtomicInt(), nullptr);
+    assertx(prev != nullptr); // We should not have called this in case it didn't exist
+    delete prev;
   }
 
 private:
@@ -308,6 +318,4 @@ private:
 };
 
 ////////////////////////////////////////////////////////////////////////////////
-}}
-
-#endif
+}

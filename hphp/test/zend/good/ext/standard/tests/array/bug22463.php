@@ -1,24 +1,24 @@
-<?php
+<?hh
 
-function a($ary) {
-	return (is_array($ary) ? array_reduce($ary, 'cb', 0) : 1);
+function a($ary) :mixed{
+    return (is_array($ary) ? array_reduce($ary, cb<>, 0) : 1);
 }
 
-function cb($v, $elem) {
-	return $v + a($elem); 
+function cb($v, $elem) :mixed{
+    return $v + a($elem);
 }
-
-$ary = array(
-	array(
-		array(
-			array(
-				array(
-					array(0, 1, 2, 3, 4)
-				)
-			)
-		)
-	)
-);
+<<__EntryPoint>> function main(): void {
+$ary = vec[
+    vec[
+        vec[
+            vec[
+                vec[
+                    vec[0, 1, 2, 3, 4]
+                ]
+            ]
+        ]
+    ]
+];
 
 var_dump(a($ary));
-?>
+}

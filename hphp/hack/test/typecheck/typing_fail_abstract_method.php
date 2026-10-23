@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 /**
  * Copyright (c) 2014, Facebook, Inc.
  * All rights reserved.
@@ -12,7 +12,7 @@
 // An abstract method shouldn't contain code
 
 abstract class A {
-  public abstract function f() {
+  public abstract function f(): int {
     return 0;
   }
 }

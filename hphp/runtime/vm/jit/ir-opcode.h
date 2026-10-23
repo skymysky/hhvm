@@ -14,8 +14,7 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_VM_IR_OPCODE_H_
-#define incl_HPHP_VM_IR_OPCODE_H_
+#pragma once
 
 #include <type_traits>
 #include <vector>
@@ -54,30 +53,16 @@ struct SSATmp;
  *     DRefineS(N)  single dst's type is intersection of src N and paramType
  *     DParam(t)    single dst has type of the instruction's type parameter,
  *                    which must be a subtype of t
- *     DParamMayRelax(t) like DParam, except type may relax
- *     DParamPtr(k) like DParam, but the param must be a PtrTo* of kind k
- *     DUnboxPtr    Unboxed PtrTo*T; adds possibility of pointing into a ref
- *     DBoxPtr      Boxed PtrTo*T
  *     DAllocObj    single dst has a type of a newly allocated object; may be a
  *                    specialized object type if the class is known
- *     DArrPacked   single dst has a packed array type
- *     DArrMixed    single dst has a mixed array type
- *     DVArr        single dst is either a packed array type or vec, depending
-                      on configuration
- *     DDArr        single dst is either a mixed array type or dict, depending
-                      on configuration
- *     DArrElem     single dst has type based on reading an array element,
- *                    intersected with an optional type parameter
  *     DVecElem    single dst has type based on reading a vec element,
  *                    intersected with an optional type parameter
  *     DDictElem   single dst has type based on reading a dict element,
                       intersected with an optional type parameter
  *     DKeysetElem single dst has type int or string, intersected with an
  *                   optional type parameter.
- *     DCtx         single dst has type Cctx|Obj<=ctx, where ctx is the
- *                    current context class
  *     DMulti       multiple dests. type and number depend on instruction
- *     DSetElem     single dst is a subset of CountedStr|Nullptr depending on
+ *     DSetElem     single dst is a subset of StaticStr|Nullptr depending on
  *                    sources
  *     DBuiltin     single dst for CallBuiltin. This can return complex data
  *                    types such as (TStr | TNull)
@@ -86,29 +71,34 @@ struct SSATmp;
  *     DGenIter     single dst for generator iteration. This can return
  *                     different types based on whether the generator is async.
  *     DSubtract(N,t) single dest has type of src N with t removed
- *     DCns         single dst's type is the union of legal types for PHP
- *                    constants
  *     DUnion(N1,...) single dest has type that is the union of the specified
  *                      N srcs.
  *     DMemoKey     single dst for memoization key generation. Type depends on
  *                    source type.
+ *     DLvalOfPtr   single dst with the Ptr type of src 0 converted to an
+ *                    equivalent Lval, preserving all inner type information.
  *
  * srcinfo:
  *
  *   Contains a series of tests on the source parameters in order.
  *
- *     NA               instruction takes no sources
- *     S(t1,...,tn)     source must be a subtype of {t1|..|tn}
- *     S(AK(<kind>))    source must be an array with specified kind
- *     C(type)          source must be a constant, and subtype of type
- *     CStr             same as C(StaticStr)
- *     SVar(t1,...,tn)  variadic source list, all subtypes of {t1|..|tn}
- *     SDArr            source must be a mixed array type or dict, depending
- *                      on configuration
- *     CDArr            source must be a constant mixed array type or dict,
- *                      depending on configuration
+ *     NA                                     instruction takes no sources
+ *     S(t1 OR ... OR tn, f1 | ... | fk)      source's type must one of t1, ..., tn
+ *     S(AK(<kind>), f1 | ... | fk)           source must be an array with specified kind
+ *     C(T, f1 | ... | fk)                    source must be a constant
+ *                                            and subtype of T
+ *     CStr(f1 | ... | fk)                    same as C(StaticStr)
+ *     SVar(t1 OR ... OR tn, f1 | ... | fk)   variadic source list,
+ *                                            each one's type one of t1, ..., tn
+ *     SCrossTrace                            cross-trace arguments specific
+ *                                            to the SrcKey target
  *
- * flags:
+ *     f1, ..., fk  are source-specific flags:
+ *     CR         consumes reference: the instruction will decref the source
+ *     MMR        may move reference: the instruction will either decref or store the source somewhere
+ *     MR         moves reference:    the instuction will store the source somewhere
+ *
+ * Opcode flags:
  *
  *   See doc/ir.specification for the meaning of these flags.
  *
@@ -121,12 +111,10 @@ struct SSATmp;
  *
  *      NF    no flags
  *      PRc   producesRC
- *      CRc   consumesRC
+ *      PNRc  producesNewRC
  *      T     isTerminal
  *      B     isBranch
  *      P     passthrough
- *      MProp MInstrProp
- *      MElem MInstrElem
  */
 
 // The IR opcode table is generated from lines that start with | in
@@ -147,23 +135,13 @@ size_t constexpr kNumOpcodes = IR_OPCODES;
 #undef O
 
 /*
- * Returns true for instructions that perform calls.
- */
-bool isCallOp(Opcode opc);
-
-/*
- * Returns true for instructions that refine the types of values with
- * a runtime check.
- */
-bool isGuardOp(Opcode opc);
-
-/*
  * Returns the negated version of the specified opcode, if its a comparison
  * opcode and can be negated (not all comparisons can be negated).
  */
-folly::Optional<Opcode> negateCmpOp(Opcode opc);
+Optional<Opcode> negateCmpOp(Opcode opc);
 
 const char* opcodeName(Opcode opcode);
+Optional<Opcode> nameToOpcode(const std::string&);
 
 bool opHasExtraData(Opcode op);
 
@@ -173,25 +151,39 @@ enum OpcodeFlag : uint64_t {
   Branch           = 1ULL << 1,
   ConsumesRC       = 1ULL << 2,
   ProducesRC       = 1ULL << 3,
-  MInstrProp       = 1ULL << 4,
-  MInstrElem       = 1ULL << 5,
-  Terminal         = 1ULL << 6, // has no next instruction
-  NaryDest         = 1ULL << 7, // has 0 or more destinations
-  HasExtra         = 1ULL << 8,
-  Passthrough      = 1ULL << 9,
+  ProducesNewRC    = 1ULL << 4,
+  Terminal         = 1ULL << 5, // has no next instruction
+  NaryDest         = 1ULL << 6, // has 0 or more destinations
+  HasExtra         = 1ULL << 7,
+  Passthrough      = 1ULL << 8,
+  LayoutAgnostic   = 1ULL << 9,
+  LayoutPreserving = 1ULL << 10,
 };
+
+enum class IRSrcFlag : uint8_t {
+  None            = 0,
+  Consume         = 1U << 0,
+  MayMove         = 1U << 1,
+  Move            = 1U << 2,
+};
+
+inline constexpr IRSrcFlag operator|(const IRSrcFlag a, const IRSrcFlag b) {
+  return IRSrcFlag(static_cast<uint8_t>(a) | static_cast<uint8_t>(b));
+}
+
+inline constexpr IRSrcFlag operator&(const IRSrcFlag a, const IRSrcFlag b) {
+  return IRSrcFlag(static_cast<uint8_t>(a) & static_cast<uint8_t>(b));
+}
+
+inline constexpr IRSrcFlag operator~(const IRSrcFlag a) {
+  return IRSrcFlag(~static_cast<uint8_t>(a));
+}
+
+
 
 bool hasEdges(Opcode opc);
 bool opcodeHasFlags(Opcode opc, uint64_t flags);
 bool opcodeMayRaise(Opcode opc);
-
-/*
- * Given an SSATmp of type Cls, try to find the name of the class.
- * Returns nullptr if can't find it.
- */
-const StringData* findClassName(SSATmp* cls);
-
-using TcaRange = folly::Range<TCA>;
 
 } // namespace jit
 } // namespace HPHP
@@ -217,5 +209,3 @@ template<> class FormatValue<HPHP::jit::Opcode> {
 }
 
 #include "hphp/runtime/vm/jit/ir-opcode-inl.h"
-
-#endif

@@ -77,16 +77,17 @@ const StaticString
   s_timeout("timeout");
 
 xmlDocPtr soap_xmlParseFile(const char *filename) {
-  String cache_key("HPHP.SOAP.WSDL.");
+  OptString cache_key("HPHP.SOAP.WSDL.");
   cache_key += filename;
 
-  auto content = Variant::attach(HHVM_FN(apc_fetch)(cache_key));
+  bool success = false;
+  auto content = Variant::attach(HHVM_FN(apc_fetch)(cache_key, success));
   if (same(content, false)) {
-    Variant cxt = HHVM_FN(stream_context_create)(make_map_array(
-                  s_http, make_map_array(s_timeout, 1000)));
+    Variant cxt = HHVM_FN(stream_context_create)(make_dict_array(
+                  s_http, make_dict_array(s_timeout, 1000)));
     auto file = File::Open(filename, "rb", 0, cast_or_null<StreamContext>(cxt));
     if (file) {
-      content = HHVM_FN(stream_get_contents)(Resource(file));
+      content = HHVM_FN(stream_get_contents)(OptResource(file));
       if (!same(content, false)) {
         HHVM_FN(apc_store)(cache_key, content);
       }
@@ -94,7 +95,7 @@ xmlDocPtr soap_xmlParseFile(const char *filename) {
   }
 
   if (!same(content, false)) {
-    String scontent = content.toString();
+    OptString scontent = content.toString();
     xmlDocPtr ret = soap_xmlParseMemory(scontent.data(), scontent.size(),
                                         false);
     if (ret) {
@@ -167,7 +168,7 @@ xmlNsPtr node_find_ns(xmlNodePtr node) {
   }
 }
 
-bool attr_is_equal_ex(xmlAttrPtr node, char *name, char *ns) {
+bool attr_is_equal_ex(xmlAttrPtr node, const char *name, const char *ns) {
   if (name == nullptr || strcmp((char*)node->name, name) == 0) {
     if (ns) {
       xmlNsPtr nsPtr = attr_find_ns(node);
@@ -182,7 +183,7 @@ bool attr_is_equal_ex(xmlAttrPtr node, char *name, char *ns) {
   return false;
 }
 
-bool node_is_equal_ex(xmlNodePtr node, char *name, char *ns) {
+bool node_is_equal_ex(xmlNodePtr node, const char *name, const char *ns) {
   if (name == nullptr || strcmp((char*)node->name, name) == 0) {
     if (ns) {
       xmlNsPtr nsPtr = node_find_ns(node);
@@ -198,7 +199,7 @@ bool node_is_equal_ex(xmlNodePtr node, char *name, char *ns) {
 }
 
 
-xmlAttrPtr get_attribute_ex(xmlAttrPtr node, char *name, char *ns) {
+xmlAttrPtr get_attribute_ex(xmlAttrPtr node, const char *name, const char *ns) {
   while (node!=nullptr) {
     if (attr_is_equal_ex(node, name, ns)) {
       return node;
@@ -208,7 +209,7 @@ xmlAttrPtr get_attribute_ex(xmlAttrPtr node, char *name, char *ns) {
   return nullptr;
 }
 
-xmlNodePtr get_node_ex(xmlNodePtr node, char *name, char *ns) {
+xmlNodePtr get_node_ex(xmlNodePtr node, const char *name, const char *ns) {
   while (node!=nullptr) {
     if (node_is_equal_ex(node, name, ns)) {
       return node;
@@ -218,7 +219,7 @@ xmlNodePtr get_node_ex(xmlNodePtr node, char *name, char *ns) {
   return nullptr;
 }
 
-xmlNodePtr get_node_recurisve_ex(xmlNodePtr node, char *name, char *ns) {
+xmlNodePtr get_node_recurisve_ex(xmlNodePtr node, const char *name, const char *ns) {
   while (node != nullptr) {
     if (node_is_equal_ex(node, name, ns)) {
       return node;
@@ -233,9 +234,9 @@ xmlNodePtr get_node_recurisve_ex(xmlNodePtr node, char *name, char *ns) {
   return nullptr;
 }
 
-xmlNodePtr get_node_with_attribute_ex(xmlNodePtr node, char *name,
-                                      char *name_ns, char *attribute,
-                                      char *value, char *attr_ns) {
+xmlNodePtr get_node_with_attribute_ex(xmlNodePtr node, const char *name,
+                                      const char *name_ns, const char *attribute,
+                                      const char *value, const char *attr_ns) {
   xmlAttrPtr attr;
   while (node != nullptr) {
     if (name != nullptr) {
@@ -254,9 +255,9 @@ xmlNodePtr get_node_with_attribute_ex(xmlNodePtr node, char *name,
   return nullptr;
 }
 
-xmlNodePtr get_node_with_attribute_recursive_ex
-(xmlNodePtr node, char *name, char *name_ns, char *attribute, char *value,
- char *attr_ns) {
+xmlNodePtr get_node_with_attribute_recursive_ex(xmlNodePtr node, const char *name,
+                                                const char *name_ns, const char *attribute,
+                                                const char *value, const char *attr_ns) {
   while (node != nullptr) {
     if (node_is_equal_ex(node, name, name_ns)) {
       xmlAttrPtr attr = get_attribute_ex(node->properties, attribute, attr_ns);

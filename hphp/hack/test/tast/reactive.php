@@ -1,5 +1,6 @@
-<?hh // strict
+<?hh
 <<__Rx>>
-function foo() : Rx<(function (int) : void)> {
-// UNSAFE
+
+function foo() : Pure<(function (int) : void)> {
+  throw new Exception();
 }

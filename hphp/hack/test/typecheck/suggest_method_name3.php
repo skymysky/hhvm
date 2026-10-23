@@ -10,7 +10,7 @@
  */
 
 class X extends Y {
-  public static function myMethod();
+  public static function myMethod(): void;
 }
 
 function test(): void {

@@ -1,5 +1,5 @@
-<?hh // strict
+<?hh
 
 function test(): void {
-  unbound_global
+  unbound_global;
 }

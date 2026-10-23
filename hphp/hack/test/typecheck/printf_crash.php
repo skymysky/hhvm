@@ -1,20 +1,18 @@
 //// def.php
-<?hh // strict
-
-newtype FormatString<T> = string;
+<?hh
 
 //// printf.php
-<?hh // decl
+<?hh
 interface MyPlainSprintf {
 }
 
-function my_sprintf(FormatString<PlainSprintf> $f, ...): string;
+function my_sprintf(\HH\FormatString<PlainSprintf> $f, mixed ...$_): string {}
 
 //// use.php
-<?hh // strict
+<?hh
 
 final class Foo {
-  public function f(FormatString $s): void {
+  public function f(\HH\FormatString $s): void {
     my_sprintf($s);
   }
 }

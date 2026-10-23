@@ -3,14 +3,14 @@
 #include <unicode/unorm.h>
 #include <unicode/utypes.h>
 
-namespace HPHP { namespace Intl {
+namespace HPHP::Intl {
 /////////////////////////////////////////////////////////////////////////////
 // class Normalizer
 
 const StaticString s_Normalizer("Normalizer");
 
 static bool HHVM_STATIC_METHOD(Normalizer, isNormalized,
-                                  const String& input, int64_t form) {
+                                  const OptString& input, int64_t form) {
   s_intl_error->clearError();
   switch (form) {
     case UNORM_NFD:
@@ -47,7 +47,7 @@ static bool HHVM_STATIC_METHOD(Normalizer, isNormalized,
 }
 
 static Variant HHVM_STATIC_METHOD(Normalizer, normalize,
-                                  const String& input, int64_t form) {
+                                  const OptString& input, int64_t form) {
   s_intl_error->clearError();
 
   int expansion_factor = 1;
@@ -103,7 +103,7 @@ static Variant HHVM_STATIC_METHOD(Normalizer, normalize,
   dest.releaseBuffer(size_needed);
 
   error = U_ZERO_ERROR;
-  String ret(u8(dest, error));
+  OptString ret(u8(dest, error));
   if (U_FAILURE(error)) {
     s_intl_error->setError(error, "normalizer_normalize: "
                                   "error converting normalized text UTF-8");
@@ -114,7 +114,7 @@ static Variant HHVM_STATIC_METHOD(Normalizer, normalize,
 
 //////////////////////////////////////////////////////////////////////////////
 
-void IntlExtension::initNormalizer() {
+void IntlExtension::registerNativeNormalizer() {
   HHVM_STATIC_ME(Normalizer, isNormalized);
   HHVM_STATIC_ME(Normalizer, normalize);
 
@@ -127,9 +127,7 @@ void IntlExtension::initNormalizer() {
   HHVM_RCC_INT(Normalizer, NFC, UNORM_NFC);
   HHVM_RCC_INT(Normalizer, FORM_KC, UNORM_NFKC);
   HHVM_RCC_INT(Normalizer, NFKC, UNORM_NFKC);
-
-  loadSystemlib("icu_normalizer");
 }
 
 //////////////////////////////////////////////////////////////////////////////
-}} // namespace HPHP::Intl
+} // namespace HPHP::Intl

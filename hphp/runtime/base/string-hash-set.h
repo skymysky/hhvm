@@ -14,8 +14,7 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_STRING_HASH_SET_H_
-#define incl_HPHP_STRING_HASH_SET_H_
+#pragma once
 
 #include "hphp/runtime/base/string-functors.h"
 #include "hphp/runtime/base/req-hash-set.h"
@@ -24,10 +23,14 @@ namespace HPHP {
 namespace req {
 
 // Set of case-insensitive Strings with iter/ref stability
-using StringISet = req::hash_set<String,hphp_string_hash,hphp_string_isame>;
+using StringTSet = req::hash_set<OptString,hphp_string_hash,hphp_string_tsame>;
+using StringFSet = req::hash_set<OptString,hphp_string_hash,hphp_string_fsame>;
+
+// Case-insensitive String keys, without iter/ref stability, but faster
+using StringTFastSet = req::fast_set<OptString,hphp_string_hash,hphp_string_tsame>;
+using StringFFastSet = req::fast_set<OptString,hphp_string_hash,hphp_string_fsame>;
 
 // Case-sensitive String keys, no ref stability but faster
-using StringFastSet = req::fast_set<String,hphp_string_hash,hphp_string_same>;
+using StringFastSet = req::fast_set<OptString,hphp_string_hash,hphp_string_same>;
 
 }}
-#endif

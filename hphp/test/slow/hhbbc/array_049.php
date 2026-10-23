@@ -1,13 +1,18 @@
-<?php
+<?hh
 
-function a() { return 1; }
-function foo() {
-  $x = array(a());
-  $x[] += 12;
+function a() :mixed{ return 1; }
+function foo() :mixed{
+  $x = vec[a()];
+  $x[] = 0;
+  $x[1] += 12;
   return $x;
 }
-function d() {
+function d() :mixed{
   $y = foo();
   var_dump($y);
 }
+
+<<__EntryPoint>>
+function main_array_049() :mixed{
 d();
+}

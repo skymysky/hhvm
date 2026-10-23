@@ -1,4 +1,4 @@
-<?hh // decl /* -*- mode: php -*- */
+<?hh /* -*- mode: php -*- */
 /**
  * Copyright (c) 2014, Facebook, Inc.
  * All rights reserved.
@@ -8,4 +8,4 @@
  *
  */
 
-class ImagickException extends RuntimeException implements Stringish {}
+class ImagickException extends RuntimeException implements StringishObject {}

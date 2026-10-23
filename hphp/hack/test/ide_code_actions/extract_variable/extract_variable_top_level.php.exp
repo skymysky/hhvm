@@ -1,0 +1,35 @@
+Code actions available:
+------------------------------------------
+Extract into variable (CodeActionKind: "refactor") SELECTED
+Devmate Quick Fix - Hack does not support top level statements. Use the `__EntryPoint` attribute on a function instead (CodeActionKind: "quickfix")
+Devmate Agent Fix - Hack does not support top level statements. Use the `__EntryPoint` attribute on a function instead (CodeActionKind: "quickfix")
+
+JSON for selected code action:
+------------------------------------------
+{
+  "title": "Extract into variable",
+  "kind": "refactor",
+  "diagnostics": [],
+  "edit": {
+    "changes": {
+      "FILE.php": [
+        {
+          "range": {
+            "start": { "line": 3, "character": 0 },
+            "end": { "line": 3, "character": 43 }
+          },
+          "newText": "$${0:placeholder0} = 300 + 500;\n$x = /*range-start*/$${0:placeholder0}/*range-end*/;"
+        }
+      ]
+    }
+  }
+}
+
+Applied edit for code action:
+------------------------------------------
+<?hh
+
+
+$${0:placeholder0} = 300 + 500;
+$x = /*range-start*/$${0:placeholder0}/*range-end*/;
+

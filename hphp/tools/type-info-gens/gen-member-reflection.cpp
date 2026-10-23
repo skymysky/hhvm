@@ -23,7 +23,7 @@
 
 #include <boost/program_options.hpp>
 
-#include <folly/Format.h>
+#include <fmt/core.h>
 #include <folly/Singleton.h>
 
 #include <algorithm>
@@ -42,7 +42,7 @@ const std::string kProgramDescription =
   "Generate member reflection helpers from debug-info";
 
 constexpr bool actually_run =
-#if !defined(DEBUG) || defined(HHVM_ENABLE_MEMBER_REFLECTION)
+#if defined(NDEBUG) || defined(HHVM_ENABLE_MEMBER_REFLECTION)
   true;
 #else
   false;
@@ -76,7 +76,7 @@ std::size_t size_of(const Type& type,
 
 void generate_entry(const Object& object, std::ostream& o,
                     const std::unique_ptr<TypeParser>& parser) {
-  o << folly::format(
+  o << fmt::format(
     "  {{\n"
     "    \"{}\",\n"
     "    [](const void* base, const void* internal) -> const char* {{\n"
@@ -95,14 +95,14 @@ void generate_entry(const Object& object, std::ostream& o,
     auto const size = size_of(member.type, parser);
 
     auto const name = member.name.empty()
-      ? folly::format("union@{}", off).str()
+      ? fmt::format("union@{}", off)
       : member.name;
 
     if (last_end < off) {
-      o << folly::format("      // hole ({})\n", off - last_end);
+      o << fmt::format("      // hole ({})\n", off - last_end);
     }
 
-    o << "      " << folly::format(
+    o << "      " << fmt::format(
       "if ({} <= diff && diff < {}) return \"{}\"; // size {}\n",
       off, off + size, name, size
     );
@@ -129,12 +129,17 @@ void generate_entry(const Object& object, std::ostream& o,
     << "  }";
 }
 
+size_t NumThreads = 24;
+
 void generate(const std::string& source_executable, std::ostream& o) {
   o << "#include <string>\n";
   o << "#include <unordered_map>\n\n";
+  o << "#include \"hphp/util/portability.h\"\n\n";
 
   o << "extern \"C\" {\n\n"
-    << "auto " << HPHP::detail::kMemberReflectionTableName << " =\n"
+    << "EXTERNALLY_VISIBLE auto "
+    << HPHP::detail::kMemberReflectionTableName
+    << " =\n"
        "  std::unordered_map<\n"
        "    std::string,\n"
        "    const char*(*)(const void*, const void*)\n"
@@ -148,7 +153,7 @@ void generate(const std::string& source_executable, std::ostream& o) {
 #undef X
     };
 
-    auto const parser = TypeParser::make(source_executable);
+    auto const parser = TypeParser::make(source_executable, NumThreads);
     auto first = true;
 
     parser->forEachObject(
@@ -157,7 +162,7 @@ void generate(const std::string& source_executable, std::ostream& o) {
         if (type.name.linkage != ObjectTypeName::Linkage::external) return;
 
         // Assume the first, complete, external definition is the canonical one.
-        if (!reflectables.count(type.name.name)) return;
+        if (!reflectables.contains(type.name.name)) return;
         reflectables.erase(type.name.name);
 
         if (first) {
@@ -192,25 +197,39 @@ int main(int argc, char** argv) {
     ("source_file",
        po::value<std::string>()->required(),
        "filename to read debug-info from")
+    ("dep",
+       po::value<std::vector<std::string>>(),
+       "just here so we can add dependencies")
     ("output_file",
        po::value<std::string>()->required(),
-       "filename of generated code");
+       "filename of generated code")
+    ("num_threads", po::value<int>(), "number of parallel threads");
 
   try {
     po::variables_map vm;
     po::store(po::parse_command_line(argc, argv, desc), vm);
 
-    if (vm.count("help")) {
+    if (vm.contains("help")) {
       std::cout << kProgramDescription << "\n\n"
                 << desc << std::endl;
       return 1;
     }
 
+    if (vm.contains("num_threads")) {
+      auto n = vm["num_threads"].as<int>();
+      if (n > 0) {
+        NumThreads = n;
+      } else {
+        std::cerr << "\nIllegal num_threads=" << n << "\n";
+        return 1;
+      }
+    }
+
     po::notify(vm);
 
     auto const source_executable = vm["source_file"].as<std::string>();
-    auto const output_filename = vm.count("install_dir")
-      ? folly::sformat(
+    auto const output_filename = vm.contains("install_dir")
+      ? fmt::format(
           "{}{}{}",
           vm["install_dir"].as<std::string>(),
           HPHP::FileUtil::getDirSeparator(),

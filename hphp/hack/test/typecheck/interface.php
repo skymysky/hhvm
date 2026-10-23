@@ -10,5 +10,5 @@
  */
 
 interface I {
-  private function foobar();
+  private function foobar(): void;
 }

@@ -18,6 +18,8 @@
 
 #include "hphp/util/string-vsnprintf.h"
 
+#include <cxxabi.h>
+
 namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -44,6 +46,12 @@ const char* Exception::what() const noexcept {
     m_what = m_msg + "\n";
   }
   return m_what.c_str();
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
+std::string current_exception_name() noexcept {
+  return __cxxabiv1::__cxa_current_exception_type()->name();
 }
 
 ///////////////////////////////////////////////////////////////////////////////

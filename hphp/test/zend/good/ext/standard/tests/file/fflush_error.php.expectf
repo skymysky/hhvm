@@ -1,36 +1,9 @@
 *** Testing error conditions ***
 -- Testing fflush(): with zero argument --
 
-Warning: %s
-bool(false)
+Warning: fflush() expects exactly 1 positional parameter, 0 given in %s/test/zend/good/ext/standard/tests/file/fflush_error.php on line 12
 -- Testing fflush(): with more than expected number of arguments --
 
-Warning: %s
-bool(false)
--- Testing fflush(): with invalid arguments --
--- Iteration 1 --
-
-Warning: %s
-bool(false)
--- Iteration 2 --
-
-Warning: %s
-bool(false)
--- Iteration 3 --
-
-Warning: %s
-bool(false)
--- Iteration 4 --
-
-Warning: %s
-bool(false)
--- Iteration 5 --
-
-Warning: %s
-bool(false)
--- Iteration 6 --
-
-Warning: %s
-bool(false)
+Warning: fflush() expects exactly 1 positional parameter, 2 given in %s/test/zend/good/ext/standard/tests/file/fflush_error.php on line 22
 
 *** Done ***

@@ -15,8 +15,7 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_EXT_HASH_ENGINE_H_
-#define incl_HPHP_EXT_HASH_ENGINE_H_
+#pragma once
 
 #include "hphp/util/assertions.h"
 
@@ -27,8 +26,6 @@
 
 namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
-
-#define L64(x) (x ## ULL)
 
 struct HashEngine {
   HashEngine(int digest_size_, int block_size_, int context_size_)
@@ -52,9 +49,7 @@ struct HashEngine {
   int context_size;
 };
 
-typedef std::map<std::string,std::shared_ptr<HashEngine>> HashEngineMap;
+using HashEngineMap = std::map<std::string,std::shared_ptr<HashEngine>>;
 
 ///////////////////////////////////////////////////////////////////////////////
 }
-
-#endif // incl_HPHP_EXT_HASH_ENGINE_H_

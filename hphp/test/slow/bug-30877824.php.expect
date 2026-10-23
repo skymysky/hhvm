@@ -1,6 +1,5 @@
-array(2) {
-  [0]=>
-  array(3) {
+vec(3) {
+  dict(3) {
     ["class"]=>
     string(1) "C"
     ["function"]=>
@@ -8,40 +7,45 @@ array(2) {
     ["type"]=>
     string(2) "->"
   }
-  [1]=>
-  array(3) {
+  dict(3) {
     ["class"]=>
     string(1) "C"
     ["function"]=>
     string(1) "f"
     ["type"]=>
     string(2) "->"
+  }
+  dict(1) {
+    ["function"]=>
+    string(4) "main"
   }
 }
 ------------------------
-array(2) {
-  [0]=>
-  array(4) {
+vec(3) {
+  dict(4) {
     ["class"]=>
     string(1) "C"
     ["function"]=>
     string(1) "g"
     ["object"]=>
-    object(C)#1 (0) {
+    object(C) (0) {
     }
     ["type"]=>
     string(2) "->"
   }
-  [1]=>
-  array(4) {
+  dict(4) {
     ["class"]=>
     string(1) "C"
     ["function"]=>
     string(1) "f"
     ["object"]=>
-    object(C)#1 (0) {
+    object(C) (0) {
     }
     ["type"]=>
     string(2) "->"
+  }
+  dict(1) {
+    ["function"]=>
+    string(4) "main"
   }
 }

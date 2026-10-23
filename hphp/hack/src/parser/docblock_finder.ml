@@ -1,4 +1,4 @@
-(**
+(*
  * Copyright (c) 2015, Facebook, Inc.
  * All rights reserved.
  *
@@ -7,7 +7,7 @@
  *
  *)
 
-open Hh_core
+open Hh_prelude
 module Syntax = Full_fidelity_positioned_syntax
 module Trivia = Full_fidelity_positioned_trivia
 module TriviaKind = Full_fidelity_trivia_kind
@@ -31,42 +31,44 @@ module TriviaKind = Full_fidelity_trivia_kind
 (* line, string, is_line_comment *)
 type comment = int * string * bool
 
-type finder = {
-  comments: comment array;
-}
+type finder = { comments: comment array }
 
-let make_docblock_finder (comments: (Pos.t * Prim_defs.comment) list) : finder =
+let make_docblock_finder (comments : (Pos.t * Prim_defs.comment) list) : finder
+    =
   (* The Hack parser produces comments in reverse but sorted order. *)
-  let comments = Array.of_list (
-    List.rev_map comments ~f:begin fun (pos, cmt) ->
-      let str = Prim_defs.string_of_comment cmt in
-      (Pos.end_line pos, str, Prim_defs.is_line_comment cmt)
-    end
-  ) in
+  let comments =
+    Array.of_list
+      (List.rev_map comments ~f:(fun (pos, cmt) ->
+           let str = Prim_defs.string_of_comment cmt in
+           (Pos.end_line pos, str, Prim_defs.is_line_comment cmt)))
+  in
   { comments }
 
 (* Binary search for the index of the last comment before a given line. *)
 
 (* Merge all consecutive line comments preceding prev_line.
  * Stop when we reach last_line. *)
-let rec merge_line_comments (finder : finder)
-                            (idx : int)
-                            (last_line : int)
-                            (prev_line : int)
-                            (acc : string list) : string list =
-  if idx < 0 then acc
-  else begin
-    let (line, str, is_line_comment) = Array.get finder.comments idx in
+let rec merge_line_comments
+    (finder : finder)
+    (idx : int)
+    (last_line : int)
+    (prev_line : int)
+    (acc : string list) : string list =
+  if idx < 0 then
+    acc
+  else
+    let (line, str, is_line_comment) = finder.comments.(idx) in
     if is_line_comment && line > last_line && line = prev_line - 1 then
       merge_line_comments finder (idx - 1) last_line line (("//" ^ str) :: acc)
-    else acc
-  end
+    else
+      acc
 
 let find_last_comment_index finder line =
-  Utils.infimum finder.comments line
-    (fun (comment_line, _, _) line -> comment_line - line)
+  Utils.infimum finder.comments line (fun (comment_line, _, _) line ->
+      comment_line - line)
 
 let open_multiline = Str.regexp "^/\\*\\(\\*?\\) *"
+
 let close_multiline = Str.regexp " *\\*/$"
 
 (** Tidies up a delimited comment.
@@ -98,41 +100,40 @@ let tidy_delimited_comment comment =
     |> Str.replace_first close_multiline ""
   in
   let lines = String_utils.split_into_lines comment in
-  let line_trimmer = match lines with
+  let line_trimmer =
+    match lines with
     | []
-    | [_] -> String.trim
+    | [_] ->
+      Stdlib.String.trim
     | _hd :: tail ->
-      let get_whitespace_count x =
-        String_utils.index_not_opt x " "
-      in
+      let get_whitespace_count x = String_utils.index_not_opt x " " in
       let counts = List.filter_map ~f:get_whitespace_count tail in
       let min =
-        List.min_elt counts ~cmp:(fun a b -> a - b)
+        List.min_elt counts ~compare:(fun a b -> a - b)
         |> Option.value ~default:0
       in
-      let removal = Str.regexp (Printf.sprintf "^%s\\(\\* ?\\)?" (String.make min ' ')) in
+      let removal =
+        Str.regexp (Printf.sprintf "^%s\\(\\* ?\\)?" (String.make min ' '))
+      in
       Str.replace_first removal ""
   in
-  lines
-  |> List.map ~f:line_trimmer
-  |> String.concat "\n"
+  lines |> List.map ~f:line_trimmer |> String.concat ~sep:"\n"
 
-let find_docblock (finder : finder)
-                  (last_line : int)
-                  (line : int) : string option =
+let find_docblock (finder : finder) (last_line : int) (line : int) :
+    string option =
   match find_last_comment_index finder line with
   | Some comment_index ->
-      let (comment_line, str, is_line_comment) =
-        Array.get finder.comments comment_index in
-      if is_line_comment then begin
-        match merge_line_comments finder comment_index last_line line [] with
-        | [] -> None
-        | lines -> Some (String.trim (String.concat "" lines))
-      end
-      else if comment_line > last_line && comment_line >= line - 2 then
-        Some ("/*" ^ str ^ "*/")
-      else
-        None
+    let (comment_line, str, is_line_comment) =
+      finder.comments.(comment_index)
+    in
+    if is_line_comment then
+      match merge_line_comments finder comment_index last_line line [] with
+      | [] -> None
+      | lines -> Some (Stdlib.String.trim (String.concat ~sep:"" lines))
+    else if comment_line > last_line && comment_line >= line - 2 then
+      Some ("/*" ^ str ^ "*/")
+    else
+      None
   | None -> None
 
 (* Find the last comment on `line` if it exists. *)
@@ -140,58 +141,100 @@ let find_inline_comment (finder : finder) (line : int) : string option =
   match find_last_comment_index finder (line + 1) with
   | Some last_comment_index ->
     let (comment_line, str, is_line_comment) =
-      Array.get finder.comments last_comment_index in
-    if comment_line = line then begin
+      finder.comments.(last_comment_index)
+    in
+    if comment_line = line then
       if is_line_comment then
-        Some (String.trim ("//" ^ str))
+        Some (Stdlib.String.trim ("//" ^ str))
       else
         Some ("/*" ^ str ^ "*/")
-    end
     else
       None
   | None -> None
 
-let line_comment_prefix = Str.regexp "^// ?"
+(* Regexp matching single-line comments, either # foo or // foo . *)
+let line_comment_prefix = Str.regexp "^\\(//\\|#\\) ?"
 
-let get_docblock node =
-  let rec helper trivia_list acc eols_until_exit =
-    match trivia_list, eols_until_exit with
-    | [], _
-    | Trivia.{kind = TriviaKind.EndOfLine; _} :: _, 0 ->
-      begin match acc with
-      | [] -> None
-      | comments ->
-        let comment =
-          comments
-          |> List.map ~f:(Str.replace_first line_comment_prefix "")
-          |> String.concat "\n"
-          |> String.trim
-        in
-        Some comment
-      end
-    | hd :: tail, _ ->
-      begin match Trivia.kind hd with
-      | TriviaKind.DelimitedComment when List.is_empty acc ->
-        Some (tidy_delimited_comment (Trivia.text hd))
-      | TriviaKind.SingleLineComment ->
-        helper tail (Trivia.text hd :: acc) 1
-      | TriviaKind.WhiteSpace -> helper tail acc eols_until_exit
-      | TriviaKind.EndOfLine -> helper tail acc (eols_until_exit - 1)
+(**
+ * Extract a // comment docblock that is directly before this node.
+ *
+ *     // A function.
+ *     // It is useful.
+ *     function foo(): void {}
+ *
+ * In this example, we return "A function.\nIt is useful."
+ *)
+let get_single_lines_docblock (node : Syntax.t) : string option =
+  let rec aux trivia_list acc (seen_newline : bool) : string list =
+    match trivia_list with
+    | [] -> acc
+    | hd :: tail ->
+      (match Trivia.kind hd with
+      | TriviaKind.SingleLineComment -> aux tail (Trivia.text hd :: acc) false
+      | TriviaKind.WhiteSpace ->
+        (* Step over whitespace. *)
+        aux tail acc seen_newline
+      | TriviaKind.EndOfLine ->
+        (* Stop if we've seen consecutive newlines, as that means
+           we've reached a blank line. *)
+        if seen_newline then
+          acc
+        else
+          aux tail acc true
       | TriviaKind.FixMe
-      | TriviaKind.IgnoreError -> helper tail acc 1
+      | TriviaKind.Ignore
+      | TriviaKind.IgnoreError ->
+        (* Step over HH_FIXME comments. *)
+        aux tail acc false
       | TriviaKind.DelimitedComment
-      | TriviaKind.Unsafe
-      | TriviaKind.UnsafeExpression
       | TriviaKind.FallThrough
-      | TriviaKind.ExtraTokenError
-      | TriviaKind.AfterHaltCompiler ->
-        (* Short circuit immediately. *)
-        helper [] acc 0
-      end
+      | TriviaKind.ExtraTokenError ->
+        (* Stop if we see a /* ... */ comment, a FALLTHROUGH
+           comment, or a syntax error. *)
+        acc)
   in
-  let trivia_list = Syntax.leading_trivia node in
 
-  (* Set the starting EOL count to 2 instead of 1 because it's valid to have up
-     to one blank line between the end of a docblock and the start of its
-     associated element. *)
-  helper (List.rev trivia_list) [] 2
+  match aux (List.rev (Syntax.leading_trivia node)) [] false with
+  | [] -> None
+  | comment_lines ->
+    Some
+      (comment_lines
+      |> List.map ~f:(Str.replace_first line_comment_prefix "")
+      |> String.concat ~sep:"\n"
+      |> Stdlib.String.trim)
+
+(**
+ * Extract a /* ... */ comment docblock that is before this node,
+ * even if there are blank lines present.
+ *
+ *)
+let get_delimited_docblock (node : Syntax.t) : string option =
+  let rec aux trivia_list : string option =
+    match trivia_list with
+    | [] -> None
+    | hd :: tail ->
+      (match Trivia.kind hd with
+      | TriviaKind.DelimitedComment ->
+        (* We've found the comment. *)
+        Some (tidy_delimited_comment (Trivia.text hd))
+      | TriviaKind.WhiteSpace
+      | TriviaKind.EndOfLine
+      | TriviaKind.FixMe
+      | TriviaKind.Ignore
+      | TriviaKind.IgnoreError ->
+        (* Step over whitespace and HH_FIXME comments. *)
+        aux tail
+      | TriviaKind.SingleLineComment ->
+        (* Give up if we have a // comment. *)
+        None
+      | TriviaKind.FallThrough
+      | TriviaKind.ExtraTokenError ->
+        (* Give up if we have a // FALLTHROUGH comment or syntax error. *)
+        None)
+  in
+  aux (List.rev (Syntax.leading_trivia node))
+
+let get_docblock (node : Syntax.t) : string option =
+  Option.first_some
+    (get_single_lines_docblock node)
+    (get_delimited_docblock node)

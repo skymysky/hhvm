@@ -1,6 +1,10 @@
-<?php
+<?hh
 
-function test() {
+function test() :mixed{
 }
- var_dump(test());
+
+ <<__EntryPoint>>
+function main_1279() :mixed{
+var_dump(test());
  $a = test();
+}

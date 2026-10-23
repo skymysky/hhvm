@@ -1,4 +1,4 @@
-(**
+(*
  * Copyright (c) 2017, Facebook, Inc.
  * All rights reserved.
  *
@@ -12,12 +12,14 @@
  * break) allowing binary search from an offset to a line number (the index in
  * the map itself + 1).
  *)
-type t [@@deriving show]
+type t [@@deriving show, eq, sexp_of]
+
+val reset_global_state : unit -> unit
 
 (* Creates a line break map from/for the given string. *)
 val make : string -> t
 
-val offset_to_file_pos_triple: t -> int -> int * int * int
+val offset_to_file_pos_triple : t -> int -> int * int * int
 
 (* Take a zero-based offset, produce a one-based (line, column) pair.
  *
@@ -26,7 +28,14 @@ val offset_to_file_pos_triple: t -> int -> int * int * int
  * an offset x where x < -l defaults to offset 0, i.e. offsets only wrap around\
  * once.
  *)
-val offset_to_position: t -> int -> int * int
+val offset_to_position : t -> int -> int * int
+
+exception
+  Position_not_found of {
+    line: int;
+    column: int;
+    num_lines_in_file: int;
+  }
 
 (* Take a one-based (line, column) pair, produce a zero-based offset.
  *
@@ -37,8 +46,13 @@ val offset_to_position: t -> int -> int * int
  * Setting cyclic_index translates negative line numbers as offsets from the
  * last line in the original string. Without cyclic_index, Invalid_argument is
  * raised with an array-out-of-bounds message.
+ *
+ * Might raise {!Position_not_found}
  *)
 val position_to_offset : ?existing:bool -> t -> int * int -> int
 
 (* Does what it says on the tin. *)
 val offset_to_line_start_offset : t -> int -> int
+
+(* Returns a list of line lengths *)
+val offsets_to_line_lengths : t -> int list

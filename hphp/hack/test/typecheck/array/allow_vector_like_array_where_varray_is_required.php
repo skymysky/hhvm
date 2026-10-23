@@ -1,5 +1,5 @@
 <?hh
 
 function test(): varray<string> {
-  return array("tingley");
+  return vec["tingley"];
 }

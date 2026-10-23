@@ -14,15 +14,15 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_VM_CODE_GEN_CF_H_
-#define incl_HPHP_VM_CODE_GEN_CF_H_
+#pragma once
 
+#include "hphp/runtime/vm/jit/smashable-instr.h"
 #include "hphp/runtime/vm/jit/string-tag.h"
 #include "hphp/runtime/vm/jit/vasm-gen.h"
 #include "hphp/runtime/vm/jit/vasm-instr.h"
 #include "hphp/runtime/vm/jit/vasm-reg.h"
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -86,6 +86,29 @@ Vreg cond(Vout& vmain, Vout& vcold, ConditionCode cc, Vreg sf,
   vmain << phidef{vmain.makeTuple({dst})};
   return dst;
 }
+
+template <class Then, class Else>
+Vtuple cond(Vout& vmain, Vout& vcold, ConditionCode cc, Vreg sf,
+          Vtuple dst, Then thenBlock, Else elseBlock, StringTag tag) {
+  auto elze = vmain.makeBlock();
+  auto then = vcold.makeBlock();
+  auto done = vmain.makeBlock();
+
+  vmain << jcc{cc, sf, {elze, then}, tag};
+
+  vmain = elze;
+  auto r1 = elseBlock(vmain);
+  vmain << phijmp{done, r1};
+
+  vcold = then;
+  auto r2 = thenBlock(vcold);
+  vcold << phijmp{done, r2};
+
+  vmain = done;
+  vmain << phidef{dst};
+  return dst;
+}
+
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -169,6 +192,38 @@ void ifThenElse(Vout& vmain, Vout& vcold, ConditionCode cc, Vreg sf,
 }
 
 /*
+ * Generate an if-then-else block construct with a tuple dst.
+ *
+ * Like ifThenElse(), except that the blocks are expected to return a dst Vtuple.
+ * The dsts are phi'd into `dst'.
+ *
+ * Returns `dst' unaltered, for convenience.
+ */
+template <class Then, class Else>
+Vtuple cond(Vout& vmain, ConditionCode cc, Vreg sf,
+          Vtuple dst, Then thenBlock, Else elseBlock,
+          StringTag tag = StringTag{}) {
+  return code_gen_detail::cond(vmain, vmain, cc, sf, dst,
+                               thenBlock, elseBlock, tag);
+}
+
+template <class Then, class Else>
+Vtuple unlikelyCond(Vout& vmain, Vout& vcold, ConditionCode cc, Vreg sf,
+                  Vtuple dst, Then thenBlock, Else elseBlock,
+                  StringTag tag = StringTag{}) {
+  return code_gen_detail::cond(vmain, vcold, cc, sf, dst,
+                               thenBlock, elseBlock, tag);
+}
+
+template <class Then, class Else>
+Vtuple cond(Vout& vmain, Vout& vcold, ConditionCode cc, Vreg sf,
+          Vtuple dst, Then thenBlock, Else elseBlock, bool unlikely,
+          StringTag tag = StringTag{}) {
+  return code_gen_detail::cond(vmain, unlikely ? vcold : vmain,
+                               cc, sf, dst, thenBlock, elseBlock, tag);
+}
+
+/*
  * Generate an if-then-else block construct with a single dst.
  *
  * Like ifThenElse(), except that the blocks are expected to return a dst Vreg.
@@ -209,14 +264,26 @@ Vreg cond(Vout& vmain, Vout& vcold, ConditionCode cc, Vreg sf,
  * appropriately for the loop.
  *
  * `loopBlock' is the lambda responsible for generating the code.  It takes
- * both the input phidef and output phijcc loop registers as arguments, and
+ * both the input phidef and output phijmp loop registers as arguments, and
  * should return a single SF Vreg to be tested against `cc'.
+ *
+ * `count' is an optional hint specifying how many times the loop is
+ * likely to execute. This will be used to adjust the block weights
+ * appropriately.
  */
 template <class Loop>
 VregList doWhile(Vout& v, ConditionCode cc,
-                 const VregList& regs, Loop loopBlock) {
+                 const VregList& regs, Loop loopBlock,
+                 int64_t count = 10) {
   auto loop = v.makeBlock();
-  auto done = v.makeBlock();
+  auto const done = v.makeBlock();
+  auto loopSplit = v.makeBlock();
+  auto const doneSplit = v.makeBlock();
+
+  if (count >= 0) {
+    loop.addWeightScale(count);
+    loopSplit.addWeightScale(count > 0 ? (count - 1) : 0);
+  }
 
   auto const freshRegs = [&] {
     auto copy = regs;
@@ -230,7 +297,13 @@ VregList doWhile(Vout& v, ConditionCode cc,
   v = loop;
   v << phidef{v.makeTuple(in)};
   auto const sf = loopBlock(in, out);
-  v << phijcc{cc, sf, {done, loop}, v.makeTuple(out)};
+  v << jcc{cc, sf, {doneSplit, loopSplit}};
+
+  v = loopSplit;
+  v << phijmp{loop, v.makeTuple(out)};
+
+  v = doneSplit;
+  v << phijmp{done, v.makeTuple(out)};
 
   v = done;
   auto fout = freshRegs();
@@ -241,6 +314,89 @@ VregList doWhile(Vout& v, ConditionCode cc,
 
 ///////////////////////////////////////////////////////////////////////////////
 
-}}
+/*
+ * Generate a counted "for loop", which may be fully or partially unrolled
+ * depending on the number of iterations.
+ *
+ * - `iterations' is the number of iterations that the loop conceptually
+ *   executes.
+ *
+ * - `regs' is the set of input registers that are live into the loop body and
+ *   that will be advanced at each iteration and phi-ed at the top of the loop.
+ *
+ * - `workBlock' is lambda to emit the body of the loop containing the actual
+ *   computation for each iteration.  It takes the set of `regs' for the current
+ *   iteration as the second argument, and the relative iteration distance to
+ *   the current values of the `regs' registers as the third argument
+ *   (necessary for unrolling).
+ *
+ * - `loopAdv' is the lambda to emit the code to advance the loop variables in
+ *   `regs'.  Its second argument is the set of input registers, the third
+ *   argument is the set of output registers, and the fourth argument is the
+ *   number of iterations to advance the registers by.
+ *
+ */
+template <class Work, class Advance>
+void forLoopUnroll(Vout& v, unsigned iterations, const VregList& regs,
+                   Work workBlock, Advance loopAdv) {
+  auto const freshRegs = [&] {
+    auto copy = regs;
+    for (auto& reg : copy) reg = v.makeReg();
+    return copy;
+  };
 
-#endif
+  const unsigned kMaxIterationsFullUnroll = 12;
+  const unsigned kUnrollFactor = 4;
+  static_assert(kUnrollFactor <= kMaxIterationsFullUnroll);
+
+  if (iterations <= kMaxIterationsFullUnroll) {
+    auto in = regs;
+    for (int i = 0; i < iterations; i++) {
+      workBlock(v, in, i);
+    }
+    return;
+  }
+
+  auto const loop = v.makeBlock();
+  auto const cont = v.makeBlock();
+  auto const done = v.makeBlock();
+
+  auto rCount = v.makeReg();
+
+  v << movzlq{v.cns(iterations - kUnrollFactor), rCount};
+  VregList args = regs;
+  args.push_back(rCount);
+  v << phijmp{loop, v.makeTuple(args)};
+
+  v = loop;
+  auto in = freshRegs();
+  auto rCountOld = v.makeReg();
+  args = in;
+  args.push_back(rCountOld);
+  v << phidef{v.makeTuple(args)};
+
+  for (int i = 0; i < kUnrollFactor; i++) {
+    workBlock(v, in, i);
+  }
+
+  auto out = freshRegs();
+  loopAdv(v, in, out, kUnrollFactor);
+  auto sf = v.makeReg();
+  auto rCountNew = v.makeReg();
+  v << subqi{(int32_t)kUnrollFactor, rCountOld, rCountNew, sf};
+  v << jcc{CC_GE, sf, {done, cont}};
+
+  v = cont;
+  args = out;
+  args.push_back(rCountNew);
+  v << phijmp{loop, v.makeTuple(args)};
+
+  v = done;
+  for (int i = 0; i < iterations % kUnrollFactor; i++) {
+    workBlock(v, in, kUnrollFactor + i);
+  }
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
+}

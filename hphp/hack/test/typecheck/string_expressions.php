@@ -18,4 +18,6 @@ class Meh {
   }
 }
 
-Meh::foo();
+function main(): void {
+  Meh::foo();
+}

@@ -1,9 +1,13 @@
-<?php
+<?hh
 
 class A {
- function test() {
+ function test() :mixed{
 }
 }
- $obj = new A();
+
+ <<__EntryPoint>>
+function main_721() :mixed{
+$obj = new A();
  $obj->test();
  $obj = 1;
+}

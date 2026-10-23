@@ -1,6 +1,14 @@
-<?php
+<?hh
 
-$dom = new domdocument;
+function adjustDoctype($xml) :mixed{
+    return str_replace(vec[">
+<","DOCTYPE HTML",'<p>','</p>'],vec["><","DOCTYPE html",'',''],$xml);
+}
+
+
+<<__EntryPoint>>
+function main_1674() :mixed{
+$dom = new DOMDocument;
 $html = <<<EOM
 <html><head>
 <title>Hello world</title>
@@ -20,8 +28,4 @@ print  "--- save as HTML
 ";
 
 print adjustDoctype($dom->saveHTML());
-
-function adjustDoctype($xml) {
-    return str_replace(array(">
-<","DOCTYPE HTML",'<p>','</p>'),array("><","DOCTYPE html",'',''),$xml);
 }

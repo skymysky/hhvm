@@ -14,8 +14,7 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_HTTP_PROTOCOL_H_
-#define incl_HPHP_HTTP_PROTOCOL_H_
+#pragma once
 
 #include "hphp/runtime/server/transport.h"
 
@@ -24,7 +23,6 @@ namespace HPHP {
 
 struct Array;
 struct RequestURI;
-struct SourceRootInfo;
 struct StringBuffer;
 struct Variant;
 struct VirtualHost;
@@ -32,13 +30,7 @@ struct VirtualHost;
 struct HttpProtocol {
   static const VirtualHost *GetVirtualHost(Transport *transport);
   static void PrepareSystemVariables(Transport *transport,
-                                     const RequestURI &r,
-                                     const SourceRootInfo &sri);
-  static void PrepareRequestVariables(Array& request,
-                                      Array& get,
-                                      Array& post,
-                                      Array& cookie,
-                                      const std::string& requestOrder);
+                                     const RequestURI &r);
   static void PrepareGetVariable(Array& get,
                                  const RequestURI &r);
   static void PreparePostVariables(Array& post,
@@ -46,12 +38,9 @@ struct HttpProtocol {
                                    Array& files,
                                    Transport* transport,
                                    const RequestURI& r);
-  static bool PrepareCookieVariable(Array& cookie,
-                                    Transport *transport);
   static void PrepareServerVariable(Array& server,
                                     Transport *transport,
                                     const RequestURI &r,
-                                    const SourceRootInfo &sri,
                                     const VirtualHost *vhost);
 
   static bool ProxyRequest(Transport *transport, bool force,
@@ -82,4 +71,3 @@ struct HttpProtocol {
 ///////////////////////////////////////////////////////////////////////////////
 }
 
-#endif // incl_HPHP_HTTP_PROTOCOL_H_

@@ -1,11 +1,31 @@
-File "bad_inout_decl_parent3.php", line 7, characters 7-8:
-Class C2 does not correctly implement all required methods  (Typing[4175])
-File "bad_inout_decl_parent3.php", line 7, characters 18-19:
-Some methods are incompatible with those declared in type C1
-Read the following to see why:
-File "bad_inout_decl_parent3.php", line 8, characters 19-21:
-Member foo has the wrong type
-File "bad_inout_decl_parent3.php", line 8, characters 28-29:
-This parameter is passed by reference
-File "bad_inout_decl_parent3.php", line 4, characters 33-34:
-It is incompatible with an inout parameter
+error: Parsing[1002] Encountered unexpected token `&`. [1]
+
+bad_inout_decl_parent3.php:8:27
+6 | 
+7 | class C2 extends C1 {
+8 |   public function foo(int &$x): void {}
+  |                           ^ [1]
+9 | }
+
+error: Typing[4341] The method `foo` is not compatible with the overridden method [1]
+-> Method `foo` has type `(function(int $x): void)` in `C2` [1]
+-> But it has type `(function(inout int $x): void)` in parent `C1` [2]
+-> Type `(function(int $x): void)` is not a subtype of `(function(inout int $x): void)` [1]
+-> This is an `inout` parameter [3]
+-> It is incompatible with a normal parameter [4]
+
+bad_inout_decl_parent3.php:8:19
+2 | 
+3 | class C1 {
+4 |   public function foo(inout int $x): void {}
+  |                   ^^^ [2]
+  |                                 ^^ [3]
+5 | }
+6 | 
+7 | class C2 extends C1 {
+8 |   public function foo(int &$x): void {}
+  |                   ^^^ [1]
+  |                            ^^ [4]
+9 | }
+
+2 errors found

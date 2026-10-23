@@ -1,9 +1,8 @@
-<?php
-function foo () {
+<?hh
+
+<<__EntryPoint>>
+function foo () :mixed{
    try {
         echo "3";
    }
 }
-
-foo();
-?>

@@ -1,32 +1,44 @@
-<?php
+<?hh
+class Foo {
+  public static int $n = 0;
+  public static function incr(): int {
+    $x = Foo::$n;
+    Foo::$n += 1;
+    return $x;
+  }
+}
+<<__EntryPoint>>
+function entrypoint_complex(): void {
 
-$n=0;
-$a=array();
+  $a=dict[];
 
-$foo = function($i) use (&$n) {
+  $foo = function($i) {
+    $n = Foo::$n;
     echo "foo($i): n = $n\n";
     return 0;
-};
+  };
 
-$bar = function($i) use (&$n) {
+  $bar = function($i) {
+    $n = Foo::$n;
     echo "bar($i): n = $n\n";
     return 0;
-};
+  };
 
-list(
-  $a[$n++ + $foo(0)],
   list(
-    $a[$n++ + $foo(10)],
-    $a[$n++ + $foo(20)],
-  ),
-  $a[$n++ + $foo(2)]
-) = array(
-  "S0: n = " . ($n++ + $bar(0)),
-  array(
-    "T0: n = " . ($n++ + $bar(10)),
-    "T1: n = " . ($n++ + $bar(20)),
-  ),
-  "S2: n = " . ($n++ + $bar(2))
-);
+    $a[Foo::incr() + $foo(0)],
+    list(
+      $a[Foo::incr() + $foo(10)],
+      $a[Foo::incr() + $foo(20)],
+    ),
+    $a[Foo::incr() + $foo(2)]
+  ) = vec[
+    "S0: n = " . (Foo::incr() + $bar(0)),
+    vec[
+      "T0: n = " . (Foo::incr() + $bar(10)),
+      "T1: n = " . (Foo::incr() + $bar(20)),
+    ],
+    "S2: n = " . (Foo::incr() + $bar(2))
+  ];
 
-var_dump($a);
+  var_dump($a);
+}

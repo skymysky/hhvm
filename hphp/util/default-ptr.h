@@ -14,8 +14,7 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_DEFAULT_PTR_H_
-#define incl_HPHP_DEFAULT_PTR_H_
+#pragma once
 
 #include <cstddef>
 #include <utility>
@@ -46,7 +45,7 @@ struct default_ptr {
     auto ptr = new T();
     T* expected = fallback();
     if (!m_p.compare_exchange_strong(
-          expected, ptr, std::memory_order_relaxed)) {
+          expected, ptr, std::memory_order_acq_rel)) {
       // Already set by someone else, use theirs.
       delete ptr;
       return expected;
@@ -59,11 +58,11 @@ struct default_ptr {
    * Assignments.
    */
   default_ptr& operator=(std::nullptr_t /*p*/) {
-    m_p.store(fallback(), std::memory_order_relaxed);
+    m_p.store(fallback(), std::memory_order_release);
     return *this;
   }
   default_ptr& operator=(T* p) {
-    m_p.store(p ? p : fallback(), std::memory_order_relaxed);
+    m_p.store(p ? p : fallback(), std::memory_order_release);
     return *this;
   }
 
@@ -71,7 +70,7 @@ struct default_ptr {
    * Observers.
    */
   const T* get() const {
-    return m_p.load(std::memory_order_relaxed);
+    return m_p.load(std::memory_order_acquire);
   }
   const T& operator*() const {
     return *get();
@@ -81,7 +80,7 @@ struct default_ptr {
   }
 
   T* raw() const {
-    auto p = m_p.load(std::memory_order_relaxed);
+    auto p = m_p.load(std::memory_order_acquire);
     return p == &s_default ? nullptr : p;
   }
   explicit operator bool() const {
@@ -113,5 +112,3 @@ const T default_ptr<T>::s_default;
 
 ///////////////////////////////////////////////////////////////////////////////
 }
-
-#endif // incl_HPHP_DEFAULT_PTR_H_

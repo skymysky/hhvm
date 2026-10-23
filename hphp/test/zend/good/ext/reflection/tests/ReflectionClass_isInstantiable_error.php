@@ -1,10 +1,9 @@
-<?php
+<?hh
 class privateCtorOld {
-	private function privateCtorOld() {}
+    private function privateCtorOld() :mixed{}
 }
+<<__EntryPoint>> function main(): void {
 $reflectionClass = new ReflectionClass("privateCtorOld");
-
-var_dump($reflectionClass->IsInstantiable('X'));
-var_dump($reflectionClass->IsInstantiable(0, null));
-
-?>
+try { var_dump($reflectionClass->isInstantiable('X')); } catch (Exception $e) { echo "\n".'Warning: '.$e->getMessage().' in '.__FILE__.' on line '.__LINE__."\n"; }
+try { var_dump($reflectionClass->isInstantiable(0, null)); } catch (Exception $e) { echo "\n".'Warning: '.$e->getMessage().' in '.__FILE__.' on line '.__LINE__."\n"; }
+}

@@ -1,11 +1,11 @@
 <?hh
-function foo1() {
+function foo1() :mixed{
   $x = "ab";
   $y = "c";
   return $x . $y;
 }
 
-function foo2() {
+function foo2() :mixed{
   $x = "x";
   $y = "y";
   $z = "z";
@@ -13,11 +13,12 @@ function foo2() {
   return $x . $y . $z;
 }
 
-function foo3($x) {
+function foo3(string $x) :mixed{
   $y = "c";
   return $x . $y;
 }
-
+<<__EntryPoint>> function main(): void {
 var_dump(foo1());
 var_dump(foo2());
 var_dump(foo3("ab"));
+}

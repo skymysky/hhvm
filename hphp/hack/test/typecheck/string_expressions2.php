@@ -11,9 +11,11 @@
 
 class Meh {
   public static function foo(): void {
-    $blah = array(3, 4, 5);
+    $blah = vec[3, 4, 5];
     print "Hello, $blah[0]dude"; // hphp output: Hello, 3dude
   }
 }
 
-Meh::foo();
+function main(): void {
+  Meh::foo();
+}

@@ -1,7 +1,7 @@
-<?php
+<?hh
 
 class X {
-  function foo() {
+  function foo() :mixed{
     switch ($this) {
     case 'foo': echo 'foo';
  break;
@@ -10,14 +10,14 @@ class X {
     default: echo 'def';
     }
   }
-  function bar($arg) {
+  function bar($arg) :mixed{
     switch ($this) {
     case $arg: echo 'arg';
  break;
     default: echo 'def';
     }
   }
-  function baz($arg) {
+  function baz($arg) :AsyncGenerator<mixed,mixed,void>{
     switch ($this) {
     case $arg: echo 'arg';
  break;
@@ -26,10 +26,14 @@ class X {
     yield $arg;
   }
 }
+
+<<__EntryPoint>>
+function main_1757() :mixed{
 $x = new X;
 $x->foo();
 $x->bar(new stdClass);
 $x->bar($x);
 foreach ($x->baz($x) as $v) {
   var_dump($v);
+}
 }

@@ -19,20 +19,19 @@
 #include "hphp/runtime/vm/jit/location.h"
 #include "hphp/runtime/vm/jit/prof-data.h"
 #include "hphp/runtime/vm/jit/trans-cfg.h"
-#include "hphp/runtime/vm/jit/translator-inline.h"
 
 #include <limits>
 
 namespace HPHP { namespace jit {
 
-TRACE_SET_MOD(pgo);
+TRACE_SET_MOD(pgo)
 
 /**
  * Remove from pConds the elements that correspond to stack positions
  * that have been popped given the current SP offset from FP.
  */
 static void discardPoppedTypes(TypedLocations& pConds,
-                               FPInvOffset curSpOffset) {
+                               SBInvOffset curSpOffset) {
   for (auto it = pConds.begin(); it != pConds.end(); ) {
     if (it->location.tag() == LTag::Stack &&
         it->location.stackIdx() > curSpOffset) {
@@ -61,7 +60,8 @@ static void mergePostConds(TypedLocations& dst,
 
 RegionDescPtr selectHotTrace(HotTransContext& ctx) {
   auto region = std::make_shared<RegionDesc>();
-  TransID tid    = ctx.tid;
+  assertx(ctx.entries.size() == 1);
+  TransID tid    = *ctx.entries.begin();
   TransID prevId = kInvalidTransID;
   TransIDSet selectedSet;
   TypedLocations accumPostConds;
@@ -74,7 +74,7 @@ RegionDescPtr selectHotTrace(HotTransContext& ctx) {
   auto numBCInstrs = ctx.maxBCInstrs;
   FTRACE(1, "selectHotTrace: starting with maxBCInstrs = {}\n", numBCInstrs);
 
-  while (!selectedSet.count(tid)) {
+  while (!selectedSet.contains(tid)) {
     auto rec = ctx.profData->transRec(tid);
     auto blockRegion = rec->region();
     if (blockRegion == nullptr) break;
@@ -98,12 +98,11 @@ RegionDescPtr selectHotTrace(HotTransContext& ctx) {
     // large regions containing the function body (starting at various
     // DV funclets).
     if (prevId != kInvalidTransID) {
-      auto const func = rec->func();
-      auto const bcOffset = rec->startBcOff();
-      if (func->base() == bcOffset) {
+      auto const sk = rec->srcKey();
+      if (!sk.anyFuncEntry() && sk.offset() == 0) {
         FTRACE(2, "selectHotTrace: breaking region because reached the main "
-               "function body entry at Translation {} (BC offset {})\n",
-               tid, bcOffset);
+               "function body entry at Translation {} (BC offset 0)\n",
+               tid);
         break;
       }
     }

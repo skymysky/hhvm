@@ -22,14 +22,11 @@
 #include "hphp/runtime/vm/jit/vasm-unit.h"
 #include "hphp/runtime/vm/jit/vasm-visit.h"
 
-#include <boost/dynamic_bitset.hpp>
-
 #include <algorithm>
-#include <cstdint>
 
-TRACE_SET_MOD(vasm);
+TRACE_SET_MOD(vasm)
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 
 namespace {
 
@@ -55,16 +52,29 @@ WidthAnalysis::WidthAnalysis(Vunit& unit)
 {
   // Initialize physical registers and constants with their appropriate widths.
 
+  VregSet ignore;
   for (size_t i = 0; i < m_def_widths.size(); ++i) {
     Vreg r{i};
-    if (r.isGP()) m_def_widths[i] &= Width::QuadN;
-    if (r.isSIMD()) m_def_widths[i] &= Width::Octa;
-    if (r.isSF()) m_def_widths[i] &= Width::Flags;
+    if (r.isPhys()) {
+      if (r.isGP()) {
+        m_def_widths[i] &= Width::QuadN;
+        ignore.add(r);
+      }
+      if (r.isSIMD()) {
+        m_def_widths[i] &= Width::Octa;
+        ignore.add(r);
+      }
+      if (r.isSF()) {
+        m_def_widths[i] &= Width::Flags;
+        ignore.add(r);
+      }
+    }
   }
 
   for (auto const& pair : unit.constToReg) {
     auto const& cns = pair.first;
     auto const r = pair.second;
+    ignore.add(r);
 
     m_def_widths[r] = [&] {
       switch (cns.kind) {
@@ -114,9 +124,11 @@ WidthAnalysis::WidthAnalysis(Vunit& unit)
         }
       } else {
         visitUses(m_unit, inst, [&] (Vreg r, Width w) {
+          if (ignore[r]) return;
           m_use_widths[r] &= w;
         });
         visitDefs(m_unit, inst, [&] (Vreg r, Width w) {
+          if (ignore[r]) return;
           m_def_widths[r] &= w;
         });
       }
@@ -130,13 +142,17 @@ WidthAnalysis::WidthAnalysis(Vunit& unit)
   do {
     changed = false;
     for (auto const& p : copies) {
-      auto orig = m_def_widths[p.d];
-      m_def_widths[p.d] &= m_def_widths[p.s];
-      if (m_def_widths[p.d] != orig) changed = true;
+      if (!ignore[p.d]) {
+        auto const orig = m_def_widths[p.d];
+        m_def_widths[p.d] &= m_def_widths[p.s];
+        if (m_def_widths[p.d] != orig) changed = true;
+      }
 
-      orig = m_use_widths[p.s];
-      m_use_widths[p.s] &= m_use_widths[p.d];
-      if (m_use_widths[p.s] != orig) changed = true;
+      if (!ignore[p.s]) {
+        auto const orig = m_use_widths[p.s];
+        m_use_widths[p.s] &= m_use_widths[p.d];
+        if (m_use_widths[p.s] != orig) changed = true;
+      }
     }
   } while (changed);
 }
@@ -174,7 +190,8 @@ bool isOnly(Vunit& unit, Vlabel b, Vinstr::Opcode op) {
  */
 bool diamondIntoCmov(Vunit& unit, jcc& jcc_i,
                      jit::vector<Vinstr>& code,
-                     jit::vector<int>& npreds) {
+                     jit::vector<int>& npreds,
+                     bool trustWidths) {
   auto const next = jcc_i.targets[0];
   auto const taken = jcc_i.targets[1];
   if (!isOnly(unit, next, Vinstr::phijmp)) return false;
@@ -190,8 +207,7 @@ bool diamondIntoCmov(Vunit& unit, jcc& jcc_i,
 
   auto const& next_uses = unit.tuples[next_phi.uses];
   auto const& taken_uses = unit.tuples[taken_phi.uses];
-  DEBUG_ONLY auto const& join_defs =
-    unit.tuples[join_block.code[0].phidef_.defs];
+  auto const& join_defs = unit.tuples[join_block.code[0].phidef_.defs];
 
   assertx(next_uses.size() == taken_uses.size());
   assertx(next_uses.size() == join_defs.size());
@@ -212,20 +228,36 @@ bool diamondIntoCmov(Vunit& unit, jcc& jcc_i,
   for (size_t i = 0; i < next_uses.size(); ++i) {
     auto const r1 = next_uses[i];
     auto const r2 = taken_uses[i];
+    auto const r3 = join_defs[i];
     auto const d = unit.makeReg();
     switch (analysis.getAppropriate(r1) &
-            analysis.getAppropriate(r2)) {
+            analysis.getAppropriate(r2) &
+            analysis.getAppropriate(r3)) {
       case Width::Byte:
-        moves.emplace_back(cmovb{cc, sf, r1, r2, d}, irctx);
-        break;
+        // After the lowering pass we can no longer trust the distinction
+        // between different word sizes as the lower pass may elide noop
+        // instructions which denote these differences. It should always still
+        // be safe to emit a cmovq in these cases. Information about flags and
+        // floating point registers should still be accurate.
+        if (trustWidths) {
+          moves.emplace_back(cmovb{cc, sf, r1, r2, d}, irctx);
+          break;
+        }
+        [[fallthrough]];
       case Width::Word:
       case Width::WordN:
-        moves.emplace_back(cmovw{cc, sf, r1, r2, d}, irctx);
-        break;
+        if (trustWidths) {
+          moves.emplace_back(cmovw{cc, sf, r1, r2, d}, irctx);
+          break;
+        }
+        [[fallthrough]];
       case Width::Long:
       case Width::LongN:
-        moves.emplace_back(cmovl{cc, sf, r1, r2, d}, irctx);
-        break;
+        if (trustWidths) {
+          moves.emplace_back(cmovl{cc, sf, r1, r2, d}, irctx);
+          break;
+        }
+        [[fallthrough]];
       case Width::Quad:
       case Width::QuadN:
         moves.emplace_back(cmovq{cc, sf, r1, r2, d}, irctx);
@@ -247,11 +279,11 @@ bool diamondIntoCmov(Vunit& unit, jcc& jcc_i,
   auto const join = next_phi.target;
   ++npreds[join];
   if (!--npreds[next]) {
-    unit.blocks[next].code[0] = trap{TRAP_REASON};
+    unit.blocks[next].code[0] = trap{TRAP_REASON, Fixup::none()};
     --npreds[join];
   }
   if (!--npreds[taken]) {
-    unit.blocks[taken].code[0] = trap{TRAP_REASON};
+    unit.blocks[taken].code[0] = trap{TRAP_REASON, Fixup::none()};
     --npreds[join];
   }
 
@@ -265,22 +297,26 @@ bool diamondIntoCmov(Vunit& unit, jcc& jcc_i,
 
 }
 
-void optimizeJmps(Vunit& unit) {
-  Timer timer(Timer::vasm_jumps);
+void optimizeJmps(Vunit& unit, bool makeSideExits, bool trustWidths) {
+  Timer timer(Timer::vasm_jumps, unit.log_entry);
+
   bool changed = false;
   bool ever_changed = false;
+
+  removeTrivialNops(unit);
+
   // The number of incoming edges from (reachable) predecessors for each block.
-  // It is maintained as an upper bound of the actual value during the
-  // transformation.
   jit::vector<int> npreds(unit.blocks.size(), 0);
+
   do {
     if (changed) {
       std::fill(begin(npreds), end(npreds), 0);
+      changed = false;
     }
-    changed = false;
+
     PostorderWalker{unit}.dfs([&](Vlabel b) {
       for (auto s : succs(unit.blocks[b])) {
-        npreds[s]++;
+        ++npreds[s];
       }
     });
     // give entry an extra predecessor to prevent cloning it.
@@ -290,6 +326,7 @@ void optimizeJmps(Vunit& unit) {
       auto& block = unit.blocks[b];
       auto& code = block.code;
       assertx(!code.empty());
+
       if (code.back().op == Vinstr::jcc) {
         auto ss = succs(block);
         if (ss[0] == ss[1]) {
@@ -299,31 +336,71 @@ void optimizeJmps(Vunit& unit) {
           changed = true;
         } else {
           auto jcc_i = code.back().jcc_;
-          if (isOnly(unit, jcc_i.targets[0], Vinstr::fallback)) {
+          if (isOnly(unit, jcc_i.targets[0], Vinstr::fallback) ||
+              isOnly(unit, jcc_i.targets[0], Vinstr::jmpi)) {
             jcc_i = jcc{ccNegate(jcc_i.cc), jcc_i.sf,
                         {jcc_i.targets[1], jcc_i.targets[0]}};
           }
-          if (isOnly(unit, jcc_i.targets[1], Vinstr::fallback)) {
+
+          auto const taken = jcc_i.targets[1];
+
+          if (makeSideExits && isOnly(unit, taken, Vinstr::fallback)) {
             // replace jcc with fallbackcc and jmp
-            const auto& fb_i = unit.blocks[jcc_i.targets[1]].code[0].fallback_;
+            FTRACE(
+              4, "vasm-jumps: Rewriting jcc ({}) -> fallback ({}) "
+                 "as fallbackcc\n",
+              b, taken
+            );
+            const auto& fb_i = unit.blocks[taken].code[0].fallback_;
             const auto t0 = jcc_i.targets[0];
             const auto jcc_irctx = code.back().irctx();
             code.pop_back();
             code.emplace_back(
-              fallbackcc{jcc_i.cc, jcc_i.sf, fb_i.target,
-                         fb_i.spOff, fb_i.trflags, fb_i.args},
+              fallbackcc{jcc_i.cc, jcc_i.sf, fb_i.target, fb_i.spOff,
+                         fb_i.args},
               jcc_irctx
             );
             code.emplace_back(jmp{t0}, jcc_irctx);
+
+            --npreds[taken];
+
             changed = true;
           }
 
-          changed |= diamondIntoCmov(unit, jcc_i, code, npreds);
+          if (makeSideExits && isOnly(unit, taken, Vinstr::jmpi)) {
+            // Replace jcc with jcci if the taken branch is just a jmpi
+            auto const& jmpi = unit.blocks[taken].code[0].jmpi_;
+            if (jmpi.args.empty()) {
+              FTRACE(
+                4, "vasm-jumps: Rewriting jcc ({}) -> jmpi ({}) as jcci\n",
+                b, taken
+              );
+              // We don't have a way to provide the jmpi's args in a jcci, so
+              // only perform the optimization if there's none.
+              auto const jcc_irctx = code.back().irctx();
+              code.pop_back();
+              code.emplace_back(
+                jcci{jcc_i.cc, jcc_i.sf, jmpi.target},
+                jcc_irctx
+              );
+              code.emplace_back(jmp{jcc_i.targets[0]}, jcc_irctx);
+
+              --npreds[taken];
+
+              changed = true;
+            }
+          }
+
+          changed |= diamondIntoCmov(unit, jcc_i, code, npreds, trustWidths);
         }
       }
 
       for (auto& s : succs(block)) {
         if (isOnly(unit, s, Vinstr::jmp)) {
+          FTRACE(
+            4, "vasm-jumps: Skipping {} -> jmp ({})\n",
+            b, s
+          );
           // skip over s
           --npreds[s];
           s = unit.blocks[s].code.back().jmp_.target;
@@ -332,13 +409,18 @@ void optimizeJmps(Vunit& unit) {
         }
       }
 
-      // If the block starts with a phijmp, and only has one predecessor, turn
-      // the phijmp/phidef pair into a copy and then a jmp. The two blocks
-      // should then be combined with the below jmp optimization. Later on, copy
-      // propagation should eliminate the copies.
+      // If the block ends with a phijmp{} and is the only predecessor of its
+      // successor, turn the phijmp{}/phidef{} pair into a copy{} and then a
+      // jmp{}.  The two blocks should then be combined with the below jmp
+      // optimization.  Later on, copy propagation should eliminate the copies.
       if (code.back().op == Vinstr::phijmp) {
         auto const target = code.back().phijmp_.target;
         if (npreds[target] == 1) {
+          FTRACE(
+            4, "vasm-jumps: Rewriting phijmp ({}) -> phidef ({}) as jmp\n",
+            b, target
+          );
+
           assertx(unit.blocks[target].code.size() > 0 &&
                   unit.blocks[target].code[0].op == Vinstr::phidef);
           auto const& uses = code.back().phijmp_.uses;
@@ -346,12 +428,15 @@ void optimizeJmps(Vunit& unit) {
           assertx(unit.tuples[uses].size() == unit.tuples[defs].size());
 
           auto const irctx = code.back().irctx();
+          // uses is a reference into code.back(), must not be used after pop_back()
+          auto instr = copyargs{uses, defs};
           code.pop_back();
-          code.emplace_back(copyargs{uses, defs}, irctx);
+          code.emplace_back(std::move(instr), irctx);
           code.emplace_back(jmp{target}, irctx);
 
           unit.blocks[target].code[0] = nop{};
 
+          --npreds[target];
           changed = true;
         }
       }
@@ -359,10 +444,17 @@ void optimizeJmps(Vunit& unit) {
       if (code.back().op == Vinstr::jmp) {
         auto s = code.back().jmp_.target;
         if (npreds[s] == 1 || isOnly(unit, s, Vinstr::jcc)) {
+          FTRACE(
+            4, "vasm-jumps: Rewriting jmp ({}) -> jcc ({}) as jcc\n",
+            b, s
+          );
           // overwrite jmp with copy of s
           auto& code2 = unit.blocks[s].code;
           code.pop_back();
           code.insert(code.end(), code2.begin(), code2.end());
+          // area_idx is from hottest to coldest
+          block.area_idx = std::max(block.area_idx, unit.blocks[s].area_idx);
+          block.weight = std::min(block.weight, unit.blocks[s].weight);
           if (--npreds[s]) {
             for (auto ss : succs(block)) {
               ++npreds[ss];
@@ -379,4 +471,4 @@ void optimizeJmps(Vunit& unit) {
   }
 }
 
-}}
+}

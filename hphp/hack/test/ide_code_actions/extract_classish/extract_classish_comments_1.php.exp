@@ -1,0 +1,51 @@
+Code actions available:
+------------------------------------------
+Extract interface (CodeActionKind: "refactor") SELECTED
+
+JSON for selected code action:
+------------------------------------------
+{
+  "title": "Extract interface",
+  "kind": "refactor",
+  "diagnostics": [],
+  "edit": {
+    "changes": {
+      "FILE.php": [
+        {
+          "range": {
+            "start": { "line": 2, "character": 7 },
+            "end": { "line": 2, "character": 7 }
+          },
+          "newText": "\n  implements Placeholder_"
+        },
+        {
+          "range": {
+            "start": { "line": 2, "character": 0 },
+            "end": { "line": 2, "character": 0 }
+          },
+          "newText": "interface Placeholder_ {\n  public function foo(): void {\n    // comment on first line;\n  }\n\n"
+        }
+      ]
+    }
+  }
+}
+
+Applied edit for code action:
+------------------------------------------
+<?hh
+
+interface Placeholder_ {
+  public function foo(): void {
+    // comment on first line;
+  }
+
+class A
+  implements Placeholder_ {
+  // Ensure that we don't comment out the closing brace in extracted interface methods
+  /*range-start*/
+  public function foo(): void {
+    // comment on first line
+  }
+  /*range-end*/
+}
+

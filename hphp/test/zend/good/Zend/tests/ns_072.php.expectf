@@ -1,5 +1,5 @@
-object(foo\test)#%d (0) {
+object(foo\test) (0) {
 }
 NULL
 
-Catchable fatal error: %s
+Catchable fatal error: Argument 1 to foo\bar::__construct() must be of type ?foo\foo, stdClass given in %s/ns_072.php on line 22

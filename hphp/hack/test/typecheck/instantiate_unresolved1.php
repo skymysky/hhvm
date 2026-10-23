@@ -10,7 +10,7 @@
  */
 
 function cached_result<T>(T $x): Awaitable<T> {
-  // UNSAFE
+  throw new Exception();
 }
 
 function consume<T>(Awaitable<T> $x): void {}

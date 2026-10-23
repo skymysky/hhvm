@@ -1,4 +1,4 @@
-<?php
+<?hh
 
 const INT_VAL = 10;
 const FLOAT_VAL = 10.5;
@@ -32,10 +32,10 @@ function string_add_val(string $a = STRING_ADD_VAL): string {
     return $a;
 }
 
-function int_val_default_null(int $a = NULL_VAL) {
+function int_val_default_null(int $a = NULL_VAL) :mixed{
     return $a;
 }
-
+<<__EntryPoint>> function main(): void {
 echo "Testing int val" . PHP_EOL;
 var_dump(int_val());
 
@@ -62,5 +62,4 @@ var_dump(string_add_val());
 //
 //echo "Testing int with null null constant" . PHP_EOL;
 //var_dump(int_val_default_null(null));
-
-?>
+}

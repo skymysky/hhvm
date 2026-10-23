@@ -19,11 +19,10 @@
 #include "hphp/runtime/ext/domdocument/ext_domdocument.h"
 #include "hphp/runtime/ext/libxml/ext_libxml.h"
 
-#include "hphp/util/functional.h"
-#include "hphp/util/hash-map.h"
 #include "hphp/system/systemlib.h"
 #include "hphp/runtime/base/file-util.h"
 #include "hphp/runtime/vm/native-data.h"
+#include "hphp/runtime/vm/native-prop-handler.h"
 #include "hphp/runtime/vm/vm-regs.h"
 
 namespace HPHP {
@@ -37,12 +36,12 @@ namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
 // helpers
 
-static xmlRelaxNGPtr _xmlreader_get_relaxNG(String source, int type,
+static xmlRelaxNGPtr _xmlreader_get_relaxNG(OptString source, int type,
     xmlRelaxNGValidityErrorFunc error_func,
     xmlRelaxNGValidityWarningFunc warn_func) {
   xmlRelaxNGParserCtxtPtr parser = nullptr;
   xmlRelaxNGPtr           sptr;
-  String valid_file;
+  OptString valid_file;
 
   switch (type) {
     case XMLREADER_LOAD_FILE:
@@ -90,7 +89,6 @@ void XMLReader::sweep() {
 }
 
 void XMLReader::close() {
-  SYNC_VM_REGS_SCOPED();
   if (m_stream) {
     m_stream->close();
   }
@@ -109,11 +107,11 @@ void XMLReader::close() {
 }
 
 Variant HHVM_METHOD(XMLReader, open,
-                 const String& uri,
+                 const OptString& uri,
                  const Variant& encoding /*= uninit_variant*/,
                  int64_t options /*= 0*/) {
   auto* data = Native::data<XMLReader>(this_);
-  const String& str_encoding = encoding.isNull()
+  const OptString& str_encoding = encoding.isNull()
                             ? null_string
                             : encoding.toString();
   SYNC_VM_REGS_SCOPED();
@@ -128,7 +126,7 @@ Variant HHVM_METHOD(XMLReader, open,
     return init_null();
   }
 
-  String valid_file = libxml_get_valid_file_path(uri.c_str());
+  OptString valid_file = libxml_get_valid_file_path(uri.c_str());
   xmlTextReaderPtr reader = nullptr;
 
   if (!valid_file.empty()) {
@@ -159,11 +157,11 @@ Variant HHVM_METHOD(XMLReader, open,
 }
 
 bool HHVM_METHOD(XMLReader, XML,
-                 const String& source,
+                 const OptString& source,
                  const Variant& encoding /*= uninit_variant*/,
                  int64_t options /*= 0*/) {
   auto* data = Native::data<XMLReader>(this_);
-  const String& str_encoding = encoding.isNull()
+  const OptString& str_encoding = encoding.isNull()
                             ? null_string
                             : encoding.toString();
   xmlParserInputBufferPtr inputbfr = xmlParserInputBufferCreateMem(
@@ -171,7 +169,7 @@ bool HHVM_METHOD(XMLReader, XML,
 
   if (inputbfr != nullptr) {
     char *uri = nullptr;
-    String directory = g_context->getCwd();
+    OptString directory = g_context->getCwd();
     if (!directory.empty()) {
       if (directory[directory.size() - 1] != '/') {
         directory += "/";
@@ -237,7 +235,7 @@ bool HHVM_METHOD(XMLReader, read) {
 bool HHVM_METHOD(XMLReader, next,
                  const Variant& localname /*= uninit_variant*/) {
   auto* data = Native::data<XMLReader>(this_);
-  const String& str_localname = localname.isNull()
+  const OptString& str_localname = localname.isNull()
                               ? null_string
                               : localname.toString();
   SYNC_VM_REGS_SCOPED();
@@ -261,32 +259,32 @@ bool HHVM_METHOD(XMLReader, next,
   return false;
 }
 
-String XMLReader::read_string_func(xmlreader_read_char_t internal_function) {
+OptString XMLReader::read_string_func(xmlreader_read_char_t internal_function) {
   SYNC_VM_REGS_SCOPED();
   char *retchar = nullptr;
   if (m_ptr) {
     retchar = (char *)internal_function(m_ptr);
   }
   if (retchar) {
-    String ret((const char*)retchar, CopyString);
+    OptString ret((const char*)retchar, CopyString);
     xmlFree(retchar);
     return ret;
   } else {
-    return empty_string();
+    return String::Empty();
   }
 }
 
-String HHVM_METHOD(XMLReader, readString) {
+OptString HHVM_METHOD(XMLReader, readString) {
   auto* data = Native::data<XMLReader>(this_);
   return data->read_string_func(xmlTextReaderReadString);
 }
 
-String HHVM_METHOD(XMLReader, readInnerXML) {
+OptString HHVM_METHOD(XMLReader, readInnerXML) {
   auto* data = Native::data<XMLReader>(this_);
   return data->read_string_func(xmlTextReaderReadInnerXml);
 }
 
-String HHVM_METHOD(XMLReader, readOuterXML) {
+OptString HHVM_METHOD(XMLReader, readOuterXML) {
   auto* data = Native::data<XMLReader>(this_);
   return data->read_string_func(xmlTextReaderReadOuterXml);
 }
@@ -302,7 +300,7 @@ bool XMLReader::bool_func_no_arg(xmlreader_read_int_t internal_function) {
   return false;
 }
 
-Variant XMLReader::string_func_string_arg(String value,
+Variant XMLReader::string_func_string_arg(OptString value,
     xmlreader_read_one_char_t internal_function) {
   SYNC_VM_REGS_SCOPED();
 
@@ -317,7 +315,7 @@ Variant XMLReader::string_func_string_arg(String value,
   }
 
   if (retchar) {
-    String ret((const char*)retchar, CopyString);
+    OptString ret((const char*)retchar, CopyString);
     xmlFree(retchar);
     return ret;
   } else {
@@ -326,7 +324,7 @@ Variant XMLReader::string_func_string_arg(String value,
 }
 
 Variant HHVM_METHOD(XMLReader, getAttribute,
-                    const String& name) {
+                    const OptString& name) {
   auto* data = Native::data<XMLReader>(this_);
   return data->string_func_string_arg(name, xmlTextReaderGetAttribute);
 }
@@ -340,7 +338,7 @@ Variant HHVM_METHOD(XMLReader, getAttributeNo,
     retchar = (char *)xmlTextReaderGetAttributeNo(data->m_ptr, index);
   }
   if (retchar) {
-    String ret((const char*)retchar, CopyString);
+    OptString ret((const char*)retchar, CopyString);
     xmlFree(retchar);
     return ret;
   } else {
@@ -349,8 +347,8 @@ Variant HHVM_METHOD(XMLReader, getAttributeNo,
 }
 
 Variant HHVM_METHOD(XMLReader, getAttributeNs,
-                    const String& name,
-                    const String& namespaceURI) {
+                    const OptString& name,
+                    const OptString& namespaceURI) {
   auto* data = Native::data<XMLReader>(this_);
   SYNC_VM_REGS_SCOPED();
   if (name.empty() || namespaceURI.empty()) {
@@ -366,7 +364,7 @@ Variant HHVM_METHOD(XMLReader, getAttributeNs,
   }
 
   if (retchar) {
-    String ret((const char*)retchar, CopyString);
+    OptString ret((const char*)retchar, CopyString);
     xmlFree(retchar);
     return ret;
   } else {
@@ -375,7 +373,7 @@ Variant HHVM_METHOD(XMLReader, getAttributeNs,
 }
 
 bool HHVM_METHOD(XMLReader, moveToAttribute,
-                 const String& name) {
+                 const OptString& name) {
   auto* data = Native::data<XMLReader>(this_);
   SYNC_VM_REGS_SCOPED();
   if (name.empty()) {
@@ -406,8 +404,8 @@ bool HHVM_METHOD(XMLReader, moveToAttributeNo,
 }
 
 bool HHVM_METHOD(XMLReader, moveToAttributeNs,
-                 const String& name,
-                 const String& namespaceURI) {
+                 const OptString& name,
+                 const OptString& namespaceURI) {
   auto* data = Native::data<XMLReader>(this_);
   SYNC_VM_REGS_SCOPED();
   if (name.empty() || namespaceURI.empty()) {
@@ -460,13 +458,13 @@ bool HHVM_METHOD(XMLReader, getParserProperty,
 }
 
 Variant HHVM_METHOD(XMLReader, lookupNamespace,
-                    const String& prefix) {
+                    const OptString& prefix) {
   auto* data = Native::data<XMLReader>(this_);
   return data->string_func_string_arg(prefix, xmlTextReaderLookupNamespace);
 }
 
 bool HHVM_METHOD(XMLReader, setSchema,
-                 const String& source) {
+                 const OptString& source) {
   auto* data = Native::data<XMLReader>(this_);
   SYNC_VM_REGS_SCOPED();
   if (source.empty()) {
@@ -499,7 +497,7 @@ bool HHVM_METHOD(XMLReader, setParserProperty,
   return false;
 }
 
-bool XMLReader::set_relaxng_schema(String source, int type) {
+bool XMLReader::set_relaxng_schema(OptString source, int type) {
   SYNC_VM_REGS_SCOPED();
   if (source.empty()) {
     raise_warning("Schema data source is required");
@@ -532,7 +530,7 @@ bool XMLReader::set_relaxng_schema(String source, int type) {
 }
 
 Variant HHVM_METHOD(XMLReader, setRelaxNGSchema,
-                 const String& filename) {
+                 const OptString& filename) {
   if (!FileUtil::checkPathAndWarn(filename, "XMLReader::setRelaxNGSchema", 1)) {
     return init_null();
   }
@@ -542,131 +540,52 @@ Variant HHVM_METHOD(XMLReader, setRelaxNGSchema,
 }
 
 bool HHVM_METHOD(XMLReader, setRelaxNGSchemaSource,
-                 const String& source) {
+                 const OptString& source) {
   auto* data = Native::data<XMLReader>(this_);
   return data->set_relaxng_schema(source, XMLREADER_LOAD_STRING);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 
-struct XMLPropertyAccessor {
-  const char *name;
-  int (*getter_int)(xmlTextReaderPtr);
-  const xmlChar* (*getter_char)(xmlTextReaderPtr);
-  DataType return_type;
-};
-
-struct XMLPropertyAccessorMap
-  : private hphp_const_char_map<XMLPropertyAccessor*>
-{
-  explicit XMLPropertyAccessorMap(XMLPropertyAccessor* props,
-                                  XMLPropertyAccessorMap *base = nullptr) {
-    if (base) {
-      *this = *base;
-    }
-    for (XMLPropertyAccessor *p = props; p->name; p++) {
-      (*this)[p->name] = p;
-      m_imap[p->name] = p;
-    }
-  }
-
-  XMLPropertyAccessor* get(const Variant& name) {
-    if (name.isString()) {
-      const char* name_data = name.toString().data();
-      const_iterator iter = find(name_data);
-      const_iterator iiter = m_imap.find(name_data);
-      if (iter != end()) {
-        return iter->second;
-      } else if (iiter != end()) {
-        raise_warning("Accessing XMLReader::$%s with the incorrect casing",
-                      name_data);
-        return iiter->second;
-      }
-    }
-    return nullptr;
-  }
-private:
-  // Previously, this class was backed by an imap. This led to a lot of
-  // code relying on accessing properties that were improperly cased.
-  // Since removing this functionality could cause a lot of functionality
-  // to break, instead we continue to allow access case-insensitively, but
-  // with a warning
-  hphp_const_char_imap<XMLPropertyAccessor*> m_imap;
-};
-
-static XMLPropertyAccessor xmlreader_properties[] = {
-  { "attributeCount", xmlTextReaderAttributeCount, nullptr, KindOfInt64 },
-  { "baseURI", nullptr, xmlTextReaderConstBaseUri, KindOfString },
-  { "depth", xmlTextReaderDepth, nullptr, KindOfInt64 },
-  { "hasAttributes", xmlTextReaderHasAttributes, nullptr, KindOfBoolean },
-  { "hasValue", xmlTextReaderHasValue, nullptr, KindOfBoolean },
-  { "isDefault", xmlTextReaderIsDefault, nullptr, KindOfBoolean },
-  { "isEmptyElement", xmlTextReaderIsEmptyElement, nullptr, KindOfBoolean },
-  { "localName", nullptr, xmlTextReaderConstLocalName, KindOfString },
-  { "name", nullptr, xmlTextReaderConstName, KindOfString },
-  { "namespaceURI", nullptr, xmlTextReaderConstNamespaceUri, KindOfString },
-  { "nodeType", xmlTextReaderNodeType, nullptr, KindOfInt64 },
-  { "prefix", nullptr, xmlTextReaderConstPrefix, KindOfString },
-  { "value", nullptr, xmlTextReaderConstValue, KindOfString },
-  { "xmlLang", nullptr, xmlTextReaderConstXmlLang, KindOfString },
-  { nullptr, nullptr, nullptr }
-};
-
-static XMLPropertyAccessorMap xmlreader_properties_map
-((XMLPropertyAccessor*)xmlreader_properties);
-
-Variant HHVM_METHOD(XMLReader, __get,
-                    const Variant& name) {
+template <int (*get)(xmlTextReaderPtr), typename TOut = int>
+static Variant process_result(const Object& this_) {
   auto* data = Native::data<XMLReader>(this_);
-  const xmlChar *retchar = nullptr;
-  int retint = 0;
-
-  XMLPropertyAccessor *propertyMap = xmlreader_properties_map.get(name);
-  if (!propertyMap) {
-    this_->raiseUndefProp(name.getStringData());
-    return init_null();
+  return !data->m_ptr ? TOut() : get(data->m_ptr);
+}
+template <const xmlChar* (*get)(xmlTextReaderPtr)>
+static Variant process_result(const Object& this_) {
+  auto* data = Native::data<XMLReader>(this_);
+  const xmlChar* ret;
+  if (!data->m_ptr || !(ret = get(data->m_ptr))) {
+    return empty_string_variant();
   }
-
-  if (data->m_ptr) {
-    if (propertyMap->getter_char) {
-      retchar = propertyMap->getter_char(data->m_ptr);
-    } else if (propertyMap->getter_int) {
-      retint = propertyMap->getter_int(data->m_ptr);
-    }
-  }
-
-  switch (propertyMap->return_type) {
-    case KindOfBoolean:
-      return retint ? true : false;
-    case KindOfInt64:
-      return retint;
-    case KindOfString:
-      if (retchar) {
-        return String((char*)retchar, CopyString);
-      } else {
-        return empty_string_variant();
-      }
-    case KindOfUninit:
-    case KindOfNull:
-    case KindOfDouble:
-    case KindOfPersistentString:
-    case KindOfArray:
-    case KindOfPersistentArray:
-    case KindOfVec:
-    case KindOfPersistentVec:
-    case KindOfDict:
-    case KindOfPersistentDict:
-    case KindOfKeyset:
-    case KindOfPersistentKeyset:
-    case KindOfObject:
-    case KindOfResource:
-    case KindOfRef:
-    case KindOfFunc:
-      return init_null();
-  }
-  not_reached();
+  return OptString((char*)ret, CopyString);
 }
 
+static Native::PropAccessor xmlreader_properties[] = {
+  { "attributeCount", process_result<xmlTextReaderAttributeCount> },
+  { "baseURI", process_result<xmlTextReaderConstBaseUri> },
+  { "depth", process_result<xmlTextReaderDepth> },
+  { "hasAttributes", process_result<xmlTextReaderHasAttributes, bool> },
+  { "hasValue", process_result<xmlTextReaderHasValue, bool> },
+  { "isDefault", process_result<xmlTextReaderIsDefault, bool> },
+  { "isEmptyElement", process_result<xmlTextReaderIsEmptyElement, bool> },
+  { "localName", process_result<xmlTextReaderConstLocalName> },
+  { "name", process_result<xmlTextReaderConstName> },
+  { "namespaceURI", process_result<xmlTextReaderConstNamespaceUri> },
+  { "nodeType", process_result<xmlTextReaderNodeType> },
+  { "prefix", process_result<xmlTextReaderConstPrefix> },
+  { "value", process_result<xmlTextReaderConstValue> },
+  { "xmlLang", process_result<xmlTextReaderConstXmlLang> },
+  { nullptr }
+};
+
+Native::PropAccessorMap xmlreader_properties_map{xmlreader_properties};
+struct XMLReaderPropHandler : Native::MapPropHandler<XMLReaderPropHandler> {
+  static constexpr Native::PropAccessorMap& map = xmlreader_properties_map;
+};
+
+const StaticString s_DOMNode("DOMNode");
 Variant HHVM_METHOD(XMLReader, expand,
                     const Variant& basenode /* = null */) {
   auto* data = Native::data<XMLReader>(this_);
@@ -675,13 +594,23 @@ Variant HHVM_METHOD(XMLReader, expand,
   SYNC_VM_REGS_SCOPED();
 
   if (!basenode.isNull()) {
-    auto dombasenode = Native::data<DOMNode>(basenode.toObject());
+    auto obj = basenode.toObject();
+    if (!obj.instanceof(s_DOMNode)) {
+      SystemLib::throwInvalidArgumentExceptionObject(
+        fmt::format(
+          "Invalid argument. Expected {}, received {}",
+          s_DOMNode.c_str(),
+          obj->getClassName().c_str()
+        )
+      );
+    }
+    auto dombasenode = Native::data<DOMNode>(obj);
     doc = dombasenode->doc();
-    docp = doc->docp();
-    if (docp == nullptr) {
+    if (doc == nullptr || doc->docp() == nullptr) {
       raise_warning("Invalid State Error");
       return false;
     }
+    docp = doc->docp();
   }
 
   if (data->m_ptr) {
@@ -708,8 +637,8 @@ Variant HHVM_METHOD(XMLReader, expand,
 
 const StaticString s_XMLReader("XMLReader");
 static struct XMLReaderExtension final : Extension {
-  XMLReaderExtension() : Extension("xmlreader", "0.1") {}
-  void moduleInit() override {
+  XMLReaderExtension() : Extension("xmlreader", "0.1", "hphp_hphpi") {}
+  void moduleRegisterNative() override {
     HHVM_RCC_INT(XMLReader, NONE, XML_READER_TYPE_NONE);
     HHVM_RCC_INT(XMLReader, ELEMENT, XML_READER_TYPE_ELEMENT);
     HHVM_RCC_INT(XMLReader, ATTRIBUTE, XML_READER_TYPE_ATTRIBUTE);
@@ -752,7 +681,6 @@ static struct XMLReaderExtension final : Extension {
     HHVM_ME(XMLReader, moveToElement);
     HHVM_ME(XMLReader, moveToFirstAttribute);
     HHVM_ME(XMLReader, isValid);
-    HHVM_ME(XMLReader, __get);
     HHVM_ME(XMLReader, getParserProperty);
     HHVM_ME(XMLReader, lookupNamespace);
     HHVM_ME(XMLReader, setSchema);
@@ -762,8 +690,7 @@ static struct XMLReaderExtension final : Extension {
     HHVM_ME(XMLReader, expand);
 
     Native::registerNativeDataInfo<XMLReader>(s_XMLReader.get());
-
-    loadSystemlib();
+    Native::registerNativePropHandler<XMLReaderPropHandler>(s_XMLReader);
   }
 } s_xml_reader_extension;
 

@@ -15,97 +15,70 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_EXT_SPEC_HOLDER_H_
-#define incl_HPHP_EXT_SPEC_HOLDER_H_
+#pragma once
+
+#include <memory>
 
 #include "hphp/runtime/ext/thrift/transport.h"
-#include "hphp/runtime/ext/thrift/ext_thrift.h"
+#include "hphp/runtime/ext/thrift/util.h"
+
+#include "hphp/runtime/base/string-data.h"
 #include "hphp/util/fixed-vector.h"
 
-#include <folly/AtomicHashMap.h>
-
-namespace HPHP { namespace thrift {
-
-enum TError {
-  ERR_UNKNOWN = 0,
-  ERR_INVALID_DATA = 1,
-  ERR_BAD_VERSION = 4
-};
-
-[[noreturn]] void thrift_error(const String& what, TError why);
-
-Array get_tspec(const Class* cls);
+namespace HPHP::thrift {
 
 struct FieldSpec {
-  int16_t fieldNum;
-  TType type;
-  StringData* name;  // TODO(9396341): Consider using LowStringPtr.
-  ArrayData* spec;
-  bool isUnion;
+  int16_t fieldNum{};
+  TType type{};
+  StringData* name{};
+  bool isUnion{};
+  TType ktype{}, vtype{};
+  const FieldSpec& key() const {
+    if (!key_) thrift_error("no key type in spec", ERR_INVALID_DATA);
+    return *key_;
+  }
+  const FieldSpec& val() const {
+    if (!val_) thrift_error("no val type in spec", ERR_INVALID_DATA);
+    return *val_;
+  }
+  StringData* format{};
+  StrNR className() const {
+    if (!className_) thrift_error("no class type in spec", ERR_INVALID_DATA);
+    return StrNR(className_);
+  }
+  Class* adapter{};
+  bool isWrapped{}; // true if the field has field_wrapper annotation
+  bool isTerse{}; // true if the field is marked as terse
+  bool isTypeWrapped{}; // true if a field has wrapped type
+  bool noTypeCheck{}; // If this field doesn't need type checking
+                      // (conservatively).
+  static FieldSpec compile(const Array& fieldSpec, bool topLevel);
+
+private:
+  std::unique_ptr<FieldSpec> key_, val_;
+  StringData* className_{};
 };
 
-using StructSpec = FixedVector<FieldSpec>;
-using SpecCacheMap = folly::AtomicHashMap<const ArrayData*, StructSpec>;
+struct StructSpec {
+  FixedVector<FieldSpec> fields;
+  const Func* withDefaultValuesFunc;
+  Optional<const Func*> clearTerseFieldsFunc;
+  bool isStrictUnion{false};
+
+  Object newObject(Class& cls) const;
+  void clearTerseFields(const Class& cls, const Object& obj) const;
+};
 
 // Provides safe access to specifications.
 struct SpecHolder {
   // The returned reference is valid at least while this SpecHolder is alive.
-  const StructSpec& getSpec(const Array& spec) {
-    auto it = s_specCacheMap.find(spec.get());
-    if (it != s_specCacheMap.end()) {
-      return it->second;
-    } else {
-      if (spec->isStatic()) {
-        // Static specs are kept by the cache.
-        auto result = s_specCacheMap.insert(spec.get(), compileSpec(spec));
-        // If someone else inserted the same key since our call to 'find', the
-        // temporary StructSpec instance above will be destructed, and the
-        // following will return the exisitng value from the cache:
-        return result.first->second;
-      } else {
-        // Temporary specs are kept by m_tempSpec.
-        StructSpec temp(compileSpec(spec));
-        m_tempSpec.swap(temp);
-        return m_tempSpec;
-      }
-    }
-  }
+  const StructSpec& getSpec(const Class& cls);
 
- private:
+private:
   // Non-static spec, or empty if source spec is static.
   StructSpec m_tempSpec;
-  static SpecCacheMap s_specCacheMap;
-
-  static StructSpec compileSpec(const Array& spec) {
-    std::vector<FieldSpec> temp(spec.size());
-    ArrayIter specIt = spec.begin();
-    for (int i = 0; i < spec.size(); ++i, ++specIt) {
-      if (!specIt.first().isInteger()) {
-        thrift_error("Bad keytype in TSPEC (expected 'long')",
-                     ERR_INVALID_DATA);
-      }
-      auto& field = temp[i];
-      field.fieldNum = specIt.first().toInt16();
-      Array fieldSpec = specIt.second().toArray();
-      field.spec = fieldSpec.get();
-      field.type = (TType)tvCastToInt64(
-        fieldSpec.rvalAt(s_type, AccessFlags::ErrorKey).tv()
-      );
-      field.name = tvCastToStringData(
-        fieldSpec.rvalAt(s_var, AccessFlags::ErrorKey).tv()
-      );
-      field.isUnion = tvCastToBoolean(
-        fieldSpec.rvalAt(s_union, AccessFlags::Key).tv()
-      );
-    }
-    if (temp.size() >> 16) {
-      thrift_error("Too many keys in TSPEC (expected < 2^16)",
-                   ERR_INVALID_DATA);
-    }
-    return StructSpec(temp);
-  }
 };
 
-}}
+const FieldSpec* getFieldSlow(const StructSpec& spec, int16_t fieldNum);
 
-#endif
+}

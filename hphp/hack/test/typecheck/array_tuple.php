@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 /**
  * Copyright (c) 2014, Facebook, Inc.
  * All rights reserved.
@@ -9,14 +9,15 @@
  *
  */
 
+function expect_arraykey(arraykey $ak):void { }
 function test(): void {
-  $array = array(array('', 0), array('', 0));
+  $array = vec[vec['', 0], vec['', 0]];
 
   foreach ($array as $update) {
     $index = 1;
     $update[$index] = 0; // force conversion from tuple-like to vec-like
     list($name, $value) = $update;
-    hh_show($name);
-    hh_show($value);
+    expect_arraykey($name);
+    expect_arraykey($value);
   }
 }

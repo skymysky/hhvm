@@ -1,10 +1,10 @@
 <?hh
 
-async function block() {
+async function block() :Awaitable<mixed>{
   await RescheduleWaitHandle::create(0, 0);
 }
 
-async function baz(int $num) {
+async function baz(int $num) :Awaitable<mixed>{
   if ($num % 2 == 1) {
     await block();
   }
@@ -12,11 +12,11 @@ async function baz(int $num) {
   return $num;
 }
 
-async function bar() {
+async function bar() :AsyncGenerator<mixed,mixed,void>{
   $exp = 0;
-  foreach (array(0, 1) as $block_dep1) {
-    foreach (array(0, 1) as $block_dep2) {
-      foreach (array(0, 1) as $block_outer) {
+  foreach (vec[0, 1] as $block_dep1) {
+    foreach (vec[0, 1] as $block_dep2) {
+      foreach (vec[0, 1] as $block_outer) {
         if ($block_outer) {
           await block();
         }
@@ -31,20 +31,24 @@ async function bar() {
   }
 }
 
-async function foo() {
+async function foo() :AsyncGenerator<mixed,mixed,void>{
   foreach (bar() await as list($x, $y)) {
-    list($a, $b) = await genva(
-      baz($x),
-      baz($y),
-    );
+    concurrent {
+      $a = await baz($x);
+      $b = await baz($y);
+    }
     yield 100 * $a + $b;
   }
 }
 
-async function main() {
+async function main() :Awaitable<mixed>{
   foreach (foo() await as $val) {
     var_dump($val);
   }
 }
 
+
+<<__EntryPoint>>
+function main_async_gen_and_genva() :mixed{
 \HH\Asio\join(main());
+}

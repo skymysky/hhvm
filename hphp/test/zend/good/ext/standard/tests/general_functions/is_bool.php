@@ -1,21 +1,21 @@
-<?php
+<?hh
 /* Prototype: bool is_bool ( mixed $var );
- * Description: Finds whether the given variable is a boolean  
+ * Description: Finds whether the given variable is a boolean
  */
-
+<<__EntryPoint>> function main(): void {
 echo "*** Testing is_bool() with valid boolean values ***\n";
-// different valid  boolean vlaues 
-$valid_bools = array(
+// different valid  boolean vlaues
+$valid_bools = vec[
   TRUE,
   FALSE,
   true,
   false,
-);
-/* loop to check that is_bool() recognizes different 
+];
+/* loop to check that is_bool() recognizes different
    bool values, expected output: bool(true) */
 $loop_counter = 1;
 foreach ($valid_bools as $bool_val ) {
-  echo "-- Iteration $loop_counter --\n"; $loop_counter++; 
+  echo "-- Iteration $loop_counter --\n"; $loop_counter++;
   var_dump( is_bool($bool_val) );
 }
 
@@ -25,16 +25,9 @@ echo "\n*** Testing is_bool() on non boolean values ***\n";
 $fp = fopen (__FILE__, "r");
 $dfp = opendir ( dirname(__FILE__) );
 
-// unset variable
-$unset_bool1 = true;
-$unset_bool2 = false;
-$unset_var = 0;
-unset ($unset_bool1);
-unset ($unset_bool2);
-unset ($unset_var);
 
-// other types in a array 
-$not_bool_types = array (
+// other types in a array
+$not_bool_types = vec[
   /* integers */
   0,
   1,
@@ -86,7 +79,7 @@ $not_bool_types = array (
   -1E7,
 
   /* objects */
-  new stdclass,
+  new stdClass,
 
   /* resources */
   $fp,
@@ -95,46 +88,40 @@ $not_bool_types = array (
   /* nulls */
   null,
   NULL,
-  
-  /* arrays */
-  array(),
-  array(0),
-  array(1),
-  array(NULL),
-  array(null),
-  array("string"),
-  array(true),
-  array(TRUE),
-  array(false),
-  array(FALSE),
-  array(1,2,3,4),
-  array(1 => "One", "two" => 2),
 
-  /* unset bool vars and undefined var */
-  @$unset_bool1, 
-  @$unset_bool2, 
-  @$unset_var, 
-  @$undefined_var
-);
-/* loop through the $not_bool_types to see working of 
+  /* arrays */
+  vec[],
+  vec[0],
+  vec[1],
+  vec[NULL],
+  vec[null],
+  vec["string"],
+  vec[true],
+  vec[TRUE],
+  vec[false],
+  vec[FALSE],
+  vec[1,2,3,4],
+  dict[1 => "One", "two" => 2],
+
+];
+/* loop through the $not_bool_types to see working of
    is_bool() on non bull types, expected output: bool(false) */
 $loop_counter = 1;
 foreach ($not_bool_types as $type ) {
-  echo "-- Iteration $loop_counter --\n"; $loop_counter++; 
+  echo "-- Iteration $loop_counter --\n"; $loop_counter++;
   var_dump( is_bool($type) );
 }
 
 echo "\n*** Testing error conditions ***\n";
 //Zero argument
-var_dump( is_bool() );
+try { var_dump( is_bool() ); } catch (Exception $e) { echo "\n".'Warning: '.$e->getMessage().' in '.__FILE__.' on line '.__LINE__."\n"; }
 
-//arguments more than expected 
-var_dump( is_bool(TRUE, FALSE) );
- 
+//arguments more than expected
+try { var_dump( is_bool(TRUE, FALSE) ); } catch (Exception $e) { echo "\n".'Warning: '.$e->getMessage().' in '.__FILE__.' on line '.__LINE__."\n"; }
+
 echo "Done\n";
 
 // close resources
 fclose($fp);
 closedir($dfp);
-
-?>
+}

@@ -18,21 +18,35 @@
 #error "func-inl.h should only be included by func.h"
 #endif
 
+#include <fmt/format.h>
+
 #include "hphp/runtime/vm/unit-util.h"
+
+#include "hphp/util/configs/eval.h"
+#include "hphp/util/configs/sandbox.h"
 
 namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
-// EH and FPI tables.
+// EH table.
 
 template<class SerDe>
-void FPIEnt::serde(SerDe& sd) {
-  sd(m_fpushOff)
-    (m_fpiEndOff)
-    (m_fpOff)
-    // These fields are recomputed by sortFPITab:
-    // (m_parentIndex)
-    // (m_fpiDepth)
+void EHEnt::serde(SerDe& sd) {
+  Optional<Offset> end;
+  if (!SerDe::deserializing) {
+    end = (m_end == kInvalidOffset) ? std::nullopt : make_optional(m_end);
+  }
+
+  sd(m_base)
+    (m_past)
+    (m_iterId)
+    (m_handler)
+    (end)
+    (m_parentIndex)
     ;
+
+  if (SerDe::deserializing) {
+    m_end = end.value_or(kInvalidOffset);
+  }
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -44,28 +58,59 @@ inline Func::ParamInfo::ParamInfo()
 
 template<class SerDe>
 inline void Func::ParamInfo::serde(SerDe& sd) {
-  sd(builtinType)
-    (funcletOff)
+  sd(funcletOff)
     (defaultValue)
     (phpCode)
-    (typeConstraint)
-    (variadic)
+    (typeConstraints)
+    (flags)
     (userAttributes)
     (userType)
-    (inout)
     ;
 }
 
 inline bool Func::ParamInfo::hasDefaultValue() const {
-  return funcletOff != InvalidAbsoluteOffset;
+  return funcletOff != kInvalidOffset;
 }
 
 inline bool Func::ParamInfo::hasScalarDefaultValue() const {
   return hasDefaultValue() && defaultValue.m_type != KindOfUninit;
 }
 
+inline bool Func::ParamInfo::hasTrivialDefaultValue() const {
+  return hasScalarDefaultValue()
+    && typeConstraints.alwaysPasses(&defaultValue);
+}
+
+inline bool Func::ParamInfo::isInOut() const {
+  return flags & (1 << static_cast<int32_t>(Flags::InOut));
+}
+
+inline bool Func::ParamInfo::isOutOnly() const {
+  return flags & (1 << static_cast<int32_t>(Flags::OutOnly));
+}
+
+inline bool Func::ParamInfo::isReadonly() const {
+  return flags & (1 << static_cast<int32_t>(Flags::Readonly));
+}
+
+inline bool Func::ParamInfo::isOptional() const {
+  return flags & (1 << static_cast<int32_t>(Flags::Optional));
+}
+
+inline bool Func::ParamInfo::isNamed() const {
+  return flags & (1 << static_cast<int32_t>(Flags::Named));
+}
+
 inline bool Func::ParamInfo::isVariadic() const {
-  return variadic;
+  return flags & (1 << static_cast<int32_t>(Flags::Variadic));
+}
+
+inline bool Func::ParamInfo::isSplat() const {
+  return flags & (1 << static_cast<int32_t>(Flags::Splat));
+}
+
+inline void Func::ParamInfo::setFlag(Func::ParamInfo::Flags flag) {
+  flags |= 1 << static_cast<int32_t>(flag);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -78,7 +123,7 @@ inline const void* Func::mallocEnd() const {
 }
 
 inline bool Func::validate() const {
-#ifdef DEBUG
+#ifndef NDEBUG
   assertx(m_magic == kMagic);
 #endif
   assertx(m_name != nullptr);
@@ -89,24 +134,19 @@ inline bool Func::validate() const {
 // FuncId manipulation.
 
 inline FuncId Func::getFuncId() const {
-  assertx(m_funcId != InvalidFuncId);
-  assertx(fromFuncId(m_funcId) == this);
-  return m_funcId;
+  assertx(fromFuncId(FuncId{this}) == this);
+  return FuncId{this};
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 // Basic info.
-
-inline bool Func::top() const {
-  return shared()->m_top;
-}
 
 inline Unit* Func::unit() const {
   return m_unit;
 }
 
 inline Class* Func::cls() const {
-  return m_cls;
+  return !isMethCaller() ? clsData().m_impl : nullptr;
 }
 
 inline PreClass* Func::preClass() const {
@@ -114,7 +154,7 @@ inline PreClass* Func::preClass() const {
 }
 
 inline Class* Func::baseCls() const {
-  return m_baseCls;
+  return !isMethCaller() ? clsData().m_base : nullptr;
 }
 
 inline Class* Func::implCls() const {
@@ -126,49 +166,82 @@ inline const StringData* Func::name() const {
   return m_name;
 }
 
+inline OptString Func::nameWithClosureName() const {
+  if (!isClosureBody()) return OptString(const_cast<StringData*>(name()));
+  // Strip the file hash from the closure name.
+  OptString name{const_cast<StringData*>(baseCls()->name())};
+  auto const pos = name.find(';');
+  if (pos < 0) return name;
+  return name.substr(0, pos);
+}
+
 inline StrNR Func::nameStr() const {
   assertx(m_name != nullptr);
   return StrNR(m_name);
 }
 
+inline size_t Func::stableHash() const {
+  return folly::hash::hash_combine(
+    name()->hashStatic(),
+    cls() ? cls()->name()->hashStatic() : 0,
+    unit()->sn()
+  );
+}
+
 inline const StringData* Func::fullName() const {
   if (m_fullName == nullptr) return m_name;
+  if (UNLIKELY(m_fullName.getRaw() == kNeedsFullName)) {
+    m_fullName = makeStaticString(
+      cls()->name()->toCppString() + "::" + m_name->data());
+  }
   return m_fullName;
+}
+
+inline OptString Func::fullNameWithClosureName() const {
+  if (!isClosureBody()) return OptString(const_cast<StringData*>(fullName()));
+  return nameWithClosureName();
 }
 
 inline StrNR Func::fullNameStr() const {
   assertx(m_fullName != nullptr);
-  return StrNR(m_fullName);
+  return StrNR(fullName());
 }
 
-inline const StringData* Func::displayName() const {
-  return LIKELY(!takesInOutParams()) ? name() : stripInOutSuffix(name());
+inline void invalidFuncConversion(const char* type) {
+  SystemLib::throwInvalidOperationExceptionObject(fmt::format(
+    "Cannot convert function to {}", type
+  ));
 }
 
-inline const StringData* Func::fullDisplayName() const {
-  return
-    LIKELY(!takesInOutParams()) ? fullName() : stripInOutSuffix(fullName());
-}
-
-inline NamedEntity* Func::getNamedEntity() {
+inline NamedFunc* Func::getNamedFunc() {
   assertx(!shared()->m_preClass);
-  return *reinterpret_cast<LowPtr<NamedEntity>*>(&m_namedEntity);
+  return const_cast<NamedFunc*>(m_namedFunc.get());
 }
 
-inline const NamedEntity* Func::getNamedEntity() const {
+inline const NamedFunc* Func::getNamedFunc() const {
   assertx(!shared()->m_preClass);
-  return *reinterpret_cast<const LowPtr<const NamedEntity>*>(&m_namedEntity);
+  return m_namedFunc;
 }
 
-inline void Func::setNamedEntity(const NamedEntity* e) {
-  *reinterpret_cast<LowPtr<const NamedEntity>*>(&m_namedEntity) = e;
+inline void Func::setNamedFunc(const NamedFunc* e) {
+  m_namedFunc = e;
+}
+
+inline const StringData* Func::methCallerClsName() const {
+  assertx(isMethCaller() && isBuiltin());
+  return methCallerData().m_clsName;
+}
+
+inline const StringData* Func::methCallerMethName() const {
+  assertx(isMethCaller() && isBuiltin());
+  return methCallerData().m_methName;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 // File info.
 
-inline const StringData* Func::originalFilename() const {
-  return shared()->m_originalFilename;
+inline const StringData* Func::originalUnit() const {
+  return shared()->m_originalUnit;
 }
 
 inline const StringData* Func::filename() const {
@@ -179,13 +252,23 @@ inline const StringData* Func::filename() const {
 
   // Use the original filename if it exists, otherwise grab the filename from
   // the unit
-  const StringData* name = originalFilename();
+  const StringData* name = originalUnit();
   if (!name) {
     assertx(m_unit);
     name = m_unit->filepath();
     assertx(name);
   }
   return name;
+}
+
+inline int Func::sn() const {
+  auto const sd = shared();
+  auto small = sd->m_sn;
+  if (UNLIKELY(small == kSmallDeltaLimit)) {
+    assertx(extShared());
+    return static_cast<const ExtendedSharedData*>(sd)->m_sn;
+  }
+  return small;
 }
 
 inline int Func::line1() const {
@@ -203,45 +286,59 @@ inline int Func::line2() const {
 }
 
 inline const StringData* Func::docComment() const {
-  return shared()->m_docComment;
+  auto const ex = extShared();
+  return ex ? ex->m_docComment : staticEmptyString();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 // Bytecode.
 
-inline PC Func::getEntry() const {
-  return m_unit->entry() + shared()->m_base;
+inline PC Func::entry() const {
+  auto const bc = shared()->m_bc.copy();
+  return bc.isPtr() ? bc.ptr() : const_cast<Func*>(this)->loadBytecode();
 }
 
-inline Offset Func::base() const {
-  return shared()->m_base;
+inline Offset Func::bclen() const {
+  return shared()->bclen();
 }
 
-inline Offset Func::past() const {
-  auto const sd = shared();
-  auto const delta = sd->m_pastDelta;
-  if (UNLIKELY(delta == kSmallDeltaLimit)) {
-    assertx(extShared());
-    return static_cast<const ExtendedSharedData*>(sd)->m_past;
+inline Offset Func::SharedData::bclen() const {
+  auto const len = this->m_bclenSmall;
+  if (UNLIKELY(len == kSmallDeltaLimit)) {
+    assertx(m_allFlags.m_hasExtendedSharedData);
+    return static_cast<const ExtendedSharedData*>(this)->m_bclen;
   }
-  return base() + delta;
+  return len;
 }
 
 inline bool Func::contains(PC pc) const {
-  return contains(Offset(pc - unit()->entry()));
+  return uintptr_t(pc - entry()) < bclen();
 }
 
 inline bool Func::contains(Offset offset) const {
-  return offset >= base() && offset < past();
+  assertx(offset >= 0);
+  return offset < bclen();
+}
+
+inline PC Func::at(Offset off) const {
+  // We don't use contains because we want to allow past becase it is often
+  // used in loops
+  assertx(off >= 0 && off <= bclen());
+  return entry() + off;
+}
+
+inline Offset Func::offsetOf(PC pc) const {
+  assertx(contains(pc));
+  return pc - entry();
+}
+
+inline Op Func::getOp(Offset instrOffset) const {
+  assertx(contains(instrOffset));
+  return peek_op(entry() + instrOffset);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 // Return type.
-
-inline MaybeDataType Func::hniReturnType() const {
-  auto const ex = extShared();
-  return ex ? ex->m_hniReturnType : folly::none;
-}
 
 inline RepoAuthType Func::repoReturnType() const {
   return shared()->m_repoReturnType;
@@ -252,19 +349,26 @@ inline RepoAuthType Func::repoAwaitedReturnType() const {
 }
 
 inline bool Func::isReturnByValue() const {
-  return shared()->m_returnByValue;
+  return shared()->m_allFlags.m_returnByValue;
 }
 
-inline bool Func::isReturnRef() const {
-  return m_attrs & AttrReference;
+inline bool Func::hasUntrustedReturnType() const {
+  return shared()->m_allFlags.m_isUntrustedReturnType;
 }
 
-inline const TypeConstraint& Func::returnTypeConstraint() const {
-  return shared()->m_retTypeConstraint;
+inline const TypeIntersectionConstraint& Func::returnTypeConstraints() const {
+  if (!hasInheritedReturnTypes()) {
+    return shared()->m_retTypeConstraints;
+  }
+  return lookupInheritedReturnTypes();
 }
 
 inline const StringData* Func::returnUserType() const {
-  return shared()->m_retUserType;
+  return shared()->m_retUserType.get(m_unit);
+}
+
+inline bool Func::hasInheritedReturnTypes() const {
+  return m_attrs & AttrHasInheritedReturnTypes;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -280,39 +384,66 @@ inline uint32_t Func::numParams() const {
   return (m_paramCounts) >> 1;
 }
 
+inline uint32_t Func::numNamedParams() const {
+  auto const ex = extShared();
+  if (!ex) return 0;
+  return ex->m_namedParamCount;
+}
+
+inline uint32_t Func::numPositionalParams() const {
+  return numNonVariadicParams() - numNamedParams();
+}
+
+inline uint32_t Func::numPositionalParamsVariadic() const {
+  return numParams() - numNamedParams();
+}
+
 inline uint32_t Func::numNonVariadicParams() const {
   assertx(bool(m_attrs & AttrVariadicParam) != bool(m_paramCounts & 1));
   assertx((m_paramCounts >> 1) == params().size());
   return (m_paramCounts - 1) >> 1;
 }
 
+inline uint32_t Func::numRequiredNamedParams() const {
+  auto numNamed = numNamedParams();
+  auto res = 0;
+  for (auto i = 0; i < numNamed; ++i) {
+    if (!params()[i].hasDefaultValue()) ++res;
+  }
+  return res;
+}
+
+inline uint32_t Func::numRequiredPositionalParams() const {
+  auto numNamed = numNamedParams();
+
+  for (auto i = numNonVariadicParams(); i > numNamed; --i) {
+    if (!params()[i - 1].hasDefaultValue()) return i - numNamed;
+  }
+  return 0;
+}
+
+inline uint32_t Func::numRequiredParams() const {
+  return numRequiredPositionalParams() + numRequiredNamedParams();
+}
+
 inline bool Func::hasVariadicCaptureParam() const {
-#ifdef DEBUG
+#ifndef NDEBUG
   assertx(bool(m_attrs & AttrVariadicParam) ==
-         (numParams() && params()[numParams() - 1].variadic));
+         (numParams() && params()[numParams() - 1].isVariadic()));
 #endif
   return m_attrs & AttrVariadicParam;
 }
 
-inline bool Func::discardExtraArgs() const {
-  return !(m_attrs & (AttrMayUseVV | AttrVariadicParam));
+inline bool Func::hasSplatParam() const {
+  return m_attrs & AttrSplatParam;
+}
+
+inline uint64_t Func::inOutBits() const {
+  return m_inoutBits;
 }
 
 inline bool Func::takesInOutParams() const {
-  return m_attrs & AttrTakesInOutParams;
-}
-
-inline bool Func::isInOutWrapper() const {
-  return m_attrs & AttrIsInOutWrapper;
-}
-
-inline uint32_t Func::numInOutParams() const {
-  if (!takesInOutParams()) return 0;
-  uint32_t count = 0;
-  for (uint32_t i = 0; i < numParams(); ++i) {
-    if (params()[i].inout) ++count;
-  }
-  return count;
+  return m_inoutBits != 0;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -326,14 +457,40 @@ inline int Func::numIterators() const {
   return shared()->m_numIterators;
 }
 
-inline int Func::numClsRefSlots() const {
-  auto const ex = extShared();
-  if (LIKELY(!ex)) return shared()->m_numClsRefSlots;
-  return ex->m_actualNumClsRefSlots;
-}
-
 inline Id Func::numNamedLocals() const {
   return shared()->m_localNames.size();
+}
+
+inline uint32_t Func::reifiedGenericsLocalId() const {
+  assertx(hasReifiedGenerics());
+  return numParams();
+}
+
+inline uint32_t Func::coeffectsLocalId() const {
+  assertx(hasCoeffectsLocal());
+  auto id = numParams();
+  if (hasReifiedGenerics()) ++id;
+  return id;
+}
+
+inline uint32_t Func::numFuncEntryInputs() const {
+  auto id = numParams();
+  if (hasReifiedGenerics()) ++id;
+  if (hasCoeffectsLocal()) ++id;
+  return id;
+}
+
+inline uint32_t Func::firstClosureUseLocalId() const {
+  assertx(isClosureBody());
+  return numFuncEntryInputs();
+}
+
+inline uint32_t Func::firstRegularLocalId() const {
+  auto id = numParams();
+  if (hasReifiedGenerics()) ++id;
+  if (hasCoeffectsLocal()) ++id;
+  if (isClosureBody()) id += numClosureUseLocals();
+  return id;
 }
 
 inline const StringData* Func::localVarName(Id id) const {
@@ -341,7 +498,14 @@ inline const StringData* Func::localVarName(Id id) const {
   return id < numNamedLocals() ? shared()->m_localNames[id] : nullptr;
 }
 
-inline LowStringPtr const* Func::localNames() const {
+inline PackedStringPtr const* Func::localNames() const {
+  return shared()->m_localNames.accessList();
+}
+
+/* By construction, named params appear at the beginning of param lists and
+ * are sorted lexicographically.
+ */
+inline PackedStringPtr const* Func::sortedNamedParamNames() const {
   return shared()->m_localNames.accessList();
 }
 
@@ -350,39 +514,28 @@ inline int Func::maxStackCells() const {
 }
 
 inline int Func::numSlotsInFrame() const {
-  return shared()->m_numLocals +
-    shared()->m_numIterators * (sizeof(Iter) / sizeof(Cell)) +
-    (numClsRefSlots() * sizeof(Class*) + sizeof(Cell) - 1) / sizeof(Cell);
+  return
+    shared()->m_numLocals +
+    shared()->m_numIterators * (sizeof(Iter) / sizeof(TypedValue));
 }
 
 inline bool Func::hasForeignThis() const {
-  return attrs() & AttrHasForeignThis;
+  return m_allFlags.m_hasForeignThis;
 }
 
-///////////////////////////////////////////////////////////////////////////////
-// Static locals.
-
-inline const Func::SVInfoVec& Func::staticVars() const {
-  return shared()->m_staticVars;
+inline void Func::setHasForeignThis(bool hasForeignThis) {
+  m_allFlags.m_hasForeignThis = hasForeignThis;
 }
 
-inline bool Func::hasStaticLocals() const {
-  return !shared()->m_staticVars.empty();
-}
-
-inline int Func::numStaticLocals() const {
-  return shared()->m_staticVars.size();
+inline void Func::setGenerated(bool isGenerated) {
+  shared()->m_allFlags.m_isGenerated = isGenerated;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 // Definition context.
 
-inline bool Func::isPseudoMain() const {
-  return m_name->empty();
-}
-
 inline bool Func::isMethod() const {
-  return !isPseudoMain() && (bool)baseCls();
+  return (bool)baseCls();
 }
 
 inline bool Func::isFromTrait() const {
@@ -393,41 +546,60 @@ inline bool Func::isPublic() const {
   return m_attrs & AttrPublic;
 }
 
+inline bool Func::isInternal() const {
+  return m_attrs & AttrInternal;
+}
+
+inline const StringData* Func::moduleName() const {
+  auto const ex = extShared();
+  if (ex) {
+    assertx(!unit()->moduleName() || ex->m_originalModuleName);
+    return ex->m_originalModuleName;
+  }
+  return unit()->moduleName();
+}
+
 inline bool Func::isStatic() const {
   return m_attrs & AttrStatic;
 }
 
 inline bool Func::isStaticInPrologue() const {
-  return (m_attrs & (AttrStatic | AttrRequiresThis)) == AttrStatic;
+  return isStatic() && !isClosureBody();
 }
 
-inline bool Func::requiresThisInBody() const {
-  return (m_attrs & AttrRequiresThis) && !isClosureBody();
-}
-
-inline bool Func::hasThisVaries() const {
-  return mayHaveThis() && !requiresThisInBody();
+inline bool Func::hasThisInBody() const {
+  return cls() && !isStatic();
 }
 
 inline bool Func::isAbstract() const {
   return m_attrs & AttrAbstract;
 }
 
-inline bool Func::mayHaveThis() const {
-  return cls() && !isStatic();
-}
-
 inline bool Func::isPreFunc() const {
-  return m_isPreFunc;
+  return m_allFlags.m_isPreFunc;
 }
 
 inline bool Func::isMemoizeWrapper() const {
-  return shared()->m_isMemoizeWrapper;
+  return shared()->m_allFlags.m_isMemoizeWrapper;
 }
 
 inline bool Func::isMemoizeWrapperLSB() const {
-  return shared()->m_isMemoizeWrapperLSB;
+  return shared()->m_allFlags.m_isMemoizeWrapperLSB;
 }
+
+inline Func::MemoizeICType Func::memoizeICType() const {
+  assertx(isMemoizeWrapper());
+  return shared()->m_allFlags.m_memoizeICType;
+}
+
+inline bool Func::isNoICMemoize() const {
+  return memoizeICType() == MemoizeICType::NoIC;
+}
+
+inline bool Func::isKeyedByImplicitContextMemoize() const {
+  return memoizeICType() == MemoizeICType::KeyedByIC;
+}
+
 
 inline bool Func::isMemoizeImpl() const {
   return isMemoizeImplName(name());
@@ -436,6 +608,12 @@ inline bool Func::isMemoizeImpl() const {
 inline const StringData* Func::memoizeImplName() const {
   assertx(isMemoizeWrapper());
   return genMemoizeImplName(name());
+}
+
+inline size_t Func::numKeysForMemoize() const {
+  return numParams()
+         + (hasReifiedGenerics() ? 1 : 0)
+         + (isKeyedByImplicitContextMemoize() ? 1 : 0);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -448,22 +626,6 @@ inline bool Func::isBuiltin() const {
 inline bool Func::isCPPBuiltin() const {
   auto const ex = extShared();
   return UNLIKELY(!!ex) && ex->m_arFuncPtr;
-}
-
-inline bool Func::readsCallerFrame() const {
-  return m_attrs & AttrReadsCallerFrame;
-}
-
-inline bool Func::writesCallerFrame() const {
-  return m_attrs & AttrWritesCallerFrame;
-}
-
-inline bool Func::accessesCallerFrame() const {
-  return m_attrs & (AttrReadsCallerFrame | AttrWritesCallerFrame);
-}
-
-inline bool Func::takesNumArgs() const {
-  return shared()->m_takesNumArgs;
 }
 
 inline ArFunction Func::arFuncPtr() const {
@@ -480,22 +642,22 @@ inline NativeFunction Func::nativeFuncPtr() const {
 // Closures.
 
 inline bool Func::isClosureBody() const {
-  return shared()->m_isClosureBody;
+  return shared()->m_allFlags.m_isClosureBody;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 // Resumables.
 
 inline bool Func::isAsync() const {
-  return shared()->m_isAsync;
+  return shared()->m_allFlags.m_isAsync;
 }
 
 inline bool Func::isGenerator() const {
-  return shared()->m_isGenerator;
+  return shared()->m_allFlags.m_isGenerator;
 }
 
 inline bool Func::isPairGenerator() const {
-  return shared()->m_isPairGenerator;
+  return shared()->m_allFlags.m_isPairGenerator;
 }
 
 inline bool Func::isAsyncFunction() const {
@@ -515,6 +677,42 @@ inline bool Func::isResumable() const {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
+// Coeffects.
+
+inline RuntimeCoeffects Func::requiredCoeffects() const {
+  return m_requiredCoeffects;
+}
+
+inline RuntimeCoeffects Func::coeffectEscapes() const {
+  return extShared() ? extShared()->m_coeffectEscapes
+                     : RuntimeCoeffects::none();
+}
+
+inline void Func::setRequiredCoeffects(RuntimeCoeffects c) {
+  m_requiredCoeffects = c;
+}
+
+inline StaticCoeffectNamesMap Func::staticCoeffectNames() const {
+  return shared()->m_staticCoeffectNames;
+}
+
+inline bool Func::hasCoeffectsLocal() const {
+  return hasCoeffectRules() &&
+         !(getCoeffectRules().size() == 1 &&
+           getCoeffectRules()[0].isGeneratorThis());
+}
+
+inline bool Func::hasCoeffectRules() const {
+  return attrs() & AttrHasCoeffectRules;
+}
+
+inline const Func::CoeffectRules& Func::getCoeffectRules() const {
+  assertx(extShared());
+  assertx(hasCoeffectRules());
+  return extShared()->m_coeffectRules;
+}
+
+///////////////////////////////////////////////////////////////////////////////
 // Methods.
 
 inline Slot Func::methodSlot() const {
@@ -523,30 +721,14 @@ inline Slot Func::methodSlot() const {
 }
 
 inline bool Func::hasPrivateAncestor() const {
-  return m_hasPrivateAncestor;
+  return m_allFlags.m_hasPrivateAncestor;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 // Magic methods.
 
 inline bool Func::isGenerated() const {
-  return shared()->m_isGenerated;
-}
-
-inline bool Func::isDestructor() const {
-  return !strcmp(m_name->data(), "__destruct");
-}
-
-inline bool Func::isMagic() const {
-  return isMagicCallMethod() || isMagicCallStaticMethod();
-}
-
-inline bool Func::isMagicCallMethod() const {
-  return m_name->isame(s___call);
-}
-
-inline bool Func::isMagicCallStaticMethod() const {
-  return m_name->isame(s___callStatic);
+  return shared()->m_allFlags.m_isGenerated;
 }
 
 inline bool Func::isSpecial(const StringData* name) {
@@ -564,8 +746,8 @@ inline const UserAttributeMap& Func::userAttributes() const {
   return shared()->m_userAttributes;
 }
 
-inline bool Func::isUnique() const {
-  return m_attrs & AttrUnique;
+inline Array Func::userAttributesArray() const {
+  return userAttributes().getArray();
 }
 
 inline bool Func::isPersistent() const {
@@ -581,31 +763,58 @@ inline bool Func::isNoInjection() const {
 }
 
 inline bool Func::isSkipFrame() const {
-  return m_attrs & AttrSkipFrame;
+  return isCPPBuiltin() || (isBuiltin() && !isMethod());
+}
+
+inline bool Func::isProvenanceSkipFrame() const {
+  return m_attrs & AttrProvenanceSkipFrame;
 }
 
 inline bool Func::isFoldable() const {
   return m_attrs & AttrIsFoldable;
 }
 
-inline bool Func::isParamCoerceMode() const {
-  return attrs() & (AttrParamCoerceModeFalse | AttrParamCoerceModeNull);
+inline bool Func::supportsAsyncEagerReturn() const {
+  return m_attrs & AttrSupportsAsyncEagerReturn;
+}
+
+inline bool Func::isEagerOnly() const {
+  return m_attrs & AttrEagerOnly;
 }
 
 inline bool Func::isDynamicallyCallable() const {
   return m_attrs & AttrDynamicallyCallable;
 }
 
-inline bool Func::isHot() const {
-  return m_hot;
+inline Optional<int64_t> Func::dynCallSampleRate() const {
+  if (auto const ex = extShared()) {
+    if (ex->m_dynCallSampleRate >= 0) return ex->m_dynCallSampleRate;
+  }
+  return std::nullopt;
 }
 
-inline void Func::setHot() {
-  m_hot = true;
+inline bool Func::isMethCaller() const {
+  return m_attrs & AttrIsMethCaller;
 }
 
 inline bool Func::isPhpLeafFn() const {
-  return shared()->m_isPhpLeafFn;
+  return shared()->m_allFlags.m_isPhpLeafFn;
+}
+
+inline bool Func::hasReifiedGenerics() const {
+  return shared()->m_allFlags.m_hasReifiedGenerics;
+}
+
+inline bool Func::hasNamedParams() const {
+  return m_allFlags.m_hasNamedParams;
+}
+
+inline bool Func::hasOptionalNamedParameters() const {
+  auto const numNamed = numNamedParams();
+  for (uint32_t i = 0; i < numNamed; ++i) {
+    if (params()[i].hasDefaultValue()) return true;
+  }
+  return false;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -615,18 +824,9 @@ inline const Func::EHEntVec& Func::ehtab() const {
   return shared()->m_ehtab;
 }
 
-inline const Func::FPIEntVec& Func::fpitab() const {
-  return shared()->m_fpitab;
-}
-
 inline const EHEnt* Func::findEH(Offset o) const {
-  assertx(o >= base() && o < past());
+  assertx(o >= 0 && o < bclen());
   return findEH(shared()->m_ehtab, o);
-}
-
-inline const EHEnt* Func::findEHbyHandler(Offset o) const {
-  assertx(o >= base() && o < past());
-  return findEHbyHandler(shared()->m_ehtab, o);
 }
 
 template<class Container>
@@ -642,46 +842,15 @@ Func::findEH(const Container& ehtab, Offset o) {
   return eh;
 }
 
-template<class Container>
-const typename Container::value_type*
-Func::findEHbyHandler(const Container& ehtab, Offset o) {
-  const typename Container::value_type* eh = nullptr;
-  Offset closest = 0;
-
-  // We cannot rely on m_end to be a useful value (not kInvalidOffset), so
-  // instead we take the handler whose start is the closest without going
-  // over the offset we are looking for. We can rely on the fault handlers
-  // to be both contigous and dominated by an Unwind/Catch because we
-  // verify this in checkSection() in the verifier
-
-  for (uint32_t i = 0, sz = ehtab.size(); i < sz; ++i) {
-    if (ehtab[i].m_handler <= o && ehtab[i].m_handler > closest) {
-      eh = &ehtab[i];
-      closest = ehtab[i].m_handler;
-    }
-  }
-  return eh;
-}
-
-
-inline const FPIEnt* Func::findFPI(Offset o) const {
-  assertx(o >= base() && o < past());
-  return findFPI(fpitab().begin(), fpitab().end(), o);
-}
-
 ///////////////////////////////////////////////////////////////////////////////
 // JIT data.
 
-inline rds::Handle Func::funcHandle() const {
-  return m_cachedFunc.handle();
+inline jit::TCA Func::getFuncEntry() const {
+  return m_funcEntry;
 }
 
-inline unsigned char* Func::getFuncBody() const {
-  return m_funcBody;
-}
-
-inline void Func::setFuncBody(unsigned char* fb) {
-  m_funcBody = fb;
+inline void Func::setFuncEntry(jit::TCA funcEntry) {
+  m_funcEntry = funcEntry;
 }
 
 inline uint8_t* Func::getPrologue(int index) const {
@@ -692,11 +861,37 @@ inline void Func::setPrologue(int index, unsigned char* tca) {
   m_prologueTable[index] = tca;
 }
 
+inline uint8_t Func::incJitReqCount() const {
+  auto curr = m_jitReqCount.load(std::memory_order_acquire);
+  do {
+    // Saturate
+    if (curr >= std::numeric_limits<uint8_t>::max()) return curr;
+    if (m_jitReqCount.compare_exchange_weak(curr, curr + 1,
+                                            std::memory_order_acq_rel)) {
+      return curr;
+    }
+  } while (true);
+  not_reached();
+}
+
+inline uint8_t Func::readJitReqCount() const {
+  return m_jitReqCount.load(std::memory_order_relaxed);
+}
+
+inline void Func::resetJitReqCount() const {
+  m_jitReqCount.store(0, std::memory_order_release);
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 // Other methods.
 
-inline int8_t& Func::maybeIntercepted() const {
-  return m_maybeIntercepted;
+inline bool Func::maybeIntercepted() const {
+  return atomicFlags().check(Func::Flags::MaybeIntercepted);
+}
+
+inline void Func::setMaybeIntercepted() {
+  assertx(isInterceptable());
+  atomicFlags().set(Func::Flags::MaybeIntercepted);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -704,34 +899,19 @@ inline int8_t& Func::maybeIntercepted() const {
 
 inline void Func::setAttrs(Attr attrs) {
   m_attrs = attrs;
-  assertx(IMPLIES(accessesCallerFrame(), isBuiltin() && !isMethod()));
 }
 
 inline void Func::setBaseCls(Class* baseCls) {
-  m_baseCls = baseCls;
-}
-
-inline void Func::setFuncHandle(rds::Link<LowPtr<Func>,
-                                          rds::Mode::NonLocal> l) {
-  // TODO(#2950356): This assertion fails for create_function with an existing
-  // declared function named __lambda_func.
-  //assert(!m_cachedFunc.valid());
-  m_cachedFunc = l;
+  clsData().m_base = baseCls;
 }
 
 inline void Func::setHasPrivateAncestor(bool b) {
-  m_hasPrivateAncestor = b;
+  m_allFlags.m_hasPrivateAncestor = b;
 }
 
 inline void Func::setMethodSlot(Slot s) {
   assertx(isMethod());
   m_methodSlot = s;
-}
-
-inline bool Func::serialize() const {
-  if (m_serialized) return false;
-  const_cast<Func*>(this)->m_serialized = true;
-  return true;
 }
 
 //////////////////////////////////////////////////////////////////////
@@ -742,7 +922,7 @@ inline const Func::ExtendedSharedData* Func::extShared() const {
 
 inline Func::ExtendedSharedData* Func::extShared() {
   auto const s = shared();
-  return UNLIKELY(s->m_hasExtendedSharedData)
+  return UNLIKELY(s->m_allFlags.m_hasExtendedSharedData)
     ? static_cast<ExtendedSharedData*>(s)
     : nullptr;
 }

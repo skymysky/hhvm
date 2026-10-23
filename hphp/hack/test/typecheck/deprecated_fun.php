@@ -1,8 +1,8 @@
 <?hh
 
 <<__Deprecated('use bar() instead')>>
-function foo() {}
+function foo(): void {}
 
-function f() {
+function f(): void {
   foo();
 }

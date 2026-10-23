@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 // Copyright 2004-present Facebook. All Rights Reserved.
 
 interface IHasFoo {
@@ -35,5 +35,6 @@ class TestClass {
   }
 }
 
-/* HH_FIXME[1002] */
-TestClass::BreakIt();
+function main(): void {
+  TestClass::BreakIt();
+}

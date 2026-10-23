@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 /**
  * Copyright (c) 2014, Facebook, Inc.
  * All rights reserved.
@@ -12,5 +12,5 @@
 // Abstract method in "normal" class
 
 class A {
-  abstract function f(): int;
+  public abstract function f(): int;
 }

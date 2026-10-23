@@ -1,10 +1,10 @@
 <?hh
-function f($x) {
+function f($x) :mixed{
   var_dump(is_array($x));
   foreach ($x as $k => $_) {
     var_dump($k);
   }
-  usort(&$x, function($x,$y) {
+  usort(inout $x, function($x,$y) {
     if (is_int($x) != is_int($y)) {
       if (is_int($x)) return -1;
       return 1;
@@ -15,7 +15,7 @@ function f($x) {
   });
   var_dump($x);
 }
-function main() {
+function main() :mixed{
   $vector = Vector {11, 22, 33, '22'};
   $map = Map {'a' => 11, 'b' => 22, 'c' => 33, 'd' => '22'};
   $set = Set {11, 22, 33, '22'};
@@ -30,5 +30,9 @@ function main() {
   f(array_values($pair));
   f($pair->toValuesArray());
 }
-main();
 
+
+<<__EntryPoint>>
+function main_array_values() :mixed{
+main();
+}

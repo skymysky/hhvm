@@ -1,0 +1,10 @@
+error: Parsing[1002] The `${x}` syntax is disallowed in Hack. Use `{$x}` instead. [1]
+
+str_interp.php:5:10
+3 | function main():void{
+4 |   $jam = "grape";
+5 |   $a = "${jam}s";
+  |          ^^^^^ [1]
+6 | }
+
+1 error found

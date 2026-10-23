@@ -16,6 +16,7 @@
 #include "hphp/runtime/base/backtrace.h"
 
 #include <folly/portability/GTest.h>
+#include <folly/test/JsonTestUtil.h>
 
 #include "hphp/runtime/base/array-init.h"
 #include "hphp/runtime/base/type-array.h"
@@ -37,9 +38,8 @@ namespace HPHP {
 
 //////////////////////////////////////////////////////////////////////
 Array mockBacktrace() {
-  auto bt = Array::Create();
-  bt.append(
-    make_map_array(
+  return make_vec_array(
+    make_dict_array(
       s_file, "filename",
       s_line, "42",
       s_function, "function_name",
@@ -47,7 +47,6 @@ Array mockBacktrace() {
       s_class, "Class"
     )
   );
-  return bt;
 }
 
 TEST(Backtrace, FullFunctionNames) {
@@ -59,15 +58,14 @@ TEST(Backtrace, FullFunctionNames) {
   auto const expectedDescription = "{\"vecs\":{\"php_lines\":[\"42\"],"
     "\"php_functions\":[\"Class::function_name\"],\"php_files\":[\"filename\"]}"
     ",\"sets\":{},\"ints\":{}}";
-  EXPECT_EQ(show(sample), expectedDescription);
+  FOLLY_EXPECT_JSON_EQ(show(sample), expectedDescription);
 }
 
 TEST(Backtrace, FunctionNameWithObject) {
   StructuredLogEntry sample;
   {
-    auto bt = Array::Create();
-    bt.append(
-      make_map_array(
+    auto bt = make_vec_array(
+      make_dict_array(
         s_file, "filename",
         s_line, "42",
         s_function, "function_name",
@@ -81,15 +79,14 @@ TEST(Backtrace, FunctionNameWithObject) {
   auto const expectedDescription = "{\"vecs\":{\"php_lines\":[\"42\"],"
     "\"php_functions\":[\"Class->function_name\"],\"php_files\":[\"filename\"]}"
     ",\"sets\":{},\"ints\":{}}";
-  EXPECT_EQ(show(sample), expectedDescription);
+  FOLLY_EXPECT_JSON_EQ(show(sample), expectedDescription);
 }
 
 TEST(Backtrace, LongFunctionNames) {
   StructuredLogEntry sample;
   {
-    auto bt = Array::Create();
-    bt.append(
-      make_map_array(
+    auto bt = make_vec_array(
+      make_dict_array(
         s_file, "filenameeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
         s_line, "42---------------------------------------------------------------------------------",
         s_function, "function_name--------------------------------------------------------------------",
@@ -108,7 +105,7 @@ TEST(Backtrace, LongFunctionNames) {
     "enameeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
     "eeeeeee\"]}"
     ",\"sets\":{},\"ints\":{}}";
-  EXPECT_EQ(show(sample), expectedDescription);
+  FOLLY_EXPECT_JSON_EQ(show(sample), expectedDescription);
 }
 
 

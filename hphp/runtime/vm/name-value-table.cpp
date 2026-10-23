@@ -23,67 +23,31 @@
 #include "hphp/runtime/vm/bytecode.h"
 #include "hphp/runtime/vm/runtime.h"
 
+#include "hphp/runtime/vm/jit/prof-data-serialize.h"
+#include "hphp/runtime/vm/jit/type.h"
+
+#include "hphp/util/configs/eval.h"
+
+#include <tbb/concurrent_hash_map.h>
+
 namespace HPHP {
 
 //////////////////////////////////////////////////////////////////////
 
 NameValueTable::NameValueTable() {
-  allocate(folly::nextPowTwo(RuntimeOption::EvalVMInitialGlobalTableSize));
-}
-
-NameValueTable::NameValueTable(ActRec* fp)
-  : m_fp(fp)
-{
-  assertx(m_fp);
-  const auto func = m_fp->m_func;
-  const Id numNames = func->numNamedLocals();
-
-  /**
-   * Reserve space for all named locals plus one additional variable
-   * to avoid reallocations if one extra dynamic variable is used.
-   */
-  reserve(numNames + 1);
-
-  for (Id i = 0; i < numNames; ++i) {
-    assertx(func->lookupVarId(func->localVarName(i)) == i);
-
-    auto elm = insert(func->localVarName(i));
-    assertx(elm && elm->m_tv.m_type == kInvalidDataType);
-    elm->m_tv.m_type = kNamedLocalDataType;
-    elm->m_tv.m_data.num = i;
-  }
-}
-
-NameValueTable::NameValueTable(const NameValueTable& nvTable, ActRec* fp)
-  : m_fp(fp)
-  , m_elms(nvTable.m_elms)
-{
-  allocate(nvTable.m_tabMask + 1);
-  assertx(m_tabMask == nvTable.m_tabMask);
-
-  for (int i = 0; i <= m_tabMask; ++i) {
-    Elm& src = nvTable.m_table[i];
-    Elm& dst = m_table[i];
-
-    dst.m_name = src.m_name;
-    if (dst.m_name) {
-      dst.m_name->incRefCount();
-      if (src.m_tv.m_type == kNamedLocalDataType) {
-        dst.m_tv.m_type = kNamedLocalDataType;
-        dst.m_tv.m_data.num = src.m_tv.m_data.num;
-      } else {
-        tvDupWithRef(src.m_tv, dst.m_tv);
-      }
-    }
-  }
+  allocate(folly::nextPowTwo(Cfg::Eval::VMInitialGlobalTableSize));
 }
 
 NameValueTable::~NameValueTable() {
-  if (leaked()) return;
   for (Elm* elm = &m_table[m_tabMask]; elm != &m_table[-1]; --elm) {
     if (elm->m_name) {
       decRefStr(const_cast<StringData*>(elm->m_name));
-      if (elm->m_tv.m_type != kNamedLocalDataType) {
+      if (elm->m_link.bound()) {
+        if (elm->m_link.isInitNoProfile()) {
+          tvDecRefGen(elm->m_link.getNoProfile());
+          elm->m_link.markUninit();
+        }
+      } else {
         tvDecRefGen(elm->m_tv);
       }
     }
@@ -91,95 +55,38 @@ NameValueTable::~NameValueTable() {
   req::free(m_table);
 }
 
-void NameValueTable::suspend(const ActRec* oldFP, ActRec* newFP) {
-  assertx(m_fp == oldFP);
-  assertx(oldFP->func() == newFP->func());
-  assertx(!oldFP->resumed());
-  assertx(newFP->resumed());
-
-  m_fp = newFP;
-}
-
-void NameValueTable::attach(ActRec* fp) {
-  assertx(m_fp == nullptr);
-  m_fp = fp;
-
-  const auto func = fp->m_func;
-  const Id numNames = func->numNamedLocals();
-  TypedValue* loc = frame_local(fp, 0);
-
-  for (Id i = 0; i < numNames; ++i, --loc) {
-    assertx(func->lookupVarId(func->localVarName(i)) == i);
-
-    auto elm = insert(func->localVarName(i));
-    assertx(elm);
-    if (elm->m_tv.m_type != kInvalidDataType) {
-      assertx(elm->m_tv.m_type != kNamedLocalDataType);
-      tvCopy(elm->m_tv, *loc);
-    }
-
-    elm->m_tv.m_type = kNamedLocalDataType;
-    elm->m_tv.m_data.num = i;
-  }
-}
-
-void NameValueTable::detach(ActRec* fp) {
-  assertx(m_fp == fp);
-  m_fp = nullptr;
-
-  const auto func = fp->m_func;
-  const Id numNames = func->numNamedLocals();
-  TypedValue* loc = frame_local(fp, 0);
-
-  for (Id i = 0; i < numNames; ++i, --loc) {
-    assertx(func->lookupVarId(func->localVarName(i)) == i);
-
-    auto elm = findElm(func->localVarName(i));
-    assertx(elm && elm->m_tv.m_type == kNamedLocalDataType);
-    tvCopy(*loc, elm->m_tv);
-    tvDebugTrash(loc);
-  }
-}
-
-void NameValueTable::leak() {
-  m_elms = 0;
-  m_tabMask = 0;
-  req::free(m_table);
-  m_table = nullptr;
-  assertx(leaked());
-}
-
-TypedValue* NameValueTable::set(const StringData* name, tv_rval val) {
-  TypedValue* target = findTypedValue(name);
-  tvSet(*tvToCell(val), *target);
-  return target;
-}
-
-TypedValue* NameValueTable::bind(const StringData* name, tv_lval val) {
-  TypedValue* target = findTypedValue(name);
-  tvSetRef(val, target);
+tv_lval NameValueTable::set(const StringData* name, tv_rval val) {
+  auto const target = findTypedValue(name);
+  tvSet(*val, target);
   return target;
 }
 
 void NameValueTable::unset(const StringData* name) {
   Elm* elm = findElm(name);
   if (!elm) return;
-  tvUnset(*derefNamedLocal(&elm->m_tv));
-}
-
-TypedValue* NameValueTable::lookup(const StringData* name) {
-  Elm* elm = findElm(name);
-  if (!elm) return nullptr;
-  TypedValue* tv = derefNamedLocal(&elm->m_tv);
-  return tv->m_type == KindOfUninit ? nullptr : tv;
-}
-
-TypedValue* NameValueTable::lookupAdd(const StringData* name) {
-  auto tv = findTypedValue(name);
-  if (tv->m_type == KindOfUninit) {
-    tvWriteNull(*tv);
+  if (elm->m_link.bound()) {
+    if (!elm->m_link.isInitNoProfile()) return;
+    tvUnset(elm->m_link.getNoProfile());
+    return;
   }
-  return tv;
+  tvUnset(&elm->m_tv);
+}
+
+tv_lval NameValueTable::lookup(const StringData* name) {
+  Elm* elm = findElm(name);
+  if (!elm) return tv_lval{};
+  if (elm->m_link.bound()) {
+    if (!elm->m_link.isInitNoProfile()) return tv_lval{};
+    return elm->m_link.getNoProfile();
+  }
+  auto const lval = &elm->m_tv;
+  return type(lval) == KindOfUninit ? tv_lval{} : lval;
+}
+
+tv_lval NameValueTable::lookupAdd(const StringData* name) {
+  auto const val = findTypedValue(name);
+  if (type(val) == KindOfUninit) tvWriteNull(val);
+  return val;
 }
 
 void NameValueTable::reserve(size_t desiredSize) {
@@ -214,19 +121,18 @@ void NameValueTable::allocate(const size_t newCapac) {
   }
 }
 
-TypedValue* NameValueTable::derefNamedLocal(TypedValue* tv) const {
-  return tv->m_type == kNamedLocalDataType
-    ? frame_local(m_fp, tv->m_data.num)
-    : tv;
-}
-
-TypedValue* NameValueTable::findTypedValue(const StringData* name) {
+tv_lval NameValueTable::findTypedValue(const StringData* name) {
   Elm* elm = insert(name);
+  if (elm->m_link.bound()) {
+    if (!elm->m_link.isInitNoProfile()) {
+      elm->m_link.initWith(make_tv<KindOfNull>());
+    }
+    return elm->m_link.getNoProfile();
+  }
   if (elm->m_tv.m_type == kInvalidDataType) {
     tvWriteNull(elm->m_tv);
-    return &elm->m_tv;
   }
-  return derefNamedLocal(&elm->m_tv);
+  return &elm->m_tv;
 }
 
 NameValueTable::Elm* NameValueTable::insertImpl(const StringData* name) {
@@ -236,6 +142,7 @@ NameValueTable::Elm* NameValueTable::insertImpl(const StringData* name) {
     assertx(numProbes++ < m_tabMask + 1);
     if (nullptr == elm->m_name) {
       elm->m_name = name;
+      elm->m_link = decltype(elm->m_link){};
       elm->m_tv.m_type = kInvalidDataType;
       return elm;
     }
@@ -252,6 +159,8 @@ NameValueTable::Elm* NameValueTable::insert(const StringData* name) {
   reserve(m_elms + 1);
   Elm* elm = insertImpl(name);
   if (elm->m_tv.m_type == kInvalidDataType) {
+    // Attempt to hook this entry up to an existing RDS slot.
+    elm->m_link = linkForGlobal(name);
     ++m_elms;
     name->incRefCount();
   }
@@ -261,11 +170,19 @@ NameValueTable::Elm* NameValueTable::insert(const StringData* name) {
 void NameValueTable::rehash(Elm* const oldTab, const size_t oldMask) {
   for (Elm* srcElm = &oldTab[oldMask]; srcElm != &oldTab[-1]; --srcElm) {
     if (srcElm->m_name) {
-      assertx(srcElm->m_tv.m_type == kNamedLocalDataType ||
-             tvIsPlausible(srcElm->m_tv));
+      if (debug) {
+        if (srcElm->m_link.bound()) {
+          if (srcElm->m_link.isInitNoProfile()) {
+            always_assert(tvIsPlausible(*srcElm->m_link.getNoProfile()));
+          }
+        } else {
+          always_assert(tvIsPlausible(srcElm->m_tv));
+        }
+      }
       Elm* dstElm = insertImpl(srcElm->m_name);
       dstElm->m_name = srcElm->m_name;
       dstElm->m_tv = srcElm->m_tv;
+      dstElm->m_link = srcElm->m_link;
     }
   }
 }
@@ -311,22 +228,6 @@ NameValueTable::Iterator::getEnd(const NameValueTable* tab) {
   return it;
 }
 
-NameValueTable::Iterator::Iterator(const NameValueTable* tab, ssize_t pos)
-  : m_tab(tab)
-  , m_idx(pos)
-{
-  assertx(pos >= 0);
-  if (!valid()) next();
-}
-
-NameValueTable::Iterator::Iterator(const NameValueTable* tab,
-                                   const StringData* start)
-  : m_tab(tab)
-{
-  Elm* e = m_tab->findElm(start);
-  m_idx = e ? e - m_tab->m_table : (m_tab->m_tabMask + 1);
-}
-
 ssize_t NameValueTable::Iterator::toInteger() const {
   const ssize_t invalid = m_tab->m_tabMask + 1;
   return valid() ? m_idx : invalid;
@@ -341,9 +242,14 @@ const StringData* NameValueTable::Iterator::curKey() const {
   return m_tab->m_table[m_idx].m_name;
 }
 
-const TypedValue* NameValueTable::Iterator::curVal() const {
+tv_rval NameValueTable::Iterator::curVal() const {
   assertx(valid());
-  return m_tab->derefNamedLocal(&m_tab->m_table[m_idx].m_tv);
+  auto const& elem = m_tab->m_table[m_idx];
+  if (elem.m_link.bound()) {
+    assertx(elem.m_link.isInitNoProfile());
+    return elem.m_link.getNoProfile();
+  }
+  return &elem.m_tv;
 }
 
 void NameValueTable::Iterator::next() {
@@ -368,11 +274,142 @@ void NameValueTable::Iterator::prev() {
 }
 
 bool NameValueTable::Iterator::atEmpty() const {
-  if (!m_tab->m_table[m_idx].m_name) {
-    return true;
+  auto const& elem = m_tab->m_table[m_idx];
+  if (!elem.m_name) return true;
+  if (elem.m_link.bound()) return !elem.m_link.isInitNoProfile();
+  return type(elem.m_tv) == KindOfUninit;
+}
+
+//////////////////////////////////////////////////////////////////////
+
+namespace {
+
+struct ProfileMeta {
+  uint64_t count{0};
+  uint64_t present{0};
+  jit::Type type{jit::TBottom};
+};
+
+using ProfileMap = tbb::concurrent_hash_map<
+  const StringData*,
+  ProfileMeta,
+  pointer_hash<StringData>
+>;
+ProfileMap s_profiling;
+
+struct PreAllocElem {
+  rds::Link<TypedValue, rds::Mode::Normal> link;
+  jit::Type type;
+  bool mainlyPresent;
+};
+
+hphp_fast_map<
+  const StringData*,
+  PreAllocElem,
+  hphp_string_hash,
+  hphp_string_same
+> s_prealloc;
+
+}
+
+bool shouldProfileGlobals() {
+  return isJitSerializing() && Cfg::Eval::ProfileGlobalsLimit > 0;
+}
+
+void profileGlobal(const StringData* name) {
+  // Look up the global. Record if it's present or not. If it is
+  // present, record it's type.
+  assertx(shouldProfileGlobals());
+  if (!name->isStatic()) name = makeStaticString(name);
+  auto const tv = g_context->m_globalNVTable->lookup(name);
+  ProfileMap::accessor acc;
+  s_profiling.insert(acc, name);
+  ++acc->second.count;
+  if (tv) {
+    ++acc->second.present;
+    acc->second.type |= jit::typeFromTV(tv, nullptr);
   }
-  const auto tv = m_tab->derefNamedLocal(&m_tab->m_table[m_idx].m_tv);
-  return tv->m_type == KindOfUninit;
+}
+
+rds::Link<TypedValue, rds::Mode::Normal> linkForGlobal(const StringData* name) {
+  auto const it = s_prealloc.find(name);
+  if (it == s_prealloc.end()) return rds::Link<TypedValue, rds::Mode::Normal>{};
+  return it->second.link;
+}
+
+bool globalMainlyPresent(const StringData* name) {
+  auto const it = s_prealloc.find(name);
+  if (it == s_prealloc.end()) return false;
+  return it->second.mainlyPresent;
+}
+
+jit::Type predictedTypeForGlobal(const StringData* name) {
+  auto const it = s_prealloc.find(name);
+  if (it == s_prealloc.end()) return jit::TCell;
+  return it->second.type;
+}
+
+void writeGlobalProfiles(jit::ProfDataSerializer& ser) {
+  if (!shouldProfileGlobals()) {
+    // Always write an entry, even if we're not profiling. This means
+    // we can safely load if the options are different.
+    jit::write_raw(ser, uint32_t(0));
+    return;
+  }
+
+  // Sort the profiled data by the total count:
+  struct SortedElem {
+    const StringData* name;
+    ProfileMeta meta;
+  };
+  std::vector<SortedElem> sorted;
+  sorted.reserve(s_profiling.size());
+  for (auto const& s : s_profiling) {
+    sorted.emplace_back(SortedElem{s.first, s.second});
+  }
+  std::sort(
+    sorted.begin(),
+    sorted.end(),
+    [&] (const SortedElem& v1, const SortedElem& v2) {
+      if (v1.meta.count != v2.meta.count) {
+        return v1.meta.count > v2.meta.count;
+      }
+      return strcmp(v1.name->data(), v2.name->data()) < 0;
+    }
+  );
+
+  // Only write out the first EvalProfileGlobalsLimit entries. These
+  // will be the hottest.
+  auto const size =
+    std::min<uint32_t>(Cfg::Eval::ProfileGlobalsLimit, sorted.size());
+  jit::write_raw(ser, uint32_t{size});
+  for (uint32_t i = 0; i < size; ++i) {
+    jit::write_string(ser, sorted[i].name);
+
+    // Record whether this global was present enough to side-exit for
+    // the missing case.
+    auto const success = sorted[i].meta.present / double(sorted[i].meta.count);
+    jit::write_raw(ser, success >= Cfg::Eval::ProfileGlobalsSlowExitThreshold);
+
+    auto type = sorted[i].meta.type;
+    // TBottom means it was never present. Nothing to guard on this
+    // case.
+    if (type == jit::TBottom) type = jit::TCell;
+    type = jit::relaxToGuardable(type);
+    type.serialize(ser);
+  }
+}
+
+void readGlobalProfiles(jit::ProfDataDeserializer& ser) {
+  auto const size = jit::read_raw<uint32_t>(ser);
+  for (uint32_t i = 0; i < size; ++i) {
+    auto const name = jit::read_string(ser);
+    auto const mainlyPresent = jit::read_raw<bool>(ser);
+    auto const type = jit::Type::deserialize(ser);
+    if (Cfg::Eval::ProfileGlobalsLimit <= 0) continue;
+    auto const link = rds::alloc<TypedValue, rds::Mode::Normal>();
+    s_prealloc.emplace(name, PreAllocElem{link, type, mainlyPresent});
+  }
 }
 
 //////////////////////////////////////////////////////////////////////

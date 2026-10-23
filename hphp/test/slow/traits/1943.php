@@ -1,12 +1,12 @@
-<?php
+<?hh
 
 class Base {
-  public function sayHello() {
+  public function sayHello() :mixed{
     echo 'Hello ';
   }
 }
 trait SayWorld {
-  public function sayHello() {
+  public function sayHello() :mixed{
     parent::sayHello();
     echo 'World!';
   }
@@ -14,7 +14,7 @@ trait SayWorld {
 class MyHelloWorld extends Base {
   use SayWorld;
 }
+<<__EntryPoint>> function main(): void {
 $o = new MyHelloWorld();
 $o->sayHello();
-?>
-
+}

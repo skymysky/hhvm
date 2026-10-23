@@ -1,1 +1,0 @@
-<?php if (!extension_loaded("spl") || !extension_loaded('reflection') || !defined('GLOB_ERR')) print "skip"; ?>

@@ -1,13 +1,13 @@
-<?php
-function Add($x,$y) {
+<?hh
+<<__DynamicallyCallable>> function Add($x,$y) :mixed{
   return $x+$y;
 }
-function Sub($x,$y) {
+function Sub($x,$y) :mixed{
   return $x-$y;
 }
-
-$server = new soapserver(null,array('uri'=>"http://testuri.org"));
-$server->addfunction(array("Sub","Add"));
+<<__EntryPoint>> function main(): void {
+$server = new SoapServer(null,dict['uri'=>"http://testuri.org"]);
+$server->addFunction(vec["Sub","Add"]);
 
 $HTTP_RAW_POST_DATA = <<<EOF
 <?xml version="1.0" encoding="ISO-8859-1"?>
@@ -28,4 +28,4 @@ EOF;
 
 $server->handle($HTTP_RAW_POST_DATA);
 echo "ok\n";
-?>
+}

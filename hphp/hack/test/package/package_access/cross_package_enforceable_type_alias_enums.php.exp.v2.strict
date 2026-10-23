@@ -1,0 +1,33 @@
+error: Typing[4472] Cannot access type alias used as an enforceable type hint `TInt` defined in package `pkg2` which may not be available [1]
+-> `TInt` is defined in cross_package_enforceable_type_alias_enums.php--pkg2/foo.php [2]
+-> `TInt` belongs to package `pkg2` by this entry in the package config [3]
+-> package `pkg1` is available because the current file belongs to it by this entry in the package config [4]
+
+cross_package_enforceable_type_alias_enums.php--bar.php:11:25
+ 9 | // Regular enum base: HHVM's Class::setEnumType runs at class init and fatals
+10 | // if the base alias can't be resolved. Non-class alias base errors in v2.strict.
+11 | enum EnumWithAliasBase: TInt { X = 1; }
+   |                         ^^^^ [1]
+12 | 
+13 | // Enum class base: AttrEnum-guarded setEnumType is skipped; synthesized method
+
+cross_package_enforceable_type_alias_enums.php--pkg2/foo.php:4:6
+ 2 | // package pkg2
+ 3 | type TShape = shape('x' => int);
+ 4 | type TInt = int;
+   |      ^^^^ [2]
+
+PACKAGES.toml:7:11
+ 1 | [packages]
+ 2 | 
+ 3 | [packages.pkg1]
+   |           ^^^^ [4]
+ 4 | include_paths=["//"]
+ 5 | allow_deployed_packages_checking = true
+ 6 | 
+ 7 | [packages.pkg2]
+   |           ^^^^ [3]
+ 8 | include_paths=[
+ 9 |     "//cross_package_access_internal1_foo.php",
+
+1 error found

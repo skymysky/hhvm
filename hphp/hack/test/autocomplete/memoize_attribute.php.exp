@@ -1,0 +1,9 @@
+KeyedByIC
+  INSERT KeyedByIC
+  ~string
+MakeICInaccessible
+  INSERT MakeICInaccessible
+  ~string
+NotKeyedByICAndLeakIC__DO_NOT_USE
+  INSERT NotKeyedByICAndLeakIC__DO_NOT_USE
+  ~string

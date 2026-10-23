@@ -1,0 +1,23 @@
+error: Typing[4323] Some type arguments violate their constraints [1]
+-> `T` is a constrained type parameter [2]
+-> This type constraint is violated [3]
+-> Expected `IBar` [3]
+-> But got `string` [4]
+
+refine_interface_no_sub.php:16:3
+ 5 | interface IBaz {}
+ 6 | 
+ 7 | function foo<T as IBar>(T $x):void { }
+   |              ^ [2]
+   |                   ^^^^ [3]
+ 8 | 
+ 9 | function testit(
+   :
+14 |   $bar as IBaz;
+15 |   // This should produce an error; this code is reachable
+16 |   foo<string>("A");
+   |   ^^^ [1]
+   |       ^^^^^^ [4]
+17 | }
+
+1 error found

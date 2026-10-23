@@ -19,22 +19,18 @@
 #include <cmath>
 #include <utility>
 
+#include "hphp/runtime/base/tv-conv-throw.h"
 #include "hphp/util/alloc.h"
-#include "hphp/util/safe-cast.h"
-#include "hphp/util/stacktrace-profiler.h"
 
-#include "hphp/runtime/base/apc-handle-defs.h"
-#include "hphp/runtime/base/apc-stats.h"
-#include "hphp/runtime/base/apc-string.h"
-#include "hphp/runtime/base/builtin-functions.h"
-#include "hphp/runtime/base/exceptions.h"
 #include "hphp/runtime/base/runtime-error.h"
-#include "hphp/runtime/base/runtime-option.h"
+#include "hphp/runtime/base/static-literals.h"
+#include "hphp/runtime/base/static-string-table.h"
+#include "hphp/runtime/base/tv-shared.h"
 #include "hphp/runtime/base/zend-functions.h"
-#include "hphp/runtime/base/zend-printf.h"
-#include "hphp/runtime/base/zend-string.h"
-#include "hphp/runtime/base/zend-strtod.h"
-#include "hphp/runtime/ext/apc/ext_apc.h"
+
+#include "hphp/runtime/vm/unit-emitter.h"
+
+#include "hphp/zend/zend-strtod.h"
 
 namespace HPHP {
 
@@ -54,44 +50,116 @@ ALWAYS_INLINE StringData* allocFlat(size_t len) {
   // Refcount initialized to 1.
   sd->initHeader_16(HeaderKind::String, OneReference, sizeIndex);
   assertx(sd->capacity() >= len);
-#ifndef NO_M_DATA
-  sd->m_data = reinterpret_cast<char*>(sd + 1);
-#endif
   return sd;
 }
 
 //////////////////////////////////////////////////////////////////////
 
-std::aligned_storage<
-  kStringOverhead,
-  alignof(StringData)
->::type s_theEmptyString;
+namespace {
+
+SymbolPrefix* getSymbolPrefix(StringData* sd) {
+  assertx(sd->isSymbol());
+  return reinterpret_cast<SymbolPrefix*>(sd) - 1;
+}
+
+const SymbolPrefix* getSymbolPrefix(const StringData* sd) {
+  assertx(sd->isSymbol());
+  return getSymbolPrefix(const_cast<StringData*>(sd));
+}
+}
+
+bool StringData::isSymbol() const {
+  return (m_aux16 >> 8) & kIsSymbolMask;
+}
+
+Class* StringData::getCachedClass() const {
+  return getSymbolPrefix(this)->cls;
+}
+
+NamedType* StringData::getNamedType() const {
+  return getSymbolPrefix(this)->nty;
+}
+
+void StringData::setCachedClass(Class* cls) {
+  auto const prefix = getSymbolPrefix(this);
+  assertx(IMPLIES(prefix->cls, prefix->cls == cls));
+  prefix->cls = cls;
+}
+
+void StringData::setNamedType(NamedType* nty) {
+  auto const prefix = getSymbolPrefix(this);
+  assertx(IMPLIES(prefix->nty, prefix->nty == nty));
+  prefix->nty = nty;
+}
+
+ptrdiff_t StringData::isSymbolOffset() {
+  return offsetof(StringData, m_aux16) + 1;
+}
+
+ptrdiff_t StringData::cachedClassOffset() {
+  return offsetof(SymbolPrefix, cls) - sizeof(SymbolPrefix);
+}
+
+//////////////////////////////////////////////////////////////////////
+
+ptrdiff_t StringData::colorOffset() {
+  return offsetof(StringData, m_aux16);
+}
+
+uint16_t StringData::color() const {
+  return m_aux16 & kColorMask;
+}
+
+void StringData::setColor(uint16_t color) {
+  assertx((color & ~kColorMask) == 0);
+  m_aux16 |= color;
+}
 
 //////////////////////////////////////////////////////////////////////
 
 // Create either a static or an uncounted string.
-// Diffrence between static and uncounted is in the lifetime
+// Difference between static and uncounted is in the lifetime
 // of the string. Static are alive for the lifetime of the process.
 // Uncounted are not ref counted but will be deleted at some point.
 template <bool trueStatic> ALWAYS_INLINE
-StringData* StringData::MakeShared(folly::StringPiece sl) {
+MemBlock StringData::AllocatePersistent(folly::StringPiece sl) {
   if (UNLIKELY(sl.size() > StringData::MaxSize)) {
     raiseStringLengthExceededError(sl.size());
   }
 
-  auto const allocSize = sl.size() + kStringOverhead;
+  auto const extra = trueStatic ? sizeof(SymbolPrefix) : 0;
+  auto const bytes = sl.size() + kStringOverhead + extra;
+  auto const ptr = trueStatic ? low_malloc(bytes) : AllocShared(bytes);
+  return MemBlock{ptr, bytes};
+}
+
+template <bool trueStatic> ALWAYS_INLINE
+StringData* StringData::MakePersistentAt(folly::StringPiece sl, MemBlock range) {
+  auto const extra = trueStatic ? sizeof(SymbolPrefix) : 0;
+  assertx(range.size >= sl.size() + kStringOverhead + extra);
+
   StringData* sd = reinterpret_cast<StringData*>(
-    trueStatic ? low_malloc(allocSize) : uncounted_malloc(allocSize)
+    reinterpret_cast<uintptr_t>(range.ptr) + extra
   );
+  // is_static_string() answers purely from the address, so the allocator
+  // AllocatePersistent() picked has to agree with it: low_malloc() puts true
+  // statics below kMidArenaMaxAddr, AllocShared() puts uncounted strings in
+  // the high arena above it.
+  always_assert(is_static_string(sd) == trueStatic);
   auto const data = reinterpret_cast<char*>(sd + 1);
 
-#ifndef NO_M_DATA
-  sd->m_data = data;
-#endif
-  auto const count = trueStatic ? StaticValue : UncountedValue;
-  sd->initHeader(HeaderKind::String, count);
+  auto const count = trueStatic ? StaticValue : SharedValue;
+  if (trueStatic) {
+    auto constexpr aux = kIsSymbolMask << 8 | kInvalidColor;
+    sd->initHeader_16(HeaderKind::String, count, aux);
+    getSymbolPrefix(sd)->nty = nullptr;
+    getSymbolPrefix(sd)->cls = nullptr;
+  } else {
+    sd->initHeader_16(HeaderKind::String, count, kInvalidColor);
+  }
   sd->m_len = sl.size(); // m_hash is computed soon.
 
+  // set null byte
   data[sl.size()] = 0;
   auto const mcret = memcpy(data, sl.data(), sl.size());
   auto const ret = reinterpret_cast<StringData*>(mcret) - 1;
@@ -99,91 +167,51 @@ StringData* StringData::MakeShared(folly::StringPiece sl) {
   ret->preCompute();                    // get m_hash right
 
   assertx(ret == sd);
-  assertx(ret->isFlat());
-  assertx(trueStatic ? ret->isStatic() : ret->isUncounted());
+  assertx(trueStatic ? ret->isStatic() : ret->isShared());
+  assertx(ret->isSymbol() == trueStatic);
   assertx(ret->checkSane());
   return ret;
 }
 
+template <bool trueStatic> ALWAYS_INLINE
+StringData* StringData::MakePersistent(folly::StringPiece sl) {
+  assertx(IMPLIES(trueStatic, StaticString::s_globalInit));
+  auto range = AllocatePersistent<trueStatic>(sl);
+  return MakePersistentAt<trueStatic>(sl, range);
+}
+
 StringData* StringData::MakeStatic(folly::StringPiece sl) {
-  return MakeShared<true>(sl);
+  return MakePersistent<true>(sl);
 }
 
-StringData* StringData::MakeUncounted(folly::StringPiece sl) {
-  if (APCStats::IsCreated()) {
-    APCStats::getAPCStats().addAPCUncountedBlock();
-  }
-  return MakeShared<false>(sl);
+StringData* StringData::MakeShared(folly::StringPiece sl) {
+  return MakePersistent<false>(sl);
 }
 
-StringData* StringData::MakeEmpty() {
-  void* vpEmpty = &s_theEmptyString;
+StringData* StringData::InitializeEmpty() {
+  auto constexpr size = kStringOverhead + sizeof(SymbolPrefix);
+  static_assert(size == StaticLiterals::kEmptyStringSize);
 
-  auto const sd = static_cast<StringData*>(vpEmpty);
-  auto const data = reinterpret_cast<char*>(sd + 1);
-
-#ifndef NO_M_DATA
-  sd->m_data        = data;
-#endif
-  sd->initHeader(HeaderKind::String, StaticValue);
-  sd->m_lenAndHash  = 0; // len=0, hash=0
-  data[0] = 0;
-  sd->preCompute();
-
-  assertx(sd->m_len == 0);
-  assertx(sd->capacity() == 0);
-  assertx(sd->m_kind == HeaderKind::String);
-  assertx(sd->isFlat());
-  assertx(sd->isStatic());
-  assertx(sd->checkSane());
-  return sd;
+  return StringData::MakePersistentAt<true>(
+    folly::StringPiece{""},
+    MemBlock{reinterpret_cast<void*>(StaticLiterals::EmptyString()), size}
+  );
 }
 
 void StringData::destructStatic() {
   assertx(checkSane() && isStatic());
-  assertx(isFlat());
-  low_free(this);
+  if (isSymbol()) {
+    low_sized_free(reinterpret_cast<SymbolPrefix*>(this) - 1,
+                    size() + kStringOverhead + sizeof(SymbolPrefix));
+  } else {
+    low_sized_free(this, size() + kStringOverhead);
+  }
 }
 
-void StringData::ReleaseUncounted(const StringData* str) {
+void StringData::ReleaseShared(StringData* str) {
   assertx(str->checkSane());
-  assertx(str->isFlat());
-  if (!str->uncountedDecRef()) return;
-
-  if (APCStats::IsCreated()) {
-    APCStats::getAPCStats().removeAPCUncountedBlock();
-  }
-  auto const allocSize = str->size() + kStringOverhead;
-  uncounted_sized_free(const_cast<StringData*>(str), allocSize);
-}
-
-//////////////////////////////////////////////////////////////////////
-
-ALWAYS_INLINE void StringData::delist() {
-  assertx(isProxy());
-  auto& payload = *proxy();
-  auto const next = payload.node.next;
-  auto const prev = payload.node.prev;
-  assertx(uintptr_t(next) != kMallocFreeWord);
-  assertx(uintptr_t(prev) != kMallocFreeWord);
-  next->prev = prev;
-  prev->next = next;
-}
-
-unsigned StringData::sweepAll() {
-  auto& head = tl_heap->getStringList();
-  auto count = 0;
-  for (StringDataNode *next, *n = head.next; n != &head; n = next) {
-    count++;
-    next = n->next;
-    assertx(next && uintptr_t(next) != kSmallFreeWord);
-    assertx(next && uintptr_t(next) != kMallocFreeWord);
-    auto const s = node2str(n);
-    assertx(s->isProxy());
-    s->proxy()->apcstr->unreference();
-  }
-  head.next = head.prev = &head;
-  return count;
+  assertx(!str->sharedCowCheck());
+  FreeShared(str, str->size() + kStringOverhead);
 }
 
 //////////////////////////////////////////////////////////////////////
@@ -212,7 +240,6 @@ StringData* StringData::Make(folly::StringPiece sl, CopyStringMode) {
   assertx(ret->m_len == sl.size());
   assertx(ret->hasExactlyOneRef());
   assertx(ret->m_hash == 0);
-  assertx(ret->isFlat());
   assertx(ret->checkSane());
   return ret;
 }
@@ -230,7 +257,6 @@ StringData* StringData::Make(size_t reserveLen) {
   sd->setSize(0);
 
   assertx(sd->hasExactlyOneRef());
-  assertx(sd->isFlat());
   assertx(sd->checkSane());
   return sd;
 }
@@ -252,6 +278,8 @@ StringData* StringData::Make(char* data, size_t len, AttachStringMode) {
 }
 
 StringData* StringData::Make(folly::StringPiece r1, folly::StringPiece r2) {
+  // Undefined behavior if we pass nullptr strings into StringData::Make
+  assertx(r1.data() && r2.data());
   auto const len = r1.size() + r2.size();
   auto const sd = allocFlat(len);
   sd->m_lenAndHash = len; // hash=0
@@ -262,7 +290,6 @@ StringData* StringData::Make(folly::StringPiece r1, folly::StringPiece r2) {
   data[len] = 0;
 
   assertx(sd->hasExactlyOneRef());
-  assertx(sd->isFlat());
   assertx(sd->checkSane());
   return sd;
 }
@@ -279,7 +306,6 @@ StringData* StringData::Make(const StringData* s1, const StringData* s2) {
   *memcpy8(next, s2->data(), s2->m_len) = 0;
 
   assertx(sd->hasExactlyOneRef());
-  assertx(sd->isFlat());
   assertx(sd->checkSane());
   return sd;
 }
@@ -301,7 +327,6 @@ StringData* StringData::Make(folly::StringPiece r1, folly::StringPiece r2,
   p[r3.size()] = 0;
 
   assertx(sd->hasExactlyOneRef());
-  assertx(sd->isFlat());
   assertx(sd->checkSane());
   return sd;
 }
@@ -320,78 +345,16 @@ StringData* StringData::Make(folly::StringPiece r1, folly::StringPiece r2,
   p[r4.size()] = 0;
 
   assertx(sd->hasExactlyOneRef());
-  assertx(sd->isFlat());
   assertx(sd->checkSane());
   return sd;
 }
 
 //////////////////////////////////////////////////////////////////////
 
-ALWAYS_INLINE void StringData::enlist() {
-  assertx(isProxy());
-  auto& head = tl_heap->getStringList();
-  // insert after head
-  auto const next = head.next;
-  auto& payload = *proxy();
-  assertx(uintptr_t(next) != kMallocFreeWord);
-  payload.node.next = next;
-  payload.node.prev = &head;
-  next->prev = head.next = &payload.node;
-}
-
-StringData* StringData::MakeProxy(const APCString* apcstr) {
-#ifdef NO_M_DATA
-  always_assert(false);
-  not_reached();
-#else
-  assertx(!apcExtension::UseUncounted);
-  // No need to check if len > MaxSize, because if it were we'd never
-  // have made the StringData in the APCVariant without throwing.
-  assertx(size_t(apcstr->getStringData()->size()) <= size_t(MaxSize));
-
-  auto const sd = static_cast<StringData*>(
-    tl_heap->mallocSmallSize(sizeof(StringData) + sizeof(Proxy))
-  );
-  auto const data = apcstr->getStringData();
-  sd->m_data = const_cast<char*>(data->m_data);
-  sd->initHeader(*data, OneReference);
-  sd->m_lenAndHash = data->m_lenAndHash;
-  sd->proxy()->apcstr = apcstr;
-  sd->enlist();
-  apcstr->reference();
-
-  assertx(sd->m_len == data->size());
-  assertx(sd->m_aux16 == data->m_aux16);
-  assertx(sd->m_kind == HeaderKind::String);
-  assertx(sd->hasExactlyOneRef());
-  assertx(sd->m_hash == data->m_hash);
-  assertx(sd->isProxy());
-  assertx(sd->checkSane());
-  return sd;
-#endif
-}
-
-void StringData::unProxy() {
-  assertx(isProxy());
-  proxy()->apcstr->unreference();
-  delist();
-}
-
-NEVER_INLINE
-void StringData::releaseProxy() {
-  unProxy();
-  tl_heap->freeSmallSize(this, sizeof(StringData) + sizeof(Proxy));
-}
-
 void StringData::release() noexcept {
   fixCountForRelease();
   assertx(isRefCounted());
   assertx(checkSane());
-  if (UNLIKELY(!isFlat())) {
-    releaseProxy();
-    AARCH64_WALKABLE_FRAME();
-    return;
-  }
   tl_heap->objFreeIndex(this, m_aux16);
   AARCH64_WALKABLE_FRAME();
 }
@@ -404,7 +367,7 @@ void StringData::release() noexcept {
   assertx(ptr != data() || len <= m_len);
 
 StringData* StringData::append(folly::StringPiece range) {
-  assertx(!isImmutable() && !hasMultipleRefs());
+  assertx(!hasMultipleRefs());
 
   auto s = range.data();
   auto const len = range.size();
@@ -423,8 +386,7 @@ StringData* StringData::append(folly::StringPiece range) {
   ALIASING_APPEND_ASSERT(s, len);
 
   auto const requestLen = static_cast<uint32_t>(newLen);
-  auto const target = UNLIKELY(isProxy()) ? escalate(requestLen)
-                                           : reserve(requestLen);
+  auto const target = reserve(requestLen);
   memcpy(target->mutableData() + m_len, s, len);
   target->setSize(newLen);
   assertx(target->checkSane());
@@ -433,7 +395,7 @@ StringData* StringData::append(folly::StringPiece range) {
 }
 
 StringData* StringData::append(folly::StringPiece r1, folly::StringPiece r2) {
-  assertx(!isImmutable() && !hasMultipleRefs());
+  assertx(!hasMultipleRefs());
 
   auto const len = r1.size() + r2.size();
 
@@ -451,9 +413,7 @@ StringData* StringData::append(folly::StringPiece r1, folly::StringPiece r2) {
    */
   ALIASING_APPEND_ASSERT(r1.data(), r1.size());
   ALIASING_APPEND_ASSERT(r2.data(), r2.size());
-
-  auto const target = UNLIKELY(isProxy()) ? escalate(newLen)
-                                          : reserve(newLen);
+  auto const target = reserve(newLen);
 
   /*
    * memcpy is safe even if it's a self append---the regions will be
@@ -473,7 +433,7 @@ StringData* StringData::append(folly::StringPiece r1, folly::StringPiece r2) {
 StringData* StringData::append(folly::StringPiece r1,
                                folly::StringPiece r2,
                                folly::StringPiece r3) {
-  assertx(!isImmutable() && !hasMultipleRefs());
+  assertx(!hasMultipleRefs());
 
   auto const len = r1.size() + r2.size() + r3.size();
 
@@ -492,9 +452,7 @@ StringData* StringData::append(folly::StringPiece r1,
   ALIASING_APPEND_ASSERT(r1.data(), r1.size());
   ALIASING_APPEND_ASSERT(r2.data(), r2.size());
   ALIASING_APPEND_ASSERT(r3.data(), r3.size());
-
-  auto const target = UNLIKELY(isProxy()) ? escalate(newLen)
-                                          : reserve(newLen);
+  auto const target = reserve(newLen);
 
   /*
    * memcpy is safe even if it's a self append---the regions will be
@@ -517,8 +475,7 @@ StringData* StringData::append(folly::StringPiece r1,
 //////////////////////////////////////////////////////////////////////
 
 StringData* StringData::reserve(size_t cap) {
-  assertx(!isImmutable() && !hasMultipleRefs());
-  assertx(isFlat());
+  assertx(!hasMultipleRefs());
 
   if (cap <= capacity()) return this;
 
@@ -527,32 +484,19 @@ StringData* StringData::reserve(size_t cap) {
 
   // Request-allocated StringData are always aligned at 16 bytes, thus it is
   // safe to copy in 16-byte groups.
-#ifdef NO_M_DATA
   // layout: [header][m_lenAndHash][...data]
   sd->m_lenAndHash = m_lenAndHash;
   // This copies the characters (m_len bytes), and the trailing zero (1 byte)
   memcpy16_inline(sd+1, this+1, (m_len + 1 + 15) & ~0xF);
   assertx(reinterpret_cast<uintptr_t>(this+1) % 16 == 0);
-#else
-  // layout: [header][m_data][m_lenAndHash][...data]
-  // This copies m_lenAndHash (8 bytes), the characters (m_len bytes),
-  // and the trailing zero (1 byte).
-  memcpy16_inline(&sd->m_lenAndHash, &m_lenAndHash,
-                  (m_len + 8 + 1 + 15) & ~0xF);
-  assertx(reinterpret_cast<uintptr_t>(&m_lenAndHash) + 8 ==
-          reinterpret_cast<uintptr_t>(m_data));
-  assertx(reinterpret_cast<uintptr_t>(&m_lenAndHash) % 16 == 0);
-#endif
 
   assertx(sd->hasExactlyOneRef());
-  assertx(sd->isFlat());
   assertx(sd->checkSane());
   return sd;
 }
 
 StringData* StringData::shrinkImpl(size_t len) {
-  assertx(!isImmutable() && !hasMultipleRefs());
-  assertx(isFlat());
+  assertx(!hasMultipleRefs());
   assertx(len <= capacity());
 
   auto const sd = allocFlat(len);
@@ -565,38 +509,12 @@ StringData* StringData::shrinkImpl(size_t len) {
   return sd;
 }
 
-StringData* StringData::shrink(size_t len) {
-  assertx(!isImmutable() && !hasMultipleRefs());
-  if (capacity() - len > kMinShrinkThreshold) {
-    return shrinkImpl(len);
-  }
-  assertx(len < MaxSize);
-  setSize(len);
-  return this;
-}
-
-// State transition from Mode::Shared to Mode::Flat.
-StringData* StringData::escalate(size_t cap) {
-  assertx(isProxy() && !isStatic() && cap >= m_len);
-
-  auto const sd = allocFlat(cap);
-  sd->m_lenAndHash = m_lenAndHash;
-  auto const sd_data = reinterpret_cast<char*>(sd + 1);
-  *memcpy8(sd_data, data(), m_len) = 0;
-
-  assertx(sd->hasExactlyOneRef());
-  assertx(sd->isFlat());
-  assertx(sd->checkSane());
-  return sd;
-}
-
 void StringData::dump() const {
   auto s = slice();
 
-  printf("StringData(%d) (%s%s%s%d): [", m_count,
-         isProxy() ? "proxy " : "",
+  printf("StringData(%d) (%s%s%d): [", m_count,
          isStatic() ? "static " : "",
-         isUncounted() ? "uncounted " : "",
+         isShared() ? "shared " : "",
          static_cast<int>(s.size()));
   for (uint32_t i = 0; i < s.size(); i++) {
     char ch = s.data()[i];
@@ -618,20 +536,15 @@ StringData* StringData::getChar(int offset) const {
 }
 
 StringData* StringData::increment() {
-  assertx(!isImmutable() && !hasMultipleRefs());
+  assertx(!hasMultipleRefs());
   assertx(!empty());
-
-  auto const sd = UNLIKELY(isProxy())
-    ? escalate(m_len + 1)
-    : reserve(m_len + 1);
+  auto const sd = reserve(m_len + 1);
   sd->incrementHelper();
   return sd;
 }
 
 void StringData::incrementHelper() {
-  if (RuntimeOption::EnableHipHopSyntax) {
-    raise_notice("Increment on string '%s'", data());
-  }
+  raise_notice("Increment on string '%s'", data());
   m_hash = 0;
 
   enum class CharKind {
@@ -724,18 +637,6 @@ void StringData::preCompute() {
   }
 }
 
-#if (!defined(__SSE4_2__) && !defined(ENABLE_AARCH64_CRC)) || \
-     defined(NO_HWCRC) || !defined(NO_M_DATA) || defined(_MSC_VER)
-// This function is implemented directly in ASM in string-data-*.S otherwise.
-NEVER_INLINE strhash_t StringData::hashHelper() const {
-  assertx(!isProxy());
-  strhash_t h = hash_string_i_unsafe(data(), m_len);
-  assertx(h >= 0);
-  m_hash |= h;
-  return h;
-}
-#endif
-
 ///////////////////////////////////////////////////////////////////////////////
 // type conversions
 
@@ -754,9 +655,6 @@ DataType StringData::isNumericWithVal(int64_t &lval, double &dval,
       overflow
     );
     if (ret == KindOfNull && allow_errors) {
-      // a proxy string has its hash precomputed - so it can't
-      // suddenly go from being numeric to not-numeric
-      assertx(!isProxy());
       m_hash |= STRHASH_MSB;
     }
   }
@@ -783,43 +681,15 @@ bool StringData::isNumeric() const {
     case KindOfDict:
     case KindOfPersistentKeyset:
     case KindOfKeyset:
-    case KindOfPersistentArray:
-    case KindOfArray:
     case KindOfObject:
     case KindOfResource:
-    case KindOfRef:
+    case KindOfRFunc:
     case KindOfFunc:
-      break;
-  }
-  not_reached();
-}
-
-bool StringData::isInteger() const {
-  if (m_hash < 0) return false;
-  int64_t lval; double dval;
-  DataType ret = isNumericWithVal(lval, dval, 0);
-  switch (ret) {
-    case KindOfNull:
-    case KindOfDouble:
-      return false;
-    case KindOfInt64:
-      return true;
-    case KindOfUninit:
-    case KindOfBoolean:
-    case KindOfPersistentString:
-    case KindOfString:
-    case KindOfPersistentVec:
-    case KindOfVec:
-    case KindOfPersistentDict:
-    case KindOfDict:
-    case KindOfPersistentKeyset:
-    case KindOfKeyset:
-    case KindOfPersistentArray:
-    case KindOfArray:
-    case KindOfObject:
-    case KindOfResource:
-    case KindOfRef:
-    case KindOfFunc:
+    case KindOfClass:
+    case KindOfLazyClass:
+    case KindOfClsMeth:
+    case KindOfRClsMeth:
+    case KindOfEnumClassLabel:
       break;
   }
   not_reached();
@@ -852,14 +722,6 @@ DataType StringData::toNumeric(int64_t &lval, double &dval) const {
 bool StringData::equal(const StringData *s) const {
   assertx(s);
   if (s == this) return true;
-  int ret;
-
-  if (!(m_hash < 0 || s->m_hash < 0)) {
-    ret = numericCompare(s);
-    if (ret >= -1) {
-      return ret == 0;
-    }
-  }
   return same(s);
 }
 
@@ -889,6 +751,7 @@ int StringData::numericCompare(const StringData *v2) const {
     if (dval1 == dval2) return 0;
     return -1;
   }
+
   if (ret1 == KindOfDouble) {
     assertx(ret2 == KindOfInt64);
     if (oflow1) {
@@ -950,6 +813,182 @@ StringData::substr(int start, int length /* = StringData::MaxSize */) {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
+// Serialization
+
+__thread UnitEmitter* BlobEncoderHelper<const StringData*>::tl_unitEmitter{nullptr};
+__thread Unit* BlobEncoderHelper<const StringData*>::tl_unit{nullptr};
+__thread BlobEncoderHelper<const StringData*>::Indexer*
+  BlobEncoderHelper<const StringData*>::tl_indexer{nullptr};
+
+void BlobEncoderHelper<const StringData*>::serde(BlobEncoder& encoder,
+                                                 const StringData* sd) {
+  assertx(!tl_unit);
+  if (auto const ue = tl_unitEmitter) {
+    Id id = ue->mergeLitstr(sd);
+    encoder(id);
+    return;
+  }
+  if (tl_indexer) {
+    auto const it = tl_indexer->m_indices.find(sd);
+    if (it == end(tl_indexer->m_indices)) {
+      auto const id = tl_indexer->m_indices.size();
+      assertx(id < std::numeric_limits<std::uint32_t>::max());
+      tl_indexer->m_indices.emplace(sd, id);
+      encoder(uint32_t(0));
+      // Fallthrough and encode the string below
+    } else {
+      encoder(uint32_t(it->second+1));
+      return;
+    }
+  }
+
+  if (!sd) {
+    encoder(uint32_t(0));
+    return;
+  }
+  auto const sz = sd->size();
+  encoder(static_cast<uint32_t>(sz + 1));
+  if (!sz) return;
+  encoder.writeRaw(sd->data(), sz);
+}
+
+void BlobEncoderHelper<const StringData*>::serde(BlobDecoder& decoder,
+                                                 const StringData*& sd,
+                                                 bool makeStatic) {
+  if (auto const ue = tl_unitEmitter) {
+    Id id;
+    decoder(id);
+    if (makeStatic) {
+      sd = ue->lookupLitstrId(id);
+      assertx(!sd || sd->isStatic());
+    } else {
+      sd = ue->lookupLitstrIdCopy(id).detach();
+    }
+    return;
+  }
+  if (auto const u = tl_unit) {
+    assertx(makeStatic);
+    Id id;
+    decoder(id);
+    sd = u->lookupLitstrId(id);
+    return;
+  }
+
+  auto const read = [&] () -> const StringData* {
+    uint32_t size;
+    decoder(size);
+    if (size == 0) return nullptr;
+    --size;
+    if (size == 0) return staticEmptyString();
+    assertx(decoder.remaining() >= size);
+    auto const data = decoder.data();
+    auto const s = makeStatic
+      ? makeStaticString((const char*)data, size)
+      : StringData::Make((const char*)data, size, CopyString);
+    decoder.advance(size);
+    return s;
+  };
+
+  if (auto const indexer = tl_indexer) {
+    assertx(makeStatic);
+    uint32_t id;
+    decoder(id);
+    if (!id) {
+      sd = read();
+      indexer->m_strs.emplace_back(sd);
+    } else {
+      --id;
+      assertx(id < indexer->m_strs.size());
+      sd = indexer->m_strs[id];
+    }
+    return;
+  }
+
+  sd = read();
+}
+
+folly::StringPiece
+BlobEncoderHelper<const StringData*>::asStringPiece(BlobDecoder& decoder) {
+  if (auto const ue = tl_unitEmitter) {
+    Id id;
+    decoder(id);
+    auto const sd = ue->lookupLitstrId(id);
+    if (!sd) return { nullptr, size_t{0} };
+    return sd->slice();
+  }
+  if (auto const u = tl_unit) {
+    Id id;
+    decoder(id);
+    auto const sd = u->lookupLitstrId(id);
+    if (!sd) return { nullptr, size_t{0} };
+    return sd->slice();
+  }
+  assertx(!tl_indexer);
+
+  uint32_t size;
+  decoder(size);
+  if (size == 0) return { (const char*)nullptr, size_t{0} };
+  auto const data = reinterpret_cast<const char*>(decoder.data());
+  if (size == 1) return { data, size_t{0} };
+  --size;
+  assertx(decoder.remaining() >= size);
+  decoder.advance(size);
+  return { data, size };
+}
+
+void BlobEncoderHelper<const StringData*>::skip(BlobDecoder& decoder) {
+  if (tl_unitEmitter || tl_unit) {
+    Id id;
+    decoder(id);
+    return;
+  }
+  assertx(!tl_indexer);
+
+  uint32_t size;
+  decoder(size);
+  // Any size less than 2 has no data (0 is a nullptr, and 1 is an
+  // empty string).
+  if (size <= 1) return;
+  --size;
+  assertx(decoder.remaining() >= size);
+  decoder.advance(size);
+}
+
+size_t BlobEncoderHelper<const StringData*>::peekSize(BlobDecoder& decoder) {
+  if (tl_unitEmitter || tl_unit) {
+    auto const before = decoder.advanced();
+    Id id;
+    decoder(id);
+    auto const size = decoder.advanced() - before;
+    decoder.retreat(size);
+    return size;
+  }
+  assertx(!tl_indexer);
+
+  auto const before = decoder.advanced();
+  uint32_t size;
+  decoder(size);
+  auto const sizeBytes = decoder.advanced() - before;
+  decoder.retreat(sizeBytes);
+  if (size <= 1) return sizeBytes;
+  --size;
+  return sizeBytes + size;
+}
+
+void BlobEncoderHelper<PackedStringPtr>::serde(BlobEncoder& encoder,
+  PackedStringPtr s) {
+  auto const sd = s.get();
+  encoder(sd);
+}
+
+void BlobEncoderHelper<PackedStringPtr>::serde(BlobDecoder& decoder,
+  PackedStringPtr& s) {
+  const StringData* sd;
+  decoder(sd);
+  s = sd;
+}
+
+///////////////////////////////////////////////////////////////////////////////
 // Debug
 
 std::string StringData::toCppString() const {
@@ -958,25 +997,19 @@ std::string StringData::toCppString() const {
 }
 
 bool StringData::checkSane() const {
-  static_assert(sizeof(StringData) == (use_lowptr ? 16 : 24),
-                "StringData size changed---update assertion if you mean it");
+  static_assert(sizeof(StringData) == 16);
   static_assert(size_t(MaxSize) <= size_t(INT_MAX), "Beware int wraparound");
-#ifdef NO_M_DATA
   static_assert(sizeof(StringData) == SD_DATA, "");
   static_assert(offsetof(StringData, m_len) == SD_LEN, "");
   static_assert(offsetof(StringData, m_hash) == SD_HASH, "");
-#endif
   assertx(kindIsValid());
   assertx(uint32_t(size()) <= MaxSize);
   assertx(size() >= 0);
-  if (isImmutable()) {
-    assertx(capacity() == 0);
-  } else {
+  assertx(IMPLIES(isSymbol(), isStatic()));
+  if (isRefCounted()) {
     assertx(size() <= capacity());
     assertx(capacity() <= MaxSize);
   }
-  // isFlat() and isProxy() both check whether m_data == payload(),
-  // which guarantees by definition that isFlat() != isProxy()
   return true;
 }
 

@@ -1,0 +1,63 @@
+error: Typing[4110] Only string and int values can be used in string interpolation [1]
+-> Expected `string` or `int` [1]
+-> But got `bool` [2]
+
+interp.php:5:11
+2 | 
+3 | // These should all have typing errors.
+4 | function bad_interp(bool $a, float $b, null $c, string $d): void {
+  |                     ^^^^ [2]
+5 |   "interp $a";
+  |           ^^ [1]
+6 |   "interp $b";
+7 |   "interp $c";
+
+error: Typing[4110] Only string and int values can be used in string interpolation [1]
+-> Expected `string` or `int` [1]
+-> But got `float` [2]
+
+interp.php:6:11
+2 | 
+3 | // These should all have typing errors.
+4 | function bad_interp(bool $a, float $b, null $c, string $d): void {
+  |                              ^^^^^ [2]
+5 |   "interp $a";
+6 |   "interp $b";
+  |           ^^ [1]
+7 |   "interp $c";
+8 |   "interp $d $a";
+
+error: Typing[4110] Only string and int values can be used in string interpolation [1]
+-> Expected `string` or `int` [1]
+-> But got `null` [2]
+
+interp.php:7:11
+2 | 
+3 | // These should all have typing errors.
+4 | function bad_interp(bool $a, float $b, null $c, string $d): void {
+  |                                        ^^^^ [2]
+5 |   "interp $a";
+6 |   "interp $b";
+7 |   "interp $c";
+  |           ^^ [1]
+8 |   "interp $d $a";
+9 | }
+
+error: Typing[4110] Only string and int values can be used in string interpolation [1]
+-> Expected `string` or `int` [1]
+-> But got `bool` [2]
+
+interp.php:8:14
+ 2 | 
+ 3 | // These should all have typing errors.
+ 4 | function bad_interp(bool $a, float $b, null $c, string $d): void {
+   |                     ^^^^ [2]
+ 5 |   "interp $a";
+ 6 |   "interp $b";
+ 7 |   "interp $c";
+ 8 |   "interp $d $a";
+   |              ^^ [1]
+ 9 | }
+10 | 
+
+4 errors found

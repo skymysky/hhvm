@@ -18,11 +18,9 @@
 
 #include "hphp/runtime/base/string-data.h"
 
-#include "hphp/runtime/vm/jit/types.h"
 #include "hphp/runtime/vm/jit/arg-group.h"
 #include "hphp/runtime/vm/jit/call-spec.h"
 #include "hphp/runtime/vm/jit/code-gen-cf.h"
-#include "hphp/runtime/vm/jit/extra-data.h"
 #include "hphp/runtime/vm/jit/ir-instruction.h"
 #include "hphp/runtime/vm/jit/ir-opcode.h"
 #include "hphp/runtime/vm/jit/ssa-tmp.h"
@@ -32,9 +30,9 @@
 
 #include "hphp/util/trace.h"
 
-namespace HPHP { namespace jit { namespace irlower {
+namespace HPHP::jit::irlower {
 
-TRACE_SET_MOD(irlower);
+TRACE_SET_MOD(irlower)
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -47,15 +45,7 @@ void cgLdStrLen(IRLS& env, const IRInstruction* inst) {
 void cgOrdStr(IRLS& env, const IRInstruction* inst) {
   auto const dst = dstLoc(env, inst, 0).reg();
   auto const sd = srcLoc(env, inst, 0).reg();
-  auto& v = vmain(env);
-
-#ifdef NO_M_DATA
-  v << loadzbq{sd[sizeof(StringData)], dst};
-#else
-  auto const data = v.makeReg();
-  v << load{sd[StringData::dataOff()], data};
-  v << loadzbq{data[0], dst};
-#endif
+  vmain(env) << loadzbq{sd[sizeof(StringData)], dst};
 }
 
 void cgOrdStrIdx(IRLS& env, const IRInstruction* inst) {
@@ -79,11 +69,7 @@ void cgOrdStrIdx(IRLS& env, const IRInstruction* inst) {
     [&] (Vout& v) {
       auto const dst = v.makeReg();
       auto const data = v.makeReg();
-#ifdef NO_M_DATA
       v << lea{sd[sizeof(StringData)], data};
-#else
-      v << load{sd[StringData::dataOff()], data};
-#endif
       v << loadzbq{data[idx], dst};
       return dst;
     }
@@ -135,14 +121,14 @@ void cgStringIsset(IRLS& env, const IRInstruction* inst) {
   v << setcc{CC_NBE, sf, dst};
 }
 
-IMPL_OPCODE_CALL(ConcatStrStr);
-IMPL_OPCODE_CALL(ConcatStrInt);
-IMPL_OPCODE_CALL(ConcatIntStr);
-IMPL_OPCODE_CALL(ConcatStr3);
-IMPL_OPCODE_CALL(ConcatStr4);
+IMPL_OPCODE_CALL(ConcatStrStr)
+IMPL_OPCODE_CALL(ConcatStrInt)
+IMPL_OPCODE_CALL(ConcatIntStr)
+IMPL_OPCODE_CALL(ConcatStr3)
+IMPL_OPCODE_CALL(ConcatStr4)
 
 IMPL_OPCODE_CALL(StringGet)
 
 ///////////////////////////////////////////////////////////////////////////////
 
-}}}
+}

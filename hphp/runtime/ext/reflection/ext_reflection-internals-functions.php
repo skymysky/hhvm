@@ -8,18 +8,8 @@
  * @return array - A map containing the extension's name, version, info string
  *                 ini settings, constants, functions and classes.
  */
-<<__Native("NoInjection"), __HipHopSpecific>>
-function hphp_get_extension_info(string $name): array<string, mixed>;
-
-/**
- * hphp_invoke() - Used by ReflectionFunction to invoke a function.
- *
- * @param string $name        - The name of the function.
- * @param Traversable $params - The parameters to pass to the function.
- * @return mixed - The result of the invoked function.
- */
-<<__Native("NoInjection"), __HipHopSpecific>>
-function hphp_invoke(string $name, mixed $params): mixed;
+<<__Native("NoInjection")>>
+function hphp_get_extension_info(string $name)[]: darray<string, mixed>;
 
 /**
  * hphp_invoke_method() - Used by ReflectionMethod to invoke a method and by
@@ -32,9 +22,21 @@ function hphp_invoke(string $name, mixed $params): mixed;
  * @param Traversable $params - The parameters to pass to the method.
  * @return mixed - The result of the invoked method.
  */
-<<__Native("NoInjection"), __HipHopSpecific>>
-function hphp_invoke_method(?object $obj, string $cls, string $name,
+<<__Native("NoInjection", "NoRecording")>>
+function hphp_invoke_method(?\HH\object $obj, string $cls, string $name,
                             mixed $params): mixed;
+
+/**
+ * hphp_invoke_callable_named_args() - Reflection helper to call a function
+ *                                     pointer or closure with named arguments.
+ * @param object $callable    - The function pointer or closure to invoke.
+ * @param Traversable $params - The positional parameters to pass to the function.
+ * @param ?dict<string, mixed> $namedArgs - A dictionary mapping named arg name to value.
+ * @return mixed - The result of the invocation.
+ */
+<<__Native("NoInjection", "NoRecording")>>
+function hphp_invoke_callable_named_args(mixed $callable, mixed $params,
+                                         ?dict<string, mixed> $namedArgs): mixed;
 
 /**
  * hphp_create_object() - Used by ReflectionClass to create a new instance of an
@@ -44,8 +46,11 @@ function hphp_invoke_method(?object $obj, string $cls, string $name,
  * @param array $params - The parameters to pass to the constructor.
  * @return object - The newly created object
  */
-<<__Native("NoInjection"), __HipHopSpecific>>
-function hphp_create_object(string $name, ?array $params): object;
+<<__Native("NoInjection")>>
+function hphp_create_object(
+  string $name,
+  ?varray<mixed> $params,
+)[defaults]: \HH\object;
 
 /**
  * hphp_create_object_without_constructor() - Used by ReflectionClass to create
@@ -55,8 +60,8 @@ function hphp_create_object(string $name, ?array $params): object;
  * @param string $name  - The name of the object to create.
  * @return object - The newly created object
  */
-<<__Native("NoInjection"), __HipHopSpecific>>
-function hphp_create_object_without_constructor(string $name): object;
+<<__Native("NoInjection")>>
+function hphp_create_object_without_constructor(string $name)[]: \HH\object;
 
 /**
  * hphp_get_property() - Used by ReflectionProperty to get the value of a
@@ -64,15 +69,16 @@ function hphp_create_object_without_constructor(string $name): object;
  *
  * @param object $obj  - The object to get the property from.
  * @param string $cls  - The name of the class that the property is accessible
- *                       in or null to only get a public property.
+ *                       in
  * @param string $prop - The name of the property.
  * @return mixed - The value of the property.
  */
-<<__Native("NoInjection"), __HipHopSpecific>>
+<<__Native("NoInjection")>>
 function hphp_get_property(
-  object $obj,
-  string $cls = "", // null will convert to this and do what we expect
-  string $prop): mixed;
+  \HH\object $obj,
+  string $cls,
+  string $prop,
+)[]: mixed;
 
 /**
  * hphp_set_property() - Used by ReflectionProperty to set the value of a
@@ -80,16 +86,17 @@ function hphp_get_property(
  *
  * @param object $obj  - The object to set the property on.
  * @param string $cls  - The name of the class that the property is accessible
- *                       in or null to only set a public property.
+ *                       in
  * @param string $prop - The name of the property.
  * @param mixed $value - The value to set the property to.
  */
-<<__Native("NoInjection"), __HipHopSpecific>>
+<<__Native("NoInjection")>>
 function hphp_set_property(
-  object $obj,
-  string $cls = "", // null will convert to this and do what we expect
+  \HH\object $obj,
+  string $cls,
   string $prop,
-  mixed $value): void;
+  mixed $value,
+)[write_props]: void;
 
 /**
  * hphp_get_static_property() - Used by ReflectionProperty to get the value of a
@@ -101,9 +108,12 @@ function hphp_set_property(
  *                       (true) or only public ones (false)
  * @return mixed - The value of the property
  */
-<<__Native("NoInjection"), __HipHopSpecific>>
-function hphp_get_static_property(string $cls, string $prop,
-                                  bool $force): mixed;
+<<__Native("NoInjection")>>
+function hphp_get_static_property(
+  string $cls,
+  string $prop,
+  bool $force,
+)[read_globals]: mixed;
 
 /**
  * hphp_set_static_property() - Used by ReflectionProperty to set the value of a
@@ -115,6 +125,10 @@ function hphp_get_static_property(string $cls, string $prop,
  * @param bool $force  - Whether or not to set protected and private properties
  *                       (true) or only public ones (false)
  */
-<<__Native("NoInjection"), __HipHopSpecific>>
-function hphp_set_static_property(string $cls, string $prop, mixed $value,
-                                  bool $force): void;
+<<__Native("NoInjection")>>
+function hphp_set_static_property(
+  string $cls,
+  string $prop,
+  mixed $value,
+  bool $force,
+)[globals]: void;

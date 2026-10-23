@@ -1,13 +1,13 @@
-<?php
-$a = new FileSystemIterator(__DIR__);
+<?hh <<__EntryPoint>> function main(): void {
+$a = new FilesystemIterator(__DIR__);
 $b = clone $a;
-var_dump((string)$b == (string)$a);
+var_dump($b->__toString() == $a->__toString());
 var_dump($a->key() == $b->key());
 $a->next();
 $a->next();
 $a->next();
 $c = clone $a;
-var_dump((string)$c == (string)$a);
+var_dump($c->__toString() == $a->__toString());
 var_dump($a->key() == $c->key());
-?>
-===DONE===
+echo "===DONE===\n";
+}

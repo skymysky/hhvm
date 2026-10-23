@@ -1,0 +1,40 @@
+warning: Warn[12040] Indexing into a value of type `dynamic` [1]
+-> This expression has type `dynamic` [2]
+
+inout_pipe_expression.php:5:21
+1 | <?hh
+2 | 
+3 | function foobar(inout dynamic $x): void {
+  |                       ^^^^^^^ [2]
+4 |   // This is OK: `$$` is not appearing in an lvalue position
+5 |   1 |> foobar(inout $x[$$]);
+  |                     ^^ [1]
+6 |   // This is not OK: `$$` is appearing in an lvalue position. This is ...
+7 |   // actually really difficult to do in practice, but we disallow it.
+
+warning: Warn[12040] Indexing into a value of type `dynamic` [1]
+-> This expression has type `dynamic` [2]
+
+inout_pipe_expression.php:8:22
+1 | <?hh
+2 | 
+3 | function foobar(inout dynamic $x): void {
+  |                       ^^^^^^^ [2]
+4 |   // This is OK: `$$` is not appearing in an lvalue position
+5 |   1 |> foobar(inout $x[$$]);
+6 |   // This is not OK: `$$` is appearing in an lvalue position. This is ...
+7 |   // actually really difficult to do in practice, but we disallow it.
+8 |   $x |> foobar(inout $$[1]);
+  |                      ^^ [1]
+9 | }
+
+error: Parsing[1002] You cannot use this syntax with `inout`. [1]
+
+inout_pipe_expression.php:8:22
+6 |   // This is not OK: `$$` is appearing in an lvalue position. This is ...
+7 |   // actually really difficult to do in practice, but we disallow it.
+8 |   $x |> foobar(inout $$[1]);
+  |                      ^^ [1]
+9 | }
+
+3 errors found

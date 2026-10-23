@@ -16,22 +16,22 @@
 
 #include "hphp/runtime/server/memory-stats.h"
 
+#include "hphp/runtime/base/bespoke/layout.h"
 #include "hphp/runtime/base/static-string-table.h"
 #include "hphp/runtime/vm/jit/tc.h"
-#include "hphp/util/managed-arena.h"
 #include "hphp/util/process.h"
 
 #include <algorithm>
 #include <cstdio>
-#include <fstream>
 #include <ios>
 #include <iostream>
 #include <sstream>
 #include <string>
 
-#include <folly/portability/Unistd.h>
-
 namespace HPHP {
+
+decltype(MemoryStats::s_allocCounts) MemoryStats::s_allocCounts;
+decltype(MemoryStats::s_allocSizes) MemoryStats::s_allocSizes;
 
 void MemoryStats::ReportMemory(std::string& output, Writer::Format format) {
   std::ostringstream out;
@@ -47,29 +47,31 @@ void MemoryStats::ReportMemory(std::string& output, Writer::Format format) {
 
   w->writeFileHeader();
 
-  ProcStatus procStatus;
-  if (!procStatus.valid()) {
+  ProcStatus::update();
+  if (!ProcStatus::valid()) {
     w->writeFileFooter();
     return;
   }
-  // Subtract unused size in hugetlb arenas
-#if USE_JEMALLOC_EXTENT_HOOKS
-  size_t unused = 0;
-  if (auto a = alloc::lowArena()) unused += a->unusedSize();
-  if (auto a = alloc::highArena()) unused += a->unusedSize();
-  procStatus.registerUnused(unused >> 10); // convert to kB
-#endif
   w->beginObject("Memory");
 
-  w->writeEntry("VmSize", procStatus.VmSizeKb);
-  w->writeEntry("VmRSS", procStatus.VmRSSKb);
-  w->writeEntry("PeakUsage", procStatus.VmHWMKb);
-  w->writeEntry("HugetlbPages", procStatus.HugetlbPagesKb);
-  w->writeEntry("adjustedRSS", procStatus.adjustedRSSKb);
+  w->writeEntry("VmSize", ProcStatus::VmSizeKb.load(std::memory_order_acquire));
+  w->writeEntry("VmRSS", ProcStatus::VmRSSKb.load(std::memory_order_acquire));
+  w->writeEntry("mem.rss", ProcStatus::VmRSSKb.load(std::memory_order_acquire));
+  w->writeEntry("PeakUsage",
+                ProcStatus::VmHWMKb.load(std::memory_order_acquire));
+  w->writeEntry("VmSwap", ProcStatus::VmSwapKb.load(std::memory_order_acquire));
+  w->writeEntry("HugetlbPages",
+                ProcStatus::HugetlbPagesKb.load(std::memory_order_acquire));
+  w->writeEntry("adjustedRSS", ProcStatus::adjustedRssKb());
+  w->writeEntry("mem.rss_adjusted", ProcStatus::adjustedRssKb());
 
-  // static string stats
   w->writeEntry("static_string_count", makeStaticStringCount());
-  w->writeEntry("static_string_size", GetStaticStringSize());
+  w->writeEntry("static_string_size", TotalSize(AllocKind::StaticString));
+  w->writeEntry("static_array_count", loadedStaticArrayCount());
+  w->writeEntry("static_array_size", TotalSize(AllocKind::StaticArray));
+  w->writeEntry("unit_size", TotalSize(AllocKind::Unit));
+  w->writeEntry("class_size", TotalSize(AllocKind::Class));
+  w->writeEntry("func_size", TotalSize(AllocKind::Func));
 
   w->endObject("Memory");
   w->writeFileFooter();
@@ -78,20 +80,49 @@ void MemoryStats::ReportMemory(std::string& output, Writer::Format format) {
   return;
 }
 
-MemoryStats* MemoryStats::GetInstance() {
-  static MemoryStats s_memoryStats;
-  return &s_memoryStats;
-}
+namespace {
 
-void MemoryStats::ResetStaticStringSize() {
-  m_staticStringSize.store(0);
-}
+ServiceData::CounterCallback s_counters(
+  [](ServiceData::CounterMap& counters) {
+    counters["mem.low-mapped"] = alloc::getLowMapped();
+    counters["mem.mid-mapped"] = alloc::getMidMapped();
+    // this isn't really a counter, but whatever. we need a way for callers
+    // to query if this build is limited by lowptr memory or not
+    counters["mem.use-low-ptr"] = 1;
+    counters["mem.used-ptrmode"] = 3;
 
-void MemoryStats::LogStaticStringAlloc(size_t bytes) {
-  m_staticStringSize += bytes;
-}
+    counters["mem.unit-size"] = MemoryStats::TotalSize(AllocKind::Unit);
+    counters["mem.func-size"] = MemoryStats::TotalSize(AllocKind::Func);
+    counters["mem.class-size"] = MemoryStats::TotalSize(AllocKind::Class);
+    counters["mem.unit-count"] = MemoryStats::Count(AllocKind::Unit);
+    counters["mem.func-count"] = MemoryStats::Count(AllocKind::Func);
+    counters["mem.class-count"] = MemoryStats::Count(AllocKind::Class);
 
-size_t MemoryStats::GetStaticStringSize() {
-  return m_staticStringSize.load();
+    counters["mem.static-string-count"] = makeStaticStringCount();
+    counters["mem.static-array-count"] = loadedStaticArrayCount();
+    counters["mem.static-string-size"] =
+      MemoryStats::TotalSize(AllocKind::StaticString);
+    counters["mem.static-array-size"] =
+      MemoryStats::TotalSize(AllocKind::StaticArray);
+
+    counters["mem.struct-layout-count"] = bespoke::numStructLayouts();
+
+    counters["mem.huge-tlb-pages-kb"] =
+      ProcStatus::HugetlbPagesKb.load(std::memory_order_acquire);
+    counters["mem.vm-size-kb"] =
+      ProcStatus::VmSizeKb.load(std::memory_order_acquire);
+    counters["mem.vm-rss-kb"] =
+      ProcStatus::VmRSSKb.load(std::memory_order_acquire);
+    counters["mem.peak-usage-kb"] =
+      ProcStatus::VmHWMKb.load(std::memory_order_acquire);
+    counters["mem.vm-swap-kb"] =
+      ProcStatus::VmSwapKb.load(std::memory_order_acquire);
+    if (ProcStatus::valid()) {
+      counters["mem.vm-rss-adjusted-kb"] = ProcStatus::adjustedRssKb();
+    }
+  },
+  "mem."
+);
+
 }
 }

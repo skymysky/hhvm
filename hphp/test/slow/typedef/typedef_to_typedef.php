@@ -1,10 +1,14 @@
 <?hh
 
-type Foo = array;
+type Foo = varray;
 type Bar = Foo;
 
-function main(Bar $x) {
+function main(Bar $x) :mixed{
   echo "Hi\n";
 }
 
-main(array(12));
+
+<<__EntryPoint>>
+function main_typedef_to_typedef() :mixed{
+main(vec[12]);
+}

@@ -1,8 +1,18 @@
-File "classmeth_constraints_bad.php", line 10, characters 8-44:
-Some type constraint(s) here are violated (Typing[4110])
-  File "classmeth_constraints_bad.php", line 6, characters 34-34:
-  'T' is a constrained type parameter
-  File "classmeth_constraints_bad.php", line 6, characters 39-42:
-  This is an object of type Base
-  File "classmeth_constraints_bad.php", line 11, characters 6-6:
-  It is incompatible with an int
+error: Typing[4110] Invalid argument [1]
+-> Expected `Base` [2]
+-> But got `int` [1]
+
+classmeth_constraints_bad.php:11:6
+ 4 | class Base {}
+ 5 | class MyClass {
+ 6 |   public static function element<T as Base>(?T $element): void {}
+   |                                       ^^^^ [2]
+ 7 | }
+ 8 | 
+ 9 | function render(): void {
+10 |   $f = MyClass::element<>;
+11 |   $f(3);
+   |      ^ [1]
+12 | }
+
+1 error found

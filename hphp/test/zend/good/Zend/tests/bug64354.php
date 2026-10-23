@@ -1,19 +1,19 @@
-<?php
+<?hh
 class B implements Serializable {
-    public function serialize() {
+    public function serialize() :mixed{
         throw new Exception("serialize");
         return NULL;
     }
 
-    public function unserialize($data) {
+    public function unserialize($data) :mixed{
     }
 }
-
-$data = array(new B);
+<<__EntryPoint>> function main(): void {
+$data = vec[new B];
 
 try {
     serialize($data);
-} catch (Exception $e) { 
+} catch (Exception $e) {
     var_dump($e->getMessage());
 }
-?>
+}

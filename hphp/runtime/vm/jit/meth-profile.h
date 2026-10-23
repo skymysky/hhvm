@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2013 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-present Facebook, Inc. (http://www.facebook.com)  |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -14,14 +14,16 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_JIT_METH_PROFILE_H_
-#define incl_HPHP_JIT_METH_PROFILE_H_
+#pragma once
+
+#include <folly/json/dynamic.h>
 
 #include "hphp/runtime/base/object-data.h"
 #include "hphp/runtime/vm/act-rec.h"
 #include "hphp/runtime/vm/func.h"
 
-#include "hphp/util/low-ptr.h"
+#include "hphp/util/assertions.h"
+#include "hphp/util/ptr.h"
 
 namespace HPHP {
 
@@ -35,7 +37,6 @@ struct ProfDataSerializer;
 struct ProfDataDeserializer;
 
 struct MethProfile {
-  using RawType = LowPtr<Class>::storage_type;
 
   enum class Tag : uint8_t {
     UniqueClass = 0,
@@ -49,12 +50,21 @@ struct MethProfile {
 
   MethProfile() : m_curMeth(nullptr), m_curClass(nullptr) {}
 
-  MethProfile(const MethProfile& other)
-    : m_curMeth(other.m_curMeth)
-    , m_curClass(other.m_curClass)
-  {}
+  MethProfile(const MethProfile& other) noexcept
+    : m_curClass(other.m_curClass)
+  {
+    m_curMeth.store(other.m_curMeth.load(std::memory_order_acquire), std::memory_order_release);
+  }
+
+  static MethProfile fromUniqueMeth(const Func* meth) {
+    assertx(meth && meth->isMethod());
+    MethProfile profile;
+    profile.setMeth(meth, Tag::UniqueMeth);
+    return profile;
+  }
 
   std::string toString() const;
+  folly::dynamic toDynamic() const;
 
   /*
    * Obtain the profiled Class* or method Func*.
@@ -79,13 +89,7 @@ struct MethProfile {
    * If `cls' is not provided (when it's not known statically), we peek in `ar'
    * for the class context.
    */
-  void reportMeth(const ActRec* ar, const Class* cls) {
-    auto const meth = ar->func();
-    if (!cls && meth->isMethod()) {
-      cls = ar->hasThis() ? ar->getThis()->getVMClass() : ar->getClass();
-    }
-    reportMethHelper(cls, meth);
-  }
+  void reportMeth(const Class* cls, const Func* meth, const Func* callerFunc);
 
   /*
    * Aggregate two MethProfiles.
@@ -98,8 +102,6 @@ struct MethProfile {
   /////////////////////////////////////////////////////////////////////////////
 
 private:
-  void reportMethHelper(const Class* cls, const Func* meth);
-
   /*
    * m_curMeth munging.
    */
@@ -116,22 +118,19 @@ private:
   const Class* rawClass() const { return m_curClass; }
   const Func* rawMeth() const { return fromValue(methValue()); }
   Tag curTag() const { return toTag(methValue()); }
-  const uintptr_t methValue() const { return uintptr_t(m_curMeth.get()); }
+  const uintptr_t methValue() const { return uintptr_t(m_curMeth.load(std::memory_order_acquire)); }
 
   void setMeth(const Func* meth, Tag tag) {
     auto encoded_meth = (Func*)(uintptr_t(meth) | static_cast<uintptr_t>(tag));
-    m_curMeth = encoded_meth;
+    m_curMeth.store(encoded_meth, std::memory_order_release);
   }
 
 private:
-  AtomicLowPtr<const Func,
-               std::memory_order_acquire, std::memory_order_release> m_curMeth;
-  AtomicLowPtr<const Class,
-               std::memory_order_acquire, std::memory_order_release> m_curClass;
+  // We need to store Func* and tags together to handle the race condition in MethProfile::reduce
+  std::atomic<const Func*> m_curMeth;
+  AtomicPackedPtr<const Class> m_curClass;
 };
 
 ///////////////////////////////////////////////////////////////////////////////
 
 }}
-
-#endif

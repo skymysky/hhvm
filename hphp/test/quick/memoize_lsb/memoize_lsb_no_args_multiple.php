@@ -46,7 +46,7 @@ class B extends Base {
   }
 }
 
-function main() {
+function main() :mixed{
   Base::$side_effects = vec[];
   $results = vec[
     B::memo5(),
@@ -64,6 +64,7 @@ function main() {
   var_dump($results);
   var_dump(Base::$side_effects);
 }
-
+<<__EntryPoint>> function main_entry(): void {
 main();
 main();
+}

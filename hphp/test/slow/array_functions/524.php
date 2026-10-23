@@ -1,4 +1,8 @@
-<?php
+<?hh
 
-$a = array('a' => 1, 3 => 3);
- var_dump(array_merge($a, array('a' => 2)));
+
+<<__EntryPoint>>
+function main_524() :mixed{
+$a = dict['a' => 1, 3 => 3];
+ var_dump(array_merge($a, dict['a' => 2]));
+}

@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 
 trait Tr {
   public static function bar(): string {
@@ -44,24 +44,25 @@ function make_vector<T>(classname<T> $classname): Vector<T> {
 }
 
 function factory<T>(classname<T> $classname): T {
-  // UNSAFE_BLOCK
+  // No way to make this function typecheck without appropriate constraints on T
+  throw new Exception();
 }
 
 function foo(): void {
-  make_vector(C1::class);
-  make_vector(Tr::class);
-  make_vector(I::class);
+  make_vector(nameof C1);
+  make_vector(nameof Tr);
+  make_vector(nameof I);
 
-  call_foo(make_vector(C1::class));
-  call_foo(make_vector(C2::class));
+  call_foo(make_vector(nameof C1));
+  call_foo(make_vector(nameof C2));
   // call_foo(make_vector(C_NotI::class)); // error, C_NotI is not an I
 
   list_children_of_I();
 }
 
 function list_children_of_I(): ConstVector<classname<I>> {
-  $v = Vector { C1::class };
-  $v[] = C2::class;
+  $v = Vector { nameof C1 };
+  $v[] = nameof C2;
   return $v;
 }
 
@@ -71,7 +72,7 @@ abstract class Super {
 
 class Sub extends Super {
   public function nameOfISubclass(): classname<C1> {
-    return C1::class;
+    return nameof C1;
   }
 }
 

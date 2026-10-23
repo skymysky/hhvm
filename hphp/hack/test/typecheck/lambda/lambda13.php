@@ -9,7 +9,7 @@
  *
  */
 
-function main($fooby): void {
+function main(string $fooby): void {
   $capture1 = "yo";
   $get_func = ($x, $y) ==> {
     return $more ==> $x.$y.$capture1.$more.$fooby;

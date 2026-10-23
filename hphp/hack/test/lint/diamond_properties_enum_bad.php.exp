@@ -1,0 +1,6 @@
+warning: Lint[5634] Property `x`, defined in T0, is inherited multiple times by class `C` and one of its instances is initialised with a class or enum constant
+   --> diamond_properties_enum_bad.php
+ 19 | class C {
+    |       ^
+
+

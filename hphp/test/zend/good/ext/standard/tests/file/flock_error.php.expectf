@@ -1,54 +1,20 @@
 *** Testing error conditions ***
 
 --- Iteration 0 ---
-Warning: %s
+Warning: Invalid argument: operation: 0 in %s/test/zend/good/ext/standard/tests/file/flock_error.php on line 23
 bool(false)
 
 --- Iteration 1 ---
-Warning: %s
+Warning: Invalid argument: operation: 4 in %s/test/zend/good/ext/standard/tests/file/flock_error.php on line 23
 bool(false)
 
---- Iteration 2 ---
-Warning: %s
+Warning: Not a valid stream resource in %s/test/zend/good/ext/standard/tests/file/flock_error.php on line 32
 bool(false)
 
---- Iteration 3 ---
-Warning: %s
-bool(false)
+Warning: flock() expects exactly 3 positional parameters, 0 given in %s/test/zend/good/ext/standard/tests/file/flock_error.php on line 37
 
---- Iteration 4 ---
-Warning: %s
-NULL
+Warning: flock() expects exactly 3 positional parameters, 1 given in %s/test/zend/good/ext/standard/tests/file/flock_error.php on line 38
 
---- Iteration 5 ---
-Warning: %s
-NULL
-
---- Iteration 6 ---
-Warning: %s
-NULL
-
---- Iteration 7 ---
-Warning: %s
-NULL
-
---- Iteration 8 ---
-Warning: %s
-NULL
-
-Warning: %s
-bool(false)
-
-Warning: %s
-NULL
-
-Warning: %s
-NULL
-
-Warning: %s
-NULL
-
-Warning: %s
-NULL
+Warning: flock() expects exactly 3 positional parameters, 4 given in %s/test/zend/good/ext/standard/tests/file/flock_error.php on line 41
 
 *** Done ***

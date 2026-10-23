@@ -1,21 +1,2 @@
-
-Warning: %s
+Warning: Unknown cipher algorithm in %s/test/zend/good/ext/openssl/tests/openssl_encrypt_error.php on line 9
 bool(false)
-
-Warning: %s
-NULL
-
-Warning: %s
-NULL
-
-Warning: %s
-NULL
-
-Warning: %s
-NULL
-
-Warning: %s
-NULL
-
-Warning: %s
-NULL

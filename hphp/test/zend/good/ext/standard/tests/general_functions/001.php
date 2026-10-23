@@ -1,5 +1,5 @@
-<?php 
-
+<?hh
+<<__EntryPoint>> function main(): void {
 $agent = sprintf("%.5s", "James Bond, 007");
 
 echo("sprintf string truncate test:   ");
@@ -35,7 +35,7 @@ if ($test == "1101001100001110000101") {
 
 echo("sprintf float test:             ");
 $test = sprintf("%0"."06.2f", 10000/3.0);
-if ($test == "003333.33") {
+if ($test == "3333.33") {
 	echo("passed\n");
 } else {
 	echo("failed!\n");
@@ -48,5 +48,4 @@ echo sprintf("%e\n", 1.234E-18);
 echo sprintf("%e\n", 1.234E+18);
 echo sprintf("%e\n", 9843243.12);
 echo sprintf("%e\n", -9843243.12);
-
-?>
+}

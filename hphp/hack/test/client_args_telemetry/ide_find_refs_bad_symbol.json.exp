@@ -1,0 +1,10 @@
+=== hh_client result ===
+argv: hh_client --ide-find-refs-by-symbol bogus
+cwd: <test_tmp>/root
+exit_code: 10
+stdout:
+<empty>
+stderr:
+Invalid input
+=== telemetry ===
+[]

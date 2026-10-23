@@ -1,15 +1,5 @@
 *** Testing vfprintf() : with unexpected values for format argument ***
 
-Notice: %s
-
-Notice: %s
-
-Notice: %s
-
-Notice: %s
-
-Notice: %s
-
 *** Testing vprintf() with with unexpected values for format argument ***
 
 -- Iteration 1 --
@@ -57,11 +47,5 @@ Array
 -- Iteration 22 --
 
 -- Iteration 23 --
-object
--- Iteration 24 --
-
--- Iteration 25 --
-
--- Iteration 26 --
 Resource id #%d
 ===DONE===

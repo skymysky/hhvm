@@ -12,6 +12,6 @@
 function meh_while(int $i): void {
   $x = $i;
   do {
-  	$i += $x;
+    $i += $x;
   } while($x = true);
 }

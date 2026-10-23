@@ -1,7 +1,7 @@
 Class CC does not exist
-Property C:: does not exist
+Argument 2 passed to ReflectionProperty::__construct() must be an instance of string, null given
 Property C:: does not exist
 Property C::p does not exist
-Property C:: does not exist
+Argument 2 passed to ReflectionProperty::__construct() must be an instance of string, null given
 Property C:: does not exist
 Property C::p does not exist

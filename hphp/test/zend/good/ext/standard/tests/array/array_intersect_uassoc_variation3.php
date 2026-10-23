@@ -1,41 +1,38 @@
-<?php
+<?hh
 /* Prototype  : array array_intersect_uassoc(array arr1, array arr2 [, array ...], callback key_compare_func)
  * Description: Computes the intersection of arrays with additional index check, compares indexes by a callback function
  * Source code: ext/standard/array.c
  */
 
-echo "*** Testing array_intersect_uassoc() : usage variation ***\n";
-
-// Initialise function arguments 
-$array1 = array("a" => "green", "b" => "brown", "c" => "blue", "red");
-$array2 = array("a" => "green", "yellow", "red");
-
-//Callback function
-function key_compare_func($a, $b) {
-    if ($a === $b) {
-        return 0;
-    }
-    return ($a > $b) ? 1 : -1;
-}
-
-//get an unset variable
-$unset_var = 10;
-unset ($unset_var);
-
-//resource variable
-$fp = fopen(__FILE__, "r");
-
 // define some classes
 class classWithToString
 {
-	public function __toString() {
-		return "Class A object";
-	}
+    public function __toString() :mixed{
+        return "Class A object";
+    }
 }
 
 class classWithoutToString
 {
 }
+
+//Callback function
+function key_compare_func($a, $b) :mixed{
+    if ($a === $b) {
+        return 0;
+    }
+    return (HH\Lib\Legacy_FIXME\gt($a, $b)) ? 1 : -1;
+}
+<<__EntryPoint>> function main(): void {
+echo "*** Testing array_intersect_uassoc() : usage variation ***\n";
+
+// Initialise function arguments
+$array1 = dict["a" => "green", "b" => "brown", "c" => "blue", 0 => "red"];
+$array2 = dict["a" => "green", 0 => "yellow", 1 => "red"];
+
+
+//resource variable
+$fp = fopen(__FILE__, "r");
 
 // heredoc string
 $heredoc = <<<EOT
@@ -43,11 +40,11 @@ hello world
 EOT;
 
 // add arrays
-$index_array = array (1, 2, 3);
-$assoc_array = array ('one' => 1, 'two' => 2);
+$index_array = vec[1, 2, 3];
+$assoc_array = dict['one' => 1, 'two' => 2];
 
 //array of values to iterate over
-$inputs = array(
+$inputs = dict[
 
       // int data
       'int 0' => 0,
@@ -86,22 +83,18 @@ $inputs = array(
       'instance of classWithToString' => new classWithToString(),
       'instance of classWithoutToString' => new classWithoutToString(),
 
-      // undefined data
-      'undefined var' => @$undefined_var,
 
-      // unset data
-      'unset var' => @$unset_var,
 
       // resource data
       'resource' => $fp,
-);
+];
 
 // loop through each element of the array for arr1
 foreach($inputs as $key =>$value) {
       echo "\n--$key--\n";
-      var_dump( array_intersect_uassoc($array1, $array2, $value, 'key_compare_func') );
+      var_dump( array_intersect_uassoc($array1, $array2, $value, key_compare_func<>) );
 };
 
 fclose($fp);
-?>
-===DONE===
+echo "===DONE===\n";
+}

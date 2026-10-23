@@ -1,4 +1,8 @@
-<?php
-if (!extension_loaded("sodium")) print "skip extension not loaded";
-if (!defined('SODIUM_CRYPTO_AEAD_AES256GCM_NPUBBYTES')) print "skip libsodium without AESGCM";
-?>
+<?hh
+// This upstream test requires hardware-supported AES256-GCM.
+<<__EntryPoint>>
+function main(): void {
+  if (!sodium_crypto_aead_aes256gcm_is_available()) {
+    echo "skip AES256-GCM is unavailable";
+  }
+}

@@ -14,16 +14,15 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_UTIL_MANAGED_ARENA_H_
-#define incl_HPHP_UTIL_MANAGED_ARENA_H_
+#pragma once
 
-#include "hphp/util/alloc.h"
-
-#if USE_JEMALLOC_EXTENT_HOOKS
-
+#include "hphp/util/alloc-defs.h"
 #include "hphp/util/bump-mapper.h"
 #include "hphp/util/extent-hooks.h"
+#include <limits>
 #include <string>
+
+#if USE_JEMALLOC
 
 namespace HPHP { namespace alloc {
 
@@ -42,15 +41,14 @@ namespace HPHP { namespace alloc {
 template <typename ExtentAllocator>
 struct ManagedArena : public ExtentAllocator {
  private:
-  // Constructor forwards all arguments.  The only correct way to create a
-  // ManagedArena is `CreateAt()` on statically allocated memory.
+  // Constructor forwards all arguments. Use `CreateAt()` or `AttachTo()` to
+  // create instances.
   template<typename... Args>
   explicit ManagedArena(Args&&... args)
-    : ExtentAllocator(std::forward<Args>(args)...) {
-    init();
-  }
-  // Create the arena and set up hooks.
-  void init();
+    : ExtentAllocator(std::forward<Args>(args)...) {}
+
+  void create();
+  void updateHook();
 
   ManagedArena(const ManagedArena&) = delete;
   ManagedArena& operator=(const ManagedArena&) = delete;
@@ -58,29 +56,69 @@ struct ManagedArena : public ExtentAllocator {
   ~ManagedArena() = delete;
 
  public:
-  inline unsigned id() const {
+  unsigned id() const {
     return m_arenaId;
+  }
+
+  void bindCurrentThread() {
+    mallctlWrite("thread.arena", id());
   }
 
   // For stats reporting
   size_t unusedSize();
-  std::string reportStats();
+  std::string reportStats() const;
 
   template<typename... Args>
   static ManagedArena* CreateAt(void* addr, Args&&... args) {
-    return new (addr) ManagedArena(std::forward<Args>(args)...);
+    auto arena = new (addr) ManagedArena(std::forward<Args>(args)...);
+    arena->create();
+    arena->updateHook();
+    return arena;
+  }
+
+  template<typename... Args>
+  static ManagedArena* AttachTo(void* addr, unsigned id, Args&&... args) {
+    auto arena = new (addr) ManagedArena(std::forward<Args>(args)...);
+    arena->m_arenaId = id;
+    arena->updateHook();
+    return arena;
   }
 
  protected:
-  unsigned m_arenaId{0};
+  static constexpr auto kInvalidArena = std::numeric_limits<unsigned>::max();
+  unsigned m_arenaId{kInvalidArena};
 };
 
-using LowArena = alloc::ManagedArena<alloc::BumpExtentAllocator>;
-using HighArena = alloc::ManagedArena<alloc::BumpExtentAllocator>;
+using RangeArena = alloc::ManagedArena<alloc::MultiRangeExtentAllocator>;
+using LowArena = RangeArena;
+using HighArena = RangeArena;
+static_assert(alignof(RangeArena) <= 64, "");
+using RangeArenaStorage = std::aligned_storage<sizeof(RangeArena), 64>::type;
+extern RangeArenaStorage g_lowArena;
+extern RangeArenaStorage g_lowSmallArena;
+extern RangeArenaStorage g_highArena;
+extern RangeArenaStorage g_coldArena;
 
-// Not using std::aligned_storage<> because zero initialization can be useful.
-extern uint8_t g_lowArena[sizeof(LowArena)];
-extern uint8_t g_highArena[sizeof(HighArena)];
+#ifndef MAX_MANAGED_ARENA_COUNT
+#define MAX_MANAGED_ARENA_COUNT 16
+#endif
+static_assert(MAX_MANAGED_ARENA_COUNT >= 1, "");
+// All ManagedArena's represented as an array of pair<id, pointer>.  Each
+// pointer can be casted to the underlying ExtentAllocator/Arena. We use this
+// to access the state of ExtentAllocators in extent hooks.  An id of zero
+// indicates an empty entry.  If the arena doesn't have a custom extent hook,
+// the arena won't be registered here.
+using ArenaArray = std::array<std::pair<unsigned, void*>,
+                              MAX_MANAGED_ARENA_COUNT>;
+extern ArenaArray g_arenas;
+template<typename T> inline T* GetByArenaId(unsigned id) {
+  for (auto i : g_arenas) {
+    if (i.first == id) {
+      return static_cast<T*>(i.second);
+    }
+  }
+  return nullptr;
+}
 
 inline LowArena* lowArena() {
   auto p = reinterpret_cast<LowArena*>(&g_lowArena);
@@ -94,7 +132,28 @@ inline HighArena* highArena() {
   return nullptr;
 }
 
-}}
+using PreMappedArena = alloc::ManagedArena<alloc::RangeFallbackExtentAllocator>;
 
-#endif // USE_JEMALLOC_EXTENT_HOOKS
-#endif
+extern std::vector<PreMappedArena*> g_local_arenas; // keyed by numa node id
+extern std::vector<PreMappedArena*> g_auto_arenas;
+
+}
+
+using DefaultArena = alloc::ManagedArena<alloc::DefaultExtentAllocator>;
+
+/*
+ * Make sure we have at least `count` extra arenas, with the same number of
+ * extra arenas for each NUMA node.  Returns whether we have enough arenas to
+ * meet the required count.  This function tries to create the extra arenas at
+ * the first time it is called with nonzero count.  Subsequent calls won't
+ * change the number of extra arenas.
+ */
+bool setup_extra_arenas(unsigned count);
+/*
+ * Get the next extra arena on the specified NUMA node.
+ */
+DefaultArena* next_extra_arena(int node);
+
+}
+
+#endif // USE_JEMALLOC

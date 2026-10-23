@@ -1,16 +1,16 @@
-<?php
+<?hh
 
 /*
  * Get locale.
  */
 
 function ut_main()
-{
-    $locales = array(
+:mixed{
+    $locales = vec[
         'en_UK',
         'en_US@California',
         'uk',
-    );
+    ];
 
     $res_str = '';
 
@@ -24,8 +24,8 @@ function ut_main()
     return $res_str;
 }
 
-include_once( 'ut_common.inc' );
-
-// Run the test
-ut_run();
-?>
+<<__EntryPoint>> function main_entry(): void {
+    include_once( 'ut_common.inc' );
+    // Run the test
+    ut_run();
+}

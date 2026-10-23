@@ -1,5 +1,8 @@
-<?php
+<?hh
 
+
+<<__EntryPoint>>
+function main_cdata() :mixed{
 $node = simplexml_load_string(<<<EOF
 <root>
   <hello><![CDATA[world!]]></hello>
@@ -7,4 +10,5 @@ $node = simplexml_load_string(<<<EOF
 EOF
 );
 
-echo $node->hello . "\n";
+echo $node->hello->__toString() . "\n";
+}

@@ -1,4 +1,8 @@
-<?php
+<?hh <<__EntryPoint>> function main(): void {
+// This file is maintained at
+// https://github.com/php/php-src/blob/master/ext/date/tests/bug33415-2.phpt
+// so if you are updating tzdata/timelib, you can check the history of that
+// file to see how they handled updates to tzdata.
 date_default_timezone_set('Africa/Bujumbura');
 
 print "TZ=Africa/Bujumbura - *Note*: Unexpected, as does not appear to
@@ -86,24 +90,16 @@ $strtotime_tstamp = strtotime("next Sunday", $tStamp);
 print "result=".date("l Y-m-d H:i:s T I", $strtotime_tstamp)."\n";
 print "wanted=Sunday            02:00:00\n\n";
 
-print "TZ=America/Guyana - Is it OK for this to be 0:45 AM? yes\n";
-date_default_timezone_set('America/Guyana');
-$tStamp = mktime (17, 17, 17, 1, 2031, 1970);
-print "tStamp=". date("l Y-m-d H:i:s T I", $tStamp). "\n";
-$strtotime_tstamp = strtotime("next Thursday", $tStamp);
-print "result=".date("l Y-m-d H:i:s T I", $strtotime_tstamp)."\n";
-print "wanted=Thursday            00:45:00\n\n";
-
 print "TZ=Asia/Tehran - Is it OK for this to be 0:30 AM? yes\n";
 date_default_timezone_set('Asia/Tehran');
 $tStamp = mktime (17, 17, 17, 1, 2855, 1970);
 print "tStamp=". date("l Y-m-d H:i:s T I", $tStamp). "\n";
 $strtotime_tstamp = strtotime("next Tuesday", $tStamp);
 print "result=".date("l Y-m-d H:i:s T I", $strtotime_tstamp)."\n";
-print "wanted=Tuesday            00:30:00\n\n";
+print "wanted=Tuesday            00:00:00\n\n";
 
 print "TZ=Pacific/Tarawa - Is it OK for this to be Midday? Note: does
-not appear to have a DST or timezone transition.\n";     
+not appear to have a DST or timezone transition.\n";
 date_default_timezone_set('Pacific/Tarawa');
 $tStamp = mktime (17, 17, 17, 1, 1, 1970);
 print "tStamp=". date("l Y-m-d H:i:s T I", $tStamp). "\n";
@@ -125,32 +121,24 @@ $tStamp = mktime (17, 17, 17, 1, 5838, 1970);
 print "tStamp=". date("l Y-m-d H:i:s T I", $tStamp). "\n";
 $strtotime_tstamp = strtotime("next Wednesday", $tStamp);
 print "result=".date("l Y-m-d H:i:s T I", $strtotime_tstamp)."\n";
-print "wanted=Wednesday            00:15:00\n\n";         
+print "wanted=Wednesday            00:15:00\n\n";
 
-print "TZ=Pacific/Nauru - Is it OK for this to be 0:30? yes\n";
+print "TZ=Pacific/Nauru - Is it OK for this to be 0:30? does not\n";
 date_default_timezone_set('Pacific/Nauru');
-$tStamp = mktime (17, 17, 17, 1, 3401, 1970);
-print "tStamp=". date("l Y-m-d H:i:s T I", $tStamp). "\n";
-$strtotime_tstamp = strtotime("next Tuesday", $tStamp);
-print "result=".date("l Y-m-d H:i:s T I", $strtotime_tstamp)."\n";
-print "wanted=Tuesday            00:30:00\n\n";
-
-print "TZ=Pacific/Niue - Is it OK for this to be 0:30 AM? yes\n";
-date_default_timezone_set('Pacific/Niue');
-$tStamp = mktime (17, 17, 17, 1, 3189, 1970);
+$tStamp = mktime (17, 17, 17, 1, 3325, 1970);
 print "tStamp=". date("l Y-m-d H:i:s T I", $tStamp). "\n";
 $strtotime_tstamp = strtotime("next Sunday", $tStamp);
 print "result=".date("l Y-m-d H:i:s T I", $strtotime_tstamp)."\n";
-print "wanted=Sunday            00:30:00\n\n";            
+print "wanted=Sunday            00:00:00\n\n";
 
 print "TZ=Pacific/Port_Moresby - Is it OK for this to be 10 AM? No DST
 or timezone transition.\n";
 date_default_timezone_set('Pacific/Port_Moresby');
-$tStamp = mktime (17, 17, 17, 1, 1, 1970);   
+$tStamp = mktime (17, 17, 17, 1, 1, 1970);
 print "tStamp=". date("l Y-m-d H:i:s T I", $tStamp). "\n";
-$strtotime_tstamp = strtotime("next Thursday", $tStamp); 
+$strtotime_tstamp = strtotime("next Thursday", $tStamp);
 print "result=".date("l Y-m-d H:i:s T I", $strtotime_tstamp)."\n";
-print "wanted=Thursday            00:00:00\n\n";          
+print "wanted=Thursday            00:00:00\n\n";
 
 print "TZ=America/Miquelon - Is it OK for this to be 1 AM ? yes\n";
 date_default_timezone_set('America/Miquelon');
@@ -163,7 +151,7 @@ print "wanted=Thursday            01:00:00\n\n";
 print "TZ=Pacific/Palau - Is it OK for this to be 9 AM? No DST or
 timezone transition.\n";
 date_default_timezone_set('Pacific/Palau');
-$tStamp = mktime (17, 17, 17, 1, 1, 1970);   
+$tStamp = mktime (17, 17, 17, 1, 1, 1970);
 print "tStamp=". date("l Y-m-d H:i:s T I", $tStamp). "\n";
 $strtotime_tstamp = strtotime("next Saturday", $tStamp);
 print "result=".date("l Y-m-d H:i:s T I", $strtotime_tstamp)."\n";
@@ -203,5 +191,4 @@ print "tStamp=". date("l Y-m-d H:i:s T I", $tStamp). "\n";
 $strtotime_tstamp = strtotime("next Monday", $tStamp);
 print "result=".date("l Y-m-d H:i:s T I", $strtotime_tstamp)."\n";
 print "wanted=Monday            00:30:00\n\n";
-
-?>
+}

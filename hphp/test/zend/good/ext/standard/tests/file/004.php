@@ -1,52 +1,42 @@
-<?php
-	chdir(dirname(__FILE__));
-	for ($i = 1; $i < 6; $i++) {
-		@unlink("./TEST{$i}");
-	}
+<?hh <<__EntryPoint>> function main(): void {
+chdir(sys_get_temp_dir());
 
-	echo "String Test: ";
-	echo file_put_contents("TEST1", file_get_contents(__FILE__)) !== FALSE ? 'OK' : 'FAIL';
-	echo "\n";
+echo "String Test: ";
+echo file_put_contents("TEST1", file_get_contents(__FILE__)) !== FALSE ? 'OK' : 'FAIL';
+echo "\n";
+$int = rand();
+$old_int = $int;
+$ret = file_put_contents("TEST2", $int);
+echo "Integer Test: ";
+if ($int === $old_int && $ret !== FALSE && md5((string)$int) == md5_file("TEST2")) {
+    echo 'OK';
+} else {
+    echo 'FAIL';
+}
+echo "\n";
+$int = time() / 1000;
+$old_int = $int;
+$ret = file_put_contents("TEST3", $int);
+echo "Float Test: ";
+if ($int === $old_int && $ret !== FALSE && md5((string)$int) == md5_file("TEST3")) {
+    echo 'OK';
+} else {
+    echo 'FAIL';
+}
+echo "\n";
 
-	$old_int = $int = rand();
-	$ret = file_put_contents("TEST2", $int);
-	echo "Integer Test: ";
-	if ($int === $old_int && $ret !== FALSE && md5($int) == md5_file("TEST2")) {
-		echo 'OK';
-	} else {
-		echo 'FAIL';
-	}
-	echo "\n";
-	
-	$old_int = $int = time() / 1000;
-	$ret = file_put_contents("TEST3", $int);
-	echo "Float Test: ";
-	if ($int === $old_int && $ret !== FALSE && md5($int) == md5_file("TEST3")) {
-		echo 'OK';
-	} else {
-		echo 'FAIL';
-	}
-	echo "\n";
-	
-	$ret = file_put_contents("TEST4", __FILE__);
-	echo "Bool Test: ";
-	if ($ret !== FALSE && md5(__FILE__) == md5_file("TEST4")) {
-		echo 'OK';
-	} else {
-		echo 'FAIL';
-	}
-	echo "\n";
-	
-	$ret = @file_put_contents("TEST5", $_SERVER);
-	echo "Array Test: ";
-	if ($ret !== FALSE && @md5(implode('', $_SERVER)) == md5_file("TEST5")) {
-		echo 'OK';
-	} else {
-		echo 'FAIL';
-	}
-	echo "\n";
+$ret = file_put_contents("TEST4", __FILE__);
+echo "Bool Test: ";
+if ($ret !== FALSE && md5(__FILE__) == md5_file("TEST4")) {
+    echo 'OK';
+} else {
+    echo 'FAIL';
+}
+echo "\n";
 
-	for ($i = 1; $i < 6; $i++) {
-		@unlink("./TEST{$i}");
-	}
-?>
+for ($i = 1; $i < 6; $i++) {
+    error_reporting(0);
+    unlink("./TEST{$i}");
+    error_reporting(E_ALL);
+}
+}

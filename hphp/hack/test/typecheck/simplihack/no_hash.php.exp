@@ -1,0 +1,10 @@
+error: Typing[4493] Run AI Code Action by clicking on this position in the file [1]
+
+no_hash.php:4:16
+2 | <<file: __EnableUnstableFeatures('simpli_hack')>>
+3 | 
+4 | <<__SimpliHack('A prompt')>>
+  |                ^^^^^^^^^^ [1]
+5 | class C {}
+
+1 error found

@@ -1,0 +1,2 @@
+%AThe native Facts DB file could not be opened%AReason: SQLiteExc [14] while running opening "%A": unable to open database file
+%AHH\Facts\enabled() = false

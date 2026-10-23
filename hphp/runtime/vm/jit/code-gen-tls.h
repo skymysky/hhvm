@@ -14,12 +14,11 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_VM_CODE_GEN_TLS_H_
-#define incl_HPHP_VM_CODE_GEN_TLS_H_
+#pragma once
 
 #include "hphp/util/thread-local.h"
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 
 struct Vout;
 struct Vreg;
@@ -46,25 +45,13 @@ struct TLSDatum {
   };
 };
 
-#if !(defined(__x86_64__) && defined(__APPLE__))
 /*
  * Wrapper helper for TLSDatum.
  */
 template<typename T>
-TLSDatum<T> tls_datum(const T& var) { return TLSDatum<T>(var); }
-
-#else
-/*
- * See code-gen-tls-x64.h for an explanation of this assembly.
- */
-#define tls_datum(var) ([] {                \
-  long* ret;                                \
-  __asm__("lea %1, %%rax\nmov %%rdi, %0" :  \
-          "=r"(ret) : "m"(var));            \
-  return TLSDatum<decltype(var)>(ret);      \
-}())
-
-#endif
+TLSDatum<T> tls_datum(const T& var) {
+  return TLSDatum<T>(var);
+}
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -75,6 +62,14 @@ template<typename T>
 Vptr emitTLSAddr(Vout& v, TLSDatum<T> datum);
 
 /*
+ * Like emitTLSAddr, but turns the address into a Vreg. You cannot necessarily
+ * just use a lea on the output of emitTLSAddr because of potential segment
+ * register issues.
+ */
+template<typename T>
+Vreg emitTLSLea(Vout& v, TLSDatum<T> datum, int offset = 0);
+
+/*
  * Load the value of the ThreadLocalNoCheck `datum' into `d'.
  */
 template<typename T>
@@ -82,13 +77,13 @@ void emitTLSLoad(Vout& v, TLSDatum<ThreadLocalNoCheck<T>> datum, Vreg d);
 
 ///////////////////////////////////////////////////////////////////////////////
 
-}}
+}
 
-#include "hphp/runtime/vm/jit/code-gen-tls-x64.h"
-#include "hphp/runtime/vm/jit/code-gen-tls-ppc64.h"
+#ifdef __aarch64__
 #include "hphp/runtime/vm/jit/code-gen-tls-arm.h"
+#else
+#include "hphp/runtime/vm/jit/code-gen-tls-x64.h"
+#endif
 
 // This has to follow all the arch-specific includes.
 #include "hphp/runtime/vm/jit/code-gen-tls-inl.h"
-
-#endif

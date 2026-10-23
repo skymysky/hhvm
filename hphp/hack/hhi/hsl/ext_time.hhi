@@ -1,4 +1,4 @@
-<?hh // decl
+<?hh
 /**
  * Copyright (c) 2014, Facebook, Inc.
  * All rights reserved.
@@ -9,5 +9,5 @@
  */
 
 namespace HH\Lib\_Private\Native {
-function request_time_ns(): int;
+  function request_time_ns(): int;
 }

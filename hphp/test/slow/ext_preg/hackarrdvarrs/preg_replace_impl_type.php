@@ -1,11 +1,11 @@
-<?hh // strict
+<?hh
 
 function f(): dict {
-  $str = array();
+  $str = dict[];
   $str[0] = "The quick brown fox jumped over the lazy dog.";
   $str[1] = "The quick brown fox jumped over the quick brown fox.";
-  $patterns = array();
-  $replacements = array();
+  $patterns = dict[];
+  $replacements = dict[];
   $patterns[0] = "/quick/";
   $patterns[1] = "/brown/";
   $patterns[2] = "/fox/";
@@ -19,4 +19,8 @@ function f(): dict {
   return $result;
 }
 
+
+<<__EntryPoint>>
+function main_preg_replace_impl_type() :mixed{
 f();
+}

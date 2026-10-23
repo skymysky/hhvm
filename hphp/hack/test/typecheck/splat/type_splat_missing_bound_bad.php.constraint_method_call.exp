@@ -1,0 +1,84 @@
+error: Typing[4323] Some type arguments violate their constraints [1]
+-> Expected `(mixed...)` [2]
+-> But got `T` [1]
+
+type_splat_missing_bound_bad.php:5:20
+3 | 
+4 | 
+5 | function ex1<T>(...T $_):void { }
+  |                    ^ [1]
+  |                      ^^ [2]
+6 | function ex2<T>():(function(...T):void) { throw new Exception("A"); }
+7 | function ex3<T>((function(...T):void) $f):void { }
+
+error: Typing[4323] Some type arguments violate their constraints [1]
+-> Expected `(mixed...)` [2]
+-> But got `mixed` [1]
+->   by the definition of `T` arising from an implicit `as mixed` constraint on this type [1]
+
+type_splat_missing_bound_bad.php:5:20
+3 | 
+4 | 
+5 | function ex1<T>(...T $_):void { }
+  |                    ^ [1]
+  |                      ^^ [2]
+6 | function ex2<T>():(function(...T):void) { throw new Exception("A"); }
+7 | function ex3<T>((function(...T):void) $f):void { }
+
+error: Typing[4323] Some type arguments violate their constraints [1]
+-> Expected `(mixed...)` [2]
+-> But got `T` [1]
+
+type_splat_missing_bound_bad.php:6:32
+4 | 
+5 | function ex1<T>(...T $_):void { }
+6 | function ex2<T>():(function(...T):void) { throw new Exception("A"); }
+  |                   ^^^^^^^^^^^^^^^^^^^^^ [2]
+  |                                ^ [1]
+7 | function ex3<T>((function(...T):void) $f):void { }
+
+error: Typing[4323] Some type arguments violate their constraints [1]
+-> Expected `(mixed...)` [2]
+-> But got `mixed` [1]
+->   by the definition of `T` arising from an implicit `as mixed` constraint on this type [1]
+
+type_splat_missing_bound_bad.php:6:32
+4 | 
+5 | function ex1<T>(...T $_):void { }
+6 | function ex2<T>():(function(...T):void) { throw new Exception("A"); }
+  |                   ^^^^^^^^^^^^^^^^^^^^^ [2]
+  |                                ^ [1]
+7 | function ex3<T>((function(...T):void) $f):void { }
+
+error: Typing[4366] This generic parameter is redundant because it only appears in a covariant (output) position. Consider replacing uses of generic parameter with `nothing` or specifying `<<__Explicit>>` on the generic parameter [1]
+
+type_splat_missing_bound_bad.php:7:14
+5 | function ex1<T>(...T $_):void { }
+6 | function ex2<T>():(function(...T):void) { throw new Exception("A"); }
+7 | function ex3<T>((function(...T):void) $f):void { }
+  |              ^ [1]
+
+error: Typing[4323] Some type arguments violate their constraints [1]
+-> Expected `(mixed...)` [2]
+-> But got `T` [1]
+
+type_splat_missing_bound_bad.php:7:30
+5 | function ex1<T>(...T $_):void { }
+6 | function ex2<T>():(function(...T):void) { throw new Exception("A"); }
+7 | function ex3<T>((function(...T):void) $f):void { }
+  |                 ^^^^^^^^^^^^^^^^^^^^^ [2]
+  |                              ^ [1]
+
+error: Typing[4323] Some type arguments violate their constraints [1]
+-> Expected `(mixed...)` [2]
+-> But got `mixed` [1]
+->   by the definition of `T` arising from an implicit `as mixed` constraint on this type [1]
+
+type_splat_missing_bound_bad.php:7:30
+5 | function ex1<T>(...T $_):void { }
+6 | function ex2<T>():(function(...T):void) { throw new Exception("A"); }
+7 | function ex3<T>((function(...T):void) $f):void { }
+  |                 ^^^^^^^^^^^^^^^^^^^^^ [2]
+  |                              ^ [1]
+
+7 errors found

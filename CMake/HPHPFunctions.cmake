@@ -1,7 +1,3 @@
-if (${CMAKE_MAJOR_VERSION} GREATER 2)
-  cmake_policy(SET CMP0026 OLD)
-endif()
-
 include(GNUInstallDirs)
 
 function(auto_sources RETURN_VALUE PATTERN SOURCE_SUBDIRS)
@@ -57,21 +53,12 @@ macro(HHVM_SELECT_SOURCES DIR)
       list(APPEND C_SOURCES ${f})
     endif()
   endforeach()
-  if (MSVC)
-    auto_sources(files "*.asm" "RECURSE" "${DIR}")
-    foreach(f ${files})
-      if (NOT (${f} MATCHES "(ext_hhvm|/(old-)?tests?/)"))
-        list(APPEND ASM_SOURCES ${f})
-      endif()
-    endforeach()
-  else()
-    auto_sources(files "*.S" "RECURSE" "${DIR}")
-    foreach(f ${files})
-      if (NOT (${f} MATCHES "(ext_hhvm|/(old-)?tests?/)"))
-        list(APPEND ASM_SOURCES ${f})
-      endif()
-    endforeach()
-  endif()
+  auto_sources(files "*.S" "RECURSE" "${DIR}")
+  foreach(f ${files})
+    if (NOT (${f} MATCHES "(ext_hhvm|/(old-)?tests?/)"))
+      list(APPEND ASM_SOURCES ${f})
+    endif()
+  endforeach()
   auto_sources(files "*.h" "RECURSE" "${DIR}")
   foreach(f ${files})
     if (NOT (${f} MATCHES "(/(old-)?tests?/)"))
@@ -113,119 +100,114 @@ macro(MYSQL_SOCKET_SEARCH)
 endmacro()
 
 function(append_systemlib TARGET SOURCE SECTNAME)
-  if(MSVC)
-    list(APPEND ${TARGET}_SLIBS_NAMES "${SECTNAME}")
-    set(${TARGET}_SLIBS_NAMES ${${TARGET}_SLIBS_NAMES} PARENT_SCOPE)
-    list(APPEND ${TARGET}_SLIBS_SOURCES "${SOURCE}")
-    set(${TARGET}_SLIBS_SOURCES ${${TARGET}_SLIBS_SOURCES} PARENT_SCOPE)
+  if (APPLE)
+    set(${TARGET}_SLIBS ${${TARGET}_SLIBS} -Wl,-sectcreate,__text,${SECTNAME},${SOURCE} PARENT_SCOPE)
   else()
-    if (APPLE)
-      set(${TARGET}_SLIBS ${${TARGET}_SLIBS} -Wl,-sectcreate,__text,${SECTNAME},${SOURCE} PARENT_SCOPE)
-    else()
-      set(${TARGET}_SLIBS ${${TARGET}_SLIBS} "--add-section" "${SECTNAME}=${SOURCE}" PARENT_SCOPE)
-    endif()
-    # Add the systemlib file to the "LINK_DEPENDS" for the systemlib, this will cause it
-    # to be relinked and the systemlib re-embedded
-    set_property(TARGET ${TARGET} APPEND PROPERTY LINK_DEPENDS ${SOURCE})
+    set(${TARGET}_SLIBS ${${TARGET}_SLIBS} "--add-section" "${SECTNAME}=${SOURCE}" PARENT_SCOPE)
   endif()
 endfunction(append_systemlib)
 
 function(embed_sections TARGET DEST)
   add_custom_command(TARGET ${TARGET} PRE_BUILD
     # OUTPUT "${CMAKE_CURRENT_SOURCE_DIR}/generated-compiler-id.txt"
+    #        "${CMAKE_CURRENT_SOURCE_DIR}/generated-compiler-timestamp.txt"
     #        "${CMAKE_CURRENT_SOURCE_DIR}/generated-repo-schema-id.txt"
     #        "${CMAKE_CURRENT_SOURCE_DIR}/generated-build-id.txt"
-    COMMAND "${HPHP_HOME}/hphp/hhvm/generate-buildinfo.sh"
+    COMMAND
+      "INSTALL_DIR=${CMAKE_BINARY_DIR}/hphp/util"
+      "SOURCE_ROOT=${CMAKE_SOURCE_DIR}"
+      "${HPHP_HOME}/hphp/hhvm/generate-buildinfo.sh"
     WORKING_DIRECTORY "${HPHP_HOME}/hphp/util"
     COMMENT "Generating Repo Schema ID and Compiler ID"
     VERBATIM)
 
   if (APPLE)
-    set(COMPILER_ID -Wl,-sectcreate,__text,"compiler_id","${HPHP_HOME}/hphp/util/generated-compiler-id.txt")
-    set(REPO_SCHEMA -Wl,-sectcreate,__text,"repo_schema_id","${HPHP_HOME}/hphp/util/generated-repo-schema-id.txt")
-    set(BUILD_ID -Wl,-sectcreate,__text,"build_id","${HPHP_HOME}/hphp/util/generated-build-id.txt")
-    target_link_libraries(${TARGET} ${${TARGET}_SLIBS} ${COMPILER_ID} ${REPO_SCHEMA} ${BUILD_ID})
-  elseif(MSVC)
-    set(RESOURCE_FILE "#pragma code_page(1252)\n")
-    set(RESOURCE_FILE "${RESOURCE_FILE}LANGUAGE 0, 0\n")
-    set(RESOURCE_FILE "${RESOURCE_FILE}\n")
-    set(RESOURCE_FILE "${RESOURCE_FILE}#include \"${HPHP_HOME}/hphp/runtime/version.h\"\n")
-    file(READ "${HPHP_HOME}/hphp/hhvm/hhvm.rc" VERSION_INFO)
-    set(RESOURCE_FILE "${RESOURCE_FILE}compiler_id RCDATA \"${HPHP_HOME}/hphp/util/generated-compiler-id.txt\"\n")
-    set(RESOURCE_FILE "${RESOURCE_FILE}repo_schema_id RCDATA \"${HPHP_HOME}/hphp/util/generated-repo-schema-id.txt\"\n")
-    set(RESOURCE_FILE "${RESOURCE_FILE}build_id RCDATA \"${HPHP_HOME}/hphp/util/generated-build-id.txt\"\n")
-    set(RESOURCE_FILE "${RESOURCE_FILE}${VERSION_INFO}\n")
-    set(i 0)
-    foreach (nm ${${TARGET}_SLIBS_NAMES})
-      list(GET ${TARGET}_SLIBS_SOURCES ${i} source)
-      set(RESOURCE_FILE "${RESOURCE_FILE}${nm} RCDATA \"${source}\"\n")
-      math(EXPR i "${i} + 1")
-    endforeach()
-    file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/embed.rc "${RESOURCE_FILE}")
+    set(COMPILER_ID -Wl,-sectcreate,__text,"compiler_id","${CMAKE_BINARY_DIR}/hphp/util/generated-compiler-id.txt")
+    set(COMPILER_TIMESTAMP -Wl,-sectcreate,__text,"compiler_ts","${CMAKE_BINARY_DIR}/hphp/util/generated-compiler-timestamp.txt")
+    set(REPO_SCHEMA -Wl,-sectcreate,__text,"repo_schema_id","${CMAKE_BINARY_DIR}/hphp/util/generated-repo-schema-id.txt")
+    set(BUILD_ID -Wl,-sectcreate,__text,"build_id","${CMAKE_BINARY_DIR}/hphp/util/generated-build-id.txt")
+    target_link_libraries(${TARGET} ${${TARGET}_SLIBS} ${COMPILER_ID} ${COMPILER_TIMESTAMP} ${REPO_SCHEMA} ${BUILD_ID})
   else()
     add_custom_command(TARGET ${TARGET} POST_BUILD
       COMMAND "objcopy"
-      ARGS "--add-section" "compiler_id=${HPHP_HOME}/hphp/util/generated-compiler-id.txt"
-           "--add-section" "repo_schema_id=${HPHP_HOME}/hphp/util/generated-repo-schema-id.txt"
-           "--add-section" "build_id=${HPHP_HOME}/hphp/util/generated-build-id.txt"
+      ARGS "--add-section" "compiler_id=${CMAKE_BINARY_DIR}/hphp/util/generated-compiler-id.txt"
+           "--add-section" "compiler_ts=${CMAKE_BINARY_DIR}/hphp/util/generated-compiler-timestamp.txt"
+           "--add-section" "repo_schema_id=${CMAKE_BINARY_DIR}/hphp/util/generated-repo-schema-id.txt"
+           "--add-section" "build_id=${CMAKE_BINARY_DIR}/hphp/util/generated-build-id.txt"
            ${${TARGET}_SLIBS}
            ${DEST}
-      DEPENDS "${HPHP_HOME}/hphp/util/generated-compiler-id.txt"
-              "${HPHP_HOME}/hphp/util/generated-repo-schema-id.txt"
-              "${HPHP_HOME}/hphp/util/generated-build-id.txt"
+      DEPENDS "${CMAKE_BINARY_DIR}/hphp/util/generated-compiler-id.txt"
+              "${CMAKE_BINARY_DIR}/hphp/util/generated-compiler-timestamp.txt"
+              "${CMAKE_BINARY_DIR}/hphp/util/generated-repo-schema-id.txt"
+              "${CMAKE_BINARY_DIR}/hphp/util/generated-build-id.txt"
       COMMENT "Embedding php in ${TARGET}")
   endif()
 endfunction(embed_sections)
 
 macro(embed_systemlib_byname TARGET SLIB)
-  get_filename_component(SLIB_BN ${SLIB} "NAME_WE")
-  string(LENGTH ${SLIB_BN} SLIB_BN_LEN)
-  math(EXPR SLIB_BN_REL_LEN "${SLIB_BN_LEN} - 4")
-  string(SUBSTRING ${SLIB_BN} 4 ${SLIB_BN_REL_LEN} SLIB_EXTNAME)
+  get_filename_component(SLIB_FILENAME ${SLIB} "NAME")
+
+  set(SLIB_EXTNAME "/:${SLIB_FILENAME}")
+
   string(MD5 SLIB_HASH_NAME ${SLIB_EXTNAME})
   # Some platforms limit section names to 16 characters :(
   string(SUBSTRING ${SLIB_HASH_NAME} 0 12 SLIB_HASH_NAME_SHORT)
-  if (MSVC)
-    # The dot would be causing the RC lexer to begin a number in the
-    # middle of our resource name, so use an underscore instead.
-    append_systemlib(${TARGET} ${SLIB} "ext_${SLIB_HASH_NAME_SHORT}")
-  else()
-    append_systemlib(${TARGET} ${SLIB} "ext.${SLIB_HASH_NAME_SHORT}")
-  endif()
+
+  append_systemlib(${TARGET} ${SLIB} "ext.${SLIB_HASH_NAME_SHORT}")
 endmacro()
 
 function(embed_all_systemlibs TARGET ROOT DEST)
-  append_systemlib(${TARGET} ${ROOT}/system/systemlib.php systemlib)
+  add_dependencies(${TARGET} generated_systemlib)
+
   foreach(SLIB ${EXTENSION_SYSTEMLIB_SOURCES} ${EZC_SYSTEMLIB_SOURCES})
-    embed_systemlib_byname(${TARGET} ${SLIB})
+    get_filename_component(SLIB_FILENAME ${SLIB} NAME)
+    file(RELATIVE_PATH SLIB_RELATIVE_PATH ${CMAKE_SOURCE_DIR} ${SLIB})
+    list(APPEND SLIB_RELATIVE_PATHS ${SLIB_RELATIVE_PATH})
+    list(
+      APPEND PRECOMPILED_SYSTEMLIB_FILES
+      ${CMAKE_CURRENT_BINARY_DIR}/slib/${SLIB_FILENAME}.decls
+      ${CMAKE_CURRENT_BINARY_DIR}/slib/${SLIB_FILENAME}.ue
+    )
   endforeach()
+
+  add_custom_command(
+    TARGET ${TARGET} POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/slib
+    COMMAND $<TARGET_FILE:hhvm> --compile-systemlib --input-dir ${CMAKE_SOURCE_DIR} --output-dir ${CMAKE_CURRENT_BINARY_DIR}/slib  ${SLIB_RELATIVE_PATHS}
+    COMMENT "Precompiling systemlib files"
+    VERBATIM)
+
+  foreach(PRECOMPILED_SLIB ${PRECOMPILED_SYSTEMLIB_FILES})
+    get_filename_component(PRECOMPILED_SLIB_FILENAME ${PRECOMPILED_SLIB} NAME)
+    embed_systemlib_byname(${TARGET} ${PRECOMPILED_SLIB})
+  endforeach()
+
   embed_sections(${TARGET} ${DEST})
 endfunction(embed_all_systemlibs)
 
 # Custom install function that doesn't relink, instead it uses chrpath to change it, if
 # it's available, otherwise, it leaves the chrpath alone
 function(HHVM_INSTALL TARGET DEST)
-  get_target_property(LOC ${TARGET} LOCATION)
   get_target_property(TY ${TARGET} TYPE)
   if (FOUND_CHRPATH)
     get_target_property(RPATH ${TARGET} INSTALL_RPATH)
     if (NOT RPATH STREQUAL "RPATH-NOTFOUND")
       if (RPATH STREQUAL "")
-        install(CODE "execute_process(COMMAND \"${CHRPATH}\" \"-d\" \"${LOC}\" ERROR_QUIET)")
+        install(CODE "execute_process(COMMAND \"${CHRPATH}\" \"-d\" \"$<TARGET_FILE,${TARGET}>\" ERROR_QUIET)")
       else()
-        install(CODE "execute_process(COMMAND \"${CHRPATH}\" \"-r\" \"${RPATH}\" \"${LOC}\" ERROR_QUIET)")
+        install(CODE "execute_process(COMMAND \"${CHRPATH}\" \"-r\" \"${RPATH}\" \"$<TARGET_FILE,${TARGET}>\" ERROR_QUIET)")
       endif()
     endif()
   endif()
   string(TOUPPER ${DEST} DEST_UPPER)
-  install(CODE "FILE(INSTALL DESTINATION \"\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_${DEST_UPPER}DIR}\" TYPE ${TY} FILES \"${LOC}\")")
+  install(CODE "FILE(INSTALL DESTINATION \"${CMAKE_INSTALL_FULL_${DEST_UPPER}DIR}\" TYPE ${TY} FILES \"${LOC}\")")
 endfunction(HHVM_INSTALL)
 
 function(HHVM_PUBLIC_HEADERS TARGET)
   install(
     CODE "INCLUDE(\"${HPHP_HOME}/CMake/HPHPFunctions.cmake\")
       HHVM_INSTALL_HEADERS(${TARGET} ${HPHP_HOME}
-      \"\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_INCLUDEDIR}\" ${ARGN})"
+      \"${CMAKE_INSTALL_FULL_INCLUDEDIR}\" ${ARGN})"
     COMPONENT dev)
 endfunction()
 
@@ -356,26 +338,6 @@ function(auto_source_group rootName rootDir)
   endforeach()
 endfunction()
 
-macro(add_precompiled_header PrecompiledHead PrecompiledSrc SourcesVar)
-  if (MSVC AND MSVC_ENABLE_PCH)
-    get_filename_component(PrecompiledHeader "${PrecompiledHead}" ABSOLUTE)
-    get_filename_component(PrecompiledSource "${PrecompiledSrc}" ABSOLUTE)
-    get_filename_component(PrecompiledBasename "${PrecompiledHeader}" NAME_WE)
-    get_filename_component(PrecompiledHeaderFilename "${PrecompiledHeader}" NAME)
-    set(PrecompiledBinary "${CMAKE_CURRENT_BINARY_DIR}/${PrecompiledBasename}.pch")
-    set(Sources ${${SourcesVar}})
-
-    set_source_files_properties(${PrecompiledSource} PROPERTIES
-      COMPILE_FLAGS "/Yc\"${PrecompiledHeaderFilename}\" /Fp\"${PrecompiledBinary}\""
-      OBJECT_OUTPUTS "${PrecompiledBinary}")
-    set_source_files_properties(${Sources} PROPERTIES
-      COMPILE_FLAGS "/Yu\"${PrecompiledHeader}\" /FI\"${PrecompiledHeader}\" /Fp\"${PrecompiledBinary}\""
-      OBJECT_DEPENDS "${PrecompiledBinary}")
-
-    list(APPEND ${SourcesVar} ${PrecompiledSource} ${PrecompiledHeader})
-  endif()
-endmacro()
-
 function(parse_version PREFIX VERSION)
   if (NOT ${VERSION} MATCHES "^[0-9]+\\.[0-9]+(\\.[0-9]+)?(-.+)?$")
     message(FATAL_ERROR "VERSION must conform to X.Y(.Z)?(-.+)?")
@@ -406,26 +368,13 @@ function(parse_version PREFIX VERSION)
   set(${PREFIX}SUFFIX ${SUFFIX} PARENT_SCOPE)
 endfunction()
 
-# MSVC doesn't support a --whole-archive flag, but newer versions
-# of CMake do support object libraries, which give the same result.
-# As we can't easily upgrade the normal builds to CMake 3.0, we
-# will just require CMake 3.0+ for MSVC builds only.
 function(add_object_library libraryName)
-  if (MSVC)
-    add_library(${libraryName} OBJECT ${ARGN})
-  else()
-    add_library(${libraryName} STATIC ${ARGN})
-  endif()
+  add_library(${libraryName} STATIC ${ARGN})
 endfunction()
 
 # Get what might be the objects of the object libraries, if needed.
 function(get_object_libraries_objects targetVariable)
   set(OBJECTS)
-  if (MSVC)
-    foreach (fil ${ARGN})
-      list(APPEND OBJECTS $<TARGET_OBJECTS:${fil}>)
-    endforeach()
-  endif()
 
   set(${targetVariable} ${OBJECTS} PARENT_SCOPE)
 endfunction()
@@ -433,10 +382,6 @@ endfunction()
 # Add the additional link targets for a set of object libraries,
 # if needed.
 function(link_object_libraries target)
-  if (MSVC)
-    return()
-  endif()
-
   set(WHOLE_ARCHIVE_LIBS)
   foreach (fil ${ARGN})
     list(APPEND WHOLE_ARCHIVE_LIBS ${fil})
@@ -464,20 +409,144 @@ endfunction()
 # This should be called for object libraries, rather than calling
 # hphp_link directly.
 function(object_library_hphp_link target)
-  # Gold doesn't need this, and MSVC can't have it. (see below)
-  if (NOT ENABLE_LD_GOLD AND NOT MSVC)
-    hphp_link(${target})
-  endif()
+  hphp_link(${target})
 endfunction()
 
 # If a library needs to be linked in to make GNU ld happy,
 # it should be done by calling this.
 function(object_library_ld_link_libraries target)
   if (${ARGC})
-    # CMake doesn't allow calls to target_link_libraries if the target
-    # is an OBJECT library, so MSVC can't have this.
-    if (NOT MSVC)
-      target_link_libraries(${target} ${ARGN})
-    endif()
+    target_link_libraries(${target} ${ARGN})
   endif()
 endfunction()
+
+set(
+  HHVM_THIRD_PARTY_SOURCE_CACHE_PREFIX
+  ""
+  CACHE
+  STRING
+  "URL prefix containing cache of third-party dependencies"
+)
+set(
+  HHVM_THIRD_PARTY_SOURCE_CACHE_SUFFIX
+  ""
+  CACHE
+  STRING
+  "URL suffix for third-party dependency cache"
+)
+set(
+  HHVM_THIRD_PARTY_SOURCE_ONLY_USE_CACHE
+  OFF
+  CACHE
+  BOOL
+  "Do not download sources that are not in cache; may cause build to fail."
+)
+set(
+  HHVM_THIRD_PARTY_SOURCE_URL_LIST_OUTPUT
+  ""
+  CACHE
+  STRING
+  "Path to a text file to put a list of sources that should be in the cache"
+)
+
+# Usage:
+#  SET_HHVM_THIRD_PARTY_SOURCE_ARGS(
+#    MY_VAR_NAME
+#    SOURCE_URL https://example.com/
+#    SOURCE_HASH SHA256=deadbeef
+#  )
+#  ... or ...
+#  SET_HHVM_THIRD_PARTY_SOURCE_ARGS(
+#    MY_VAR_NAME
+#    Linux_URL https://example.com/linux.tar.bz2
+#    Linux_HASH SHA256=deadbeef
+#    Darwin_URL https://example.com/macos.tar.bz2
+#    Darwin_HASH SHA256=deadbeef
+#  )
+#
+macro(SET_HHVM_THIRD_PARTY_SOURCE_ARGS VAR_NAME)
+  cmake_parse_arguments(
+    # Prefix (FOO becomes _arg_FOO - trailing _ implied)
+    _arg
+    # No-arg parameter (none):
+    ""
+    # Single-argument parameters
+    "SOURCE_URL;SOURCE_HASH;Linux_URL;Linux_HASH;Darwin_URL;Darwin_HASH;FILENAME_PREFIX"
+    # Multi-argument parameters (none)
+    ""
+    ${ARGN}
+  )
+
+  # Try source, but fall back to platform-specific
+  if (NOT "${_arg_SOURCE_URL}" STREQUAL "")
+    set(_URL "${_arg_SOURCE_URL}")
+    set("${VAR_NAME}" URL_HASH "${_arg_SOURCE_HASH}")
+    if (NOT "${HHVM_THIRD_PARTY_SOURCE_URL_LIST_OUTPUT}" STREQUAL "")
+      FILE(
+        APPEND
+        "${HHVM_THIRD_PARTY_SOURCE_URL_LIST_OUTPUT}"
+        "${_arg_SOURCE_URL}\n"
+      )
+    endif()
+  else()
+    set(_URL "${_arg_${CMAKE_HOST_SYSTEM_NAME}_URL}")
+    set("${VAR_NAME}" URL_HASH "${_arg_${CMAKE_HOST_SYSTEM_NAME}_HASH}")
+    if (NOT "${HHVM_THIRD_PARTY_SOURCE_URL_LIST_OUTPUT}" STREQUAL "")
+      FILE(
+        APPEND
+        "${HHVM_THIRD_PARTY_SOURCE_URL_LIST_OUTPUT}"
+        "${_arg_Linux_URL}\n"
+        "${_arg_Darwin_URL}\n"
+      )
+    endif()
+  endif()
+
+
+  get_filename_component("_URL_NAME" "${_URL}" NAME)
+  if ("${HHVM_THIRD_PARTY_SOURCE_CACHE_PREFIX}" STREQUAL "")
+    list(APPEND ${VAR_NAME} URL "${_URL}")
+    if (${HHVM_THIRD_PARTY_SOURCE_ONLY_USE_CACHE})
+      message(
+        FATAL_ERROR
+        "HHVM_THIRD_PARTY_ONLY_USE_CACHE is set, but cache is not configured"
+      )
+    endif()
+  else()
+    set(
+      _CACHE_URL
+      "${HHVM_THIRD_PARTY_SOURCE_CACHE_PREFIX}${_arg_FILENAME_PREFIX}${_URL_NAME}${HHVM_THIRD_PARTY_SOURCE_CACHE_SUFFIX}"
+    )
+    set(_CACHE_PATH "")
+
+    # CMake 3.31 rejects mixed URL lists if one entry is local. For local caches,
+    # pick a single source at configure time instead of passing both cache and
+    # remote URLs to ExternalProject_Add.
+    if ("${HHVM_THIRD_PARTY_SOURCE_CACHE_PREFIX}" MATCHES "^file://")
+      string(REGEX REPLACE "^file://" "" _CACHE_PATH "${_CACHE_URL}")
+    elseif ("${HHVM_THIRD_PARTY_SOURCE_CACHE_PREFIX}" MATCHES "^/")
+      set(_CACHE_PATH "${HHVM_THIRD_PARTY_SOURCE_CACHE_PREFIX}${_arg_FILENAME_PREFIX}${_URL_NAME}${HHVM_THIRD_PARTY_SOURCE_CACHE_SUFFIX}")
+      set(_CACHE_URL "file://${_CACHE_PATH}")
+    endif()
+
+    if (NOT "${_CACHE_PATH}" STREQUAL "")
+      if (EXISTS "${_CACHE_PATH}")
+        list(APPEND "${VAR_NAME}" URL "${_CACHE_URL}")
+      elseif (${HHVM_THIRD_PARTY_SOURCE_ONLY_USE_CACHE})
+        message(
+          FATAL_ERROR
+          "HHVM_THIRD_PARTY_ONLY_USE_CACHE is set, but cache entry is missing:\n"
+          "  ${_CACHE_PATH}"
+        )
+      else()
+        list(APPEND "${VAR_NAME}" URL "${_URL}")
+      endif()
+    else()
+      list(APPEND "${VAR_NAME}" URL "${_CACHE_URL}")
+      if (NOT ${HHVM_THIRD_PARTY_SOURCE_ONLY_USE_CACHE})
+        list(APPEND "${VAR_NAME}" "${_URL}")
+      endif()
+    endif()
+  endif()
+  list(APPEND "${VAR_NAME}" DOWNLOAD_NAME "${_arg_FILENAME_PREFIX}${_URL_NAME}")
+  message(STATUS "Download name: ${_arg_FILENAME_PREFIX}${_URL_NAME}")
+endmacro()

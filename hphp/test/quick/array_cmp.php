@@ -1,13 +1,7 @@
 <?hh
-function main() {
-  $x = array('a' => 1);
-  $y = array('b' => 2);
-  var_dump($x <= $y);
-  var_dump($x > $y);
-  echo "\n";
-  var_dump($x < $y);
-  var_dump($x >= $y);
-  echo "\n";
+<<__EntryPoint>> function main(): void {
+  $x = dict['a' => 1];
+  $y = dict['b' => 2];
   var_dump($x == $y);
   var_dump($x != $y);
   echo "\n";
@@ -15,4 +9,3 @@ function main() {
   var_dump($x !== $y);
   echo "\n";
 }
-main();

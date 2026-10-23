@@ -1,4 +1,4 @@
-(**
+(*
  * Copyright (c) 2018, Facebook, Inc.
  * All rights reserved.
  *
@@ -7,196 +7,363 @@
  *
  *)
 
-type env [@@deriving show]
-type t = env [@@deriving show]
+type env
+
+type t = env
 
 exception Not_in_class
 
-val print_ty : env -> 'a Typing_defs.ty -> string
-(** Return a string representation of the given type using Hack-like syntax. *)
+(*
+* All+only functions in Typing_env that are safe in tasts checks
+* should hereby be available as Tast_env.get_class, Tast_env.get_typedef, etc.
+*
+* See comment in typing_env.mli Expose_to_tast_env on when+how to add things
+*)
+include
+  module type of Typing_env.Expose_to_tast_env
+    (* forget that Tast_env.env = Typing_env_types.env *)
+    with type env := env
 
-val print_ty_with_identity :
-  env ->
-  'a Typing_defs.ty ->
-  'b SymbolOccurrence.t ->
-  'b SymbolDefinition.t option ->
-  string
+type class_or_typedef_result =
+  | ClassResult of Decl_provider.class_decl
+  | TypedefResult of Typing_defs.typedef_type
+
+(** Return a string representation of the given type using Hack-like syntax. *)
+val print_ty : env -> Typing_defs.locl_ty -> string
+
+val print_decl_ty : ?msg:bool -> env -> Typing_defs.decl_ty -> string
+
+val print_error_ty :
+  ?ignore_dynamic:bool -> env -> Typing_defs.locl_ty -> string
+
+val print_hint : env -> Aast.hint -> string
+
 (** Return a string representation of the given type using Hack-like syntax,
     formatted with limited width and line breaks, including additional
     information from the {!SymbolOccurrence.t} and (if provided)
     {!SymbolDefinition.t}. *)
+val print_ty_with_identity :
+  env ->
+  Typing_defs.locl_ty ->
+  'b Symbol_occurrence.t ->
+  'b Symbol_definition.t option ->
+  string
 
-val ty_to_json : env -> 'a Typing_defs.ty -> Hh_json.json
+val print_decl_ty_with_identity :
+  env ->
+  Typing_defs.decl_ty ->
+  'b Symbol_occurrence.t ->
+  'b Symbol_definition.t option ->
+  string
+
 (** Return a JSON representation of the given type. *)
+val ty_to_json :
+  env -> ?show_like_ty:bool -> Typing_defs.locl_ty -> Yojson.Safe.t
 
-val get_self_id_exn : env -> string
-(** Return the name of the enclosing class definition.
-    When not in a class definition, raise {!Not_in_class}. *)
+(** Convert a JSON representation of a type back into a locl-phase type. *)
+val json_to_locl_ty :
+  ?keytrace:Hh_json_helpers.Access.keytrace ->
+  Provider_context.t ->
+  Yojson.Safe.t ->
+  (Typing_defs.locl_ty, Typing_defs.deserialization_error) result
 
-val get_self_id : env -> string option
-(** Return the name of the enclosing class definition.
-    When not in a class definition, return {!None}. *)
-
-val get_self_exn : env -> Tast.ty
 (** Return the type of the enclosing class definition.
     When not in a class definition, raise {!Not_in_class}. *)
+val get_self_ty_exn : env -> Tast.ty
 
-val get_self : env -> Tast.ty option
-(** Return the type of the enclosing class definition.
-    When not in a class definition, return {!None}. *)
+val get_class_or_typedef :
+  env -> Decl_provider.type_key -> class_or_typedef_result Decl_entry.t
 
-val is_static : env -> bool
-(** Return {true} when in the definition of a static property or method. *)
+val outside_expr_tree : env -> env
 
-val is_strict : env -> bool
-(** Return {true} if the containing file was checked in strict mode. *)
-
-val in_loop : env -> bool
-(** Return {true} when inside any For, Do, While, or Foreach statement. *)
-
-val get_tcopt : env -> TypecheckerOptions.t
-(** Return the {!TypecheckerOptions.t} with which this TAST was checked. *)
-
-val forward_compat_ge : env -> int -> bool
-(** Return {true} if the forward compatibility level is newer than the given ISO
-    date (represented with an int; e.g. 2018_06_14) *)
-
-val error_if_forward_compat_ge : env -> int -> (unit -> unit) -> unit
-(** Call the func if the forward compatibility level is new enough *)
+(** Return the {!Provider_context.t} with which this TAST was checked. *)
+val get_ctx : env -> Provider_context.t
 
 val get_file : env -> Relative_path.t
+
+val get_deps_mode : env -> Typing_deps_mode.t
+
 (* Return the {!Relative_path.t} of the file the env is from *)
 
-val expand_type : env -> Tast.ty -> env * Tast.ty
 (** Expand a type variable ({!Typing_defs.Tvar}) to the type it refers to. *)
+val expand_type : env -> Tast.ty -> env * Tast.ty
 
-val fully_expand : env -> Tast.ty -> Tast.ty
 (** Eliminate type variables ({!Typing_defs.Tvar}) in the given type by
     recursively replacing them with the type they refer to. *)
+val fully_expand : env -> Tast.ty -> Tast.ty
 
-val get_class_ids : env -> Tast.ty -> string list
+(** Eliminate a type splat parameter in a function type that has been
+ * instantiated to a tuple e.g. function(int $i, ...(string,bool) $a)
+ * expands to function(int $i, string $a[0], bool $a[1])
+ *)
+val expand_splat_param_in_function_type : env -> Tast.ty -> Tast.ty
+
+(** Strip ~ from type *)
+val strip_dynamic : env -> Tast.ty -> Tast.ty
+
+type is_disjoint_result =
+  | NonDisjoint  (** Types are possibly overlapping *)
+  | Disjoint  (** Types are definitely non-overlapping *)
+  | DisjointIgnoringDynamic of Tast.ty * Tast.ty
+      (** Types overlap in dynamic, but as like-stripped types are disjoint *)
+
+(** Are types disjoint? If is_dynamic_call is true, then
+    we are checking a dynamic call through a like type, so
+    result cannot be precise (i.e. won't return Disjoint) *)
+val is_disjoint :
+  is_dynamic_call:bool -> env -> Tast.ty -> Tast.ty -> is_disjoint_result
+
+(** Strip supportdyn from type, return whether it was there or not *)
+val strip_supportdyn : env -> Tast.ty -> bool * Tast.ty
+
+val get_underlying_function_type :
+  env -> Tast.ty -> (Typing_reason.t * Tast.ty Typing_defs.fun_type) option
+
+(** Types that can have methods called on them. Usually a class but
+    also includes dynamic types *)
+type receiver_identifier =
+  | RIclass of string * Tast.ty list
+  | RIdynamic
+  | RIerr
+  | RIany
+
+(** Given some class type or unresolved union of class types, return the
+    identifiers of all receivers the type may represent. *)
+val get_receiver_ids : env -> Tast.ty -> receiver_identifier list
+
 (** Given some class type or unresolved union of class types, return the
     identifiers of all classes the type may represent. *)
+val get_class_ids : env -> Tast.ty -> string list
 
-val fold_unresolved : env -> Tast.ty -> env * Tast.ty
-(** Try to unify all the types in an unresolved union. *)
+(** For an `EnumClass\Label<T, _>` returns `T`. *)
+val get_label_receiver_ty : env -> Tast.ty -> env * Tast.ty
 
-val flatten_unresolved : env -> Tast.ty -> Tast.ty list -> env * Tast.ty list
-(** Flatten nested unresolved unions, turning ((A | B) | C) to (A | B | C). *)
+(** Intersect type with nonnull *)
+val intersect_with_nonnull : env -> Pos_or_decl.t -> Tast.ty -> env * Tast.ty
 
-val push_option_out : env -> Tast.ty -> env * Tast.ty
-(** Strip away all Toptions that we possibly can in a type, expanding type
-    variables along the way, turning ?T -> T. *)
-
-val get_concrete_supertypes : env -> Tast.ty -> env * Tast.ty list
 (** Get the "as" constraints from an abstract type or generic parameter, or
     return the type itself if there is no "as" constraint. In the case of a
     generic parameter whose "as" constraint is another generic parameter, repeat
     the process until a type is reached that is not a generic parameter. Don't
-    loop on cycles. (For example, function foo<Tu as Tv, Tv as Tu>(...)) *)
-
-val is_visible :
+    loop on cycles. (For example, function foo<Tu as Tv, Tv as Tu>(...))
+    The abstract_enum flag controls whether arraykey bound enums are considered
+    abstract, or as arraykey bound.
+     *)
+val get_concrete_supertypes :
+  ?expand_supportdyn:bool ->
+  abstract_enum:bool ->
   env ->
-  Typing_defs.visibility ->
-  Nast.class_id_ option ->
-  Typing_defs.class_type ->
-  bool
-(** Return {true} if the given {class_type} (referred to by the given
+  Tast.ty ->
+  env * Tast.ty list
+
+(** Return {true} if the given {Decl_provider.class_decl} (referred to by the given
     {class_id_}, if provided) allows the current class (the one returned by
     {!get_self}) to access its members with the given {visibility}. *)
+val is_visible :
+  is_method:bool ->
+  env ->
+  Typing_defs.ce_visibility * bool ->
+  Nast.class_id_ option ->
+  Decl_provider.class_decl ->
+  bool
 
-val assert_nontrivial : Pos.t -> Ast.bop -> env -> Tast.ty -> Tast.ty -> unit
 (** Assert that the types of values involved in a strict (non-)equality
     comparison are compatible; e.g., that the types are not statically
     known to be disjoint, in which case the comparison will always return
     true or false. *)
+val assert_nontrivial :
+  Pos.t -> Ast_defs.bop -> env -> Tast.ty -> Tast.ty -> unit
 
-val assert_nullable : Pos.t -> Ast.bop -> env -> Tast.ty -> unit
-(** Assert that the type of a value involved in a strict (non-)equality
-    comparsion to null is nullable (otherwise it is known to always
-    return true or false). *)
-
-val hint_to_ty : env -> Aast.hint -> Typing_defs.decl Typing_defs.ty
 (** Return the declaration-phase type the given hint represents. *)
+val hint_to_ty : env -> Aast.hint -> Typing_defs.decl_ty
 
-val localize_with_self : env -> Typing_defs.decl Typing_defs.ty -> env * Tast.ty
-(** Transforms a declaration phase type ({!Typing_defs.decl Typing_defs.ty})
-    into a localized type ({!Typing_defs.locl Typing_defs.ty} = {!Tast.ty}).
+val localize :
+  env -> Typing_defs.expand_env -> Typing_defs.decl_ty -> env * Tast.ty
+
+val localize_hint_for_refinement : env -> Aast.hint -> env * Tast.ty
+
+(** Return [Result.Ok ()] if the current hint is supported in the new
+  constraint-based refinement logic. Otherwise returns [Result.Err string],
+  where [string] is the reason why the hint isn't supported. *)
+val supports_new_refinement : env -> Aast.hint -> (unit, string) Result.t
+
+(** Transforms a declaration phase type ({!Typing_defs.decl_ty})
+    into a localized type ({!Typing_defs.locl_ty} = {!Tast.ty}).
     Performs no substitutions of generics and initializes the late static bound
     type ({!Typing_defs.Tthis}) to the current class type (the type returned by
     {!get_self}).
 
     This is mostly provided as legacy support for {!AutocompleteService}, and
-    should not be considered a general mechanism for transforming a {decl ty} to
-    a {!Tast.ty}. *)
+    should not be considered a general mechanism for transforming a {decl_ty} to
+    a {!Tast.ty}.
 
-val localize_with_dty_validator:
-  env ->
-  Typing_defs.decl Typing_defs.ty ->
-  (Typing_defs.decl Typing_defs.ty -> unit) ->
-  env * Tast.ty
-(** Identical to localize_with_self, but also takes a validator that is applied
-    to every expanded decl type on the way to becoming a locl type. *)
+    {!quiet} silences certain errors because those errors have already fired
+    and/or are not appropriate at the time we call localize.
+    *)
+val localize_no_subst :
+  env -> ignore_errors:bool -> Typing_defs.decl_ty -> env * Tast.ty
 
-val get_upper_bounds: env -> string -> Type_parameter_env.tparam_bounds
-(** Get the upper bounds of the type parameter with the given name. *)
+(** Get the upper bounds of the type parameter with the given name.
+  FIXME: This function cannot return correct bounds at this time, because
+  during TAST checks, the Next continuation in the typing environment (which stores
+  information about type parameters) is gone.
+ *)
+val get_upper_bounds : env -> string -> Type_parameter_env.tparam_bounds
 
-val is_fresh_generic_parameter: string -> bool
+(** Get the reification of the type parameter with the given name. *)
+val get_reified : env -> string -> Aast.reify_kind
+
+(** Get whether the type parameter supports testing with is/as. *)
+val get_enforceable : env -> string -> bool
+
+(** Indicates whether the type parameter with the given name is <<__Newable>>. *)
+val get_newable : env -> string -> bool
+
+val fresh_type : env -> Pos.t -> env * Typing_defs.locl_ty
+
 (** Return whether the type parameter with the given name was implicity created
-    as part of an `instamceof`, `is`, or `as` expression (instead of being
+    as part of an `instanceof`, `is`, or `as` expression (instead of being
     explicitly declared in code by the user). *)
+val is_fresh_generic_parameter : string -> bool
 
-val subtype: env -> Tast.ty -> Tast.ty -> env * bool
-(** Return {true} when the first type is a subtype of the second type. *)
+(** Assert that one type is a subtype of another, resolving unbound type
+    variables in both types (if any), with {!env} reflecting the new state of
+    these type variables. Produce an error if they cannot be subtypes. *)
+val assert_subtype :
+  Pos.t ->
+  Typing_reason.ureason ->
+  env ->
+  Tast.ty ->
+  Tast.ty ->
+  Typing_error.Callback.t ->
+  env
 
-val referenced_typeconsts :
-  env -> Aast.hint -> Aast.sid list -> (string * string * Pos.t) list
+(** Return {true} when the first type is a subtype of the second type
+    regardless of the values of unbound type variables in both types (if any). *)
+val is_sub_type : env -> Tast.ty -> Tast.ty -> bool
+
+(** Return {false} when the first type is not a subtype of the second type
+    regardless of the values of unbound type variables in both types (if any). *)
+val is_maybe_sub_type : env -> Tast.ty -> Tast.ty -> bool
+
+val is_dynamic_aware_sub_type : env -> Tast.ty -> Tast.ty -> bool
+
+(** Return {true} when the first type can be considered a subtype of the second
+    type after resolving unbound type variables in both types (if any). *)
+val can_subtype : env -> Tast.ty -> Tast.ty -> bool
+
+(** Return {true} when the first type is a subtype of the second type. There is
+    no type T such that for all T', T <: T' and T' <: T (which is the case for Tany
+    and Terr in `can_subtype`) *)
+val is_sub_type_for_union : env -> Tast.ty -> Tast.ty -> bool
+
+(** Simplify unions in a type. *)
+val simplify_unions : env -> Tast.ty -> env * Tast.ty
+
+(** Simplify intersections in a type. *)
+val simplify_intersections : env -> Tast.ty -> env * Tast.ty
+
+val as_bounds_to_non_intersection_type :
+  env -> Tast.decl_ty list -> Tast.ty option
+
+(** Union a list of types. *)
+val union_list : env -> Typing_reason.t -> Tast.ty list -> env * Tast.ty
+
 (** Returns (class_name, tconst_name, tconst_reference_position) for each type
     constant referenced in the type access path. *)
+val referenced_typeconsts :
+  env -> Aast.hint -> Aast.sid list -> (string * string * Pos.t) list
 
-val set_static : env -> env
+val is_any : env -> Tast.ty -> bool
+
 (** Return an {!env} for which {!is_static} will return {true}.
     If you are using {!Tast_visitor}, you should have no need of this. *)
+val set_static : env -> env
 
-val set_inside_constructor : env -> env
+(** Return an {!env} for which {!val_kind} is set to the second argument. *)
+val set_val_kind : env -> Typing_defs.val_kind -> env
+
+(** Returns the val_kind of the typing environment *)
+val get_val_kind : env -> Typing_defs.val_kind
+
 (** Returns an {!env} for which {!inside_constructor} is set to {true}.
     If you are using {!Tast_visitor}, you should have no need of this. *)
+val set_inside_constructor : env -> env
 
-val set_in_loop : env -> env
-(** Return an {!env} for which {!in_loop} will return {true}.
-    If you are using {!Tast_visitor}, you should have no need of this. *)
-
-val get_inside_constructor : env -> bool
 (** Returns whether or not the typing environment is inside the
     constructor of a class *)
+val get_inside_constructor : env -> bool
 
-val get_decl_env : env -> Decl_env.env
 (** Returns a {!Decl_env.env} *)
+val get_decl_env : env -> Decl_env.env
 
-val get_inside_ppl_class : env -> bool
-(** Returns whether or not the typing environment is
-    inside a <<__PPL>> annotated class. *)
-
-val save : env -> Tast.saved_env
-(** Return the subset of this {!env} which is persisted in a TAST.
-    It should usually not be necessary to invoke this. *)
-
-val empty : TypecheckerOptions.t -> env
 (** Construct an empty {!env}. Unlikely to be the best choice; prefer using
     {!Tast_visitor} or constructing an {!env} from a {!Tast.def}. *)
+val empty : Provider_context.t -> env
 
-val def_env : Tast.def -> env
 (** Construct an {!env} from a toplevel definition. *)
+val def_env : Provider_context.t -> Tast.def -> env
 
-val restore_method_env : env -> Tast.method_ -> env
 (** Construct an {!env} from a method definition and the {!env} of the context
     it appears in. *)
+val restore_method_env : env -> Tast.method_ -> env
 
-val restore_fun_env : env -> Tast.fun_ -> env
 (** Construct an {!env} from a lambda definition and the {!env} of the context
     it appears in. *)
+val restore_fun_env : env -> Tast.fun_ -> env
 
-val set_ppl_lambda : env -> env
-(** Construct an {!env} where inside_ppl_class is {false}. Due to rewriting
-    limitations, we are unable to rewrite lambdas inside <<__PPL>> classes.
-    If you are using {!Tast_visitor}, you should have no need of this. *)
+(**
+   * Evil, defeats the purpose of separating Tast_env and Typing_env.
+   *
+   * If you're reaching for this:
+   * - to pass an env to a Typing_env function:
+   *    - There may already be a corresponding Tast_env function you
+   *      can use.
+  *     - Or it may be safe to expose the Typing_env function as
+   *       a tast_env function. See the comment at the top of typing_env.ml
+   * - to pass an env into typing or error reporting:
+   *    - sigh and do the conversion. It's probabaly safe, but nothing
+   *      guarantees it. One day there may be a better API.
+   * To use it, just unwrap and OCaml will know that Tast_env.env = Typing_env_types.env:
+   * `let Eq = Typing_env_types.Eq in fn_expecting_typing_env tast_env`
+ *)
+val eq_typing_env : (env, Typing_env_types.env) Type.eq
+
+(** Verify that an XHP body expression is legal. *)
+val is_xhp_child : env -> Pos.t -> Tast.ty -> bool * Typing_error.t option
+
+val is_enum : env -> Decl_provider.type_key -> bool
+
+val set_allow_wildcards : env -> env
+
+val get_allow_wildcards : env -> bool
+
+val fun_has_implicit_return : env -> bool
+
+val fun_has_readonly : env -> bool
+
+(** Check that the position is in the current decl and if it is, resolve
+    it with the current file. *)
+val fill_in_pos_filename_if_in_current_decl :
+  env -> Pos_or_decl.t -> Pos.t option
+
+(** Check if the environment is for a definition in a while that is a builtin. *)
+val is_hhi : env -> bool
+
+(** See {!Tast.check_status} to understand what this function returns from the
+    environment. *)
+val get_check_status : env -> Tast.check_status
+
+val get_current_decl_and_file : env -> Pos_or_decl.ctx
+
+val derive_instantiation :
+  env ->
+  Typing_defs.decl_ty ->
+  Typing_defs.locl_ty ->
+  env * Derive_type_instantiation.Instantiation.t
+
+val add_typing_error : Typing_error.t -> env:env -> unit
+
+val add_warning : env -> ('x, 'a) Typing_warning.t -> unit
+
+val get_tcopt : env -> Typechecker_options.t

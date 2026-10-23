@@ -1,21 +1,19 @@
-<?php
-
-error_reporting(E_ALL);
+<?hh
 
 class foo {
-	public $x = array();
-	public function __construct() {
-		$h = array();
-		$h[] = new stdclass;
-		$this->x = $h;
-	}
-	public function __invoke() {
-		return $this->x;
-	}
+    public $x = vec[];
+    public function __construct() {
+        $h = vec[];
+        $h[] = new stdClass;
+        $this->x = $h;
+    }
+    public function __invoke() :mixed{
+        return $this->x;
+    }
 }
 
-
+<<__EntryPoint>> function main(): void {
+error_reporting(E_ALL);
 $fo = new foo;
 var_dump($fo()[0]);
-
-?>
+}

@@ -1,4 +1,4 @@
-(**
+(*
  * Copyright (c) 2015, Facebook, Inc.
  * All rights reserved.
  *
@@ -7,123 +7,160 @@
  *
  *)
 
-open Hh_core
+open Hh_prelude
+module Printexc = Stdlib.Printexc
 
-external realpath: string -> string option = "hh_realpath"
-external is_nfs: string -> bool = "hh_is_nfs"
-external is_apple_os : unit -> bool = "hh_sysinfo_is_apple_os"
+external realpath : string -> string option = "hh_realpath"
 
-(** Option type intead of exception throwing. *)
+external is_nfs : string -> bool = "hh_is_nfs"
+
+external freopen : string -> string -> Unix.file_descr -> unit = "hh_freopen"
+
+external open_tmpfile :
+  rd:bool -> wr:bool -> dir:string -> file_perm:int -> Unix.file_descr
+  = "hh_open_tmpfile"
+
 let get_env name =
   try Some (Sys.getenv name) with
-  | Not_found -> None
+  | Stdlib.Not_found -> None
 
+(** see .mli *)
 let getenv_user () =
-  let user_var = if Sys.win32 then "USERNAME" else "USER" in
+  let user_var = "USER" in
   let logname_var = "LOGNAME" in
   let user = get_env user_var in
   let logname = get_env logname_var in
   Option.first_some user logname
 
 let getenv_home () =
-  let home_var = if Sys.win32 then "APPDATA" else "HOME" in
+  let home_var = "HOME" in
   get_env home_var
 
 let getenv_term () =
-  let term_var = "TERM" in (* This variable does not exist on windows. *)
+  let term_var = "TERM" in
   get_env term_var
 
-let path_sep = if Sys.win32 then ";" else ":"
-let null_path = if Sys.win32 then "nul" else "/dev/null"
-let temp_dir_name =
-  if Sys.win32 then Filename.get_temp_dir_name () else "/tmp"
+let path_sep = ":"
+
+let null_path = "/dev/null"
+
+let temp_dir_name = "/tmp"
 
 let getenv_path () =
-  let path_var = "PATH" in (* Same variable on windows *)
+  let path_var = "PATH" in
   get_env path_var
 
 let open_in_no_fail fn =
-  try open_in fn
-  with e ->
+  try In_channel.create fn with
+  | e ->
     let e = Printexc.to_string e in
-    Printf.fprintf stderr "Could not open_in: '%s' (%s)\n" fn e;
+    Printf.fprintf stderr "Could not In_channel.create: '%s' (%s)\n" fn e;
     exit 3
 
 let open_in_bin_no_fail fn =
-  try open_in_bin fn
-  with e ->
+  try In_channel.create ~binary:true fn with
+  | e ->
     let e = Printexc.to_string e in
-    Printf.fprintf stderr "Could not open_in_bin: '%s' (%s)\n" fn e;
+    Printf.fprintf
+      stderr
+      "Could not In_channel.create ~binary:true: '%s' (%s)\n"
+      fn
+      e;
     exit 3
 
 let close_in_no_fail fn ic =
-  try close_in ic with e ->
+  try In_channel.close ic with
+  | e ->
     let e = Printexc.to_string e in
     Printf.fprintf stderr "Could not close: '%s' (%s)\n" fn e;
     exit 3
 
 let open_out_no_fail fn =
-  try open_out fn
-  with e ->
+  try Out_channel.create fn with
+  | e ->
     let e = Printexc.to_string e in
-    Printf.fprintf stderr "Could not open_out: '%s' (%s)\n" fn e;
+    Printf.fprintf stderr "Could not Out_channel.create: '%s' (%s)\n" fn e;
     exit 3
 
 let open_out_bin_no_fail fn =
-  try open_out_bin fn
-  with e ->
+  try Out_channel.create ~binary:true fn with
+  | e ->
     let e = Printexc.to_string e in
-    Printf.fprintf stderr "Could not open_out_bin: '%s' (%s)\n" fn e;
+    Printf.fprintf
+      stderr
+      "Could not Out_channel.create ~binary:true: '%s' (%s)\n"
+      fn
+      e;
     exit 3
 
 let close_out_no_fail fn oc =
-  try close_out oc with e ->
+  try Out_channel.close oc with
+  | e ->
     let e = Printexc.to_string e in
     Printf.fprintf stderr "Could not close: '%s' (%s)\n" fn e;
     exit 3
+
+let file_exists = Disk.file_exists
 
 let cat = Disk.cat
 
 let cat_or_failed file =
   try Some (Disk.cat file) with
+  | Test_disk.No_such_file_or_directory _
   | Sys_error _
   | Failure _ ->
     None
 
 let cat_no_fail filename =
   let ic = open_in_bin_no_fail filename in
-  let len = in_channel_length ic in
+  let len = Int64.to_int @@ In_channel.length ic in
+  let len = Option.value_exn len in
   let buf = Buffer.create len in
-  Buffer.add_channel buf ic len;
+  Stdlib.Buffer.add_channel buf ic len;
   let content = Buffer.contents buf in
   close_in_no_fail filename ic;
   content
 
 let nl_regexp = Str.regexp "[\r\n]"
+
 let split_lines = Str.split nl_regexp
 
-(** Returns true if substring occurs somewhere inside str. *)
 let string_contains str substring =
-  (** regexp_string matches only this string and nothing else. *)
+  (* regexp_string matches only this string and nothing else. *)
   let re = Str.regexp_string substring in
-  try (Str.search_forward re str 0) >= 0 with Not_found -> false
+  try Str.search_forward re str 0 >= 0 with
+  | Stdlib.Not_found -> false
 
 let exec_read cmd =
   let ic = Unix.open_process_in cmd in
-  let result = input_line ic in
-  assert (Unix.close_process_in ic = Unix.WEXITED 0);
+  let result = In_channel.input_line ic in
+  assert (Poly.(Unix.close_process_in ic = Unix.WEXITED 0));
   result
 
-let exec_read_lines ?(reverse=false) cmd =
+let exec_try_read cmd =
+  let ic = Unix.open_process_in cmd in
+  let out = In_channel.input_line ic in
+  let status = Unix.close_process_in ic in
+  match (out, status) with
+  | (Some _, Unix.WEXITED 0) -> out
+  | _ -> None
+
+let exec_read_lines ?(reverse = false) cmd =
   let ic = Unix.open_process_in cmd in
   let result = ref [] in
   (try
-    while true do
-      result := input_line ic :: !result
-    done;
-  with End_of_file -> ());
-  assert (Unix.close_process_in ic = Unix.WEXITED 0);
-  if not reverse then List.rev !result else !result
+     while true do
+       match In_channel.input_line ic with
+       | Some line -> result := line :: !result
+       | None -> raise End_of_file
+     done
+   with
+  | End_of_file -> ());
+  assert (Poly.(Unix.close_process_in ic = Unix.WEXITED 0));
+  if not reverse then
+    List.rev !result
+  else
+    !result
 
 (**
  * Collects paths that satisfy a predicate, recursively traversing directories.
@@ -131,324 +168,331 @@ let exec_read_lines ?(reverse=false) cmd =
 let rec collect_paths path_predicate path =
   if Sys.is_directory path then
     path
-      |> Sys.readdir
-      |> Array.to_list
-      |> List.map ~f:(Filename.concat path)
-      |> List.concat_map ~f:(collect_paths path_predicate)
+    |> Sys.readdir
+    |> Array.to_list
+    |> List.map ~f:(Filename.concat path)
+    |> List.concat_map ~f:(collect_paths path_predicate)
   else
     Utils.singleton_if (path_predicate path) path
 
-(**
- * Sometimes the user wants to pass a list of paths on the command-line.
- * However, we have enough files in the codebase that sometimes that list
- * exceeds the maximum number of arguments that can be passed on the
- * command-line. To work around this, we can use the convention that some Unix
- * tools use: a `@` before a path name represents a file that should be read
- * to get the necessary information (in this case, containing a list of files,
- * one per line).
- *)
-let parse_path_list (paths: string list): string list =
+let parse_path_list (paths : string list) : string list =
   List.concat_map paths ~f:(fun path ->
-    if String_utils.string_starts_with path "@"
-    then
-      let path = String_utils.lstrip path "@" in
-      cat path |> split_lines
-    else
-      [path]
-) |> List.map ~f:(fun path ->
-  match realpath path with
-  | Some path -> path
-  | None -> failwith (Printf.sprintf "Invalid path: %s" path)
-)
+      if String.is_prefix path ~prefix:"@" then
+        let path = String_utils.lstrip path "@" in
+        cat path |> split_lines
+      else
+        [path])
 
-let rm_dir_tree = Disk.rm_dir_tree
+let rm_dir_tree ?(skip_mocking = false) =
+  if skip_mocking then
+    Real_disk.rm_dir_tree
+  else
+    Disk.rm_dir_tree
 
 let restart () =
   let cmd = Sys.argv.(0) in
   let argv = Sys.argv in
   Unix.execv cmd argv
 
+(** see .mli *)
 let logname_impl () =
   match getenv_user () with
-    | Some user -> user
-    | None ->
-      (* If this function is generally useful, it can be lifted to toplevel
-         in this file, but this is the only place we need it for now. *)
-      let exec_try_read cmd =
-        let ic = Unix.open_process_in cmd in
-        let out = try Some (input_line ic) with End_of_file -> None in
-        let status = Unix.close_process_in ic in
-        match out, status with
-          | Some _, Unix.WEXITED 0 -> out
-          | _ -> None in
-      try Utils.unsafe_opt (exec_try_read "logname") with Invalid_argument _ ->
-      try Utils.unsafe_opt (exec_try_read "id -un") with Invalid_argument _ ->
-        "[unknown]"
+  | Some user -> user
+  | None ->
+    (try Utils.unsafe_opt (exec_try_read "logname") with
+    | Invalid_argument _ ->
+      (try Utils.unsafe_opt (exec_try_read "id -un") with
+      | Invalid_argument _ -> "[unknown]"))
 
-let logname_ref = ref None
-let logname () =
-  if !logname_ref = None then logname_ref := Some (logname_impl ());
-  Utils.unsafe_opt !logname_ref
+let logname_lazy = lazy (logname_impl ())
+
+let logname () = Lazy.force logname_lazy
+
+let get_primary_owner () =
+  let owners_file = "/etc/devserver.owners" in
+  let logged_in_user = logname () in
+  if not (Disk.file_exists owners_file) then
+    logged_in_user
+  else
+    let lines = Core.String.split_lines (Disk.cat owners_file) in
+    if List.mem lines logged_in_user ~equal:String.( = ) then
+      logged_in_user
+    else
+      lines |> List.last |> Option.value ~default:logged_in_user
 
 let with_umask umask f =
   let old_umask = ref 0 in
   Utils.with_context
     ~enter:(fun () -> old_umask := Unix.umask umask)
-    ~exit:(fun () -> Unix.umask !old_umask)
+    ~exit:(fun () ->
+      let _ = Unix.umask !old_umask in
+      ())
     ~do_:f
-let with_umask umask f =
-  if Sys.win32 then f () else with_umask umask f
 
 let read_stdin_to_string () =
   let buf = Buffer.create 4096 in
   try
     while true do
-      Buffer.add_string buf (input_line stdin);
-      Buffer.add_char buf '\n'
+      match In_channel.input_line In_channel.stdin with
+      | Some line ->
+        Buffer.add_string buf line;
+        Buffer.add_char buf '\n'
+      | None -> raise End_of_file
     done;
     assert false
-  with End_of_file ->
-    Buffer.contents buf
+  with
+  | End_of_file -> Buffer.contents buf
 
-let read_all ?(buf_size=4096) ic =
+let read_all ?(buf_size = 4096) ic =
   let buf = Buffer.create buf_size in
   (try
-    while true do
-      let data = Bytes.create buf_size in
-      let bytes_read = input ic data 0 buf_size in
-      if bytes_read = 0 then raise Exit;
-      Buffer.add_subbytes buf data 0 bytes_read;
-    done
-  with Exit -> ());
+     while true do
+       let data = Bytes.create buf_size in
+       let bytes_read = In_channel.input ic ~buf:data ~pos:0 ~len:buf_size in
+       if bytes_read = 0 then raise Exit;
+       Buffer.add_subbytes buf data ~pos:0 ~len:bytes_read
+     done
+   with
+  | Exit -> ());
   Buffer.contents buf
 
-(**
- * Like Python's os.path.expanduser, though probably doesn't cover some cases.
- * Roughly follow's bash's tilde expansion:
- * http://www.gnu.org/software/bash/manual/html_node/Tilde-Expansion.html
- *
- * ~/foo -> /home/bob/foo if $HOME = "/home/bob"
- * ~joe/foo -> /home/joe/foo if joe's home is /home/joe
- *)
 let expanduser path =
   Str.substitute_first
     (Str.regexp "^~\\([^/]*\\)")
-    begin fun s ->
-      match Str.matched_group 1 s with
-        | "" ->
-          begin
-            match getenv_home () with
-              | None -> (Unix.getpwuid (Unix.getuid())).Unix.pw_dir
-              | Some home -> home
-          end
+    begin
+      fun s ->
+        match Str.matched_group 1 s with
+        | "" -> begin
+          match getenv_home () with
+          | None -> (Unix.getpwuid (Unix.getuid ())).Unix.pw_dir
+          | Some home -> home
+        end
         | unixname ->
-          try (Unix.getpwnam unixname).Unix.pw_dir
-          with Not_found -> Str.matched_string s end
+          (try (Unix.getpwnam unixname).Unix.pw_dir with
+          | Stdlib.Not_found -> Str.matched_string s)
+    end
     path
 
-(* Turns out it's surprisingly complex to figure out the path to the current
-   executable, which we need in order to extract its embedded libraries. If
-   argv[0] is a path, then we can use that; sometimes it's just the exe name,
-   so we have to search $PATH for it the same way shells do. for example:
-   https://www.gnu.org/software/bash/manual/html_node/Command-Search-and-Execution.html
-
-   There are other options which might be more reliable when they exist, like
-   using the `_` env var set by bash, or /proc/self/exe on Linux, but they are
-   not portable. *)
 let executable_path : unit -> string =
   let executable_path_ = ref None in
   let dir_sep = Filename.dir_sep.[0] in
   let search_path path =
     let paths =
       match getenv_path () with
-        | None -> failwith "Unable to determine executable path"
-        | Some paths ->
-          Str.split (Str.regexp_string path_sep) paths in
-    let path = List.fold_left paths ~f:begin fun acc p ->
-      match acc with
-      | Some _ -> acc
-      | None -> realpath (expanduser (Filename.concat p path))
-    end ~init:None
+      | None -> failwith "Unable to determine executable path"
+      | Some paths -> Str.split (Str.regexp_string path_sep) paths
+    in
+    let path =
+      List.fold_left
+        paths
+        ~f:
+          begin
+            fun acc p ->
+              match acc with
+              | Some _ -> acc
+              | None -> realpath (expanduser (Filename.concat p path))
+          end
+        ~init:None
     in
     match path with
     | Some path -> path
     | None -> failwith "Unable to determine executable path"
   in
-  fun () -> match !executable_path_ with
-  | Some path -> path
-  | None ->
+  fun () ->
+    match !executable_path_ with
+    | Some path -> path
+    | None ->
       let path = Sys.executable_name in
       let path =
         if String.contains path dir_sep then
           match realpath path with
           | Some path -> path
           | None -> failwith "Unable to determine executable path"
-        else search_path path
+        else
+          search_path path
       in
       executable_path_ := Some path;
       path
 
 let lines_of_in_channel ic =
   let rec loop accum =
-    match try Some(input_line ic) with _ -> None with
+    match In_channel.input_line ic with
     | None -> List.rev accum
-    | Some(line) -> loop (line::accum)
+    | Some line -> loop (line :: accum)
   in
   loop []
 
 let lines_of_file filename =
-  let ic = open_in filename in
+  let ic = In_channel.create filename in
   try
     let result = lines_of_in_channel ic in
-    let _ = close_in ic in
+    let () = In_channel.close ic in
     result
-  with _ ->
-    close_in ic;
+  with
+  | _ ->
+    In_channel.close ic;
     []
 
-
 let read_file file =
-  let ic = open_in_bin file  in
-  let size = in_channel_length ic in
+  let ic = In_channel.create ~binary:true file in
+  let size = Int64.to_int @@ In_channel.length ic in
+  let size = Option.value_exn size in
   let buf = Bytes.create size in
-  really_input ic buf 0 size;
-  close_in ic;
+  Option.value_exn (In_channel.really_input ic ~buf ~pos:0 ~len:size);
+  In_channel.close ic;
   buf
 
-let write_file ~file s =
-  Disk.write_file ~file ~contents:s
+let write_file ~file s = Disk.write_file ~file ~contents:s
 
 let append_file ~file s =
-  let chan = open_out_gen [Open_wronly; Open_append; Open_creat] 0o666 file in
-  (output_string chan s; close_out chan)
+  let chan = Out_channel.create ~append:true ~perm:0o666 file in
+  Out_channel.output_string chan s;
+  Out_channel.close chan
 
-let write_strings_to_file ~file ss =
-  let chan = open_out_gen [Open_wronly; Open_creat] 0o666 file in
-  List.iter ~f:(output_string chan) ss;
-  close_out chan
+let write_strings_to_file ~file (ss : string list) =
+  let chan = Out_channel.create ~perm:0o666 file in
+  List.iter ~f:(Out_channel.output_string chan) ss;
+  Out_channel.close chan
 
 (* could be in control section too *)
 
-let filemtime file =
-  (Unix.stat file).Unix.st_mtime
+let mkdir_p ?(skip_mocking = false) =
+  if skip_mocking then
+    Real_disk.mkdir_p
+  else
+    Disk.mkdir_p
+
+let mkdir_no_fail dir =
+  with_umask 0 (fun () ->
+      (* Don't set sticky bit since the socket opening code wants to remove any
+       * old sockets it finds, which may be owned by a different user. *)
+      try Unix.mkdir dir 0o777 with
+      | Unix.Unix_error (Unix.EEXIST, _, _) -> ())
+
+let unlink_no_fail fn =
+  try Unix.unlink fn with
+  | Unix.Unix_error (Unix.ENOENT, _, _) -> ()
+
+let readlink_no_fail fn =
+  try Unix.readlink fn with
+  | _ -> fn
+
+let filemtime file = (Unix.stat file).Unix.st_mtime
 
 external lutimes : string -> unit = "hh_lutimes"
 
-let try_touch ~follow_symlinks file =
-  try
-    if follow_symlinks then Unix.utimes file 0.0 0.0
-    else lutimes file
-  with _ ->
-    ()
+(** see .mli *)
+type touch_mode =
+  | Touch_existing of { follow_symlinks: bool }
+  | Touch_existing_file_or_create_new of {
+      mkdir_if_new: bool;
+      perm_if_new: Unix.file_perm;
+    }
 
-let mkdir_p = Disk.mkdir_p
+let touch mode file =
+  match mode with
+  | Touch_existing { follow_symlinks = true } -> Unix.utimes file 0. 0.
+  | Touch_existing { follow_symlinks = false } -> lutimes file
+  | Touch_existing_file_or_create_new { mkdir_if_new; perm_if_new } ->
+    with_umask 0o000 (fun () ->
+        if mkdir_if_new then mkdir_no_fail (Filename.dirname file);
+        let oc =
+          Out_channel.create ~append:true ~binary:true ~perm:perm_if_new file
+        in
+        Out_channel.close oc)
 
-(* Emulate "mkdir -p", i.e., no error if already exists. *)
-let mkdir_no_fail dir =
-  with_umask 0 begin fun () ->
-    (* Don't set sticky bit since the socket opening code wants to remove any
-     * old sockets it finds, which may be owned by a different user. *)
-    try Unix.mkdir dir 0o777 with Unix.Unix_error (Unix.EEXIST, _, _) -> ()
-  end
-
-let unlink_no_fail fn =
-  try Unix.unlink fn with Unix.Unix_error (Unix.ENOENT, _, _) -> ()
-
-let readlink_no_fail fn =
-  if Sys.win32 && Sys.file_exists fn then
-    cat fn
-  else
-    try Unix.readlink fn with _ -> fn
+let try_touch mode file =
+  try touch mode file with
+  | _ -> ()
 
 let splitext filename =
   let root = Filename.chop_extension filename in
   let root_length = String.length root in
   (* -1 because the extension includes the period, e.g. ".foo" *)
   let ext_length = String.length filename - root_length - 1 in
-  let ext = String.sub filename (root_length + 1) ext_length in
-  root, ext
+  let ext = String.sub filename ~pos:(root_length + 1) ~len:ext_length in
+  (root, ext)
 
-let is_test_mode () =
-  try
-    ignore @@ Sys.getenv "HH_TEST_MODE";
-    true
-  with _ -> false
+let prod_telemetry () =
+  match Sys.getenv_opt "HH_TEST_MODE" with
+  | Some "0" -> true
+  | Some _ -> false
+  | None -> not Build_id.is_dev_build
 
-let sleep ~seconds =
-  ignore @@ Unix.select [] [] [] seconds
+let deterministic_behavior_for_tests () = not (prod_telemetry ())
 
-let symlink =
-  (* Dummy implementation of `symlink` on Windows: we create a text
-     file containing the targeted-file's path. Symlink are available
-     on Windows since Vista, but until Seven (included), one should
-     have administratrive rights in order to create symlink. *)
-  let win32_symlink source dest = write_file ~file:dest source in
-  if Sys.win32
-  then win32_symlink
-  else
+let sleep ~seconds = ignore @@ Unix.select [] [] [] seconds
+
+let symlink
     (* 4.03 adds an optional argument to Unix.symlink that we want to ignore
      *)
-    fun source dest -> Unix.symlink source dest
+      source
+    dest =
+  Unix.symlink source dest
 
-(* Creates a symlink at <dir>/<linkname.ext> to
- * <dir>/<pluralized ext>/<linkname>-<timestamp>.<ext> *)
 let make_link_of_timestamped linkname =
-  let open Unix in
-  let dir = Filename.dirname linkname in
-  mkdir_no_fail dir;
-  let base = Filename.basename linkname in
-  let base, ext = splitext base in
-  let dir = Filename.concat dir (Printf.sprintf "%ss" ext) in
-  mkdir_no_fail dir;
-  let tm = localtime (time ()) in
-  let year = tm.tm_year + 1900 in
-  let time_str = Printf.sprintf "%d-%02d-%02d-%02d-%02d-%02d"
-    year (tm.tm_mon + 1) tm.tm_mday tm.tm_hour tm.tm_min tm.tm_sec in
-  let filename = Filename.concat dir
-    (Printf.sprintf "%s-%s.%s" base time_str ext) in
-  unlink_no_fail linkname;
-  symlink filename linkname;
-  filename
+  Unix.(
+    let dir = Filename.dirname linkname in
+    mkdir_p dir;
+    let base = Filename.basename linkname in
+    let (base, ext) = splitext base in
+    let dir = Filename.concat dir (Printf.sprintf "%ss" ext) in
+    mkdir_p dir;
+    let tm = localtime (time ()) in
+    let year = tm.tm_year + 1900 in
+    let time_str =
+      Printf.sprintf
+        "%d-%02d-%02d-%02d-%02d-%02d"
+        year
+        (tm.tm_mon + 1)
+        tm.tm_mday
+        tm.tm_hour
+        tm.tm_min
+        tm.tm_sec
+    in
+    let filename =
+      Filename.concat dir (Printf.sprintf "%s-%s.%s" base time_str ext)
+    in
+    unlink_no_fail linkname;
+    symlink filename linkname;
+    filename)
 
-let setsid =
-  (* Not implemented on Windows. Let's just return the pid *)
-  if Sys.win32 then Unix.getpid else Unix.setsid
+let setsid = Unix.setsid
 
-let set_signal = if not Sys.win32 then Sys.set_signal else (fun _ _ -> ())
-let signal =
-  if not Sys.win32
-  then (fun a b -> ignore (Sys.signal a b))
-  else (fun _ _ -> ())
+let set_signal = Sys.set_signal
 
-external get_total_ram : unit -> int = "hh_sysinfo_totalram"
-external uptime : unit -> int = "hh_sysinfo_uptime"
-external nproc: unit -> int = "nproc"
+let signal a b = ignore (Sys.signal a b)
 
-let total_ram = get_total_ram ()
-let nbr_procs = nproc ()
+type sysinfo = {
+  uptime: int;
+  totalram: int;
+  freeram: int;
+  sharedram: int;
+  bufferram: int;
+  totalswap: int;
+  freeswap: int;
+  totalhigh: int;
+  freehigh: int;
+}
 
-external set_priorities : cpu_priority:int -> io_priority:int -> unit =
-  "hh_set_priorities"
+external sysinfo : unit -> sysinfo option = "hh_sysinfo"
 
-external pid_of_handle: int -> int = "pid_of_handle"
-external handle_of_pid_for_termination: int -> int =
-  "handle_of_pid_for_termination"
+external nprocs : unit -> int = "hh_nproc"
+
+let nbr_procs = nprocs ()
+
+let total_ram =
+  Option.value_map (sysinfo ()) ~default:0 ~f:(fun si -> si.totalram)
+
+let uptime () =
+  Option.value_map (sysinfo ()) ~default:0 ~f:(fun si -> si.uptime)
+
+external set_priorities : cpu_priority:int -> io_priority:int -> unit
+  = "hh_set_priorities"
 
 let terminate_process pid = Unix.kill pid Sys.sigkill
 
-let lstat path =
-  (* WTF, on Windows `lstat` fails if a directory path ends with an
-     '/' (or a '\', whatever) *)
-  Unix.lstat @@
-  if Sys.win32 && String_utils.string_ends_with path Filename.dir_sep then
-    String.sub path 0 (String.length path - 1)
-  else
-    path
-
-let normalize_filename_dir_sep =
-  let dir_sep_char = String.get Filename.dir_sep 0 in
-  String.map (fun c -> if c = dir_sep_char then '/' else c)
-
+let lstat = Unix.lstat
 
 let name_of_signal = function
   | s when s = Sys.sigabrt -> "SIGABRT (Abnormal termination)"
@@ -481,74 +525,341 @@ let name_of_signal = function
   | s when s = Sys.sigxfsz -> "SIGXFSZ (File size limit exceeded)"
   | other -> string_of_int other
 
-(* The units for each of these fields is seconds, similar to Unix.times().
- * cpu_info and processor_info are constructed by c code (see processor_info.c) so be very
- * careful modifying these types! *)
 type cpu_info = {
   cpu_user: float;
   cpu_nice_user: float;
   cpu_system: float;
   cpu_idle: float;
 }
+
 type processor_info = {
   proc_totals: cpu_info;
   proc_per_cpu: cpu_info array;
 }
 
-external processor_info: unit -> processor_info = "hh_processor_info"
+external processor_info : unit -> processor_info = "hh_processor_info"
 
-(* We implement timers using sigalarm which means selects can be interrupted. This is a wrapper
- * around EINTR which continues the select if it gets interrupted by a signal *)
+(* This assertion allows us to safely use Obj.magic to
+   * convert between Unix.file_descr and int below.
+   * This assertion will fail on Windows, but we don't support Windows anyway. *)
+let () = assert (Obj.is_int (Obj.repr Unix.stdin))
+
+let string_of_fd (fd : Unix.file_descr) : string = string_of_int (Obj.magic fd)
+
+(** AVOID. Breaks the abstraction of OCaml's Unix.file_descr
+ * The assertion above ensures this is safe-ish. Use sparingly.
+ * This Obj.magic has been present since D2332777 (15f9ac332fe5, Aug 2015)
+ * via Handle.get_handle/wrap_handle, which were defined as `Obj.magic` for Unix-style OSs *)
+let fd_to_int_naughty (fd : Unix.file_descr) : int = Obj.magic fd
+
+(** AVOID, see {!fd_to_int_naughty} *)
+let int_to_fd_naughty (i : int) : Unix.file_descr = Obj.magic i
+
+let show_inode (fd : Unix.file_descr) : string =
+  let stat = Unix.fstat fd in
+  Printf.sprintf "inode#%d:%d" stat.Unix.st_dev stat.Unix.st_ino
+
 let rec select_non_intr read write exn timeout =
   let start_time = Unix.gettimeofday () in
-  try Unix.select read write exn timeout
-  with Unix.Unix_error (Unix.EINTR, _, _) ->
+  try Unix.select read write exn timeout with
+  | Unix.Unix_error (Unix.EINTR, _, _) ->
     (* Negative timeouts mean no timeout *)
     let timeout =
-      if timeout < 0.0
-      then timeout
-      else max 0.0 (timeout -. (Unix.gettimeofday () -. start_time)) in
+      if Float.(timeout < 0.0) then
+        (* A negative timeout means no timeout, i.e. unbounded wait. *)
+        timeout
+      else
+        Float.(max 0.0 (timeout -. (Unix.gettimeofday () -. start_time)))
+    in
     select_non_intr read write exn timeout
+  | Unix.Unix_error (Unix.EINVAL, fun_name, "") ->
+    (* There are suspicions that we are receiving this exception because we are
+     * leaking file descriptors and end up using fds beyond the allowable
+     * range of 1024, so this intends to log all of the file descriptors that
+     * we call select on to verify those suspicions.
+     *)
+    let fdl_to_str fdl =
+      (* Using `Obj.magic` to convert file descriptors to ints because there is no
+       * library function to do so. See (https://github.com/ocaml/ocaml/pull/1990)
+       *)
+      "["
+      ^ List.fold_left
+          ~f:(fun init fd -> init ^ string_of_fd fd ^ ", ")
+          ~init:""
+          fdl
+      ^ "]"
+    in
+    let fun_params =
+      Printf.sprintf
+        "%s %s %s %f"
+        (fdl_to_str read)
+        (fdl_to_str write)
+        (fdl_to_str exn)
+        timeout
+    in
+    raise (Unix.Unix_error (Unix.EINVAL, fun_name, fun_params))
 
-(* Flow uses lwt, which installs a sigchld handler. So the old pattern of fork & waitpid will hit
- * an EINTR when the forked process dies and the parent gets a sigchld signal. Note: this is only a
- * problem if you're not using the WNOHANG flag, since EINTR isn't thrown for WNOHANG *)
+let rec restart_on_EINTR f x =
+  try f x with
+  | Unix.Unix_error (Unix.EINTR, _, _) -> restart_on_EINTR f x
+
+let write_non_intr (fd : Unix.file_descr) (buf : bytes) (pos : int) (len : int)
+    : unit =
+  let pos = ref pos in
+  while !pos < len do
+    (* must use Unix.single_write, not Unix.write, because the latter does arbitrarily
+       many OS calls and we don't know which one got the EINTR *)
+    let n = restart_on_EINTR (Unix.single_write fd buf !pos) (len - !pos) in
+    pos := !pos + n
+  done
+
+let read_non_intr (fd : Unix.file_descr) (len : int) : bytes option =
+  let buf = Bytes.create len in
+  let pos = ref 0 in
+  let is_eof = ref false in
+  while !pos < len && not !is_eof do
+    let n = restart_on_EINTR (Unix.read fd buf !pos) (len - !pos) in
+    pos := !pos + n;
+    if n = 0 then is_eof := true
+  done;
+  if !is_eof then
+    None
+  else
+    Some buf
+
 let rec waitpid_non_intr flags pid =
-  try Unix.waitpid flags pid
-  with Unix.Unix_error (Unix.EINTR, _, _) -> waitpid_non_intr flags pid
+  try Unix.waitpid flags pid with
+  | Unix.Unix_error (Unix.EINTR, _, _) -> waitpid_non_intr flags pid
 
-(* Exposing this for a unit test *)
 let find_oom_in_dmesg_output pid name lines =
-  let re = Str.regexp (Printf.sprintf
-      "Out of memory: Kill process \\([0-9]+\\) (%s)" name) in
-  List.exists lines begin fun line ->
-    try
-      ignore @@ Str.search_forward re line 0;
-      let pid_s = Str.matched_group 1 line in
-      int_of_string pid_s = pid
-    with Not_found -> false
-  end
+  (* oomd: "Memory cgroup out of memory: Killed process 4083583 (hh_server)" (https://facebookmicrosites.github.io/oomd/)
+     oomkiller: "Out of memory: Kill process 4083583 (hh_server)" *)
+  let re =
+    Str.regexp
+      (Printf.sprintf
+         "[Oo]ut of memory: Kill\\(ed\\)? process \\([0-9]+\\) (%s)"
+         name)
+  in
+  let pid = string_of_int pid in
+  List.exists lines ~f:(fun line ->
+      try
+        ignore @@ Str.search_forward re line 0;
+        let pid_s = Str.matched_group 2 line in
+        String.equal pid_s pid
+      with
+      | Stdlib.Not_found -> false)
 
 let check_dmesg_for_oom pid name =
-    let dmesg = exec_read_lines ~reverse:true "dmesg" in
-    find_oom_in_dmesg_output pid name dmesg
+  let dmesg = exec_read_lines ~reverse:true "dmesg" in
+  find_oom_in_dmesg_output pid name dmesg
 
 (* Be careful modifying the rusage type! Like other types that interact with C, the order matters!
  * If you change things here you must update hh_getrusage too! *)
 type rusage = {
-  ru_maxrss: int;        (* maximum resident set size *)
-  ru_ixrss: int;         (* integral shared memory size *)
-  ru_idrss: int;         (* integral unshared data size *)
-  ru_isrss: int;         (* integral unshared stack size *)
-  ru_minflt: int;        (* page reclaims (soft page faults) *)
-  ru_majflt: int;        (* page faults (hard page faults) *)
-  ru_nswap: int;         (* swaps *)
-  ru_inblock: int;       (* block input operations *)
-  ru_oublock: int;       (* block output operations *)
-  ru_msgsnd: int;        (* IPC messages sent *)
-  ru_msgrcv: int;        (* IPC messages received *)
-  ru_nsignals: int;      (* signals received *)
-  ru_nvcsw: int;         (* voluntary context switches *)
-  ru_nivcsw: int;        (* involuntary context switches *)
+  ru_maxrss: int;
+  (* maximum resident set size *)
+  ru_ixrss: int;
+  (* integral shared memory size *)
+  ru_idrss: int;
+  (* integral unshared data size *)
+  ru_isrss: int;
+  (* integral unshared stack size *)
+  ru_minflt: int;
+  (* page reclaims (soft page faults) *)
+  ru_majflt: int;
+  (* page faults (hard page faults) *)
+  ru_nswap: int;
+  (* swaps *)
+  ru_inblock: int;
+  (* block input operations *)
+  ru_oublock: int;
+  (* block output operations *)
+  ru_msgsnd: int;
+  (* IPC messages sent *)
+  ru_msgrcv: int;
+  (* IPC messages received *)
+  ru_nsignals: int;
+  (* signals received *)
+  ru_nvcsw: int;
+  (* voluntary context switches *)
+  ru_nivcsw: int; (* involuntary context switches *)
 }
-external getrusage: unit -> rusage = "hh_getrusage"
+
+external getrusage : unit -> rusage = "hh_getrusage"
+
+external start_gc_profiling : unit -> unit = "hh_start_gc_profiling" [@@noalloc]
+
+external get_gc_time : unit -> float * float = "hh_get_gc_time"
+
+module For_test = struct
+  let find_oom_in_dmesg_output = find_oom_in_dmesg_output
+end
+
+let atomically_create_and_init_file
+    (path : string)
+    ~(rd : bool)
+    ~(wr : bool)
+    (file_perm : Unix.file_perm)
+    ~(init : Unix.file_descr -> unit) : Unix.file_descr option =
+  (* There's no way to pass O_TMPFILE to Unix.openfile. So, we need our own version... *)
+  let fd = open_tmpfile ~rd ~wr ~dir:(Filename.dirname path) ~file_perm in
+  try
+    init fd;
+
+    (* If the user's callback worked, we can proceed to atomically move the file into place.
+       If this fails due to pre-existing, then we'll return None.
+       Implementation of Unix.link is at
+       https://github.com/ocaml/ocaml/blob/trunk/otherlibs/unix/link_unix.c.
+       The ~follow:true flag makes it do
+       linkat(AT_FDCWD, "/proc/self/fd/<fd>", AT_FDCWD, filename, AT_SYMLINK_FOLLOW) *)
+
+    (* Here is documentation from "man 2 open": https://man7.org/linux/man-pages/man2/open.2.html
+       Note that it only exists on linux (since 2013) and not on other unix platforms.
+
+       O_TMPFILE must be specified with one of O_RDWR or O_WRONLY and, optionally, O_EXCL. If O_EXCL
+       is not specified, then linkat(2) can be used to link the temporary file into the filesystem,
+       making it permanent, using code like the following:
+         char path[PATH_MAX];
+         fd = open("/path/to/dir", O_TMPFILE | O_RDWR, S_IRUSR | S_IWUSR);
+         /* File I/O on 'fd'... */
+         snprintf(path, PATH_MAX,  "/proc/self/fd/%d", fd);
+         linkat(AT_FDCWD, path, AT_FDCWD, "/path/for/file", AT_SYMLINK_FOLLOW);
+
+       There are two main use cases for O_TMPFILE:
+
+       * Improved tmpfile(3) functionality: race-free creation of temporary files that (1) are
+       automatically deleted when closed; (2) can never be reached via any pathname; (3) are not
+       subject to symlink attacks; and (4) do not require the caller to devise unique names.
+       *  Creating a file that is initially invisible, which is then populated with data and adjusted to
+       have appropriate filesystem attributes (fchown(2), fchmod(2), fsetxattr(2), etc.) before being
+       atomically linked into the filesystem in a fully formed state (using linkat(2) as described above)
+    *)
+    begin
+      try
+        Unix.link
+          ~follow:true
+          (Printf.sprintf "/proc/self/fd/%s" (string_of_fd fd))
+          path;
+        Some fd
+      with
+      | Unix.Unix_error (Unix.EEXIST, _, _) ->
+        Unix.close fd;
+        None
+    end
+  with
+  | exn ->
+    let e = Exception.wrap exn in
+    Unix.close fd;
+    Exception.reraise e
+
+let protected_read_exn (filename : string) : string =
+  (* TODO(ljw): this function is vulnerable to EINTR. Although we only hit it about once a month. *)
+  (* TODO(ljw): we should use atomic-create for this! *)
+
+  (* We can't use the standard Disk.cat because we need to read from an existing (locked)
+     fd for the file; not open the file a second time and read from that. *)
+  let cat_from_fd (fd : Unix.file_descr) : string =
+    let total = Unix.lseek fd 0 Unix.SEEK_END in
+    let _0 = Unix.lseek fd 0 Unix.SEEK_SET in
+    let buf = Bytes.create total in
+    let rec rec_read offset =
+      if offset = total then
+        ()
+      else
+        let bytes_read = Unix.read fd buf offset (total - offset) in
+        if bytes_read = 0 then raise End_of_file;
+        rec_read (offset + bytes_read)
+    in
+    rec_read 0;
+    Bytes.to_string buf
+  in
+  (* Unix has no way to atomically create a file and lock it; fnctl inherently
+     only works on an existing file. There's therefore a race where the writer
+     might create the file before locking it, but we get our read lock in first.
+     We'll work around this with a hacky sleep+retry. Other solutions would be
+     to have the file always exist, or to use a separate .lock file. *)
+  let rec retry_if_empty () =
+    let fd = Unix.openfile filename [Unix.O_RDONLY] 0o666 in
+    let content =
+      Utils.try_finally
+        ~f:(fun () ->
+          Unix.lockf fd Unix.F_RLOCK 0;
+          cat_from_fd fd)
+        ~finally:(fun () -> Unix.close fd)
+    in
+    if String.is_empty content then
+      let () = Unix.sleepf 0.001 in
+      retry_if_empty ()
+    else
+      content
+  in
+  retry_if_empty ()
+
+let protected_write_exn (filename : string) (content : string) : unit =
+  if String.is_empty content then failwith "Empty content not supported.";
+  with_umask 0o000 (fun () ->
+      let fd = Unix.openfile filename [Unix.O_RDWR; Unix.O_CREAT] 0o666 in
+      Utils.try_finally
+        ~f:(fun () ->
+          Unix.lockf fd Unix.F_LOCK 0;
+          let _written =
+            Unix.write_substring fd content 0 (String.length content)
+          in
+          Unix.ftruncate fd (String.length content))
+        ~finally:(fun () -> Unix.close fd))
+
+let with_lock
+    (fd : Unix.file_descr) (lock_command : Unix.lock_command) ~(f : unit -> 'a)
+    =
+  (* helper function to set current file position to 0, then do "f",
+     then restore it to what it was before *)
+  let with_pos0 ~f =
+    let pos = Unix.lseek fd 0 Unix.SEEK_CUR in
+    let _ = Unix.lseek fd 0 Unix.SEEK_SET in
+    let result = f () in
+    let _ = Unix.lseek fd pos Unix.SEEK_SET in
+    result
+  in
+
+  Utils.try_finally
+    ~f:(fun () ->
+      (* lockf is applied starting at the file-descriptors current position.
+         We use "with_pos0" so that when we acquire or release the lock,
+         we're locking from the start of the file through to (len=0) the end. *)
+      with_pos0 ~f:(fun () -> restart_on_EINTR (Unix.lockf fd lock_command) 0);
+      f ())
+    ~finally:(fun () ->
+      with_pos0 ~f:(fun () -> restart_on_EINTR (Unix.lockf fd Unix.F_ULOCK) 0);
+      ())
+
+let redirect_stdout_and_stderr_to_file (filename : string) : unit =
+  let old_stdout = Unix.dup Unix.stdout in
+  let old_stderr = Unix.dup Unix.stderr in
+  Utils.try_finally
+    ~finally:(fun () ->
+      (* Those two old_* handles must be closed so as not to have dangling FDs.
+         Neither success nor failure path holds onto them: the success path ignores
+         then, and the failure path dups them. That's why we can close them here. *)
+      (try Unix.close old_stdout with
+      | _ -> ());
+      (try Unix.close old_stderr with
+      | _ -> ());
+      ())
+    ~f:(fun () ->
+      try
+        (* We want both stdout and stderr to be redirected to the same file.
+           Do not attempt to open a file that's already open:
+           https://wiki.sei.cmu.edu/confluence/display/c/FIO24-C.+Do+not+open+a+file+that+is+already+open
+           Use dup for this scenario instead:
+           https://stackoverflow.com/questions/15155314/redirect-stdout-and-stderr-to-the-same-file-and-restore-it *)
+        freopen filename "w" Unix.stdout;
+        Unix.dup2 Unix.stdout Unix.stderr;
+        ()
+      with
+      | exn ->
+        let e = Exception.wrap exn in
+        (try Unix.dup2 old_stdout Unix.stdout with
+        | _ -> ());
+        (try Unix.dup2 old_stderr Unix.stderr with
+        | _ -> ());
+        Exception.reraise e)

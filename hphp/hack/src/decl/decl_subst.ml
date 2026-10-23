@@ -1,4 +1,4 @@
-(**
+(*
  * Copyright (c) 2015, Facebook, Inc.
  * All rights reserved.
  *
@@ -7,10 +7,11 @@
  *
  *)
 
-open Hh_core
+open Hh_prelude
 open Typing_defs
-
 module Reason = Typing_reason
+
+type decl_subst = decl_ty S_map.t
 
 (*****************************************************************************)
 (* Builds a substitution out of a list of type parameters and a list of types.
@@ -26,19 +27,31 @@ module Reason = Typing_reason
  *)
 (*****************************************************************************)
 
-let make tparams tyl =
+let make_locl tparams tyl =
+  let make_subst_tparam (subst, tyl) t =
+    match tyl with
+    | [] -> (subst, [])
+    | ty :: rl -> (S_map.add (snd t.tp_name) ty subst, rl)
+  in
+  let (subst, _) =
+    List.fold tparams ~init:(S_map.empty, tyl) ~f:make_subst_tparam
+  in
+  subst
+
+let make_decl tparams tyl =
   (* We tolerate missing types in silent_mode. When that happens, we bind
    * all the parameters we can, and bind the remaining ones to "Tany".
    *)
-  let make_subst_tparam subst tyl (_, (_, tparam_name), _, _) =
-    let ty =
-      match !tyl with
-      | [] -> Reason.Rnone, Tany
-      | ty :: rl -> tyl := rl; ty
+  let make_subst_tparam (subst, tyl) t =
+    let (ty, tyl) =
+      match tyl with
+      | [] ->
+        ((Typing_defs.mk (Reason.none, Typing_defs.make_tany ()) : decl_ty), [])
+      | ty :: rl -> (ty, rl)
     in
-    subst := SMap.add tparam_name ty !subst
+    (S_map.add (snd t.tp_name) ty subst, tyl)
   in
-  let subst = ref SMap.empty in
-  let tyl = ref tyl in
-  List.iter tparams (make_subst_tparam subst tyl);
-  !subst
+  let (subst, _) =
+    List.fold tparams ~init:(S_map.empty, tyl) ~f:make_subst_tparam
+  in
+  subst

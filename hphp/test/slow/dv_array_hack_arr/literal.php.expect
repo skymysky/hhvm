@@ -18,13 +18,11 @@ vec(12) {
   string(3) "abc"
   int(100)
   float(1.23)
-  object(stdClass)#1 (0) {
+  object(stdClass) (0) {
   }
   resource(4) of type (xml)
-  array(2) {
-    [0]=>
+  vec(2) {
     int(1)
-    [1]=>
     int(2)
   }
   vec(2) {
@@ -92,15 +90,13 @@ dict(12) {
   ["key3"]=>
   float(1.23)
   [40]=>
-  object(stdClass)#1 (0) {
+  object(stdClass) (0) {
   }
   [50]=>
   resource(5) of type (xml)
   [60]=>
-  array(2) {
-    [0]=>
+  vec(2) {
     int(1)
-    [1]=>
     int(2)
   }
   ["key4"]=>

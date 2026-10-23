@@ -1,4 +1,4 @@
-<?hh // decl /* -*- php -*- */
+<?hh /* -*- php -*- */
 /**
  * Copyright (c) 2014, Facebook, Inc.
  * All rights reserved.
@@ -8,122 +8,220 @@
  *
  */
 
-const int DNS_A = 1;
-const int DNS_A6 = 16777216;
-const int DNS_AAAA = 134217728;
-const int DNS_ALL = 251713587;
-const int DNS_ANY = 268435456;
-const int DNS_CNAME = 16;
-const int DNS_HINFO = 4096;
-const int DNS_MX = 16384;
-const int DNS_NAPTR = 67108864;
-const int DNS_NS = 2;
-const int DNS_PTR = 2048;
-const int DNS_SOA = 32;
-const int DNS_SRV = 33554432;
-const int DNS_TXT = 32768;
+namespace {
 
-const int LOG_ALERT = 1;
-const int LOG_AUTH = 32;
-const int LOG_AUTHPRIV = 80;
-const int LOG_CONS = 2;
-const int LOG_CRIT = 2;
-const int LOG_CRON = 72;
-const int LOG_DAEMON = 24;
-const int LOG_DEBUG = 7;
-const int LOG_EMERG = 0;
-const int LOG_ERR = 3;
-const int LOG_INFO = 6;
-const int LOG_KERN = 0;
-const int LOG_LOCAL0 = 128;
-const int LOG_LOCAL1 = 136;
-const int LOG_LOCAL2 = 144;
-const int LOG_LOCAL3 = 152;
-const int LOG_LOCAL4 = 160;
-const int LOG_LOCAL5 = 168;
-const int LOG_LOCAL6 = 176;
-const int LOG_LOCAL7 = 184;
-const int LOG_LPR = 48;
-const int LOG_MAIL = 16;
-const int LOG_NDELAY = 8;
-const int LOG_NEWS = 56;
-const int LOG_NOTICE = 5;
-const int LOG_NOWAIT = 16;
-const int LOG_ODELAY = 4;
-const int LOG_PERROR = 32;
-const int LOG_PID = 1;
-const int LOG_SYSLOG = 40;
-const int LOG_USER = 8;
-const int LOG_UUCP = 64;
-const int LOG_WARNING = 4;
+const int DNS_A;
+const int DNS_A6;
+const int DNS_AAAA;
+const int DNS_ALL;
+const int DNS_ANY;
+const int DNS_CAA;
+const int DNS_CNAME;
+const int DNS_HINFO;
+const int DNS_MX;
+const int DNS_NAPTR;
+const int DNS_NS;
+const int DNS_PTR;
+const int DNS_SOA;
+const int DNS_SRV;
+const int DNS_TXT;
+
+const int LOG_ALERT;
+const int LOG_AUTH;
+const int LOG_AUTHPRIV;
+const int LOG_CONS;
+const int LOG_CRIT;
+const int LOG_CRON;
+const int LOG_DAEMON;
+const int LOG_DEBUG;
+const int LOG_EMERG;
+const int LOG_ERR;
+const int LOG_INFO;
+const int LOG_KERN;
+const int LOG_LOCAL0;
+const int LOG_LOCAL1;
+const int LOG_LOCAL2;
+const int LOG_LOCAL3;
+const int LOG_LOCAL4;
+const int LOG_LOCAL5;
+const int LOG_LOCAL6;
+const int LOG_LOCAL7;
+const int LOG_LPR;
+const int LOG_MAIL;
+const int LOG_NDELAY;
+const int LOG_NEWS;
+const int LOG_NOTICE;
+const int LOG_NOWAIT;
+const int LOG_ODELAY;
+const int LOG_PERROR;
+const int LOG_PID;
+const int LOG_SYSLOG;
+const int LOG_USER;
+const int LOG_UUCP;
+const int LOG_WARNING;
 
 <<__PHPStdLib>>
-function gethostname();
+function gethostname()[]: HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function gethostbyaddr($ip_address);
+function gethostbyaddr(string $ip_address): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function gethostbyname($hostname);
+function gethostbyname(string $hostname): string;
 <<__PHPStdLib>>
-function gethostbynamel($hostname);
+function gethostbynamel(string $hostname): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function getprotobyname($name);
+function getprotobyname(string $name): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function getprotobynumber($number);
+function getprotobynumber(int $number): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function getservbyname($service, $protocol);
+function getservbyname(
+  string $service,
+  string $protocol,
+): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function getservbyport($port, $protocol);
-<<__PHPStdLib, __Rx>>
-function inet_ntop($in_addr);
-<<__PHPStdLib, __Rx>>
-function inet_pton($address);
-<<__PHPStdLib, __Rx>>
-function ip2long($ip_address);
-<<__PHPStdLib, __Rx>>
-function long2ip($proper_address);
+function getservbyport(
+  int $port,
+  string $protocol,
+): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function dns_check_record($host, $type = null);
+function inet_ntop(string $in_addr)[]: HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function checkdnsrr($host, $type = null);
+function inet_ntop_folly(string $in_addr)[]: ?string;
 <<__PHPStdLib>>
-function dns_get_record($hostname, $type = -1, &$authns = null, &$addtl = null);
+function inet_ntop_nullable(string $in_addr)[]: ?string;
 <<__PHPStdLib>>
-function dns_get_mx($hostname, &$mxhosts, &$weights = null);
+function inet_pton(string $address)[]: HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function getmxrr($hostname, &$mxhosts, &$weight = null);
+function ip2long(string $ip_address)[]: HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function fsockopen($hostname, $port = -1, &$errnum = null, &$errstr = null, $timeout = 0.0);
+function long2ip(string $proper_address)[]: string;
 <<__PHPStdLib>>
-function pfsockopen($hostname, $port = -1, &$errnum = null, &$errstr = null, $timeout = 0.0);
+function dns_check_record(
+  string $host,
+  string $type = 'MX',
+): bool;
 <<__PHPStdLib>>
-function socket_get_status($stream);
+function checkdnsrr(
+  string $host,
+  string $type = "MX",
+): bool;
 <<__PHPStdLib>>
-function socket_set_blocking($stream, $mode);
+function dns_get_record(
+  string $hostname,
+  int $type,
+  inout HH\FIXME\MISSING_PARAM_TYPE $authns,
+  inout HH\FIXME\MISSING_PARAM_TYPE $addtl,
+): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function socket_set_timeout($stream, $seconds, $microseconds = 0);
+function dns_get_mx(
+  string $hostname,
+  inout HH\FIXME\MISSING_PARAM_TYPE $mxhosts,
+  inout HH\FIXME\MISSING_PARAM_TYPE $weights,
+): bool;
 <<__PHPStdLib>>
-function header($str, $replace = true, $http_response_code = 0);
+function getmxrr(
+  string $hostname,
+  inout HH\FIXME\MISSING_PARAM_TYPE $mxhosts,
+  inout HH\FIXME\MISSING_PARAM_TYPE $weight,
+): bool;
 <<__PHPStdLib>>
-function http_response_code($response_code = 0);
+function fsockopen(
+  string $hostname,
+  int $port,
+  inout HH\FIXME\MISSING_PARAM_TYPE $errnum,
+  inout HH\FIXME\MISSING_PARAM_TYPE $errstr,
+  float $timeout = 0.0,
+): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function headers_list();
+function pfsockopen(
+  string $hostname,
+  int $port,
+  inout HH\FIXME\MISSING_PARAM_TYPE $errnum,
+  inout HH\FIXME\MISSING_PARAM_TYPE $errstr,
+  float $timeout = 0.0,
+): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function get_http_request_size();
+function socket_get_status(
+  resource $stream,
+): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function headers_sent(&$file = null, &$line = null);
+function socket_set_blocking(
+  resource $stream,
+  bool $mode,
+): bool;
 <<__PHPStdLib>>
-function header_register_callback($callback);
+function socket_set_timeout(
+  resource $stream,
+  int $seconds,
+  int $microseconds = 0,
+): bool;
 <<__PHPStdLib>>
-function header_remove($name = null);
+function header(
+  string $str,
+  bool $replace = true,
+  int $http_response_code = 0,
+): void;
 <<__PHPStdLib>>
-function setcookie($name, $value = null, $expire = 0, $path = null, $domain = null, $secure = false, $httponly = false);
+function http_response_code(
+  int $response_code = 0,
+): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function setrawcookie($name, $value = null, $expire = 0, $path = null, $domain = null, $secure = false, $httponly = false);
+function headers_list()[read_globals]: HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function define_syslog_variables();
+function get_http_request_size(): int;
 <<__PHPStdLib>>
-function openlog($ident, $option, $facility);
+function headers_sent(): bool;
 <<__PHPStdLib>>
-function closelog();
+function headers_sent_with_file_line(
+  inout HH\FIXME\MISSING_PARAM_TYPE $file,
+  inout HH\FIXME\MISSING_PARAM_TYPE $line,
+): bool;
+<<__PHPStdLib>>
+function header_register_callback(
+  HH\FIXME\MISSING_PARAM_TYPE $callback,
+): HH\FIXME\MISSING_RETURN_TYPE;
+<<__PHPStdLib>>
+function header_remove(
+  ?string $name = null,
+): void;
+<<__PHPStdLib>>
+function setcookie(
+  string $name,
+  string $value = "",
+  int $expire = 0,
+  string $path = "",
+  string $domain = "",
+  bool $secure = false,
+  bool $httponly = false,
+): bool;
+<<__PHPStdLib>>
+function setrawcookie(
+  string $name,
+  string $value = "",
+  int $expire = 0,
+  string $path = "",
+  string $domain = "",
+  bool $secure = false,
+  bool $httponly = false,
+): bool;
+<<__PHPStdLib>>
+function define_syslog_variables(): void;
+<<__PHPStdLib>>
+function openlog(
+  string $ident,
+  int $option,
+  int $facility,
+): bool;
+<<__PHPStdLib>>
+function closelog(): bool;
 <<__PHPStdLib>>
 function syslog(int $priority, string $message): bool;
+
+}
+
+namespace HH {
+
+function parse_cookies(
+  string $header_value,
+)[]: dict<arraykey, mixed>;
+
+}

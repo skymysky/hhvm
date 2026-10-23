@@ -1,4 +1,4 @@
-<?php
+<?hh
 
 const ONE = 1;
 const TWO = ONE + 1;
@@ -13,7 +13,7 @@ class C {
   const ONE_THIRD = ONE / self::THREE;
   const SENTENCE = 'The value of THREE is '.self::THREE;
 
-  public function f($a = ONE + self::THREE) {
+  public function f($a = ONE + self::THREE) :mixed{
     return $a;
   }
 }
@@ -25,7 +25,7 @@ class D {
   const PROTECT = self::NULL ?: self::CHOOSE;
 }
 
-function main() {
+function main() :mixed{
   var_dump(ONE);
   var_dump(TWO);
   var_dump(THREE);
@@ -44,4 +44,8 @@ function main() {
   var_dump(D::PROTECT);
 }
 
+
+<<__EntryPoint>>
+function main_const_expr() :mixed{
 main();
+}

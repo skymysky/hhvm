@@ -1,15 +1,13 @@
-<?php
+<?hh
 /* Prototype  : float round  ( float $val  [, int $precision  ] )
  * Description: Returns the rounded value of val  to specified precision (number of digits
  * after the decimal point)
  * Source code: ext/standard/math.c
  */
 
+<<__EntryPoint>> function main(): void {
 echo "*** Testing round() : usage variations ***\n";
 
-//get an unset variable
-$unset_var = 10;
-unset ($unset_var);
 
 // heredoc string
 $heredoc = <<<EOT
@@ -17,20 +15,15 @@ abc
 xyz
 EOT;
 
-// get a class
-class classA
-{
-}
-
 // get a resource variable
 $fp = fopen(__FILE__, "r");
 
-$inputs = array(
+$inputs = vec[
        // int data
 /*1*/  0,
        1,
        12345,
-       -2345,       
+       -2345,
        2147483647,
 
        // float data
@@ -49,37 +42,28 @@ $inputs = array(
        false,
        TRUE,
        FALSE,
-       
+
        // empty data
 /*17*/ "",
        '',
-       array(),
+       vec[],
 
        // string data
 /*20*/ "abcxyz",
        'abcxyz',
        $heredoc,
-       
-       // object data
-/*23*/ new classA(),       
-       
-       // undefined data
-/*24*/ @$undefined_var,
-
-       // unset data
-/*25*/ @$unset_var,
 
        // resource variable
-/*26*/ $fp
-);
+/*24*/ $fp
+];
 
 // loop through each element of $inputs to check the behaviour of round()
 $iterator = 1;
 foreach($inputs as $input) {
-	echo "\n-- Iteration $iterator --\n";
-	var_dump(round($input, 14));
-	$iterator++;
+    echo "\n-- Iteration $iterator --\n";
+    var_dump(round($input, 14));
+    $iterator++;
 };
 fclose($fp);
-?>
-===Done===
+echo "===Done===";
+}

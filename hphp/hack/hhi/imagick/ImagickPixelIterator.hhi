@@ -1,4 +1,4 @@
-<?hh // decl /* -*- mode: php -*- */
+<?hh /* -*- mode: php -*- */
 /**
  * Copyright (c) 2014, Facebook, Inc.
  * All rights reserved.
@@ -8,14 +8,13 @@
  *
  */
 
-class ImagickPixelIterator implements
-  KeyedTraversable<int, darray<int, ImagickPixel>>,
-  Iterator<darray<int, ImagickPixel>> {
+class ImagickPixelIterator
+  implements
+    KeyedTraversable<int, varray<ImagickPixel>>,
+    Iterator<varray<ImagickPixel>> {
 
   // Methods
-  public static function getPixelIterator(
-    Imagick $wand,
-  ): ImagickPixelIterator;
+  public static function getPixelIterator(Imagick $wand): ImagickPixelIterator;
   public static function getPixelRegionIterator(
     Imagick $wand,
     int $x,
@@ -23,7 +22,7 @@ class ImagickPixelIterator implements
     int $columns,
     int $rows,
   ): ImagickPixelIterator;
-  public function current(): darray<int, ImagickPixel>;
+  public function current(): varray<ImagickPixel>;
   public function key(): int;
   public function next(): void;
   public function rewind(): void;
@@ -31,10 +30,10 @@ class ImagickPixelIterator implements
   public function clear(): bool;
   public function __construct(Imagick $wand);
   public function destroy(): bool;
-  public function getCurrentIteratorRow(): darray<int, ImagickPixel>;
+  public function getCurrentIteratorRow(): varray<ImagickPixel>;
   public function getIteratorRow(): int;
-  public function getNextIteratorRow(): darray<int, ImagickPixel>;
-  public function getPreviousIteratorRow(): darray<int, ImagickPixel>;
+  public function getNextIteratorRow(): varray<ImagickPixel>;
+  public function getPreviousIteratorRow(): varray<ImagickPixel>;
   public function newPixelIterator(Imagick $wand): bool;
   public function newPixelRegionIterator(
     Imagick $wand,

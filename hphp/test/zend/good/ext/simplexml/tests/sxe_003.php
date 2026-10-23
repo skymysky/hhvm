@@ -1,6 +1,7 @@
-<?php 
-
-$xml =<<<EOF
+<?hh
+<<__EntryPoint>>
+function main(): void {
+  $xml = <<<EOF
 <?xml version='1.0'?>
 <!DOCTYPE sxe SYSTEM "notfound.dtd">
 <sxe id="elem1">
@@ -27,26 +28,30 @@ $xml =<<<EOF
 </sxe>
 EOF;
 
-$sxe = simplexml_load_string((binary)$xml, 'SimpleXMLIterator');
+  $sxe = simplexml_load_string((string)$xml, 'SimpleXMLIterator');
 
-foreach($sxe->getChildren() as $name => $data) {
-	var_dump($name);
-	var_dump(get_class($data));
-	var_dump(trim($data));
+  try {
+    foreach ($sxe->getChildren() as $name => $data) {
+      var_dump($name);
+      var_dump(get_class($data));
+      var_dump(trim($data->__toString()));
+    }
+  } catch (InvalidForeachArgumentException $e) {
+    var_dump($e->getMessage());
+  }
+
+  echo "===RESET===\n";
+
+  for ($sxe->rewind(); $sxe->valid(); $sxe->next()) {
+    var_dump($sxe->hasChildren());
+    var_dump(trim($sxe->key()));
+    var_dump(trim(($sxe->current())->__toString()));
+    foreach ($sxe->getChildren() as $name => $data) {
+      var_dump($name);
+      var_dump(get_class($data));
+      var_dump(trim($data->__toString()));
+    }
+  }
+
+  echo "===DONE===\n";
 }
-
-echo "===RESET===\n";
-
-for ($sxe->rewind(); $sxe->valid(); $sxe->next()) {
-	var_dump($sxe->hasChildren());
-	var_dump(trim($sxe->key()));
-	var_dump(trim($sxe->current()));
-	foreach($sxe->getChildren() as $name => $data) {
-		var_dump($name);
-		var_dump(get_class($data));
-		var_dump(trim($data));
-	}
-}
-
-?>
-===DONE===

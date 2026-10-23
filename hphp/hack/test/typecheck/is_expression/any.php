@@ -3,7 +3,7 @@
 /**
  * TODO(T29281383)
  */
-function main($x): void {
+function main(/* TAny */ $x): void {
   if ($x is int) {
     expect_int($x);
     expect_string($x);

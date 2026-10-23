@@ -25,7 +25,7 @@
  * and select from an array of items. Typically, the message format will come
  * from resources and the arguments will be dynamically set at runtime.
  */
-<<__NativeData("MessageFormatter")>>
+<<__NativeData>>
 class MessageFormatter {
   /**
    * Constructs a new Message Formatter
@@ -76,7 +76,7 @@ class MessageFormatter {
    */
   public static function formatMessage(string $locale,
                                        string $pattern,
-                                       array $args): mixed {
+                                       darray<arraykey, mixed> $args): mixed {
     $fmt = new MessageFormatter($locale, $pattern);
     return $fmt->format($args);
   }
@@ -89,7 +89,7 @@ class MessageFormatter {
    * @return string - The formatted string, or FALSE if an error occurred
    */
   <<__Native>>
-  public function format(array $args): mixed;
+  public function format(darray<arraykey, mixed> $args): mixed;
 
   /**
    * Get the error code from last operation
@@ -106,7 +106,7 @@ class MessageFormatter {
    * @return string - Description of the last error.
    */
   <<__Native>>
-  public function getErrorMessage(): string;
+  public function getErrorMessage(): ?string;
 
   /**
    * Get the locale for which the formatter was created.
@@ -114,7 +114,7 @@ class MessageFormatter {
    * @return string - The locale name
    */
   <<__Native>>
-  public function getLocale(): string;
+  public function getLocale(): ?string;
 
   /**
    * Get the pattern used by the formatter
@@ -122,7 +122,7 @@ class MessageFormatter {
    * @return string - The pattern string for this message formatter
    */
   <<__Native>>
-  public function getPattern(): string;
+  public function getPattern(): ?string;
 
   /**
    * Quick parse input string
@@ -203,8 +203,10 @@ function msgfmt_create(string $locale,
  */
 function msgfmt_format_message(string $locale,
                                string $pattern,
-                               array $args): string {
-  return MessageFormatter::formatMessage($locale, $pattern, $args);
+                               darray<arraykey, mixed> $args): string {
+  return HH\FIXME\UNSAFE_CAST<mixed, string>(
+    MessageFormatter::formatMessage($locale, $pattern, $args)
+  );
 }
 
 /**
@@ -216,7 +218,7 @@ function msgfmt_format_message(string $locale,
  * @return string - The formatted string, or FALSE if an error occurred
  */
 function msgfmt_format(MessageFormatter $fmt,
-                       array $args): mixed {
+                       darray<arraykey, mixed> $args): mixed {
   return $fmt->format($args);
 }
 
@@ -239,7 +241,7 @@ function msgfmt_get_error_code(MessageFormatter $fmt): int {
  *
  * @return string - Description of the last error.
  */
-function msgfmt_get_error_message(MessageFormatter $fmt): string {
+function msgfmt_get_error_message(MessageFormatter $fmt): ?string {
   return $fmt->getErrorMessage();
 }
 
@@ -250,7 +252,7 @@ function msgfmt_get_error_message(MessageFormatter $fmt): string {
  *
  * @return string - The locale name
  */
-function msgfmt_get_locale(MessageFormatter $fmt): string {
+function msgfmt_get_locale(MessageFormatter $fmt): ?string {
   return $fmt->getLocale();
 }
 
@@ -261,7 +263,7 @@ function msgfmt_get_locale(MessageFormatter $fmt): string {
  *
  * @return string - The pattern string for this message formatter
  */
-function msgfmt_get_pattern(MessageFormatter $fmt): string {
+function msgfmt_get_pattern(MessageFormatter $fmt): ?string {
   return $fmt->getPattern();
 }
 

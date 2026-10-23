@@ -3,20 +3,20 @@
 /**
  * Transliterator provides transliteration of strings.
  */
-<<__NativeData("Transliterator")>>
+<<__NativeData>>
 class Transliterator {
   public string $id = '';
 
   /**
    * This class may only be instantiated by ::create or ::createFromRules
    */
-  private final function __construct() {}
+  private function __construct() {}
 
   /**
    * Setup internal transliterator object
    */
   <<__Native>>
-  private final function __init(string $idOrRules,
+  private function __init(string $idOrRules,
                                 int $direction,
                                 bool $rules): bool;
 
@@ -52,7 +52,7 @@ class Transliterator {
   public static function createFromRules(string $rules,
                                          int $direction = self::FORWARD):
                                                               ?Transliterator {
-    $obj = new Transliterator;
+    $obj = new Transliterator();
     if (!$obj->__init($rules, $direction, true)) {
       return null;
     }
@@ -64,7 +64,7 @@ class Transliterator {
    * Helper for ->createInverse()
    */
   <<__Native>>
-  private final function __createInverse(): ?Transliterator;
+  private function __createInverse(): ?Transliterator;
 
   /**
    * Create an inverse transliterator
@@ -97,7 +97,7 @@ class Transliterator {
    *   or on failure.
    */
   <<__Native>>
-  public function getErrorMessage(): string;
+  public function getErrorMessage(): ?string;
 
   /**
    * Fetch the transliterator's ID
@@ -194,7 +194,7 @@ function transliterator_get_error_message(Transliterator $t): string {
  * @return array - An array of registered transliterator IDs on success,
  *   .
  */
-function transliterator_list_ids(): array {
+function transliterator_list_ids(): varray {
   return Transliterator::listIDs();
 }
 
@@ -212,7 +212,7 @@ function transliterator_transliterate(mixed $tOrId,
                                       string $subject,
                                       int $start = 0,
                                       int $end = -1): mixed {
-  if (!($tOrId instanceof Transliterator)) {
+  if (!($tOrId is Transliterator)) {
     $tOrId = Transliterator::create((string)$tOrId,
                                     Transliterator::FORWARD);
     if (!$tOrId) {
@@ -221,4 +221,3 @@ function transliterator_transliterate(mixed $tOrId,
   }
   return $tOrId->transliterate($subject, $start, $end);
 }
-

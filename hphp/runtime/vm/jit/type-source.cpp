@@ -19,11 +19,9 @@
 #include "hphp/runtime/vm/jit/ir-instruction.h"
 #include "hphp/runtime/vm/jit/ssa-tmp.h"
 
-#include <folly/Format.h>
-
 #include <string>
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 
 bool TypeSource::operator<(const TypeSource& rhs) const {
   if (kind != rhs.kind) {
@@ -52,4 +50,4 @@ std::string show(const TypeSourceSet& typeSrcs) {
   return ret;
 }
 
-}}
+}

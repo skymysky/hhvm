@@ -1,4 +1,4 @@
-<?php
+<?hh
 
 class A {
   private $b = 'b';
@@ -11,9 +11,10 @@ class E {
   static public $h = 'h';
 }
 
-function getProps($class, $obj) {
+function getProps($class, $obj) :mixed{
+  $ret = dict[];
   foreach ((new ReflectionClass($class))->getProperties() as $key => $prop) {
-    $values = array();
+    $values = vec[];
 
     $key = $prop->getName();
 
@@ -28,6 +29,10 @@ function getProps($class, $obj) {
   return $ret;
 }
 
+
+<<__EntryPoint>>
+function main_set_accessible() :mixed{
 $ret = array_merge(getProps('A', new A), getProps('E', 'E'));
-ksort($ret);
+ksort(inout $ret);
 var_dump($ret);
+}

@@ -14,11 +14,9 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_HTTP_SERVER_H_
-#define incl_HPHP_HTTP_SERVER_H_
+#pragma once
 
 #include "hphp/runtime/server/server.h"
-#include "hphp/runtime/server/satellite-server.h"
 #include "hphp/runtime/server/shutdown-stats.h"
 
 #include "hphp/util/async-func.h"
@@ -30,20 +28,21 @@
 namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
 
-struct HttpServer : Synchronizable, TakeoverListener,
-                    Server::ServerEventListener {
+struct HttpServer : Synchronizable, Server::ServerEventListener {
+ public:
   static std::shared_ptr<HttpServer> Server;
   static time_t StartTime;
   static std::atomic<double> LoadFactor;
   static std::atomic_int QueueDiscount;
+  static std::atomic_int SignalReceived;
 
-private:
+ private:
   static std::atomic_int_fast64_t PrepareToStopTime;
   static time_t OldServerStopTime;
   static std::vector<ShutdownStat> ShutdownStats;
   static folly::MicroSpinLock StatsLock; // for ShutdownStats
 
-public:
+ public:
   explicit HttpServer();
   ~HttpServer() override;
 
@@ -55,6 +54,11 @@ public:
    * without running any atexit handlers.
    */
   void runOrExitProcess();
+  /*
+   * A separate method to do the same thing for admin server, which can
+   * be started sooner than the other servers.
+   */
+  void runAdminServerOrExitProcess();
 
   // stop() cannot be called from a signal handler, use stopOnSignal() in that
   // case.
@@ -64,19 +68,14 @@ public:
   bool isStopped() const { return m_stopped;}
 
   void flushLog();
-  void watchDog();
-
-  void takeoverShutdown() override;
 
   void serverStopped(HPHP::Server* server) override;
 
   HPHP::Server* getPageServer() { return m_pageServer.get(); }
-  void getSatelliteStats(std::vector<std::pair<std::string, int>> *stats);
-  // Get total ongoing/queued request count for all satellite servers.
-  std::pair<int, int> getSatelliteRequestCount() const;
 
   static void MarkShutdownStat(ShutdownEvent event);
   static void LogShutdownStats();
+  static void ProfileFlush();
 
   static int64_t GetPrepareToStopTime() {
     // Make sure changes are seen right away after PrepareToStop().
@@ -88,7 +87,7 @@ public:
    * stop it was made.  This function doesn't wait until the previous
    * server exits.  Nothing bad happens if the old server isn't there,
    * or is already in the process of stopping.  These functions are
-   * designed to work when RuntimeOption::StopOldServer is set.
+   * designed to work when Cfg::Server::StopOld is set.
    *
    * Currently they are implemented through commands on admin port.
    * So they will not work if admin server is not present, or if the
@@ -99,8 +98,8 @@ public:
   static bool StopOldServer();
 
   /*
-   * When running with RuntimeOption::StopOldServer, given a target
-   * memory needed (RuntimeOption::ServerRSSNeededMb), check memory
+   * When running with Cfg::Server::StopOld, given a target
+   * memory needed (Cfg::Server::RSSNeededMb), check memory
    * status, stop the old server when necessary, and wait for at most
    * RuntimeOption::OldServerWait seconds after trying to stop the old
    * server, before proceeding regardless of available memory. `final`
@@ -123,15 +122,12 @@ private:
   bool startServer(bool pageServer);
   void onServerShutdown();
   void waitForServers();
+  void startupFailure(const std::string& msg);
 
   // pid file functions
   void createPid();
   void removePid();
   void killPid();
-
-  // memory monitoring functions
-  void dropCache();
-  void checkMemory();
 
   // Allow cleanups (e.g., flush cached values into a database) using
   // PHP code when server stops.
@@ -139,18 +135,14 @@ private:
 
 private:
   std::atomic<bool> m_stopping{false};
-  bool m_stopped;
-  bool m_killed;
-  const char* m_stopReason;
+  bool m_stopped{false};
+  const char* m_stopReason{nullptr};
 
   ServerPtr m_pageServer;
+  ServerPtr m_secondaryPageServer;
   ServerPtr m_adminServer;
-  std::vector<std::unique_ptr<SatelliteServer>> m_satellites;
-  AsyncFunc<HttpServer> m_watchDog;
   ServiceData::CounterCallback m_counterCallback;
 };
 
 ///////////////////////////////////////////////////////////////////////////////
 }
-
-#endif // incl_HPHP_HTTP_SERVER_H_

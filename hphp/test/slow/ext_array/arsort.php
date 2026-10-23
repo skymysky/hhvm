@@ -1,30 +1,34 @@
-<?php
+<?hh
 
-$fruits = array(
+
+<<__EntryPoint>>
+function main_arsort() :mixed{
+$fruits = dict[
   "d" => "lemon",
   "a" => "orange",
   "b" => "banana",
   "c" => "apple"
-);
-arsort($fruits);
+];
+arsort(inout $fruits);
 var_dump($fruits);
 
 
-$fruits = array(
+$fruits = dict[
   "d" => "lemon",
   "a" => "orange",
   "b" => "banana",
   "c" => "apple"
-);
-ksort($fruits);
+];
+ksort(inout $fruits);
 var_dump($fruits);
 
 
-$fruits = array(
+$fruits = dict[
   "d" => "lemon",
   "a" => "orange",
   "b" => "banana",
   "c" => "apple"
-);
-krsort($fruits);
+];
+krsort(inout $fruits);
 var_dump($fruits);
+}

@@ -63,7 +63,7 @@ static void xslt_ext_error_handler(void *,
 // NativeData
 
 const StaticString
-  s_XSLTProcessorData("XSLTProcessorData"),
+  s_XSLTProcessor("XSLTProcessor"),
   s_DOMDocument("DOMDocument"),
   s_DOMElement("DOMElement"),
   s_DOMAttr("DOMAttr"),
@@ -75,13 +75,13 @@ struct XSLTProcessorData {
   m_secprefs(k_XSL_SECPREF_DEFAULT),
   m_registerPhpFunctions(0) {
     if (m_params.empty()) {
-      m_params = Array::Create();
+      m_params = Array::CreateDict();
     }
 
     if (m_registered_phpfunctions.empty()) {
-      m_registered_phpfunctions = Array::Create();
+      m_registered_phpfunctions = Array::CreateDict();
     }
-  };
+  }
 
   ~XSLTProcessorData() {
     sweep();
@@ -102,10 +102,10 @@ struct XSLTProcessorData {
   int m_secprefs;
   int m_registerPhpFunctions;
   Array m_registered_phpfunctions;
-  String m_profile;
+  OptString m_profile;
 
-  Array m_usedElements; // don't let DOMElements get free'd out from under us
-                        // while preparing to create a new document
+  // Only used to hold DOMElements in scope when constructing a new document
+  Array m_usedElements = Array::CreateVec();
 
   xmlDocPtr apply_stylesheet();
 };
@@ -262,8 +262,8 @@ static xmlChar *xslt_string_to_xpathexpr(const char *str) {
   return value;
 }
 
-static Object newNode(const String name, xmlNodePtr obj) {
-  auto const cls = Unit::lookupClass(name.get());
+static Object newNode(const OptString name, xmlNodePtr obj) {
+  auto const cls = Class::load(name.get());
   Object ret{cls};
   auto retData = Native::data<DOMNode>(ret);
   retData->setNode(obj);
@@ -308,18 +308,17 @@ static void xslt_ext_function_php(xmlXPathParserContextPtr ctxt,
     return;
   }
 
-  Array args;
-  // Reverse order to pop values off ctxt stack
+  Array args_vec = Array::CreateVec();
   for (int i = nargs - 2; i >= 0; i--) {
     Variant arg;
     obj = valuePop(ctxt);
     if (obj == nullptr) {
-      args.prepend(init_null());
+      args_vec.append(init_null());
       continue;
     }
     switch (obj->type) {
     case XPATH_STRING:
-      arg = String((char*)obj->stringval, CopyString);
+      arg = OptString((char*)obj->stringval, CopyString);
       break;
     case XPATH_BOOLEAN:
       arg = (bool)obj->boolval;
@@ -330,10 +329,10 @@ static void xslt_ext_function_php(xmlXPathParserContextPtr ctxt,
     case XPATH_NODESET:
       if (type == 1) {
         char *str = (char*)xmlXPathCastToString(obj);
-        arg = String(str, CopyString);
+        arg = OptString(str, CopyString);
         xmlFree(str);
       } else if (type == 2) {
-        arg = Array::Create();
+        arg = Array::CreateVec();
         if (obj->nodesetval && obj->nodesetval->nodeNr > 0) {
           for (int j = 0; j < obj->nodesetval->nodeNr; j++) {
             // TODO: not sure this is the right thing to do.
@@ -342,33 +341,39 @@ static void xslt_ext_function_php(xmlXPathParserContextPtr ctxt,
             if (node->type == XML_ELEMENT_NODE) {
               Object element = newNode(s_DOMElement,
                                        xmlCopyNode(node, /*extended*/ 1));
-              arg.toArrRef().append(element);
+              arg.asArrRef().append(element);
             } else if (node->type == XML_ATTRIBUTE_NODE) {
               Object attribute =
                 newNode(s_DOMAttr,
                         (xmlNodePtr)xmlCopyProp(nullptr, (xmlAttrPtr)node));
-              arg.toArrRef().append(attribute);
+              arg.asArrRef().append(attribute);
             } else if (node->type == XML_TEXT_NODE) {
               Object text =
                 newNode(s_DOMText,
                         (xmlNodePtr)xmlNewText(xmlNodeGetContent(node)));
-              arg.toArrRef().append(text);
+              arg.asArrRef().append(text);
             } else {
               raise_warning("Unhandled node type '%d'", node->type);
               // Use a generic DOMNode as fallback for now.
               Object nodeobj = newNode(s_DOMNode,
                                        xmlCopyNode(node, /*extended*/ 1));
-              arg.toArrRef().append(nodeobj);
+              arg.asArrRef().append(nodeobj);
             }
           }
         }
       }
       break;
     default:
-      arg = String((char*)xmlXPathCastToString(obj), CopyString);
+      arg = OptString((char*)xmlXPathCastToString(obj), CopyString);
     }
     xmlXPathFreeObject(obj);
-    args.prepend(arg);
+    args_vec.append(arg);
+  }
+
+  // Reverse order to pop values off ctxt stack
+  Array args;
+  for (auto i = args_vec.size(); i > 0; i--) {
+    args.append(args_vec.lookup(safe_cast<int64_t>(i - 1)));
   }
 
   obj = valuePop(ctxt);
@@ -379,7 +384,7 @@ static void xslt_ext_function_php(xmlXPathParserContextPtr ctxt,
     valuePush(ctxt, xmlXPathNewString((xmlChar*)""));
     return;
   }
-  String handler((char*)obj->stringval, CopyString);
+  OptString handler((char*)obj->stringval, CopyString);
   xmlXPathFreeObject(obj);
 
   if (!is_callable(handler)) {
@@ -398,7 +403,7 @@ static void xslt_ext_function_php(xmlXPathParserContextPtr ctxt,
       ObjectData *retval_data = retval.asCObjRef().get();
       xmlNode* nodep = Native::data<DOMNode>(retval_data)->nodep();
       valuePush(ctxt, xmlXPathNewNodeSet(nodep));
-      intern->m_usedElements.prepend(retval);
+      intern->m_usedElements.append(retval);
     } else if (retval.is(KindOfBoolean)) {
       valuePush(ctxt, xmlXPathNewBoolean(retval.toBoolean()));
     } else if (retval.isObject()) {
@@ -406,7 +411,7 @@ static void xslt_ext_function_php(xmlXPathParserContextPtr ctxt,
       // Push an empty string to get an xslt result.
       valuePush(ctxt, xmlXPathNewString((xmlChar*)""));
     } else {
-      String sretval = retval.toString();
+      OptString sretval = retval.toString();
       valuePush(ctxt, xmlXPathNewString((xmlChar*)sretval.data()));
     }
   }
@@ -444,7 +449,7 @@ static void xslt_ext_error_handler(void* /*ctx*/, const char* fmt, ...) {
 
 static Variant
 HHVM_METHOD(XSLTProcessor, getParameter, const Variant& /*namespaceURI*/,
-            const String& localName) {
+            const OptString& localName) {
   auto data = Native::data<XSLTProcessorData>(this_);
 
   // namespaceURI argument is unused in PHP5 XSL extension.
@@ -475,18 +480,8 @@ static void HHVM_METHOD(XSLTProcessor, importStylesheet,
     if (doc == nullptr) {
       raise_error("Unable to import stylesheet");
     }
-  } else if (stylesheet.instanceof(SimpleXMLElement_classof())) {
-    auto ssNode = SimpleXMLElement_exportNode(stylesheet);
-    // This doc will be freed by xsltFreeStylesheet.
-    doc = xmlNewDoc((const xmlChar*)"1.0");
-    xmlNodePtr node = xmlCopyNode(ssNode, /*extended*/ 1);
-    if (doc == nullptr || node == nullptr) {
-      raise_error("Unable to import stylesheet");
-    }
-    xmlDocSetRootElement(doc, node);
   } else {
-    raise_error("Object must be an instance of DOMDocument or "
-                "SimpleXMLElement");
+    raise_error("Object must be an instance of DOMDocument");
   }
 
   if (doc) {
@@ -500,7 +495,7 @@ static void HHVM_METHOD(XSLTProcessor, importStylesheet,
 
 static bool
 HHVM_METHOD(XSLTProcessor, removeParameter, const Variant& /*namespaceURI*/,
-            const String& localName) {
+            const OptString& localName) {
   auto data = Native::data<XSLTProcessorData>(this_);
 
   // namespaceURI argument is unused in PHP5 XSL extension.
@@ -549,22 +544,13 @@ HHVM_METHOD(XSLTProcessor, setParameter, const Variant& /*namespaceURI*/,
 
   // namespaceURI argument is unused in PHP5 XSL extension.
   if (localName.isString() && value.isString()) {
-    if (data->m_params.exists(localName)) {
-      data->m_params.set(localName, value);
-    } else {
-      data->m_params.add(localName, value);
-    }
-
+    data->m_params.set(localName, value);
     return true;
   } else if (localName.isArray() && value.isNull()) {
     int ret = true;
     for (ArrayIter iter(localName); iter; ++iter) {
       if (iter.first().isString() && iter.second().isString()) {
-        if (data->m_params.exists(iter.first().toString())) {
-          data->m_params.set(iter.first().toString(), iter.second().toString());
-        } else {
-          data->m_params.add(iter.first().toString(), iter.second().toString());
-        }
+        data->m_params.set(iter.first().toString(), iter.second().toString());
       } else {
         ret = false;
       }
@@ -597,7 +583,7 @@ static int64_t HHVM_METHOD(XSLTProcessor, setSecurityPrefs,
 }
 
 static bool HHVM_METHOD(XSLTProcessor, setProfiling,
-                        const String& filename) {
+                        const OptString& filename) {
   auto data = Native::data<XSLTProcessorData>(this_);
 
   if (!FileUtil::checkPathAndWarn(filename, "XSLTProcessor::setProfiling", 1)) {
@@ -605,7 +591,7 @@ static bool HHVM_METHOD(XSLTProcessor, setProfiling,
   }
 
   if (filename.length() > 0) {
-    String translated = File::TranslatePath(filename);
+    OptString translated = File::TranslatePath(filename);
     Stream::Wrapper* w = Stream::getWrapperFromURI(translated);
     if (!w) return false;
     if (w->access(translated, W_OK)) {
@@ -639,7 +625,7 @@ static Variant HHVM_METHOD(XSLTProcessor, transformToDoc,
 
 static Variant HHVM_METHOD(XSLTProcessor, transformToURI,
                            const Object& doc,
-                           const String& uri) {
+                           const OptString& uri) {
   auto data = Native::data<XSLTProcessorData>(this_);
 
   if (!FileUtil::checkPathAndWarn(uri, "XSLTProcessor::transformToUri", 2)) {
@@ -652,7 +638,7 @@ static Variant HHVM_METHOD(XSLTProcessor, transformToURI,
       libxml_register_node(xmlCopyDoc ((xmlDocPtr)domdoc->nodep(),
                                        /*recursive*/ 1));
 
-    String translated = libxml_get_valid_file_path(uri);
+    OptString translated = libxml_get_valid_file_path(uri);
     if (translated.empty()) {
       raise_warning("Invalid URI");
       return false;
@@ -703,7 +689,7 @@ static Variant HHVM_METHOD(XSLTProcessor, transformToXML,
       return false;
     }
 
-    String ret = String((char*)mem, size, CopyString);
+    OptString ret = OptString((char*)mem, size, CopyString);
     xmlFree(mem);
     return ret;
   }
@@ -715,11 +701,14 @@ static Variant HHVM_METHOD(XSLTProcessor, transformToXML,
 // extension
 
 struct XSLExtension final : Extension {
-    XSLExtension() : Extension("xsl", "0.1") {};
+    XSLExtension() : Extension("xsl", "0.1", "hphp_hphpi") {}
 
     void moduleInit() override {
       xsltSetGenericErrorFunc(nullptr, xslt_ext_error_handler);
       exsltRegisterAll();
+    }
+
+    void moduleRegisterNative() override {
       HHVM_RC_INT(XSL_SECPREF_NONE, k_XSL_SECPREF_NONE);
       HHVM_RC_INT(XSL_SECPREF_READ_FILE, k_XSL_SECPREF_READ_FILE);
       HHVM_RC_INT(XSL_SECPREF_WRITE_FILE, k_XSL_SECPREF_WRITE_FILE);
@@ -744,9 +733,7 @@ struct XSLExtension final : Extension {
       HHVM_ME(XSLTProcessor, transformToXML);
 
       Native::
-        registerNativeDataInfo<XSLTProcessorData>(s_XSLTProcessorData.get());
-
-      loadSystemlib();
+        registerNativeDataInfo<XSLTProcessorData>(s_XSLTProcessor.get());
     }
 } s_xsl_extension;
 

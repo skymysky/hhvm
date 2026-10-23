@@ -1,0 +1,82 @@
+error: Typing[4064] Typing error [1]
+-> You are trying to access the property `i` but this object can be null. [2]
+-> This can be null [3]
+
+decompose_nullable1.php:13:32
+11 | class D { public int $i = 0; }
+12 | 
+13 | function test1(?A  $x): void { $x->i; }
+   |                ^^ [3]
+   |                                ^^ [1]
+   |                                    ^ [2]
+14 | function test2(?B  $x): void { $x->i; }
+15 | function test3((?A & ?B) $x): void { $x->i; }
+
+error: Typing[4064] Typing error [1]
+-> You are trying to access the property `i` but this object can be null. [2]
+-> This can be null [3]
+
+decompose_nullable1.php:14:32
+12 | 
+13 | function test1(?A  $x): void { $x->i; }
+14 | function test2(?B  $x): void { $x->i; }
+   |                ^^ [3]
+   |                                ^^ [1]
+   |                                    ^ [2]
+15 | function test3((?A & ?B) $x): void { $x->i; }
+16 | function test4((?A & (C | ?B)) $x): void { $x->i; }
+
+error: Typing[4064] Typing error [1]
+-> You are trying to access the property `i` but this object can be null. [2]
+-> This can be null [3]
+
+decompose_nullable1.php:15:38
+13 | function test1(?A  $x): void { $x->i; }
+14 | function test2(?B  $x): void { $x->i; }
+15 | function test3((?A & ?B) $x): void { $x->i; }
+   |                 ^^ [3]
+   |                                      ^^ [1]
+   |                                          ^ [2]
+16 | function test4((?A & (C | ?B)) $x): void { $x->i; }
+17 | function test5((?A & (C | (B | ?A))) $x ): void { $x->i; }
+
+error: Typing[4064] Typing error [1]
+-> You are trying to access the property `i` but this object can be null. [2]
+-> This can be null [3]
+
+decompose_nullable1.php:16:44
+14 | function test2(?B  $x): void { $x->i; }
+15 | function test3((?A & ?B) $x): void { $x->i; }
+16 | function test4((?A & (C | ?B)) $x): void { $x->i; }
+   |                 ^^ [3]
+   |                                            ^^ [1]
+   |                                                ^ [2]
+17 | function test5((?A & (C | (B | ?A))) $x ): void { $x->i; }
+18 | function test6((?A & ?(C | ?A)) $x): void { $x->i; }
+
+error: Typing[4064] Typing error [1]
+-> You are trying to access the property `i` but this object can be null. [2]
+-> This can be null [3]
+
+decompose_nullable1.php:17:51
+15 | function test3((?A & ?B) $x): void { $x->i; }
+16 | function test4((?A & (C | ?B)) $x): void { $x->i; }
+17 | function test5((?A & (C | (B | ?A))) $x ): void { $x->i; }
+   |                 ^^ [3]
+   |                                                   ^^ [1]
+   |                                                       ^ [2]
+18 | function test6((?A & ?(C | ?A)) $x): void { $x->i; }
+
+error: Typing[4064] Typing error [1]
+-> You are trying to access the property `i` but this object can be null. [2]
+-> This can be null [3]
+
+decompose_nullable1.php:18:45
+16 | function test4((?A & (C | ?B)) $x): void { $x->i; }
+17 | function test5((?A & (C | (B | ?A))) $x ): void { $x->i; }
+18 | function test6((?A & ?(C | ?A)) $x): void { $x->i; }
+   |                 ^^ [3]
+   |                                             ^^ [1]
+   |                                                 ^ [2]
+
+6 errors found

@@ -21,22 +21,12 @@
 #include "hphp/runtime/ext/filter/sanitizing_filters.h"
 
 #include "hphp/runtime/base/array-init.h"
-#include "hphp/runtime/base/comparisons.h"
-#include "hphp/runtime/base/init-fini-node.h"
-#include "hphp/runtime/base/request-local.h"
-#include "hphp/runtime/base/php-globals.h"
+#include "hphp/runtime/base/array-iterator.h"
 
 namespace HPHP {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-const int64_t k_INPUT_POST = 0;
-const int64_t k_INPUT_GET = 1;
-const int64_t k_INPUT_COOKIE = 2;
-const int64_t k_INPUT_ENV = 4;
-const int64_t k_INPUT_SERVER = 5;
-const int64_t k_INPUT_SESSION = 6;
-const int64_t k_INPUT_REQUEST = 99;
 const int64_t k_FILTER_FLAG_NONE = 0;
 const int64_t k_FILTER_REQUIRE_SCALAR = 33554432;
 const int64_t k_FILTER_REQUIRE_ARRAY = 16777216;
@@ -62,7 +52,6 @@ const int64_t k_FILTER_SANITIZE_URL = 518;
 const int64_t k_FILTER_SANITIZE_NUMBER_INT = 519;
 const int64_t k_FILTER_SANITIZE_NUMBER_FLOAT = 520;
 const int64_t k_FILTER_SANITIZE_MAGIC_QUOTES = 521;
-const int64_t k_FILTER_CALLBACK = 1024;
 const int64_t k_FILTER_FLAG_ALLOW_OCTAL = 1;
 const int64_t k_FILTER_FLAG_ALLOW_HEX = 2;
 const int64_t k_FILTER_FLAG_STRIP_LOW = 4;
@@ -85,145 +74,21 @@ const int64_t k_FILTER_FLAG_IPV6 = 2097152;
 const int64_t k_FILTER_FLAG_NO_RES_RANGE = 4194304;
 const int64_t k_FILTER_FLAG_NO_PRIV_RANGE = 8388608;
 
-const StaticString
-  s_GET("_GET"),
-  s_POST("_POST"),
-  s_COOKIE("_COOKIE"),
-  s_SERVER("_SERVER"),
-  s_ENV("_ENV");
-
-struct FilterRequestData final {
-  void requestInit() {
-    // This doesn't copy them yet, but will do COW if they are modified
-    m_GET    = php_global(s_GET).toArray();
-    m_POST   = php_global(s_POST).toArray();
-    m_COOKIE = php_global(s_COOKIE).toArray();
-    m_SERVER = php_global(s_SERVER).toArray();
-    m_ENV    = php_global(s_ENV).toArray();
-  }
-
-  void requestShutdown() {
-    m_GET.detach();
-    m_POST.detach();
-    m_COOKIE.detach();
-    m_SERVER.detach();
-    m_ENV.detach();
-  }
-
-  Array getVar(int64_t type) {
-    switch (type) {
-      case k_INPUT_GET: return m_GET;
-      case k_INPUT_POST: return m_POST;
-      case k_INPUT_COOKIE: return m_COOKIE;
-      case k_INPUT_SERVER: return m_SERVER;
-      case k_INPUT_ENV: return m_ENV;
-    }
-    return empty_array();
-  }
-
-private:
-  Array m_GET;
-  Array m_POST;
-  Array m_COOKIE;
-  Array m_SERVER;
-  Array m_ENV;
-};
-THREAD_LOCAL_NO_CHECK(FilterRequestData, s_filter_request_data);
 
 static struct FilterExtension final : Extension {
-  FilterExtension() : Extension("filter", "0.11.0") {}
+  FilterExtension() : Extension("filter", "0.12.1", "hphp_hphpi") {}
 
-  void moduleLoad(const IniSetting::Map& /*ini*/, Hdf /*config*/) override {
-    HHVM_FE(__SystemLib_filter_input_get_var);
-    HHVM_FE(_filter_snapshot_globals);
-  }
+  void moduleRegisterNative() override;
 
-  void moduleInit() override {
-    HHVM_RC_INT(INPUT_POST, k_INPUT_POST);
-    HHVM_RC_INT(INPUT_GET, k_INPUT_GET);
-    HHVM_RC_INT(INPUT_COOKIE, k_INPUT_COOKIE);
-    HHVM_RC_INT(INPUT_ENV, k_INPUT_ENV);
-    HHVM_RC_INT(INPUT_SERVER, k_INPUT_SERVER);
-    HHVM_RC_INT(INPUT_SESSION, k_INPUT_SESSION);
-    HHVM_RC_INT(INPUT_REQUEST, k_INPUT_REQUEST);
-    HHVM_RC_INT(FILTER_FLAG_NONE, k_FILTER_FLAG_NONE);
-    HHVM_RC_INT(FILTER_REQUIRE_SCALAR, k_FILTER_REQUIRE_SCALAR);
-    HHVM_RC_INT(FILTER_REQUIRE_ARRAY, k_FILTER_REQUIRE_ARRAY);
-    HHVM_RC_INT(FILTER_FORCE_ARRAY, k_FILTER_FORCE_ARRAY);
-    HHVM_RC_INT(FILTER_NULL_ON_FAILURE, k_FILTER_NULL_ON_FAILURE);
-    HHVM_RC_INT(FILTER_VALIDATE_INT, k_FILTER_VALIDATE_INT);
-    HHVM_RC_INT(FILTER_VALIDATE_BOOLEAN, k_FILTER_VALIDATE_BOOLEAN);
-    HHVM_RC_INT(FILTER_VALIDATE_FLOAT, k_FILTER_VALIDATE_FLOAT);
-    HHVM_RC_INT(FILTER_VALIDATE_REGEXP, k_FILTER_VALIDATE_REGEXP);
-    HHVM_RC_INT(FILTER_VALIDATE_URL, k_FILTER_VALIDATE_URL);
-    HHVM_RC_INT(FILTER_VALIDATE_EMAIL, k_FILTER_VALIDATE_EMAIL);
-    HHVM_RC_INT(FILTER_VALIDATE_IP, k_FILTER_VALIDATE_IP);
-    HHVM_RC_INT(FILTER_VALIDATE_MAC, k_FILTER_VALIDATE_MAC);
-    HHVM_RC_INT(FILTER_DEFAULT, k_FILTER_DEFAULT);
-    HHVM_RC_INT(FILTER_UNSAFE_RAW, k_FILTER_UNSAFE_RAW);
-    HHVM_RC_INT(FILTER_SANITIZE_STRING, k_FILTER_SANITIZE_STRING);
-    HHVM_RC_INT(FILTER_SANITIZE_STRIPPED, k_FILTER_SANITIZE_STRIPPED);
-    HHVM_RC_INT(FILTER_SANITIZE_ENCODED, k_FILTER_SANITIZE_ENCODED);
-    HHVM_RC_INT(FILTER_SANITIZE_SPECIAL_CHARS, k_FILTER_SANITIZE_SPECIAL_CHARS);
-    HHVM_RC_INT(FILTER_SANITIZE_FULL_SPECIAL_CHARS,
-                k_FILTER_SANITIZE_FULL_SPECIAL_CHARS);
-    HHVM_RC_INT(FILTER_SANITIZE_EMAIL, k_FILTER_SANITIZE_EMAIL);
-    HHVM_RC_INT(FILTER_SANITIZE_URL, k_FILTER_SANITIZE_URL);
-    HHVM_RC_INT(FILTER_SANITIZE_NUMBER_INT, k_FILTER_SANITIZE_NUMBER_INT);
-    HHVM_RC_INT(FILTER_SANITIZE_NUMBER_FLOAT, k_FILTER_SANITIZE_NUMBER_FLOAT);
-    HHVM_RC_INT(FILTER_SANITIZE_MAGIC_QUOTES, k_FILTER_SANITIZE_MAGIC_QUOTES);
-    HHVM_RC_INT(FILTER_CALLBACK, k_FILTER_CALLBACK);
-    HHVM_RC_INT(FILTER_FLAG_ALLOW_OCTAL, k_FILTER_FLAG_ALLOW_OCTAL);
-    HHVM_RC_INT(FILTER_FLAG_ALLOW_HEX, k_FILTER_FLAG_ALLOW_HEX);
-    HHVM_RC_INT(FILTER_FLAG_STRIP_LOW, k_FILTER_FLAG_STRIP_LOW);
-    HHVM_RC_INT(FILTER_FLAG_STRIP_HIGH, k_FILTER_FLAG_STRIP_HIGH);
-    HHVM_RC_INT(FILTER_FLAG_ENCODE_LOW, k_FILTER_FLAG_ENCODE_LOW);
-    HHVM_RC_INT(FILTER_FLAG_ENCODE_HIGH, k_FILTER_FLAG_ENCODE_HIGH);
-    HHVM_RC_INT(FILTER_FLAG_ENCODE_AMP, k_FILTER_FLAG_ENCODE_AMP);
-    HHVM_RC_INT(FILTER_FLAG_NO_ENCODE_QUOTES, k_FILTER_FLAG_NO_ENCODE_QUOTES);
-    HHVM_RC_INT(FILTER_FLAG_EMPTY_STRING_NULL, k_FILTER_FLAG_EMPTY_STRING_NULL);
-    HHVM_RC_INT(FILTER_FLAG_STRIP_BACKTICK, k_FILTER_FLAG_STRIP_BACKTICK);
-    HHVM_RC_INT(FILTER_FLAG_ALLOW_FRACTION, k_FILTER_FLAG_ALLOW_FRACTION);
-    HHVM_RC_INT(FILTER_FLAG_ALLOW_THOUSAND, k_FILTER_FLAG_ALLOW_THOUSAND);
-    HHVM_RC_INT(FILTER_FLAG_ALLOW_SCIENTIFIC, k_FILTER_FLAG_ALLOW_SCIENTIFIC);
-    HHVM_RC_INT(FILTER_FLAG_SCHEME_REQUIRED, k_FILTER_FLAG_SCHEME_REQUIRED);
-    HHVM_RC_INT(FILTER_FLAG_HOST_REQUIRED, k_FILTER_FLAG_HOST_REQUIRED);
-    HHVM_RC_INT(FILTER_FLAG_PATH_REQUIRED, k_FILTER_FLAG_PATH_REQUIRED);
-    HHVM_RC_INT(FILTER_FLAG_QUERY_REQUIRED, k_FILTER_FLAG_QUERY_REQUIRED);
-    HHVM_RC_INT(FILTER_FLAG_IPV4, k_FILTER_FLAG_IPV4);
-    HHVM_RC_INT(FILTER_FLAG_IPV6, k_FILTER_FLAG_IPV6);
-    HHVM_RC_INT(FILTER_FLAG_NO_RES_RANGE, k_FILTER_FLAG_NO_RES_RANGE);
-    HHVM_RC_INT(FILTER_FLAG_NO_PRIV_RANGE, k_FILTER_FLAG_NO_PRIV_RANGE);
-
-    HHVM_FE(filter_list);
-    HHVM_FE(filter_id);
-    HHVM_FE(filter_var);
-
-    loadSystemlib();
-  }
-
-  void threadInit() override {
-    s_filter_request_data.getCheck();
-  }
-
-  void requestShutdown() override {
-    // warm up the s_filter_request_data
-    s_filter_request_data->requestShutdown();
-  }
 } s_filter_extension;
-
-namespace {
-InitFiniNode globalsInit([]() { s_filter_request_data->requestInit(); },
-                         InitFiniNode::When::GlobalsInit);
-}
 
 ///////////////////////////////////////////////////////////////////////////////
 
-typedef struct filter_list_entry {
+struct filter_list_entry {
   StaticString name;
   int64_t id;
   Variant (*function)(PHP_INPUT_FILTER_PARAM_DECL);
-} filter_list_entry;
+};
 
 static const filter_list_entry filter_list[] = {
   {
@@ -302,10 +167,6 @@ static const filter_list_entry filter_list[] = {
     StaticString("magic_quotes"),
     k_FILTER_SANITIZE_MAGIC_QUOTES,
     php_filter_magic_quotes
-  }, {
-    StaticString("callback"),
-    k_FILTER_CALLBACK,
-    php_filter_callback
   },
 };
 
@@ -370,9 +231,9 @@ static bool filter_var(Variant& ret, const Variant& variable, int64_t filter,
   return true;
 }
 
-static bool filter_recursive(Variant& ret, const Variant& variable, int64_t filter,
-                             const Variant& options) {
-  Array arr = Array::Create();
+static bool filter_recursive(Variant& ret, const Variant& variable,
+                             int64_t filter, const Variant& options) {
+  Array arr = Array::CreateDict();
   for (ArrayIter iter(variable.toArray()); iter; ++iter) {
     Variant v;
     if (iter.second().isArray()) {
@@ -380,7 +241,7 @@ static bool filter_recursive(Variant& ret, const Variant& variable, int64_t filt
     } else {
       FAIL_IF(!filter_var(v, iter.second(), filter, options));
     }
-    arr.add(iter.first(), v);
+    arr.set(iter.first(), v);
   }
   ret = arr;
   return true;
@@ -400,7 +261,7 @@ Variant HHVM_FUNCTION(filter_list) {
 }
 
 Variant HHVM_FUNCTION(filter_id,
-                      const String& filtername) {
+                      const OptString& filtername) {
   size_t size = sizeof(filter_list) / sizeof(filter_list_entry);
   for (size_t i = 0; i < size; ++i) {
     if (filter_list[i].name == filtername) {
@@ -418,11 +279,11 @@ Variant HHVM_FUNCTION(filter_id,
 
 Variant HHVM_FUNCTION(filter_var,
                       const Variant& variable,
-                      int64_t filter /* = 516 */,
-                      const Variant& options /* = empty_array_ref */) {
+                      int64_t filter /* = FILTER_DEFAULT */,
+                      const Variant& options /* = shape() */) {
   int64_t filter_flags;
   if (options.isArray()) {
-    filter_flags = options.toCArrRef()[s_flags].toInt64();
+    filter_flags = options.asCArrRef()[s_flags].toInt64();
   } else {
     filter_flags = options.toInt64();
   }
@@ -430,11 +291,6 @@ Variant HHVM_FUNCTION(filter_var,
   if (!(filter_flags & k_FILTER_REQUIRE_ARRAY ||
         filter_flags & k_FILTER_FORCE_ARRAY)) {
     filter_flags |= k_FILTER_REQUIRE_SCALAR;
-  }
-
-  // No idea why, but zend does this..
-  if (filter == k_FILTER_CALLBACK) {
-    filter_flags = 0;
   }
 
   if (variable.isArray()) {
@@ -448,19 +304,65 @@ Variant HHVM_FUNCTION(filter_var,
   Variant ret;
   FAIL_IF(!filter_var(ret, variable, filter, options));
   if (filter_flags & k_FILTER_FORCE_ARRAY && !ret.isArray()) {
-    ret = make_packed_array(ret);
+    ret = make_vec_array(ret);
   }
   return ret;
 }
 
 #undef FAIL_IF
 
-Array HHVM_FUNCTION(__SystemLib_filter_input_get_var, int64_t variable_name) {
-  return s_filter_request_data->getVar(variable_name);
-}
+void FilterExtension::moduleRegisterNative() {
+  HHVM_RC_INT(FILTER_FLAG_NONE, k_FILTER_FLAG_NONE);
+  HHVM_RC_INT(FILTER_REQUIRE_SCALAR, k_FILTER_REQUIRE_SCALAR);
+  HHVM_RC_INT(FILTER_REQUIRE_ARRAY, k_FILTER_REQUIRE_ARRAY);
+  HHVM_RC_INT(FILTER_FORCE_ARRAY, k_FILTER_FORCE_ARRAY);
+  HHVM_RC_INT(FILTER_NULL_ON_FAILURE, k_FILTER_NULL_ON_FAILURE);
+  HHVM_RC_INT(FILTER_VALIDATE_INT, k_FILTER_VALIDATE_INT);
+  HHVM_RC_INT(FILTER_VALIDATE_BOOLEAN, k_FILTER_VALIDATE_BOOLEAN);
+  HHVM_RC_INT(FILTER_VALIDATE_FLOAT, k_FILTER_VALIDATE_FLOAT);
+  HHVM_RC_INT(FILTER_VALIDATE_REGEXP, k_FILTER_VALIDATE_REGEXP);
+  HHVM_RC_INT(FILTER_VALIDATE_URL, k_FILTER_VALIDATE_URL);
+  HHVM_RC_INT(FILTER_VALIDATE_EMAIL, k_FILTER_VALIDATE_EMAIL);
+  HHVM_RC_INT(FILTER_VALIDATE_IP, k_FILTER_VALIDATE_IP);
+  HHVM_RC_INT(FILTER_VALIDATE_MAC, k_FILTER_VALIDATE_MAC);
+  HHVM_RC_INT(FILTER_DEFAULT, k_FILTER_DEFAULT);
+  HHVM_RC_INT(FILTER_UNSAFE_RAW, k_FILTER_UNSAFE_RAW);
+  HHVM_RC_INT(FILTER_SANITIZE_STRING, k_FILTER_SANITIZE_STRING);
+  HHVM_RC_INT(FILTER_SANITIZE_STRIPPED, k_FILTER_SANITIZE_STRIPPED);
+  HHVM_RC_INT(FILTER_SANITIZE_ENCODED, k_FILTER_SANITIZE_ENCODED);
+  HHVM_RC_INT(FILTER_SANITIZE_SPECIAL_CHARS, k_FILTER_SANITIZE_SPECIAL_CHARS);
+  HHVM_RC_INT(FILTER_SANITIZE_FULL_SPECIAL_CHARS,
+              k_FILTER_SANITIZE_FULL_SPECIAL_CHARS);
+  HHVM_RC_INT(FILTER_SANITIZE_EMAIL, k_FILTER_SANITIZE_EMAIL);
+  HHVM_RC_INT(FILTER_SANITIZE_URL, k_FILTER_SANITIZE_URL);
+  HHVM_RC_INT(FILTER_SANITIZE_NUMBER_INT, k_FILTER_SANITIZE_NUMBER_INT);
+  HHVM_RC_INT(FILTER_SANITIZE_NUMBER_FLOAT, k_FILTER_SANITIZE_NUMBER_FLOAT);
+  HHVM_RC_INT(FILTER_SANITIZE_MAGIC_QUOTES, k_FILTER_SANITIZE_MAGIC_QUOTES);
+  HHVM_RC_INT(FILTER_FLAG_ALLOW_OCTAL, k_FILTER_FLAG_ALLOW_OCTAL);
+  HHVM_RC_INT(FILTER_FLAG_ALLOW_HEX, k_FILTER_FLAG_ALLOW_HEX);
+  HHVM_RC_INT(FILTER_FLAG_STRIP_LOW, k_FILTER_FLAG_STRIP_LOW);
+  HHVM_RC_INT(FILTER_FLAG_STRIP_HIGH, k_FILTER_FLAG_STRIP_HIGH);
+  HHVM_RC_INT(FILTER_FLAG_ENCODE_LOW, k_FILTER_FLAG_ENCODE_LOW);
+  HHVM_RC_INT(FILTER_FLAG_ENCODE_HIGH, k_FILTER_FLAG_ENCODE_HIGH);
+  HHVM_RC_INT(FILTER_FLAG_ENCODE_AMP, k_FILTER_FLAG_ENCODE_AMP);
+  HHVM_RC_INT(FILTER_FLAG_NO_ENCODE_QUOTES, k_FILTER_FLAG_NO_ENCODE_QUOTES);
+  HHVM_RC_INT(FILTER_FLAG_EMPTY_STRING_NULL, k_FILTER_FLAG_EMPTY_STRING_NULL);
+  HHVM_RC_INT(FILTER_FLAG_STRIP_BACKTICK, k_FILTER_FLAG_STRIP_BACKTICK);
+  HHVM_RC_INT(FILTER_FLAG_ALLOW_FRACTION, k_FILTER_FLAG_ALLOW_FRACTION);
+  HHVM_RC_INT(FILTER_FLAG_ALLOW_THOUSAND, k_FILTER_FLAG_ALLOW_THOUSAND);
+  HHVM_RC_INT(FILTER_FLAG_ALLOW_SCIENTIFIC, k_FILTER_FLAG_ALLOW_SCIENTIFIC);
+  HHVM_RC_INT(FILTER_FLAG_SCHEME_REQUIRED, k_FILTER_FLAG_SCHEME_REQUIRED);
+  HHVM_RC_INT(FILTER_FLAG_HOST_REQUIRED, k_FILTER_FLAG_HOST_REQUIRED);
+  HHVM_RC_INT(FILTER_FLAG_PATH_REQUIRED, k_FILTER_FLAG_PATH_REQUIRED);
+  HHVM_RC_INT(FILTER_FLAG_QUERY_REQUIRED, k_FILTER_FLAG_QUERY_REQUIRED);
+  HHVM_RC_INT(FILTER_FLAG_IPV4, k_FILTER_FLAG_IPV4);
+  HHVM_RC_INT(FILTER_FLAG_IPV6, k_FILTER_FLAG_IPV6);
+  HHVM_RC_INT(FILTER_FLAG_NO_RES_RANGE, k_FILTER_FLAG_NO_RES_RANGE);
+  HHVM_RC_INT(FILTER_FLAG_NO_PRIV_RANGE, k_FILTER_FLAG_NO_PRIV_RANGE);
 
-void HHVM_FUNCTION(_filter_snapshot_globals) {
-  s_filter_request_data->requestInit();
+  HHVM_FE(filter_list);
+  HHVM_FE(filter_id);
+  HHVM_FE(filter_var);
 }
 
 ///////////////////////////////////////////////////////////////////////////////

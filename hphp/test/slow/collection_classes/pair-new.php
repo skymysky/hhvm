@@ -1,5 +1,5 @@
 <?hh
-function main() {
+function main() :mixed{
   try {
     var_dump(new Pair());
   } catch (Exception $e) {
@@ -11,4 +11,8 @@ function main() {
     echo $e->getMessage(), "\n";
   }
 }
+
+<<__EntryPoint>>
+function main_pair_new() :mixed{
 main();
+}

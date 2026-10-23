@@ -1,29 +1,28 @@
-<?php
+<?hh
 
 class PEAR {
-  static function f() {
- PEAR::g();
- }
-  function g() {
- echo 'This is g()';
- }
-}
-if ($x) {
-  class PEAR {
-}
+  static function f() :mixed{
+    PEAR::g();
+  }
+  static function g() :mixed{
+    echo 'This is g()';
+  }
 }
 class D1 extends PEAR {
   public $foo;
   private $bar;
-  function bar() {
- return $this->foo + $this->bar;
- }
+  function bar() :mixed{
+    return $this->foo + $this->bar;
+  }
 }
 class D2 extends D1 {
   public $foo;
   private $bar;
-  function bar() {
- return $this->foo + $this->bar;
- }
+  function bar() :mixed{
+    return $this->foo + $this->bar;
+  }
 }
-PEAR::f();
+<<__EntryPoint>>
+function entrypoint_1476(): void {
+  PEAR::f();
+}

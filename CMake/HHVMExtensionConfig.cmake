@@ -108,7 +108,7 @@ include(Options)
 # Using more than one will result in undefined behavior.
 #
 # [PRETTY_NAME string]
-# If passed, use this name when naming the extension in mesages. If this is
+# If passed, use this name when naming the extension in messages. If this is
 # not passed, default to NAME.
 #
 # [IS_ENABLED VARNAME]
@@ -128,9 +128,13 @@ include(Options)
 # [SYSTEMLIB ...]
 # The PHP API of the extension.
 #
+# [HACK_SYSTEMLIB_DIR ...]
+# A directory containing a Hack library that should be part of the
+# extension.
+#
 # [DEPENDS ...]
 # The dependencies of the extension. Extensions are prefixed
-# with "ext_", and external libaries with "lib".
+# with "ext_", and external libraries with "lib".
 # "systemlib" is a special dependency that represents the
 # systemlib header.
 #
@@ -213,6 +217,8 @@ function(HHVM_DEFINE_EXTENSION extNameIn)
       set(argumentState 5)
     elseif ("x${arg}" STREQUAL "xDEPENDS")
       set(argumentState 7)
+    elseif ("x${arg}" STREQUAL "xHACK_SYSTEMLIB_DIR")
+      set(argumentState 8)
     elseif ("x${arg}" STREQUAL "xREQUIRED")
       if (NOT ${argumentState} EQUAL 0)
         message(FATAL_ERROR "The REQUIRED modifier should only be placed immediately after the extension's name! (while processing the '${extensionPrettyName}' extension)")
@@ -282,6 +288,30 @@ function(HHVM_DEFINE_EXTENSION extNameIn)
       endif()
       list(APPEND extensionDependencies ${arg})
       list(APPEND extensionDependenciesOptional OFF)
+    elseif (${argumentState} EQUAL 8)
+      # HACK_SYSTEMLIB_DIR
+      set(singleFilePath "${CMAKE_CURRENT_BINARY_DIR}/ext_${extensionName}.hack")
+      if(IS_ABSOLUTE ${arg})
+        set(sourceDir ${arg})
+      else()
+        set(sourceDir "${HRE_CURRENT_EXT_PATH}/${arg}")
+      endif()
+      add_custom_command(
+        OUTPUT "${singleFilePath}"
+        COMMAND
+        "${CMAKE_SOURCE_DIR}/hphp/hack/scripts/concatenate_all.sh"
+        "--install_dir=${CMAKE_CURRENT_BINARY_DIR}"
+        "--root=${sourceDir}"
+        "--output_file=${singleFilePath}"
+        VERBATIM
+      )
+      add_custom_target(
+        "ext_${extensionName}_generated_systemlib"
+        DEPENDS
+        "${singleFilePath}"
+      )
+      add_dependencies(generated_systemlib "ext_${extensionName}_generated_systemlib")
+      list(APPEND extensionLibrary "${singleFilePath}")
     else()
       message(FATAL_ERROR "An error occurred while processing the arguments of the '${extensionPrettyName}' extension!")
     endif()
@@ -412,17 +442,18 @@ function (HHVM_EXTENSION_INTERNAL_SORT_OUT_SOURCES rootDir)
     elseif (${fileExtension} STREQUAL ".h" OR ${fileExtension} STREQUAL ".hpp")
       list(APPEND HEADER_SOURCES "${rootDir}/${fileName}")
     elseif (${fileExtension} STREQUAL ".s")
-      # AT&T syntax, MSVC doesn't like.
-      if (NOT MSVC)
-        list(APPEND ASM_SOURCES "${rootDir}/${fileName}")
-      endif()
-    elseif (${fileExtension} STREQUAL ".asm")
-      # MASM syntax. MSVC only.
-      if (MSVC)
-        list(APPEND ASM_SOURCES "${rootDir}/${fileName}")
-      endif()
+      list(APPEND ASM_SOURCES "${rootDir}/${fileName}")
     elseif (${fileExtension} STREQUAL ".php")
-      list(APPEND PHP_SOURCES "${rootDir}/${fileName}")
+      if(IS_ABSOLUTE "${fileName}")
+        list(APPEND PHP_SOURCES "${fileName}")
+      else()
+        list(APPEND PHP_SOURCES "${rootDir}/${fileName}")
+      endif()
+    elseif (${fileExtension} STREQUAL ".hack")
+      # .hack files are used by typechecked systemlib; there's a directory,
+      # and the actual .hack file is generated. As such, it's in the build
+      # directory instead, so we have an absolute path
+      list(APPEND PHP_SOURCES "${fileName}")
     else()
       message(FATAL_ERROR "Unknown file extension '${fileExtension}'!")
     endif()
@@ -495,10 +526,6 @@ function(HHVM_EXTENSION_INTERNAL_RESOLVE_DEPENDENCIES_OF_EXTENSION resolvedDestV
         if (${listIDX} EQUAL 0)
           # OS Dependency
           if (${currentDependency} STREQUAL "osPosix")
-            if (MSVC)
-              HHVM_EXTENSION_INTERNAL_SET_FAILED_DEPENDENCY(${extensionID} ${currentDependency} ON)
-              break()
-            endif()
           else()
             message(FATAL_ERROR "The only OS restriction that is currently valid is 'osPosix', got '${currentDependency}'!")
           endif()
@@ -528,7 +555,7 @@ endfunction()
 function(HHVM_EXTENSION_INTERNAL_SET_FAILED_DEPENDENCY extensionID failedDependency)
   list(FIND HHVM_EXTENSION_${extensionID}_DEPENDENCIES ${failedDependency} depIdx)
   if (depIdx EQUAL -1)
-    message(FATAL_ERROR "An issue occured while processing the '${failedDependency}' dependency of the ${HHVM_EXTENSION_${extensionID}_PRETTY_NAME} extension!")
+    message(FATAL_ERROR "An issue occurred while processing the '${failedDependency}' dependency of the ${HHVM_EXTENSION_${extensionID}_PRETTY_NAME} extension!")
   endif()
   list(GET HHVM_EXTENSION_${extensionID}_DEPENDENCIES_OPTIONAL ${depIdx} isOptional)
 
@@ -604,18 +631,18 @@ function (HHVM_EXTENSION_INTERNAL_HANDLE_LIBRARY_DEPENDENCY extensionID dependen
     ${libraryName} STREQUAL "folly" OR
     ${libraryName} STREQUAL "lz4" OR
     ${libraryName} STREQUAL "mbfl" OR
-    ${libraryName} STREQUAL "mcrouter" OR
     ${libraryName} STREQUAL "oniguruma" OR
     ${libraryName} STREQUAL "openssl" OR
     ${libraryName} STREQUAL "pcre" OR
     ${libraryName} STREQUAL "readline" OR
     ${libraryName} STREQUAL "sqlite" OR
-    ${libraryName} STREQUAL "squangle" OR
-    ${libraryName} STREQUAL "webscalesql" OR
     ${libraryName} STREQUAL "zip" OR
     ${libraryName} STREQUAL "zlib"
   )
     # Nothing to do, they are included by default.
+  elseif(${libraryName} STREQUAL "blake3")
+    find_package(blake3 CONFIG REQUIRED)
+    HHVM_EXTENSION_INTERNAL_ADD_LINK_LIBRARIES(BLAKE3::blake3)
   elseif (${libraryName} STREQUAL "bzip2")
     find_package(BZip2 ${requiredVersion})
     find_package(EXPAT ${requiredVersion})
@@ -680,19 +707,6 @@ function (HHVM_EXTENSION_INTERNAL_HANDLE_LIBRARY_DEPENDENCY extensionID dependen
     endif()
 
     if (${addPaths})
-      set(CMAKE_REQUIRED_LIBRARIES "${CURL_LIBRARIES}")
-      set(CMAKE_REQUIRED_INCLUDES "${CURL_INCLUDE_DIR}")
-      CHECK_FUNCTION_EXISTS("curl_multi_select" HAVE_CURL_MULTI_SELECT)
-      CHECK_FUNCTION_EXISTS("curl_multi_wait" HAVE_CURL_MULTI_WAIT)
-      if (HAVE_CURL_MULTI_SELECT)
-        HHVM_EXTENSION_INTERNAL_ADD_DEFINES("-DHAVE_CURL_MULTI_SELECT")
-      endif()
-      if (HAVE_CURL_MULTI_WAIT)
-        HHVM_EXTENSION_INTERNAL_ADD_DEFINES("-DHAVE_CURL_MULTI_WAIT")
-      endif()
-      set(CMAKE_REQUIRED_LIBRARIES)
-      set(CMAKE_REQUIRED_INCLUDES)
-
       HHVM_EXTENSION_INTERNAL_ADD_INCLUDE_DIRS(${CURL_INCLUDE_DIR})
       HHVM_EXTENSION_INTERNAL_ADD_LINK_LIBRARIES(${CURL_LIBRARIES})
       HHVM_EXTENSION_INTERNAL_ADD_DEFINES("-DHAVE_LIBCURL")
@@ -760,6 +774,17 @@ function (HHVM_EXTENSION_INTERNAL_HANDLE_LIBRARY_DEPENDENCY extensionID dependen
       HHVM_EXTENSION_INTERNAL_ADD_INCLUDE_DIRS(${GMP_INCLUDE_DIR})
       HHVM_EXTENSION_INTERNAL_ADD_LINK_LIBRARIES(${GMP_LIBRARY})
       HHVM_EXTENSION_INTERNAL_ADD_DEFINES("-DHAVE_LIBGMP")
+    endif()
+  elseif (${libraryName} STREQUAL "heif")
+    find_package(Libheif ${requiredVersion} REQUIRED)
+    if (NOT LIBHEIF_INCLUDE_DIR OR NOT LIBHEIF_LIBRARY)
+      HHVM_EXTENSION_INTERNAL_SET_FAILED_DEPENDENCY(${extensionID} ${dependencyName})
+      return()
+    endif()
+
+    if (${addPaths})
+      HHVM_EXTENSION_INTERNAL_ADD_INCLUDE_DIRS(${LIBHEIF_INCLUDE_DIR})
+      HHVM_EXTENSION_INTERNAL_ADD_LINK_LIBRARIES(${LIBHEIF_LIBRARY})
     endif()
   elseif (${libraryName} STREQUAL "iconv")
     find_package(Libiconv ${requiredVersion})
@@ -832,18 +857,6 @@ function (HHVM_EXTENSION_INTERNAL_HANDLE_LIBRARY_DEPENDENCY extensionID dependen
       HHVM_EXTENSION_INTERNAL_ADD_DEFINES("-DHAVE_LIBJPEG")
       HHVM_EXTENSION_INTERNAL_ADD_DEFINES("-DHAVE_GD_JPG")
     endif()
-  elseif (${libraryName} STREQUAL "jsonc")
-    find_package(Libjsonc ${requiredVersion})
-    if (NOT LIBJSONC_INCLUDE_DIR OR NOT LIBJSONC_LIBRARY)
-      HHVM_EXTENSION_INTERNAL_SET_FAILED_DEPENDENCY(${extensionID} ${dependencyName})
-      return()
-    endif()
-
-    if (${addPaths})
-      HHVM_EXTENSION_INTERNAL_ADD_INCLUDE_DIRS(${LIBJSONC_INCLUDE_DIR})
-      HHVM_EXTENSION_INTERNAL_ADD_LINK_LIBRARIES(${LIBJSONC_LIBRARY})
-      HHVM_EXTENSION_INTERNAL_ADD_DEFINES("-DHAVE_LIBJSONC")
-    endif()
   elseif (${libraryName} STREQUAL "ldap")
     find_package(Ldap ${requiredVersion})
     if (NOT LDAP_INCLUDE_DIR OR NOT LDAP_LIBRARIES)
@@ -855,6 +868,17 @@ function (HHVM_EXTENSION_INTERNAL_HANDLE_LIBRARY_DEPENDENCY extensionID dependen
       HHVM_EXTENSION_INTERNAL_ADD_INCLUDE_DIRS(${LDAP_INCLUDE_DIR})
       HHVM_EXTENSION_INTERNAL_ADD_LINK_LIBRARIES(${LDAP_LIBRARIES})
       HHVM_EXTENSION_INTERNAL_ADD_DEFINES("-DHAVE_LIBLDAP")
+    endif()
+  elseif (${libraryName} STREQUAL "lmdb")
+    find_package(Lmdb ${requiredVersion} REQUIRED)
+    if (NOT LMDB_INCLUDE_DIR OR NOT LMDB_LIBRARY)
+      HHVM_EXTENSION_INTERNAL_SET_FAILED_DEPENDENCY(${extensionID} ${dependencyName})
+      return()
+    endif()
+
+    if (${addPaths})
+      HHVM_EXTENSION_INTERNAL_ADD_INCLUDE_DIRS(${LMDB_INCLUDE_DIR})
+      HHVM_EXTENSION_INTERNAL_ADD_LINK_LIBRARIES(${LMDB_LIBRARY})
     endif()
   elseif (${libraryName} STREQUAL "magickwand")
     find_package(LibMagickWand ${requiredVersion})
@@ -868,6 +892,9 @@ function (HHVM_EXTENSION_INTERNAL_HANDLE_LIBRARY_DEPENDENCY extensionID dependen
       HHVM_EXTENSION_INTERNAL_ADD_LINK_LIBRARIES(${LIBMAGICKWAND_LIBRARIES} ${LIBMAGICKCORE_LIBRARIES})
       HHVM_EXTENSION_INTERNAL_ADD_DEFINES("-DHAVE_LIBMAGICKWAND")
     endif()
+  elseif (${libraryName} STREQUAL "mcrouter")
+    HHVM_EXTENSION_INTERNAL_ADD_LINK_LIBRARIES(mcrouter::mcroutercore)
+    HHVM_EXTENSION_INTERNAL_ADD_DEFINES("-DLIBMC_FBTRACE_DISABLE")
   elseif (${libraryName} STREQUAL "mcrypt")
     find_package(Mcrypt ${requiredVersion})
     if (NOT Mcrypt_INCLUDE_DIR OR NOT Mcrypt_LIB)
@@ -906,75 +933,9 @@ function (HHVM_EXTENSION_INTERNAL_HANDLE_LIBRARY_DEPENDENCY extensionID dependen
       HHVM_EXTENSION_INTERNAL_ADD_DEFINES("-DHAVE_LIBMEMCACHED")
     endif()
   elseif (${libraryName} STREQUAL "mysql")
-    # mysql checks - if we're using async mysql, we use webscalesqlclient from
-    # third-party/ instead
-    if (ENABLE_ASYNC_MYSQL)
-      set(MYSQL_CLIENT_LIB_DIR ${TP_DIR}/webscalesqlclient/src/)
-      set(MYSQL_CLIENT_LIBS
-        ${MYSQL_CLIENT_LIB_DIR}/libmysql/libfbmysqlclient_r.a
-      )
-
-      if (${addPaths})
-        HHVM_EXTENSION_INTERNAL_ADD_INCLUDE_DIRS(
-          ${RE2_INCLUDE_DIR}
-          ${TP_DIR}/squangle/src/
-          ${TP_DIR}/webscalesqlclient/src/include/
-        )
-        HHVM_EXTENSION_INTERNAL_ADD_DEFINES("-DENABLE_ASYNC_MYSQL=1")
-      endif()
-    else()
-      find_package(MySQL ${requiredVersion})
-      if (NOT MYSQL_LIB_DIR OR NOT MYSQL_INCLUDE_DIR OR NOT MYSQL_CLIENT_LIBS)
-        HHVM_EXTENSION_INTERNAL_SET_FAILED_DEPENDENCY(${extensionID} ${dependencyName})
-        return()
-      endif()
-
-      if (${addPaths})
-        link_directories(${MYSQL_LIB_DIR})
-        HHVM_EXTENSION_INTERNAL_ADD_INCLUDE_DIRS(${MYSQL_INCLUDE_DIR})
-      endif()
-    endif()
-
+    HHVM_EXTENSION_INTERNAL_ADD_LINK_LIBRARIES(fbmysqlclient)
     MYSQL_SOCKET_SEARCH()
-    if (MYSQL_UNIX_SOCK_ADDR)
-      if (${addPaths})
-        HHVM_EXTENSION_INTERNAL_ADD_DEFINES("-DPHP_MYSQL_UNIX_SOCK_ADDR=\"${MYSQL_UNIX_SOCK_ADDR}\"")
-      endif()
-    elseif (NOT ${addPaths})
-      HHVM_EXTENSION_INTERNAL_SET_FAILED_DEPENDENCY(${extensionID} ${dependencyName})
-      return()
-    else()
-      message(FATAL_ERROR "Could not find MySQL socket path - if you install a MySQL server, this should be automatically detected. Alternatively, specify -DMYSQL_UNIX_SOCK_ADDR=/path/to/mysql.socket ; if you don't care about unix socket support for MySQL, specify -DMYSQL_UNIX_SOCK_ADDR=/dev/null")
-    endif()
-
-    if (${addPaths})
-      HHVM_EXTENSION_INTERNAL_ADD_LINK_LIBRARIES(${MYSQL_CLIENT_LIBS})
-    endif()
-  elseif (${libraryName} STREQUAL "pgsql")
-    FIND_PATH(PGSQL_INCLUDE_DIR NAMES libpq-fe.h
-      PATHS
-        /usr/include
-        /usr/include/postgresql
-        /usr/include/pgsql
-        /usr/local/include
-        /usr/local/include/postgresql
-        /usr/local/include/pgsql
-      )
-    FIND_LIBRARY(PGSQL_LIBRARY NAMES pq
-      PATHS
-        /lib
-        /usr/lib
-        /usr/local/lib
-    )
-    IF (NOT PGSQL_INCLUDE_DIR OR NOT PGSQL_LIBRARY)
-      HHVM_EXTENSION_INTERNAL_SET_FAILED_DEPENDENCY(${extensionID} ${dependencyName})
-      return()
-    endif()
-
-    if(${addPaths})
-      HHVM_EXTENSION_INTERNAL_ADD_INCLUDE_DIRS(${PGSQL_INCLUDE_DIR})
-      HHVM_EXTENSION_INTERNAL_ADD_LINK_LIBRARIES(${PGSQL_LIBRARY})
-    endif()
+    HHVM_EXTENSION_INTERNAL_ADD_DEFINES("-DPHP_MYSQL_UNIX_SOCK_ADDR=\"${MYSQL_UNIX_SOCK_ADDR}\"")
   elseif (${libraryName} STREQUAL "png")
     find_package(LibPng ${requiredVersion})
     if (NOT LIBPNG_INCLUDE_DIRS OR NOT LIBPNG_LIBRARIES)
@@ -1000,17 +961,14 @@ function (HHVM_EXTENSION_INTERNAL_HANDLE_LIBRARY_DEPENDENCY extensionID dependen
       HHVM_EXTENSION_INTERNAL_ADD_INCLUDE_DIRS(${SNAPPY_INCLUDE_DIRS})
       HHVM_EXTENSION_INTERNAL_ADD_LINK_LIBRARIES(${SNAPPY_LIBRARIES})
     endif()
-  elseif (${libraryName} STREQUAL "sodium")
-    find_package(LibSodium ${requiredVersion})
-    if (NOT LIBSODIUM_INCLUDE_DIRS OR NOT LIBSODIUM_LIBRARIES)
-      HHVM_EXTENSION_INTERNAL_SET_FAILED_DEPENDENCY(${extensionID} ${dependencyName})
-      return()
-    endif()
-
-    if (${addPaths})
-      HHVM_EXTENSION_INTERNAL_ADD_INCLUDE_DIRS(${LIBSODIUM_INCLUDE_DIRS})
-      HHVM_EXTENSION_INTERNAL_ADD_LINK_LIBRARIES(${LIBSODIUM_LIBRARIES})
-    endif()
+  elseif (${libraryName} STREQUAL "squangle")
+    HHVM_EXTENSION_INTERNAL_ADD_LINK_LIBRARIES(squangle)
+  elseif (${libraryName} STREQUAL "thrift")
+    set(THRIFT_LIBRARIES
+      FBThrift::thriftcpp2 FBThrift::thriftprotocol FBThrift::transport FBThrift::async FBThrift::concurrency FBThrift::rpcmetadata FBThrift::thriftmetadata FBThrift::thriftannotation FBThrift::thrift-core FBThrift::thriftfrozen2
+      FBThrift::thrifttyperep FBThrift::thrifttype FBThrift::thriftanyrep
+    )
+    HHVM_EXTENSION_INTERNAL_ADD_LINK_LIBRARIES(${THRIFT_LIBRARIES})
   elseif (${libraryName} STREQUAL "vpx")
     find_package(LibVpx ${requiredVersion})
     if (NOT LIBVPX_INCLUDE_DIRS OR NOT LIBVPX_LIBRARIES)
@@ -1053,17 +1011,23 @@ function (HHVM_EXTENSION_INTERNAL_HANDLE_LIBRARY_DEPENDENCY extensionID dependen
         HHVM_EXTENSION_INTERNAL_ADD_DEFINES("-DLIBEXSLT_STATIC=1")
       endif()
     endif()
-  elseif (${libraryName} STREQUAL "watchmanclient")
-    find_package(libWatchmanClient ${requiredVersion})
-    if (NOT WATCHMANCLIENT_INCLUDE_DIRS OR NOT WATCHMANCLIENT_LIBRARIES)
-      HHVM_EXTENSION_INTERNAL_SET_FAILED_DEPENDENCY(${extensionID} ${dependencyName})
-      return()
-    endif()
-
+  elseif (TARGET "${dependencyName}")
+    # If we have libfoo, resolve as libfoo
+    message(STATUS "Resolving extension '${HHVM_EXTENSION_${extensionID}_NAME}' dependency '${dependencyName}' as CMake target")
     if (${addPaths})
-      HHVM_EXTENSION_INTERNAL_ADD_INCLUDE_DIRS(${WATCHMANCLIENT_INCLUDE_DIRS})
-      HHVM_EXTENSION_INTERNAL_ADD_LINK_LIBRARIES(${WATCHMANCLIENT_LIBRARIES})
-    endif()
+      HHVM_EXTENSION_INTERNAL_ADD_LINK_LIBRARIES(${dependencyName})
+      get_target_property(DEPENDENCY_TARGET_INCLUDE_DIR ${dependencyName} INTERFACE_INCLUDE_DIRECTORIES)
+      HHVM_EXTENSION_INTERNAL_ADD_INCLUDE_DIRS("${DEPENDENCY_TARGET_INCLUDE_DIR}")
+    endif ()
+  elseif (TARGET "${originalLibraryName}")
+    # If we have libfoo, resolve as 'foo'; the `lib` prefix is needed for our cmake to consider it to be a
+    # library dependency, so either case is valid :(
+    message(STATUS "Resolving extension '${HHVM_EXTENSION_${extensionID}_NAME}' dependency '${dependencyName}' as CMake target '${originalLibraryName}'")
+    if (${addPaths})
+      HHVM_EXTENSION_INTERNAL_ADD_LINK_LIBRARIES(${originalLibraryName})
+      get_target_property(DEPENDENCY_TARGET_INCLUDE_DIR ${originalLibraryName} INTERFACE_INCLUDE_DIRECTORIES)
+      HHVM_EXTENSION_INTERNAL_ADD_INCLUDE_DIRS("${DEPENDENCY_TARGET_INCLUDE_DIR}")
+    endif ()
   else()
     message(FATAL_ERROR "Unknown library '${originalLibraryName}' as a dependency of the '${HHVM_EXTENSION_${extensionID}_PRETTY_NAME}' extension!")
   endif()

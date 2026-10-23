@@ -1,24 +1,29 @@
 <?hh
 
-require_once('test_base.inc');
-
-
-function createSocketStream($serverPort) {
-  $stream = stream_socket_client(php_uname('n').":".$serverPort,
-    &$errorCode, &$errorMessage, 3.0);
+function createSocketStream($serverPort) :mixed{
+  $errorCode = null;
+  $errorMessage = null;
+  $stream = stream_socket_client(
+    php_uname('n').":".$serverPort,
+    inout $errorCode,
+    inout $errorMessage,
+    3.0
+  );
   if (!$stream) {
-      die($errorMessage);
+      exit($errorMessage);
   }
   return $stream;
 }
 
-function createReq(){
+function createReq():mixed{
   $host_name = "hphpd.debugger.".php_uname('n');
   $message = "GET /large_response.php HTTP/1.1\r\n".
              "Host: $host_name\r\nContent-Length:0\r\n\r\n";
   return $message;
 }
-
+<<__EntryPoint>> function main(): void {
+require_once('test_base.inc');
+init();
 runTest(function ($serverPort) {
   $stream = createSocketStream($serverPort);
   fwrite($stream, createReq());
@@ -34,3 +39,4 @@ runTest(function ($serverPort) {
   var_dump(strlen($data));
   fclose($stream);
 });
+}

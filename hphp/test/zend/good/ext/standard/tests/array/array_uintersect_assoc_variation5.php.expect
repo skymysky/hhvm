@@ -1,0 +1,13 @@
+*** Testing array_uintersect_assoc() : usage variation - differing comparison functions***
+
+-- comparison function with an incorrect return value --
+dict(0) {
+}
+
+-- comparison function taking too many parameters --
+string(70) "too_many_parameters() expects exactly 3 positional parameters, 2 given"
+
+-- comparison function taking too few parameters --
+dict(0) {
+}
+===DONE===

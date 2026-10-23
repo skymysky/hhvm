@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 
 abstract class Box {
   abstract const type T;
@@ -8,7 +8,7 @@ abstract class Box {
 class IntBox extends Box {
   const type T = int;
   public function getK() : this::T {
-    // UNSAFE
+    return 4;
   }
   public function setK(this::T $x) : void {}
 

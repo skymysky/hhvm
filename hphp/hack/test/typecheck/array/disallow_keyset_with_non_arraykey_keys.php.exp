@@ -1,6 +1,26 @@
-File "disallow_keyset_with_non_arraykey_keys.php", line 6, characters 8-27:
-Invalid index type for this keyset (Typing[4110])
-File "disallow_keyset_with_non_arraykey_keys.php", line 6, characters 15-17:
-This is an array key (int/string) because only array keys can be used to index into a Map, dict, darray, Set, or keyset
-File "disallow_keyset_with_non_arraykey_keys.php", line 6, characters 15-17:
-It is incompatible with a float
+error: Typing[4110] Invalid element type for this keyset [1]
+-> Expected `arraykey` because only array keys can be used as elements of `keyset` or `Set` [2]
+-> But got `float` [2]
+
+disallow_keyset_with_non_arraykey_keys.php:6:8
+4 | 
+5 | function test(): void {
+6 |   $x = keyset[2.3, new C()];
+  |        ^^^^^^^^^^^^^^^^^^^^ [1]
+  |               ^^^ [2]
+7 | }
+
+error: Typing[4110] Invalid element type for this keyset [1]
+-> Expected `arraykey` because only array keys can be used as elements of `keyset` or `Set` [2]
+-> But got `C` [3]
+
+disallow_keyset_with_non_arraykey_keys.php:6:8
+4 | 
+5 | function test(): void {
+6 |   $x = keyset[2.3, new C()];
+  |        ^^^^^^^^^^^^^^^^^^^^ [1]
+  |                    ^^^^^^^ [2]
+  |                        ^ [3]
+7 | }
+
+2 errors found

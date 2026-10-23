@@ -1,0 +1,14 @@
+error: Typing[4110] The keys of this `dict` are incompatible [1]
+-> Expected `string` [2]
+-> But got `int` [3]
+
+explicit_type_collection_mismatch2.php:4:8
+2 | 
+3 | function f(): void {
+4 |   $b = dict<string, int>[6 => 6, "1" => 11, "2" => 12];
+  |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ [1]
+  |             ^^^^^^ [2]
+  |                          ^ [3]
+5 | }
+
+1 error found

@@ -14,13 +14,12 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_JIT_ALIGNMENT_H_
-#define incl_HPHP_JIT_ALIGNMENT_H_
+#pragma once
 
 #include <cstdint>
 #include <string>
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -60,13 +59,6 @@ enum class Alignment : uint32_t {
   QuadWordSmashable,
 
   /*
-   * Continuous range constraints needed for FuncGuards, and ephemeral stubs
-   * on ARM.
-   */
-  FuncGuard,
-  EphemeralStub,
-
-  /*
    * Alignments needed by smashable instructions.
    */
   SmashMovq,
@@ -74,10 +66,11 @@ enum class Alignment : uint32_t {
   SmashCall,
   SmashJmp,
   SmashJcc,
+  SmashIntercept,
 };
 
 constexpr auto kNumAlignments =
-  static_cast<size_t>(Alignment::SmashJcc) + 1;
+  static_cast<size_t>(Alignment::SmashIntercept) + 1;
 
 /*
  * Under most architectures, the Alignments can be expressed by stipulating
@@ -95,6 +88,5 @@ struct AlignInfo {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-}}
+}
 
-#endif

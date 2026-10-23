@@ -1,0 +1,28 @@
+error: Parsing[1002] Encountered unexpected token `$i`. [1]
+
+object_cast.php:4:16
+2 | 
+3 | function my_example(int $i): void {
+4 |   $x = (object)$i;
+  |                ^^ [1]
+5 | }
+
+error: Naming[2049] Unbound name: `object` (a global constant) [1]
+
+object_cast.php:4:9
+2 | 
+3 | function my_example(int $i): void {
+4 |   $x = (object)$i;
+  |         ^^^^^^ [1]
+5 | }
+
+error: Typing[4106] Unbound global constant (Typing) [1]
+
+object_cast.php:4:9
+2 | 
+3 | function my_example(int $i): void {
+4 |   $x = (object)$i;
+  |         ^^^^^^ [1]
+5 | }
+
+3 errors found

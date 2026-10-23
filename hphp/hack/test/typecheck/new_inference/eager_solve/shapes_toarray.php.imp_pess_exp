@@ -1,0 +1,54 @@
+error: Typing[4323] Some type arguments violate their constraints [1]
+-> `Tk` is a constrained type parameter [2]
+-> This type constraint is violated [3]
+-> Expected `arraykey` [3]
+-> But got `Tk` [4]
+
+shapes_toarray.php:19:4
+17 | KeyedTraversable<Tk, Ta> $collection,
+18 | (function(Tk, Ta): Tb) $mapping_function,
+19 | ): darray<Tk, Tb>
+   |    ^^^^^^^^^^^^^^ [1]
+   |           ^^ [4]
+20 | {
+21 |   return dict[];
+
+hackarray.hhi:33:24
+31 |   <<__SupportDynamicType>>
+32 |   abstract final class dict<
+33 |     <<__NoAutoBound>> +Tk as arraykey,
+   |                        ^^ [2]
+   |                              ^^^^^^^^ [3]
+34 |     <<__NoAutoBound>> +Tv,
+35 |   > extends AnyArray<Tk, Tv> {}
+
+error: Typing[4323] Some type arguments violate their constraints [1]
+-> `Tk` is a constrained type parameter [2]
+-> This type constraint is violated [3]
+-> Expected `arraykey` [3]
+-> But got `mixed` [4]
+->   by the definition of `Tk` [5]
+
+shapes_toarray.php:19:4
+14 |   return Map{};
+15 | }
+16 | function mapWithKey<Tk, Ta, Tb>(
+   |                     ^^ [5]
+17 | KeyedTraversable<Tk, Ta> $collection,
+18 | (function(Tk, Ta): Tb) $mapping_function,
+19 | ): darray<Tk, Tb>
+   |    ^^^^^^^^^^^^^^ [1]
+   |           ^^ [4]
+20 | {
+21 |   return dict[];
+
+hackarray.hhi:33:24
+31 |   <<__SupportDynamicType>>
+32 |   abstract final class dict<
+33 |     <<__NoAutoBound>> +Tk as arraykey,
+   |                        ^^ [2]
+   |                              ^^^^^^^^ [3]
+34 |     <<__NoAutoBound>> +Tv,
+35 |   > extends AnyArray<Tk, Tv> {}
+
+2 errors found

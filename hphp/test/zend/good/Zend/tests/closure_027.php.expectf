@@ -1,10 +1,6 @@
-object(stdClass)#%d (0) {
+object(stdClass) (0) {
 }
 NULL
+string(21) "Undefined variable: y"
 
-Notice: %s
-
-Warning: %s
-NULL
-
-Catchable fatal error: %s
+Catchable fatal error: Argument 1 passed to test() must be an instance of Closure, stdClass given in %s/closure_027.php on line %d

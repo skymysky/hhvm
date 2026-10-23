@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 
 type a = shape(
   'x' => int,
@@ -7,3 +7,4 @@ type a = shape(
 type b = shape(
   y => int,
 );
+

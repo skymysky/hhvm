@@ -1,0 +1,33 @@
+error: Typing[4448] Cannot access non-public members within expression trees. [1]
+-> Member defined here [2]
+
+instance_method_protected.php:7:9
+ 5 | function test(ExampleExpression<string> $y): void {
+ 6 |   ExampleDsl`(MyState $x) ==> {
+ 7 |     $x->foo(1);
+   |         ^^^ [1]
+ 8 |   }`;
+ 9 | }
+10 | 
+11 | abstract class MyState {
+12 |   protected function foo(ExampleInt $x): void {}
+   |                      ^^^ [2]
+13 | }
+
+error: Typing[4112] You cannot access this method [1]
+-> This member is protected [2]
+
+instance_method_protected.php:7:9
+ 5 | function test(ExampleExpression<string> $y): void {
+ 6 |   ExampleDsl`(MyState $x) ==> {
+ 7 |     $x->foo(1);
+   |         ^^^ [1]
+ 8 |   }`;
+ 9 | }
+10 | 
+11 | abstract class MyState {
+12 |   protected function foo(ExampleInt $x): void {}
+   |                      ^^^ [2]
+13 | }
+
+2 errors found

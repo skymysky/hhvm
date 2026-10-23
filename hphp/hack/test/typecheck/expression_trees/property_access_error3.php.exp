@@ -1,0 +1,19 @@
+error: Typing[4373] You are trying to access the property `my_prop` but this is an int [1]
+-> Definition is here [2]
+
+property_access_error3.php:7:13
+ 5 | function test(): void {
+ 6 |   ExampleDsl`(MyState $x) ==> {
+ 7 |     foo(1)->my_prop = 1;
+   |             ^^^^^^^ [1]
+ 8 |   }`;
+ 9 | }
+10 | 
+11 | async function foo(
+12 |   ExampleContext $_,
+13 | ): Awaitable<ExampleExpression<ExampleFunction<(function(ExampleInt): ExampleInt)>>> {
+   |                                                                       ^^^^^^^^^^ [2]
+14 |   throw new Exception();
+15 | }
+
+1 error found

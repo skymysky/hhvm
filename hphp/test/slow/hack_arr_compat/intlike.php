@@ -1,9 +1,9 @@
 <?hh
 // Copyright 2004-present Facebook. All Rights Reserved.
 
-function test($a, $k) {
+function test($a, $k) :mixed{
   echo "=============== get ================================\n";
-  var_dump($a[$k]);
+  try { var_dump($a[$k]); } catch (Exception $e) { echo $e->getMessage()."\n"; }
   echo "=============== isset===============================\n";
   var_dump(isset($a[$k]));
   echo "=============== akey-exists=========================\n";
@@ -17,9 +17,9 @@ function test($a, $k) {
   return $a;
 }
 
-function test_const_key($a) {
+function test_const_key($a) :mixed{
   echo "=============== get ================================\n";
-  var_dump($a['2']);
+  try { var_dump($a['2']); } catch (Exception $e) { echo $e->getMessage()."\n"; }
   echo "=============== isset===============================\n";
   var_dump(isset($a['2']));
   echo "=============== akey-exists=========================\n";
@@ -33,29 +33,29 @@ function test_const_key($a) {
   return $a;
 }
 
-function test_casting($a) {
-  echo "======================= array cast =================\n";
-  var_dump((array)$a);
+function test_casting($a) :mixed{
   echo "======================= darray cast ================\n";
   var_dump(darray($a));
 }
 
-function run_tests() {
-  test([], '10');
-  test([1, 2, 3, 4], '2');
-  test([10 => 'abc'], '10');
+function run_tests() :mixed{
+  test(dict[], '10');
+  test(darray(vec[1, 2, 3, 4]), '2');
+  test(darray(dict[10 => 'abc']), '10');
 
-  test_const_key([]);
-  test_const_key([1, 2, 3, 4]);
-  test_const_key([2 => 'abc']);
+  test_const_key(dict[]);
+  test_const_key(darray(vec[1, 2, 3, 4]));
+  test_const_key(darray(dict[2 => 'abc']));
 
   test_casting(dict['1' => true, '2' => false]);
   test_casting(keyset['1', '2', '3']);
 
   echo "======================= literals ===================\n";
-  var_dump((array)dict['1' => true, '2' => false]);
   var_dump(darray(dict['1' => true, '2' => false]));
-  var_dump((array)keyset['1', '2', '3']);
   var_dump(darray(keyset['1', '2', '3']));
 }
+
+<<__EntryPoint>>
+function main_intlike() :mixed{
 run_tests();
+}

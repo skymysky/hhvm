@@ -1,0 +1,25 @@
+error: Typing[4323] Some type arguments violate their constraints [1]
+-> `Tk` is a constrained type parameter [2]
+-> This type constraint is violated [3]
+-> Expected `arraykey` [3]
+-> But got `?string` [4]
+
+const_type_violated_constraint.php:4:9
+ 2 | 
+ 3 | class Test {
+ 4 |   const dict<?string, string> test_dict = dict[
+   |         ^^^^^^^^^^^^^^^^^^^^^ [1]
+   |              ^^^^^^^ [4]
+ 5 |     '1' => '1',
+ 6 |   ];
+
+hackarray.hhi:33:24
+31 |   <<__SupportDynamicType>>
+32 |   abstract final class dict<
+33 |     <<__NoAutoBound>> +Tk as arraykey,
+   |                        ^^ [2]
+   |                              ^^^^^^^^ [3]
+34 |     <<__NoAutoBound>> +Tv,
+35 |   > extends AnyArray<Tk, Tv> {}
+
+1 error found

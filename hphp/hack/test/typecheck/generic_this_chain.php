@@ -19,13 +19,14 @@ class Base<T> {
   public function get(): T {
     return $this->data->data;
   }
-  public function set($val): this {
+  public function set(mixed $val): this {
     return $this;
   }
-  public function __call(string $name, array $args): this {
+  public function magic(mixed ...$args): this {
     return $this;
   }
 
+  <<__NeedsConcrete>>
   public static function make(Gen<T> $data): this {
     return new static($data);
   }
@@ -40,8 +41,8 @@ final class Another<T> {
     $this->data = $data;
     return $this;
   }
-  public function __call(string $name, array $args): ?T {
-    return $this->data ? $this->data->data : null;
+  public function magicGetter(mixed ...$args): ?T {
+    return $this->data !== null ? $this->data->data : null;
   }
   public static function make(Gen<T> $data): this {
     $i = new static();

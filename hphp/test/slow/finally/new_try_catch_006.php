@@ -1,10 +1,10 @@
-<?php
+<?hh
 
 class A extends Exception {}
 class B extends Exception {}
 class C extends B {}
 
-function blah() {
+function blah() :mixed{
   echo "1\n";
   try {
     echo "2\n";
@@ -56,6 +56,6 @@ function blah() {
   echo "fff\n";
   return 666;
 }
-
+<<__EntryPoint>> function main(): void {
 var_dump(blah());
-
+}

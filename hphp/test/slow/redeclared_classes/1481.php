@@ -1,23 +1,24 @@
-<?php
+<?hh
 
 class b {
-  function z() {
+  function z() :mixed{
     $this->x();
   }
-  function y() {
+  function y() :mixed{
     echo 'y';
   }
 }
 class c extends b {
-  function x() {
+  function x() :mixed{
     $this->y();
   }
 }
-if (false) {
-  class b{
+
+<<__EntryPoint>>
+function main_1481() :mixed{
+  if (__hhvm_intrinsics\launder_value(false)) {
+    include '1481.inc';
+  }
+  $x = new c();
+  $x->z();
 }
-  class c{
-}
-}
-$x = new c();
-$x->z();

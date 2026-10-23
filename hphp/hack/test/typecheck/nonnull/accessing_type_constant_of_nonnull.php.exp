@@ -1,4 +1,12 @@
-File "accessing_type_constant_of_nonnull.php", line 5, characters 12-12:
-You are trying to access the member C but this is not an object, it is a nonnull value (Typing[4062])
-File "accessing_type_constant_of_nonnull.php", line 5, characters 15-15:
-Check this out
+error: Typing[4062] Invalid type hint [1]
+-> You are trying to access the type constant `C` but this is a nonnull value [2]
+-> Definition is here [1]
+
+accessing_type_constant_of_nonnull.php:5:12
+3 | type N = nonnull;
+4 | 
+5 | function f(N::C $x): void {}
+  |            ^^^^ [1]
+  |               ^ [2]
+
+1 error found

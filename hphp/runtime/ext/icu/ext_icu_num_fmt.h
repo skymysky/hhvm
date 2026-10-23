@@ -14,19 +14,18 @@
    | license@php.net so we can mail you a copy immediately.               |
    +----------------------------------------------------------------------+
 */
-#ifndef incl_HPHP_ICU_NUMFMT_H
-#define incl_HPHP_ICU_NUMFMT_H
+#pragma once
 
 #include "hphp/runtime/ext/extension.h"
 #include "hphp/runtime/ext/icu/icu.h"
 
 #include <unicode/unum.h>
 
-namespace HPHP { namespace Intl {
+namespace HPHP::Intl {
 /////////////////////////////////////////////////////////////////////////////
 extern const StaticString s_NumberFormatter;
 
-struct NumberFormatter : IntlError {
+struct NumberFormatter : IntlError, SystemLib::ClassLoader<"NumberFormatter"> {
   NumberFormatter() {}
   NumberFormatter(const NumberFormatter&) = delete;
   NumberFormatter& operator=(const NumberFormatter& src) {
@@ -40,9 +39,9 @@ struct NumberFormatter : IntlError {
     }
   }
 
-  void setNumberFormatter(const String& locale,
+  void setNumberFormatter(const OptString& locale,
                           int64_t style,
-                          const String& pattern);
+                          const OptString& pattern);
   void setNumberFormatter(const NumberFormatter *orig);
 
   bool isValid() const {
@@ -50,24 +49,18 @@ struct NumberFormatter : IntlError {
   }
 
   static Object newInstance() {
-    if (!c_NumberFormatter) {
-      c_NumberFormatter = Unit::lookupClass(s_NumberFormatter.get());
-      assertx(c_NumberFormatter);
-    }
-    return Object{c_NumberFormatter};
+    return Object{ classof() };
   }
   static NumberFormatter* Get(ObjectData* obj) {
-    return GetData<NumberFormatter>(obj, s_NumberFormatter);
+    return GetData<NumberFormatter>(obj, className());
   }
 
   UNumberFormat *formatter() const { return m_formatter; }
 
 private:
   UNumberFormat *m_formatter = nullptr;
-  static Class* c_NumberFormatter;
 };
 
 /////////////////////////////////////////////////////////////////////////////
-}} // namespace HPHP::Intl
+} // namespace HPHP::Intl
 
-#endif // incl_HPHP_ICU_NUMFMT_H

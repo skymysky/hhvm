@@ -15,21 +15,15 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_EXT_DEBUGGER_H_
-#define incl_HPHP_EXT_DEBUGGER_H_
+#pragma once
 
 #include "hphp/runtime/ext/extension.h"
 
 namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
 
-String HHVM_FUNCTION(hphpd_auth_token);
-void HHVM_FUNCTION(hphpd_break, bool condition = true);
-bool HHVM_FUNCTION(hphp_debug_break, bool condition = true);
 bool HHVM_FUNCTION(hphp_debugger_attached);
-Array HHVM_FUNCTION(debugger_get_info);
 
 ///////////////////////////////////////////////////////////////////////////////
 }
 
-#endif // incl_HPHP_EXT_DEBUGGER_H_

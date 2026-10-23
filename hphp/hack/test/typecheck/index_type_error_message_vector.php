@@ -9,7 +9,7 @@
  *
  */
 
-function test() {
+function test(): void {
   $m = Vector { 3, 2, 1, 0 };
   $m['0'] = 100;
 }

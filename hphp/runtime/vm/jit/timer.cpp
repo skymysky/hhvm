@@ -24,11 +24,13 @@
 #include <folly/Format.h>
 
 #include "hphp/runtime/base/execution-context.h"
+#include "hphp/util/configs/jit.h"
+#include "hphp/util/rds-local.h"
 #include "hphp/util/struct-log.h"
 #include "hphp/util/timer.h"
 #include "hphp/util/trace.h"
 
-TRACE_SET_MOD(jittime);
+TRACE_SET_MOD(jittime)
 
 namespace HPHP { namespace jit {
 
@@ -36,7 +38,9 @@ namespace {
 
 //////////////////////////////////////////////////////////////////////
 
-__thread Timer::Counter s_counters[Timer::kNumTimers];
+std::array<Timer::Counter,Timer::kNumTimers> kCountersDefault{};
+using TimerType = std::array<Timer::Counter,Timer::kNumTimers>;
+RDS_LOCAL_NO_CHECK(TimerType, s_counters)(kCountersDefault);
 
 struct TimerName { const char* str; Timer::Name name; };
 const TimerName s_names[] = {
@@ -46,12 +50,12 @@ const TimerName s_names[] = {
 };
 
 int64_t getCPUTimeNanos() {
-  return RuntimeOption::EvalJitTimer ? HPHP::Timer::GetThreadCPUTimeNanos() :
+  return Cfg::Jit::Timer ? HPHP::Timer::GetThreadCPUTimeNanos() :
          -1;
 }
 
 int64_t getWallClockMicros() {
-  return RuntimeOption::EvalJitTimer ? HPHP::Timer::GetCurrentTimeMicros() :
+  return Cfg::Jit::Timer ? HPHP::Timer::GetCurrentTimeMicros() :
          -1;
 }
 
@@ -73,7 +77,7 @@ Timer::~Timer() {
 }
 
 int64_t Timer::stop() {
-  if (!RuntimeOption::EvalJitTimer) return 0;
+  if (!Cfg::Jit::Timer) return 0;
 
   assertx(!m_finished);
   auto const elapsed = getCPUTimeNanos() - m_start;
@@ -95,7 +99,8 @@ int64_t Timer::stop() {
 
 Timer::CounterVec Timer::Counters() {
   CounterVec ret;
-  for (auto& pair : s_names) {
+  ret.reserve(std::size(s_names));
+  for (const auto& pair : s_names) {
     ret.emplace_back(pair.str, s_counters[pair.name]);
   }
   return ret;
@@ -106,7 +111,7 @@ Timer::Counter Timer::CounterValue(Timer::Name name) {
 }
 
 void Timer::RequestInit() {
-  memset(&s_counters, 0, sizeof(s_counters));
+  memset(s_counters.get(), 0, sizeof(Timer::Counter[Timer::kNumTimers]));
 }
 
 void Timer::RequestExit() {

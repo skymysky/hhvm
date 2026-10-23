@@ -28,14 +28,14 @@
 #include <boost/regex.hpp>
 #include <boost/algorithm/string.hpp>
 
-#include <folly/Format.h>
+#include <fmt/core.h>
 #include <folly/String.h>
 
 #include "hphp/util/disasm.h"
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 
-typedef X64Assembler Asm;
+using Asm = X64Assembler;
 using namespace reg;
 
 namespace {
@@ -120,7 +120,7 @@ std::vector<std::string> dump_disasm(Asm& a) {
                .addresses(false)
                .forceAttSyntax(true));
   std::ostringstream sstream;
-  dis.disasm(sstream, a.base(), a.base() + a.used());
+  dis.disasm(sstream, a.base(), a.base() + a.used(), 0);
 
   std::vector<std::string> ret;
   folly::split('\n', sstream.str(), ret);
@@ -311,7 +311,7 @@ void dotest(const char* opName, Asm& a, void (Asm::*memFn)(Arg1, Arg2),
   for (auto& ar1 : args1) {
     for (auto& ar2 : args2) {
       expecteds.push_back(
-        folly::format("{}, {}", expected_str(ar1), expected_str(ar2)).str()
+        fmt::format("{}, {}", expected_str(ar1), expected_str(ar2))
       );
       (a.*memFn)(ar1, ar2);
     }
@@ -332,35 +332,33 @@ void dotest(const char* opName, Asm& a, void (Asm::*memFn)(Arg1, Arg2)) {
 
 // Wrappers for generating test cases for various addressing modes.
 
-typedef void (Asm::*OpR64)(Reg64);
-typedef void (Asm::*OpR32)(Reg32);
-typedef void (Asm::*OpR8)(Reg8);
-typedef void (Asm::*OpRR64)(Reg64, Reg64);
-typedef void (Asm::*OpRR32)(Reg32, Reg32);
-typedef void (Asm::*OpRR8)(Reg8, Reg8);
-typedef void (Asm::*OpR8R32)(Reg8, Reg32);
-typedef void (Asm::*OpR8R64)(Reg8, Reg64);
-typedef void (Asm::*OpMR64)(MemoryRef, Reg64);
-typedef void (Asm::*OpMR32)(MemoryRef, Reg32);
-typedef void (Asm::*OpMR8)(MemoryRef, Reg8);
-typedef void (Asm::*OpSMR64)(MemoryRef, Reg64);
-typedef void (Asm::*OpSMR32)(MemoryRef, Reg32);
-typedef void (Asm::*OpSMR8)(MemoryRef, Reg8);
-typedef void (Asm::*OpRM64)(Reg64, MemoryRef);
-typedef void (Asm::*OpRM32)(Reg32, MemoryRef);
-typedef void (Asm::*OpRM8)(Reg8, MemoryRef);
-typedef void (Asm::*OpRSM64)(Reg64, MemoryRef);
-typedef void (Asm::*OpRSM32)(Reg32, MemoryRef);
-typedef void (Asm::*OpRSM8)(Reg8, MemoryRef);
-typedef void (Asm::*OpIR64)(Immed, Reg64);
-typedef void (Asm::*OpIR32)(Immed, Reg32);
-typedef void (Asm::*OpIR8)(Immed, Reg8);
-typedef void (Asm::*OpIM64)(Immed, MemoryRef);
-typedef void (Asm::*OpIM32)(Immed, MemoryRef);
-typedef void (Asm::*OpIM16)(Immed, MemoryRef);
-typedef void (Asm::*OpISM64)(Immed, MemoryRef);
-typedef void (Asm::*OpISM32)(Immed, MemoryRef);
-typedef void (Asm::*OpISM16)(Immed, MemoryRef);
+using OpR64   = void (Asm::*)(Reg64);
+using OpR32   = void (Asm::*)(Reg32);
+using OpR8    = void (Asm::*)(Reg8);
+using OpRR64  = void (Asm::*)(Reg64, Reg64);
+using OpRR32  = void (Asm::*)(Reg32, Reg32);
+using OpRR8   = void (Asm::*)(Reg8, Reg8);
+using OpR8R32 = void (Asm::*)(Reg8, Reg32);
+using OpR8R64 = void (Asm::*)(Reg8, Reg64);
+using OpMR64  = void (Asm::*)(MemoryRef, Reg64);
+using OpMR32  = void (Asm::*)(MemoryRef, Reg32);
+using OpMR8   = void (Asm::*)(MemoryRef, Reg8);
+using OpSMR64 = void (Asm::*)(MemoryRef, Reg64);
+using OpSMR32 = void (Asm::*)(MemoryRef, Reg32);
+using OpSMR8  = void (Asm::*)(MemoryRef, Reg8);
+using OpRM64  = void (Asm::*)(Reg64, MemoryRef);
+using OpRM32  = void (Asm::*)(Reg32, MemoryRef);
+using OpRM8   = void (Asm::*)(Reg8, MemoryRef);
+using OpRSM64 = void (Asm::*)(Reg64, MemoryRef);
+using OpRSM32 = void (Asm::*)(Reg32, MemoryRef);
+using OpRSM8  = void (Asm::*)(Reg8, MemoryRef);
+using OpIR64  = void (Asm::*)(Immed, Reg64);
+using OpIR32  = void (Asm::*)(Immed, Reg32);
+using OpIR8   = void (Asm::*)(Immed, Reg8);
+using OpIM64  = void (Asm::*)(Immed, MemoryRef);
+using OpIM32  = void (Asm::*)(Immed, MemoryRef);
+using OpISM64 = void (Asm::*)(Immed, MemoryRef);
+using OpISM32 = void (Asm::*)(Immed, MemoryRef);
 
 //////////////////////////////////////////////////////////////////////
 
@@ -975,6 +973,24 @@ TEST(Asm, Psllq) {
   EXPECT_EQ(0x73, current[3]);
 }
 
-}}
+#if defined(USE_HWCRC) && defined(__SSE4_2__)
+TEST(Asm, Crc32q) {
+  TestDataBlock db(10 << 24);
+  Asm a { db };
+
+  a.   push   (rax);
+  a.   push   (rbx);
+  a.   movq   (0x15, rax);
+  a.   crc32q (rax, rbx);
+  expect_asm(a, R"(
+pushq %rax
+pushq %rbx
+mov $0x15, %rax
+crc32 %rax, %rbx
+)");
+}
+#endif
+
+}
 
 #endif

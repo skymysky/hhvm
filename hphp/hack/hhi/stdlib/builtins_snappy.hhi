@@ -1,4 +1,4 @@
-<?hh // decl /* -*- php -*- */
+<?hh /* -*- php -*- */
 /**
  * Copyright (c) 2014, Facebook, Inc.
  * All rights reserved.
@@ -9,10 +9,10 @@
  */
 
 <<__PHPStdLib>>
-function sncompress($data);
+function sncompress(string $data)[]: HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function snuncompress($data);
+function snuncompress(string $data)[]: HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function snappy_compress(string $data): mixed;
+function snappy_compress(string $data)[]: mixed;
 <<__PHPStdLib>>
-function snappy_uncompress(string $data): mixed;
+function snappy_uncompress(string $data)[]: mixed;

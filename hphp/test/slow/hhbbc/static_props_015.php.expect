@@ -1,7 +1,6 @@
-array(3) {
+dict(3) {
   ["foo"]=>
-  array(1) {
-    [0]=>
+  vec(1) {
     string(3) "bar"
   }
   [0]=>

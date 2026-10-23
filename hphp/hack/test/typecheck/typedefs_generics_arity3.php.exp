@@ -1,2 +1,13 @@
-File "typedefs_generics_arity3.php", line 5, characters 10-10:
-The type A expects 1 type parameter(s) (Typing[4101])
+error: Typing[4101] Wrong number of type arguments (expected 1, got 0) [1]
+-> Definition is here [2]
+
+typedefs_generics_arity3.php:5:10
+1 | <?hh
+2 | // Copyright 2004-present Facebook. All Rights Reserved.
+3 | type A<T> = T;
+  |      ^ [2]
+4 | 
+5 | type B = A;
+  |          ^ [1]
+
+1 error found

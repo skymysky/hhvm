@@ -1,5 +1,6 @@
-<?php
-    $constants = array(
+<?hh
+<<__EntryPoint>> function main(): void {
+    $constants = dict[
         "IMAGETYPE_GIF"      => IMAGETYPE_GIF,
         "IMAGETYPE_JPEG"     => IMAGETYPE_JPEG,
         "IMAGETYPE_PNG"      => IMAGETYPE_PNG,
@@ -14,18 +15,18 @@
         "IMAGETYPE_JB2"      => IMAGETYPE_JB2,
         "IMAGETYPE_IFF"      => IMAGETYPE_IFF,
         "IMAGETYPE_WBMP"     => IMAGETYPE_WBMP,
+        "IMAGETYPE_WEBP"     => IMAGETYPE_WEBP,
         "IMAGETYPE_JPEG2000" => IMAGETYPE_JPEG2000,
+        "IMAGETYPE_AVIF"     => IMAGETYPE_AVIF,
+        "IMAGETYPE_HEIC"     => IMAGETYPE_HEIC,
         "IMAGETYPE_XBM"      => IMAGETYPE_XBM
-    );
+    ];
     foreach($constants as $name => $constant) {
         printf("Constant: %s\n\tWith dot: %s\n\tWithout dot: %s\n", $name, image_type_to_extension($constant), image_type_to_extension($constant, false));
     }
-
-	var_dump(image_type_to_extension(-1, array()));
-	var_dump(image_type_to_extension(new stdclass));
-	var_dump(image_type_to_extension(1000000, NULL));
-	var_dump(image_type_to_extension());
-	var_dump(image_type_to_extension(0));
-	var_dump(image_type_to_extension(0, 0, 0));
-?>
-Done
+    var_dump(image_type_to_extension(1000000, false));
+    try { var_dump(image_type_to_extension()); } catch (Exception $e) { echo "\n".'Warning: '.$e->getMessage().' in '.__FILE__.' on line '.__LINE__."\n"; }
+    var_dump(image_type_to_extension(0));
+    try { var_dump(image_type_to_extension(0, 0, 0)); } catch (Exception $e) { echo "\n".'Warning: '.$e->getMessage().' in '.__FILE__.' on line '.__LINE__."\n"; }
+echo "Done";
+}

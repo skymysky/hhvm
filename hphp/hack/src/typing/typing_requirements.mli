@@ -1,4 +1,4 @@
-(**
+(*
  * Copyright (c) 2015, Facebook, Inc.
  * All rights reserved.
  *
@@ -7,4 +7,9 @@
  *
  *)
 
-val check_class : Typing_env.env -> Typing_defs.class_type -> unit
+(** Checks that all the requirements of the traits and interfaces a class uses are satisfied. *)
+val check_class :
+  Typing_env_types.env ->
+  Pos.t ->
+  Decl_provider.class_decl ->
+  Typing_env_types.env

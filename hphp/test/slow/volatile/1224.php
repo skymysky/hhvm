@@ -1,16 +1,13 @@
-<?php
+<?hh
 
-function foo($a) {
+function foo($a) :mixed{
   if ($a) {
-    class A {
-}
+    include '1224-1.inc';
   }
 }
-foo(true);
-function bar() {
+function bar() :mixed{
   if (class_exists('A')) {
-    class C extends A {
- }
+    include '1224-2.inc';
     $obj = new C;
     var_dump($obj);
   }
@@ -18,4 +15,9 @@ function bar() {
     var_dump('no');
   }
 }
+
+<<__EntryPoint>>
+function main_1224() :mixed{
+foo(true);
 bar();
+}

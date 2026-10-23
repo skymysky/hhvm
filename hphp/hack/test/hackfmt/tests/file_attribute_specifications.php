@@ -1,0 +1,3 @@
+<?hh
+
+<<file: MyAttribute('foo')>>

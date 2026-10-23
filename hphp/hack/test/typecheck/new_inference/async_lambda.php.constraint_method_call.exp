@@ -1,0 +1,24 @@
+error: Typing[4323] Typing error [1]
+-> `Tu` is a constrained type parameter [2]
+-> This type constraint is violated [3]
+-> Expected `arraykey` [3]
+-> But got `Awaitable<int>` (result of an `async` function) [4]
+
+async_lambda.php:6:3
+  4 | function test(bool $b): void {
+  5 |   $c = $b ? Vector {} : Set {};
+  6 |   $c->map(async $_ ==> 42);
+    |   ^^^^^^^^^^^^^^^^^^^^^^^^ [1]
+    |           ^^^^^^^^^^^^^^^ [4]
+  7 | }
+
+collections/Set.hhi:198:25
+196 |      * @guide /hack/collections/examples
+197 |      */
+198 |     public function map<Tu as arraykey>(
+    |                         ^^ [2]
+    |                               ^^^^^^^^ [3]
+199 |       (function(Tv)[_]: Tu) $fn,
+200 |     )[ctx $fn]: Set<Tu>;
+
+1 error found

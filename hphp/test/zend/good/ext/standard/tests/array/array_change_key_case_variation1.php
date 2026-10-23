@@ -1,6 +1,6 @@
-<?php
+<?hh
 /* Prototype  : array array_change_key_case(array $input [, int $case])
- * Description: Retuns an array with all string keys lowercased [or uppercased] 
+ * Description: Retuns an array with all string keys lowercased [or uppercased]
  * Source code: ext/standard/array.c
  */
 
@@ -8,19 +8,16 @@
  * Pass different data types as $input argument to test behaviour of array_change_key_case()
  */
 
-echo "*** Testing array_change_key_case() : usage variations ***\n";
-
-//get an unset variable
-$unset_var = 10;
-unset ($unset_var);
-
 // get a class
 class classA
 {
-  public function __toString() {
+  public function __toString() :mixed{
     return "Class A object";
   }
 }
+<<__EntryPoint>> function main(): void {
+echo "*** Testing array_change_key_case() : usage variations ***\n";
+
 
 // heredoc string
 $heredoc = <<<EOT
@@ -31,7 +28,7 @@ EOT;
 $fp = fopen(__FILE__, "r");
 
 // unexpected values to be passed to $input argument
-$inputs = array(
+$inputs = vec[
 
        // int data
 /*1*/  0,
@@ -55,29 +52,25 @@ $inputs = array(
        false,
        TRUE,
        FALSE,
-       
+
        // empty data
 /*16*/ "",
        '',
-       array(),
+       vec[],
 
        // string data
 /*19*/ "string",
        'string',
        $heredoc,
-       
+
        // object data
 /*22*/ new classA(),
 
-       // undefined data
-/*23*/ @$undefined_var,
 
-       // unset data
-/*24*/ @$unset_var,
 
        // resource variable
-/*25*/ $fp
-);
+/*23*/ $fp
+];
 
 // loop through each element of $inputs to check the behavior of array_change_key_case()
 $iterator = 1;
@@ -90,5 +83,4 @@ foreach($inputs as $input) {
 fclose($fp);
 
 echo "Done";
-?>
-
+}

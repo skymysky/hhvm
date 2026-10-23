@@ -1,0 +1,10 @@
+error: Typing[4404] This variable cannot be reassigned because it is used for a dependent context [1]
+
+catch.php:8:22
+6 |   try {
+7 |     throw new Exception();
+8 |   } catch (Exception $v) {}
+  |                      ^^ [1]
+9 | }
+
+1 error found

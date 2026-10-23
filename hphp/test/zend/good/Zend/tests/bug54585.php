@@ -1,7 +1,9 @@
-<?php
-function testing($source) {
-                unset($source[$cos]);
+<?hh
+function testing($source) :mixed{
+  unset($source['']);
 }
-testing($_GET);
-echo "ok\n";
-?>
+<<__EntryPoint>>
+function main(): void {
+  testing(\HH\global_get('_GET'));
+  echo "ok\n";
+}

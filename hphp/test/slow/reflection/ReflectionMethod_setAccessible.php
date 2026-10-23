@@ -1,19 +1,22 @@
-<?php
+<?hh
 class Foo {
-  private function myPrivateMethod() {
+  private function myPrivateMethod() :mixed{
     return 42;
   }
-  protected function myProtectedMethod() {
+  protected function myProtectedMethod() :mixed{
     return 52;
   }
-  public function myPublicMethod() {
+  public function myPublicMethod() :mixed{
     return 62;
   }
-  protected static function myProtectedStaticMethod() {
+  protected static function myProtectedStaticMethod() :mixed{
     return 72;
   }
 }
 
+
+<<__EntryPoint>>
+function main_reflection_method_set_accessible() :mixed{
 $method = new ReflectionMethod('Foo', 'myPrivateMethod');
 $method->setAccessible(true);
 var_dump($method->invoke(new Foo()));
@@ -33,3 +36,4 @@ var_dump($method->invoke(new Foo()));
 $method = new ReflectionMethod('Foo', 'myProtectedStaticMethod');
 $method->setAccessible(true);
 var_dump($method->invoke(new Foo()));
+}

@@ -14,8 +14,7 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_UTIL_TYPE_SCAN_H_
-#define incl_HPHP_UTIL_TYPE_SCAN_H_
+#pragma once
 
 #include <cstdint>
 #include <stdexcept>
@@ -60,7 +59,7 @@
  * and annotations will be required to resolve (see below).
  */
 
-namespace HPHP { namespace type_scan {
+namespace HPHP::type_scan {
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -86,14 +85,14 @@ constexpr const Index kIndexUnknownNoPtrs = 1;
 
 ////////////////////////////////////////////////////////////////////////////////
 
-}}
+}
 
 // Various ugly internal implementation details put here not to muddle the
 // external interface. Look in here if you're interested in implementation
 // comments.
 #include "hphp/util/type-scan-detail.h"
 
-namespace HPHP { namespace type_scan { namespace Action {
+namespace HPHP::type_scan { namespace Action {
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -411,6 +410,5 @@ struct Scanner {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-}}
+}
 
-#endif

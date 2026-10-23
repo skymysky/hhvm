@@ -1,11 +1,16 @@
-<?php
+<?hh
 
-function aa() { return 'a'; }
-function heh() { return array('a' => aa()); }
-function x() {
+function aa() :mixed{ return 'a'; }
+function heh() :mixed{ return dict['a' => aa()]; }
+function x() :mixed{
   $x = heh();
-  $r = $x[null] = 2;
+  $r = 2;
+  $x[''] = 2;
   var_dump($r);
   var_dump($x);
 }
+
+<<__EntryPoint>>
+function main_array_037() :mixed{
 x();
+}

@@ -1,4 +1,4 @@
-<?hh // decl    /* -*- php -*- */
+<?hh /* -*- php -*- */
 /**
  * Copyright (c) 2014, Facebook, Inc.
  * All rights reserved.
@@ -9,234 +9,438 @@
  */
 
 // flags for array_change_key_case()
-const int CASE_LOWER = 0;
-const int CASE_UPPER = 0;
+const int CASE_LOWER;
+const int CASE_UPPER;
 
 // flags for array_multisort
-const int SORT_ASC = 0;
-const int SORT_DESC = 0;
+const int SORT_ASC;
+const int SORT_DESC;
 
 // flags for sort() family
-const int SORT_REGULAR = 0;
-const int SORT_NUMERIC = 0;
-const int SORT_STRING = 0;
-const int SORT_LOCALE_STRING = 0;
-const int SORT_NATURAL = 0;
-const int SORT_FLAG_CASE = 0;
+const int SORT_REGULAR;
+const int SORT_NUMERIC;
+const int SORT_STRING;
+const int SORT_LOCALE_STRING;
+const int SORT_NATURAL;
+const int SORT_FLAG_CASE;
 
 // flags for count()
-const int COUNT_NORMAL = 0;
-const int COUNT_RECURSIVE = 0;
+const int COUNT_NORMAL;
+const int COUNT_RECURSIVE;
 
-// flags for extract()
-const int EXTR_OVERWRITE = 0;
-const int EXTR_SKIP = 0;
-const int EXTR_PREFIX_SAME = 0;
-const int EXTR_PREFIX_ALL = 0;
-const int EXTR_PREFIX_INVALID = 0;
-const int EXTR_PREFIX_IF_EXISTS = 0;
-const int EXTR_IF_EXISTS = 0;
-const int EXTR_REFS = 0;
+const int UCOL_DEFAULT;
+const int UCOL_PRIMARY;
+const int UCOL_SECONDARY;
+const int UCOL_TERTIARY;
+const int UCOL_DEFAULT_STRENGTH;
+const int UCOL_QUATERNARY;
+const int UCOL_IDENTICAL;
+const int UCOL_OFF;
+const int UCOL_ON;
+const int UCOL_SHIFTED;
+const int UCOL_NON_IGNORABLE;
+const int UCOL_LOWER_FIRST;
+const int UCOL_UPPER_FIRST;
+const int UCOL_FRENCH_COLLATION;
+const int UCOL_ALTERNATE_HANDLING;
+const int UCOL_CASE_FIRST;
+const int UCOL_CASE_LEVEL;
+const int UCOL_NORMALIZATION_MODE;
+const int UCOL_STRENGTH;
+const int UCOL_HIRAGANA_QUATERNARY_MODE;
+const int UCOL_NUMERIC_COLLATION;
 
-const int UCOL_DEFAULT = 0;
-const int UCOL_PRIMARY = 0;
-const int UCOL_SECONDARY = 0;
-const int UCOL_TERTIARY = 0;
-const int UCOL_DEFAULT_STRENGTH = 0;
-const int UCOL_QUATERNARY = 0;
-const int UCOL_IDENTICAL = 0;
-const int UCOL_OFF = 0;
-const int UCOL_ON = 0;
-const int UCOL_SHIFTED = 0;
-const int UCOL_NON_IGNORABLE = 0;
-const int UCOL_LOWER_FIRST = 0;
-const int UCOL_UPPER_FIRST = 0;
-const int UCOL_FRENCH_COLLATION = 0;
-const int UCOL_ALTERNATE_HANDLING = 0;
-const int UCOL_CASE_FIRST = 0;
-const int UCOL_CASE_LEVEL = 0;
-const int UCOL_NORMALIZATION_MODE = 0;
-const int UCOL_STRENGTH = 0;
-const int UCOL_HIRAGANA_QUATERNARY_MODE = 0;
-const int UCOL_NUMERIC_COLLATION = 0;
-<<__PHPStdLib, __Rx>>
-function array_change_key_case($input, $upper = false);
-<<__PHPStdLib, __Rx>>
-function array_chunk($input, $size, $preserve_keys = false);
-<<__PHPStdLib, __Rx>>
-function array_combine($keys, $values);
-<<__PHPStdLib, __Rx>>
-function array_count_values($input);
-<<__PHPStdLib, __Rx>>
-function array_column<Tk as arraykey, Tv>(
-  array<array<Tk, Tv>> $array,
-  ?Tk $column_key,
-  ?Tk $index_key = null,
-): array;
-<<__PHPStdLib, __Rx>>
-function array_fill_keys($keys, $value);
-/*
- * Calls to array_filter are rewritten depending on the type
- * of argument to have one of the following signatures:
- *
- * function(array, ?(function(Tv):bool)): array
- * function(KeyedContainer<Tk, Tv>, ?(function(Tv):bool)): array<Tk, Tv>
- * function(Container<Tv>, ?(function(Tv):bool)): array<arraykey, Tv>
- *
- * Single argument calls additionally remove nullability of Tv, i.e.:
- *
- * function(Container<?Tv>): array<arraykey, Tv>
- *
- */
-function array_filter<Tv>(Container<Tv> $input, ?(function(Tv):bool) $callback = null);
-<<__PHPStdLib, __Rx>>
-function array_flip($trans);
-<<__PHPStdLib, __Rx>>
-function key_exists($key, $search);
-<<__PHPStdLib, __Rx>>
-function array_keys<Tk, Tv>(
-  KeyedContainer<Tk, Tv> $input,
-  ?Tv $search_value = null,
-  bool $strict = false
-): array<Tk>;
+const int TAG_PROVENANCE_HERE_MUTATE_COLLECTIONS;
+
+<<__PHPStdLib>>
+function array_change_key_case<Tv>(
+  KeyedContainer<arraykey, Tv> $input,
+  int $upper = CASE_LOWER,
+)[]: darray<arraykey, Tv>;
+/** inner container will be a varray<mixed> or darray<arraykey, mixed> depending on $preserve_keys */
+<<__PHPStdLib>>
+function array_chunk<Tv>(
+  Container<Tv> $input,
+  int $size,
+  bool $preserve_keys = false,
+)[]: varray<Container<int>>;
+<<__PHPStdLib>>
+function array_combine<Tv1 as arraykey, Tv2>(
+  Container<Tv1> $keys,
+  Container<Tv2> $values,
+)[]: darray<Tv1, Tv2>;
+<<__PHPStdLib>>
+function array_count_values<Tv as arraykey>(
+  Container<Tv> $input,
+)[]: darray<Tv, int>;
+<<__PHPStdLib>>
+function array_column<Tv>(
+  Container<KeyedContainer<arraykey, Tv>> $array,
+  ?arraykey $column_key,
+)[]: varray_or_darray<Tv>;
+<<__PHPStdLib>>
+function array_fill_keys<Tk as arraykey, Tv>(
+  Container<Tk> $keys,
+  Tv $value,
+)[]: darray<Tk, Tv>;
 /**
- * array_map signature is rewritten based on the arity of the call:
+ * `array_filter` returns a `KeyedContainer<_, _>` with the items that match
+ * the predicate.
  *
- * array_map(F, A1, A2, ..., An); becomes
+ * This function is deprecated; please use `Dict\filter` or `Vec\filter`
+ * instead, or the respective `filter_nulls` variant.
  *
- * array_map<T1, ... Tn, Tr>(
- *   (function(T1, ..., Tn): Tr),
- *   Container<T1>,
- *   ...,
- *   Container<Tn>
- *): R;
+ * `array_filter` used to have special typing to indicate:
+ *   - Whether or not it preserved the input type
+ *   - How it removed nulls upon not providing a callback
  *
- * where for n > 1, R = array<Tr>
- * for n = 1, R depends on actual type of container passed at the call site:
- *
- * array                 -> R = array
- * array<X>              -> R = array<Tr>
- * array<X, Y>           -> R = array<X, Tr>
- * Vector<X>             -> R = array<Tr>
- * KeyedContainer<X, Y>  -> R = array<X, Tr>
- * Container<X>          -> R = array<arraykey, Tr>
- * X (unknown type)      -> R = Y (other unknown type)
+ * These typing behaviors are now split into the aforementioned four Hack
+ * Standard Library functions.
  */
-function array_map($callback, $arr1, ...);
-<<__PHPStdLib, __Rx>>
-function array_merge_recursive($array1, ...);
-<<__PHPStdLib, __Rx>>
-function array_merge($array1, ...);
-<<__Rx>>
-function array_replace_recursive($array1, ...);
-<<__Rx>>
-function array_replace($array1, ...);
-/* HH_IGNORE_ERROR[3068] this is a builtin */
-function array_multisort(&$arr1, &...$rest);
-<<__PHPStdLib, __Rx>>
-function array_pad($input, $pad_size, $pad_value);
 <<__PHPStdLib>>
-function array_pop(&$array);
+function array_filter<Tk as arraykey, Tv>(
+  KeyedContainer<Tk, Tv> $input,
+  ?(function(Tv): bool) $callback = null,
+): KeyedContainer<Tk, Tv>;
 <<__PHPStdLib>>
-function array_push(&$array, $var, ...);
+function array_flip(
+  HH\FIXME\MISSING_PARAM_TYPE $trans,
+)[]: HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function array_rand($input, $num_req = 1);
-function array_reduce($input, $callback, $initial = null);
-<<__PHPStdLib, __Rx>>
-function array_reverse($array, $preserve_keys = false);
-<<__PHPStdLib, __Rx>>
-function array_search($needle, $haystack, $strict = false);
+function key_exists(
+  HH\FIXME\MISSING_PARAM_TYPE $key,
+  HH\FIXME\MISSING_PARAM_TYPE $search,
+)[]: bool;
 <<__PHPStdLib>>
-function array_shift(&$array);
-<<__PHPStdLib, __Rx>>
-function array_slice($array, $offset, $length = null, $preserve_keys = false);
+function array_keys<Tk as arraykey>(
+  KeyedContainer<Tk, mixed> $input,
+)[]: varray<Tk>;
+/**
+ * `array_map` previously had it's signature rewritten based on the arity of
+ * the call, to match runtime behaviors including:
+ * - Preserving the input container type
+ * - Allowing for `N` args and accepting a function of the same arity
+ *
+ * This runtime behavior still exists but this function is deprecated in favor
+ * of HSL functions like `Vec\map` or `Dict\map`.
+ */
 <<__PHPStdLib>>
-function array_splice(&$input, $offset, $length = null, $replacement = null);
-<<__PHPStdLib, __Rx>>
-function array_unique($array, $sort_flags = 2);
+function array_map<Tk as arraykey, Tin, Tout>(
+  (function(Tin): Tout) $callback,
+  KeyedContainer<Tk, Tin> $arr,
+): KeyedContainer<Tk, Tout>;
+
 <<__PHPStdLib>>
-function array_unshift(&$array, $var, ...);
-<<__PHPStdLib, __Rx>>
-function array_values<Tv>(Container<Tv> $input): array<Tv>;
+function array_merge_recursive(
+  HH\FIXME\MISSING_PARAM_TYPE $array1,
+  HH\FIXME\MISSING_PARAM_TYPE ...$args
+)[]: HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function array_walk_recursive(&$input, $funcname, $userdata = null);
+function array_merge(
+  HH\FIXME\MISSING_PARAM_TYPE $array1,
+  HH\FIXME\MISSING_PARAM_TYPE ...$args
+)[]: HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function array_walk(&$input, $funcname, $userdata = null);
-function compact($varname, ...);
+function array_replace_recursive(
+  HH\FIXME\MISSING_PARAM_TYPE $array1,
+  HH\FIXME\MISSING_PARAM_TYPE ...$args
+)[]: HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function shuffle(&$array);
-<<__Deprecated('Use count(), it does the same thing as sizeof() in PHP and '.
-  'doesn\'t suggest that it\'s counting bytes.'), __PHPStdLib, __Rx>>
-function sizeof($var, $recursive = false);
+function array_replace(
+  HH\FIXME\MISSING_PARAM_TYPE $array1,
+  HH\FIXME\MISSING_PARAM_TYPE ...$args
+)[]: HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function each(&$array);
+function array_multisort1(inout mixed $arg1): bool;
 <<__PHPStdLib>>
-function current(&$array);
+function array_multisort2(
+  inout mixed $arg1,
+  inout mixed $arg2,
+): bool;
 <<__PHPStdLib>>
-function hphp_current_ref(&$array);
+function array_multisort3(
+  inout mixed $arg1,
+  inout mixed $arg2,
+  inout mixed $arg3,
+): bool;
 <<__PHPStdLib>>
-function next(&$array);
+function array_multisort4(
+  inout mixed $arg1,
+  inout mixed $arg2,
+  inout mixed $arg3,
+  inout mixed $arg4,
+): bool;
 <<__PHPStdLib>>
-function pos(&$array);
+function array_multisort5(
+  inout mixed $arg1,
+  inout mixed $arg2,
+  inout mixed $arg3,
+  inout mixed $arg4,
+  inout mixed $arg5,
+): bool;
 <<__PHPStdLib>>
-function prev(&$array);
+function array_multisort6(
+  inout mixed $arg1,
+  inout mixed $arg2,
+  inout mixed $arg3,
+  inout mixed $arg4,
+  inout mixed $arg5,
+  inout mixed $arg6,
+): bool;
 <<__PHPStdLib>>
-function reset(&$array);
+function array_multisort7(
+  inout mixed $arg1,
+  inout mixed $arg2,
+  inout mixed $arg3,
+  inout mixed $arg4,
+  inout mixed $arg5,
+  inout mixed $arg6,
+  inout mixed $arg7,
+): bool;
 <<__PHPStdLib>>
-function end(&$array);
+function array_multisort8(
+  inout mixed $arg1,
+  inout mixed $arg2,
+  inout mixed $arg3,
+  inout mixed $arg4,
+  inout mixed $arg5,
+  inout mixed $arg6,
+  inout mixed $arg7,
+  inout mixed $arg8,
+): bool;
 <<__PHPStdLib>>
-function key(&$array);
+function array_multisort9(
+  inout mixed $arg1,
+  inout mixed $arg2,
+  inout mixed $arg3,
+  inout mixed $arg4,
+  inout mixed $arg5,
+  inout mixed $arg6,
+  inout mixed $arg7,
+  inout mixed $arg8,
+  inout mixed $arg9,
+): bool;
 <<__PHPStdLib>>
-function hphp_get_iterator($iterable);
+function array_pad(
+  HH\FIXME\MISSING_PARAM_TYPE $input,
+  int $pad_size,
+  HH\FIXME\MISSING_PARAM_TYPE $pad_value,
+)[]: HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function hphp_get_mutable_iterator(&$iterable);
-<<__PHPStdLib, __Rx>>
-function in_array($needle, $haystack, $strict = false);
-<<__PHPStdLib, __Rx>>
-function range($low, $high, $step = 1);
-<<__PHPStdLib, __Rx>>
-function array_diff($array1, $array2, ...);
+function array_pop(
+  inout HH\FIXME\MISSING_PARAM_TYPE $array,
+)[write_props]: HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function array_udiff($array1, $array2, $data_compare_func, ...);
-<<__PHPStdLib, __Rx>>
-function array_diff_assoc($array1, $array2, ...);
+function array_push(
+  inout HH\FIXME\MISSING_PARAM_TYPE $array,
+  HH\FIXME\MISSING_PARAM_TYPE $var,
+  HH\FIXME\MISSING_PARAM_TYPE ...$args
+)[]: HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function array_diff_uassoc($array1, $array2, $key_compare_func, ...);
+function array_rand(
+  HH\FIXME\MISSING_PARAM_TYPE $input,
+  int $num_req = 1,
+)[leak_safe]: HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function array_udiff_assoc($array1, $array2, $data_compare_func, ...);
+function array_reduce(
+  HH\FIXME\MISSING_PARAM_TYPE $input,
+  HH\FIXME\MISSING_PARAM_TYPE $callback,
+  HH\FIXME\MISSING_PARAM_TYPE $initial = null,
+): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function array_udiff_uassoc($array1, $array2, $data_compare_func, $key_compare_func, ...);
-<<__PHPStdLib, __Rx>>
-function array_diff_key($array1, $array2, ...);
+function array_reverse(
+  HH\FIXME\MISSING_PARAM_TYPE $array,
+  bool $preserve_keys = false,
+)[]: HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function array_diff_ukey($array1, $array2, $key_compare_func, ...);
-<<__PHPStdLib, __Rx>>
-function array_intersect($array1, $array2, ...);
+function array_search(
+  HH\FIXME\MISSING_PARAM_TYPE $needle,
+  HH\FIXME\MISSING_PARAM_TYPE $haystack,
+  bool $strict = false,
+)[]: HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function array_uintersect($array1, $array2, $data_compare_func, ...);
-<<__PHPStdLib, __Rx>>
-function array_intersect_assoc($array1, $array2, ...);
+function array_shift<T>(inout T $array)[]: HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function array_intersect_uassoc($array1, $array2, $key_compare_func, ...);
+function array_slice(
+  HH\FIXME\MISSING_PARAM_TYPE $array,
+  int $offset,
+  HH\FIXME\MISSING_PARAM_TYPE $length = null,
+  bool $preserve_keys = false,
+)[]: HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function array_uintersect_assoc($array1, $array2, $data_compare_func, ...);
+function array_splice(
+  inout mixed $input,
+  int $offset,
+  mixed $length = null,
+  mixed $replacement = null,
+): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function array_uintersect_uassoc($array1, $array2, $data_compare_func, $key_compare_func, ...);
-<<__PHPStdLib, __Rx>>
-function array_intersect_key($array1, $array2, ...);
+function array_unique(
+  HH\FIXME\MISSING_PARAM_TYPE $array,
+  int $sort_flags = 2,
+)[]: HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function array_intersect_ukey($array1, $array2, $key_compare_func, ...);
+function array_unshift<T>(
+  inout T $array,
+  HH\FIXME\MISSING_PARAM_TYPE $var,
+  HH\FIXME\MISSING_PARAM_TYPE ...$args
+)[]: HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function natsort(&$array);
+function array_values<Tv>(Container<Tv> $input)[]: varray<Tv>;
 <<__PHPStdLib>>
-function natcasesort(&$array);
+function shuffle<T>(inout T $array)[leak_safe]: void;
+<<
+  __Deprecated(
+    'Use count(), it does the same thing as sizeof() in PHP and '.
+    'doesn\'t suggest that it\'s counting bytes.',
+  ),
+  __PHPStdLib,
+>>
+function sizeof(
+  HH\FIXME\MISSING_PARAM_TYPE $var,
+)[]: int;
 <<__PHPStdLib>>
-function i18n_loc_get_default();
+function hphp_get_iterator(
+  HH\FIXME\MISSING_PARAM_TYPE $iterable,
+): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function i18n_loc_set_default($locale);
+function in_array(
+  HH\FIXME\MISSING_PARAM_TYPE $needle,
+  HH\FIXME\MISSING_PARAM_TYPE $haystack,
+  bool $strict = false,
+)[]: bool;
 <<__PHPStdLib>>
-function i18n_loc_set_attribute($attr, $val);
+function range(
+  HH\FIXME\MISSING_PARAM_TYPE $low,
+  HH\FIXME\MISSING_PARAM_TYPE $high,
+  HH\FIXME\MISSING_PARAM_TYPE $step = 1,
+)[]: HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function i18n_loc_set_strength($strength);
+function array_diff(
+  HH\FIXME\MISSING_PARAM_TYPE $array1,
+  HH\FIXME\MISSING_PARAM_TYPE $array2,
+  HH\FIXME\MISSING_PARAM_TYPE ...$args
+)[]: HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function i18n_loc_get_error_code();
+function array_udiff(
+  HH\FIXME\MISSING_PARAM_TYPE $array1,
+  HH\FIXME\MISSING_PARAM_TYPE $array2,
+  HH\FIXME\MISSING_PARAM_TYPE $data_compare_func,
+  HH\FIXME\MISSING_PARAM_TYPE ...$args
+): HH\FIXME\MISSING_RETURN_TYPE;
+<<__PHPStdLib>>
+function array_diff_assoc(
+  HH\FIXME\MISSING_PARAM_TYPE $array1,
+  HH\FIXME\MISSING_PARAM_TYPE $array2,
+  HH\FIXME\MISSING_PARAM_TYPE ...$args
+)[]: HH\FIXME\MISSING_RETURN_TYPE;
+<<__PHPStdLib>>
+function array_diff_uassoc(
+  HH\FIXME\MISSING_PARAM_TYPE $array1,
+  HH\FIXME\MISSING_PARAM_TYPE $array2,
+  HH\FIXME\MISSING_PARAM_TYPE $key_compare_func,
+  HH\FIXME\MISSING_PARAM_TYPE ...$args
+): HH\FIXME\MISSING_RETURN_TYPE;
+<<__PHPStdLib>>
+function array_udiff_assoc(
+  HH\FIXME\MISSING_PARAM_TYPE $array1,
+  HH\FIXME\MISSING_PARAM_TYPE $array2,
+  HH\FIXME\MISSING_PARAM_TYPE $data_compare_func,
+  HH\FIXME\MISSING_PARAM_TYPE ...$args
+): HH\FIXME\MISSING_RETURN_TYPE;
+<<__PHPStdLib>>
+function array_udiff_uassoc(
+  HH\FIXME\MISSING_PARAM_TYPE $array1,
+  HH\FIXME\MISSING_PARAM_TYPE $array2,
+  HH\FIXME\MISSING_PARAM_TYPE $data_compare_func,
+  HH\FIXME\MISSING_PARAM_TYPE $key_compare_func,
+  HH\FIXME\MISSING_PARAM_TYPE ...$args
+): HH\FIXME\MISSING_RETURN_TYPE;
+<<__PHPStdLib>>
+function array_diff_key(
+  HH\FIXME\MISSING_PARAM_TYPE $array1,
+  HH\FIXME\MISSING_PARAM_TYPE $array2,
+  HH\FIXME\MISSING_PARAM_TYPE ...$args
+)[]: HH\FIXME\MISSING_RETURN_TYPE;
+<<__PHPStdLib>>
+function array_diff_ukey(
+  HH\FIXME\MISSING_PARAM_TYPE $array1,
+  HH\FIXME\MISSING_PARAM_TYPE $array2,
+  HH\FIXME\MISSING_PARAM_TYPE $key_compare_func,
+  HH\FIXME\MISSING_PARAM_TYPE ...$args
+): HH\FIXME\MISSING_RETURN_TYPE;
+<<__PHPStdLib>>
+function array_intersect(
+  HH\FIXME\MISSING_PARAM_TYPE $array1,
+  HH\FIXME\MISSING_PARAM_TYPE $array2,
+  HH\FIXME\MISSING_PARAM_TYPE ...$args
+)[]: HH\FIXME\MISSING_RETURN_TYPE;
+<<__PHPStdLib>>
+function array_uintersect(
+  HH\FIXME\MISSING_PARAM_TYPE $array1,
+  HH\FIXME\MISSING_PARAM_TYPE $array2,
+  HH\FIXME\MISSING_PARAM_TYPE $data_compare_func,
+  HH\FIXME\MISSING_PARAM_TYPE ...$args
+): HH\FIXME\MISSING_RETURN_TYPE;
+<<__PHPStdLib>>
+function array_intersect_assoc(
+  HH\FIXME\MISSING_PARAM_TYPE $array1,
+  HH\FIXME\MISSING_PARAM_TYPE $array2,
+  HH\FIXME\MISSING_PARAM_TYPE ...$args
+)[]: HH\FIXME\MISSING_RETURN_TYPE;
+<<__PHPStdLib>>
+function array_intersect_uassoc(
+  HH\FIXME\MISSING_PARAM_TYPE $array1,
+  HH\FIXME\MISSING_PARAM_TYPE $array2,
+  HH\FIXME\MISSING_PARAM_TYPE $key_compare_func,
+  HH\FIXME\MISSING_PARAM_TYPE ...$args
+): HH\FIXME\MISSING_RETURN_TYPE;
+<<__PHPStdLib>>
+function array_uintersect_assoc(
+  HH\FIXME\MISSING_PARAM_TYPE $array1,
+  HH\FIXME\MISSING_PARAM_TYPE $array2,
+  HH\FIXME\MISSING_PARAM_TYPE $data_compare_func,
+  HH\FIXME\MISSING_PARAM_TYPE ...$args
+): HH\FIXME\MISSING_RETURN_TYPE;
+<<__PHPStdLib>>
+function array_uintersect_uassoc(
+  HH\FIXME\MISSING_PARAM_TYPE $array1,
+  HH\FIXME\MISSING_PARAM_TYPE $array2,
+  HH\FIXME\MISSING_PARAM_TYPE $data_compare_func,
+  HH\FIXME\MISSING_PARAM_TYPE $key_compare_func,
+  HH\FIXME\MISSING_PARAM_TYPE ...$args
+): HH\FIXME\MISSING_RETURN_TYPE;
+<<__PHPStdLib>>
+function array_intersect_key(
+  HH\FIXME\MISSING_PARAM_TYPE $array1,
+  HH\FIXME\MISSING_PARAM_TYPE $array2,
+  HH\FIXME\MISSING_PARAM_TYPE ...$args
+)[]: HH\FIXME\MISSING_RETURN_TYPE;
+<<__PHPStdLib>>
+function array_intersect_ukey(
+  HH\FIXME\MISSING_PARAM_TYPE $array1,
+  HH\FIXME\MISSING_PARAM_TYPE $array2,
+  HH\FIXME\MISSING_PARAM_TYPE $key_compare_func,
+  HH\FIXME\MISSING_PARAM_TYPE ...$args
+): HH\FIXME\MISSING_RETURN_TYPE;
+<<__PHPStdLib>>
+function natsort(
+  inout HH\FIXME\MISSING_PARAM_TYPE $array,
+): bool;
+<<__PHPStdLib>>
+function natcasesort(
+  inout HH\FIXME\MISSING_PARAM_TYPE $array,
+): bool;
+<<__PHPStdLib>>
+function i18n_loc_get_default(): string;
+<<__PHPStdLib>>
+function i18n_loc_set_default(string $locale): bool;
+<<__PHPStdLib>>
+function i18n_loc_set_attribute(
+  int $attr,
+  int $val,
+): bool;
+<<__PHPStdLib>>
+function i18n_loc_set_strength(int $strength): bool;
+<<__PHPStdLib>>
+function i18n_loc_get_error_code(): HH\FIXME\MISSING_RETURN_TYPE;

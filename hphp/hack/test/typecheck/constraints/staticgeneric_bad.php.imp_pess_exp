@@ -1,0 +1,58 @@
+error: Typing[4323] Invalid argument [1]
+-> `T` is a constrained type parameter [2]
+-> This type constraint is violated [3]
+-> Expected `arraykey` [3]
+-> But got `bool` [1]
+
+staticgeneric_bad.php:14:14
+ 2 | // Copyright 2004-present Facebook. All Rights Reserved.
+ 3 | 
+ 4 | class C<T as arraykey> {
+   |         ^ [2]
+   |              ^^^^^^^^ [3]
+ 5 |   public function __construct(private T $item) {}
+ 6 |   public static function id(T $x): T {
+   :
+12 | }
+13 | function test(int $x): string {
+14 |   $z = C::id(true);
+   |              ^^^^ [1]
+15 |   return C::selfy(new C(false));
+16 | }
+
+error: Typing[4323] Invalid argument [1]
+-> `T` is a constrained type parameter [2]
+-> This type constraint is violated [3]
+-> Expected `arraykey` [3]
+-> But got `bool` [1]
+
+staticgeneric_bad.php:15:25
+ 2 | // Copyright 2004-present Facebook. All Rights Reserved.
+ 3 | 
+ 4 | class C<T as arraykey> {
+   |         ^ [2]
+   |              ^^^^^^^^ [3]
+ 5 |   public function __construct(private T $item) {}
+ 6 |   public static function id(T $x): T {
+   :
+13 | function test(int $x): string {
+14 |   $z = C::id(true);
+15 |   return C::selfy(new C(false));
+   |                         ^^^^^ [1]
+16 | }
+
+error: Typing[4110] Invalid argument [1]
+-> Expected `string` [2]
+-> But got `bool` [1]
+
+staticgeneric_bad.php:15:25
+11 |   }
+12 | }
+13 | function test(int $x): string {
+   |                        ^^^^^^ [2]
+14 |   $z = C::id(true);
+15 |   return C::selfy(new C(false));
+   |                         ^^^^^ [1]
+16 | }
+
+3 errors found

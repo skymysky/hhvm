@@ -1,0 +1,17 @@
+error: Parsing[1002] A left brace `{` is expected here. [1]
+
+class_level_where_clauses_disabled.php:12:16
+10 |  */
+11 | 
+12 | class Base <T> where T = int {}
+   |                ^ [1]
+
+error: Parsing[1002] Encountered unexpected text `where`, was expecting a class element. [1]
+
+class_level_where_clauses_disabled.php:12:16
+10 |  */
+11 | 
+12 | class Base <T> where T = int {}
+   |                ^^^^^ [1]
+
+2 errors found

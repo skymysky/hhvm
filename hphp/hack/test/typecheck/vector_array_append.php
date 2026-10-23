@@ -9,6 +9,6 @@
  *
  */
 
-function foo1(Vector<string> $vec) {
+function foo1(Vector<string> $vec): void {
   $vec[] = 'meh';
 }

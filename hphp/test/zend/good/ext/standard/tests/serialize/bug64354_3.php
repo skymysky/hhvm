@@ -1,24 +1,24 @@
-<?php
+<?hh
 class A {
-    public function __sleep() {
+    public function __sleep() :mixed{
         throw new Exception("Failed");
     }
 }
 
 class B implements Serializable {
-    public function serialize() {
+    public function serialize() :mixed{
         return NULL;
     }
 
-    public function unserialize($data) {
+    public function unserialize($data) :mixed{
     }
 }
-
-$data = array(new A, new B);
+<<__EntryPoint>> function main(): void {
+$data = vec[new A, new B];
 
 try {
     serialize($data);
-} catch (Exception $e) { 
+} catch (Exception $e) {
     var_dump($e->getMessage());
 }
-?>
+}

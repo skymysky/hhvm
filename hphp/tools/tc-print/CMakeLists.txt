@@ -1,27 +1,45 @@
-if(IS_X64)
-  find_package(LibXed REQUIRED)
-  if (LibXed_INCLUDE_DIR AND LibXed_LIBRARY)
-    include_directories(${LibXed_INCLUDE_DIR})
-    add_definitions("-DHAVE_LIBXED")
-    add_executable(tc-print "mappers.cpp" "offline-trans-data.cpp"
-                            "offline-code.cpp"
-                            "offline-x86-code.cpp"  "perf-events.cpp"
-                            "repo-wrapper.cpp"  "tc-print.cpp"
-                            "../../hhvm/process-init.cpp")
-    link_object_libraries(tc-print ${HHVM_WHOLE_ARCHIVE_LIBRARIES})
-    target_link_libraries(tc-print ${HHVM_LINK_LIBRARIES})
-    embed_all_systemlibs(tc-print "${CMAKE_CURRENT_BINARY_DIR}/../.."
-                                  "${CMAKE_CURRENT_BINARY_DIR}/tc-print")
+set(
+  TC_PRINT_CXX_SOURCES
+  annotation-cache.cpp
+  mappers.cpp
+  offline-arm-code.cpp
+  offline-code.cpp
+  offline-trans-data.cpp
+  perf-events.cpp
+  printir-annotation.cpp
+  repo-wrapper.cpp
+  std-logger.cpp
+  tc-print.cpp
+)
+
+if(HHVM_ENABLE_XED)
+  if (LibXed_FOUND)
+    set(TC_PRINT_XED_LIBRARY ${LibXed_LIBRARY})
+  else()
+    set(TC_PRINT_XED_LIBRARY xed)
   endif()
+  list(APPEND TC_PRINT_CXX_SOURCES offline-x86-code.cpp)
+else()
+  message(STATUS "XED disabled, tc-print will not be built")
+  return()
 endif()
-if(NOT IS_X64)
-  add_executable(tc-print "mappers.cpp" "offline-trans-data.cpp"
-                          "offline-code.cpp"  "perf-events.cpp"
-                          "offline-arm-code.cpp" "offline-ppc64-code.cpp"
-                          "repo-wrapper.cpp"  "tc-print.cpp"
-                          "../../hhvm/process-init.cpp")
-  link_object_libraries(tc-print ${HHVM_WHOLE_ARCHIVE_LIBRARIES})
-  target_link_libraries(tc-print ${HHVM_LINK_LIBRARIES})
-  embed_all_systemlibs(tc-print "${CMAKE_CURRENT_BINARY_DIR}/../.."
-                                "${CMAKE_CURRENT_BINARY_DIR}/tc-print")
+
+add_executable(tc-print ${TC_PRINT_CXX_SOURCES})
+add_dependencies(tc-print hhvm)
+
+link_object_libraries(tc-print ${HHVM_WHOLE_ARCHIVE_LIBRARIES})
+target_link_libraries(tc-print ${HHVM_LINK_LIBRARIES})
+if(NOT HHVM_REQUIRE_XED)
+  target_link_libraries(tc-print ${TC_PRINT_XED_LIBRARY})
 endif()
+hphp_link(tc-print)
+if (NOT WINDOWS)
+  target_link_libraries(
+    tc-print ${LIBELF_LIBRARIES} ${LIBDWARF_LIBRARIES} ${ZLIB_LIBRARIES}
+  )
+endif()
+
+embed_all_systemlibs(tc-print "${CMAKE_CURRENT_BINARY_DIR}/../.."
+                              "${CMAKE_CURRENT_BINARY_DIR}/tc-print")
+
+install(TARGETS tc-print)

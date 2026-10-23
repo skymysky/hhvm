@@ -14,15 +14,14 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_VM_SSATMP_H_
-#define incl_HPHP_VM_SSATMP_H_
+#pragma once
 
 #include "hphp/runtime/vm/jit/type.h"
 #include "hphp/runtime/vm/jit/types.h"
 
 #include "hphp/runtime/base/type-variant.h"
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 
 struct IRInstruction;
 struct IRUnit;
@@ -53,13 +52,17 @@ struct SSATmp {
   uint64_t           rawVal() const       { return type().rawVal(); }
   double             dblVal() const       { return type().dblVal(); }
   const StringData*  strVal() const       { return type().strVal(); }
+  const StringData*  eclVal() const       { return type().eclVal(); }
   const ArrayData*   arrVal() const       { return type().arrVal(); }
+  const ArrayData*   shapeVal() const     { return type().shapeVal(); }
   const ArrayData*   vecVal() const       { return type().vecVal(); }
   const ArrayData*   dictVal() const      { return type().dictVal(); }
   const ArrayData*   keysetVal() const    { return type().keysetVal(); }
+  const ArrayData*   arrLikeVal() const   { return type().arrLikeVal(); }
   const Func*        funcVal() const      { return type().funcVal(); }
   const Class*       clsVal() const       { return type().clsVal(); }
-  ConstCctx          cctxVal() const      { return type().cctxVal(); }
+  LazyClassData      lclsVal() const      { return type().lclsVal(); }
+  const ClsMethDataRef clsmethVal() const { return type().clsmethVal(); }
   rds::Handle        rdsHandleVal() const { return type().rdsHandleVal(); }
   TCA                tcaVal() const       { return type().tcaVal(); }
   Variant            variantVal() const;
@@ -95,6 +98,4 @@ private:
   const uint32_t  m_id;
 };
 
-}}
-
-#endif
+}

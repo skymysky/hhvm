@@ -1,8 +1,16 @@
-<?php
+<?hh
 
-function test() {
- $a = 0;
- $a += $b;
+function test() :mixed{
+  $a = 0;
+  try {
+    $a += $b;
+  } catch (UndefinedVariableException $e) {
+    var_dump($e->getMessage());
+  }
 }
-test();
-echo "done\n";
+
+<<__EntryPoint>>
+function main_1260() :mixed{
+  test();
+  echo "done\n";
+}

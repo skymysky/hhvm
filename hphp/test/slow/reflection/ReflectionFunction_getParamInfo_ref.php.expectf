@@ -1,0 +1,223 @@
+vec(1) {
+  object(ReflectionParameter) (2) {
+    ["info":"ReflectionParameter":private]=>
+    dict(8) {
+      ["index"]=>
+      int(0)
+      ["name"]=>
+      string(1) "a"
+      ["type_hint"]=>
+      string(7) "HH\bool"
+      ["function"]=>
+      string(1) "f"
+      ["type_hint_nullable"]=>
+      bool(false)
+      ["inout"]=>
+      bool(true)
+      ["attributes"]=>
+      dict(0) {
+      }
+      ["is_optional"]=>
+      bool(false)
+    }
+    ["name"]=>
+    string(1) "a"
+  }
+}
+vec(2) {
+  object(ReflectionParameter) (2) {
+    ["info":"ReflectionParameter":private]=>
+    dict(8) {
+      ["index"]=>
+      int(0)
+      ["name"]=>
+      string(1) "a"
+      ["type_hint"]=>
+      string(7) "HH\bool"
+      ["function"]=>
+      string(1) "g"
+      ["type_hint_nullable"]=>
+      bool(false)
+      ["inout"]=>
+      bool(true)
+      ["attributes"]=>
+      dict(0) {
+      }
+      ["is_optional"]=>
+      bool(false)
+    }
+    ["name"]=>
+    string(1) "a"
+  }
+  object(ReflectionParameter) (2) {
+    ["info":"ReflectionParameter":private]=>
+    dict(7) {
+      ["index"]=>
+      int(1)
+      ["name"]=>
+      string(9) "not_inout"
+      ["type_hint"]=>
+      string(7) "HH\bool"
+      ["function"]=>
+      string(1) "g"
+      ["type_hint_nullable"]=>
+      bool(false)
+      ["attributes"]=>
+      dict(0) {
+      }
+      ["is_optional"]=>
+      bool(false)
+    }
+    ["name"]=>
+    string(9) "not_inout"
+  }
+}
+vec(1) {
+  object(ReflectionParameter) (2) {
+    ["info":"ReflectionParameter":private]=>
+    dict(7) {
+      ["index"]=>
+      int(0)
+      ["name"]=>
+      string(1) "a"
+      ["type_hint"]=>
+      string(7) "HH\bool"
+      ["function"]=>
+      string(1) "h"
+      ["type_hint_nullable"]=>
+      bool(false)
+      ["attributes"]=>
+      dict(0) {
+      }
+      ["is_optional"]=>
+      bool(false)
+    }
+    ["name"]=>
+    string(1) "a"
+  }
+}
+vec(3) {
+  object(ReflectionParameter) (2) {
+    ["info":"ReflectionParameter":private]=>
+    dict(7) {
+      ["index"]=>
+      int(0)
+      ["name"]=>
+      string(1) "_"
+      ["type_hint"]=>
+      string(7) "HH\bool"
+      ["function"]=>
+      string(1) "i"
+      ["type_hint_nullable"]=>
+      bool(false)
+      ["attributes"]=>
+      dict(0) {
+      }
+      ["is_optional"]=>
+      bool(false)
+    }
+    ["name"]=>
+    string(1) "_"
+  }
+  object(ReflectionParameter) (2) {
+    ["info":"ReflectionParameter":private]=>
+    dict(7) {
+      ["index"]=>
+      int(1)
+      ["name"]=>
+      string(2) "_0"
+      ["type_hint"]=>
+      string(7) "HH\bool"
+      ["function"]=>
+      string(1) "i"
+      ["type_hint_nullable"]=>
+      bool(false)
+      ["attributes"]=>
+      dict(0) {
+      }
+      ["is_optional"]=>
+      bool(false)
+    }
+    ["name"]=>
+    string(2) "_0"
+  }
+  object(ReflectionParameter) (2) {
+    ["info":"ReflectionParameter":private]=>
+    dict(7) {
+      ["index"]=>
+      int(2)
+      ["name"]=>
+      string(2) "_1"
+      ["type_hint"]=>
+      string(7) "HH\bool"
+      ["function"]=>
+      string(1) "i"
+      ["type_hint_nullable"]=>
+      bool(false)
+      ["attributes"]=>
+      dict(0) {
+      }
+      ["is_optional"]=>
+      bool(false)
+    }
+    ["name"]=>
+    string(2) "_1"
+  }
+}
+dict(1) {
+  [0]=>
+  bool(true)
+}
+dict(2) {
+  [0]=>
+  bool(true)
+  [1]=>
+  bool(false)
+}
+dict(1) {
+  [0]=>
+  bool(false)
+}
+dict(3) {
+  [0]=>
+  bool(false)
+  [1]=>
+  bool(false)
+  [2]=>
+  bool(false)
+}
+string(%d) "Function [ <user> function f ] {
+  @@ %s/ReflectionFunction_getParamInfo_ref.php %d - %d
+
+  - Parameters [1] {
+    Parameter #0 [ <required> inout HH\bool $a ]
+  }
+}
+"
+string(%d) "Function [ <user> function g ] {
+  @@ %s/ReflectionFunction_getParamInfo_ref.php %d - %d
+
+  - Parameters [2] {
+    Parameter #0 [ <required> inout HH\bool $a ]
+    Parameter #1 [ <required> HH\bool $not_inout ]
+  }
+}
+"
+string(%d) "Function [ <user> function h ] {
+  @@ %s/ReflectionFunction_getParamInfo_ref.php %d - %d
+
+  - Parameters [1] {
+    Parameter #0 [ <required> HH\bool $a ]
+  }
+}
+"
+string(%d) "Function [ <user> function i ] {
+  @@ %s/ReflectionFunction_getParamInfo_ref.php %d - %d
+
+  - Parameters [3] {
+    Parameter #0 [ <required> HH\bool $_ ]
+    Parameter #1 [ <required> HH\bool $_0 ]
+    Parameter #2 [ <required> HH\bool $_1 ]
+  }
+}
+"

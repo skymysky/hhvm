@@ -1,0 +1,12 @@
+error: Typing[4121] Illegal usage of a contravariant type parameter [1]
+-> This is where the parameter was declared as contravariant `-` [2]
+-> Aliased types are covariant [1]
+
+covariance_typedef_decl_bad_2.php:3:14
+1 | <?hh
+2 | 
+3 | type X<-T> = T;
+  |         ^ [2]
+  |              ^ [1]
+
+1 error found

@@ -1,9 +1,10 @@
-<?php
+<?hh
 function gen($o)
-{
-	yield 'foo';
-	$o->fatalError();
+:AsyncGenerator<mixed,mixed,void>{
+    yield 'foo';
+    $o->fatalError();
 }
-
+<<__EntryPoint>> function main(): void {
 foreach(gen(new stdClass()) as $value)
-	echo $value, "\n";
+    echo $value, "\n";
+}

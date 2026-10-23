@@ -1,0 +1,18 @@
+error: Typing[4110] Invalid return type [1]
+-> Expected `string` [2]
+-> But got `int` [1]
+->   from this definition [3]
+
+wildcard_nested_in_lambda_return_bad.php:6:10
+1 | <?hh
+2 | 
+3 | function test1():string {
+  |                  ^^^^^^ [2]
+4 |   $f = (int $_) : vec<_> ==> vec[3];
+  |                                  ^ [3]
+5 |   $x = $f(3);
+6 |   return $x[0];
+  |          ^^^^^ [1]
+7 | }
+
+1 error found

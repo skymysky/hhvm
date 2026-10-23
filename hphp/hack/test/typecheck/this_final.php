@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 /**
  * Copyright (c) 2014, Facebook, Inc.
  * All rights reserved.
@@ -19,4 +19,10 @@ final class Foo {
   public function get2(): this {
     return new self();
   }
+  public function expectThis(this $_):void { }
+}
+
+function testit(Foo $x, Foo $y):void {
+  $z = $x->get1();
+  $y->expectThis($z);
 }

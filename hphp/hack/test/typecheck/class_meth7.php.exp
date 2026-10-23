@@ -1,4 +1,19 @@
-File "class_meth7.php", line 13, characters 27-28:
-This is a private method (Typing[4078])
-File "class_meth7.php", line 19, characters 8-33:
-you cannot use it with class_meth (whether you are in the same class or not).
+error: Typing[4112] You cannot access this method [1]
+-> This member is private [2]
+
+class_meth7.php:19:11
+11 | 
+12 | class A {
+13 |   private static function f1(string $s): int {
+   |                           ^^ [2]
+14 |     return 1;
+15 |   }
+16 | }
+17 | 
+18 | function foo(): int {
+19 |   $p = A::f1<>;
+   |           ^^ [1]
+20 |   return $p('moo');
+21 | }
+
+1 error found

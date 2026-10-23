@@ -1,0 +1,14 @@
+error: Typing[4121] Illegal usage of a contravariant type parameter [1]
+-> This is where the parameter was declared as contravariant `-` [2]
+-> Function return types are covariant [1]
+
+contravariance_static_function_bad.php:3:40
+1 | <?hh
+2 | class Contra<-T> {
+  |               ^ [2]
+3 |   public static function foo(int $v): ?T {
+  |                                        ^ [1]
+4 |     return null;
+5 |   }
+
+1 error found

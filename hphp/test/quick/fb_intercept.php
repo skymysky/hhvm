@@ -1,96 +1,79 @@
-<?php
-
-function handler($name, $obj, $args, $data, &$done) {
+<?hh
+function mkh($c) :mixed{ return ($_1, $_2, inout $_3) ==> shape('value' => $c()); }
+<<__DynamicallyCallable>> function handler($name, $obj, inout $args) :mixed{
   echo "----HANDLER----\n";
-  var_dump($name, $obj, $args, $data, $done);
+  var_dump($name, $obj, $args);
   echo "---------------\n";
+  return shape('value' => null);
 }
 
-function passthrough_handler($name, $obj, $args, $data, &$done) {
+<<__DynamicallyCallable>> function passthrough_handler($name, $obj, inout $args) :mixed{
   echo "----HANDLER----\n";
-  var_dump($name, $obj, $args, $data, $done);
-  $done = false;
+  var_dump($name, $obj, $args);
   echo "---------------\n";
+  return shape();
 }
 
-class MagicCall {
-  public function __call($name, $args) {
-    echo "magic call! ";
-    var_dump($name, $args);
-    echo "\n";
-  }
-}
-
-function frap($arg) {
+function frap($arg) :mixed{
   echo "frap $arg\n";
 }
 
-function test_standard_function() {
+function test_standard_function() :mixed{
   echo '---------- ', __FUNCTION__, ' ----------', "\n";
   // Call once normally first; make sure translator can handle it
   frap('claptrap');
 
   // Intercept a function
-  fb_intercept('frap', 'handler', 'data');
+  fb_intercept2('frap', HH\dynamic_fun('handler'));
   frap('claptrap');
-  call_user_func('frap', 'callfunc');
+  call_user_func(frap<>, 'callfunc');
 
-  fb_intercept('frap', 'passthrough_handler');
+  fb_intercept2('frap', HH\dynamic_fun('passthrough_handler'));
   frap('claptrap');
-  call_user_func('frap', 'callfunc');
+  call_user_func(frap<>, 'callfunc');
 
   // Replace with closure
-  fb_intercept('frap', function () { echo "Closure! wooooo\n"; });
-  frap('claptrap');
-
-  // Replace with __call-having object
-  $mc = new MagicCall();
-  fb_intercept('frap', array($mc, 'i_dont_exist'));
+  fb_intercept2('frap', mkh(function () { echo "Closure! wooooo\n"; }));
   frap('claptrap');
 
   // Reset
-  fb_intercept('frap', null);
+  fb_intercept2('frap', null);
   frap('claptrap');
 }
 
-function var_frap($arg, ...$rest) {
+function var_frap($arg, ...$rest) :mixed{
   echo "var_frap $arg "; var_dump($rest);
 }
 
-function test_variadic_function() {
+function test_variadic_function() :mixed{
   echo '---------- ', __FUNCTION__, ' ----------', "\n";
 
   // Call once normally first; make sure translator can handle it
   var_frap('claptrap', 'blah');
 
   // Intercept a function
-  fb_intercept('var_frap', 'handler', 'data');
+  fb_intercept2('var_frap', HH\dynamic_fun('handler'));
   var_frap('claptrap', 'blah');
-  call_user_func('var_frap', 'callfunc');
+  call_user_func(var_frap<>, 'callfunc');
 
-  fb_intercept('var_frap', 'passthrough_handler');
+  fb_intercept2('var_frap', HH\dynamic_fun('passthrough_handler'));
   var_frap('claptrap', 'blah');
-  call_user_func('var_frap', 'callfunc');
+  call_user_func(var_frap<>, 'callfunc');
 
   // Replace with closure
-  fb_intercept('var_frap', function () { echo "Closure! wooooo\n"; });
-  var_frap('claptrap', 'blah');
-
-  // Replace with __call-having object
-  $mc = new MagicCall();
-  fb_intercept('var_frap', array($mc, 'i_dont_exist'));
+  fb_intercept2('var_frap', mkh(function () { echo "Closure! wooooo\n"; }));
   var_frap('claptrap', 'blah');
 
   // Reset
-  fb_intercept('var_frap', null);
+  fb_intercept2('var_frap', null);
   var_frap('claptrap', 'blah');
 }
 
 class Blark {
-  public static function sfrap() {
-    echo "static frap " . get_called_class() . "\n";
+  public static function sfrap() :mixed{
+    echo "static frap " . static::class . "\n";
   }
-  public function frap() {
+  public function frap() :mixed{
     echo "non-static frap\n";
   }
 }
@@ -98,71 +81,56 @@ class Blark {
 class SubBlark extends Blark {}
 class SubBlark2 extends Blark {}
 
-function test_methods() {
+function test_methods() :mixed{
   echo '---------- ', __FUNCTION__, ' ----------', "\n";
-  $mc = new MagicCall();
 
   // Intercept static method
-  fb_intercept('SubBlark2::sfrap', 'handler');
+  fb_intercept2('SubBlark2::sfrap', HH\dynamic_fun('handler'));
   Blark::sfrap();
-  call_user_func(array('Blark', 'sfrap'));
+  call_user_func(vec['Blark', 'sfrap']);
   SubBlark::sfrap();
-  call_user_func(array('SubBlark', 'sfrap'));
+  call_user_func(vec['SubBlark', 'sfrap']);
   SubBlark2::sfrap();
-  call_user_func(array('SubBlark2', 'sfrap'));
+  call_user_func(vec['SubBlark2', 'sfrap']);
 
-  fb_intercept('Blark::sfrap', 'handler');
+  fb_intercept2('Blark::sfrap', HH\dynamic_fun('handler'));
   Blark::sfrap();
-  call_user_func(array('Blark', 'sfrap'));
+  call_user_func(vec['Blark', 'sfrap']);
   SubBlark::sfrap();
-  call_user_func(array('SubBlark', 'sfrap'));
+  call_user_func(vec['SubBlark', 'sfrap']);
   SubBlark2::sfrap();
-  call_user_func(array('SubBlark2', 'sfrap'));
+  call_user_func(vec['SubBlark2', 'sfrap']);
 
-  fb_intercept('Blark::sfrap', 'passthrough_handler');
+  fb_intercept2('Blark::sfrap', HH\dynamic_fun('passthrough_handler'));
   Blark::sfrap();
-  call_user_func(array('Blark', 'sfrap'));
-
-  fb_intercept('Blark::sfrap', array($mc, 'i_dont_exist_either'));
-  Blark::sfrap();
-  call_user_func(array('Blark', 'sfrap'));
+  call_user_func(vec['Blark', 'sfrap']);
 
   // Intercept non-static method
   $b = new Blark();
-  fb_intercept('Blark::frap', 'handler');
+  fb_intercept2('Blark::frap', HH\dynamic_fun('handler'));
   $b->frap();
-  call_user_func(array($b, 'frap'));
+  call_user_func(vec[$b, 'frap']);
 
-  fb_intercept('Blark::frap', 'passthrough_handler');
+  fb_intercept2('Blark::frap', HH\dynamic_fun('passthrough_handler'));
   $b->frap();
-  call_user_func(array($b, 'frap'));
-
-  fb_intercept('Blark::frap', array($mc, 'i_dont_exist_either'));
-  $b->frap();
-  call_user_func(array($b, 'frap'));
+  call_user_func(vec[$b, 'frap']);
 
   // MULTI-INTERCEPT!
-  fb_intercept('frap', 'handler');
-  fb_intercept('handler', 'passthrough_handler');
+  fb_intercept2('frap', HH\dynamic_fun('handler'));
+  fb_intercept2('handler', HH\dynamic_fun('passthrough_handler'));
   frap('claptrap');
 
   // Reset all
-  fb_intercept('', null);
+  fb_intercept2('frap', null);
+  fb_intercept2('Blark::sfrap', null);
+  fb_intercept2('Blark::frap', null);
   frap('claptrap');
   Blark::sfrap();
   $b->frap();
-
-  // Intercept __call
-  fb_intercept('MagicCall::__call', 'handler');
-  $mc->blark('hi');
-  fb_intercept('MagicCall::__call', 'passthrough_handler');
-  $mc->blark('ho');
 }
 
-function main() {
+<<__EntryPoint>> function main(): void {
   test_standard_function();
   test_variadic_function();
   test_methods();
 }
-
-main();

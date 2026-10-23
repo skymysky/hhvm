@@ -17,18 +17,17 @@
 #include "hphp/runtime/vm/jit/vasm-gen.h"
 
 #include "hphp/runtime/vm/jit/abi.h"
-#include "hphp/runtime/vm/jit/abi-x64.h"
-#include "hphp/runtime/vm/jit/abi-ppc64.h"
 #include "hphp/runtime/vm/jit/vasm-emit.h"
 #include "hphp/runtime/vm/jit/vasm-instr.h"
 #include "hphp/runtime/vm/jit/vasm-print.h"
 
 #include "hphp/util/arch.h"
+#include "hphp/util/configs/jit.h"
 #include "hphp/util/trace.h"
 
-TRACE_SET_MOD(vasm);
+TRACE_SET_MOD(vasm)
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 ///////////////////////////////////////////////////////////////////////////////
 // Vout.
 
@@ -60,12 +59,16 @@ bool Vout::closed() const {
 }
 
 Vout Vout::makeBlock() {
-  uint64_t weight = 0;
-  if (m_irctx.origin != nullptr) {
-    weight = m_irctx.origin->block()->profCount();
-  }
-  weight = weight * areaWeightFactor(area());
-  return {m_unit, m_unit.makeBlock(area(), weight), m_irctx};
+  auto weight = m_irctx.origin
+    ? m_irctx.origin->block()->profCount()
+    : 1;
+  weight *= (m_weight_scale * areaWeightFactor(area()));
+  return {m_unit, m_unit.makeBlock(area(), weight), m_irctx, m_weight_scale};
+}
+
+void Vout::addWeightScale(uint64_t scale) {
+  m_weight_scale *= scale;
+  m_unit.blocks[m_block].weight *= scale;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -86,75 +89,86 @@ Vout& Vasm::out(AreaIndex area) {
 // Vauto.
 
 Vauto::~Vauto() {
-  for (auto& b : unit().blocks) {
-    if (!b.code.empty()) {
-      // Found at least one nonempty block.  Finish up.
+  tracing::Block _{"vauto-finish", [&] { return traceProps(unit()); }};
+
+  try {
+    for (auto& b : unit().blocks) {
+      if (!b.code.empty()) {
+        // Found at least one nonempty block.  Finish up.
+        if (!main().closed()) main() << fallthru{};
+        if (!cold().closed()) cold() << fallthru{};
+
+        // Prevent spurious printir traces.
+        Trace::Bump bumper{Trace::printir, 10};
+
+        CodeBlock mainTmp, coldTmp;
+        auto text = [&] {
+            if (m_relocate) {
+              auto& cold = m_text.cold().code;
+              if (cold.canEmit(0x10000)) {
+                mainTmp.init(cold.frontier() + 0x8000,
+                             cold.toDestAddress(cold.frontier() + 0x8000),
+                             0x4000,
+                             "vauto main tmp");
+                coldTmp.init(cold.frontier() + 0xc000,
+                             cold.toDestAddress(cold.frontier() + 0xc000),
+                             0x4000,
+                             "vauto cold tmp");
+                return Vtext(mainTmp, coldTmp, m_text.data());
+              }
+              m_relocate = false;
+            }
+            return std::move(m_text);
+          }();
+
+        SCOPE_ASSERT_DETAIL("vasm unit") { return show(unit()); };
+        auto const abi = jit::abi(m_kind);
+        optimize(unit(), abi, true /* regalloc */);
+        emit(unit(), text, m_fixups, nullptr);
+
+        if (m_relocate) {
+          tc::relocateTranslation(
+            nullptr,
+            mainTmp, m_text.main().code, m_text.main().code.frontier(),
+            coldTmp, m_text.cold().code, m_text.cold().code.frontier(),
+            coldTmp, coldTmp.frontier(),
+            nullptr, m_fixups);
+        }
+        return;
+      }
+    }
+
+    if (unit().padding) {
+      // Force emission due to padding
       if (!main().closed()) main() << fallthru{};
       if (!cold().closed()) cold() << fallthru{};
 
-      // Prevent spurious printir traces.
-      Trace::Bump bumper{Trace::printir, 10};
-
-      CodeBlock mainTmp, coldTmp;
-      auto text = [&] {
-        if (m_relocate) {
-          auto& cold = m_text.cold().code;
-          if (cold.canEmit(0x10000)) {
-            mainTmp.init(cold.frontier() + 0x8000, 0x4000, "vauto main tmp");
-            coldTmp.init(cold.frontier() + 0xc000, 0x4000, "vauto cold tmp");
-            return Vtext(mainTmp, coldTmp, m_text.data());
-          }
-          m_relocate = false;
-        }
-        return std::move(m_text);
-      }();
-
-      auto const abi = jit::abi(m_kind);
-      switch (arch()) {
-        case Arch::X64:
-          optimizeX64(unit(), abi, true /* regalloc */);
-          emitX64(unit(), text, m_fixups, nullptr);
-          break;
-        case Arch::ARM:
-          optimizeARM(unit(), abi, true /* regalloc */);
-          emitARM(unit(), text, m_fixups, nullptr);
-          break;
-        case Arch::PPC64:
-          optimizePPC64(unit(), abi, true /* regalloc */);
-          emitPPC64(unit(), text, m_fixups, nullptr);
-          break;
-      }
-
-      if (m_relocate) {
-        tc::relocateTranslation(
-          nullptr,
-          mainTmp, m_text.main().code, m_text.main().code.frontier(),
-          coldTmp, m_text.cold().code, m_text.cold().code.frontier(),
-          coldTmp, coldTmp.frontier(),
-          nullptr, m_fixups);
-      }
-      return;
+      emit(unit(), m_text, m_fixups, nullptr);
     }
-  }
 
-  if (unit().padding) {
-    // Force emission due to padding
-    if (!main().closed()) main() << fallthru{};
-    if (!cold().closed()) cold() << fallthru{};
-
-    switch (arch()) {
-      case Arch::X64:
-        emitX64(unit(), m_text, m_fixups, nullptr);
-        break;
-      case Arch::ARM:
-        emitARM(unit(), m_text, m_fixups, nullptr);
-        break;
-      case Arch::PPC64:
-        emitPPC64(unit(), m_text, m_fixups, nullptr);
-        break;
+    if (m_wasFull) *m_wasFull = false;
+  } catch (const DataBlockFull& full) {
+    if (!m_wasFull) {
+      // Dtors are noexcept, so we cannot let DataBlockFull escape from
+      // here.
+      always_assert_flog(
+        false,
+        "Data block full in ~Vauto: {}",
+        full.what()
+      );
     }
+    *m_wasFull = true;
   }
 }
 
+uint64_t areaWeightFactor(AreaIndex area) {
+  switch (area) {
+    case AreaIndex::Main:   return Cfg::Jit::LayoutMainFactor;
+    case AreaIndex::Cold:   return Cfg::Jit::LayoutColdFactor;
+    case AreaIndex::Frozen: return 1;
+  };
+  always_assert(false);
+}
+
 ///////////////////////////////////////////////////////////////////////////////
-}}
+}

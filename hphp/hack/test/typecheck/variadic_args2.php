@@ -1,3 +1,3 @@
 <?hh
 
-function f(...$args = array()): void {}
+function f(mixed ...$args = vec[]): void {}

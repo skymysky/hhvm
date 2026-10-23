@@ -1,7 +1,10 @@
 <?hh
 class Foo {
-  public static function bar() {
-    static $x;
+
+  private static mixed $barX;
+  public static function bar() :void{
   }
 }
+<<__EntryPoint>> function main(): void {
 var_dump((new ReflectionClass('Foo'))->isInstantiable());
+}

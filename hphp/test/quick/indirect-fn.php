@@ -1,8 +1,10 @@
 <?hh
-function f($a) {
+<<__DynamicallyCallable>>
+function f(string $a) :void{
   echo $a;
   echo "\n";
 }
+<<__EntryPoint>> function main(): void {
 $name = "f";
-$name("param");
-
+HH\dynamic_fun($name)("param");
+}

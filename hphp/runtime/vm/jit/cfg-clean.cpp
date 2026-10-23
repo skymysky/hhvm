@@ -20,9 +20,9 @@
 #include "hphp/runtime/vm/jit/pass-tracer.h"
 #include "hphp/runtime/vm/jit/timer.h"
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 
-TRACE_SET_MOD(hhir_cfg);
+TRACE_SET_MOD(hhir_cfg)
 
 namespace {
 
@@ -38,17 +38,8 @@ bool convertCondBranchToJmp(IRUnit& unit, Block* block) {
   // Only look at some conditional branches with no side effects.
   if (!term.is(JmpZero,
                JmpNZero,
-               CheckTypeMem,
                CheckLoc,
-               CheckStk,
-               CheckMBase,
-               CheckInit,
-               CheckInitMem,
-               CheckInitProps,
-               CheckInitSProps,
-               CheckRefInner,
-               CheckCtxThis,
-               CheckFuncStatic)) {
+               CheckRDSInitialized)) {
     return false;
   }
 
@@ -66,15 +57,6 @@ bool convertCondBranchToJmp(IRUnit& unit, Block* block) {
         takenBlk = block->next();
       }
       isUnconditional = true;
-    } else if (term.is(CheckInit)) {
-      if (!src->type().maybe(TUninit)) {
-        // Never taken.
-        takenBlk = block->next();
-        isUnconditional = true;
-      } else if (src->isA(TUninit)) {
-        // Always taken.
-        isUnconditional = true;
-      }
     }
   }
 
@@ -136,7 +118,7 @@ bool foldJmp(IRUnit& unit, Block* block) {
     // If we reach here, takenBlk cannot be merged into block as it has other
     // predecessors. We could duplicate whatever code in takenBlk in block, but
     // we only do it if takenBlk contains only a cheap instruction.
-    if (takenBlk->begin()->is(Jmp, JmpZero, JmpNZero, CheckInit)) {
+    if (takenBlk->begin()->is(Jmp, JmpZero, JmpNZero)) {
       block->back().become(unit, &*takenBlk->begin());
       FTRACE(1, "Duplicated B{} into B{}\n", takenBlk->id(), block->id());
       // takenBlk is probably still reachable from other blocks.
@@ -202,9 +184,9 @@ bool collapseDiamond(IRUnit& unit, Block* block) {
   assertx(join->begin()->is(DefLabel));
   assertx(join->begin()->numDsts() == nextJmp->numSrcs());
 
-  // For every value forwarded to the join point, generate a Select at the head
-  // of the diamond. Each Select chooses between the value provided on the left
-  // or right side of the diamond.
+  // For every value forwarded to the join point, generate a Select
+  // at the head of the diamond. Each Select chooses between the
+  // value provided on the left or right side of the diamond.
   std::vector<SSATmp*> newSrcs{nextJmp->numSrcs()};
   for (uint32_t i = 0; i < nextJmp->numSrcs(); ++i) {
     auto const t = term.is(JmpZero) ? nextJmp->src(i) : takenJmp->src(i);
@@ -244,7 +226,7 @@ bool collapseDiamond(IRUnit& unit, Block* block) {
  */
 void cleanCfg(IRUnit& unit) {
   PassTracer tracer { &unit, Trace::hhir_cfg, "cleanCfg" };
-  Timer timer(Timer::optimize_cleancfg);
+  Timer timer(Timer::optimize_cleancfg, unit.logEntry().get_pointer());
   bool changed = false;
   do {
     auto const blocks = rpoSortCfg(unit);
@@ -268,4 +250,4 @@ void cleanCfg(IRUnit& unit) {
   if (changed) reflowTypes(unit);
 }
 
-}}
+}

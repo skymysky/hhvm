@@ -1,6 +1,6 @@
-<?php
+<?hh
 
-function reflectMethod($class, $method) {
+function reflectMethod($class, $method) :mixed{
     $methodInfo = new ReflectionMethod($class, $method);
     echo "**********************************\n";
     echo "Reflecting on method $class::$method()\n\n";
@@ -18,36 +18,32 @@ function reflectMethod($class, $method) {
     var_dump($methodInfo->isStatic());
     echo "\nisConstructor():\n";
     var_dump($methodInfo->isConstructor());
-    echo "\nisDestructor():\n";
-    var_dump($methodInfo->isDestructor());
     echo "\n**********************************\n";
 }
 
 class TestClass
 {
-    public function foo() {
+    public function foo() :mixed{
         echo "Called foo()\n";
     }
-    
-    static function stat() {
+
+    static function stat() :mixed{
         echo "Called stat()\n";
     }
-    
-    private function priv() {
+
+    private function priv() :mixed{
         echo "Called priv()\n";
     }
-    
-    protected function prot() {}
-    
-    public function __destruct() {}
+
+    protected function prot() :mixed{}
 }
 
 class DerivedClass extends TestClass {}
 
 interface TestInterface {
-    public function int();
+    public function int():mixed;
 }
-
+<<__EntryPoint>> function main(): void {
 reflectMethod("DerivedClass", "foo");
 reflectMethod("TestClass", "stat");
 reflectMethod("TestClass", "priv");
@@ -55,6 +51,4 @@ reflectMethod("TestClass", "prot");
 reflectMethod("DerivedClass", "prot");
 reflectMethod("TestInterface", "int");
 reflectMethod("ReflectionProperty", "__construct");
-reflectMethod("TestClass", "__destruct");
-
-?>
+}

@@ -1,10 +1,11 @@
-<?php
-
-$char_variation = array( 'a', "a", 67, -67, 99 );
+<?hh
+<<__EntryPoint>> function main(): void {
+$char_variation = vec[ 'a', "a", 67, -67, 99 ];
 
 /* creating dumping file */
-$data_file = dirname(__FILE__) . '/fprintf_variation_004.phpt.txt';
-if (!($fp = fopen($data_file, 'wt')))
+$data_file = sys_get_temp_dir().'/'.'fprintf_variation_004.phpt.txt';
+$fp = fopen($data_file, 'wt');
+if (!$fp)
    return;
 
 /* char type variations */
@@ -20,5 +21,4 @@ print_r(file_get_contents($data_file));
 echo "\nDone";
 
 unlink($data_file);
-
-?>
+}

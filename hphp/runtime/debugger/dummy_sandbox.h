@@ -14,13 +14,12 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_EVAL_DUMMY_SANDBOX_H_
-#define incl_HPHP_EVAL_DUMMY_SANDBOX_H_
+#pragma once
 
 #include "hphp/util/async-func.h"
 #include "hphp/util/synchronizable.h"
 
-namespace HPHP { namespace Eval {
+namespace HPHP::Eval {
 ///////////////////////////////////////////////////////////////////////////////
 
 struct DebuggerProxy;
@@ -54,6 +53,5 @@ private:
 };
 
 ///////////////////////////////////////////////////////////////////////////////
-}}
+}
 
-#endif // incl_HPHP_EVAL_DUMMY_SANDBOX_H_

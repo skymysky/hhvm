@@ -1,30 +1,28 @@
-<?php
+<?hh
 /* Prototype  : mixed array_sum(array $input)
- * Description: Returns the sum of the array entries 
+ * Description: Returns the sum of the array entries
  * Source code: ext/standard/array.c
 */
 
 /*
-* Passing different scalar/nonscalar values as 'input' argument to array_sum() 
+* Passing different scalar/nonscalar values as 'input' argument to array_sum()
 */
-
-echo "*** Testing array_sum() : unexpected values for 'input' ***\n";
-
-// get an unset variable
-$unset_var = 10;
-unset ($unset_var);
 
 // Class definition
 class MyClass
 {
   public function __toString()
-  {
+:mixed  {
     return "object";
   }
 }
+<<__EntryPoint>> function main(): void {
+echo "*** Testing array_sum() : unexpected values for 'input' ***\n";
+
 
 // different scalar/non scalar values for 'input' argument
-$input_values = array(
+$fp = fopen(__FILE__,'r');
+$input_values = vec[
 
          // int data
 /*1*/    0,
@@ -61,14 +59,10 @@ $input_values = array(
 /*20*/   new MyClass(),
 
          // resource data
-/*21*/   $fp = fopen(__FILE__,'r'),
+/*21*/   $fp,
 
-         // undefined data
-/*22*/   @$undefined_var,
 
-         // unset data
-/*23*/   @$unset_var,
-);
+];
 
 // loop through each element of the array for input
 for($count = 0; $count < count($input_values); $count++) {
@@ -77,5 +71,5 @@ for($count = 0; $count < count($input_values); $count++) {
 };
 
 fclose($fp);
-echo "Done"
-?>
+echo "Done";
+}

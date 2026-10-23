@@ -1,12 +1,25 @@
-File "this_as_argument.php", line 20, characters 18-19:
-Invalid argument (Typing[4110])
-File "this_as_argument.php", line 20, characters 5-5:
-This is an object of type C (known to be exactly the class 'C')
-File "this_as_argument.php", line 20, characters 5-5:
-  where the class 'C' was referenced here
-File "this_as_argument.php", line 9, characters 24-24:
-It is incompatible with an object of type C
-File "this_as_argument.php", line 20, characters 5-5:
-This requires the late-bound type to be exactly C
-File "this_as_argument.php", line 9, characters 24-24:
-Since C is not final this might be an instance of a child class
+error: Typing[4110] Invalid argument [1]
+-> Expected exactly the type `C` [2]
+->   where the class `C` was referenced here [3]
+-> But got the nonexact type `C` [4]
+
+this_as_argument.php:20:18
+ 5 | <<__ConsistentConstruct>>
+ 6 | class C {
+ 7 |   public static function thisAsArg(this $c): void {}
+   |                                    ^^^^ [2]
+ 8 | 
+ 9 |   public function test(C $c): void {
+   |                        ^ [4]
+10 |     $c::thisAsArg($c);
+11 | 
+   :
+18 | 
+19 |     // Error because we cannot prove $c is exactly the type 'C'
+20 |     C::thisAsArg($c);
+   |     ^ [3]
+   |                  ^^ [1]
+21 |   }
+22 | }
+
+1 error found

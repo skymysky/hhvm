@@ -1,5 +1,7 @@
 <?hh
 
+namespace SealedClass7;
+
 <<__Sealed(SomeOtherTrait::class, SomeClass::class)>>
 trait SomeTrait {}
 
@@ -27,4 +29,9 @@ class SomeOtherOtherClass {
 
 class SomeOtherOtherOtherClass {
   use SomeTrait;
+}
+
+<<__EntryPoint>>
+function main(): void {
+  echo "Done.\n";
 }

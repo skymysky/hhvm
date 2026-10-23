@@ -14,14 +14,16 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_XBOX_SERVER_H_
-#define incl_HPHP_XBOX_SERVER_H_
+#pragma once
 
+#include "hphp/runtime/base/request-id.h"
 #include "hphp/runtime/base/runtime-option.h"
 #include "hphp/runtime/base/type-string.h"
+#include "hphp/runtime/server/cli-server.h"
 #include "hphp/runtime/server/satellite-server.h"
 #include "hphp/runtime/server/server-task-event.h"
 #include "hphp/runtime/server/transport.h"
+#include "hphp/util/configs/xbox.h"
 #include "hphp/util/synchronizable.h"
 
 namespace HPHP {
@@ -29,7 +31,6 @@ namespace HPHP {
 
 struct Array;
 struct XboxServerInfo;
-struct RPCRequestHandler;
 struct XboxTransport;
 
 struct XboxServer {
@@ -39,34 +40,20 @@ struct XboxServer {
   static void Restart();
   static void Stop();
 
-public:
-  /**
-   * Send/PostMessage paradigm for local and remote RPC.
-   */
-  static bool SendMessage(const String& message,
-                          Array& ret,
-                          int timeout_ms,
-                          const String& host = "localhost");
-  static bool PostMessage(const String& message, const String& host = "localhost");
+  static bool Enabled();
 
+public:
   /**
    * Local tasklet for parallel processing.
    */
-  static Resource TaskStart(const String& msg, const String& reqInitDoc = "",
-      ServerTaskEvent<XboxServer, XboxTransport> *event = nullptr);
-  static void TaskStartFromNonRequest(
-    const folly::StringPiece msg,
-    const folly::StringPiece reqInitDoc = "");
-  static bool TaskStatus(const Resource& task);
-  static int TaskResult(const Resource& task, int timeout_ms, Variant *ret);
+  static OptResource TaskStart(const OptString& msg, const OptString& reqInitDoc = "",
+      ServerTaskEvent<XboxServer, XboxTransport> *event = nullptr, RequestId m_root_req_id = RequestId());
+  static bool TaskStatus(const OptResource& task);
+  static int TaskResult(const OptResource& task, int timeout_ms, Variant *ret);
   static int TaskResult(XboxTransport* const job, int timeout_ms, Variant *ret);
 
-  /**
-   * Gets the ServerInfo and RequestHandler for the current xbox worker thread.
-   * Returns NULL for non-xbox threads.
-   */
-  static std::shared_ptr<XboxServerInfo> GetServerInfo();
-  static RPCRequestHandler *GetRequestHandler();
+  static int GetActiveWorkers();
+  static int GetQueuedJobs();
 };
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -79,25 +66,20 @@ struct XboxServerInfo : SatelliteServerInfo {
   }
 
   void reload() {
-    m_threadCount = RuntimeOption::XboxServerThreadCount;
-    m_port        = RuntimeOption::XboxServerPort;
-    m_maxRequest  = RuntimeOption::XboxServerInfoMaxRequest;
-    m_maxDuration = RuntimeOption::XboxServerInfoDuration;
-    m_reqInitFunc = RuntimeOption::XboxServerInfoReqInitFunc;
-    m_reqInitDoc  = RuntimeOption::XboxServerInfoReqInitDoc;
-    m_alwaysReset = RuntimeOption::XboxServerInfoAlwaysReset;
+    m_threadCount = Cfg::Xbox::ServerInfoThreadCount;
+    m_reqInitFunc = Cfg::Xbox::ServerInfoRequestInitFunction;
+    m_reqInitDoc  = Cfg::Xbox::ServerInfoRequestInitDocument;
   }
-
-  void setMaxDuration(int duration) { m_maxDuration = duration; }
 };
 
 ///////////////////////////////////////////////////////////////////////////////
 
-const StaticString s_xbox("xbox");
+extern const StaticString s_xbox;
 
 struct XboxTransport final : Transport, Synchronizable {
   explicit XboxTransport(
     const folly::StringPiece message,
+    const RequestId root_req_id,
     const folly::StringPiece reqInitDoc = "");
 
   timespec getStartTimer() const { return m_queueTime; }
@@ -126,7 +108,10 @@ struct XboxTransport final : Transport, Synchronizable {
    * Manage headers.
    */
   std::string getHeader(const char *name) override;
-  void getHeaders(HeaderMap& /*headers*/) override {}
+  const HeaderMap& getHeaders() override {
+    static const HeaderMap emptyMap{};
+    return emptyMap;
+  }
   void addHeaderImpl(const char* /*name*/, const char* /*value*/) override {}
   void removeHeaderImpl(const char* /*name*/) override {}
 
@@ -137,7 +122,7 @@ struct XboxTransport final : Transport, Synchronizable {
   /**
    * Get a description of the type of transport.
    */
-  String describe() const override {
+  OptString describe() const override {
     return s_xbox;
   }
 
@@ -145,7 +130,7 @@ struct XboxTransport final : Transport, Synchronizable {
    * Task interface.
    */
   bool isDone() { return m_done; }
-  String getResults(int &code, int timeout_ms = 0);
+  OptString getResults(int &code, int timeout_ms = 0);
 
   void setHost(const std::string &host) { m_host = host;}
   void setAsioEvent(ServerTaskEvent<XboxServer, XboxTransport> *event) {
@@ -163,6 +148,11 @@ struct XboxTransport final : Transport, Synchronizable {
     }
   }
 
+  void setCliContext(CLIContext&& ctx) {
+    m_cli.emplace(std::move(ctx));
+  }
+  Optional<CLIContext> detachCliContext() { return std::move(m_cli); }
+
 private:
   std::atomic<int> m_refCount;
 
@@ -174,11 +164,11 @@ private:
   std::string m_host;
   std::string m_reqInitDoc;
 
+  Optional<CLIContext> m_cli;
+
   // points to an event with an attached waithandle from a different request
   ServerTaskEvent<XboxServer, XboxTransport> *m_event;
 };
 
 ///////////////////////////////////////////////////////////////////////////////
 }
-
-#endif // incl_HPHP_XBOX_SERVER_H_

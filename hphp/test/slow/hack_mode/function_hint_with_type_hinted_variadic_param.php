@@ -5,10 +5,14 @@ function mymeth(int $x, string... $y):void {
 }
 
 class C {
-  public function foo((function(int, string ...):void) $func) {
+  public function foo((function(int, string ...):void) $func) :mixed{
     $func(0, "some", "string");
   }
 }
 
+
+<<__EntryPoint>>
+function main_function_hint_with_type_hinted_variadic_param() :mixed{
 $c = new C();
-$c->foo(HH\fun('mymeth'));
+$c->foo(mymeth<>);
+}

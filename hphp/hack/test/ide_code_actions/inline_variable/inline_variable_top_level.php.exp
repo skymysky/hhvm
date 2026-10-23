@@ -1,0 +1,40 @@
+Code actions available:
+------------------------------------------
+Inline variable $the_variable (CodeActionKind: "refactor") SELECTED
+Devmate Quick Fix - Hack does not support top level statements. Use the `__EntryPoint` attribute on a function instead (CodeActionKind: "quickfix")
+Devmate Agent Fix - Hack does not support top level statements. Use the `__EntryPoint` attribute on a function instead (CodeActionKind: "quickfix")
+
+JSON for selected code action:
+------------------------------------------
+{
+  "title": "Inline variable $the_variable",
+  "kind": "refactor",
+  "diagnostics": [],
+  "edit": {
+    "changes": {
+      "FILE.php": [
+        {
+          "range": {
+            "start": { "line": 2, "character": 0 },
+            "end": { "line": 3, "character": 0 }
+          },
+          "newText": ""
+        },
+        {
+          "range": {
+            "start": { "line": 3, "character": 20 },
+            "end": { "line": 3, "character": 33 }
+          },
+          "newText": "(300 * 400)"
+        }
+      ]
+    }
+  }
+}
+
+Applied edit for code action:
+------------------------------------------
+<?hh
+
+$x = /*range-start*/(300 * 400)/*range-end*/ + 1;
+

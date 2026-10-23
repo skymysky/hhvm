@@ -15,16 +15,21 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_EXT_HASH_CRC32_H_
-#define incl_HPHP_EXT_HASH_CRC32_H_
+#pragma once
 
 #include "hphp/runtime/ext/hash/hash_engine.h"
 
 namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
 
+enum class Crc32Variant {
+  Crc32,
+  Crc32B,
+  Crc32C,
+};
+
 struct hash_crc32 : HashEngine {
-  hash_crc32(bool b);
+  explicit hash_crc32(Crc32Variant variant);
 
   virtual void hash_init(void *context);
   virtual void hash_update(void *context, const unsigned char *buf,
@@ -32,10 +37,8 @@ struct hash_crc32 : HashEngine {
   virtual void hash_final(unsigned char *digest, void *context);
 
 private:
-  bool m_b;
+  Crc32Variant m_variant;
 };
 
 ///////////////////////////////////////////////////////////////////////////////
 }
-
-#endif // incl_HPHP_EXT_HASH_CRC32_H_

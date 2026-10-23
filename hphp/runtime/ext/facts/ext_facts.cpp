@@ -1,0 +1,1062 @@
+/*
+   +----------------------------------------------------------------------+
+   | HipHop for PHP                                                       |
+   +----------------------------------------------------------------------+
+   | Copyright (c) 2010-present Facebook, Inc. (http://www.facebook.com)  |
+   +----------------------------------------------------------------------+
+   | This source path is subject to version 3.01 of the PHP license,      |
+   | that is bundled with this package in the path LICENSE, and is        |
+   | available through the world-wide-web at the following url:           |
+   | http://www.php.net/license/3_01.txt                                  |
+   | If you did not receive a copy of the PHP license and are unable to   |
+   | obtain it through the world-wide-web, please send a note to          |
+   | license@php.net so we can mail you a copy immediately.               |
+   +----------------------------------------------------------------------+
+*/
+
+#include <pwd.h>
+#include <sys/types.h>
+#include <chrono>
+#include <filesystem>
+#include <functional>
+#include <mutex>
+#include <string>
+#include <string_view>
+
+#include <fmt/core.h>
+#include <folly/Conv.h>
+#include <folly/Hash.h>
+#include <folly/concurrency/ConcurrentHashMap.h>
+#include <folly/io/async/EventBaseThread.h>
+#include <folly/json/json.h>
+#include <folly/logging/xlog.h>
+
+#include "hphp/runtime/base/array-iterator.h"
+#include "hphp/runtime/base/autoload-handler.h"
+#include "hphp/runtime/base/autoload-map.h"
+#include "hphp/runtime/base/builtin-functions.h"
+#include "hphp/runtime/base/config.h"
+#include "hphp/runtime/base/static-string-table.h"
+#include "hphp/runtime/base/string-data.h"
+#include "hphp/runtime/base/type-string.h"
+#include "hphp/runtime/base/watchman-connection.h"
+#include "hphp/runtime/ext/extension.h"
+#include "hphp/runtime/ext/facts/config.h"
+#include "hphp/runtime/ext/facts/fact-extractor.h"
+#include "hphp/runtime/ext/facts/facts-store.h"
+#include "hphp/runtime/ext/facts/logging.h"
+#include "hphp/runtime/ext/facts/sqlite-autoload-db.h"
+#include "hphp/runtime/ext/facts/sqlite-key.h"
+#include "hphp/runtime/ext/facts/static-watcher.h"
+#include "hphp/runtime/ext/facts/string-ptr.h"
+#include "hphp/runtime/ext/facts/watchman-watcher.h"
+#include "hphp/system/systemlib.h"
+#include "hphp/util/assertions.h"
+#include "hphp/util/configs/autoload.h"
+#include "hphp/util/configs/watchman.h"
+#include "hphp/util/hash-map.h"
+#include "hphp/util/hash.h"
+#include "hphp/util/logger.h"
+#include "hphp/util/sandbox-events.h"
+#include "hphp/util/sqlite-wrapper.h"
+#include "hphp/util/trace.h"
+
+TRACE_SET_MOD(facts)
+
+namespace fs = std::filesystem;
+
+namespace HPHP {
+namespace Facts {
+namespace {
+
+constexpr std::chrono::seconds kDefaultIdleSec{30 * 60};
+constexpr int32_t kDefaultWatchmanRetries = 0;
+
+struct RepoOptionsParseExc : public std::runtime_error {
+  explicit RepoOptionsParseExc(const std::string& msg)
+      : std::runtime_error{msg} {}
+};
+
+bool hasWatchedFileExtension(const std::filesystem::path& path) {
+  auto ext = path.extension();
+  return ext == ".php" || ext == ".hck" || ext == ".inc";
+}
+
+SQLiteKey getDBKey(const fs::path& root, const RepoOptions& repoOptions) {
+  if (!root.is_absolute()) {
+    throw RepoOptionsParseExc{fmt::format(
+        "Cannot locate the native Facts DB: repo root \"{}\" is not an absolute "
+        "path. This usually means the request's repo options (.hhvmconfig.hdf) "
+        "could not be resolved.",
+        root.native())};
+  }
+
+  auto trustedDBPath = [&]() -> fs::path {
+    fs::path trusted{repoOptions.flags().trustedDBPath()};
+    if (trusted.empty()) {
+      return trusted;
+    }
+    // If the trustedDBPath is relative, make sure we resolve it relative
+    // to the repo root rather than the current working directory
+    if (trusted.is_relative()) {
+      trusted = root / trusted;
+    }
+    try {
+      return fs::canonical(trusted);
+    } catch (const fs::filesystem_error& e) {
+      throw RepoOptionsParseExc{fmt::format(
+          "Error resolving Autoload.TrustedDBPath = {}: {}",
+          trusted.native().c_str(),
+          e.what())};
+    }
+  }();
+
+  // Autoload out of a read-only, "trusted" DB, like in /var/www
+  if (!trustedDBPath.empty()) {
+    return SQLiteKey::readOnly(std::move(trustedDBPath));
+  }
+  auto const dbPath = repoOptions.autoloadDB();
+  if (dbPath.empty()) {
+    throw RepoOptionsParseExc{fmt::format(
+        "Cannot open the native Facts DB for repo \"{}\": Autoload.DB is unset. "
+        "Set Autoload.DB in the repo's .hhvmconfig.hdf.",
+        root.native())};
+  }
+  if (!dbPath.is_absolute()) {
+    throw RepoOptionsParseExc{fmt::format(
+        "Cannot open the native Facts DB for repo \"{}\": Autoload.DB path "
+        "\"{}\" is not absolute.",
+        root.native(),
+        dbPath.native())};
+  }
+  // Create a DB with the given permissions if none exists
+  if (Cfg::Autoload::DBCanCreate) {
+    auto gid = parseDBGroup();
+    auto mode = parseDBPerms();
+    return SQLiteKey::readWriteCreate(dbPath, gid, mode);
+  }
+  // Use an existing DB and throw if it doesn't exist
+  return SQLiteKey::readWrite(dbPath);
+}
+
+namespace {
+
+folly::dynamic make_list(const std::vector<std::string>& values) {
+  if (values.size() == 1) {
+    return folly::dynamic(values.front());
+  } else {
+    folly::dynamic list = folly::dynamic::array();
+    for (const auto& value : values) {
+      list.push_back(value);
+    }
+    return list;
+  }
+}
+
+folly::dynamic anyof(
+    const std::string& key,
+    const std::vector<std::string>& values) {
+  if (values.size() == 1) {
+    return folly::dynamic::array(key, values.front());
+  } else {
+    folly::dynamic list = folly::dynamic::array("anyof");
+    for (const auto& value : values) {
+      list.push_back(folly::dynamic::array(key, value));
+    }
+    return list;
+  }
+}
+
+} // namespace
+
+/**
+ * List of options making a SqliteAutoloadMap unique
+ */
+struct SqliteAutoloadMapKey {
+  static SqliteAutoloadMapKey get(const RepoOptions& repoOptions) {
+    auto root = repoOptions.dir();
+
+    auto queryExpr = [&]() -> folly::dynamic {
+      auto const includedPaths = repoOptions.flags().autoloadIncludePaths();
+      auto const excludedPaths = repoOptions.flags().autoloadExcludePaths();
+      auto const extensions = repoOptions.flags().autoloadFileExtensions();
+
+      if (!extensions.empty() && !includedPaths.empty()) {
+        folly::dynamic expression = folly::dynamic::array("allof");
+        expression.push_back(folly::dynamic::array("type", "f"));
+
+        expression.push_back(anyof("suffix", extensions));
+        expression.push_back(anyof("dirname", includedPaths));
+        if (!excludedPaths.empty()) {
+          expression.push_back(
+              folly::dynamic::array("not", anyof("dirname", excludedPaths)));
+        }
+
+        folly::dynamic query = folly::dynamic::object;
+        query.insert("expression", expression);
+        query.insert("suffix", make_list(extensions));
+
+        XLOGF(INFO, "Constructed Watchman Query: {}", folly::toJson(query));
+        return query;
+      }
+
+      auto const cached = repoOptions.flags().autoloadQueryObj();
+      if (cached.isObject())
+        return cached;
+
+      auto queryStr = repoOptions.flags().autoloadQuery();
+      if (queryStr.empty()) {
+        return {};
+      }
+      try {
+        return folly::parseJson(queryStr);
+      } catch (const folly::json::parse_error& e) {
+        throw RepoOptionsParseExc{fmt::format(
+            "Error JSON-parsing Autoload.Query = \"{}\": {}",
+            queryStr,
+            e.what())};
+      }
+    }();
+
+    auto dbKey = getDBKey(root, repoOptions);
+
+    return SqliteAutoloadMapKey{
+        .m_root = std::move(root),
+        .m_queryExpr = std::move(queryExpr),
+        .m_indexedMethodAttrs = repoOptions.flags().indexedMethodAttributes(),
+        .m_indexedFunctionAttrs =
+            repoOptions.flags().indexedFunctionAttributes(),
+        .m_dbKey = std::move(dbKey)};
+  }
+
+  bool operator==(const SqliteAutoloadMapKey& rhs) const noexcept {
+    return m_root == rhs.m_root && m_queryExpr == rhs.m_queryExpr &&
+        m_indexedMethodAttrs == rhs.m_indexedMethodAttrs &&
+        m_indexedFunctionAttrs == rhs.m_indexedFunctionAttrs &&
+        m_dbKey == rhs.m_dbKey;
+  }
+
+  std::string toString() const {
+    std::string indexedMethodAttrString = "{";
+    for (auto const& v : m_indexedMethodAttrs) {
+      if (indexedMethodAttrString.size() > 1) {
+        indexedMethodAttrString += ',';
+      }
+      indexedMethodAttrString += v;
+    }
+    indexedMethodAttrString += '}';
+
+    std::string indexedFunctionAttrString = "{";
+    for (auto const& v : m_indexedFunctionAttrs) {
+      if (indexedFunctionAttrString.size() > 1) {
+        indexedFunctionAttrString += ',';
+      }
+      indexedFunctionAttrString += v;
+    }
+    indexedFunctionAttrString += '}';
+
+    return fmt::format(
+        "SqliteAutoloadMapKey({}, {}, {}, {}, {})",
+        m_root.native(),
+        folly::toJson(m_queryExpr),
+        indexedMethodAttrString,
+        indexedFunctionAttrString,
+        m_dbKey.toString());
+  }
+
+  strhash_t hash() const noexcept {
+    return folly::hash::hash_combine(
+        hash_string_cs(m_root.native()),
+        m_queryExpr.hash(),
+        folly::hash::hash_range(
+            m_indexedMethodAttrs.begin(), m_indexedMethodAttrs.end()),
+        folly::hash::hash_range(
+            m_indexedFunctionAttrs.begin(), m_indexedFunctionAttrs.end()),
+        m_dbKey.hash());
+  }
+
+  fs::path m_root;
+  folly::dynamic m_queryExpr;
+  std::vector<std::string> m_indexedMethodAttrs;
+  std::vector<std::string> m_indexedFunctionAttrs;
+  SQLiteKey m_dbKey;
+};
+
+} // namespace
+} // namespace Facts
+} // namespace HPHP
+
+namespace std {
+template <>
+struct hash<HPHP::Facts::SqliteAutoloadMapKey> {
+  size_t operator()(const HPHP::Facts::SqliteAutoloadMapKey& k) const {
+    return static_cast<size_t>(k.hash());
+  }
+};
+} // namespace std
+
+namespace HPHP {
+namespace Facts {
+namespace {
+
+/**
+ * Sent to AutoloadHandler so AutoloadHandler can create
+ * SqliteAutoloadMaps across the open-source / FB-only boundary.
+ */
+struct SqliteAutoloadMapFactory final : public FactsFactory {
+  SqliteAutoloadMapFactory() = default;
+  SqliteAutoloadMapFactory(const SqliteAutoloadMapFactory&) = delete;
+  SqliteAutoloadMapFactory(SqliteAutoloadMapFactory&&) = delete;
+  SqliteAutoloadMapFactory& operator=(const SqliteAutoloadMapFactory&) = delete;
+  SqliteAutoloadMapFactory& operator=(SqliteAutoloadMapFactory&&) = delete;
+  ~SqliteAutoloadMapFactory() override = default;
+
+  FactsStore* getForOptions(const RepoOptions& options) override;
+
+  /**
+   * Delete AutoloadMaps which haven't been accessed in the last
+   * `idleSec` seconds.
+   */
+  void garbageCollectUnusedAutoloadMaps(std::chrono::seconds idleSec);
+
+ private:
+  std::mutex m_mutex;
+
+  /**
+   * A FactsStore implements Facts API queries
+   *  - autoload queries (symbol -> file lookups)
+   *  - decl queries (details about files, symbols, methods, attributes)
+   *  - symbols with a certain attribute
+   *  - derived classes of a certain base
+   */
+  hphp_hash_map<SqliteAutoloadMapKey, std::shared_ptr<FactsStore>> m_stores;
+
+  /**
+   * Map from root to time we last accessed the AutoloadMap
+   */
+  hphp_hash_map<
+      SqliteAutoloadMapKey,
+      std::chrono::time_point<std::chrono::steady_clock>>
+      m_lastUsed;
+};
+
+struct FactsExtension final : Extension {
+  FactsExtension() : Extension("facts", "1.0", "sandbox_infra") {}
+
+  void moduleLoad(const IniSetting::Map& ini, Hdf config) override {
+    // Why are we using TRACE/Logger in moduleLoad instead of XLOG?  Because of
+    // the HHVM startup process and where moduleLoad happens within it, we can't
+    // initialize any async handlers until moduleInit() otherwise HHVM
+    // with throw an exception for having created a thread before it was ready.
+
+    // Create all resources at a deterministic time to avoid SIOF
+    m_data = FactsData{};
+
+    // An AutoloadMap may be freed after this many seconds since its last use
+    m_data->m_idleSec = std::chrono::seconds{Config::GetInt64(
+        ini, config, "Autoload.MapIdleGCTimeSeconds", kDefaultIdleSec.count())};
+    if (m_data->m_idleSec != kDefaultIdleSec) {
+      FTRACE(
+          3, "Autoload.MapIdleGCTimeSeconds = {}\n", m_data->m_idleSec.count());
+    }
+
+    if (!Cfg::Watchman::SocketDefault.empty()) {
+      FTRACE(3, "watchman.socket.default = {}\n", Cfg::Watchman::SocketDefault);
+    }
+
+    if (!Cfg::Watchman::SocketRoot.empty()) {
+      FTRACE(3, "watchman.socket.root = {}\n", Cfg::Watchman::SocketRoot);
+    }
+
+    m_data->m_watchmanWatcherOpts = WatchmanWatcherOpts{
+        .m_retries = Config::GetInt32(
+            ini, config, "Autoload.WatchmanRetries", kDefaultWatchmanRetries)};
+  }
+
+  void moduleInit() override;
+  void moduleRegisterNative() override;
+
+  void moduleShutdown() override {
+    // Destroy all resources at a deterministic time to avoid SDOF
+    if (FactsFactory::getInstance() == m_data->m_factory.get()) {
+      // FactsFactory is still the one installed by this extension.
+      // Deregister it now.
+      FactsFactory::setInstance(nullptr);
+    } else {
+      // Some other extension initialized FactsFactory - leave it alone.
+    }
+    m_data = {};
+  }
+
+  std::chrono::seconds getExpirationTime() const {
+    return m_data->m_idleSec;
+  }
+
+  const WatchmanWatcherOpts& getWatchmanWatcherOpts() const {
+    return m_data->m_watchmanWatcherOpts;
+  }
+
+ private:
+  // Add new members to this struct instead of the top level so we can be sure
+  // your new member is destroyed at the right time.
+  struct FactsData {
+    std::chrono::seconds m_idleSec{kDefaultIdleSec};
+    std::unique_ptr<SqliteAutoloadMapFactory> m_factory;
+    WatchmanWatcherOpts m_watchmanWatcherOpts;
+  };
+  Optional<FactsData> m_data;
+} s_ext;
+
+std::shared_ptr<Watcher> make_watcher(const SqliteAutoloadMapKey& mapKey) {
+  if (mapKey.m_queryExpr.isObject()) {
+    // Pass the query expression to Watchman to watch the directory
+    return make_watchman_watcher(
+        mapKey.m_queryExpr,
+        get_watchman_client(mapKey.m_root),
+        s_ext.getWatchmanWatcherOpts());
+  } else {
+    XLOG(INFO) << "Crawling " << mapKey.m_root << " ...";
+    // Crawl the filesystem now to build a list of files for the static watcher.
+    // We won't refresh this list of files.
+    std::vector<std::filesystem::path> staticFiles;
+    for (auto const& entry :
+         std::filesystem::recursive_directory_iterator{mapKey.m_root}) {
+      if (entry.is_regular_file() && hasWatchedFileExtension(entry)) {
+        staticFiles.push_back(
+            std::filesystem::relative(entry.path(), mapKey.m_root));
+      }
+    }
+    if (staticFiles.size() > 100'000) {
+      XLOG(WARN)
+          << "Found " << staticFiles.size() << " files in " << mapKey.m_root
+          << " . Consider installing Watchman and setting Autoload.Query in "
+             "your repo's .hhvmconfig.hdf file.";
+    }
+    return make_static_watcher(staticFiles);
+  }
+}
+
+// Factory entry point called by autoload getFactsForRequest().
+FactsStore* SqliteAutoloadMapFactory::getForOptions(
+    const RepoOptions& options) {
+  auto mapKey = [&]() -> Optional<SqliteAutoloadMapKey> {
+    try {
+      auto mk = SqliteAutoloadMapKey::get(options);
+      return {std::move(mk)};
+    } catch (const RepoOptionsParseExc& e) {
+      XLOG(ERR) << e.what();
+      rareSboxEvent("ext_facts", "RepoOptionsParseExc", e.what());
+      return std::nullopt;
+    }
+  }();
+
+  if (!mapKey) {
+    return nullptr;
+  }
+
+  std::unique_lock g{m_mutex};
+
+  // Mark the fact that we've accessed the map
+  m_lastUsed.insert_or_assign(*mapKey, std::chrono::steady_clock::now());
+
+  // Try to return a corresponding SqliteAutoloadMap
+  auto const it = m_stores.find(*mapKey);
+  if (it != m_stores.end()) {
+    return it->second.get();
+  }
+
+  // We're creating a new map. This is a good sign that an existing map may
+  // be defunct, so schedule a cleanup job to check.
+  Treadmill::enqueue(
+      [this] { garbageCollectUnusedAutoloadMaps(s_ext.getExpirationTime()); });
+
+  AutoloadDB::Opener dbOpener =
+      [dbKey = mapKey->m_dbKey]() -> std::shared_ptr<AutoloadDB> {
+    return SQLiteAutoloadDB::get(dbKey);
+  };
+
+  if (mapKey->m_dbKey.m_mode == SQLite::OpenMode::ReadOnly) {
+    rareSboxEvent(
+        "ext_facts", "getForOptions opening trusted store", mapKey->toString());
+    XLOGF(
+        DBG0,
+        "Loading {} from trusted Autoload DB at {}",
+        mapKey->m_root.native(),
+        mapKey->m_dbKey.m_path.native());
+    return m_stores
+        .insert(
+            {*mapKey,
+             make_trusted_facts(
+                 mapKey->m_root,
+                 std::move(dbOpener),
+                 mapKey->m_indexedMethodAttrs,
+                 mapKey->m_indexedFunctionAttrs)})
+        .first->second.get();
+  }
+
+  Optional<std::filesystem::path> updateSuppressionPath;
+  if (!Cfg::Autoload::UpdateSuppressionPath.empty()) {
+    updateSuppressionPath = {
+        std::filesystem::path{Cfg::Autoload::UpdateSuppressionPath}};
+  }
+
+  // Prefetch a FactsDB if we don't have one, while guarded by m_mutex
+  prefetchDb(mapKey->m_root, mapKey->m_dbKey);
+
+  rareSboxEvent(
+      "ext_facts", "getForOptions opening mutable store", mapKey->toString());
+  return m_stores
+      .insert(
+          {*mapKey,
+           make_watcher_facts(
+               mapKey->m_root,
+               std::move(dbOpener),
+               make_watcher(*mapKey),
+               Cfg::Server::Mode,
+               std::move(updateSuppressionPath),
+               mapKey->m_indexedMethodAttrs,
+               mapKey->m_indexedFunctionAttrs)})
+      .first->second.get();
+}
+
+void SqliteAutoloadMapFactory::garbageCollectUnusedAutoloadMaps(
+    std::chrono::seconds idleSec) {
+  auto mapsToRemove = [&]() -> std::vector<std::shared_ptr<FactsStore>> {
+    std::unique_lock g{m_mutex};
+
+    // If a map was last used before this time, remove it
+    auto deadline = std::chrono::steady_clock::now() - idleSec;
+
+    std::vector<SqliteAutoloadMapKey> keysToRemove;
+    for (auto const& [mapKey, _] : m_stores) {
+      auto lastUsedIt = m_lastUsed.find(mapKey);
+      if (lastUsedIt == m_lastUsed.end() || lastUsedIt->second < deadline) {
+        keysToRemove.push_back(mapKey);
+      }
+    }
+
+    std::vector<std::shared_ptr<FactsStore>> maps;
+    maps.reserve(keysToRemove.size());
+    for (auto const& mapKey : keysToRemove) {
+      XLOG(INFO) << "Evicting SqliteAutoloadMap: " << mapKey.toString();
+      auto it = m_stores.find(mapKey);
+      if (it != m_stores.end()) {
+        rareSboxEvent("ext_facts", __func__, mapKey.toString());
+        maps.push_back(std::move(it->second));
+        m_stores.erase(it);
+      } else {
+        rareSboxEvent("ext_facts", "evict unknown mapkey", mapKey.toString());
+      }
+      m_lastUsed.erase(mapKey);
+    }
+    return maps;
+  }();
+
+  for (auto& map : mapsToRemove) {
+    // Join each map's update threads
+    map->close();
+  }
+
+  // Final references to shared_ptr<Facts> fall out of scope on the Treadmill
+  Treadmill::enqueue([_destroyed = std::move(mapsToRemove)]() {});
+}
+
+FactsStore& getFactsOrThrow() {
+  auto* facts = AutoloadHandler::s_instance->getFacts();
+  if (facts == nullptr) {
+    SystemLib::throwInvalidOperationExceptionObject(
+        "Native Facts is not enabled. Call HH\\Facts\\enabled() to determine "
+        "if native Facts is enabled for the current request.");
+  }
+  return *facts;
+}
+
+// Only bool, int, double, string, class, lazyclass, and Hack arrays are
+// supported.
+folly::dynamic dynamicFromVariant(const Variant& v) {
+  if (v.isBoolean()) {
+    return v.getBoolean();
+  }
+  if (v.isInteger()) {
+    return v.getInt64();
+  }
+  if (v.isDouble()) {
+    return v.getDouble();
+  }
+  if (v.isLazyClass()) {
+    return v.toLazyClassVal().name()->toCppString();
+  }
+  if (v.isClass()) {
+    return v.toClassVal()->name()->toCppString();
+  }
+  if (v.isString()) {
+    return v.getStringData()->toCppString();
+  }
+  if (v.isDict()) {
+    folly::dynamic ret = folly::dynamic::object;
+    ret.resize(v.getArrayData()->size());
+    IterateKV(v.getArrayData(), [&](TypedValue k, TypedValue v) {
+      ret[dynamicFromVariant(Variant::wrap(k))] =
+          dynamicFromVariant(Variant::wrap(v));
+    });
+    return ret;
+  }
+  if (v.isArray()) {
+    folly::dynamic ret = folly::dynamic::array;
+    ret.resize(v.getArrayData()->size());
+    uint64_t i;
+    IterateV(v.getArrayData(), [&](TypedValue v) {
+      ret[i] = dynamicFromVariant(Variant::wrap(v));
+      i++;
+    });
+    return ret;
+  }
+  return nullptr;
+}
+
+} // namespace
+} // namespace Facts
+
+bool HHVM_FUNCTION(facts_enabled) {
+  return AutoloadHandler::s_instance->getFacts() != nullptr;
+}
+
+void HHVM_FUNCTION(facts_validate, const Array& types_to_ignore) {
+  std::set<std::string> types_to_ignore_str;
+  IterateV(types_to_ignore.get(), [&](TypedValue v) {
+    types_to_ignore_str.insert(v.m_data.pstr->toCppString());
+  });
+  try {
+    Facts::getFactsOrThrow().validate(types_to_ignore_str);
+  } catch (std::logic_error& e) {
+    SystemLib::throwUnexpectedValueExceptionObject(e.what());
+  }
+}
+
+void HHVM_FUNCTION(facts_sync) {
+  Facts::getFactsOrThrow().ensureUpdated();
+}
+
+OptString HHVM_FUNCTION(facts_db_path, const OptString& rootStr) {
+  // Turn rootStr into an absolute path.
+  auto root = [&]() -> Optional<fs::path> {
+    fs::path maybeRoot{rootStr.toCppString()};
+    if (maybeRoot.is_absolute()) {
+      return maybeRoot;
+    }
+    // The given root is a relative path, so find the directory where the
+    // current request's `.hhvmconfig.hdf` file lives and resolve relative to
+    // that.
+    auto requestOptions = g_context->getRepoOptionsForRequest();
+    if (!requestOptions || requestOptions->path().empty()) {
+      return std::nullopt;
+    }
+    return requestOptions->dir() / maybeRoot;
+  }();
+  if (!root) {
+    XLOG(ERR) << "Error resolving " << rootStr.slice();
+    rareSboxEvent("ext_facts", "facts_db_path bad root", rootStr.slice());
+    return OptString{};
+  }
+  assertx(root->is_absolute());
+
+  auto optionPath = *root / ".hhvmconfig.hdf";
+  XLOG(DBG0) << "Got options at " << optionPath.native();
+  auto const& repoOptions = RepoOptions::forFile(optionPath.native().c_str());
+
+  try {
+    return OptString{
+        Facts::SqliteAutoloadMapKey::get(repoOptions).m_dbKey.m_path.native()};
+  } catch (const Facts::RepoOptionsParseExc& e) {
+    rareSboxEvent(
+        "ext_facts",
+        fmt::format("facts_db_path {}", rootStr.slice()),
+        e.what());
+    throw_invalid_operation_exception(makeStaticString(e.what()));
+  }
+}
+
+int64_t HHVM_FUNCTION(facts_schema_version) {
+  return Facts::kSchemaVersion;
+}
+
+OptString HHVM_FUNCTION(facts_type_to_path, const OptString& typeName) {
+  auto fileRes = Facts::getFactsOrThrow().getTypeFileRelative(typeName);
+  if (!fileRes) {
+    return OptString{};
+  } else {
+    return OptString{fileRes->m_path};
+  }
+}
+
+OptString HHVM_FUNCTION(
+    facts_type_or_type_alias_to_path,
+    const OptString& typeName) {
+  auto fileRes =
+      Facts::getFactsOrThrow().getTypeOrTypeAliasFileRelative(typeName);
+  if (!fileRes) {
+    return OptString{};
+  } else {
+    return OptString{fileRes->m_path};
+  }
+}
+
+OptString HHVM_FUNCTION(facts_function_to_path, const OptString& functionName) {
+  auto fileRes = Facts::getFactsOrThrow().getFunctionFileRelative(functionName);
+  if (!fileRes) {
+    return OptString{};
+  } else {
+    return OptString{fileRes->m_path};
+  }
+}
+
+OptString HHVM_FUNCTION(facts_constant_to_path, const OptString& constantName) {
+  auto fileRes = Facts::getFactsOrThrow().getConstantFileRelative(constantName);
+  if (!fileRes) {
+    return OptString{};
+  } else {
+    return OptString{fileRes->m_path};
+  }
+}
+
+OptString HHVM_FUNCTION(facts_module_to_path, const OptString& moduleName) {
+  auto fileRes = Facts::getFactsOrThrow().getModuleFileRelative(moduleName);
+  if (!fileRes) {
+    return OptString{};
+  } else {
+    return OptString{fileRes->m_path};
+  }
+}
+
+OptString HHVM_FUNCTION(
+    facts_type_alias_to_path,
+    const OptString& typeAliasName) {
+  auto fileRes =
+      Facts::getFactsOrThrow().getTypeAliasFileRelative(typeAliasName);
+  if (!fileRes) {
+    return OptString{};
+  } else {
+    return OptString{fileRes->m_path};
+  }
+}
+
+Array HHVM_FUNCTION(facts_path_to_types, const OptString& path) {
+  return Facts::getFactsOrThrow().getFileTypes(path);
+}
+
+Array HHVM_FUNCTION(facts_path_to_functions, const OptString& path) {
+  return Facts::getFactsOrThrow().getFileFunctions(path);
+}
+
+Array HHVM_FUNCTION(facts_path_to_constants, const OptString& path) {
+  return Facts::getFactsOrThrow().getFileConstants(path);
+}
+
+Array HHVM_FUNCTION(facts_path_to_modules, const OptString& path) {
+  return Facts::getFactsOrThrow().getFileModules(path);
+}
+
+OptString HHVM_FUNCTION(
+    facts_path_to_module_membership,
+    const OptString& path) {
+  auto result = Facts::getFactsOrThrow().getFileModuleMembership(path);
+  if (!result) {
+    return OptString{};
+  } else {
+    return result.value();
+  }
+}
+
+Array HHVM_FUNCTION(facts_all_modules) {
+  return Facts::getFactsOrThrow().getAllModules();
+}
+
+OptString HHVM_FUNCTION(facts_path_to_package, const OptString& path) {
+  auto result = Facts::getFactsOrThrow().getFilePackageMembership(path);
+  if (!result) {
+    return OptString{};
+  } else {
+    return result.value();
+  }
+}
+
+Array HHVM_FUNCTION(facts_path_to_type_aliases, const OptString& path) {
+  return Facts::getFactsOrThrow().getFileTypeAliases(path);
+}
+
+OptString HHVM_FUNCTION(facts_type_name, const OptString& type) {
+  return Facts::getFactsOrThrow().getTypeName(type);
+}
+
+Variant HHVM_FUNCTION(facts_kind, const OptString& type) {
+  return Facts::getFactsOrThrow().getKind(type);
+}
+
+OptString HHVM_FUNCTION(facts_sha1, const OptString& path) {
+  auto maybeSha1 = Facts::getFactsOrThrow().getSha1(path);
+  return maybeSha1.has_value() ? OptString{maybeSha1.value()} : OptString{};
+}
+
+bool HHVM_FUNCTION(facts_is_abstract, const OptString& type) {
+  return Facts::getFactsOrThrow().isTypeAbstract(type);
+}
+
+bool HHVM_FUNCTION(facts_is_final, const OptString& type) {
+  return Facts::getFactsOrThrow().isTypeFinal(type);
+}
+
+const StringData* className(TypedValue tv) {
+  if (tvIsClass(tv)) {
+    return val(tv).pclass->name();
+  } else if (tvIsLazyClass(tv)) {
+    return val(tv).plazyclass.name();
+  } else if (tvIsString(tv)) {
+    return val(tv).pstr;
+  } else {
+    always_assert_flog(
+        false, "value should not have passed class_or_classname type hint");
+  }
+}
+
+Array HHVM_FUNCTION(
+    facts_subtypes,
+    TypedValue baseType,
+    const Variant& filters) {
+  return Facts::getFactsOrThrow().getDerivedTypes(
+      StrNR(className(baseType)).asString(), filters);
+}
+
+Array HHVM_FUNCTION(
+    facts_transitive_subtypes,
+    TypedValue baseType,
+    const Variant& filters,
+    bool includeInterfaceRequireExtends) {
+  return Facts::getFactsOrThrow().getTransitiveDerivedTypes(
+      StrNR(className(baseType)).asString(),
+      filters,
+      includeInterfaceRequireExtends);
+}
+
+Array HHVM_FUNCTION(
+    facts_supertypes,
+    TypedValue derivedType,
+    const Variant& filters) {
+  return Facts::getFactsOrThrow().getBaseTypes(
+      StrNR(className(derivedType)).asString(), filters);
+}
+
+Array HHVM_FUNCTION(facts_types_with_attribute, const TypedValue attr) {
+  return Facts::getFactsOrThrow().getTypesWithAttribute(
+      StrNR(className(attr)).asString());
+}
+
+Array HHVM_FUNCTION(facts_type_aliases_with_attribute, const OptString& attr) {
+  return Facts::getFactsOrThrow().getTypeAliasesWithAttribute(attr);
+}
+
+Array HHVM_FUNCTION(facts_methods_with_attribute, const OptString& attr) {
+  return Facts::getFactsOrThrow().getMethodsWithAttribute(attr);
+}
+
+Array HHVM_FUNCTION(facts_functions_with_attribute, const OptString& attr) {
+  return Facts::getFactsOrThrow().getFunctionsWithAttribute(attr);
+}
+
+Array HHVM_FUNCTION(facts_type_method_attributes, const OptString& type) {
+  return Facts::getFactsOrThrow().getTypeMethodAttributes(type);
+}
+
+Array HHVM_FUNCTION(facts_files_with_attribute, const OptString& attr) {
+  return Facts::getFactsOrThrow().getFilesWithAttribute(attr);
+}
+
+Array HHVM_FUNCTION(
+    facts_files_with_attribute_and_any_value,
+    const OptString& attr,
+    const Variant& value) {
+  return Facts::getFactsOrThrow().getFilesWithAttributeAndAnyValue(
+      attr, Facts::dynamicFromVariant(value));
+}
+
+Array HHVM_FUNCTION(
+    facts_files_and_attr_args_with_attr,
+    const OptString& attr) {
+  return Facts::getFactsOrThrow().getFilesAndAttrValsWithAttribute(attr);
+}
+
+Array HHVM_FUNCTION(facts_type_attributes, const OptString& type) {
+  return Facts::getFactsOrThrow().getTypeAttributes(type);
+}
+
+Array HHVM_FUNCTION(facts_type_alias_attributes, const OptString& typeAlias) {
+  return Facts::getFactsOrThrow().getTypeAliasAttributes(typeAlias);
+}
+
+Array HHVM_FUNCTION(
+    facts_method_attributes,
+    const OptString& type,
+    const OptString& method) {
+  return Facts::getFactsOrThrow().getMethodAttributes(type, method);
+}
+
+Array HHVM_FUNCTION(facts_function_attributes, const OptString& function) {
+  return Facts::getFactsOrThrow().getFunctionAttributes(function);
+}
+
+Array HHVM_FUNCTION(facts_file_attributes, const OptString& file) {
+  return Facts::getFactsOrThrow().getFileAttributes(file);
+}
+
+Array HHVM_FUNCTION(
+    facts_type_attribute_parameters,
+    const OptString& type,
+    const OptString& attr) {
+  return Facts::getFactsOrThrow().getTypeAttrArgs(type, attr);
+}
+
+Array HHVM_FUNCTION(
+    facts_type_alias_attribute_parameters,
+    const OptString& type,
+    const OptString& attr) {
+  return Facts::getFactsOrThrow().getTypeAliasAttrArgs(type, attr);
+}
+
+Array HHVM_FUNCTION(
+    facts_method_attribute_parameters,
+    const OptString& type,
+    const OptString& method,
+    const OptString& attr) {
+  return Facts::getFactsOrThrow().getMethodAttrArgs(type, method, attr);
+}
+
+Array HHVM_FUNCTION(
+    facts_function_attribute_parameters,
+    const OptString& function,
+    const OptString& attr) {
+  return Facts::getFactsOrThrow().getFunctionAttrArgs(function, attr);
+}
+
+Array HHVM_FUNCTION(
+    facts_file_attribute_parameters,
+    const OptString& file,
+    const OptString& attr) {
+  return Facts::getFactsOrThrow().getFileAttrArgs(file, attr);
+}
+
+namespace Facts {
+
+void FactsExtension::moduleInit() {
+  // This, unfortunately, cannot be done in moduleLoad() due to the fact
+  // that certain async loggers may create a new thread.  HHVM will throw
+  // if any threads have been created during the moduleLoad() step.
+  try {
+    enableFactsLogging(
+        Cfg::Server::User,
+        Cfg::Autoload::Logging,
+        Cfg::Autoload::AllowLoggingPropagation);
+  } catch (std::exception& e) {
+    Logger::FError(
+        "Caught exception ({}) while setting up logging with settings: {}",
+        e.what(),
+        Cfg::Autoload::Logging);
+  }
+
+  if (Cfg::Autoload::DBPath.empty()) {
+    XLOG(ERR) << "Autoload.DB.Path was empty, not enabling native autoloader.";
+    return;
+  }
+
+  if (Cfg::Watchman::SocketDefault.empty()) {
+    XLOG(INFO) << "watchman.socket.default was not provided.";
+  }
+
+  if (Cfg::Watchman::SocketRoot.empty()) {
+    XLOG(INFO) << "watchman.socket.root was not provided.";
+  }
+
+  m_data->m_factory = std::make_unique<SqliteAutoloadMapFactory>();
+  FactsFactory::setInstance(m_data->m_factory.get());
+}
+
+void FactsExtension::moduleRegisterNative() {
+  HHVM_NAMED_FE(HH\\Facts\\enabled, HHVM_FN(facts_enabled));
+  HHVM_NAMED_FE(HH\\Facts\\validate, HHVM_FN(facts_validate));
+  HHVM_NAMED_FE(HH\\Facts\\db_path, HHVM_FN(facts_db_path));
+  HHVM_NAMED_FE(HH\\Facts\\schema_version, HHVM_FN(facts_schema_version));
+  HHVM_NAMED_FE(HH\\Facts\\sync, HHVM_FN(facts_sync));
+  HHVM_NAMED_FE(HH\\Facts\\type_to_path, HHVM_FN(facts_type_to_path));
+  HHVM_NAMED_FE(
+      HH\\Facts\\type_or_type_alias_to_path,
+      HHVM_FN(facts_type_or_type_alias_to_path));
+  HHVM_NAMED_FE(HH\\Facts\\function_to_path, HHVM_FN(facts_function_to_path));
+  HHVM_NAMED_FE(HH\\Facts\\constant_to_path, HHVM_FN(facts_constant_to_path));
+  HHVM_NAMED_FE(HH\\Facts\\module_to_path, HHVM_FN(facts_module_to_path));
+  HHVM_NAMED_FE(
+      HH\\Facts\\type_alias_to_path, HHVM_FN(facts_type_alias_to_path));
+
+  HHVM_NAMED_FE(HH\\Facts\\path_to_types, HHVM_FN(facts_path_to_types));
+  HHVM_NAMED_FE(HH\\Facts\\path_to_functions, HHVM_FN(facts_path_to_functions));
+  HHVM_NAMED_FE(HH\\Facts\\path_to_constants, HHVM_FN(facts_path_to_constants));
+  HHVM_NAMED_FE(
+      HH\\Facts\\path_to_type_aliases, HHVM_FN(facts_path_to_type_aliases));
+  HHVM_NAMED_FE(HH\\Facts\\path_to_modules, HHVM_FN(facts_path_to_modules));
+  HHVM_NAMED_FE(
+      HH\\Facts\\path_to_module_membership,
+      HHVM_FN(facts_path_to_module_membership));
+  HHVM_NAMED_FE(HH\\Facts\\all_modules, HHVM_FN(facts_all_modules));
+  HHVM_NAMED_FE(HH\\Facts\\path_to_package, HHVM_FN(facts_path_to_package));
+  HHVM_NAMED_FE(HH\\Facts\\type_name, HHVM_FN(facts_type_name));
+  HHVM_NAMED_FE(HH\\Facts\\kind, HHVM_FN(facts_kind));
+  HHVM_NAMED_FE(HH\\Facts\\sha1, HHVM_FN(facts_sha1));
+  HHVM_NAMED_FE(HH\\Facts\\is_abstract, HHVM_FN(facts_is_abstract));
+  HHVM_NAMED_FE(HH\\Facts\\is_final, HHVM_FN(facts_is_final));
+  HHVM_NAMED_FE(HH\\Facts\\subtypes, HHVM_FN(facts_subtypes));
+  HHVM_NAMED_FE(
+      HH\\Facts\\transitive_subtypes, HHVM_FN(facts_transitive_subtypes));
+  HHVM_NAMED_FE(HH\\Facts\\supertypes, HHVM_FN(facts_supertypes));
+  HHVM_NAMED_FE(
+      HH\\Facts\\types_with_attribute, HHVM_FN(facts_types_with_attribute));
+  HHVM_NAMED_FE(
+      HH\\Facts\\type_aliases_with_attribute,
+      HHVM_FN(facts_type_aliases_with_attribute));
+  HHVM_NAMED_FE(
+      HH\\Facts\\methods_with_attribute, HHVM_FN(facts_methods_with_attribute));
+  HHVM_NAMED_FE(
+      HH\\Facts\\functions_with_attribute,
+      HHVM_FN(facts_functions_with_attribute));
+  HHVM_NAMED_FE(
+      HH\\Facts\\type_method_attributes, HHVM_FN(facts_type_method_attributes));
+  HHVM_NAMED_FE(
+      HH\\Facts\\files_with_attribute, HHVM_FN(facts_files_with_attribute));
+  HHVM_NAMED_FE(
+      HH\\Facts\\files_with_attribute_and_any_value,
+      HHVM_FN(facts_files_with_attribute_and_any_value));
+  HHVM_NAMED_FE(
+      HH\\Facts\\files_and_attr_args_with_attribute,
+      HHVM_FN(facts_files_and_attr_args_with_attr));
+  HHVM_NAMED_FE(HH\\Facts\\type_attributes, HHVM_FN(facts_type_attributes));
+  HHVM_NAMED_FE(
+      HH\\Facts\\type_alias_attributes, HHVM_FN(facts_type_alias_attributes));
+  HHVM_NAMED_FE(HH\\Facts\\method_attributes, HHVM_FN(facts_method_attributes));
+  HHVM_NAMED_FE(
+      HH\\Facts\\function_attributes, HHVM_FN(facts_function_attributes));
+  HHVM_NAMED_FE(HH\\Facts\\file_attributes, HHVM_FN(facts_file_attributes));
+  HHVM_NAMED_FE(
+      HH\\Facts\\type_attribute_parameters,
+      HHVM_FN(facts_type_attribute_parameters));
+  HHVM_NAMED_FE(
+      HH\\Facts\\type_alias_attribute_parameters,
+      HHVM_FN(facts_type_alias_attribute_parameters));
+  HHVM_NAMED_FE(
+      HH\\Facts\\method_attribute_parameters,
+      HHVM_FN(facts_method_attribute_parameters));
+  HHVM_NAMED_FE(
+      HH\\Facts\\function_attribute_parameters,
+      HHVM_FN(facts_function_attribute_parameters));
+  HHVM_NAMED_FE(
+      HH\\Facts\\file_attribute_parameters,
+      HHVM_FN(facts_file_attribute_parameters));
+}
+
+} // namespace Facts
+} // namespace HPHP

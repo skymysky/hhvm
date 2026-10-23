@@ -16,6 +16,8 @@
 #include "hphp/runtime/base/exceptions.h"
 
 #include "hphp/system/systemlib.h"
+#include "hphp/runtime/base/array-iterator.h"
+#include "hphp/runtime/base/array-provenance.h"
 #include "hphp/runtime/base/backtrace.h"
 #include "hphp/runtime/base/execution-context.h"
 #include "hphp/runtime/base/object-data.h"
@@ -31,12 +33,14 @@ const StaticString s_file("file");
 const StaticString s_line("line");
 const StaticString s_trace("trace");
 const StaticString s_traceOpts("traceOpts");
-const Slot s_fileIdx{3};
-const Slot s_lineIdx{4};
-const Slot s_traceIdx{5};
-const Slot s_traceOptsIdx{0};
+const StaticString s___toString("__toString");
+const StaticString s_throwableToStringFailed("(throwable_to_string failed)");
+const Slot s_fileSlot{3};
+const Slot s_lineSlot{4};
+const Slot s_traceSlot{5};
+const Slot s_traceOptsSlot{0};
 
-__thread int tl_exit_code{0};
+RDS_LOCAL(int, rl_exit_code);
 
 ExtendedException::ExtendedException() : Exception() {
   computeBacktrace();
@@ -104,14 +108,14 @@ Array ExtendedException::getBacktrace() const {
   return Array(m_btp.get());
 }
 
-std::pair<String, int> ExtendedException::getFileAndLine() const {
-  String file = empty_string();
+std::pair<OptString, int> ExtendedException::getFileAndLine() const {
+  OptString file = String::Empty();
   int line = 0;
   Array bt = getBacktrace();
   if (!bt.empty()) {
-    Array top = tvCastToArrayLike(bt.rvalAt(0).tv());
-    if (top.exists(s_file)) file = tvCastToString(top.rvalAt(s_file).tv());
-    if (top.exists(s_line)) line = tvCastToInt64(top.rvalAt(s_line).tv());
+    Array top = tvCastToArrayLike(bt.lookup(0));
+    if (top.exists(s_file)) file = tvCastToString(top.lookup(s_file));
+    if (top.exists(s_line)) line = tvCastToInt64(top.lookup(s_line));
   }
   return std::make_pair(file, line);
 }
@@ -167,6 +171,10 @@ void throw_not_supported(const char* feature, const char* reason) {
   throw ExtendedException("%s is not supported: %s", feature, reason);
 }
 
+void throw_stack_overflow() {
+  throw FatalErrorException("Stack overflow");
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 
 [[noreturn]]
@@ -175,10 +183,6 @@ void raise_fatal_error(const char* msg,
                        bool recoverable /* = false */,
                        bool silent /* = false */,
                        bool throws /* = true */) {
-  if (RuntimeOption::PHP7_EngineExceptions && throws) {
-    VMRegAnchor _;
-    SystemLib::throwErrorObject(Variant(msg));
-  }
   auto ex = bt.isNull() && !recoverable
     ? FatalErrorException(msg)
     : FatalErrorException(msg, bt, recoverable);
@@ -186,117 +190,90 @@ void raise_fatal_error(const char* msg,
   throw ex;
 }
 
+[[noreturn]]
+void raise_parse_error(const StringData* filename,
+                       const char* msg,
+                       const Location::Range& loc) {
+  VMParserFrame parserFrame;
+  parserFrame.filename = filename;
+  parserFrame.lineNumber = loc.line1;
+  Array bt = createBacktrace(BacktraceArgs()
+    .withSelf()
+    .setParserFrame(&parserFrame));
+  raise_fatal_error(msg, bt);
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 
 namespace {
-  DEBUG_ONLY bool vmfp_is_builtin() {
-    VMRegAnchor _;
-    auto const fp = vmfp();
-    return fp && fp->func()->isBuiltin();
-  }
-
-  DEBUG_ONLY bool is_throwable(ObjectData* throwable) {
-    auto const erCls = SystemLib::s_ErrorClass;
-    auto const exCls = SystemLib::s_ExceptionClass;
+  DEBUG_ONLY bool is_throwable(const ObjectData* throwable) {
+    auto const erCls = SystemLib::getErrorClass();
+    auto const exCls = SystemLib::getExceptionClass();
     return throwable->instanceof(erCls) || throwable->instanceof(exCls);
   }
 
   DEBUG_ONLY bool throwable_has_expected_props() {
-    auto const erCls = SystemLib::s_ErrorClass;
-    auto const exCls = SystemLib::s_ExceptionClass;
+    auto const erCls = SystemLib::getErrorClass();
+    auto const exCls = SystemLib::getExceptionClass();
+    if (erCls->lookupDeclProp(s_file.get()) != s_fileSlot ||
+        exCls->lookupDeclProp(s_file.get()) != s_fileSlot ||
+        erCls->lookupDeclProp(s_line.get()) != s_lineSlot ||
+        exCls->lookupDeclProp(s_line.get()) != s_lineSlot ||
+        erCls->lookupDeclProp(s_trace.get()) != s_traceSlot ||
+        exCls->lookupDeclProp(s_trace.get()) != s_traceSlot) {
+      return false;
+    }
+    // Check that we don't have the expected type-hints on these props so we
+    // don't need to verify anything.
     return
-      erCls->lookupDeclProp(s_file.get()) == s_fileIdx &&
-      exCls->lookupDeclProp(s_file.get()) == s_fileIdx &&
-      erCls->lookupDeclProp(s_line.get()) == s_lineIdx &&
-      exCls->lookupDeclProp(s_line.get()) == s_lineIdx &&
-      erCls->lookupDeclProp(s_trace.get()) == s_traceIdx &&
-      exCls->lookupDeclProp(s_trace.get()) == s_traceIdx;
+      erCls->declPropTypeConstraint(s_fileSlot).isString() &&
+      exCls->declPropTypeConstraint(s_fileSlot).isString() &&
+      erCls->declPropTypeConstraint(s_lineSlot).isInt() &&
+      exCls->declPropTypeConstraint(s_lineSlot).isInt() &&
+      erCls->declPropTypeConstraint(s_traceSlot).isVec() &&
+      exCls->declPropTypeConstraint(s_traceSlot).isVec();
   }
 
   int64_t exception_get_trace_options() {
-    auto const exCls = SystemLib::s_ExceptionClass;
-    assertx(exCls->lookupSProp(s_traceOpts.get()) == s_traceOptsIdx);
+    auto const exCls = SystemLib::getExceptionClass();
+    assertx(exCls->lookupSProp(s_traceOpts.get()) == s_traceOptsSlot);
     assertx(exCls->needInitialization());
 
     exCls->initialize();
-    auto const traceOptsTV = exCls->getSPropData(s_traceOptsIdx);
-    return traceOptsTV->m_type == KindOfInt64
-      ? traceOptsTV->m_data.num : 0;
-  }
-}
-
-void throwable_init_file_and_line_from_builtin(ObjectData* throwable) {
-  assertx(vmfp_is_builtin());
-  assertx(is_throwable(throwable));
-  assertx(throwable_has_expected_props());
-
-  auto const trace_rval = throwable->propRvalAtOffset(s_traceIdx);
-
-  if (trace_rval.type() == KindOfResource) {
-    auto bt = dyn_cast<CompactTrace>(Resource(trace_rval.val().pres));
-    assertx(bt);
-
-    for (auto& f : bt->frames()) {
-      if (!f.func || f.func->isBuiltin()) continue;
-
-      auto const opAtPrevPc = f.func->unit()->getOp(f.prevPc);
-      Offset pcAdjust = 0;
-      if (opAtPrevPc == Op::PopR ||
-          opAtPrevPc == Op::UnboxR ||
-          opAtPrevPc == Op::UnboxRNop) {
-        pcAdjust = 1;
-      }
-
-      auto const ln = f.func->unit()->getLineNumber(f.prevPc - pcAdjust);
-      tvSetIgnoreRef(
-        make_tv<KindOfInt64>(ln),
-        throwable->propLvalAtOffset(s_lineIdx)
-      );
-
-      if (auto fn = f.func->originalFilename()) {
-        tvSetIgnoreRef(
-          make_tv<KindOfPersistentString>(fn),
-          throwable->propLvalAtOffset(s_fileIdx)
-        );
-      } else {
-        tvSetIgnoreRef(
-          make_tv<KindOfPersistentString>(f.func->unit()->filepath()),
-          throwable->propLvalAtOffset(s_fileIdx)
-        );
-      }
-      return;
-    }
-    return;
+    auto const traceOptsTV = exCls->getSPropData(s_traceOptsSlot);
+    return type(traceOptsTV) == KindOfInt64 ? val(traceOptsTV).num : 0;
   }
 
-  assertx(RuntimeOption::EvalHackArrDVArrs ?
-    isVecType(trace_rval.type()) :
-    isArrayType(trace_rval.type())
-  );
-  auto const trace = trace_rval.val().parr;
-  for (ArrayIter iter(trace); iter; ++iter) {
-    assertx(iter.second().asTypedValue()->m_type == (
-      RuntimeOption::EvalHackArrDVArrs ? KindOfDict : KindOfArray
-    ));
-    auto const frame = iter.second().asTypedValue()->m_data.parr;
-    auto const file = frame->rval(s_file.get());
-    auto const line = frame->rval(s_line.get());
-    if (file || line) {
-      if (file) {
-        auto const tv = file.tv();
-        tvSetIgnoreRef(
-          tvAssertCell(tv),
-          throwable->propLvalAtOffset(s_fileIdx)
-        );
+  void throwable_init_file_and_line_from_trace(ObjectData* throwable) {
+    assertx(is_throwable(throwable));
+    assertx(throwable_has_expected_props());
+
+    auto const trace_rval = throwable->propRvalAtOffset(s_traceSlot);
+    // We ought to only populate `$trace` from inside HHVM, to start. This
+    // should *always* be an array. If it's not, then we ought to assert.
+    assertx(isArrayLikeType(trace_rval.type()));
+    auto const trace = trace_rval.val().parr;
+    for (ArrayIter iter(trace); iter; ++iter) {
+      auto const frame_tv = iter.secondVal();
+      assertx(isArrayLikeType(type(frame_tv)));
+      auto const frame = val(frame_tv).parr;
+      auto const file = frame->get(s_file.get());
+      auto const line = frame->get(s_line.get());
+      if (file.is_init() || line.is_init()) {
+        if (file.is_init()) {
+          tvSet(
+            tvAssertPlausible(file),
+            throwable->propLvalAtOffset(s_fileSlot)
+          );
+        }
+        if (line.is_init()) {
+          tvSet(
+            tvAssertPlausible(line),
+            throwable->propLvalAtOffset(s_lineSlot)
+          );
+        }
+        return;
       }
-      if (line) {
-        auto const tv = line.tv();
-        tvSetIgnoreRef(
-          tvAssertCell(tv),
-          throwable->propLvalAtOffset(s_lineIdx)
-        );
-      }
-      return;
     }
   }
 }
@@ -305,25 +282,11 @@ void throwable_init(ObjectData* throwable) {
   assertx(is_throwable(throwable));
   assertx(throwable_has_expected_props());
 
-  auto const trace_lval = throwable->propLvalAtOffset(s_traceIdx);
-  auto opts = exception_get_trace_options();
-  auto const filterOpts = opts & ~k_DEBUG_BACKTRACE_IGNORE_ARGS;
-  if (
-    !RuntimeOption::EvalEnableCompactBacktrace || filterOpts ||
-    (RuntimeOption::EnableArgsInBacktraces &&
-     opts != k_DEBUG_BACKTRACE_IGNORE_ARGS)
-    ) {
-    auto trace = HHVM_FN(debug_backtrace)(opts);
-    auto tv = RuntimeOption::EvalHackArrDVArrs ?
-      make_tv<KindOfVec>(trace.detach()) :
-      make_tv<KindOfArray>(trace.detach());
-    cellMove(tv, trace_lval);
-  } else {
-    cellMove(
-      make_tv<KindOfResource>(createCompactBacktrace().detach()->hdr()),
-      trace_lval
-    );
-  }
+  auto const trace_lval = throwable->propLvalAtOffset(s_traceSlot);
+  auto const opts = exception_get_trace_options();
+  auto trace = HHVM_FN(debug_backtrace)(opts);
+  auto tv = make_array_like_tv(trace.detach());
+  tvMove(tv, trace_lval);
 
   VMRegAnchor _;
   auto const fp = vmfp();
@@ -331,19 +294,97 @@ void throwable_init(ObjectData* throwable) {
   if (UNLIKELY(fp->func()->isBuiltin())) {
     throwable_init_file_and_line_from_builtin(throwable);
   } else {
-    auto const unit = fp->func()->unit();
-    auto const file = const_cast<StringData*>(unit->filepath());
-    auto const line = unit->getLineNumber(unit->offsetOf(vmpc()));
-    tvSetIgnoreRef(
+    // Get the current function and offset in an inline-aware way. It must
+    // always exist, as vmfp() is a non-builtin frame pointer.
+    auto const funcAndOffset = getCurrentFuncAndOffset();
+    assertx(funcAndOffset.first != nullptr);
+    auto const func = funcAndOffset.first;
+    auto const file = const_cast<StringData*>(funcAndOffset.first->filename());
+    auto const line = func->getLineNumber(funcAndOffset.second);
+    tvSet(
       make_tv<KindOfString>(file),
-      throwable->propLvalAtOffset(s_fileIdx)
+      throwable->propLvalAtOffset(s_fileSlot)
     );
-    tvSetIgnoreRef(
+    tvSet(
       make_tv<KindOfInt64>(line),
-      throwable->propLvalAtOffset(s_lineIdx)
+      throwable->propLvalAtOffset(s_lineSlot)
     );
   }
 }
 
+void throwable_init_file_and_line_from_builtin(ObjectData* throwable) {
+  throwable_init_file_and_line_from_trace(throwable);
+}
+
+void throwable_recompute_backtrace_from_wh(ObjectData* throwable,
+                                           c_WaitableWaitHandle* wh) {
+  assertx(is_throwable(throwable));
+  assertx(throwable_has_expected_props());
+  assertx(wh);
+
+  auto const trace_lval = throwable->propLvalAtOffset(s_traceSlot);
+  auto opts = exception_get_trace_options();
+  bool provide_object = opts & k_DEBUG_BACKTRACE_PROVIDE_OBJECT;
+  bool provide_metadata = opts & k_DEBUG_BACKTRACE_PROVIDE_METADATA;
+  bool only_metadata_frames = opts & k_DEBUG_BACKTRACE_ONLY_METADATA_FRAMES;
+  bool ignore_args = opts & k_DEBUG_BACKTRACE_IGNORE_ARGS;
+
+  auto trace = createBacktrace(BacktraceArgs()
+                               .fromWaitHandle(wh)
+                               .withSelf()
+                               .withThis(provide_object)
+                               .withMetadata(provide_metadata)
+                               .onlyMetadataFrames(only_metadata_frames)
+                               .ignoreArgs(ignore_args));
+  auto tv = make_array_like_tv(trace.detach());
+  tvMove(tv, trace_lval);
+  throwable_init_file_and_line_from_trace(throwable);
+}
+
+void throwable_mark_array(const ObjectData* throwable, Array& props) {
+  assertx(is_throwable(throwable));
+  assertx(throwable_has_expected_props());
+
+  auto const prop = throwable->getVMClass()->declProperties()[s_traceSlot];
+  auto const name = StrNR(prop.mangledName()).asString();
+  auto const base = props.lookup(name);
+  if (!tvIsArrayLike(base)) return;
+
+  auto const incref = Variant::wrap(base);
+  // We use a depth of 2 because backtrace arrays are varrays-of-darrays.
+  auto const marked = Variant::attach(arrprov::markTvToDepth(base, true, 2));
+  props.set(name, marked);
+}
+
+OptString throwable_to_string(ObjectData* throwable) {
+  auto const cls = throwable->getVMClass();
+  if (cls->classof(SystemLib::getThrowableClass())) {
+    try {
+      auto result = ObjectData::InvokeSimple(throwable, s___toString,
+                                             RuntimeCoeffects::fixme());
+      if (result.isString()) {
+        return result.asCStrRef();
+      }
+      Logger::FError("{}::__toString() didn't return a string",
+                     cls->name()->slice());
+    } catch (const Object& ex) {
+      Logger::FError("encountered {} in {}::__toString()",
+                     ex->getVMClass()->name()->slice(),
+                     cls->name()->slice());
+    }
+    auto message = throwable->getProp(MemberLookupContext{cls, cls->moduleName()},
+                                      makeStaticString("message"));
+    if (!message) {
+      Logger::Error("Throwable object doesn't have the expected message field");
+      return OptString{StringData::Make(cls->name(), ": no message")};
+    }
+    return OptString{StringData::Make(cls->name()->slice(),
+                              folly::StringPiece{": "},
+                              message.val().pstr->slice())};
+  } else {
+    return s_throwableToStringFailed +
+      " on an object of class " + cls->name()->data();
+  }
+}
 ///////////////////////////////////////////////////////////////////////////////
 }

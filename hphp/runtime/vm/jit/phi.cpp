@@ -24,15 +24,20 @@
 
 #include "hphp/util/trace.h"
 
-#include <folly/Optional.h>
-
 #include <iterator>
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 
-TRACE_SET_MOD(hhir_phi);
+TRACE_SET_MOD(hhir_phi)
 
 namespace {
+
+struct SinkableInst {
+  explicit operator bool() const { return inst; }
+
+  const IRInstruction* inst;
+  bool is_lval;
+};
 
 /*
  * If every value in values is equivalent and safe to sink through a phi,
@@ -44,14 +49,21 @@ namespace {
  * - One SSATmp src, which must be either a constant or the globally-available
      FramePtr/StkPtr.
  */
-const IRInstruction* findSinkablePhiSrc(
+SinkableInst findSinkablePhiSrc(
   const jit::flat_set<SSATmp*>& values
 ) {
   const IRInstruction* inst = nullptr;
+  auto is_lval = false;
 
   for (auto val : values) {
-    if (!val->inst()->is(LdLocAddr, LdStkAddr, LdMIStateAddr, LdStaticLoc)) {
-      return nullptr;
+    if (inst && val->inst()->is(ConvPtrToLval) != is_lval) return {};
+
+    if (val->inst()->is(ConvPtrToLval)) {
+      val = val->inst()->src(0);
+      is_lval = true;
+    }
+    if (!val->inst()->is(LdLocAddr, LdStkAddr, LdMIStateTempBaseAddr)) {
+      return {};
     }
     assertx(val->inst()->numSrcs() <= 1);
 
@@ -67,11 +79,11 @@ const IRInstruction* findSinkablePhiSrc(
          !equalsExtra(newInst->op(), newInst->rawExtra(), inst->rawExtra())) ||
         newInst->numSrcs() != inst->numSrcs() ||
         (newInst->numSrcs() && newInst->src(0) != inst->src(0))) {
-      return nullptr;
+      return {};
     }
   }
 
-  return inst;
+  return {inst, is_lval};
 }
 
 }
@@ -99,6 +111,45 @@ bool optimizePhis(IRUnit& unit) {
     auto it = b->begin();
     auto& label = *it;
     if (!label.is(DefLabel)) return;
+
+    // If the DefLabel has multiple defs with all the same sources,
+    // collapse those to a single def (and move that to the other
+    // SSATmps).
+    if (label.numDsts() > 1) {
+      jit::vector<jit::vector<SSATmp*>> allSrcs;
+      jit::vector<std::pair<unsigned int, unsigned int>> rewrites;
+
+      allSrcs.resize(label.numDsts());
+      for (unsigned int i = 0; i < label.numDsts(); ++i) {
+        auto& srcs = allSrcs[i];
+        assertx(srcs.empty());
+        b->forEachSrc(
+          i,
+          [&] (IRInstruction* jmp, SSATmp*) {
+            copyProp(jmp);
+            srcs.emplace_back(jmp->src(i));
+          }
+        );
+        assertx(!srcs.empty());
+
+        for (unsigned int j = 0; j < i; ++j) {
+          auto const& otherSrcs = allSrcs[j];
+          if (otherSrcs != srcs) continue;
+          srcs.clear();
+
+          auto insertAfter = b->iteratorTo(&label);
+          auto const dst = label.dst(i);
+          auto const src = label.dst(j);
+          auto const newInst = unit.gen(dst, Mov, label.bcctx(), src);
+          deletePhiDest(&label, i);
+          b->insert(std::next(insertAfter), newInst);
+          changed = repeat = true;
+          --i;
+          break;
+        }
+      }
+    }
+
     // Look for blocks of the form t = DefLabel; Jmp[N]Zero t
     // We're interested in the case that all inputs are constants,
     // so that we can redirect the phijmps.
@@ -108,6 +159,7 @@ bool optimizePhis(IRUnit& unit) {
                            it->src(0) == label.dst(0));
 
     for (unsigned i = 0; i < label.numDsts(); ++i) {
+      auto insert_after = b->iteratorTo(&label);
       values.clear();
       b->forEachSrc(i, [&](IRInstruction* jmp, SSATmp*) {
         copyProp(jmp);
@@ -131,22 +183,20 @@ bool optimizePhis(IRUnit& unit) {
         // This is safe without any extra dominator checks because we know that
         // there are no preds that don't have the value available.
         newInst = unit.gen(phiDest, Mov, label.bcctx(), *values.begin());
-      } else if (auto sinkInst = findSinkablePhiSrc(values)) {
-        // As long as DefInlineFP exists, FramePtr SSATmps aren't truly
-        // SSA. We have to make sure the live FramePtr at the point of the
-        // DefLabel is the same as the one from the LdLocAddr, if that's the
-        // instruction we're trying to sink.
-        if (sinkInst->is(LdLocAddr) &&
-            sinkInst->marker().fp() != label.marker().fp()) {
-          continue;
-        }
-        newInst = unit.clone(sinkInst, phiDest);
+      } else if (auto sink = findSinkablePhiSrc(values)) {
+        newInst = unit.clone(sink.inst, sink.is_lval ? nullptr : phiDest);
         newInst->marker() = label.marker();
+        if (sink.is_lval) {
+          b->insert(std::next(insert_after), newInst);
+          insert_after++;
+          newInst =
+            unit.gen(phiDest, ConvPtrToLval, label.bcctx(), newInst->dst());
+        }
       }
 
       if (newInst != nullptr) {
         deletePhiDest(&label, i);
-        b->insert(std::next(b->iteratorTo(&label)), newInst);
+        b->insert(std::next(insert_after), newInst);
         changed = repeat = true;
       } else if (maybe_foldable) {
         foldable_labels.insert(phiDest);
@@ -220,7 +270,7 @@ bool optimizePhis(IRUnit& unit) {
     }
   } while (repeat);
 
-  return false;
+  return changed;
 }
 
-}}
+}

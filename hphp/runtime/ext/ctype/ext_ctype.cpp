@@ -36,7 +36,7 @@ static bool ctype(const Variant& v, int (*iswhat)(int)) {
   }
 
   if (v.isString()) {
-    String s = v.toString();
+    OptString s = v.toString();
     if (!s.empty()) {
       const char *p = s.data();
       const char *e = s.data() + s.size();
@@ -101,8 +101,8 @@ bool HHVM_FUNCTION(ctype_xdigit, const Variant& text) {
 ///////////////////////////////////////////////////////////////////////////////
 
 struct CtypeExtension final : Extension {
-  CtypeExtension() : Extension("ctype") {}
-  void moduleInit() override {
+  CtypeExtension() : Extension("ctype", NO_EXTENSION_VERSION_YET, "hphp_hphpi") {}
+  void moduleRegisterNative() override {
     HHVM_FE(ctype_alnum);
     HHVM_FE(ctype_alpha);
     HHVM_FE(ctype_cntrl);
@@ -114,8 +114,6 @@ struct CtypeExtension final : Extension {
     HHVM_FE(ctype_space);
     HHVM_FE(ctype_upper);
     HHVM_FE(ctype_xdigit);
-
-    loadSystemlib();
   }
 } s_ctype_extension;
 

@@ -1,4 +1,4 @@
-<?php
+<?hh
 
 class A {
   private $foo, $bar;
@@ -6,10 +6,14 @@ class A {
  $this->foo = 1;
  $this->bar = 2;
 }
-   public function __sleep() {
+   public function __sleep() :mixed{
  $this->foo = 3;
- return array('foo');
+ return vec['foo'];
 }
  }
- $a = new A();
+
+ <<__EntryPoint>>
+function main_747() :mixed{
+$a = new A();
  var_dump(serialize($a));
+}

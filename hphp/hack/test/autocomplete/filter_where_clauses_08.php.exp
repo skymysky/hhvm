@@ -1,0 +1,6 @@
+check
+  INSERT check()
+  function(): void
+notToThrow
+  INSERT notToThrow()
+  function<TRet>(): void

@@ -1,4 +1,9 @@
 <?hh
 class A {
-  public function a(array $a1 = "abc") {}
+  public function a(AnyArray $a1 = "abc") :mixed{}
+}
+
+<<__EntryPoint>>
+function main(): void {
+  echo "Done.\n";
 }

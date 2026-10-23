@@ -1,21 +1,17 @@
 <?hh
 
-set_error_handler('handler');
+<<__DynamicallyCallable>> function foo() :mixed{ echo __FUNCTION__,"\n"; }
 
-function handler($a, $b) {
-  var_dump($a, $b);
+function test() :mixed{
+  call_user_func_array(HH\dynamic_fun('foo'), vec[]);
 }
 
-function foo() {}
-
-function test() {
-  call_user_func_array('foo', array());
-}
-
-function main() {
+function main() :mixed{
   test();
   fb_rename_function('foo', 'bar');
   test();
 }
-
-main();
+<<__EntryPoint>>
+function main_entry(): void {
+  main();
+}

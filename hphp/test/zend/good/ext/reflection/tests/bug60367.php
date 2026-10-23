@@ -1,23 +1,22 @@
-<?php
+<?hh
+
 abstract class A {
+  const WHAT = 'A';
 
-	const WHAT = 'A';
-
-	public static function call() {
-		echo static::WHAT;
-	}
-
+  <<__DynamicallyCallable>> public static function call() :mixed{
+    echo static::WHAT;
+  }
 }
 
 class B extends A {
-
-	const WHAT = 'B';
-
+  const WHAT = 'B';
 }
 
-$method = new ReflectionMethod("b::call");
-$method->invoke(null);
-$method->invokeArgs(null, array());
-$method = new ReflectionMethod("A::call");
-$method->invoke(null);
-$method->invokeArgs(null, array());
+<<__EntryPoint>> function main(): void {
+  $method = new ReflectionMethod("B::call");
+  $method->invoke(null);
+  $method->invokeArgs(null, vec[]);
+  $method = new ReflectionMethod("A::call");
+  $method->invoke(null);
+  $method->invokeArgs(null, vec[]);
+}

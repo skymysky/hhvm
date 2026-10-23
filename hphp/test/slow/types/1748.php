@@ -1,9 +1,17 @@
-<?php
+<?hh
 
-function foo($p) {
+function foo($p) :mixed{
   if ($p) {
-    $a = array();
+    $a = vec[];
   }
-  var_dump((string)$a);
+  try {
+    var_dump((string)$a);
+  } catch (UndefinedVariableException $e) {
+    var_dump($e->getMessage());
+  }
 }
-foo(false);
+
+<<__EntryPoint>>
+function main_1748() :mixed{
+  foo(false);
+}

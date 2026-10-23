@@ -11,7 +11,7 @@
  * @return string - The compressed string or FALSE if an error occurred.
  */
 <<__Native>>
-function snappy_compress(string $data): mixed;
+function snappy_compress(string $data)[]: mixed;
 
 /**
  * This function uncompress a compressed string.
@@ -21,20 +21,20 @@ function snappy_compress(string $data): mixed;
  * @return string - The decompressed string or FALSE if an error occurred.
  */
 <<__Native>>
-function snappy_uncompress(string $data): mixed;
+function snappy_uncompress(string $data)[]: mixed;
 
 /**
  * This is a wrapper function as sncompress is now snappy_compress
  *
  * https://github.com/facebook/hhvm/pull/3258 - 23/07/2014
  */
-<<__Native, __HipHopSpecific>>
-function sncompress(string $data): mixed;
+<<__Native>>
+function sncompress(string $data)[]: mixed;
 
 /**
  * This is a wrapper function as snuncompress is now snappy_uncompress
  *
  * https://github.com/facebook/hhvm/pull/3258 - 23/07/2014
  */
-<<__Native, __HipHopSpecific>>
-function snuncompress(string $data): mixed;
+<<__Native>>
+function snuncompress(string $data)[]: mixed;

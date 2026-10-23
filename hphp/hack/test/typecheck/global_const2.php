@@ -1,3 +1,3 @@
-<?hh // strict
+<?hh
 
-const int X = array();
+const int X = vec[];

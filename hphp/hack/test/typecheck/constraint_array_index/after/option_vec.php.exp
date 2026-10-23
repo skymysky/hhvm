@@ -1,0 +1,12 @@
+error: Typing[4063] You are trying to access an element of this container but the container could be `null`.  [1]
+-> This is what makes me believe it can be `null` [2]
+
+option_vec.php:3:3
+1 | <?hh
+2 | function f(?vec<int> $v): void {
+  |            ^^^^^^^^^ [2]
+3 |   $v[0];
+  |   ^^^^^ [1]
+4 | }
+
+1 error found

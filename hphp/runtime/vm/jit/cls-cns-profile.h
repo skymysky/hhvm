@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2013 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-present Facebook, Inc. (http://www.facebook.com)  |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -14,8 +14,9 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_JIT_CLS_CNS_PROFILE_H_
-#define incl_HPHP_JIT_CLS_CNS_PROFILE_H_
+#pragma once
+
+#include <folly/json/dynamic.h>
 
 #include "hphp/runtime/base/types.h"
 
@@ -31,11 +32,8 @@ namespace jit {
 struct ClsCnsProfile {
   ClsCnsProfile() : m_curSlot(0) {}
 
-  ClsCnsProfile(const ClsCnsProfile& other)
-    : m_curSlot(other.m_curSlot)
-  {}
-
   std::string toString() const;
+  folly::dynamic toDynamic() const;
 
   /*
    * Obtain the profiled Slot
@@ -48,7 +46,7 @@ struct ClsCnsProfile {
   /*
    * Register a use of a class constant
    */
-  const TypedValue* reportClsCns(const Class* cls, const StringData* cns);
+  TypedValue reportClsCns(const Class* cls, const StringData* cns);
 
   /*
    * Aggregate two ClsCnsProfiles.
@@ -64,5 +62,3 @@ private:
 ///////////////////////////////////////////////////////////////////////////////
 
 }}
-
-#endif

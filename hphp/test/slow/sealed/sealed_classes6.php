@@ -1,5 +1,7 @@
 <?hh
 
+namespace SealedClass6;
+
 <<__Sealed(SomeTrait::class)>>
 interface SomeSealedInteface {}
 
@@ -14,3 +16,8 @@ trait SomeOtherTrait {
 }
 
 trait SomeOtherOtherTrait implements SomeSealedInteface {}
+
+<<__EntryPoint>>
+function main(): void {
+  echo "Done.\n";
+}

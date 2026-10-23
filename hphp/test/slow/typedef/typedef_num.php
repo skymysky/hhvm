@@ -1,24 +1,18 @@
 <?hh
-error_reporting(-1);
-function handler($errno, $errmsg) {
-  if ($errno === E_RECOVERABLE_ERROR) {
-    echo "E_RECOVERABLE_ERROR: $errmsg\n";
-  } else {
-    return false;
-  }
-}
-set_error_handler('handler');
+
 type X = num;
 newtype Y = ?num;
 newtype A = num;
 type B = ?num;
 newtype C = X;
 type D = Y;
-function a(A $x) {}
-function b(B $x) {}
-function c(C $x) {}
-function d(D $x) {}
-function main() {
+function a(<<__Soft>> A $x) :mixed{}
+function b(<<__Soft>> B $x) :mixed{}
+function c(<<__Soft>> C $x) :mixed{}
+function d(<<__Soft>> D $x) :mixed{}
+
+<<__EntryPoint>>
+function main() :mixed{
   a(null);
   a(1);
   a(1.0);
@@ -37,4 +31,3 @@ function main() {
   d('foo');
   echo "Done\n";
 }
-main();

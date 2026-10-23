@@ -1,0 +1,51 @@
+error: Typing[4320] This abstract type constant does not have a default type [1]
+-> It cannot override an abstract type constant that has a default type [2]
+
+redeclare_no_default.php:8:23
+ 2 | 
+ 3 | abstract class A {
+ 4 |   abstract const type T as mixed = arraykey;
+   |                       ^ [2]
+ 5 | }
+ 6 | 
+ 7 | abstract class B extends A {
+ 8 |   abstract const type T as string;
+   |                       ^ [1]
+ 9 | }
+10 | 
+
+error: Typing[4047] This class was declared as `final`. It must provide an implementation for the abstract type constant `T` [1]
+-> `C` uses `B` [2]
+-> The type constant is defined here [3]
+
+redeclare_no_default.php:11:13
+ 6 | 
+ 7 | abstract class B extends A {
+ 8 |   abstract const type T as string;
+   |                       ^ [3]
+ 9 | }
+10 | 
+11 | final class C extends B {}
+   |             ^ [1]
+   |                       ^ [2]
+12 | 
+13 | function f(): void {
+
+error: Typing[4129] Cannot reference abstract constant `C::T` directly [1]
+-> Declaration is here [2]
+
+redeclare_no_default.php:14:33
+ 6 | 
+ 7 | abstract class B extends A {
+ 8 |   abstract const type T as string;
+   |                       ^ [2]
+ 9 | }
+10 | 
+11 | final class C extends B {}
+12 | 
+13 | function f(): void {
+14 |   $c = type_structure(C::class, 'T');
+   |                                 ^^^ [1]
+15 | }
+
+3 errors found

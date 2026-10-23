@@ -1,0 +1,1 @@
+Fatal error: `$GLOBALS` variable is removed from the language. Use HH\global functions in %s/test/slow/class_constant/globals-array.php on line 5

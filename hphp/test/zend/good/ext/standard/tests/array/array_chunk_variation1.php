@@ -1,25 +1,22 @@
-<?php
+<?hh
 /* Prototype  : proto array array_chunk(array $array, int $size [, bool $preserve_keys])
  * Description: Split array into chunks
- *              Chunks an array into size  large chunks. 
+ *              Chunks an array into size  large chunks.
  * Source code: ext/standard/array.c
 */
 
 /*
-* Testing array_chunk() function with unexpected values for 'array' argument 
+* Testing array_chunk() function with unexpected values for 'array' argument
 */
-
+<<__EntryPoint>> function main(): void {
 echo "*** Testing array_chunk() : usage variations ***\n";
 
-// Initialise function arguments 
+// Initialise function arguments
 $size = 10;
 
-//get an unset variable
-$unset_var = 10;
-unset ($unset_var);
 
 //array of values to iterate over
-$values = array(
+$values = vec[
 
         // int data
 /*1*/   0,
@@ -53,15 +50,9 @@ $values = array(
         'string',
 
         // object data
-/*20*/  new stdclass(),
+/*20*/  new stdClass(),
 
-        // undefined data
-/*21*/  @undefined_var,
-
-        // unset data
-/*22*/  @unset_var
-
-);
+];
 
 $count = 1;
 // loop through each element of the array for input
@@ -74,4 +65,4 @@ foreach($values as $value){
 }
 
 echo "Done";
-?>
+}

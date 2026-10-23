@@ -1,4 +1,4 @@
-(**
+(*
  * Copyright (c) 2015, Facebook, Inc.
  * All rights reserved.
  *
@@ -7,9 +7,6 @@
  *
  *
  *)
-
-open Integration_test_base_types
-open ServerCommandTypes
 
 module Test = Integration_test_base
 
@@ -26,52 +23,54 @@ let foo_with_errors = "<?hh
 
 let bar_name = "bar.php"
 
-let foo2_definition = "function foo2() {}\n"
-
 let bar_contents = "<?hh
 function test() {
   fo
 }
 "
 
-let build_code_edit st_line st_column ed_line ed_column text =
-  Ide_api_types.{
-    range = Some {
-      st = {
-        line = st_line;
-        column = st_column;
-      };
-      ed = {
-        line = ed_line;
-        column = ed_column;
-      };
-    };
-    text;
-  }
+let bar_new_contents = "<?hh
+function foo2() {}
+function test() {
+  fo
+}
+"
 
-let () =
-
-  let env = Test.setup_server () in
-  let env = Test.setup_disk env [
-    foo_name, foo_no_errors
-  ] in
-  let env = Test.connect_persistent_client env in
-
+let test () =
+  Test.Client.with_env ~custom_config:None @@ fun env ->
+  let env = Test.Client.setup_disk env [(foo_name, foo_no_errors)] in
   (* Open a new file in editor *)
-  let env = Test.open_file env bar_name ~contents:"" in
+  let (env, _diagnostics) = Test.Client.edit_file env bar_name "" in
   (* Start typing in the new file *)
-  let env, _ = Test.edit_file env bar_name bar_contents in
+  let (env, _diagnostics) = Test.Client.edit_file env bar_name bar_contents in
   (* Request completions *)
-  let env, loop_output = Test.ide_autocomplete env (bar_name, 3, 5) in
-  Test.assert_ide_autocomplete loop_output ["foo"];
+  let (env, response) =
+    Client_ide_daemon.Test.handle
+      env
+      Client_ide_message.(
+        Completion
+          ( Test.doc bar_name bar_contents,
+            File_content.Position.from_one_based 3 5,
+            { is_manually_invoked = true } ))
+  in
+  Test.assert_ide_completions response ["foo"];
 
-  (* Add a new definition to the file *)
-  let env, _ = Test.(run_loop_once env { default_loop_input with
-    persistent_client_request = Some (Request (EDIT_FILE
-      (Test.prepend_root bar_name, [build_code_edit 2 1 2 1 foo2_definition])
-    ))
-  }) in
-
+  (* Add a new definition to the file and save it *)
+  let (env, _diagnostics) =
+    Test.Client.edit_file env bar_name bar_new_contents
+  in
+  let env = Test.Client.setup_disk env [(bar_name, bar_new_contents)] in
   (* Check that new definition is among the completions *)
-  let _, loop_output = Test.ide_autocomplete env (bar_name, 4, 5) in
-  Test.assert_ide_autocomplete loop_output ["foo"; "foo2"]
+  let (env, response) =
+    Client_ide_daemon.Test.handle
+      env
+      Client_ide_message.(
+        Completion
+          ( Test.doc bar_name bar_new_contents,
+            File_content.Position.from_one_based 4 5,
+            { is_manually_invoked = true } ))
+  in
+  Test.assert_ide_completions response ["foo"; "foo2"];
+
+  ignore env;
+  ()

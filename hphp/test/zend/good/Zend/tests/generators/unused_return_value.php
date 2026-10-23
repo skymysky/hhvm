@@ -1,8 +1,8 @@
-<?php
+<?hh
 
-function gen($foo) { yield; }
-
+function gen($foo) :AsyncGenerator<mixed,mixed,void>{ yield; }
+<<__EntryPoint>> function main(): void {
 gen('foo'); // return value not used
 
-?>
-===DONE===
+echo "===DONE===\n";
+}

@@ -13,24 +13,18 @@
    | license@php.net so we can mail you a copy immediately.               |
    +----------------------------------------------------------------------+
 */
-#ifndef incl_HPHP_WORD_MEM_H_
-#define incl_HPHP_WORD_MEM_H_
+#pragma once
 
 #include <limits>
 #include <folly/Portability.h>
 
 #include "hphp/util/assertions.h"
+#include "hphp/util/portability.h"
 
 extern "C" void* _memcpy8(void* dst, const void* src, size_t len);
 extern "C" void* _memcpy16(void* dst, const void* src, size_t len);
 extern "C" void _bcopy32(void* dst, const void* src, size_t len);
 extern "C" void _bcopy_in_64(void* dst, const void* src, size_t lenIn64);
-
-#ifdef __APPLE__
-#define ASM_LOCAL_LABEL(x) "L" x
-#else
-#define ASM_LOCAL_LABEL(x) ".L" x
-#endif
 
 namespace HPHP {
 
@@ -117,19 +111,15 @@ inline void bcopy32_inline(void* dst, const void* src, size_t len) {
                        :: "xmm0", "xmm1"
                       );
 #elif defined(__aarch64__)
-  int64_t t3, t4, t5, t6, t7;
+  char __attribute__((vector_size(16))) vt0, vt1;
   __asm__ __volatile__("lsr    %x0, %x0, #5\n"
-                       "sub    %x1, %x1, #16\n"
-                       "sub    %x2, %x2, #16\n"
                        ASM_LOCAL_LABEL("BCP32%=") ":\n"
-                       "ldp    %x3, %x4, [%x1, #16]\n"
-                       "ldp    %x5, %x6, [%x1, #32]!\n"
-                       "stp    %x3, %x4, [%x2, #16]\n"
-                       "stp    %x5, %x6, [%x2, #32]!\n"
+                       "ldp    %q3, %q4, [%x1], #32\n"
+                       "stp    %q3, %q4, [%x2], #32\n"
                        "subs   %x0, %x0, #1\n"
                        "bgt    " ASM_LOCAL_LABEL("BCP32%=") "\n"
                        : "+r"(len), "+r"(src), "+r"(dst),
-                         "=r"(t3), "=r"(t4), "=r"(t5), "=r"(t6), "=r"(t7)
+                         "=&w"(vt0), "=&w"(vt1)
                        :: "cc"
                       );
 #else
@@ -158,28 +148,23 @@ inline void memcpy16_inline(void* dst, const void* src, size_t len) {
                        :: "xmm0", "xmm1"
                       );
 #elif defined(__aarch64__)
-  int64_t t3, t4, t5, t6, s1, d1, d2;
-  __asm__ __volatile__("mov    %x7, %x1\n"
-                       "add    %x1, %x1, %x0\n"
-                       "ldp    %x3, %x4, [%x1, #-16]!\n"
-                       "mov    %x8, %x2\n"
-                       "add    %x2, %x2, %x0\n"
-                       "stp    %x3, %x4, [%x2, #-16]!\n"
+  char __attribute__((vector_size(16))) vt0, vt1;
+  int64_t s1, d1;
+  __asm__ __volatile__("add    %x5, %x1, %x0\n"
+                       "add    %x6, %x2, %x0\n"
+                       "ldr    %q3, [%x5, #-16]\n"
+                       "str    %q3, [%x6, #-16]\n"
                        "lsr    %x0, %x0, #5\n"
                        "cbz    %x0, " ASM_LOCAL_LABEL("END%=") "\n"
-                       "sub    %x7, %x7, #16\n"
-                       "sub    %x8, %x8, #16\n"
                        ASM_LOCAL_LABEL("R32%=") ":\n"
-                       "ldp    %x3, %x4, [%x7, #16]\n"
-                       "ldp    %x5, %x6, [%x7, #32]!\n"
-                       "stp    %x3, %x4, [%x8, #16]\n"
-                       "stp    %x5, %x6, [%x8, #32]!\n"
+                       "ldp    %q3, %q4, [%x1], #32\n"
+                       "stp    %q3, %q4, [%x2], #32\n"
                        "subs   %x0, %x0, #1\n"
                        "bgt    " ASM_LOCAL_LABEL("R32%=") "\n"
                        ASM_LOCAL_LABEL("END%=") ":\n"
                        : "+r"(len), "+r"(src), "+r"(dst),
-                         "=r"(t3), "=r"(t4), "=r"(t5), "=r"(t6),
-                         "=r"(s1), "=r"(d1), "=r"(d2)
+                         "=&w"(vt0), "=&w"(vt1),
+                         "=&r"(s1), "=&r"(d1)
                        :: "cc"
                       );
 #else
@@ -195,11 +180,11 @@ inline void memcpy16_inline(void* dst, const void* src, size_t len) {
  * the two strings have the same length. It will not check for the null
  * terminator.
  *
- * Assumes that the the buffer addresses are word aligned, and that it can
- * read lenBytes rounded up to a whole word. This is possible in HPHP because
- * we always allocate whole numbers of words.
- * The final word compare is adjusted to handle the slack in lenBytes so only
- * the bytes we care about are compared.
+ * Assumes that the buffer addresses are word aligned, and that it can read
+ * lenBytes rounded up to a whole word. This is possible in HPHP because we
+ * always allocate whole numbers of words.  The final word compare is adjusted
+ * to handle the slack in lenBytes so only the bytes we care about are
+ * compared.
  */
 ALWAYS_INLINE
 bool wordsame(const void* mem1, const void* mem2, uint32_t lenBytes) {
@@ -289,5 +274,3 @@ T* wordfillones(T* ptr, size_t numT) {
 //////////////////////////////////////////////////////////////////////
 
 }
-
-#endif

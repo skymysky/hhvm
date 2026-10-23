@@ -1,9 +1,9 @@
-<?php
+<?hh
 
-function blah() {
-  $xs = array(1, 2, 3);
-  $ys = array(1, 2, 3);
-  $zs = array(1, 2, 3);
+function blah() :mixed{
+  $xs = vec[1, 2, 3];
+  $ys = vec[1, 2, 3];
+  $zs = vec[1, 2, 3];
   try {
     foreach ($xs as $x) {
       foreach ($ys as $y) {
@@ -33,6 +33,6 @@ function blah() {
     echo "6\n";
   }
 }
-
+<<__EntryPoint>> function main(): void {
 var_dump(blah());
-
+}

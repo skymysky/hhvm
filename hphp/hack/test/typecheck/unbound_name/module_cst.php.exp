@@ -1,0 +1,11 @@
+error: Naming[2049] Unbound name: `doesnotexists` (a module) [1]
+
+module_cst.php:3:8
+1 | <?hh
+2 | 
+3 | module doesnotexists;
+  |        ^^^^^^^^^^^^^ [1]
+4 | 
+5 | const int C = 42;
+
+1 error found

@@ -13,13 +13,34 @@
    | license@php.net so we can mail you a copy immediately.               |
    +----------------------------------------------------------------------+
 */
-#ifndef incl_HPHP_REPO_GLOBAL_DATA_H_
-#define incl_HPHP_REPO_GLOBAL_DATA_H_
+#pragma once
 
-#include "hphp/runtime/vm/repo.h"
-#include "hphp/runtime/base/repo-auth-type-array.h"
+#include "hphp/runtime/base/config.h"
+#include "hphp/runtime/base/configs/repo-global-data-generated.h"
+
+#include "hphp/util/optional.h"
+
+#include <cstdint>
+#include <vector>
 
 namespace HPHP {
+
+//////////////////////////////////////////////////////////////////////
+
+enum class RepoFileCapability : uint32_t {
+  // This RepoFile was explicitly built for incremental reuse. Its UnitEmitter
+  // blobs can be copied without decoding or recompiling them, and it contains
+  // one meth-caller list per unit so RepoFile-level indexes can be rebuilt
+  // without decoding retained UnitEmitters.
+  //
+  // HHBBC and declaration-driven compilation can make a unit's output depend
+  // on other units, so RepoFiles produced in those modes do not advertise this
+  // capability. This capability alone does not establish full compatibility:
+  // the RepoFile schema must still match, the caller must use a compatible
+  // compiler configuration, and every unit affected by an input change must
+  // be invalidated.
+  RAW_UNIT_EMITTER_REUSE = 1 << 0,
+};
 
 //////////////////////////////////////////////////////////////////////
 
@@ -28,229 +49,63 @@ namespace HPHP {
  *
  * Only used in RepoAuthoritative mode.  See loadGlobalData().
  */
-struct Repo::GlobalData {
-  GlobalData() {}
+struct RepoGlobalData {
+#define C(_, Name, Type) Type Name;
+  CONFIGS_FOR_REPOGLOBALDATA()
+#undef C
 
   /*
-   * Indicates whether a repo was compiled using HHBBC.
+   * Should we display function arguments in backtraces?
    */
-  bool UsedHHBBC = false;
-
-  /*
-   * Was the repo compiled with EnableHipHopSyntax.
-   */
-  bool EnableHipHopSyntax = false;
-
-  /*
-   * Copy of InitialNamedEntityTableSize for hhbbc to use.
-   */
-  uint32_t InitialNamedEntityTableSize = 0;
-
-  /*
-   * Copy of InitialStaticStringTableSize for hhbbc to use.
-   */
-  uint32_t InitialStaticStringTableSize = 0;
-
-  /*
-   * Indicates whether a repo was compiled with HardTypeHints.
-   *
-   * If so, we disallow recovering from the E_RECOVERABLE_ERROR we
-   * raise if you violate a parameter typehint, because doing so
-   * would allow violating assumptions from the optimizer.
-   */
-  bool HardTypeHints = false;
-
-  /*
-   * Indicates whether a repo was compiled with HardReturnTypeHints.
-   *
-   * If so, we disallow recovering from the E_RECOVERABLE_ERROR we
-   * raise if you violate a return typehint, because doing so would
-   * allow violating assumptions from the optimizer.
-   */
-  bool HardReturnTypeHints = false;
-
-  /*
-   * Indicates whether a repo was compiled assumming that `this` types will be
-   * verified by Verify*Type instructions at runtime.
-   *
-   * This changes program behavior because this type hints that are checked
-   * at runtime will enable additional HHBBC optimizations.
-   */
-  int32_t ThisTypeHintLevel = 0;
-
-  /*
-   * Indicates whether a repo was compiled with HardPrivatePropInference.
-   */
-  bool HardPrivatePropInference = false;
-
-  /*
-   * Indicates whether the repo was compiled with DisallowDynamicVarEnvFuncs. If
-   * so, we assume that '$f()' doesn't read or write over locals (that
-   * haven't been passed).
-   */
-  HackStrictOption DisallowDynamicVarEnvFuncs = HackStrictOption::OFF;
-
-  /*
-   * Indicates whether the repo was compiled with ElideAutoloadInvokes. If so,
-   * potential invocations of the autoloader may have been optimized away if it
-   * could be proven the invocation would not find a viable function.
-   */
-  bool ElideAutoloadInvokes = true;
-
-  /*
-   * Indicates whether the repo was compiled with PHP7 integer semantics. This
-   * slightly changes the way certain arithmetic operations are evaluated, in
-   * small enough ways that don't warrant new bytecodes, but in ways that do
-   * affect everything from hphpc's constant folding up through the JIT, and
-   * so need to be kept consistent.
-   */
-  bool PHP7_IntSemantics = false;
-
-  /*
-   * Indicates whether hex strings (e.g. "0x20") can be used for numeric
-   * operations, e.g. ("0x20" + 1)
-   */
-  bool PHP7_NoHexNumerics = false;
-
-  /*
-   * Indicates whether the repo was compiled with PHP7 scalar type hint support.
-   * In this mode non hh units will default to weak types and scalar types will
-   * be available outside the HH namespace.
-   */
-  bool PHP7_ScalarTypes = false;
-
-  /*
-   * Indicates whether the repo was compiled with PHP7 builtins enabled.
-   */
-  bool PHP7_Builtins = false;
-
-  /*
-   * Indicates whether the repo was compiled with PHP7 substr behavior which
-   * returns an empty string if the stringi length is equal to start characters
-   * long, instead of PHP5's false.
-   */
-  bool PHP7_Substr = false;
-
-  /*
-   * Indicates that generators should be autoprimed and not require an initial
-   * call to next() before calling other generator functions.
-   */
-  bool AutoprimeGenerators = true;
-
-  /*
-   * Should emptyish in lval context be promoted to a stdclass object?
-   */
-  bool PromoteEmptyObject = true;
-
-  /*
-   * Disable return by reference in PHP
-   */
-  bool DisableReturnByReference = true;
-
-  /*
-   * Should all functions be interceptable?
-   */
-  bool EnableRenameFunction = false;
-
-  /*
-   * Are Hack array compatibility notices enabled? If so, certain optimizations
-   * may be disabled.
-   */
-  bool HackArrCompatNotices = false;
-  bool HackArrCompatIsArrayNotices = false;
-  bool HackArrCompatPromoteNotices = false;
-  bool HackArrCompatTypeHintNotices = false;
-  bool HackArrCompatDVCmpNotices = false;
-  bool HackArrCompatSerializeNotices = false;
-
-  /*
-   * Are d/varrays dicts and vecs?
-   */
-  bool HackArrDVArrs = false;
-
-  /*
-   * Should the extension containing HHVM intrinsics be enabled?
-   */
-  bool EnableIntrinsicsExtension = false;
-
-  /*
-   * Should the runtime emit notices or throw whenever a function is called
-   * dynamically and that function has not been marked as allowing that?
-   */
-  int32_t ForbidDynamicCalls = 0;
-
-  /*
-   * Should the runtime emit notices whenever a builtin is called dynamically?
-   */
-  bool NoticeOnBuiltinDynamicCalls = false;
-
-  /*
-   * Should we enforce that reffiness annotations are invaraint in overridden
-   * methods?
-   */
-  bool ReffinessInvariance = false;
-
-  /*
-   * Should we use the multiple stack return value optimization for inout
-   * function calls?
-   */
-  bool UseMSRVForInOut = false;
-
-  /*
-   * Are objects allowed to run destructors?
-   */
-  bool AllowObjectDestructors = false;
+  bool EnableArgsInBacktraces = false;
 
   /*
    * A more-or-less unique identifier for the repo
    */
   uint64_t Signature = 0;
 
-  std::vector<const StringData*> APCProfile;
+  uint32_t RepoFileCapabilities = 0;
 
-  std::vector<std::pair<std::string,Cell>> ConstantFunctions;
+  bool hasRepoFileCapability(RepoFileCapability capability) const {
+    return RepoFileCapabilities & static_cast<uint32_t>(capability);
+  }
+
+  std::vector<std::pair<std::string,std::string>> ConstantFunctions;
+
+  std::unordered_map<std::string, int> EvalCoeffectEnforcementLevels = {};
+
+  /*
+   * If set, const fold the File and Dir bytecodes, using this as the
+   * SourceRoot.
+   */
+  Optional<std::string> SourceRootForFileBC;
+
+  // Load the appropriate options into their matching
+  // RuntimeOptions. If `loadConstantFuncs' is true, also deserialize
+  // ConstantFunctions and store it in RuntimeOptions (this can only
+  // be done if the memory manager is initialized).
+  void load(bool loadConstantFuncs = true) const;
+
+  // NB: Only use C++ types in this struct because we want to be able
+  // to serde it before memory manager and family are set up.
 
   template<class SerDe> void serde(SerDe& sd) {
-    sd(UsedHHBBC)
-      (EnableHipHopSyntax)
-      (InitialNamedEntityTableSize)
-      (InitialStaticStringTableSize)
-      (HardTypeHints)
-      (ThisTypeHintLevel)
-      (HardReturnTypeHints)
-      (HardPrivatePropInference)
-      (DisallowDynamicVarEnvFuncs)
-      (ElideAutoloadInvokes)
-      (PHP7_IntSemantics)
-      (PHP7_NoHexNumerics)
-      (PHP7_ScalarTypes)
-      (PHP7_Substr)
-      (PHP7_Builtins)
-      (AutoprimeGenerators)
-      (PromoteEmptyObject)
-      (EnableRenameFunction)
-      (HackArrCompatNotices)
-      (HackArrCompatIsArrayNotices)
-      (HackArrCompatPromoteNotices)
-      (HackArrCompatTypeHintNotices)
-      (HackArrCompatDVCmpNotices)
-      (HackArrCompatSerializeNotices)
-      (HackArrDVArrs)
-      (EnableIntrinsicsExtension)
-      (ReffinessInvariance)
-      (ForbidDynamicCalls)
-      (NoticeOnBuiltinDynamicCalls)
-      (UseMSRVForInOut)
-      (AllowObjectDestructors)
-      (Signature)
-      (DisableReturnByReference)
+    sd(Signature)
+      (RepoFileCapabilities)
+      (EnableArgsInBacktraces)
+      (ConstantFunctions)
+      (EvalCoeffectEnforcementLevels, std::less<std::string>{})
+      (SourceRootForFileBC)
       ;
+
+#define C(_, Name, ...) sd(Name);
+  CONFIGS_FOR_REPOGLOBALDATA()
+#undef C
   }
 };
+
+std::string show(const RepoGlobalData& gd);
 
 //////////////////////////////////////////////////////////////////////
 
 }
-
-
-#endif

@@ -1,6 +1,10 @@
 <?hh
-function t(?X $a) {
+function t(?X $a) :mixed{
  echo 1;
  }
- t(42);
+
+ <<__EntryPoint>>
+function main_2206() :mixed{
+t(42);
 echo "\n";
+}

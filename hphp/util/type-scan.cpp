@@ -22,7 +22,7 @@
 #include <vector>
 
 #include <folly/container/F14Set.h>
-#include <folly/Format.h>
+#include <fmt/core.h>
 
 #include "hphp/util/build-info.h"
 #include "hphp/util/embedded-data.h"
@@ -48,6 +48,7 @@ const folly::F14FastSet<std::string> forbidden_template = {
   "boost::container::flat_set",
   "HPHP::FixedVector",
   "HPHP::TinyVector",
+  "HPHP::Optional",
   "std::deque",
   "std::forward_list",
   "std::list",
@@ -68,8 +69,8 @@ const folly::F14FastSet<std::string> forbidden_template = {
 };
 
 const folly::F14FastSet<std::string> forced_conservative = {
-  "boost::variant",
-  "folly::Optional",
+  "std::variant",
+  "boost::Optional",
   "std::optional",
   "std::function"
 };
@@ -100,7 +101,7 @@ std::string stripTemplateArgs(std::string name) {
 
 }
 
-namespace HPHP { namespace type_scan { namespace detail {
+namespace HPHP::type_scan { namespace detail {
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -124,15 +125,15 @@ const Metadata* g_metadata_table = stub_metadata_table;
 std::size_t g_metadata_table_size = 2;
 
 bool isIgnoredType(const std::string& name) {
-  return ignored.count(stripTemplateArgs(name));
+  return ignored.contains(stripTemplateArgs(name));
 }
 
 bool isForbiddenTemplate(const std::string& name) {
-  return forbidden_template.count(stripTemplateArgs(name));
+  return forbidden_template.contains(stripTemplateArgs(name));
 }
 
 bool isForcedConservativeTemplate(const std::string& name) {
-  return forced_conservative.count(stripTemplateArgs(name));
+  return forced_conservative.contains(stripTemplateArgs(name));
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -144,14 +145,14 @@ using namespace detail;
 void init(const std::string& extractPath,
           const std::string& fallbackPath,
           bool trust) {
-#if defined(__clang__)
-  // Clang is currently broken... It doesn't emit uncalled member functions in a
+#if defined(__clang__) && !defined(CLANG_STANDALONE_DEBUG)
+  // Older versions of clang don't emit uncalled member functions in a
   // template class, even when using ATTRIBUTE_USED. This prevents the custom
   // scanners from being emitted (silently), which causes all sorts of
-  // problems. Punt for now until we can figure out a fix. This means that we'll
-  // continue to just conservative scan everything. See t10336705.
+  // problems. Fixed in https://reviews.llvm.org/D56928. Clang builds also
+  // need -fstandalone-debug to emit full types in DWARF.
   return;
-#elif defined(__linux__) || defined(__FreeBSD__)
+#elif defined(__linux__) 
 
   using init_func_t = const Metadata*(*)(std::size_t&);
 
@@ -181,7 +182,7 @@ void init(const std::string& extractPath,
     // Find the initialization function.
     auto const init = dlsym(handle, kInitFuncName);
     if (!init) {
-      throw InitException { folly::sformat("dlsym() fails: {}", dlerror()) };
+      throw InitException { fmt::format("dlsym() fails: {}", dlerror()) };
     }
     return reinterpret_cast<init_func_t>(init);
   }();
@@ -203,4 +204,4 @@ void init(const std::string& extractPath,
 
 ////////////////////////////////////////////////////////////////////////////////
 
-}}
+}

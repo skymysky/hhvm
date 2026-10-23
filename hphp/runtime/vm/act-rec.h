@@ -14,11 +14,14 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_ACT_REC_H_
-#define incl_HPHP_ACT_REC_H_
+#pragma once
 
 #include "hphp/runtime/base/types.h"
 #include "hphp/runtime/base/typed-value.h"
+#include "hphp/runtime/vm/coeffects.h"
+#include "hphp/runtime/vm/func.h"
+#include "hphp/util/compact-tagged-ptrs.h"
+
 /*
  * These header dependencies need to stay as minimal as possible.
  */
@@ -29,12 +32,10 @@ namespace HPHP {
 
 struct ActRec;
 struct Class;
-struct ExtraArgs;
 struct Func;
 struct ObjectData;
 struct StringData;
 struct Unit;
-struct VarEnv;
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -45,8 +46,9 @@ struct VarEnv;
  * For most purposes, an ActRec can be considered to be in one of three
  * possible states:
  *   Pre-live:
- *     After the FPush* instruction which materialized the ActRec on the stack
- *     but before the corresponding FCall instruction.
+ *     In the middle of the FCall instruction and function prologues, when the
+ *     ActRec is materialized on the stack, but the rest of the frame (such as
+ *     locals) is not yet initialized.
  *   Live:
  *     After the corresponding FCall instruction but before the ActRec fields
  *     and locals/iters have been decref'd (either by return or unwinding).
@@ -58,72 +60,44 @@ struct VarEnv;
  * state.
  */
 struct ActRec {
-#if defined(__powerpc64__)
-  ActRec* m_sfp;         // Previous hardware frame pointer/ActRec.
-  uint32_t m_savedCR;    // PPC64's sign flags (CR)
-  uint32_t m_reserved;   // Reserved word as on ABI
-  uint64_t m_savedRip;   // In-TC address to return to.
-  uint64_t m_savedToc;   // TOC save doubleword
-#else // X64 style
   // This pair of uint64_t's must be the first two elements in the structure
   // so that the pointer to the ActRec can also be used for RBP chaining.
   // Note that ActRecs are also native frames, so this is an implicit machine
   // dependency.
   ActRec* m_sfp;       // Previous hardware frame pointer/ActRec
   uint64_t m_savedRip; // native (in-TC) return address
-#endif
-  const Func* m_func;  // Function.
-  uint32_t m_soff;     // offset of caller from its bytecode start.
-  uint32_t m_numArgsAndFlags; // arg_count:28, flags:4
+  FuncId m_funcId;
+  // bit 0: LocalsDecRefd
+  // bit 1: IsInlined
+  // bit 2: AsyncEagerRet
+  // bits 3-31: bc offset of call opcode from caller func entry
+  uint32_t m_callOffAndFlags;
   union {
     ObjectData* m_thisUnsafe; // This.
     Class* m_clsUnsafe;       // Late bound class.
   };
-  union {
-    VarEnv* m_varEnv;       // Variable environment when live
-    ExtraArgs* m_extraArgs; // Lightweight extra args, when live
-    StringData* m_invName;  // Invoked name, used for __call(), when pre-live
-  };
 
   TYPE_SCAN_CUSTOM_FIELD(m_thisUnsafe) {
-    // skip if "this" is a class
-    if (checkThisOrNull(m_thisUnsafe)) scanner.scan(m_thisUnsafe);
-  }
-  TYPE_SCAN_CUSTOM_FIELD(m_varEnv) {
-    // All three union members could be heap pointers, but we don't care
-    // which kind; PtrMap will resolve things.
-    scanner.scan(m_varEnv);
+    if (func()->implCls()) scanner.scan(m_thisUnsafe);
   }
 
   /////////////////////////////////////////////////////////////////////////////
 
   enum Flags : uint32_t {
-    None          = 0,
-
-    // Set if the function was called using one of the FCallM instructions and
-    // must return a value via RetM.
-    MultiReturn = (1u << 26),
-
-    // Set if this corresponds to a dynamic call
-    DynamicCall = (1u << 27),
-
     // This bit can be independently set on ActRecs with any other flag state.
     // It's used by the unwinder to know that an ActRec has been partially torn
     // down (locals freed).
-    LocalsDecRefd = (1u << 29),
+    LocalsDecRefd,
 
-    // Four mutually exclusive execution mode states in these 2 bits.
-    InResumed     = (1u << 30),
-    IsFCallAwait  = (1u << 31),
-    MagicDispatch = InResumed|IsFCallAwait,
-    // MayNeedStaticWaitHandle, if neither bit is set.
+    // Indicates whether this frame is inlined.
+    IsInlined,
+
+    // Async eager return was requested.
+    AsyncEagerRet,
+
+    // The first bit of the call offset.
+    CallOffsetStart,
   };
-
-  static constexpr int kNumArgsBits = 26;
-  static constexpr int kNumArgsMask = (1 << kNumArgsBits) - 1;
-  static constexpr int kFlagsMask = ~kNumArgsMask;
-  static constexpr int kExecutionModeMask =
-    ~(LocalsDecRefd | DynamicCall | MultiReturn);
 
   /*
    * To conserve space, we use unions for pairs of mutually exclusive fields
@@ -133,10 +107,7 @@ struct ActRec {
    * that we can distinguish at runtime which field is valid.  We define
    * accessors (below) to encapsulate this logic.
    */
-  static auto constexpr      kHasClassBit  = 0x1;  // unset for m_this
-  static auto constexpr      kExtraArgsBit = 0x1;  // unset for m_varEnv
 
-  static constexpr uintptr_t kTrashedVarEnvSlot = 0xfeeefeee000f000f;
   static constexpr uintptr_t kTrashedThisSlot = 0xfeeefeeef00fe00e;
   static constexpr uintptr_t kTrashedFuncSlot = 0xfeeefeeef00fe00d;
 
@@ -153,10 +124,12 @@ struct ActRec {
   const Func* func() const;
   const Unit* unit() const;
 
+  void setFunc(const Func*);
+
   /*
    * Set up frame linkage with the caller ActRec.
    */
-  void setReturn(ActRec* fp, PC pc, void* retAddr);
+  void setReturn(ActRec* fp, PC callPC, void* retAddr, bool asyncEagerReturn);
   void setJitReturn(void* retAddr);
 
   /*
@@ -173,85 +146,37 @@ struct ActRec {
   bool skipFrame() const;
 
   /////////////////////////////////////////////////////////////////////////////
-  // NumArgs / Flags.
-
-  /*
-   * Number of arguments passed for this invocation.
-   */
-  int32_t numArgs() const;
+  // Flags, call offset, number of args.
 
   /*
    * Raw flags accessors.
    */
-  Flags flags() const;
   bool localsDecRefd() const;
-  bool resumed() const;
-  bool isFCallAwait() const;
-  bool mayNeedStaticWaitHandle() const;
-  bool magicDispatch() const;
-  bool isDynamicCall() const;
-  bool isFCallM() const;
+  bool isInlined() const;
+  bool isAsyncEagerReturn() const;
 
   /*
-   * Pack `numArgs' and `flags' into the format expected by m_numArgsAndFlags.
+   * BC offset of call opcode from caller func entry.
    */
-  static uint32_t encodeNumArgsAndFlags(uint32_t numArgs, Flags flags);
+  Offset callOffset() const;
 
   /*
-   * Set the numArgs component of m_numArgsAndFlags to `numArgs'.
-   *
-   * The init* flavor zeroes the flags component, whereas the set* flavor
-   * preserves flags.
+   * Initialize call offset. Assumes flags were not written yet.
    */
-  void initNumArgs(uint32_t numArgs);
-  void setNumArgs(uint32_t numArgs);
+  void initCallOffset(Offset offset);
+
+  /*
+   * Combine offset with flags.
+   */
+  static uint32_t encodeCallOffsetAndFlags(Offset offset, uint32_t flags);
 
   /*
    * Flags setters.
    */
   void setLocalsDecRefd();
-  void setResumed();
-  void setFCallAwait();
-  void setDynamicCall();
-  void setFCallM();
-
-  /*
-   * Set or clear both m_invName and the MagicDispatch flag.
-   */
-  void setMagicDispatch(StringData* invName);
-  StringData* clearMagicDispatch();
 
   /////////////////////////////////////////////////////////////////////////////
   // This / Class.
-
-  /*
-   * Encode `obj' or `cls' for the m_this/m_cls union.
-   */
-  static void* encodeThis(ObjectData* obj);
-  static void* encodeClass(const Class* cls);
-
-  /*
-   * Determine whether p is a Class* or an ObjectData* based
-   * on kHasClassBit.
-   *
-   * @requires: p != nullptr
-   */
-  static bool checkThis(void* p);
-
-  /*
-   * Determine whether p is a Class* based on kHasClassBit.
-   *
-   * @requires: p is a Cctx, an ObjectData* or a nullptr
-   */
-  static bool checkThisOrNull(void* p);
-
-  /*
-   * Decode `p', encoded in the format of m_this/m_cls.
-   *
-   * If `p' has the other encoding (or is nullptr), return nullptr.
-   */
-  static ObjectData* decodeThis(void* p);
-  static Class* decodeClass(void* p);
 
   /*
    * Set m_this/m_cls to the pre-encoded `objOrCls'.
@@ -262,12 +187,22 @@ struct ActRec {
   void setThisOrClassAllowNull(void* objOrCls);
 
   /*
-   * Whether the m_this/m_cls union is discriminated in the desired way.
+   * Whether the m_this/m_cls union is discriminated in the desired way in the
+   * function body.
    *
    * @requires: m_func->implCls() != nullptr
    */
   bool hasThis() const;
   bool hasClass() const;
+
+  /*
+   * Whether the m_this/m_cls union is discriminated in the desired way in the
+   * function prologue.
+   *
+   * @requires: m_func->implCls() != nullptr
+   */
+  bool hasThisInPrologue() const;
+  bool hasClassInPrologue() const;
 
   /*
    * Get the (encoded) value of the m_this/m_cls union.
@@ -280,13 +215,22 @@ struct ActRec {
    * Get m_thisUnsafe. Caller takes responsibility for its meaning.
    */
   ObjectData* getThisUnsafe() const;
+
   /*
-   * Get and decode the value of m_this/m_cls.
+   * Get and decode the value of m_this/m_cls in the function body.
    *
    * @requires: hasThis() or hasClass(), respectively
    */
   ObjectData* getThis() const;
   Class* getClass() const;
+
+  /*
+   * Get and decode the value of m_this/m_cls in the prologue.
+   *
+   * @requires: hasThis() or hasClass(), respectively
+   */
+  ObjectData* getThisInPrologue() const;
+  Class* getClassInPrologue() const;
 
   /*
    * Encode and set `val' to m_this/m_cls
@@ -298,8 +242,7 @@ struct ActRec {
   /*
    * Encode and set `val' to m_this/m_cls
    *
-   * @requires: m_func->implClass() and
-   *            !(m_func->attrs() & AttrRequiresThis)
+   * @requires: m_func->implClass() and m_func->isStaticInPrologue()
    */
   void setClass(Class* val);
 
@@ -309,61 +252,13 @@ struct ActRec {
   void trashThis();
 
   /////////////////////////////////////////////////////////////////////////////
-  // VarEnv / ExtraArgs.
 
   /*
-   * Write garbage to the m_varEnv/m_extraArgs union (in debug mode only).
+   * Returns the ambient and required coeffects of the function respectively
    */
-  void trashVarEnv();
-
-  /*
-   * Check that the m_varEnv/m_extraArgs union is not the special garbage
-   * value.
-   */
-  bool checkVarEnv() const;
-
-  /*
-   * Whether the m_varEnv/m_extraArgs union is discriminated in the desired
-   * way.
-   */
-  bool hasVarEnv() const;
-  bool hasExtraArgs() const;
-
-  /*
-   * Get and decode the VarEnv.
-   *
-   * @requires: hasVarEnv()
-   */
-  VarEnv* getVarEnv() const;
-
-  /*
-   * Get and decode the ExtraArgs.
-   *
-   * If !hasExtraArgs(), returns nullptr.
-   */
-  ExtraArgs* getExtraArgs() const;
-
-  /*
-   * Get and decode the magic invocation name.
-   *
-   * @requires: magicDispatch()
-   */
-  StringData* getInvName() const;
-
-  /*
-   * Encode and set `val' to the m_varEnv/m_extraArgs union.
-   */
-  void setVarEnv(VarEnv* val);
-  void setExtraArgs(ExtraArgs* val);
-  void resetExtraArgs();
-
-  /*
-   * Get the extra argument with index `ind', from either the VarEnv or the
-   * ExtraArgs, whichever is set.
-   *
-   * Returns nullptr if there are no extra arguments.
-   */
-  TypedValue* getExtraArg(unsigned ind) const;
+  RuntimeCoeffects coeffects() const;
+  RuntimeCoeffects requiredCoeffects() const;
+  RuntimeCoeffects providedCoeffectsForCall(bool isCtor) const;
 
   /*
    * address to teleport the return value after destroying this actrec.
@@ -379,7 +274,8 @@ static_assert(offsetof(ActRec, m_sfp) == 0,
 /*
  * Size in bytes of the target architecture's call frame.
  */
-constexpr auto kNativeFrameSize = offsetof(ActRec, m_func);
+constexpr auto kNativeFrameSize = offsetof(ActRec, m_funcId);
+static_assert(kNativeFrameSize % sizeof(TypedValue) == 0, "");
 
 /*
  * offset from frame ptr to return value slot after teardown
@@ -388,26 +284,16 @@ constexpr auto kArRetOff = sizeof(ActRec) - sizeof(TypedValue);
 static_assert(kArRetOff % sizeof(TypedValue) == 0, "");
 
 /*
- * Whether `address' is a helper stub that we're permitted to set
- * ActRec::m_savedRip to.
+ * Whether `address' is a return helper stub or a call to exit stub that we're
+ * permitted to set ActRec::m_savedRip to.
  */
-bool isReturnHelper(void* address);
-bool isDebuggerReturnHelper(void* address);
-
-/* Offset of the m_func and m_thisUnsafe fields in cells */
-
-static_assert(offsetof(ActRec, m_func) % sizeof(Cell) == 0, "");
-static_assert(offsetof(ActRec, m_thisUnsafe) % sizeof(Cell) == 0, "");
-
-constexpr auto kActRecFuncCellOff = offsetof(ActRec, m_func) /
-                                    sizeof(Cell);
-constexpr auto kActRecCtxCellOff  = offsetof(ActRec, m_thisUnsafe) /
-                                    sizeof(Cell);
+bool isReturnHelper(uint64_t address);
+bool isCallToExit(uint64_t address);
 
 ///////////////////////////////////////////////////////////////////////////////
 
 }
 
+#define incl_HPHP_VM_ACT_REC_INL_H_
 #include "hphp/runtime/vm/act-rec-inl.h"
-
-#endif
+#undef incl_HPHP_VM_ACT_REC_INL_H_

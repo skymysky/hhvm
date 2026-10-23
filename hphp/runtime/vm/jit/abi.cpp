@@ -18,11 +18,13 @@
 
 #include "hphp/util/arch.h"
 
+#ifdef __aarch64__
 #include "hphp/runtime/vm/jit/abi-arm.h"
-#include "hphp/runtime/vm/jit/abi-ppc64.h"
+#else
 #include "hphp/runtime/vm/jit/abi-x64.h"
+#endif
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -35,6 +37,7 @@ PhysReg rsp() { return ARCH_SWITCH_CALL(rsp); }
 
 RegSet vm_regs_with_sp() { return ARCH_SWITCH_CALL(vm_regs_with_sp); }
 RegSet vm_regs_no_sp() { return ARCH_SWITCH_CALL(vm_regs_no_sp); }
+RegSet cross_jit_save() { return ARCH_SWITCH_CALL(cross_jit_save); }
 
 PhysReg rret_data() { return ARCH_SWITCH_CALL(rret_data); }
 PhysReg rret_type() { return ARCH_SWITCH_CALL(rret_type); }
@@ -51,6 +54,7 @@ size_t num_arg_regs_simd() { return ARCH_SWITCH_CALL(num_arg_regs_simd); }
 size_t num_arg_regs_ind_ret() { return ARCH_SWITCH_CALL(num_arg_regs_ind_ret); }
 
 PhysReg r_svcreq_req() { return ARCH_SWITCH_CALL(r_svcreq_req); }
+PhysReg r_svcreq_spoff() { return ARCH_SWITCH_CALL(r_svcreq_spoff); }
 PhysReg r_svcreq_stub() { return ARCH_SWITCH_CALL(r_svcreq_stub); }
 PhysReg r_svcreq_sf() { return ARCH_SWITCH_CALL(r_svcreq_sf); }
 PhysReg r_svcreq_arg(size_t i) { return ARCH_SWITCH_CALL(r_svcreq_arg, i); }
@@ -83,4 +87,4 @@ Vflags required_flags(jit::ConditionCode cc) {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-}}
+}

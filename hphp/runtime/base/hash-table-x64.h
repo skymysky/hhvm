@@ -14,21 +14,21 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_HASH_TABLE_X64_H_
-#define incl_HPHP_HASH_TABLE_X64_H_
+#pragma once
 
-#define MixedArray_SCALE        16
-#define MixedArray_DATA         32
-#define MixedArrayElm_HASH      20
-#define MixedArrayElm_KEY       0
-#define MixedArrayElm_DATA      8
-#define MixedArrayElm_QUADWORDS 3
+#define VanillaDict_SCALE        16
+#define VanillaDict_DATA         32
+#define VanillaDictElm_HASH      12
+#define VanillaDictElm_KEY       16
+#define VanillaDictElm_DATA      0
+#define VanillaDictElm_TYPE      8
+#define VanillaDictElm_QUADWORDS 3
 
-#define SetArray_SCALE        16
-#define SetArray_DATA         32
-#define SetArrayElm_HASH      12
-#define SetArrayElm_KEY       0
-#define SetArrayElm_DATA      0
-#define SetArrayElm_QUADWORDS 2
+#define VanillaKeyset_SCALE        16
+#define VanillaKeyset_DATA         32
+#define VanillaKeysetElm_HASH      12
+#define VanillaKeysetElm_KEY       0
+#define VanillaKeysetElm_DATA      0
+#define VanillaKeysetElm_TYPE      8
+#define VanillaKeysetElm_QUADWORDS 2
 
-#endif

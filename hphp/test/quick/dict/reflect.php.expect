@@ -1,32 +1,25 @@
 ReflectionMethod:
 string(7) "HH\dict"
-bool(false)
 string(26) "HH\dict<HH\string, HH\int>"
-bool(false)
 string(6) "HH\int"
-bool(false)
 string(10) "Foo::Tdict"
 
 ReflectionFunction:
 string(23) "HH\dict<HH\int, HH\int>"
-bool(false)
 string(26) "HH\dict<HH\int, HH\string>"
-bool(false)
 string(25) "HH\dict<HH\arraykey, Foo>"
 
 Foo::TDict type_structure:
-array(2) {
+dict(2) {
   ["kind"]=>
   int(19)
   ["generic_types"]=>
-  array(2) {
-    [0]=>
-    array(1) {
+  vec(2) {
+    dict(1) {
       ["kind"]=>
       int(1)
     }
-    [1]=>
-    array(1) {
+    dict(1) {
       ["kind"]=>
       int(1)
     }
@@ -35,18 +28,16 @@ array(2) {
 string(4) "dict"
 
 CDictWithUnsafeType::TDict type_structure:
-array(2) {
+dict(2) {
   ["kind"]=>
   int(19)
   ["generic_types"]=>
-  array(2) {
-    [0]=>
-    array(1) {
+  vec(2) {
+    dict(1) {
       ["kind"]=>
       int(4)
     }
-    [1]=>
-    array(2) {
+    dict(2) {
       ["kind"]=>
       int(9)
       ["alias"]=>
@@ -56,18 +47,16 @@ array(2) {
 }
 
 ADictType type_structure:
-array(3) {
+dict(3) {
   ["kind"]=>
   int(19)
   ["generic_types"]=>
-  array(2) {
-    [0]=>
-    array(1) {
+  vec(2) {
+    dict(1) {
       ["kind"]=>
       int(4)
     }
-    [1]=>
-    array(2) {
+    dict(2) {
       ["kind"]=>
       int(9)
       ["alias"]=>

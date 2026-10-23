@@ -1,14 +1,10 @@
 ====================================================
-array(1) {
+dict(1) {
   ["checkme"]=>
-  array(4) {
-    [0]=>
+  vec(4) {
     int(6)
-    [1]=>
     NULL
-    [2]=>
     NULL
-    [3]=>
     int(0)
   }
 }
@@ -16,29 +12,21 @@ bool(true)
 bool(false)
 bool(true)
 bool(false)
-bool(false)
+bool(true)
 ====================================================
-array(2) {
+dict(2) {
   ["e"]=>
-  array(4) {
-    [0]=>
+  vec(4) {
     int(5)
-    [1]=>
     string(9) "Exception"
-    [2]=>
     NULL
-    [3]=>
     int(0)
   }
   ["checkme"]=>
-  array(4) {
-    [0]=>
+  vec(4) {
     int(6)
-    [1]=>
     NULL
-    [2]=>
     NULL
-    [3]=>
     int(0)
   }
 }
@@ -46,51 +34,35 @@ bool(true)
 bool(false)
 bool(true)
 bool(false)
-bool(false)
+bool(true)
 ====================================================
-array(4) {
+dict(4) {
   ["num"]=>
-  array(4) {
-    [0]=>
+  vec(4) {
     int(3)
-    [1]=>
     NULL
-    [2]=>
     NULL
-    [3]=>
     int(0)
   }
   ["checkme"]=>
-  array(4) {
-    [0]=>
+  vec(4) {
     int(6)
-    [1]=>
     NULL
-    [2]=>
     NULL
-    [3]=>
     int(0)
   }
   ["beans"]=>
-  array(4) {
-    [0]=>
+  vec(4) {
     int(6)
-    [1]=>
     NULL
-    [2]=>
     NULL
-    [3]=>
     int(0)
   }
   ["cheese"]=>
-  array(4) {
-    [0]=>
+  vec(4) {
     int(1)
-    [1]=>
     NULL
-    [2]=>
     NULL
-    [3]=>
     int(0)
   }
 }
@@ -98,51 +70,35 @@ bool(true)
 bool(false)
 bool(true)
 bool(false)
-bool(false)
+bool(true)
 ====================================================
-array(4) {
+dict(4) {
   ["num"]=>
-  array(4) {
-    [0]=>
+  vec(4) {
     int(3)
-    [1]=>
     NULL
-    [2]=>
     int(2)
-    [3]=>
     int(0)
   }
   ["checkme"]=>
-  array(4) {
-    [0]=>
+  vec(4) {
     int(6)
-    [1]=>
     NULL
-    [2]=>
     NULL
-    [3]=>
     int(0)
   }
   ["beans"]=>
-  array(4) {
-    [0]=>
+  vec(4) {
     int(6)
-    [1]=>
     NULL
-    [2]=>
     NULL
-    [3]=>
     int(0)
   }
   ["cheese"]=>
-  array(4) {
-    [0]=>
+  vec(4) {
     int(1)
-    [1]=>
     NULL
-    [2]=>
     string(2) "hi"
-    [3]=>
     int(0)
   }
 }
@@ -150,4 +106,4 @@ bool(true)
 bool(false)
 bool(true)
 bool(false)
-bool(false)
+bool(true)

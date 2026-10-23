@@ -1,0 +1,10 @@
+=== hh_client result ===
+argv: hh_client --multi ../sigint_fifo
+cwd: <test_tmp>/root
+exit_code: 130
+stdout:
+<empty>
+stderr:
+<empty>
+=== telemetry ===
+[]

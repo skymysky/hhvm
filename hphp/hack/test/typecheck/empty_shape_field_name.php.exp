@@ -1,0 +1,39 @@
+error: Parsing[1002] Shape field name must be a nonempty single-quoted string or a class constant [1]
+
+empty_shape_field_name.php:2:25
+1 | <?hh
+2 | function test() : shape('' => int) {
+  |                         ^^ [1]
+3 |   $x = shape('' => 6);
+4 |   return $x;
+
+error: Parsing[1002] Shape field name must be a nonempty single-quoted string or a class constant [1]
+
+empty_shape_field_name.php:3:14
+1 | <?hh
+2 | function test() : shape('' => int) {
+3 |   $x = shape('' => 6);
+  |              ^^ [1]
+4 |   return $x;
+5 | }
+
+error: Typing[4136] A shape field name cannot be an empty string [1]
+
+empty_shape_field_name.php:2:25
+1 | <?hh
+2 | function test() : shape('' => int) {
+  |                         ^^ [1]
+3 |   $x = shape('' => 6);
+4 |   return $x;
+
+error: Typing[4136] A shape field name cannot be an empty string [1]
+
+empty_shape_field_name.php:3:14
+1 | <?hh
+2 | function test() : shape('' => int) {
+3 |   $x = shape('' => 6);
+  |              ^^ [1]
+4 |   return $x;
+5 | }
+
+4 errors found

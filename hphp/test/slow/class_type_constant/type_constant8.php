@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 
 interface I {
   abstract const type T;
@@ -12,4 +12,9 @@ class Incompat implements I {
   // If an interface parameter is defined in terms of a type constant then we
   // require implementers to provide a type hint
   public function foo($t): void {}
+}
+
+<<__EntryPoint>>
+function main(): void {
+  echo "Done.\n";
 }

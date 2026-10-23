@@ -13,26 +13,13 @@
    | license@php.net so we can mail you a copy immediately.               |
    +----------------------------------------------------------------------+
 */
-#ifndef incl_HPHP_TREADMILL_INL_H_
-#define incl_HPHP_TREADMILL_INL_H_
+#pragma once
 
-#include <folly/Likely.h>
-
-#include <atomic>
-#include <memory>
 #include <utility>
 
-namespace HPHP { namespace Treadmill {
+#include "hphp/util/concurrent-slist.h"
 
-extern std::atomic<int64_t> g_nextThreadIdx;
-extern __thread int64_t tl_thisThreadIdx;
-
-inline int64_t threadIdx() {
-  if (UNLIKELY(tl_thisThreadIdx == kInvalidThreadIdx)) {
-    tl_thisThreadIdx = g_nextThreadIdx.fetch_add(1, std::memory_order_relaxed);
-  }
-  return tl_thisThreadIdx;
-}
+namespace HPHP::Treadmill {
 
 //////////////////////////////////////////////////////////////////////
 
@@ -41,9 +28,7 @@ void enqueueInternal(std::unique_ptr<WorkItem>);
 
 //////////////////////////////////////////////////////////////////////
 
-using GenCount = int64_t;
-
-struct WorkItem {
+struct WorkItem : ConcurrentSListNode {
   WorkItem() = default;
   WorkItem(const WorkItem&) = delete;
   WorkItem& operator=(const WorkItem&) = delete;
@@ -55,11 +40,10 @@ private:
   friend void finishRequest();
   friend void enqueueInternal(std::unique_ptr<WorkItem>);
 
-private:
   // Inherently racy. We get a lower bound on the generation;
   // presumably clients are aware of this, and are creating the
   // trigger for an object that was reachable strictly in the past.
-  GenCount m_gen{0};
+  Clock::time_point m_timestamp;
 };
 
 template<class F>
@@ -80,6 +64,5 @@ void enqueue(F&& f) {
 
 //////////////////////////////////////////////////////////////////////
 
-}}
+}
 
-#endif

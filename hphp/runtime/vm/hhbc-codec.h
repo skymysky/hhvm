@@ -14,9 +14,9 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_VM_HHBC_CODEC_H_
-#define incl_HPHP_VM_HHBC_CODEC_H_
+#pragma once
 
+#include "hphp/runtime/base/repo-auth-type.h"
 #include "hphp/runtime/vm/hhbc.h"
 #include "hphp/util/either.h"
 
@@ -58,6 +58,14 @@ inline uint8_t decode_byte(PC& pc) {
 }
 
 /*
+ * Return the encoded size of the given Op, in bytes.
+ */
+constexpr size_t encoded_op_size(Op op) {
+  return (sizeof(Op) == sizeof(uint8_t) || static_cast<size_t>(op) < 0xff)
+    ? 1 : 2;
+}
+
+/*
  * Encode the given Op, using write_byte to write a byte at a time.
  */
 template<typename F>
@@ -65,12 +73,12 @@ void encode_op(Op op, F write_byte) {
   static_assert(Op_count <= 0x1fe,
                 "Op encoding scheme doesn't support Ops >= 0x1fe");
   auto rawVal = static_cast<size_t>(op);
-  if (rawVal >= 0xff) {
+  if (encoded_op_size(op) > 1) {
     // Write a 0xff signal byte
     write_byte(static_cast<uint8_t>(0xff));
     rawVal -= 0xff;
+    assertx(rawVal < 0xff);
   }
-  assertx(rawVal < 0xff);
 
   write_byte(rawVal);
 }
@@ -82,7 +90,9 @@ void encode_op(Op op, F write_byte) {
  */
 inline Op decode_op_unchecked(PC& pc) {
   uint32_t raw = decode_byte(pc);
-  return LIKELY(raw != 0xff) ? Op(raw) : Op(decode_byte(pc) + 0xff);
+  return LIKELY(sizeof(Op) == sizeof(uint8_t) || raw != 0xff)
+    ? Op(raw)
+    : Op(decode_byte(pc) + 0xff);
 }
 
 /*
@@ -101,13 +111,6 @@ inline Op peek_op(PC pc) {
   return decode_op(pc);
 }
 
-/*
- * Return the encoded size of the given Op, in bytes.
- */
-constexpr size_t encoded_op_size(Op op) {
-  return static_cast<size_t>(op) < 0xff ? 1 : 2;
-}
-
 //////////////////////////////////////////////////////////////////////
 
 /*
@@ -117,6 +120,10 @@ constexpr size_t encoded_op_size(Op op) {
 
 template<class T> T decode_oa(PC& pc) {
   return decode_raw<T>(pc);
+}
+
+ALWAYS_INLINE Offset decode_ba(PC& pc) {
+  return decode_raw<Offset>(pc);
 }
 
 ALWAYS_INLINE uint32_t decode_iva(PC& pc) {
@@ -129,12 +136,19 @@ ALWAYS_INLINE uint32_t decode_iva(PC& pc) {
   return small;
 }
 
+using StringDecoder = Either<const Unit*, const UnitEmitter*>;
+
+/*
+ * decode a namedlocal, advancing pc past it.
+ */
+NamedLocal decode_named_local(PC& pc);
+
 /*
  * Decode a MemberKey, advancing pc past it.
  */
-MemberKey decode_member_key(PC& pc, Either<const Unit*, const UnitEmitter*> u);
+MemberKey decode_member_key(PC& pc, StringDecoder u);
 
-void encode_member_key(MemberKey mk, UnitEmitter& ue);
+void encode_member_key(MemberKey mk, FuncEmitter& fe, UnitEmitter& ue);
 
 //////////////////////////////////////////////////////////////////////
 
@@ -166,11 +180,41 @@ void foreachSSwitchString(PC pc, L func) {
 
 //////////////////////////////////////////////////////////////////////
 
-void encodeLocalRange(UnitEmitter&, const LocalRange&);
+void encodeLocalRange(FuncEmitter&, const LocalRange&);
 LocalRange decodeLocalRange(const unsigned char*&);
 
 //////////////////////////////////////////////////////////////////////
 
+void encodeIterArgs(FuncEmitter&, const IterArgs&);
+IterArgs decodeIterArgs(const unsigned char*&);
+
+//////////////////////////////////////////////////////////////////////
+
+void encodeFCallArgsBase(FuncEmitter&, const FCallArgsBase&,
+                         bool hasInoutArgs, bool hasReadonlyArgs,
+                         bool hasNamedArgs,  bool hasAsyncEagerOffset,
+                         bool hasContext);
+void encodeFCallArgsBoolVec(FuncEmitter&, int numBytes, const uint8_t*);
+
+FCallArgs decodeFCallArgs(Op, PC&, StringDecoder);
+
+template<typename T, typename IO, typename RO, typename NA, typename CTX>
+void encodeFCallArgs(FuncEmitter& fe, const FCallArgsBase& fca,
+                     bool hasInoutArgs, IO emitInoutArgs,
+                     bool hasReadonlyArgs, RO emitReadonlyArgs,
+                     bool hasNamedArgs, NA emitNamedArgs,
+                     bool hasAsyncEagerOffset, T emitAsyncEagerOffset,
+                     bool hasContext, CTX emitContext) {
+  encodeFCallArgsBase(fe, fca, hasInoutArgs, hasReadonlyArgs,
+                      hasNamedArgs, hasAsyncEagerOffset,
+                      hasContext);
+  if (hasInoutArgs) emitInoutArgs();
+  if (hasReadonlyArgs) emitReadonlyArgs();
+  if (hasNamedArgs) emitNamedArgs();
+  if (hasAsyncEagerOffset) emitAsyncEagerOffset();
+  if (hasContext) emitContext();
 }
 
-#endif
+//////////////////////////////////////////////////////////////////////
+
+}

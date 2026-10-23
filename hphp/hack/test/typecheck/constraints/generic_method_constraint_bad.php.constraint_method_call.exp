@@ -1,0 +1,91 @@
+error: Typing[4323] Typing error [1]
+-> `T` is a constrained type parameter [2]
+-> This type constraint is violated [3]
+-> Expected `arraykey` [3]
+-> But got `float` [4]
+
+generic_method_constraint_bad.php:16:3
+ 3 | 
+ 4 | class C {
+ 5 |   public function cmeth<T as arraykey>(T $x):void { }
+   |                         ^ [2]
+   |                              ^^^^^^^^ [3]
+ 6 |   public static function smeth<T as arraykey>(T $x):void { }
+ 7 | }
+   :
+14 |   $c = new C();
+15 |   $d = new D<float>();
+16 |   $c->cmeth(2.3);
+   |   ^^^^^^^^^^^^^^ [1]
+   |             ^^^ [4]
+17 |   C::smeth(true);
+18 |   $d->cmeth_where(2.3);
+
+error: Typing[4323] Invalid argument [1]
+-> `T` is a constrained type parameter [2]
+-> This type constraint is violated [3]
+-> Expected `arraykey` [3]
+-> But got `bool` [1]
+
+generic_method_constraint_bad.php:17:12
+ 4 | class C {
+ 5 |   public function cmeth<T as arraykey>(T $x):void { }
+ 6 |   public static function smeth<T as arraykey>(T $x):void { }
+   |                                ^ [2]
+   |                                     ^^^^^^^^ [3]
+ 7 | }
+ 8 | class D<Td> {
+   :
+15 |   $d = new D<float>();
+16 |   $c->cmeth(2.3);
+17 |   C::smeth(true);
+   |            ^^^^ [1]
+18 |   $d->cmeth_where(2.3);
+19 |   D::smeth_where(true);
+
+error: Typing[4323] A `where` type constraint is violated here [1]
+-> This is the method with `where` type constraints [2]
+-> Expected `arraykey` [3]
+-> But got `float` [4]
+->   via this generic `Td` [5]
+
+generic_method_constraint_bad.php:18:7
+ 7 | }
+ 8 | class D<Td> {
+ 9 |   public function cmeth_where(Td $x):void where Td as arraykey  { }
+   |                   ^^^^^^^^^^^ [2]
+   |                                                 ^^ [5]
+   |                                                       ^^^^^^^^ [3]
+10 |   public static function smeth_where(Td $x):void where Td as arraykey { }
+11 | }
+12 | 
+13 | function testit():void {
+14 |   $c = new C();
+15 |   $d = new D<float>();
+   |              ^^^^^ [4]
+16 |   $c->cmeth(2.3);
+17 |   C::smeth(true);
+18 |   $d->cmeth_where(2.3);
+   |       ^^^^^^^^^^^ [1]
+19 |   D::smeth_where(true);
+20 | }
+
+error: Typing[4110] Invalid argument [1]
+-> Expected `arraykey` [2]
+-> But got `bool` [1]
+
+generic_method_constraint_bad.php:19:18
+ 8 | class D<Td> {
+ 9 |   public function cmeth_where(Td $x):void where Td as arraykey  { }
+10 |   public static function smeth_where(Td $x):void where Td as arraykey { }
+   |                                                              ^^^^^^^^ [2]
+11 | }
+12 | 
+   :
+17 |   C::smeth(true);
+18 |   $d->cmeth_where(2.3);
+19 |   D::smeth_where(true);
+   |                  ^^^^ [1]
+20 | }
+
+4 errors found

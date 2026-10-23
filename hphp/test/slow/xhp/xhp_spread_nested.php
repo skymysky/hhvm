@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 
 class :foo {
   attribute string name, int age;
@@ -10,7 +10,7 @@ class :foo {
   }
 }
 
-function test() {
+function test() :mixed{
   <foo {
     ...<foo {
         ...<foo age={3} />
@@ -19,4 +19,8 @@ function test() {
       } age={4} />
   } age={5} />;
 }
+
+<<__EntryPoint>>
+function main_xhp_spread_nested() :mixed{
 test();
+}

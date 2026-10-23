@@ -1,18 +1,12 @@
-<?php
+<?hh
 
 class C {
-  function __destruct() {
-    echo "woot-cakes\n";
-  }
 }
 
-function f() {
-  if (array(new C())) {
+<<__EntryPoint>> function f() :mixed{
+  if (vec[new C()]) {
     echo "branch works\n";
   } else {
     echo "branch broken\n";
   }
 }
-
-f();
-

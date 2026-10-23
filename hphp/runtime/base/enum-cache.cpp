@@ -13,7 +13,6 @@
    | license@php.net so we can mail you a copy immediately.               |
    +----------------------------------------------------------------------+
 */
-
 #include "hphp/runtime/base/enum-cache.h"
 #include "hphp/runtime/base/tv-type.h"
 
@@ -38,19 +37,29 @@ const EnumValues* EnumCache::getValues(const Class* klass,
     EnumCache::failLookup(msg);
   }
   if (LIKELY(!recurse)) {
-    if (auto values = klass->getEnumValues()) {
-      return values;
-    }
+    if (auto const values = klass->getEnumValues()) return values;
   }
   return s_cache.getEnumValues(klass, recurse);
 }
 
 const EnumValues* EnumCache::getValuesBuiltin(const Class* klass) {
-  assertx(isEnum(klass));
-  if (auto values = klass->getEnumValues()) {
-    return values;
-  }
+  assertx(isAnyEnum(klass));
+  if (auto const values = klass->getEnumValues()) return values;
   return s_cache.getEnumValues(klass, false);
+}
+
+const EnumValues* EnumCache::getValuesStatic(const Class* klass) {
+  assertx(isAnyEnum(klass));
+  auto const result = [&]() -> const EnumValues* {
+    if (auto const values = klass->getEnumValues()) return values;
+    return s_cache.getEnumValues(klass, false, true);
+  }();
+  if (!result) return nullptr;
+  assertx(result->names->isStatic());
+  assertx(result->values->isStatic());
+  // Sizes may mismatch if there are duplicate names or values.
+  if (result->names->size() != result->values->size()) return nullptr;
+  return result;
 }
 
 void EnumCache::deleteValues(const Class* klass) {
@@ -77,8 +86,8 @@ const EnumValues* EnumCache::cachePersistentEnumValues(
   bool recurse,
   Array&& names,
   Array&& values) {
-  assertx(names.isDictOrDArray());
-  assertx(values.isDictOrDArray());
+  assertx(names.isDict());
+  assertx(values.isDict());
 
   std::unique_ptr<EnumValues> enums(new EnumValues());
   enums->values = ArrayData::GetScalarArray(std::move(values));
@@ -102,10 +111,10 @@ const EnumValues* EnumCache::cacheRequestEnumValues(
   Array&& names,
   Array&& values) {
 
-  assertx(names.isDictOrDArray());
-  assertx(values.isDictOrDArray());
+  assertx(names.isDict());
+  assertx(values.isDict());
 
-  m_nonScalarEnumValuesMap.bind(rds::Mode::Normal);
+  m_nonScalarEnumValuesMap.bind(rds::Mode::Normal, rds::LinkID{"EnumCache"});
   if (!m_nonScalarEnumValuesMap.isInit()) {
     m_nonScalarEnumValuesMap.initWith(req::make_raw<ReqEnumValuesMap>());
   }
@@ -121,48 +130,75 @@ const EnumValues* EnumCache::cacheRequestEnumValues(
   return enums;
 }
 
-const EnumValues* EnumCache::loadEnumValues(const Class* klass,
-                                            bool recurse) {
+const EnumValues* EnumCache::loadEnumValues(
+    const Class* klass, bool recurse, bool require_static) {
   auto const numConstants = klass->numConstants();
-  auto values = Array::CreateDArray();
-  auto names = Array::CreateDArray();
+  auto values = Array::CreateDict();
+  auto names = Array::CreateDict();
   auto const consts = klass->constants();
   bool persist = true;
   for (size_t i = 0; i < numConstants; i++) {
-    if (consts[i].isAbstract() || consts[i].isType()) {
+    if (consts[i].isAbstractAndUninit()
+        || consts[i].kind() != ConstModifierFlags::Kind::Value) {
       continue;
     }
-    if (consts[i].cls != klass && !recurse) {
-      continue;
+    // The outer condition below enables caching of enum constants defined
+    // in enums included by the current class.
+    if (!(isAnyEnum(klass)
+        && klass->hasIncludedEnums()
+        && klass->allIncludedEnums().contains(consts[i].cls->name()))) {
+      if (consts[i].cls != klass && !recurse) {
+        continue;
+      }
     }
-    Cell value = consts[i].val;
-    // Handle dynamically set constants
+    TypedValue value = consts[i].val;
+    // Handle dynamically set constants. We can't get a static value here.
     if (value.m_type == KindOfUninit) {
+      if (require_static) return nullptr;
       persist = false;
       value = klass->clsCnsGet(consts[i].name);
     }
     assertx(value.m_type != KindOfUninit);
-    if (UNLIKELY(!(isIntType(value.m_type) || tvIsString(&value)))) {
-      // only int and string values allowed for enums.
+    bool isEnumClass = klass->attrs() & AttrEnumClass;
+    if (!isEnumClass &&
+        !(isIntType(value.m_type) || tvIsString(&value) ||
+          tvIsClass(&value) || tvIsLazyClass(&value))) {
+      // Enum values must be ints or strings. We can't get a static value here.
+      if (require_static) return nullptr;
       std::string msg;
       msg += klass->name()->data();
       msg += " enum can only contain string and int values";
       EnumCache::failLookup(msg);
     }
-    values.set(StrNR(consts[i].name), cellAsCVarRef(value));
-
+    values.set(StrNR(consts[i].name), tvAsCVarRef(value));
+    if (isEnumClass) {
+      // The enum values of enum classes are objects. This makes it
+      // such that we can't build `names` (which requires enum values be
+      // either int or string as they serve as array keys there).
+      continue; // So, the `names` member of the calculated
+                // `EnumValues` will be empty. This is OK, since we
+                // don't care to support `getNames` for enum classes.
+    }
     // Manually perform int-like key coercion even if names is a dict for
     // backwards compatibility.
     int64_t n;
-    if (tvIsString(&value) && value.m_data.pstr->isStrictlyInteger(n)) {
+    auto const source = "enum";
+    if (tvIsString(&value) &&
+        value.m_data.pstr->isStrictlyInteger(n)) {
       names.set(n, make_tv<KindOfPersistentString>(consts[i].name));
+    } else if (tvIsClass(&value)) {
+      names.set(StrNR{classToStringHelper(val(value).pclass, source)},
+                make_tv<KindOfPersistentString>(consts[i].name), true);
+    } else if (tvIsLazyClass(&value)) {
+      names.set(StrNR{lazyClassToStringHelper(val(value).plazyclass, source)},
+                make_tv<KindOfPersistentString>(consts[i].name), true);
     } else {
       names.set(value, make_tv<KindOfPersistentString>(consts[i].name), true);
     }
   }
 
-  assertx(names.isDictOrDArray());
-  assertx(values.isDictOrDArray());
+  assertx(names.isDict());
+  assertx(values.isDict());
 
   // If we saw dynamic constants we cannot cache the enum values across requests
   // as they may not be the same in every request.
@@ -198,14 +234,11 @@ const EnumValues* EnumCache::getEnumValuesIfDefined(
   return nullptr;
 }
 
-const EnumValues* EnumCache::getEnumValues(const Class* klass,
-                                           bool recurse) {
-  const EnumValues* values =
-      getEnumValuesIfDefined(getKey(klass, recurse));
-  if (values == nullptr) {
-    values = loadEnumValues(klass, recurse);
-  }
-  return values;
+const EnumValues* EnumCache::getEnumValues(
+    const Class* klass, bool recurse, bool require_static) {
+  auto const values = getEnumValuesIfDefined(getKey(klass, recurse));
+  if (values && require_static && !values->names->isStatic()) return nullptr;
+  return values ? values : loadEnumValues(klass, recurse, require_static);
 }
 
 void EnumCache::deleteEnumValues(intptr_t key) {

@@ -1,0 +1,38 @@
+Code actions available:
+------------------------------------------
+Extract into variable (CodeActionKind: "refactor") SELECTED
+slog variable (CodeActionKind: "refactor")
+Extract into method (CodeActionKind: "refactor")
+
+JSON for selected code action:
+------------------------------------------
+{
+  "title": "Extract into variable",
+  "kind": "refactor",
+  "diagnostics": [],
+  "edit": {
+    "changes": {
+      "FILE.php": [
+        {
+          "range": {
+            "start": { "line": 4, "character": 4 },
+            "end": { "line": 4, "character": 47 }
+          },
+          "newText": "$${0:placeholder0} = 1 * 2;\n    $x = /*range-start*/$${0:placeholder0}/*range-end*/ + 3;"
+        }
+      ]
+    }
+  }
+}
+
+Applied edit for code action:
+------------------------------------------
+<?hh
+
+class Klass {
+  public function foo(): void {
+    $${0:placeholder0} = 1 * 2;
+    $x = /*range-start*/$${0:placeholder0}/*range-end*/ + 3;
+  }
+}
+

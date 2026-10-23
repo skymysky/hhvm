@@ -1,0 +1,146 @@
+(library
+ (name test_all_ide)
+ (wrapped false)
+ (modules
+  test_added_parent_ide
+  test_auto_ns_aliasing
+  test_autoclose_xhp
+  test_diagnostics_in_closed_file
+  test_error_pos
+  test_failed_naming_ide
+  test_ide_close
+  test_ide_consistency
+  test_ide_diagnostic_subscription
+  test_ide_file_sync
+  test_identify_symbol
+  test_ide_parsing_errors
+  test_naming_errors
+  test_override
+  test_union_intersection_type_hints_single_file
+  test_remove_function
+  test_remove_parent
+  test_unsaved_changes)
+ (libraries integration_test_base))
+
+(rule
+ (alias identify_symbol)
+ (deps ../test_all.exe)
+ (action
+  (run ../test_all.exe ide/identify_symbol)))
+
+(rule
+ (alias autoclose_xhp)
+ (deps ../test_all.exe)
+ (action
+  (run ../test_all.exe ide/autoclose_xhp)))
+
+(rule
+ (alias ide_file_sync)
+ (deps ../test_all.exe)
+ (action
+  (run ../test_all.exe ide/ide_file_sync)))
+
+(rule
+ (alias ide_consistency)
+ (deps ../test_all.exe)
+ (action
+  (run ../test_all.exe ide/ide_consistency)))
+
+(rule
+ (alias ide_parsing_errors)
+ (deps ../test_all.exe)
+ (action
+  (run ../test_all.exe ide/ide_parsing_errors)))
+
+(rule
+ (alias ide_close)
+ (deps ../test_all.exe)
+ (action
+  (run ../test_all.exe ide/ide_close)))
+
+(rule
+ (alias added_parent)
+ (deps ../test_all.exe)
+ (action
+  (run ../test_all.exe ide/added_parent)))
+
+(rule
+ (alias auto_ns_aliasing)
+ (deps ../test_all.exe)
+ (action
+  (run ../test_all.exe ide/auto_ns_aliasing)))
+
+(rule
+ (alias remove_function)
+ (deps ../test_all.exe)
+ (action
+  (run ../test_all.exe ide/remove_function)))
+
+(rule
+ (alias diagnostics_in_closed_file)
+ (deps ../test_all.exe)
+ (action
+  (run ../test_all.exe ide/diagnostics_in_closed_file)))
+
+(rule
+ (alias naming_errors)
+ (deps ../test_all.exe)
+ (action
+  (run ../test_all.exe ide/naming_errors)))
+
+(rule
+ (alias override)
+ (deps ../test_all.exe)
+ (action
+  (run ../test_all.exe ide/override)))
+
+(rule
+ (alias union_intersection_type_hints_single_file)
+ (deps ../test_all.exe)
+ (action
+  (run ../test_all.exe ide/union_intersection_type_hints_single_file)))
+
+(rule
+ (alias remove_parent)
+ (deps ../test_all.exe)
+ (action
+  (run ../test_all.exe ide/remove_parent)))
+
+(rule
+ (alias failed_naming)
+ (deps ../test_all.exe)
+ (action
+  (run ../test_all.exe ide/failed_naming)))
+
+(rule
+ (alias unsaved_changes)
+ (deps ../test_all.exe)
+ (action
+  (run ../test_all.exe ide/unsaved_changes)))
+
+(rule
+ (alias error_pos)
+ (deps ../test_all.exe)
+ (action
+  (run ../test_all.exe ide/error_pos)))
+
+(alias
+ (name runtest)
+ (deps
+  (alias identify_symbol)
+  (alias ide_file_sync)
+  (alias ide_consistency)
+  (alias ide_parsing_errors)
+  (alias ide_close)
+  (alias added_parent)
+  (alias auto_ns_aliasing)
+  (alias remove_function)
+  (alias diagnostics_in_closed_file)
+  (alias naming_errors)
+  (alias override)
+  (alias union_intersection_type_hints_single_file)
+  (alias remove_parent)
+  (alias failed_naming)
+  (alias unsaved_changes)
+  (alias autoclose_xhp)
+  (alias error_pos)))

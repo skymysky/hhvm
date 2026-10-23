@@ -1,19 +1,23 @@
-<?php
+<?hh
 
 class A {
- function foo() {
+ function foo() :mixed{
  var_dump(__CLASS__);
 }
 }
  class B extends A {
- function foo() {
+ function foo() :mixed{
  var_dump(__CLASS__);
 }
 }
- function bar() {
+ function bar() :mixed{
    $obj = new A;
  $obj->foo();
   $obj = new B;
  $obj->foo();
 }
- bar();
+
+ <<__EntryPoint>>
+function main_76() :mixed{
+bar();
+}

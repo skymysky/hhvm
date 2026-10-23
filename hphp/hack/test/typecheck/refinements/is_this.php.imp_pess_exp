@@ -1,0 +1,19 @@
+File "is_this.php", line 6, characters 7-17:
+  (this | (nonnull & dynamic)) where this as C
+File "is_this.php", line 8, characters 7-17:
+  ?(nonnull & not this)
+File "is_this.php", line 14, characters 7-17:
+  this as C
+File "is_this.php", line 16, characters 7-17:
+  nothing
+warning: Warn[12009] This `is` check is always `true`. The expression on the left has type `this` which is a subtype of `~this`. [1]
+
+is_this.php:13:9
+11 | 
+12 |   public function test_self(this $x): void {
+13 |     if ($x is this) {
+   |         ^^^^^^^^^^ [1]
+14 |       hh_show($x);
+15 |     } else {
+
+1 error found

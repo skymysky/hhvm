@@ -1,11 +1,12 @@
-<?php
-
-$string_variation = array( "%5s", "%-5s", "%05s", "%'#5s" );
-$strings = array( NULL, "abc", 'aaa' );
+<?hh
+<<__EntryPoint>> function main(): void {
+$string_variation = vec[ "%5s", "%-5s", "%05s", "%'#5s" ];
+$strings = vec[ NULL, "abc", 'aaa' ];
 
 /* creating dumping file */
-$data_file = dirname(__FILE__) . '/fprintf_variation_009.phpt.txt';
-if (!($fp = fopen($data_file, 'wt')))
+$data_file = sys_get_temp_dir().'/'.'fprintf_variation_009.phpt.txt';
+$fp = fopen($data_file, 'wt');
+if (!$fp)
    return;
 
 $counter = 1;
@@ -26,5 +27,4 @@ print_r(file_get_contents($data_file));
 echo "\nDone";
 
 unlink($data_file);
-
-?>
+}

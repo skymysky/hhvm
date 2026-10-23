@@ -1,25 +1,4 @@
-
-Warning: %s
-
-Warning: %s
-NULL
-bool(true)
-
-Warning: %s
-NULL
-bool(true)
-
-Warning: %s
-NULL
-bool(true)
-
-Warning: %s
-NULL
-bool(true)
-
-Warning: %s
-NULL
-bool(true)
+Warning: options should have the form ["wrappername"]["optionname"] = $value in %s/test/zend/good/ext/libxml/tests/004.php on line 5
 NULL
 bool(true)
 NULL

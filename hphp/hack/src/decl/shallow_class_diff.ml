@@ -1,0 +1,846 @@
+(**
+ * Copyright (c) 2019, Facebook, Inc.
+ * All rights reserved.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the "hack" directory of this source tree.
+ *
+ *)
+
+open Hh_prelude
+open Class_diff
+open Shallow_decl_defs
+module SN = Naming_special_names
+
+module Parents = struct
+  type t = {
+    extends: Typing_defs.decl_ty list;
+    implements: Typing_defs.decl_ty list;
+    req_extends: Typing_defs.decl_ty list;
+    req_implements: Typing_defs.decl_ty list;
+    req_constraints: Shallow_decl_defs.decl_constraint_requirement list;
+    uses: Typing_defs.decl_ty list;
+    xhp_attr_uses: Typing_defs.decl_ty list;
+  }
+  [@@deriving eq]
+
+  let of_shallow_class c =
+    let {
+      sc_extends;
+      sc_implements;
+      sc_req_extends;
+      sc_req_implements;
+      sc_req_constraints;
+      sc_uses;
+      sc_xhp_attr_uses;
+      sc_mode = _;
+      sc_final = _;
+      sc_abstract = _;
+      sc_is_xhp = _;
+      sc_internal = _;
+      sc_has_xhp_keyword = _;
+      sc_kind = _;
+      sc_module = _;
+      sc_name = _;
+      sc_tparams = _;
+      sc_xhp_enum_values = _;
+      sc_xhp_marked_empty = _;
+      sc_support_dynamic_type = _;
+      sc_consts = _;
+      sc_typeconsts = _;
+      sc_props = _;
+      sc_sprops = _;
+      sc_constructor = _;
+      sc_static_methods = _;
+      sc_methods = _;
+      sc_user_attributes = _;
+      sc_enum_type = _;
+      sc_docs_url = _;
+      sc_package = _;
+    } =
+      c
+    in
+    {
+      extends = sc_extends;
+      implements = sc_implements;
+      req_extends = sc_req_extends;
+      req_implements = sc_req_implements;
+      req_constraints = sc_req_constraints;
+      uses = sc_uses;
+      xhp_attr_uses = sc_xhp_attr_uses;
+    }
+end
+
+let merge_member_lists
+    (get_name : 'member -> string) (l1 : 'member list) (l2 : 'member list) :
+    ('member option * 'member option) S_map.t =
+  (* When a member of a given name is declared multiple times, keep the first
+     (as Decl_inheritance does). *)
+  let map =
+    List.fold l1 ~init:S_map.empty ~f:(fun map x ->
+        let name = get_name x in
+        if S_map.mem name map then
+          map
+        else
+          S_map.add name (Some x, None) map)
+  in
+  List.fold l2 ~init:map ~f:(fun map y ->
+      let name = get_name y in
+      match S_map.find_opt name map with
+      | Some (x, None) -> S_map.add name (x, Some y) map
+      | None -> S_map.add name (None, Some y) map
+      | Some (_, Some _) -> map)
+
+module type Member_S = sig
+  type t
+
+  val diff : t -> t -> member_change option
+
+  val is_private : t -> bool
+
+  val is_internal : t -> bool
+
+  (** Whether adding this member implies that the constructor and the
+    constructor of all descendants should be considered modified.
+    This is the case for example for required XHP attributes. *)
+  val constructor_is_changed_inheritance_when_added : t -> bool
+
+  (** Whether modifying this member implies that the constructor and the
+    constructor of all descendants should be considered modified.
+    This is the case for example for required XHP attributes. *)
+  val constructor_is_changed_inheritance_when_modified : old:t -> new_:t -> bool
+end
+
+(** A module change can alter an internal member's accessibility even if its
+    declaration is unchanged. *)
+let diff_member
+    (type member)
+    (module Member : Member_S with type t = member)
+    ~module_changed
+    ~(old : member)
+    ~(new_ : member) : member_change option =
+  let diff = Member.diff old new_ in
+  match diff with
+  | None
+    when module_changed && Member.is_internal old && Member.is_internal new_ ->
+    Some (Modified MemberModification.Other)
+  | None
+  | Some _ ->
+    diff
+
+(** Returns the diff of two member lists, plus a diff on the constructor if the member changes
+  impact the constructor. *)
+let diff_members
+    (type member)
+    (members_left_right : (member option * member option) S_map.t)
+    (module Member : Member_S with type t = member)
+    (classish_kind : Ast_defs.classish_kind)
+    (module_changed : bool) : member_change S_map.t * constructor_change =
+  S_map.fold
+    (fun name old_and_new (diff, constructor_change) ->
+      match old_and_new with
+      | (None, None) -> failwith "merge_member_lists added (None, None)"
+      | (Some member, None)
+      | (None, Some member)
+        when (not Ast_defs.(is_c_trait classish_kind))
+             && Member.is_private member ->
+        (S_map.add name Private_change_not_in_trait diff, constructor_change)
+      | (Some _, None) -> (S_map.add name Removed diff, constructor_change)
+      | (None, Some m) ->
+        let constructor_change =
+          max_constructor_change
+            constructor_change
+            (if Member.constructor_is_changed_inheritance_when_added m then
+              Some Changed_inheritance
+            else
+              None)
+        in
+        (S_map.add name Added diff, constructor_change)
+      | (Some old_member, Some new_member) ->
+        let member_changes =
+          diff_member
+            (module Member)
+            ~module_changed
+            ~old:old_member
+            ~new_:new_member
+          |> Option.fold ~init:diff ~f:(fun diff ch -> S_map.add name ch diff)
+        in
+        let constructor_change =
+          max_constructor_change
+            constructor_change
+            (if
+             Member.constructor_is_changed_inheritance_when_modified
+               ~old:old_member
+               ~new_:new_member
+            then
+              Some Changed_inheritance
+            else
+              None)
+        in
+        (member_changes, constructor_change))
+    members_left_right
+    (S_map.empty, None)
+
+module ClassConst : Member_S with type t = shallow_class_const = struct
+  type t = shallow_class_const
+
+  let diff (c1 : shallow_class_const) c2 : member_change option =
+    let c1 = Decl_pos_utils.NormalizeSig.shallow_class_const c1 in
+    let c2 = Decl_pos_utils.NormalizeSig.shallow_class_const c2 in
+    if equal_shallow_class_const c1 c2 then
+      None
+    else if
+      not (Typing_defs.equal_class_const_kind c1.scc_abstract c2.scc_abstract)
+    then
+      Some Changed_inheritance
+    else
+      Some (Modified MemberModification.Other)
+
+  let is_private _ = false
+
+  let is_internal _ = false
+
+  let constructor_is_changed_inheritance_when_added _ = false
+
+  let constructor_is_changed_inheritance_when_modified ~old:_ ~new_:_ = false
+end
+
+module TypeConst : Member_S with type t = shallow_typeconst = struct
+  type t = shallow_typeconst
+
+  let diff tc1 tc2 : member_change option =
+    let tc1 = Decl_pos_utils.NormalizeSig.shallow_typeconst tc1 in
+    let tc2 = Decl_pos_utils.NormalizeSig.shallow_typeconst tc2 in
+    if equal_shallow_typeconst tc1 tc2 then
+      None
+    else
+      let open Typing_defs in
+      match (tc1.stc_kind, tc2.stc_kind) with
+      | (TCAbstract _, TCAbstract _)
+      | (TCConcrete _, TCConcrete _) ->
+        Some (Modified MemberModification.Other)
+      | (_, (TCAbstract _ | TCConcrete _)) -> Some Changed_inheritance
+
+  let is_private _ = false
+
+  let is_internal _ = false
+
+  let constructor_is_changed_inheritance_when_added _ = false
+
+  let constructor_is_changed_inheritance_when_modified ~old:_ ~new_:_ = false
+end
+
+module Prop : Member_S with type t = shallow_prop = struct
+  type t = shallow_prop
+
+  let diff p1 p2 : member_change option =
+    let p1 = Decl_pos_utils.NormalizeSig.shallow_prop p1 in
+    let p2 = Decl_pos_utils.NormalizeSig.shallow_prop p2 in
+    if equal_shallow_prop p1 p2 then
+      None
+    else if
+      (not (Aast.equal_visibility p1.sp_visibility p2.sp_visibility))
+      || Bool.( <> ) (sp_abstract p1) (sp_abstract p2)
+      || Bool.( <> ) (sp_lsb p1) (sp_lsb p2)
+      || Bool.( <> )
+           (sp_tests_bypass_visibility p1)
+           (sp_tests_bypass_visibility p2)
+    then
+      Some Changed_inheritance
+    else
+      Some (Modified MemberModification.Other)
+
+  let is_private p : bool =
+    Aast_defs.equal_visibility p.sp_visibility Aast_defs.Private
+
+  let is_internal p : bool =
+    Aast_defs.equal_visibility p.sp_visibility Aast_defs.Internal
+    || Aast_defs.equal_visibility p.sp_visibility Aast_defs.ProtectedInternal
+
+  let constructor_is_changed_inheritance_when_added p =
+    Xhp_attribute.opt_is_required p.sp_xhp_attr
+
+  let constructor_is_changed_inheritance_when_modified ~old ~new_ =
+    Xhp_attribute.opt_is_required new_.sp_xhp_attr
+    && (not @@ Xhp_attribute.opt_is_required old.sp_xhp_attr)
+end
+
+module Method : Member_S with type t = shallow_method = struct
+  type t = shallow_method
+
+  let diff m1 m2 : member_change option =
+    let m1 = Decl_pos_utils.NormalizeSig.shallow_method m1 in
+    let m2 = Decl_pos_utils.NormalizeSig.shallow_method m2 in
+    if equal_shallow_method m1 m2 then
+      None
+    else if
+      (not (Aast.equal_visibility m1.sm_visibility m2.sm_visibility))
+      || Bool.( <> ) (sm_abstract m1) (sm_abstract m2)
+      || Bool.( <> )
+           (sm_tests_bypass_visibility m1)
+           (sm_tests_bypass_visibility m2)
+    then
+      Some Changed_inheritance
+    else
+      let member_modification =
+        let is_async (ty : Typing_defs.decl_ty) : bool =
+          match Typing_defs.get_node ty with
+          | Typing_defs.Tfun fun_type -> Typing_defs.Flags.get_ft_async fun_type
+          | _ -> false
+        in
+        match (is_async m1.sm_type, is_async m2.sm_type) with
+        | (false, true) -> MemberModification.Asyncified
+        | (true, false) -> MemberModification.Deasyncified
+        | _ -> MemberModification.Other
+      in
+      Some (Modified member_modification)
+
+  let is_private m : bool =
+    Aast_defs.equal_visibility m.sm_visibility Aast_defs.Private
+
+  let is_internal m : bool =
+    Aast_defs.equal_visibility m.sm_visibility Aast_defs.Internal
+    || Aast_defs.equal_visibility m.sm_visibility Aast_defs.ProtectedInternal
+
+  let constructor_is_changed_inheritance_when_added _ = false
+
+  let constructor_is_changed_inheritance_when_modified ~old:_ ~new_:_ = false
+end
+
+let diff_constructor old_cls new_cls ~module_changed old_cstr new_cstr :
+    member_change option =
+  let consistent1 = Decl_utils.consistent_construct_kind old_cls in
+  let consistent2 = Decl_utils.consistent_construct_kind new_cls in
+  if not (Typing_defs.equal_consistent_kind consistent1 consistent2) then
+    Some Changed_inheritance
+  else
+    match (old_cstr, new_cstr) with
+    | (None, None) -> None
+    | (Some _, None) -> Some Removed
+    | (None, Some _) -> Some Added
+    | (Some old_method, Some new_method) ->
+      diff_member
+        (module Method)
+        ~module_changed
+        ~old:old_method
+        ~new_:new_method
+
+let diff_class_members (c1 : shallow_class) (c2 : shallow_class) :
+    Class_diff.member_diff =
+  let diff = Class_diff.empty_member_diff in
+  let kind = c2.sc_kind in
+  let module_changed =
+    match (c1.sc_module, c2.sc_module) with
+    | (Some (_, m1), Some (_, m2)) when String.equal m1 m2 -> false
+    | (None, None) -> false
+    | _ -> true
+  in
+  let diff =
+    let get_name x = snd x.scc_name in
+    let consts = merge_member_lists get_name c1.sc_consts c2.sc_consts in
+    let (consts, constructor_change) =
+      diff_members
+        consts
+        (module ClassConst : Member_S with type t = shallow_class_const)
+        kind
+        module_changed
+    in
+    {
+      diff with
+      consts;
+      constructor = max_constructor_change diff.constructor constructor_change;
+    }
+  in
+  let diff =
+    let get_name x = snd x.stc_name in
+    let typeconsts =
+      merge_member_lists get_name c1.sc_typeconsts c2.sc_typeconsts
+    in
+    let (typeconsts, constructor_change) =
+      diff_members
+        typeconsts
+        (module TypeConst : Member_S with type t = shallow_typeconst)
+        kind
+        module_changed
+    in
+    {
+      diff with
+      typeconsts;
+      constructor = max_constructor_change diff.constructor constructor_change;
+    }
+  in
+  let diff =
+    let get_name x = snd x.sp_name in
+    let props = merge_member_lists get_name c1.sc_props c2.sc_props in
+    let (props, constructor_change) =
+      diff_members
+        props
+        (module Prop : Member_S with type t = shallow_prop)
+        kind
+        module_changed
+    in
+    {
+      diff with
+      props;
+      constructor = max_constructor_change diff.constructor constructor_change;
+    }
+  in
+  let diff =
+    let get_name x = snd x.sp_name in
+    let sprops = merge_member_lists get_name c1.sc_sprops c2.sc_sprops in
+    let (sprops, constructor_change) =
+      diff_members
+        sprops
+        (module Prop : Member_S with type t = shallow_prop)
+        kind
+        module_changed
+    in
+    {
+      diff with
+      sprops;
+      constructor = max_constructor_change diff.constructor constructor_change;
+    }
+  in
+  let diff =
+    let get_name x = snd x.sm_name in
+    let methods = merge_member_lists get_name c1.sc_methods c2.sc_methods in
+    let (methods, constructor_change) =
+      diff_members
+        methods
+        (module Method : Member_S with type t = shallow_method)
+        kind
+        module_changed
+    in
+    {
+      diff with
+      methods;
+      constructor = max_constructor_change diff.constructor constructor_change;
+    }
+  in
+  let diff =
+    let get_name x = snd x.sm_name in
+    let smethods =
+      merge_member_lists get_name c1.sc_static_methods c2.sc_static_methods
+    in
+    let (smethods, constructor_change) =
+      diff_members
+        smethods
+        (module Method : Member_S with type t = shallow_method)
+        kind
+        module_changed
+    in
+    {
+      diff with
+      smethods;
+      constructor = max_constructor_change diff.constructor constructor_change;
+    }
+  in
+  let diff =
+    let constructor =
+      diff_constructor c1 c2 ~module_changed c1.sc_constructor c2.sc_constructor
+    in
+    {
+      diff with
+      constructor = max_constructor_change diff.constructor constructor;
+    }
+  in
+  diff
+
+(** Return true if the two classes would (shallowly) produce the same member
+    resolution order.  
+    NB: It is critical for the correctness of incremental typechecking that every
+    bit of information used to decide the ordering of decl folding is checked here! *)
+let mro_inputs_equal (c1 : shallow_class) (c2 : shallow_class) : bool =
+  let is_to_string m = String.equal (snd m.sm_name) SN.Members.__toString in
+  let sc_name_equal =
+    (* compare c1 and c2 sc_name ignoring the position in the file, but not the filename *)
+    String.equal (snd c1.sc_name) (snd c2.sc_name)
+    && Relative_path.equal
+         (Pos_or_decl.filename (fst c1.sc_name))
+         (Pos_or_decl.filename (fst c2.sc_name))
+  in
+  sc_name_equal
+  && Ast_defs.equal_classish_kind c1.sc_kind c2.sc_kind
+  && Option.equal
+       equal_shallow_method
+       (List.find c1.sc_methods ~f:is_to_string)
+       (List.find c2.sc_methods ~f:is_to_string)
+  && List.equal Poly.( = ) c1.sc_tparams c2.sc_tparams
+  && List.equal Poly.( = ) c1.sc_extends c2.sc_extends
+  && List.equal Poly.( = ) c1.sc_implements c2.sc_implements
+  && List.equal Poly.( = ) c1.sc_uses c2.sc_uses
+  && List.equal Poly.( = ) c1.sc_req_extends c2.sc_req_extends
+  && List.equal Poly.( = ) c1.sc_req_implements c2.sc_req_implements
+  && List.equal Poly.( = ) c1.sc_xhp_attr_uses c2.sc_xhp_attr_uses
+
+(* The ConsistentConstruct attribute is propagated down the inheritance
+   hierarchy, so we can model it with Changed_inheritance on the constructor. To
+   do so, though, we need to remove the attribute while normalizing classes (so
+   that we don't consider it a Major_change). *)
+let remove_consistent_construct_attribute sc =
+  {
+    sc with
+    sc_user_attributes =
+      List.filter sc.sc_user_attributes ~f:(fun ua ->
+          not
+            (String.equal
+               (snd ua.Typing_defs.ua_name)
+               SN.UserAttributes.uaConsistentConstruct));
+  }
+
+let remove_user_defined_attributes sc =
+  {
+    sc with
+    sc_user_attributes =
+      List.filter sc.sc_user_attributes ~f:(fun ua ->
+          SN.UserAttributes.is_reserved (snd ua.Typing_defs.ua_name));
+  }
+
+(* Normalize module if the class is public *)
+let remove_modules_if_public sc =
+  if sc.sc_internal then
+    sc
+  else
+    { sc with sc_module = None }
+
+let remove_members_except_to_string sc =
+  {
+    sc with
+    sc_constructor = None;
+    sc_consts = [];
+    sc_typeconsts = [];
+    sc_props = [];
+    sc_sprops = [];
+    sc_static_methods = [];
+    sc_methods =
+      List.filter sc.sc_methods ~f:(fun m ->
+          String.equal (snd m.sm_name) SN.Members.__toString);
+  }
+
+(* To normalize classes for comparison, we:
+
+   - Remove the ConsistentConstruct attribute
+   - When annotation-agnostic decl diffing is enabled, remove user-defined
+     attributes
+   - Remove module if class itself is public
+   - Remove all members (except for the toString method, which results in the
+     implicit inclusion of the Stringish interface),
+   - Replace all positions with Pos.none
+
+   We consider any difference between normalized classes to be a "Major change".
+   This means only that we have not implemented some means of computing a fanout
+   for that change which is smaller than what would be added by
+   Shallow_class_fanout.add_maximum_fanout (e.g., since we DO have fine-grained
+   dependency tracking for uses of members, and can handle them in a more
+   intelligent way, we remove them during major-change-detection).
+
+   There are certainly opportunities for us to be cleverer about some kinds of
+   changes, but any kind of cleverness in reducing fanout must be implemented
+   with great care. *)
+let normalize ~enable_annotation_agnostic_decl_diffing sc =
+  let sc = remove_consistent_construct_attribute sc in
+  let sc =
+    if enable_annotation_agnostic_decl_diffing then
+      remove_user_defined_attributes sc
+    else
+      sc
+  in
+  sc
+  |> remove_members_except_to_string
+  |> Decl_pos_utils.NormalizeSig.shallow_class
+  |> remove_modules_if_public
+
+let type_name ty =
+  let (_, (_, name), tparams) = Decl_utils.unwrap_class_type ty in
+  (name, tparams)
+
+(** A bag of strings.
+  A bag is a set where elements can appear multiple times *)
+module Bag : sig
+  type t
+
+  val remove : string -> t -> t
+
+  val mem : string -> t -> bool
+
+  val of_list : string list -> t
+end = struct
+  type t = int S_map.t
+
+  let empty = S_map.empty
+
+  let add s t =
+    let v = S_map.find_opt s t |> Option.value ~default:0 in
+    S_map.add s (v + 1) t
+
+  let remove s t =
+    match S_map.find_opt s t with
+    | None -> t
+    | Some v ->
+      if Int.equal v 1 then
+        S_map.remove s t
+      else
+        S_map.add s (v - 1) t
+
+  let mem s t = S_map.mem s t
+
+  let of_list l = List.fold l ~init:empty ~f:(fun bag x -> add x bag)
+end
+
+exception Found_swap
+
+(** The order has changed if there exists x and y
+  such that x comes before y in [l1],
+  but y comes before x in [l2],
+  i.e. if there exists two elements which are in both lists
+  and have been swapped. *)
+let order_has_changed l1 l2 =
+  let rec go l1 l2 l1_bag l2_bag =
+    match l1 with
+    | [] -> false
+    | x1 :: l1 ->
+      (match l2 with
+      | [] -> false
+      | l2 ->
+        let l1_bag = Bag.remove x1 l1_bag in
+        if Bag.mem x1 l2_bag then
+          find_swap l1 l2 l1_bag l2_bag x1
+        else
+          go l1 l2 l1_bag l2_bag)
+  and find_swap l1 l2 l1_bag l2_bag x1 =
+    match l2 with
+    | x2 :: l2 ->
+      let l2_bag = Bag.remove x2 l2_bag in
+      if String.equal x2 x1 then
+        go l1 l2 l1_bag l2_bag
+      else if Bag.mem x2 l1_bag then
+        raise Found_swap
+      else
+        find_swap l1 l2 l1_bag l2_bag x1
+    | [] -> failwith "We should have found x1 in l2 before this happens."
+  in
+  try go l1 l2 (Bag.of_list l1) (Bag.of_list l2) with
+  | Found_swap -> true
+
+let diff_value_lists values1 values2 ~equal ~get_name_value ~diff =
+  if List.equal equal values1 values2 then
+    None
+  else
+    Some
+      (let values1 = List.map ~f:get_name_value values1 in
+       let values2 = List.map ~f:get_name_value values2 in
+       {
+         NamedItemsListChange.order_change =
+           order_has_changed (List.map ~f:fst values1) (List.map ~f:fst values2);
+         per_name_changes =
+           S_map.merge
+             (fun _ value1 value2 ->
+               match (value1, value2) with
+               | (None, None) -> None
+               | (None, Some _) -> Some ValueChange.Added
+               | (Some _, None) -> Some ValueChange.Removed
+               | (Some value1, Some value2) ->
+                 let open Option.Monad_infix in
+                 diff value1 value2 >>| fun change ->
+                 ValueChange.Modified change)
+             (S_map.of_list values1)
+             (S_map.of_list values2);
+       })
+
+let diff_of_equal equal x y =
+  if equal x y then
+    None
+  else
+    Some ()
+
+let diff_type_lists =
+  diff_value_lists
+    ~equal:Typing_defs.ty_equal
+    ~get_name_value:type_name
+    ~diff:
+      (diff_value_lists
+         ~equal:Typing_defs.ty_equal
+         ~get_name_value:type_name
+         ~diff:(diff_of_equal Typing_defs.tyl_equal))
+
+let diff_parents (c1 : Parents.t) (c2 : Parents.t) : parent_changes option =
+  if Parents.equal c1 c2 then
+    None
+  else
+    let rec equal_req_constraints rc1 rc2 =
+      match (rc1, rc2) with
+      | (DCR_Equal c1 :: tl1, DCR_Equal c2 :: tl2)
+      | (DCR_Subtype c1 :: tl1, DCR_Subtype c2 :: tl2) ->
+        Typing_defs.ty_equal c1 c2 && equal_req_constraints tl1 tl2
+      | ([], []) -> true
+      | _ -> false
+    in
+
+    Some
+      {
+        extends_changes = diff_type_lists c1.Parents.extends c2.Parents.extends;
+        implements_changes =
+          diff_type_lists c1.Parents.implements c2.Parents.implements;
+        req_extends_changes =
+          diff_type_lists c1.Parents.req_extends c2.Parents.req_extends;
+        req_implements_changes =
+          diff_type_lists c1.Parents.req_implements c2.Parents.req_implements;
+        req_constraints_changes =
+          not
+            (equal_req_constraints
+               c1.Parents.req_constraints
+               c2.Parents.req_constraints);
+        uses_changes = diff_type_lists c1.Parents.uses c2.Parents.uses;
+        xhp_attr_changes =
+          diff_type_lists c1.Parents.xhp_attr_uses c2.Parents.xhp_attr_uses;
+      }
+
+let diff_kinds kind1 kind2 =
+  if Ast_defs.equal_classish_kind kind1 kind2 then
+    None
+  else
+    Some { KindChange.new_kind = kind2 }
+
+let diff_bools b1 b2 =
+  match (b1, b2) with
+  | (true, true)
+  | (false, false) ->
+    None
+  | (false, true) -> Some BoolChange.Became
+  | (true, false) -> Some BoolChange.No_more
+
+let diff_options option1 option2 ~diff =
+  match (option1, option2) with
+  | (None, None) -> None
+  | (None, Some _) -> Some ValueChange.Added
+  | (Some _, None) -> Some ValueChange.Removed
+  | (Some value1, Some value2) ->
+    (match diff value1 value2 with
+    | None -> None
+    | Some diff -> Some (ValueChange.Modified diff))
+
+let diff_modules = diff_options ~diff:(diff_of_equal Ast_defs.equal_id)
+
+let diff_packages =
+  diff_options ~diff:(fun pm1 pm2 ->
+      let open Aast_defs in
+      match (pm1, pm2) with
+      | (PackageOverride (_, p1), PackageOverride (_, p2))
+      | (PackageConfigAssignment p1, PackageOverride (_, p2))
+      | (PackageOverride (_, p1), PackageConfigAssignment p2)
+      | (PackageConfigAssignment p1, PackageConfigAssignment p2) ->
+        diff_of_equal String.equal p1 p2)
+
+let diff
+    (type value)
+    ~(equal : value -> value -> bool)
+    (old_value : value)
+    (new_value : value) : value ValueDiff.t option =
+  if equal old_value new_value then
+    None
+  else
+    Some { ValueDiff.old_value; new_value }
+
+let diff_types = diff ~equal:Typing_defs.ty_equal
+
+let diff_enum_types
+    (enum_type1 : Typing_defs.enum_type) (enum_type2 : Typing_defs.enum_type) :
+    enum_type_change option =
+  if Typing_defs.equal_enum_type enum_type1 enum_type2 then
+    None
+  else
+    Option.some
+    @@
+    let {
+      Typing_defs.te_base = base1;
+      te_constraint = constraint1;
+      te_includes = includes1;
+    } =
+      enum_type1
+    in
+    let {
+      Typing_defs.te_base = base2;
+      te_constraint = constraint2;
+      te_includes = includes2;
+    } =
+      enum_type2
+    in
+
+    {
+      base_change = diff_types base1 base2;
+      constraint_change = diff_options ~diff:diff_types constraint1 constraint2;
+      includes_change = diff_type_lists includes1 includes2;
+    }
+
+let diff_enum_type_options = diff_options ~diff:diff_enum_types
+
+let user_attribute_name_value { Typing_defs.ua_name = (_, name); ua_params; _ }
+    =
+  (name, ua_params)
+
+let diff_user_attribute_params
+    (attrs1 : Typing_defs_core.user_attribute_param list)
+    (attrs2 : Typing_defs_core.user_attribute_param list) :
+    unit NamedItemsListChange.t option =
+  diff_value_lists
+    attrs1
+    attrs2
+    ~equal:Typing_defs.equal_user_attribute_param
+    ~get_name_value:(fun param ->
+      (Typing_defs_core.user_attribute_param_to_string param, param))
+    ~diff:(diff_of_equal Typing_defs.equal_user_attribute_param)
+
+let diff_class_shells (c1 : shallow_class) (c2 : shallow_class) :
+    class_shell_change =
+  {
+    old_classish_kind = c1.sc_kind;
+    parent_changes =
+      diff_parents (Parents.of_shallow_class c1) (Parents.of_shallow_class c2);
+    type_parameters_change =
+      diff_value_lists
+        c2.sc_tparams
+        c1.sc_tparams
+        ~equal:Typing_defs.equal_decl_tparam
+        ~get_name_value:(fun tparam -> (snd tparam.Typing_defs.tp_name, tparam))
+        ~diff:(diff_of_equal Typing_defs.equal_decl_tparam);
+    kind_change = diff_kinds c1.sc_kind c2.sc_kind;
+    final_change = diff_bools c1.sc_final c2.sc_final;
+    abstract_change = diff_bools c1.sc_abstract c2.sc_abstract;
+    is_xhp_change = diff_bools c1.sc_is_xhp c2.sc_is_xhp;
+    internal_change = diff_bools c1.sc_internal c2.sc_internal;
+    has_xhp_keyword_change =
+      diff_bools c1.sc_has_xhp_keyword c2.sc_has_xhp_keyword;
+    support_dynamic_type_change =
+      diff_bools c1.sc_support_dynamic_type c2.sc_support_dynamic_type;
+    module_change = diff_modules c1.sc_module c2.sc_module;
+    package_change = diff_packages c1.sc_package c2.sc_package;
+    xhp_enum_values_change =
+      not @@ equal_xhp_enum_values c1.sc_xhp_enum_values c2.sc_xhp_enum_values;
+    user_attributes_changes =
+      diff_value_lists
+        c1.sc_user_attributes
+        c2.sc_user_attributes
+        ~equal:Typing_defs.equal_user_attribute
+        ~get_name_value:user_attribute_name_value
+        ~diff:diff_user_attribute_params;
+    enum_type_change = diff_enum_type_options c1.sc_enum_type c2.sc_enum_type;
+  }
+
+let diff_class
+    ~(enable_annotation_agnostic_decl_diffing : bool)
+    (c1 : shallow_class)
+    (c2 : shallow_class) : Class_diff.t option =
+  let class_shell1 = normalize ~enable_annotation_agnostic_decl_diffing c1
+  and class_shell2 = normalize ~enable_annotation_agnostic_decl_diffing c2 in
+  let member_diff = diff_class_members c1 c2 in
+  if not (equal_shallow_class class_shell1 class_shell2) then
+    Some
+      (Major_change
+         (MajorChange.Modified
+            (diff_class_shells class_shell1 class_shell2, member_diff)))
+  else
+    let mro_inputs_equal = mro_inputs_equal c1 c2 in
+    if mro_inputs_equal && Class_diff.is_empty_member_diff member_diff then
+      None
+    else
+      Some (Minor_change member_diff)

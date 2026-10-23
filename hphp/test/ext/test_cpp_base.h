@@ -40,13 +40,10 @@ struct TestCppBase : TestBase {
   // building blocks
   bool TestIpBlockMap();
   bool TestIpBlockMapIni();
-  bool TestSatelliteServer();
-  bool TestSatelliteServerIni();
   bool TestVirtualHost();
   bool TestVirtualHostIni();
   bool TestCollectionHdf();
   bool TestCollectionIni();
-  bool TestVariantArrayRef();
 };
 
 ///////////////////////////////////////////////////////////////////////////////

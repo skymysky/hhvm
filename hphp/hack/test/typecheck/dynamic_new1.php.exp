@@ -1,1 +1,10 @@
-No errors
+error: Naming[2060] Cannot use dynamic `new`. [1]
+
+dynamic_new1.php:16:7
+14 | function f(): void {
+15 |   $a = dict['foo' => 'C'];
+16 |   new $a['foo']();
+   |       ^^^^^^^^^ [1]
+17 | }
+
+1 error found

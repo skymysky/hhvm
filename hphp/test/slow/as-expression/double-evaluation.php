@@ -1,0 +1,12 @@
+<?hh
+<<__EntryPoint>> function main(): void {
+$x = 1;
+
+++$x; $x as int;
+var_dump($x); // 2
+
+try {
+  ++$x; $x as string;
+} catch (Exception $_) {}
+var_dump($x); // 3
+}

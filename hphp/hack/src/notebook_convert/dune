@@ -1,0 +1,14 @@
+(library
+ (name notebook_convert)
+ (libraries
+  full_fidelity
+  hh_json
+  hackfmt
+  relative_path
+  sys_utils
+  utils_core
+  redeclarations
+  yojson)
+ (preprocess
+  (pps ppx_deriving.std)))
+(include_subdirs unqualified)

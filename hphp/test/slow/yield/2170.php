@@ -1,9 +1,9 @@
-<?php
+<?hh
 
-function bar($x) {
+function bar($x) :mixed{
  return $x ? $x + 1 : false;
  }
-function foo($a) {
+function foo($a) :AsyncGenerator<mixed,mixed,void>{
   $x = bar($a);
   switch ($x) {
     case 'hello': echo 1;
@@ -13,6 +13,10 @@ function foo($a) {
   }
   yield $x;
 }
+
+<<__EntryPoint>>
+function main_2170() :mixed{
 foreach(foo(3) as $x) {
  var_dump($x);
  }
+}

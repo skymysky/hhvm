@@ -1,0 +1,12 @@
+error: Typing[4120] Illegal usage of a covariant type parameter [1]
+-> This is where the parameter was declared as covariant `+` [2]
+-> This type parameter was declared as invariant (cf 'Foo') [1]
+
+covariance_decl_conflict_2.php:5:27
+3 | class Foo<T> {}
+4 | 
+5 | class Bar<+T> extends Foo<T> {}
+  |            ^ [2]
+  |                           ^ [1]
+
+1 error found

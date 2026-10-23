@@ -1,20 +1,11 @@
 <?hh
-function main() {
-  $a = array();
-  $x = array_shift(&$a);
+<<__EntryPoint>> function main(): void {
+  $a = dict[];
+  $x = array_shift(inout $a);
   var_dump($x);
-  unset($a, $x);
-  $a = array();
-  $x = array_pop(&$a);
+  $a = null; $x = null;
+  $a = dict[];
+  $x = array_pop(inout $a);
   var_dump($x);
-  unset($a, $x);
-  $a = array();
-  $x = next(&$a);
-  var_dump($x);
-  unset($a, $x);
-  $a = array();
-  $x = prev(&$a);
-  var_dump($x);
-  unset($a, $x);
+  $a = null; $x = null;
 }
-main();

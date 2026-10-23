@@ -1,0 +1,52 @@
+Code actions available:
+------------------------------------------
+Extract into variable (CodeActionKind: "refactor")
+slog variable (CodeActionKind: "refactor")
+Extract into method (CodeActionKind: "refactor") SELECTED
+
+JSON for selected code action:
+------------------------------------------
+{
+  "title": "Extract into method",
+  "kind": "refactor",
+  "diagnostics": [],
+  "edit": {
+    "changes": {
+      "FILE.php": [
+        {
+          "range": {
+            "start": { "line": 3, "character": 0 },
+            "end": { "line": 3, "character": 0 }
+          },
+          "newText": "  private function ${0:method0}(): void {\n    $local = 100;\n  }\n\n"
+        },
+        {
+          "range": {
+            "start": { "line": 6, "character": 4 },
+            "end": { "line": 6, "character": 17 }
+          },
+          "newText": "$this->${0:method0}();"
+        }
+      ]
+    }
+  }
+}
+
+Applied edit for code action:
+------------------------------------------
+<?hh
+
+class Klass {
+  private function ${0:method0}(): void {
+    $local = 100;
+  }
+
+  public function foo(): void {
+    $ignore1 = 1;
+    /*range-start*/
+    $this->${0:method0}();
+    /*range-end*/
+    $ignore2 = 1;
+  }
+}
+

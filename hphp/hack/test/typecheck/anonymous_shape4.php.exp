@@ -1,0 +1,15 @@
+error: Typing[4062] Typing error [1]
+-> You are trying to access the property `x` but this is a shape. Did you mean `$foo['x']` instead? [2]
+-> Definition is here [3]
+
+anonymous_shape4.php:4:3
+1 | <?hh
+2 | 
+3 | function test(shape('x' => int) $s): void {
+  |               ^^^^^^^^^^^^^^^^^ [3]
+4 |   $s->x;
+  |   ^^ [1]
+  |       ^ [2]
+5 | }
+
+1 error found

@@ -1,7 +1,7 @@
 <?hh
 // Copyright 2004-present Facebook. All Rights Reserved.
 
-function test($c) {
+function test($c) :mixed{
   echo "====================================================\n";
   $x1 = $c->toVArray();
   $x2 = $c->toDArray();
@@ -13,6 +13,9 @@ function test($c) {
   var_dump(is_darray($x2));
 }
 
+
+<<__EntryPoint>>
+function main_collections() :mixed{
 test(Vector{});
 test(Map{});
 test(Set{});
@@ -29,3 +32,4 @@ test(Pair{'abc', 'def'});
 test(ImmVector{100, 200, 300});
 test(ImmMap{'a' => 100, 'b' => 200});
 test(ImmSet{'a', 'b', 'c'});
+}

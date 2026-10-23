@@ -1,0 +1,28 @@
+error: Naming[2049] Unbound name: `a` (an object type) [1]
+
+unsupported_module.php--file2.php:4:10
+2 | 
+3 | function f(): void {
+4 |   nameof a.b; // (nameof a).b
+  |          ^ [1]
+5 | }
+
+error: Naming[2049] Unbound name: `b` (a global constant) [1]
+
+unsupported_module.php--file2.php:4:12
+2 | 
+3 | function f(): void {
+4 |   nameof a.b; // (nameof a).b
+  |            ^ [1]
+5 | }
+
+error: Typing[4106] Unbound global constant (Typing) [1]
+
+unsupported_module.php--file2.php:4:12
+2 | 
+3 | function f(): void {
+4 |   nameof a.b; // (nameof a).b
+  |            ^ [1]
+5 | }
+
+3 errors found

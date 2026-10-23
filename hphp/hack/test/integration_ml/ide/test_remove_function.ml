@@ -1,4 +1,4 @@
-(**
+(*
  * Copyright (c) 2016, Facebook, Inc.
  * All rights reserved.
  *
@@ -11,11 +11,14 @@
 module Test = Integration_test_base
 
 let foo_name = "foo.php"
+
 let foo_contents = "<?hh // strict
 
 function foo() : void {}
 "
+
 let bar_name = "bar.php"
+
 let bar_contents = "<?hh // strict
 
 function test(): void {
@@ -23,37 +26,32 @@ function test(): void {
 }
 "
 
-let full_diagnostics = "
+let full_diagnostics =
+  "
 /bar.php:
-File \"/bar.php\", line 4, characters 3-5:
-Unbound name: foo (a global function) (Naming[2049])
+ERROR: File \"/bar.php\", line 4, characters 3-5:
+Unbound name: `foo` (a global function) (Naming[2049])
 
-File \"/bar.php\", line 4, characters 3-5:
-Unbound name: foo (a global constant) (Naming[2049])
-
-File \"/bar.php\", line 4, characters 3-5:
-Unbound name (typing): foo (Typing[4107])
+ERROR: File \"/bar.php\", line 4, characters 3-5:
+Unbound name (typing): `foo` (Typing[4107])
 "
 
-let () =
+let test () =
+  Test.Client.with_env ~custom_config:None @@ fun env ->
+  let env =
+    Test.Client.setup_disk
+      env
+      [(foo_name, foo_contents); (bar_name, bar_contents) (* no errors *)]
+  in
 
-  let env = Test.setup_server () in
-  let env = Test.setup_disk env [
-    (foo_name, foo_contents);
-    (bar_name, bar_contents); (* no errors *)
-  ] in
-  let env = Test.connect_persistent_client env in
-  let env = Test.subscribe_diagnostic env in
-  let env, loop_outputs = Test.(run_loop_once env default_loop_input) in
-  Test.assert_no_diagnostics loop_outputs; (* no diagnostics initially *)
-  let env = Test.open_file env foo_name in
+  (* no diagnostics initially *)
+  let (env, diagnostics) = Test.Client.open_file env bar_name in
+  Test.Client.assert_no_diagnostics diagnostics;
+
   (* Delete foo() *)
-  let env, _ = Test.edit_file env foo_name "" in
-  let env = Test.wait env in
-  let env, loop_outputs = Test.(run_loop_once env default_loop_input) in
-  (* Change introduces an error in bar.php, but this file is not open in IDE
-   * so we don't recheck it immediately. *)
-  Test.assert_no_diagnostics loop_outputs;
-  (* Asking for global error list will trigger recheck of bar.php *)
-  let _, loop_outputs = Test.full_check env in
-  Test.assert_diagnostics loop_outputs full_diagnostics
+  let env = Test.Client.setup_disk env [(foo_name, "")] in
+  let (env, diagnostics) = Test.Client.open_file env bar_name in
+  Test.Client.assert_diagnostics_string diagnostics full_diagnostics;
+
+  ignore env;
+  ()

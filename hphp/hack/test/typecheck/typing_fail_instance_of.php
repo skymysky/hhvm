@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 /**
  * Copyright (c) 2014, Facebook, Inc.
  * All rights reserved.
@@ -26,19 +26,17 @@ class B {
 
 function test(): void {
   $x = new A();
-  if ($x instanceof B) {
+  if ($x is B) {
 
   }
 }
 
-function test2(dyn $x): void {
-  if ($x instanceof A) {
+function test2(mixed $x): void {
+  if ($x is A) {
     $x->f();
-  } else if ($x instanceof B) {
+  } else if ($x is B) {
     $x->g();
-  } else if ($x = 0) {
-    $y = $x + 1;
-  } else if ($x) {
+  } else if ($x is nonnull) {
     $x = $x + 1;
   }
 }

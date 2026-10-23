@@ -1,0 +1,57 @@
+Code actions available:
+------------------------------------------
+await expression (CodeActionKind: "quickfix") SELECTED
+Devmate Quick Fix - Casting Awaitable<int> to int: casting a non-primitive type to a primitive rarely yields a useful value. Did you mean to extract a value from this object before casting it, or to do a null-check? (CodeActionKind: "quickfix")
+Devmate Agent Fix - Casting Awaitable<int> to int: casting a non-primitive type to a primitive rarely yields a useful value. Did you mean to extract a value from this object before casting it, or to do a null-check? (CodeActionKind: "quickfix")
+Devmate Quick Fix - This expression is of type `Awaitable`, but it's either being discarded or used in a dangerous way before being awaited (CodeActionKind: "quickfix")
+Devmate Agent Fix - This expression is of type `Awaitable`, but it's either being discarded or used in a dangerous way before being awaited (CodeActionKind: "quickfix")
+
+JSON for selected code action:
+------------------------------------------
+{
+  "title": "await expression",
+  "kind": "quickfix",
+  "diagnostics": [],
+  "edit": {
+    "changes": {
+      "FILE.php": [
+        {
+          "range": {
+            "start": { "line": 7, "character": 18 },
+            "end": { "line": 7, "character": 23 }
+          },
+          "newText": "Awaitable<mixed>"
+        },
+        {
+          "range": {
+            "start": { "line": 7, "character": 0 },
+            "end": { "line": 7, "character": 0 }
+          },
+          "newText": "async "
+        },
+        {
+          "range": {
+            "start": { "line": 8, "character": 2 },
+            "end": { "line": 8, "character": 28 }
+          },
+          "newText": "return (int)await gen_int() + 3;"
+        }
+      ]
+    }
+  }
+}
+
+Applied edit for code action:
+------------------------------------------
+<?hh
+
+async function gen_int(): Awaitable<int> {
+  return 1;
+}
+
+
+async function repro(): Awaitable<mixed> {
+  return (int)await gen_int() + 3;
+           //  ^ at-caret should be a quickfix (not a refactoring)
+}
+

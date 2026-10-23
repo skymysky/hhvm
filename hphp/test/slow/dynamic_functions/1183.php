@@ -1,8 +1,12 @@
-<?php
-
-function test(&$a, $b) {
+<?hh
+<<__DynamicallyCallable>>
+function test(inout $a, $b) :mixed{
  $a = 'ok';
 }
- $a = 'Test';
- $a($a, 10);
+
+ <<__EntryPoint>>
+function main_1183() :mixed{
+ $a = 'test';
+ HH\dynamic_fun($a)(inout $a, 10);
  print $a;
+}

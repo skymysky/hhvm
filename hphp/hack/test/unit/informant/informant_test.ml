@@ -1,382 +1,633 @@
-module Report_comparator : Asserter.Comparator
-  with type t = Informant_sig.report = struct
-    open Informant_sig
-    type t = Informant_sig.report
-    let to_string v = match v with
-      | Move_along ->
-        "Move_along"
-      | Restart_server state ->
-        let str = begin match state with
-          | None -> "None"
-          | Some state ->
-            Printf.sprintf "(Some %s %d)"
-              state.ServerMonitorUtils.mini_state_everstore_handle
-              state.ServerMonitorUtils.target_svn_rev
-        end in
-        Printf.sprintf "Restart_server %s" str
+open Hh_prelude
 
-    let is_equal exp actual =
-      exp = actual
-end;;
+module Report_comparator : Asserter.Comparator with type t = Informant.report =
+struct
+  open Informant
 
+  type t = Informant.report
 
-module Report_asserter = Asserter.Make_asserter (Report_comparator);;
+  let to_string v =
+    match v with
+    | Move_along -> "Move_along"
+    | Restart_server -> "Restart_server"
 
-module WEWClient = WatchmanEventWatcherClient
-module WEWConfig = WatchmanEventWatcherConfig
+  let is_equal exp actual = String.equal (to_string exp) (to_string actual)
+end
+
+module Report_asserter = Asserter.Make_asserter (Report_comparator)
 
 module Tools = struct
   include Informant_test_tools
 
   (** Test the given transition to an hg_rev and assert the expected report. *)
-  let test_transition informant transition hg_rev server_status
-    expected_report assert_msg =
-      set_next_watchman_state_transition
-        transition hg_rev;
-      let report = HhMonitorInformant.report
-        informant server_status in
-      Report_asserter.assert_equals expected_report report
-        assert_msg
-end;;
+  let test_transition_watchman
+      informant transition hg_rev server_status expected_report assert_msg =
+    set_next_watchman_state_transition transition hg_rev;
+    let report = Informant.report informant server_status in
+    Report_asserter.assert_equals expected_report report assert_msg
 
+  let test_transition_eden
+      informant transition hg_rev server_status expected_report assert_msg =
+    set_next_eden_state_transitions [transition] hg_rev;
+    let report = Informant.report informant server_status in
+    Report_asserter.assert_equals expected_report report assert_msg
+end
+
+(** Create XDB table entries for rev 5 and 200. Start Informant. *)
+let basic_setup_rev_5_and_200_and_start_informant_watchman
+    ?(initial_saved_state_is_precomputed = false)
+    ?(allow_restart_from_precomputed_saved_state = false)
+    temp_dir =
+  Tools.set_hg_to_global_rev_map ();
+
+  Watchman.Mocking.init_returns @@ Some "test_mock_basic";
+  Hg.Mocking.current_working_copy_base_rev_returns
+    (Future.of_value Tools.global_rev_1);
+  Watchman.Mocking.get_changes_returns
+    (Watchman.Watchman_pushed (Watchman.Files_changed S_set.empty));
+  let informant =
+    Informant.init
+      {
+        Informant.root = temp_dir;
+        allow_subscriptions = true;
+        min_distance_restart = 100;
+        use_dummy = false;
+        watchman_debug_logging = false;
+        use_eden = false;
+        ignore_hh_version = false;
+        initial_saved_state_is_precomputed;
+        allow_restart_from_precomputed_saved_state;
+      }
+  in
+  let report = Informant.report informant Informant.Server_alive in
+  Report_asserter.assert_equals Informant.Move_along report "no distance moved";
+  informant
+
+let basic_setup_rev_5_and_200_and_start_informant_eden
+    ?delay_rev_5
+    ?(initial_saved_state_is_precomputed = false)
+    ?(allow_restart_from_precomputed_saved_state = false)
+    temp_dir =
+  Tools.set_hg_to_global_rev_map ?delay_rev_5 ();
+
+  Hg.Mocking.current_working_copy_base_rev_returns
+    (Future.of_value Tools.global_rev_1);
+  Edenfs_watcher.Mocking.get_changes_async_returns [];
+  let informant =
+    Informant.init
+      {
+        Informant.root = temp_dir;
+        allow_subscriptions = true;
+        min_distance_restart = 100;
+        use_dummy = false;
+        watchman_debug_logging = false;
+        use_eden = true;
+        ignore_hh_version = false;
+        initial_saved_state_is_precomputed;
+        allow_restart_from_precomputed_saved_state;
+      }
+  in
+  let report = Informant.report informant Informant.Server_alive in
+  Report_asserter.assert_equals Informant.Move_along report "no distance moved";
+  informant
 
 (** When base revision has changed significantly, informant asks
  * for server restart. Also, ensures that there are entries in XDB
  * table for those revisions. *)
-let test_informant_restarts_significant_move temp_dir =
-  Tools.set_hg_to_svn_map ();
-  (** In XDB table, add an entry for svn rev 200. *)
-  Tools.set_xdb ~state_svn_rev:200
-    ~for_svn_rev:200 ~everstore_handle:"dummy_handle_for_svn_200" ~tiny:false;
-  Tools.set_xdb ~state_svn_rev:5
-    ~for_svn_rev:5 ~everstore_handle:"dummy_handle_for_svn_5" ~tiny:false;
-  Watchman.Mocking.init_returns @@ Some "test_mock_basic";
-  Hg.Mocking.current_working_copy_base_rev_returns
-    (Future.of_value Tools.svn_1);
-  Watchman.Mocking.get_changes_returns
-    (Watchman.Watchman_pushed (Watchman.Files_changed SSet.empty));
-  let informant = HhMonitorInformant.init {
-    HhMonitorInformant.root = temp_dir;
-    state_prefetcher = State_prefetcher.dummy;
-    allow_subscriptions = true;
-    min_distance_restart = 100;
-    use_dummy = false;
-    watchman_debug_logging = false;
-    use_xdb = true;
-    saved_state_cache_limit = 20;
-    devinfra_saved_state_lookup = false;
-    ignore_hh_version = false;
-  } in
-  let report = HhMonitorInformant.report
-    informant Informant_sig.Server_alive in
-  Report_asserter.assert_equals Informant_sig.Move_along report
-    "no distance moved" ;
+let test_watchman_informant_restarts_significant_move temp_dir =
+  let informant =
+    basic_setup_rev_5_and_200_and_start_informant_watchman temp_dir
+  in
+  let test_transition = Tools.test_transition_watchman in
 
   (**** Following tests all have a State_enter followed by a State_leave
-   * and then a Changed_merge_base. *)
+   * and then possibly a Changed_merge_base. *)
 
-  (** Move base revisions insignificant distance away. *)
-  Tools.test_transition
-    informant Tools.State_enter Tools.hg_rev_5
-    Informant_sig.Server_alive Informant_sig.Move_along
+  (* Move base revisions insignificant distance away. *)
+  test_transition
+    informant
+    Tools.State_enter
+    Tools.hg_rev_5
+    Informant.Server_alive
+    Informant.Move_along
     "state enter insignificant distance";
-  Tools.test_transition
-    informant Tools.State_leave Tools.hg_rev_5
-    Informant_sig.Server_alive Informant_sig.Move_along
+  test_transition
+    informant
+    Tools.State_leave
+    Tools.hg_rev_5
+    Informant.Server_alive
+    Informant.Move_along
     "state leave insignificant distance";
 
-  (** Move significant distance. *)
-  Tools.test_transition
-    informant Tools.State_enter Tools.hg_rev_200
-    Informant_sig.Server_alive Informant_sig.Move_along
+  (* Move significant distance. *)
+  test_transition
+    informant
+    Tools.State_enter
+    Tools.hg_rev_200
+    Informant.Server_alive
+    Informant.Move_along
     "state enter significant distance";
-  Tools.test_transition
-    informant Tools.State_leave Tools.hg_rev_200
-    Informant_sig.Server_alive Informant_sig.Move_along
+  test_transition
+    informant
+    Tools.State_leave
+    Tools.hg_rev_200
+    Informant.Server_alive
+    Informant.Move_along
     "state leave significant distance";
-  let expected_state_target = {
-    ServerMonitorUtils.mini_state_everstore_handle = "dummy_handle_for_svn_200";
-    is_tiny = false;
-    target_svn_rev = 200;
-  } in
-  Tools.test_transition
-    informant Tools.Changed_merge_base Tools.hg_rev_200
-    Informant_sig.Server_alive
-    (Informant_sig.Restart_server (Some expected_state_target))
+  test_transition
+    informant
+    Tools.Changed_merge_base
+    Tools.hg_rev_200
+    Informant.Server_alive
+    Informant.Restart_server
     "Move forward significant distance";
 
-  (** Informant now sitting at revision 200. Moving to 230 no restart. *)
-  Tools.test_transition
-    informant Tools.State_enter Tools.hg_rev_230
-    Informant_sig.Server_alive Informant_sig.Move_along
+  (* Informant now sitting at revision 200. Moving to 230 no restart. *)
+  test_transition
+    informant
+    Tools.State_enter
+    Tools.hg_rev_230
+    Informant.Server_alive
+    Informant.Move_along
     "state enter insignificant distance";
-  Tools.test_transition
-    informant Tools.State_leave Tools.hg_rev_230
-    Informant_sig.Server_alive Informant_sig.Move_along
+  test_transition
+    informant
+    Tools.State_leave
+    Tools.hg_rev_230
+    Informant.Server_alive
+    Informant.Move_along
     "state leave insignificant distance";
-  Tools.test_transition
-    informant Tools.Changed_merge_base Tools.hg_rev_230
-    Informant_sig.Server_alive Informant_sig.Move_along
+  test_transition
+    informant
+    Tools.Changed_merge_base
+    Tools.hg_rev_230
+    Informant.Server_alive
+    Informant.Move_along
     "Changed merge base insignificant distance";
 
-  (** Moving back to 200 no restart. *)
-  Tools.test_transition
-    informant Tools.State_enter Tools.hg_rev_200
-    Informant_sig.Server_alive Informant_sig.Move_along
+  (* Moving back to 200 no restart. *)
+  test_transition
+    informant
+    Tools.State_enter
+    Tools.hg_rev_200
+    Informant.Server_alive
+    Informant.Move_along
     "state enter insignificant distance";
-  Tools.test_transition
-    informant Tools.State_leave Tools.hg_rev_200
-    Informant_sig.Server_alive Informant_sig.Move_along
+  test_transition
+    informant
+    Tools.State_leave
+    Tools.hg_rev_200
+    Informant.Server_alive
+    Informant.Move_along
     "state leave insignificant distance";
-  Tools.test_transition
-    informant Tools.Changed_merge_base Tools.hg_rev_200
-    Informant_sig.Server_alive Informant_sig.Move_along
+  test_transition
+    informant
+    Tools.Changed_merge_base
+    Tools.hg_rev_200
+    Informant.Server_alive
+    Informant.Move_along
     "Changed_merge_base insignificant distance";
 
-  (** Moving back to SVN rev 5 (hg_rev_5) restarts. *)
-  Tools.test_transition
-    informant Tools.State_enter Tools.hg_rev_5
-    Informant_sig.Server_alive Informant_sig.Move_along
+  (* Moving to a local commit on top of 200 (same globalrev/merge base).
+     No Changed_merge_base! *)
+  test_transition
+    informant
+    Tools.State_enter
+    Tools.hg_rev_200_plus_local
+    Informant.Server_alive
+    Informant.Move_along
+    "state enter insignificant distance";
+  test_transition
+    informant
+    Tools.State_leave
+    Tools.hg_rev_200_plus_local
+    Informant.Server_alive
+    Informant.Move_along
+    "state leave insignificant distance";
+
+  (* Moving back to SVN rev 5 (hg_rev_5) restarts. *)
+  test_transition
+    informant
+    Tools.State_enter
+    Tools.hg_rev_5
+    Informant.Server_alive
+    Informant.Move_along
     "state enter significant distance";
-  Tools.test_transition
-    informant Tools.State_leave Tools.hg_rev_5
-    Informant_sig.Server_alive Informant_sig.Move_along
+  test_transition
+    informant
+    Tools.State_leave
+    Tools.hg_rev_5
+    Informant.Server_alive
+    Informant.Move_along
     "state leave significant distance";
-  let expected_state_target = {
-    ServerMonitorUtils.mini_state_everstore_handle = "dummy_handle_for_svn_5";
-    is_tiny = false;
-    target_svn_rev = 5;
-  } in
-  Tools.test_transition
-    informant Tools.Changed_merge_base Tools.hg_rev_5
-    Informant_sig.Server_alive
-    (Informant_sig.Restart_server (Some expected_state_target))
+  test_transition
+    informant
+    Tools.Changed_merge_base
+    Tools.hg_rev_5
+    Informant.Server_alive
+    Informant.Restart_server
     "Move back significant distance";
   true
 
-(** This test is similar to the above (but shorter) except the
- * query for the SVN revision for the Changed_merge_base revision is
- * delayed. *)
-let test_informant_restarts_significant_move_delayed temp_dir =
-  (** We delay it by 8. It seems an odd number, but the state
-   * transition queue can get pumped multiple times at each
-   * Informant.report call. This occurs because Revision_tracker.report
-   * calls itself recursively if something arrived on the Watchman
-   * subscription. *)
-  Tools.set_hg_to_svn_map ~delay_rev_200:8 ();
-  Watchman.Mocking.init_returns @@ Some "test_mock_basic";
-  Hg.Mocking.current_working_copy_base_rev_returns
-    (Future.of_value Tools.svn_1);
-  Watchman.Mocking.get_changes_returns
-    (Watchman.Watchman_pushed (Watchman.Files_changed SSet.empty));
-  let informant = HhMonitorInformant.init {
-    HhMonitorInformant.root = temp_dir;
-    state_prefetcher = State_prefetcher.dummy;
-    allow_subscriptions = true;
-    min_distance_restart = 100;
-    use_dummy = false;
-    watchman_debug_logging = false;
-    use_xdb = false;
-    saved_state_cache_limit = 20;
-    devinfra_saved_state_lookup = false;
-    ignore_hh_version = false;
-  } in
-  let report = HhMonitorInformant.report
-    informant Informant_sig.Server_alive in
-  Report_asserter.assert_equals Informant_sig.Move_along report
-    "no distance moved" ;
+(** Like test_watchman_informant_restarts_significant_move, but using Eden.
+    Therefore, we get Changed_commit instead of Changed_merge_base  *)
+let test_eden_informant_restarts_significant_move temp_dir =
+  let informant = basic_setup_rev_5_and_200_and_start_informant_eden temp_dir in
+  let test_transition = Tools.test_transition_eden in
 
-  (** Start with a significant Changed Merge Base to a revision that's mapped
-   * SVN revision is delayed by a few cycles. *)
-  Tools.test_transition
-    informant Tools.Changed_merge_base Tools.hg_rev_200
-    Informant_sig.Server_alive Informant_sig.Move_along
-    "Changed_merge_base significant distance, but delayed should not restart";
+  (**** Following tests all have a State_enter followed by a State_leave
+   * and then possibly a Changed_commit. *)
 
-  (** Informant now sitting at revision 200, but informant doesn't know it yet
-   * because of the delayed computation. we nudge it twice. *)
-  Tools.test_transition
-    informant Tools.State_enter Tools.hg_rev_230
-    Informant_sig.Server_alive Informant_sig.Move_along
-    "Nudge delayed future with State_enter";
-  Tools.test_transition
-    informant Tools.State_leave Tools.hg_rev_230
-    Informant_sig.Server_alive Informant_sig.Move_along
-    "Nudge delayed future with State_leave";
+  (* Move base revisions insignificant distance away. *)
+  test_transition
+    informant
+    Tools.State_enter
+    Tools.hg_rev_5
+    Informant.Server_alive
+    Informant.Move_along
+    "state enter (not translated to ServerInformant.repo_transition)";
+  test_transition
+    informant
+    Tools.State_leave
+    Tools.hg_rev_5
+    Informant.Server_alive
+    Informant.Move_along
+    "state leave (not translated to ServerInformant.repo_transition)";
 
-  (** Now we come back to 200, but this last nudge of the delayed value produces
-   * the actual SVN rev for 200. So the Restart_server from the
-   * Changed_merge_base above shows up now. *)
-  Tools.test_transition
-    informant Tools.State_enter Tools.hg_rev_200
-    Informant_sig.Server_alive (Informant_sig.Restart_server None)
-    "Trigger last delayed value for prior Changed_merge_base svn rev mapping";
+  (* Move significant distance. *)
+  test_transition
+    informant
+    Tools.State_enter
+    Tools.hg_rev_200
+    Informant.Server_alive
+    Informant.Move_along
+    "state enter (not translated to ServerInformant.repo_transition)";
+  test_transition
+    informant
+    Tools.State_leave
+    Tools.hg_rev_200
+    Informant.Server_alive
+    Informant.Move_along
+    "state leave (not translated to ServerInformant.repo_transition)";
+  test_transition
+    informant
+    Tools.Commit_transition
+    Tools.hg_rev_200
+    Informant.Server_alive
+    Informant.Restart_server
+    "Move forward significant distance";
+
+  (* Informant now sitting at revision 200. Moving to 230 no restart. *)
+  test_transition
+    informant
+    Tools.State_enter
+    Tools.hg_rev_230
+    Informant.Server_alive
+    Informant.Move_along
+    "state enter (not translated to ServerInformant.repo_transition)";
+  test_transition
+    informant
+    Tools.State_leave
+    Tools.hg_rev_230
+    Informant.Server_alive
+    Informant.Move_along
+    "state leave (not translated to ServerInformant.repo_transition)";
+  test_transition
+    informant
+    Tools.Commit_transition
+    Tools.hg_rev_230
+    Informant.Server_alive
+    Informant.Move_along
+    "Changed commit insignificant distance";
+
+  (* Moving back to 200 no restart. *)
+  test_transition
+    informant
+    Tools.State_enter
+    Tools.hg_rev_200
+    Informant.Server_alive
+    Informant.Move_along
+    "state enter (not translated to ServerInformant.repo_transition)";
+  test_transition
+    informant
+    Tools.State_leave
+    Tools.hg_rev_200
+    Informant.Server_alive
+    Informant.Move_along
+    "state leave (not translated to ServerInformant.repo_transition)";
+  test_transition
+    informant
+    Tools.Commit_transition
+    Tools.hg_rev_200
+    Informant.Server_alive
+    Informant.Move_along
+    "Changed_commit insignificant distance";
+
+  (* Moving to a local commit on top of 200 (same globalrev/merge base).
+     Watchman produces no Changed_merge_base here! *)
+  test_transition
+    informant
+    Tools.State_enter
+    Tools.hg_rev_200_plus_local
+    Informant.Server_alive
+    Informant.Move_along
+    "state enter (not translated to ServerInformant.repo_transition)";
+  test_transition
+    informant
+    Tools.State_leave
+    Tools.hg_rev_200_plus_local
+    Informant.Server_alive
+    Informant.Move_along
+    "state leave (not translated to ServerInformant.repo_transition)";
+  test_transition
+    informant
+    Tools.Commit_transition
+    Tools.hg_rev_200
+    Informant.Server_alive
+    Informant.Move_along
+    "Changed_commit insignificant distance";
+
+  (* Moving back to rev 5 (hg_rev_5) restarts. *)
+  test_transition
+    informant
+    Tools.State_enter
+    Tools.hg_rev_5
+    Informant.Server_alive
+    Informant.Move_along
+    "state enter (not translated to ServerInformant.repo_transition)";
+  test_transition
+    informant
+    Tools.State_leave
+    Tools.hg_rev_5
+    Informant.Server_alive
+    Informant.Move_along
+    "state leave (not translated to ServerInformant.repo_transition)";
+  test_transition
+    informant
+    Tools.Commit_transition
+    Tools.hg_rev_5
+    Informant.Server_alive
+    Informant.Restart_server
+    "Move back significant distance";
   true
 
-(** This test is similar to the above (but shorter) except the
- * we are going to svn_230 which has no entry in the XDB table,
- * and thus we get no restart report.
- *)
-let test_informant_no_saved_state_no_restart temp_dir =
-  Tools.set_hg_to_svn_map ();
-  Watchman.Mocking.init_returns @@ Some "test_mock_basic";
-  Hg.Mocking.current_working_copy_base_rev_returns
-    (Future.of_value Tools.svn_1);
-  Watchman.Mocking.get_changes_returns
-    (Watchman.Watchman_pushed (Watchman.Files_changed SSet.empty));
-  let informant = HhMonitorInformant.init {
-    HhMonitorInformant.root = temp_dir;
-    state_prefetcher = State_prefetcher.dummy;
-    allow_subscriptions = true;
-    min_distance_restart = 100;
-    use_dummy = false;
-    watchman_debug_logging = false;
-    use_xdb = true;
-    saved_state_cache_limit = 20;
-    devinfra_saved_state_lookup = false;
-    ignore_hh_version = false;
-  } in
-  let report = HhMonitorInformant.report
-    informant Informant_sig.Server_alive in
-  Report_asserter.assert_equals Informant_sig.Move_along report
-    "no distance moved" ;
-
-  (** There's no saved state for rev 4, so we don't restart. *)
-  Tools.test_transition
-    informant Tools.Changed_merge_base Tools.hg_rev_230
-    Informant_sig.Server_alive Informant_sig.Move_along
-    "Significantly changed merge base, but no saved state for this rev";
-    true
-
-(** The found saved state in the XDB table is too far, so we should
- * just prefer letting incremental run its course.
- *
- * We start Informant at rev 5, transition to rev 200, but only find
- * a saved state for rev 1. So we prefer incremental (Move_along) instead
- * of loading a new saved state (Restart_server). *)
-let test_informant_xdb_saved_state_too_far temp_dir =
-  Tools.set_hg_to_svn_map ();
-  Watchman.Mocking.init_returns @@ Some "test_mock_basic";
-  Hg.Mocking.current_working_copy_base_rev_returns
-    (Future.of_value Tools.svn_5);
-  Watchman.Mocking.get_changes_returns
-    (Watchman.Watchman_pushed (Watchman.Files_changed SSet.empty));
-  let informant = HhMonitorInformant.init {
-    HhMonitorInformant.root = temp_dir;
-    state_prefetcher = State_prefetcher.dummy;
-    allow_subscriptions = true;
-    min_distance_restart = 100;
-    use_dummy = false;
-    watchman_debug_logging = false;
-    use_xdb = true;
-    saved_state_cache_limit = 20;
-    devinfra_saved_state_lookup = false;
-    ignore_hh_version = false;
-  } in
-  let report = HhMonitorInformant.report
-    informant Informant_sig.Server_alive in
-  Report_asserter.assert_equals Informant_sig.Move_along report
-    "no distance moved" ;
-  (** At rev 200, we will find a saved state made for rev 1. *)
-  Tools.set_xdb ~state_svn_rev:1 ~for_svn_rev:200
-    ~everstore_handle:"Fake everstore handle for svn rev 1" ~tiny:false;
-  Tools.test_transition
-    informant Tools.Changed_merge_base Tools.hg_rev_200
-    Informant_sig.Server_alive Informant_sig.Move_along
-    "Significantly changed merge base, saved state for this rev is too distant";
-    true
-
-(** We emulate the repo being in a mid-update state when the informant
- * starts. i.e., the .hg/updatestate file is present. *)
-let test_repo_starts_midupdate temp_dir =
-  Tools.set_hg_to_svn_map ();
-  (** Start by having the mock response Mid_update. *)
-  WEWClient.Mocking.get_status_returns (Some WEWConfig.Responses.Mid_update);
-  Watchman.Mocking.init_returns @@ Some "test_mock_basic";
-  Hg.Mocking.current_working_copy_base_rev_returns
-    (Future.of_value Tools.svn_1);
-  Watchman.Mocking.get_changes_returns
-    (Watchman.Watchman_pushed (Watchman.Files_changed SSet.empty));
-  let informant = HhMonitorInformant.init {
-    HhMonitorInformant.root = temp_dir;
-    min_distance_restart = 100;
-    state_prefetcher = State_prefetcher.dummy;
-    allow_subscriptions = true;
-    use_dummy = false;
-    watchman_debug_logging = false;
-    use_xdb = false;
-    saved_state_cache_limit = 20;
-    devinfra_saved_state_lookup = false;
-    ignore_hh_version = false;
-  } in
-  let should_start_first_server =
-    HhMonitorInformant.should_start_first_server informant in
-  Asserter.Bool_asserter.assert_equals false
-    should_start_first_server "Shouldn't start when repo is in flux";
-  (** Set mock response to settled, then informant report should restart. *)
-  WEWClient.Mocking.get_status_returns (Some WEWConfig.Responses.Settled);
-  let report = HhMonitorInformant.report
-    informant Informant_sig.Server_not_yet_started in
+(** Test that when Eden delivers a batch of [StateEnter; StateLeave; CommitTransition],
+    the pending queue processes them in FIFO order *)
+let test_eden_batch_ordering temp_dir =
+  let informant = basic_setup_rev_5_and_200_and_start_informant_eden temp_dir in
+  Tools.set_next_eden_state_transitions
+    [Tools.State_enter; Tools.State_leave; Tools.Commit_transition]
+    Tools.hg_rev_200;
+  let report = Informant.report informant Informant.Server_alive in
   Report_asserter.assert_equals
-    (Informant_sig.Restart_server None) report
-    "Should report restart server since repo is settled";
+    Informant.Restart_server
+    report
+    "Batch [StateEnter; StateLeave; CommitTransition] should restart";
   true
 
-(** When Watchman Event Watcher in unknown state, then we should start
- * first server. *)
-let test_watcher_in_unknown_state temp_dir =
-  Tools.set_hg_to_svn_map ();
-  (** WEW status returns Unknown. *)
-  WEWClient.Mocking.get_status_returns (Some WEWConfig.Responses.Unknown);
-  Watchman.Mocking.init_returns @@ Some "test_mock_basic";
-  Hg.Mocking.current_working_copy_base_rev_returns
-    (Future.of_value Tools.svn_1);
-  Watchman.Mocking.get_changes_returns
-    (Watchman.Watchman_pushed (Watchman.Files_changed SSet.empty));
-  let informant = HhMonitorInformant.init {
-    HhMonitorInformant.root = temp_dir;
-    min_distance_restart = 100;
-    state_prefetcher = State_prefetcher.dummy;
-    allow_subscriptions = true;
-    use_dummy = false;
-    watchman_debug_logging = false;
-    use_xdb = false;
-    saved_state_cache_limit = 20;
-    devinfra_saved_state_lookup = false;
-    ignore_hh_version = false;
-  } in
-  let should_start_first_server =
-    HhMonitorInformant.should_start_first_server informant in
-  Asserter.Bool_asserter.assert_equals true
-    should_start_first_server "Should start when repo is in unknown state";
-    true
+(** Test that preprocessing short-circuits when a newer change's
+    future resolves before an older queued one, and that the early decision
+    clears the queue of pending changes. *)
+let test_eden_preprocess_early_decision temp_dir =
+  (* delay_rev_5:10 is well above the number of is_ready calls that happen
+     during the first report, ensuring that rev_5's future stays unresolved
+     and the change gets queued. *)
+  let informant =
+    basic_setup_rev_5_and_200_and_start_informant_eden ~delay_rev_5:10 temp_dir
+  in
 
-let run_test test =
-  Xdb.Mocking.reset_find_nearest ();
-  Tempfile.with_tempdir test
+  (* Send a batch for rev_5.  Its future is delayed, so it can't be resolved yet. *)
+  Tools.set_next_eden_state_transitions
+    [Tools.State_enter; Tools.State_leave; Tools.Commit_transition]
+    Tools.hg_rev_5;
+  let report = Informant.report informant Informant.Server_alive in
+  Report_asserter.assert_equals
+    Informant.Move_along
+    report
+    "rev_5 future not ready, queued";
 
-let tests =
-  [
-    "test_informant_restarts_significant_move", (fun () ->
-      run_test test_informant_restarts_significant_move);
-    "test_informant_restarts_significant_move_delayed", (fun () ->
-      run_test test_informant_restarts_significant_move_delayed);
-    "test_informant_no_saved_state_no_restart", (fun () ->
-      run_test test_informant_no_saved_state_no_restart);
-    "test_informant_xdb_saved_state_too_far", (fun () ->
-      run_test test_informant_xdb_saved_state_too_far);
-    "test_repo_starts_midupdate", (fun () ->
-      run_test test_repo_starts_midupdate);
-    "test_watcher_in_unknown_state", (fun () ->
-      run_test test_watcher_in_unknown_state);
-  ]
+  (* Send a batch for rev_200.  Its future resolves immediately and
+     |200 - 1| > 100, so preprocess makes an early restart decision,
+     clearing the queue (discarding the pending rev_5 entry). *)
+  Tools.set_next_eden_state_transitions
+    [Tools.State_enter; Tools.State_leave; Tools.Commit_transition]
+    Tools.hg_rev_200;
+  let report = Informant.report informant Informant.Server_alive in
+  Report_asserter.assert_equals
+    Informant.Restart_server
+    report
+    "rev_200 future ready, preprocess early restart";
 
-let setup_global_test_state () =
-  EventLogger.init EventLogger.Event_logger_fake 0.0;
-  Relative_path.(set_path_prefix Root (Path.make "/tmp"));
-  let hhconfig_path = Relative_path.(create Root "/tmp/.hhconfig") in
-  Disk.write_file (Relative_path.to_absolute hhconfig_path) "assume_php = false"
+  (* Verify queue was cleared: pump enough empty reports for rev_5's delayed
+     future to have resolved if it were still in the queue.  Since
+     |5 - 200| > 100, a surviving entry would trigger Restart_server. *)
+  Edenfs_watcher.Mocking.get_changes_async_returns [];
+  for _ = 1 to 10 do
+    let report = Informant.report informant Informant.Server_alive in
+    Report_asserter.assert_equals
+      Informant.Move_along
+      report
+      "queue should be empty after early decision"
+  done;
+
+  (* Verify the early decision updated base to globalrev 200: rev_230 should
+     be insignificant (|230 - 200| < 100).  If base were still 1,
+     this would trigger a restart (|230 - 1| > 100). *)
+  Tools.set_next_eden_state_transitions
+    [Tools.State_enter; Tools.State_leave; Tools.Commit_transition]
+    Tools.hg_rev_230;
+  let report = Informant.report informant Informant.Server_alive in
+  Report_asserter.assert_equals
+    Informant.Move_along
+    report
+    "rev_230 insignificant from new base 200";
+  true
+
+let assert_watchman_move informant hg_rev expected_report =
+  (* Watchman's SCM-aware mergebase notification follows state-leave. *)
+  List.iter [Tools.State_enter; Tools.State_leave] ~f:(fun transition ->
+      Tools.test_transition_watchman
+        informant
+        transition
+        hg_rev
+        Informant.Server_alive
+        Informant.Move_along
+        "wait for the mergebase notification");
+  Tools.test_transition_watchman
+    informant
+    Tools.Changed_merge_base
+    hg_rev
+    Informant.Server_alive
+    expected_report
+    "restart policy after Watchman's mergebase notification"
+
+let assert_eden_move informant hg_rev expected_report =
+  Tools.set_next_eden_state_transitions
+    [Tools.State_enter; Tools.Commit_transition; Tools.State_leave]
+    hg_rev;
+  Report_asserter.assert_equals
+    expected_report
+    (Informant.report informant Informant.Server_alive)
+    "restart policy after Eden's complete hg.update batch"
+
+(** Deliver a complete update whose globalrev lookup is delayed, then verify
+    the decision when polling resolves that lookup without further events. *)
+let assert_queued_eden_move informant expected_report =
+  Tools.set_hg_to_global_rev_map ~delay_rev_200:10 ();
+  assert_eden_move informant Tools.hg_rev_200 Informant.Move_along;
+
+  Edenfs_watcher.Mocking.get_changes_async_returns [];
+  let report = ref Informant.Move_along in
+  for _ = 1 to 10 do
+    match Informant.report informant Informant.Server_alive with
+    | Informant.Restart_server -> report := Informant.Restart_server
+    | Informant.Move_along -> ()
+  done;
+  Report_asserter.assert_equals
+    expected_report
+    !report
+    "queued revision changes obey the precomputed-state policy"
+
+(** Watchman must suppress significant moves for a precomputed start by default. *)
+let test_watchman_precomputed_default_restart_policy temp_dir =
+  let informant =
+    basic_setup_rev_5_and_200_and_start_informant_watchman
+      ~initial_saved_state_is_precomputed:true
+      ~allow_restart_from_precomputed_saved_state:false
+      temp_dir
+  in
+  assert_watchman_move informant Tools.hg_rev_5 Informant.Move_along;
+  assert_watchman_move informant Tools.hg_rev_200 Informant.Move_along;
+  true
+
+(** Opting in lets Watchman restart a precomputed server only for significant moves. *)
+let test_watchman_precomputed_opt_in_restart_policy temp_dir =
+  let informant =
+    basic_setup_rev_5_and_200_and_start_informant_watchman
+      ~initial_saved_state_is_precomputed:true
+      ~allow_restart_from_precomputed_saved_state:true
+      temp_dir
+  in
+  assert_watchman_move informant Tools.hg_rev_5 Informant.Move_along;
+  assert_watchman_move informant Tools.hg_rev_200 Informant.Restart_server;
+  true
+
+(** The permission flag preserves Watchman's distance checks for native starts. *)
+let test_watchman_native_opt_in_restart_policy temp_dir =
+  let informant =
+    basic_setup_rev_5_and_200_and_start_informant_watchman
+      ~initial_saved_state_is_precomputed:false
+      ~allow_restart_from_precomputed_saved_state:true
+      temp_dir
+  in
+  assert_watchman_move informant Tools.hg_rev_5 Informant.Move_along;
+  assert_watchman_move informant Tools.hg_rev_200 Informant.Restart_server;
+  true
+
+(** Eden must suppress significant moves for a precomputed start by default. *)
+let test_eden_precomputed_default_restart_policy temp_dir =
+  let informant =
+    basic_setup_rev_5_and_200_and_start_informant_eden
+      ~initial_saved_state_is_precomputed:true
+      ~allow_restart_from_precomputed_saved_state:false
+      temp_dir
+  in
+  assert_eden_move informant Tools.hg_rev_5 Informant.Move_along;
+  assert_eden_move informant Tools.hg_rev_200 Informant.Move_along;
+  true
+
+(** Opting in lets Eden restart a precomputed server only for significant moves. *)
+let test_eden_precomputed_opt_in_restart_policy temp_dir =
+  let informant =
+    basic_setup_rev_5_and_200_and_start_informant_eden
+      ~initial_saved_state_is_precomputed:true
+      ~allow_restart_from_precomputed_saved_state:true
+      temp_dir
+  in
+  assert_eden_move informant Tools.hg_rev_5 Informant.Move_along;
+  assert_eden_move informant Tools.hg_rev_200 Informant.Restart_server;
+  true
+
+(** The permission flag preserves Eden's distance checks for native starts. *)
+let test_eden_native_opt_in_restart_policy temp_dir =
+  let informant =
+    basic_setup_rev_5_and_200_and_start_informant_eden
+      ~initial_saved_state_is_precomputed:false
+      ~allow_restart_from_precomputed_saved_state:true
+      temp_dir
+  in
+  assert_eden_move informant Tools.hg_rev_5 Informant.Move_along;
+  assert_eden_move informant Tools.hg_rev_200 Informant.Restart_server;
+  true
+
+(** A delayed revision lookup must still suppress precomputed restarts by default. *)
+let test_precomputed_queued_restart_default temp_dir =
+  let informant =
+    basic_setup_rev_5_and_200_and_start_informant_eden
+      ~initial_saved_state_is_precomputed:true
+      ~allow_restart_from_precomputed_saved_state:false
+      temp_dir
+  in
+  assert_queued_eden_move informant Informant.Move_along;
+  true
+
+(** Opting in permits a precomputed restart after a delayed revision lookup. *)
+let test_precomputed_queued_restart_opt_in temp_dir =
+  let informant =
+    basic_setup_rev_5_and_200_and_start_informant_eden
+      ~initial_saved_state_is_precomputed:true
+      ~allow_restart_from_precomputed_saved_state:true
+      temp_dir
+  in
+  assert_queued_eden_move informant Informant.Restart_server;
+  true
 
 let () =
-  setup_global_test_state ();
-  Unit_test.run_all tests
+  Event_logger.init_fake ();
+  Relative_path.(set_path_prefix Root (Path.make "/tmp"));
+  Relative_path.(set_path_prefix Root (Path.make Sys_utils.temp_dir_name));
+  let hhconfig_path = Relative_path.(create Root "/tmp/.hhconfig") in
+  Disk.write_file
+    ~file:(Relative_path.to_absolute hhconfig_path)
+    ~contents:"assume_php = false";
+
+  Unit_test.run_all
+    [
+      ( "test_watchman_informant_restarts_significant_move",
+        fun () ->
+          Tempfile.with_tempdir
+            test_watchman_informant_restarts_significant_move );
+      ( "test_eden_informant_restarts_significant_move",
+        fun () ->
+          Tempfile.with_tempdir test_eden_informant_restarts_significant_move );
+      ( "test_eden_batch_ordering",
+        (fun () -> Tempfile.with_tempdir test_eden_batch_ordering) );
+      ( "test_eden_preprocess_early_decision",
+        (fun () -> Tempfile.with_tempdir test_eden_preprocess_early_decision) );
+      ( "test_watchman_precomputed_default_restart_policy",
+        fun () ->
+          Tempfile.with_tempdir test_watchman_precomputed_default_restart_policy
+      );
+      ( "test_watchman_precomputed_opt_in_restart_policy",
+        fun () ->
+          Tempfile.with_tempdir test_watchman_precomputed_opt_in_restart_policy
+      );
+      ( "test_watchman_native_opt_in_restart_policy",
+        fun () ->
+          Tempfile.with_tempdir test_watchman_native_opt_in_restart_policy );
+      ( "test_eden_precomputed_default_restart_policy",
+        fun () ->
+          Tempfile.with_tempdir test_eden_precomputed_default_restart_policy );
+      ( "test_eden_precomputed_opt_in_restart_policy",
+        fun () ->
+          Tempfile.with_tempdir test_eden_precomputed_opt_in_restart_policy );
+      ( "test_eden_native_opt_in_restart_policy",
+        (fun () -> Tempfile.with_tempdir test_eden_native_opt_in_restart_policy)
+      );
+      ( "test_precomputed_queued_restart_default",
+        (fun () -> Tempfile.with_tempdir test_precomputed_queued_restart_default)
+      );
+      ( "test_precomputed_queued_restart_opt_in",
+        (fun () -> Tempfile.with_tempdir test_precomputed_queued_restart_opt_in)
+      );
+    ]

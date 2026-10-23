@@ -14,8 +14,7 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_JIT_SMASHABLE_INSTR_X64_H_
-#define incl_HPHP_JIT_SMASHABLE_INSTR_X64_H_
+#pragma once
 
 #include "hphp/runtime/vm/jit/align-x64.h"
 #include "hphp/runtime/vm/jit/types.h"
@@ -24,7 +23,7 @@
 #include "hphp/util/asm-x64.h"
 #include "hphp/util/data-block.h"
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 
 struct CGMeta;
 
@@ -41,13 +40,10 @@ constexpr size_t smashableCmpqLen() { return 8; }
 constexpr size_t smashableCallLen() { return 5; }
 constexpr size_t smashableJmpLen()  { return 5; }
 constexpr size_t smashableJccLen()  { return 6; }
-
-constexpr size_t smashableAlignTo() { return cache_line_size(); }
+constexpr size_t smashableInterceptLen () { return 2; }
 
 TCA emitSmashableMovq(CodeBlock& cb, CGMeta& fixups, uint64_t imm,
-                      PhysReg d);
-TCA emitSmashableCmpq(CodeBlock& cb, CGMeta& fixups, int32_t imm,
-                      PhysReg r, int8_t disp);
+                      PhysReg d, bool emitFarLiteral = false);
 TCA emitSmashableCall(CodeBlock& cb, CGMeta& fixups, TCA target);
 TCA emitSmashableJmp(CodeBlock& cb, CGMeta& fixups, TCA target);
 TCA emitSmashableJcc(CodeBlock& cb, CGMeta& fixups, TCA target,
@@ -57,10 +53,13 @@ void smashCmpq(TCA inst, uint32_t imm);
 void smashCall(TCA inst, TCA target);
 void smashJmp(TCA inst, TCA target);
 void smashJcc(TCA inst, TCA target);
+void smashInterceptJcc(TCA inst);
+void smashInterceptJmp(TCA inst);
 
 uint64_t smashableMovqImm(TCA inst);
 uint32_t smashableCmpqImm(TCA inst);
 TCA smashableCallTarget(TCA inst);
+TCA smashableCallLiteral(TCA inst);
 TCA smashableJmpTarget(TCA inst);
 TCA smashableJccTarget(TCA inst);
 ConditionCode smashableJccCond(TCA inst);
@@ -79,6 +78,4 @@ constexpr size_t kSmashCmpqImmOff = 4;
 
 ///////////////////////////////////////////////////////////////////////////////
 
-}}}
-
-#endif
+}}

@@ -8,13 +8,9 @@
 #include "hphp/runtime/base/comparisons.h"
 #include "hphp/runtime/base/tv-refcount.h"
 #include "hphp/runtime/base/tv-type.h"
+#include "hphp/runtime/vm/native.h"
 
 namespace HPHP { namespace collections {
-/////////////////////////////////////////////////////////////////////////////
-
-const StaticString
-  s_HH_Pair("HH\\Pair"),
-  s_PairIterator("PairIterator");
 
 /////////////////////////////////////////////////////////////////////////////
 // PairIterator
@@ -23,7 +19,7 @@ static Variant HHVM_METHOD(PairIterator, current) {
   return Native::data<PairIterator>(this_)->current();
 }
 
-static Variant HHVM_METHOD(PairIterator, key) {
+static int64_t HHVM_METHOD(PairIterator, key) {
   return Native::data<PairIterator>(this_)->key();
 }
 
@@ -43,8 +39,6 @@ static void HHVM_METHOD(PairIterator, rewind) {
 // Pair
 }
 
-Class* c_Pair::s_cls;
-
 c_Pair::~c_Pair() {
   tvDecRefGen(&elm0);
   tvDecRefGen(&elm1);
@@ -59,16 +53,9 @@ int64_t c_Pair::linearSearch(const Variant& value) const {
   return -1;
 }
 
-Array c_Pair::toArrayImpl() const {
-  return make_packed_array(tvAsCVarRef(&elm0), tvAsCVarRef(&elm1));
-}
-
-Array c_Pair::toVArrayImpl() const {
-  return make_varray(tvAsCVarRef(&elm0), tvAsCVarRef(&elm1));
-}
-
-Array c_Pair::toDArrayImpl() const {
-  return make_darray(0, tvAsCVarRef(&elm0), 1, tvAsCVarRef(&elm1));
+Array c_Pair::toPHPArrayImpl() const {
+  return make_dict_array(0, tvAsCVarRef(&elm0),
+                         1, tvAsCVarRef(&elm1));
 }
 
 c_Pair* c_Pair::Clone(ObjectData* obj) {
@@ -82,14 +69,7 @@ void c_Pair::throwBadKeyType() {
     "Only integer keys may be used with Pairs");
 }
 
-Array c_Pair::ToArray(const ObjectData* obj) {
-  auto pair = static_cast<const c_Pair*>(obj);
-  check_collection_cast_to_array();
-  return pair->toArrayImpl();
-}
-
 bool c_Pair::OffsetIsset(ObjectData* obj, const TypedValue* key) {
-  assertx(!isRefType(key->m_type));
   auto pair = static_cast<c_Pair*>(obj);
   TypedValue* result;
   if (key->m_type == KindOfInt64) {
@@ -98,24 +78,10 @@ bool c_Pair::OffsetIsset(ObjectData* obj, const TypedValue* key) {
     throwBadKeyType();
     result = nullptr;
   }
-  return result ? !cellIsNull(result) : false;
-}
-
-bool c_Pair::OffsetEmpty(ObjectData* obj, const TypedValue* key) {
-  assertx(!isRefType(key->m_type));
-  auto pair = static_cast<c_Pair*>(obj);
-  TypedValue* result;
-  if (key->m_type == KindOfInt64) {
-    result = pair->get(key->m_data.num);
-  } else {
-    throwBadKeyType();
-    result = nullptr;
-  }
-  return result ? !cellToBool(*result) : true;
+  return result ? !tvIsNull(result) : false;
 }
 
 bool c_Pair::OffsetContains(ObjectData* obj, const TypedValue* key) {
-  assertx(!isRefType(key->m_type));
   auto pair = static_cast<c_Pair*>(obj);
   if (key->m_type == KindOfInt64) {
     return pair->contains(key->m_data.num);
@@ -141,26 +107,19 @@ Object c_Pair::getIterator() {
 namespace collections {
 /////////////////////////////////////////////////////////////////////////////
 
-void CollectionsExtension::initPair() {
+void CollectionsExtension::registerNativePair() {
   HHVM_ME(PairIterator, current);
   HHVM_ME(PairIterator, key);
   HHVM_ME(PairIterator, valid);
   HHVM_ME(PairIterator, next);
   HHVM_ME(PairIterator, rewind);
 
-  Native::registerNativeDataInfo<PairIterator>(
-    s_PairIterator.get(),
-    Native::NDIFlags::NO_SWEEP
-  );
+  Native::registerNativeDataInfo<PairIterator>(Native::NDIFlags::NO_SWEEP);
 
   HHVM_NAMED_ME(HH\\Pair, values,         materialize<c_ImmVector>);
   HHVM_NAMED_ME(HH\\Pair, at,             &c_Pair::php_at);
   HHVM_NAMED_ME(HH\\Pair, get,            &c_Pair::php_get);
   HHVM_NAMED_ME(HH\\Pair, linearSearch,   &c_Pair::linearSearch);
-  HHVM_NAMED_ME(HH\\Pair, toArray,        &c_Pair::toArrayImpl);
-  HHVM_NAMED_ME(HH\\Pair, toVArray,       &c_Pair::toVArrayImpl);
-  HHVM_NAMED_ME(HH\\Pair, toDArray,       &c_Pair::toDArrayImpl);
-  HHVM_NAMED_ME(HH\\Pair, toValuesArray,  &c_Pair::toVArrayImpl);
   HHVM_NAMED_ME(HH\\Pair, getIterator,    &c_Pair::getIterator);
 
   HHVM_NAMED_ME(HH\\Pair, toVector,       materialize<c_Vector>);
@@ -170,12 +129,9 @@ void CollectionsExtension::initPair() {
   HHVM_NAMED_ME(HH\\Pair, toSet,          materialize<c_Set>);
   HHVM_NAMED_ME(HH\\Pair, toImmSet,       materialize<c_ImmSet>);
 
-  loadSystemlib("collections-pair");
+  Native::registerNativePropHandler<CollectionPropHandler>(c_Pair::className());
 
-  c_Pair::s_cls = Unit::lookupClass(s_HH_Pair.get());
-  assertx(c_Pair::s_cls);
-
-  finishClass<c_Pair>();
+  Native::registerClassExtraDataHandler(c_Pair::className(), finish_class<c_Pair>);
 }
 
 /////////////////////////////////////////////////////////////////////////////

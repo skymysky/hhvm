@@ -1,15 +1,18 @@
-<?php
+<?hh
 namespace test;
 
 class Test {
-	static function foo() {
-		echo __CLASS__,"::",__FUNCTION__,"\n";
-	}
+  <<__DynamicallyCallable>>
+    static function foo() :mixed{
+        echo __CLASS__,"::",__FUNCTION__,"\n";
+    }
 }
 
-function foo() {
-	echo __FUNCTION__,"\n";
+<<__DynamicallyCallable>>
+function foo() :mixed{
+    echo __FUNCTION__,"\n";
 }
-
-call_user_func(__NAMESPACE__."\\foo");
-call_user_func(__NAMESPACE__."\\test::foo");
+<<__EntryPoint>> function main(): void {
+\call_user_func(\HH\dynamic_fun(__NAMESPACE__."\\foo"));
+\call_user_func(__NAMESPACE__."\\Test::foo");
+}

@@ -1,0 +1,44 @@
+error: Typing[4419] Type alias marked `<<__DisjointShapeSplat>>` may contain overlapping shapes [1]
+-> Shape field `id` is defined here [2]
+-> Shape field `id` is also defined here [3]
+
+disjoint_attr_bad_open_shape.php:7:6
+5 | // outer shape in `supportdyn`, but the overlapping `id` fields must be checked.
+6 | <<__DisjointShapeSplat>>
+7 | type Bad = shape(...shape('id' => int), 'id' => bool, ...);
+  |      ^^^ [1]
+  |                           ^^^^ [2]
+  |                                         ^^^^ [3]
+8 | 
+9 | // An explicit wrapper combines with the automatically inserted wrapper, so
+
+error: Typing[4419] Type alias marked `<<__DisjointShapeSplat>>` may contain overlapping shapes [1]
+-> Shape field `nested_id` is defined here [2]
+-> Shape field `nested_id` is also defined here [3]
+
+disjoint_attr_bad_open_shape.php:12:6
+10 | // stripping `supportdyn` must be recursive.
+11 | <<__DisjointShapeSplat>>
+12 | type BadNestedSupportdyn =
+   |      ^^^^^^^^^^^^^^^^^^^ [1]
+13 |   supportdyn<shape(...shape('nested_id' => int), 'nested_id' => bool, ...)>;
+   |                             ^^^^^^^^^^^ [2]
+   |                                                  ^^^^^^^^^^^ [3]
+14 | 
+15 | // A top-level union must recurse before peeling the implicit `supportdyn`
+
+error: Typing[4419] Type alias marked `<<__DisjointShapeSplat>>` may contain overlapping shapes [1]
+-> Shape field `union_id` is defined here [2]
+-> Shape field `union_id` is also defined here [3]
+
+disjoint_attr_bad_open_shape.php:18:6
+16 | // wrapper from its open shape branch.
+17 | <<__DisjointShapeSplat>>
+18 | type BadUnion =
+   |      ^^^^^^^^ [1]
+19 |   (shape() |
+20 |     shape(...shape('union_id' => int), 'union_id' => bool, ...));
+   |                    ^^^^^^^^^^ [2]
+   |                                        ^^^^^^^^^^ [3]
+
+3 errors found

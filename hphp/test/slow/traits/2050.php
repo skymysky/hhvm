@@ -1,8 +1,8 @@
-<?php
+<?hh
 
 trait T {
-  static function foo() {
-    echo "I'm in class " . get_class() . "\n";
+  static function foo() :mixed{
+    echo "I'm in class " . get_class(new self()) . "\n";
   }
 }
 class C {
@@ -10,17 +10,7 @@ class C {
  }
 class D extends C {
 }
-trait T2 {
- use T;
- }
-trait T3 {
- use T2;
- }
-$x = new D();
-$x->foo();
+<<__EntryPoint>> function main(): void {
 C::foo();
 D::foo();
-T::foo();
-T2::foo();
-T3::foo();
-?>
+}

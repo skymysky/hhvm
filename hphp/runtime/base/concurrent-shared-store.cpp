@@ -16,31 +16,29 @@
 
 #include "hphp/runtime/base/concurrent-shared-store.h"
 
-#include <mutex>
-#include <set>
-#include <string>
-#include <vector>
-#include <folly/Format.h>
-
-#include "hphp/util/logger.h"
-#include "hphp/util/timer.h"
-#include "hphp/util/trace.h"
-
-#include "hphp/runtime/base/variable-serializer.h"
-#include "hphp/runtime/base/variable-unserializer.h"
-#include "hphp/runtime/base/apc-handle-defs.h"
 #include "hphp/runtime/base/apc-object.h"
 #include "hphp/runtime/base/apc-stats.h"
-#include "hphp/runtime/base/apc-file-storage.h"
+#include "hphp/runtime/base/request-id.h"
+#include "hphp/runtime/base/variable-serializer.h"
 #include "hphp/runtime/ext/apc/ext_apc.h"
-#include "hphp/runtime/ext/apc/snapshot.h"
-#include "hphp/runtime/vm/treadmill.h"
+
+#include "hphp/util/logger.h"
+#include "hphp/util/trace.h"
+
+#include <atomic>
+#include <mutex>
+#include <string>
+#include <vector>
+
+#include <fmt/format.h>
+#include <folly/Format.h>
+#include <folly/Random.h>
 
 using folly::SharedMutex;
 
 namespace HPHP {
 
-TRACE_SET_MOD(apc);
+TRACE_SET_MOD(apc)
 
 //////////////////////////////////////////////////////////////////////
 
@@ -48,22 +46,9 @@ namespace {
 
 //////////////////////////////////////////////////////////////////////
 
-bool check_noTTL(const char* key, size_t keyLen) {
-  for (auto& listElem : apcExtension::NoTTLPrefix) {
-    auto const prefix = listElem.c_str();
-    auto const prefixLen = listElem.size();
-    if (keyLen >= prefixLen && memcmp(key, prefix, prefixLen) == 0) {
-      return true;
-    }
-  }
-  return false;
-}
-
 #ifdef HPHP_TRACE
 std::string show(const StoreValue& sval) {
-  return sval.data().left() ?
-    folly::sformat("size {} kind {}", sval.dataSize, (int)sval.getKind()) :
-    folly::sformat("size {} serialized", std::abs(sval.dataSize));
+  return fmt::format("size {} kind {}", sval.dataSize, (int)sval.getKind());
 }
 #endif
 
@@ -73,17 +58,42 @@ std::string show(const StoreValue& sval) {
 
 //////////////////////////////////////////////////////////////////////
 
-void StoreValue::set(APCHandle* v, int64_t ttl) {
+void StoreValue::set(APCHandle* v, int64_t expire_ttl, int64_t max_ttl, int64_t bump_ttl) {
   setHandle(v);
-  mtime = time(nullptr);
+  uint32_t mtime = time(nullptr);
   if (c_time == 0)  c_time = mtime;
-  expire = ttl ? mtime + ttl : 0;
+  expireRequestId.store(RequestId(), std::memory_order_release);
+  expireTime.store(expire_ttl ? mtime + expire_ttl : 0, std::memory_order_release);
+  bumpTTL.store(bump_ttl, std::memory_order_release);
+  maxExpireTime.store(max_ttl ? mtime + max_ttl : 0, std::memory_order_release);
 }
 
 bool StoreValue::expired() const {
   // For primed values, 'expire' is not valid to read.
   if (c_time == 0) return false;
-  return expire && time(nullptr) >= expire;
+  auto const e = rawExpire();
+  return e && time(nullptr) >= e;
+}
+
+uint32_t StoreValue::queueExpire() const {
+  assertx(c_time != 0); // Should not call queueExpire for primed values
+
+  auto expire = expireTime.load(std::memory_order_acquire);
+  if (!expire) {
+    return expire;
+  }
+
+  auto bump = bumpTTL.load(std::memory_order_acquire);
+  if (bump == 0) {
+    return expire;
+  }
+
+  auto now = time(nullptr);
+  auto halftimeExpire = expire - (bump / 2);
+  if (halftimeExpire > now) {
+    return halftimeExpire;
+  }
+  return expire;
 }
 
 //////////////////////////////////////////////////////////////////////
@@ -95,50 +105,56 @@ EntryInfo::Type EntryInfo::getAPCType(const APCHandle* handle) {
     case APCKind::Bool:
     case APCKind::Int:
     case APCKind::Double:
-    case APCKind::StaticString:
+    case APCKind::PersistentClass:
+    case APCKind::LazyClass:
+    case APCKind::PersistentFunc:
+    case APCKind::PersistentClsMeth:
+    case APCKind::FuncEntity:
+    case APCKind::ClsMeth:
     case APCKind::StaticArray:
-    case APCKind::StaticVec:
-    case APCKind::StaticDict:
-    case APCKind::StaticKeyset:
-      return EntryInfo::Type::Uncounted;
-    case APCKind::UncountedString:
-      return EntryInfo::Type::UncountedString;
+    case APCKind::StaticBespoke:
+    case APCKind::StaticString:
+      return EntryInfo::Type::Shared;
     case APCKind::SharedString:
-      return EntryInfo::Type::APCString;
-    case APCKind::UncountedArray:
-      return EntryInfo::Type::UncountedArray;
-    case APCKind::UncountedVec:
-      return EntryInfo::Type::UncountedVec;
-    case APCKind::UncountedDict:
-      return EntryInfo::Type::UncountedDict;
-    case APCKind::UncountedKeyset:
-      return EntryInfo::Type::UncountedKeyset;
-    case APCKind::SerializedArray:
-      return EntryInfo::Type::SerializedArray;
+      return EntryInfo::Type::SharedString;
+    case APCKind::SharedArray:
+    case APCKind::SharedBespoke:
+      switch (handle->type()) {
+        case KindOfPersistentVec:    return EntryInfo::Type::SharedVec;
+        case KindOfPersistentDict:   return EntryInfo::Type::SharedDict;
+        case KindOfPersistentKeyset: return EntryInfo::Type::SharedKeyset;
+        default: always_assert(false);
+      }
     case APCKind::SerializedVec:
       return EntryInfo::Type::SerializedVec;
     case APCKind::SerializedDict:
       return EntryInfo::Type::SerializedDict;
     case APCKind::SerializedKeyset:
       return EntryInfo::Type::SerializedKeyset;
-    case APCKind::SharedVec:
+    case APCKind::CopiedVec:
+    case APCKind::CopiedLegacyVec:
       return EntryInfo::Type::APCVec;
-    case APCKind::SharedDict:
+    case APCKind::CopiedDict:
+    case APCKind::CopiedLegacyDict:
       return EntryInfo::Type::APCDict;
-    case APCKind::SharedKeyset:
+    case APCKind::CopiedKeyset:
       return EntryInfo::Type::APCKeyset;
-    case APCKind::SharedArray:
-    case APCKind::SharedPackedArray:
-    case APCKind::SharedVArray:
-    case APCKind::SharedDArray:
-      return EntryInfo::Type::APCArray;
     case APCKind::SerializedObject:
       return EntryInfo::Type::SerializedObject;
-    case APCKind::SharedObject:
-    case APCKind::SharedCollection:
+    case APCKind::CopiedObject:
+    case APCKind::CopiedCollection:
       return EntryInfo::Type::APCObject;
+    case APCKind::RFunc:
+      return EntryInfo::Type::APCRFunc;
+    case APCKind::RClsMeth:
+      return EntryInfo::Type::APCRClsMeth;
   }
   not_reached();
+}
+
+size_t EntryInfo::totalSize() const {
+  return size + key.size() + 1 /* null terminator in string */ +
+    ConcurrentTableSharedStore::NodeSize + sizeof(StoreValue);
 }
 
 //////////////////////////////////////////////////////////////////////
@@ -172,7 +188,7 @@ struct HotCache {
    * Else, returns false, leaves 'value' unchanged, but fills 'idx' with
    * information about the failure to be passed to 'store'.
    */
-  bool get(const StringData* key, Variant& value, Idx& idx) const;
+  bool get(const StringData* key, Variant& value, Idx& idx, bool pure) const;
 
   /*
    * Try to add or update an entry (key, svar), if they both are eligible
@@ -192,7 +208,7 @@ struct HotCache {
    * under read/write locks like ConcurrentTableSharedStore::get/store/erase).
    */
   bool clearValue(const StoreValue& sval) {
-    return clearValueIdx(sval.hotIndex.load(std::memory_order_relaxed));
+    return clearValueIdx(sval.hotIndex.load(std::memory_order_acquire));
   }
 
   /*
@@ -201,16 +217,16 @@ struct HotCache {
   bool hasValue(const StringData* key) const;
 
  private:
-  // Uncounted ArrayData is stored 'unwrapped' to save one dereference.
-  using HotValue = Either<APCHandle*,ArrayData*,either_policy::high_bit>;
-  using HotValueRaw = HotValue::Opaque;
-
   // Keys stored are char*, but lookup/insert always use StringData*.
   struct EqualityTester {
     bool operator()(const char* a, const StringData* b) const {
       // AtomicHashArray magic keys are < 0; valid pointers are > 0 and aligned.
+#if !FOLLY_SANITIZE
       return reinterpret_cast<intptr_t>(a) > 0 &&
         wordsame(a, b->data(), b->size() + 1);
+#else
+      return reinterpret_cast<intptr_t>(a) > 0 && !strcmp(a, b->data());
+#endif
     }
   };
   struct Hasher {
@@ -228,48 +244,14 @@ struct HotCache {
       return reinterpret_cast<const char*>(dst);
     }
   };
-  using HotMap = folly::AtomicHashArray<const char*, std::atomic<HotValueRaw>,
+  using HotMap = folly::AtomicHashArray<const char*, std::atomic<APCHandle*>,
                                         Hasher, EqualityTester,
                                         APCAllocator<char>,
                                         folly::AtomicHashArrayLinearProbeFcn,
                                         KeyConverter>;
 
   static bool supportedKind(const APCHandle* h) {
-    return h->isSingletonKind() || h->isUncounted();
-  }
-
-  static HotValueRaw makeRawValue(APCHandle* h) {
-    assertx(h != nullptr && supportedKind(h));
-    HotValue v = [&] {
-      switch (h->kind()) {
-        case APCKind::UncountedArray:
-          return HotValue{APCTypedValue::fromHandle(h)->getArrayData()};
-        case APCKind::UncountedVec:
-          return HotValue{APCTypedValue::fromHandle(h)->getVecData()};
-        case APCKind::UncountedDict:
-          return HotValue{APCTypedValue::fromHandle(h)->getDictData()};
-        case APCKind::UncountedKeyset:
-          return HotValue{APCTypedValue::fromHandle(h)->getKeysetData()};
-        default:
-          return HotValue{h};
-      }
-    }();
-    return v.toOpaque();
-  }
-
-  static bool rawValueToLocal(HotValueRaw vraw, Variant& value) {
-    HotValue v = HotValue::fromOpaque(vraw);
-    if (ArrayData* ad = v.right()) {
-      value = Variant{
-        ad, ad->toPersistentDataType(), Variant::PersistentArrInit{}
-      };
-      return true;
-    }
-    if (APCHandle* h = v.left()) {
-      value = h->toLocal();
-      return true;
-    }
-    return false;
+    return h->isSingletonKind() || h->isShared();
   }
 
   bool clearValueIdx(Idx idx);
@@ -337,10 +319,10 @@ bool HotCache::hasValue(const StringData* key) const {
   if (!maybeHotFast(key)) return false;
   HotMap::const_iterator it = m_hotMap->find(key);
   return it != m_hotMap->end() &&
-    !HotValue::fromOpaque(it->second.load(std::memory_order_relaxed)).isNull();
+         it->second.load(std::memory_order_acquire) != nullptr;
 }
 
-bool HotCache::get(const StringData* key, Variant& value, Idx& idx) const {
+bool HotCache::get(const StringData* key, Variant& value, Idx& idx, bool pure) const {
   if (!maybeHotFast(key)) {
     idx = StoreValue::kHotCacheKnownIneligible;
     return false;
@@ -350,7 +332,8 @@ bool HotCache::get(const StringData* key, Variant& value, Idx& idx) const {
     idx = StoreValue::kHotCacheUnknown;
     return false;
   }
-  if (rawValueToLocal(it->second.load(std::memory_order_relaxed), value)) {
+  if (auto const handle = it->second.load(std::memory_order_acquire)) {
+    value = handle->toLocal(pure);
     return true;
   }
   idx = it.getIndex();
@@ -361,20 +344,19 @@ bool HotCache::store(Idx idx, const StringData* key,
                      APCHandle* svar, const StoreValue* sval) {
   if (idx == StoreValue::kHotCacheKnownIneligible) return false;
   if (!svar || !supportedKind(svar)) return false;
-  auto raw = makeRawValue(svar);
   if (idx == StoreValue::kHotCacheUnknown) {
     if (!maybeHot(key->data())) return false;
-    if (m_isFull.load(std::memory_order_relaxed)) return false;
-    auto p = m_hotMap->emplace(key, raw);
+    if (m_isFull.load(std::memory_order_acquire)) return false;
+    auto p = m_hotMap->emplace(key, svar);
     if (p.first == m_hotMap->end()) {
-      m_isFull.store(true, std::memory_order_relaxed);
+      m_isFull.store(true, std::memory_order_release);
       return false;
     }
     idx = p.first.getIndex();
   }
   assertx(idx >= 0);
-  sval->hotIndex.store(idx, std::memory_order_relaxed);
-  m_hotMap->findAt(idx)->second.store(raw, std::memory_order_relaxed);
+  sval->hotIndex.store(idx, std::memory_order_release);
+  m_hotMap->findAt(idx)->second.store(svar, std::memory_order_release);
   return true;
 }
 
@@ -382,106 +364,84 @@ bool HotCache::clearValueIdx(Idx idx) {
   if (idx == StoreValue::kHotCacheUnknown) return false;
   assertx(idx >= 0);
   auto it = m_hotMap->findAt(idx);
-  it->second.store(HotValue(nullptr).toOpaque(), std::memory_order_relaxed);
+  it->second.store(nullptr, std::memory_order_release);
   return true;
 }
 
 //////////////////////////////////////////////////////////////////////
 
-bool ConcurrentTableSharedStore::clear() {
-  SharedMutex::WriteHolder l(m_lock);
-  for (Map::iterator iter = m_vars.begin(); iter != m_vars.end();
-       ++iter) {
-    s_hotCache.clearValue(iter->second);
-    iter->second.data().match(
-      [&] (APCHandle* handle) {
-        handle->unreferenceRoot(iter->second.dataSize);
-      },
-      [&] (char*) {}
-    );
-    const void* vpKey = iter->first;
-    free(const_cast<void*>(vpKey));
-  }
-  m_vars.clear();
-  return true;
-}
-
-bool ConcurrentTableSharedStore::eraseKey(const String& key) {
+bool ConcurrentTableSharedStore::eraseKey(const OptString& key) {
   assertx(!key.isNull());
-  return eraseImpl(tagStringData(key.get()), false, 0, nullptr);
+  return eraseImpl(tagStringData(key.get()), false, nullptr);
 }
 
 /*
  * The Map::accessor here establishes a write lock, which means that other
  * threads, protected by read locks through Map::const_accessor, will not
  * read erased values from APC.
- *
- * The ReadLock here is to sync with clear(), which only has a WriteLock,
- * not a specific accessor.
  */
 bool ConcurrentTableSharedStore::eraseImpl(const char* key,
                                            bool expired,
-                                           int64_t oldestLive,
-                                           ExpMap::accessor* expAcc) {
+                                           ExpSet::accessor* expAcc) {
   assertx(key);
 
-  SharedMutex::ReadHolder l(m_lock);
+  std::shared_lock l(m_lock);
   Map::accessor acc;
   if (!m_vars.find(acc, key)) {
     return false;
   }
-  if (expired && !acc->second.expired()) {
+  auto& storeVal = acc->second;
+  if (expired && !storeVal.expired()) {
+    auto expiry = storeVal.queueExpire();
+    if (expiry) {
+      s_hotCache.clearValue(storeVal);
+
+      // If we got an expAcc it means that we are iterating over m_expQueue and
+      // expiring things. But if the item is not expired yet we need to put it back
+      // into the queue with the correct expire time. It happens if expire time was
+      // updated either by apc_extend_ttl or by setting a new value with a TTL on
+      // an existing key.
+      if (expAcc) {
+        auto ikey = intptr_t(acc->first);
+        m_expQueue.push({ ikey, expiry });
+      }
+    }
     return false;
   }
 
-  auto& storeVal = acc->second;
-  bool wasCached = s_hotCache.clearValue(storeVal);
-
-  if (auto const var = storeVal.data().left()) {
-    APCStats::getAPCStats().removeAPCValue(storeVal.dataSize, var,
-                                           storeVal.expire == 0, expired);
-    /*
-     * As an optimization, we eagerly delete uncounted values that expired
-     * long ago. But HotCache does not check expiration on every 'get', so
-     * any values previously cached there must take the usual treadmill route.
-     */
-    if (expired && storeVal.expire < oldestLive &&
-        var->isUncounted() && !wasCached) {
-      APCTypedValue::fromHandle(var)->deleteUncounted();
-    } else {
-      var->unreferenceRoot(storeVal.dataSize);
-    }
-  } else {
-    assertx(!expired);  // primed keys never say true to expired()
-  }
+  s_hotCache.clearValue(storeVal);
 
   FTRACE(2, "Remove {} {}\n", acc->first, show(acc->second));
+  auto const var = storeVal.data();
+  APCStats::getAPCStats().removeAPCValue(storeVal.dataSize, var, expired);
+  var->unreferenceRoot(storeVal.dataSize);
+
   APCStats::getAPCStats().removeKey(strlen(acc->first));
   const void* vpkey = acc->first;
   /*
    * Note that we have a delicate situation here; purgeExpired obtains
-   * the ExpMap accessor, and then the Map accessor, while eraseImpl
+   * the ExpSet accessor, and then the Map accessor, while eraseImpl
    * (called from other sites) apparently obtains the Map accessor
-   * followed by the ExpMap accessor.
+   * followed by the ExpSet accessor.
    *
    * This does not result in deadlock, because the Map accessor is
    * released by m_vars.erase. But we need this ordering to ensure
-   * that as long as you hold an accessor to m_expMap, its key
+   * that as long as you hold an accessor to m_expSet, its key
    * converted to a char* will be a valid c-string.
    */
   m_vars.erase(acc);
   if (expAcc) {
-    m_expMap.erase(*expAcc);
+    m_expSet.erase(*expAcc);
   } else {
     /*
-     * Note that we can't just call m_expMap.erase(intptr_t(vpkey))
+     * Note that we can't just call m_expSet.erase(intptr_t(vpkey))
      * here. That will remove the element and not block, even if
-     * we hold an ExpMap::accessor to the element in another thread,
+     * we hold an ExpSet::accessor to the element in another thread,
      * which would allow us to proceed and free vpkey.
      */
-    ExpMap::accessor eAcc;
-    if (m_expMap.find(eAcc, intptr_t(vpkey))) {
-      m_expMap.erase(eAcc);
+    ExpSet::accessor eAcc;
+    if (m_expSet.find(eAcc, intptr_t(vpkey))) {
+      m_expSet.erase(eAcc);
     }
   }
   free(const_cast<void*>(vpkey));
@@ -490,43 +450,50 @@ bool ConcurrentTableSharedStore::eraseImpl(const char* key,
 
 // Should be called outside m_lock
 void ConcurrentTableSharedStore::purgeExpired() {
-  if (m_purgeCounter.fetch_add(1, std::memory_order_relaxed) %
-      apcExtension::PurgeFrequency != 0) {
-    return;
-  }
+  auto last = m_lastPurgeTime.load(std::memory_order_acquire);
   time_t now = time(nullptr);
-  int64_t oldestLive = apcExtension::UseUncounted ?
-      HPHP::Treadmill::getOldestStartTime() : 0;
+  if (now < last + apcExtension::PurgeInterval) return;
+  if (!m_lastPurgeTime.compare_exchange_strong(last, now,
+                                               std::memory_order_acq_rel)) {
+    return;                             // someone beat us
+  }
   ExpirationPair tmp;
-  int i = 0;
-  while (apcExtension::PurgeRate < 0 || i < apcExtension::PurgeRate) {
-    if (!m_expQueue.try_pop(tmp)) {
-      break;
-    }
+  DEBUG_ONLY int i = 0;
+  DEBUG_ONLY int j = 0;
+  while (m_expQueue.try_pop(tmp)) {
     if (tmp.second > now) {
       m_expQueue.push(tmp);
       break;
     }
-    if (UNLIKELY(tmp.first ==
-                 intptr_t(apcExtension::FileStorageFlagKey.c_str()))) {
-      adviseOut();
-      tmp.second = time(nullptr) + apcExtension::FileStorageAdviseOutPeriod;
-      m_expQueue.push(tmp);
-      continue;
+    ExpSet::accessor acc;
+    if (m_expSet.find(acc, tmp.first)) {
+      FTRACE(3, "Expiring {}...", (char*)tmp.first);
+      if (eraseImpl((char*)tmp.first, true, &acc)) {
+        FTRACE(3, "succeeded\n");
+        ++i;
+        continue;
+      }
+      FTRACE(3, "failed\n");
     }
-    ExpMap::accessor acc;
-    if (m_expMap.find(acc, tmp.first)) {
-      eraseImpl((char*)tmp.first, true, oldestLive, &acc);
-    }
-    ++i;
+    ++j;
   }
-  FTRACE(1, "Expired {} entries", i);
+  FTRACE(1, "Expired {} entries and ignored {}\n", i, j);
 }
 
-bool ConcurrentTableSharedStore::handlePromoteObj(const String& key,
+void ConcurrentTableSharedStore::purgeDeferred(req::vector<StringData*>&& keys) {
+  for (auto const& key : keys) {
+    if (eraseImpl(tagStringData(key), true, nullptr)) {
+      FTRACE(3, "purgeDeferred: {}\n", key);
+    }
+  }
+  keys.clear();
+}
+
+bool ConcurrentTableSharedStore::handlePromoteObj(const OptString& key,
                                                   APCHandle* svar,
-                                                  const Variant& value) {
-  auto const pair = APCObject::MakeAPCObject(svar, value);
+                                                  const Variant& value,
+                                                  bool pure) {
+  auto const pair = APCObject::MakeAPCObject(svar, value, pure);
   if (!pair.handle) return false;
   auto const converted = pair.handle;
   auto const size = pair.size;
@@ -542,11 +509,11 @@ bool ConcurrentTableSharedStore::handlePromoteObj(const String& key,
   // Our handle may not be same as `svar' here because some other thread may
   // have updated it already, check before updating.
   auto& sval = acc->second;
-  auto const handle = sval.data().left();
+  auto const handle = sval.data();
   if (handle == svar && handle->kind() == APCKind::SerializedObject) {
     sval.setHandle(converted);
     APCStats::getAPCStats().updateAPCValue(
-      converted, size, handle, sval.dataSize, sval.expire == 0, false);
+      converted, size, handle, sval.dataSize, false);
     handle->unreferenceRoot(sval.dataSize);
     sval.dataSize = size;
     return true;
@@ -556,126 +523,132 @@ bool ConcurrentTableSharedStore::handlePromoteObj(const String& key,
   return false;
 }
 
-APCHandle* ConcurrentTableSharedStore::unserialize(const String& key,
-                                                   StoreValue* sval) {
-  auto const sAddr = sval->data().right();
-  assertx(sAddr != nullptr);
+bool ConcurrentTableSharedStore::checkExpire(const OptString& keyStr,
+                                                Map::const_accessor& acc) {
+  auto const tag = tagStringData(keyStr.get());
+  if (!m_vars.find(acc, tag)) return true;
+  auto const sval = &acc->second;
+  if (sval->c_time == 0) return false;
   /*
-    This method is special, since another thread T may concurrently
-    attempt to 'get' this entry while we're unserializing it. If T
-    observes sval->data with a cleared tag, it will proceed without
-    any further locking (it only has a const_accessor).
-
-    Thus, this method must ensure that the tag of sval->data is cleared
-    only *after* sval is in a fully consistent unserialized state.
+   * To reduce thundering herds, expiration on apc_fetch is "deferred":
+   * First fetch that sees entry is too old sets expireTime to 1, stores its
+   * thread id, and returns false. Subsequent apc_fetch calls by *other*
+   * threads will treat that entry as unexpired, but all other code will
+   * treat it as expired, in particular, the periodic purging.
    */
+  auto const e = sval->expireTime.load(std::memory_order_acquire);
+  if (e == 0) return false;
 
-  try {
-    auto const sType =
-      apcExtension::EnableApcSerialize
-        ? VariableUnserializer::Type::APCSerialize
-        : VariableUnserializer::Type::Internal;
-
-    VariableUnserializer vu(sAddr, sval->getSerializedSize(), sType);
-    if (sval->readOnly) vu.setReadOnly();
-    Variant v = vu.unserialize();
-    auto const pair = APCHandle::Create(v, sval->isSerializedObj(),
-      APCHandleLevel::Outer, false);
-    sval->dataSize = pair.size;
-    sval->setHandle(pair.handle);  // Publish unserialized value (see 'get').
-    APCStats::getAPCStats().addAPCValue(pair.handle, pair.size, true);
-    return pair.handle;
-  } catch (ResourceExceededException&) {
-    throw;
-  } catch (Exception& e) {
-    raise_notice("APC Primed fetch failed: key %s (%s).",
-                 key.c_str(), e.getMessage().c_str());
-    return nullptr;
-  }
-}
-
-bool ConcurrentTableSharedStore::get(const String& keyStr, Variant& value) {
-  FTRACE(3, "Get {}\n", keyStr.get()->data());
-  HotCache::Idx hotIdx;
-  if (s_hotCache.get(keyStr.get(), value, hotIdx)) return true;
-  const StoreValue *sval;
-  APCHandle *svar = nullptr;
-  SharedMutex::ReadHolder l(m_lock);
-  bool expired = false;
-  bool promoteObj = false;
-  auto tag = tagStringData(keyStr.get());
-  {
-    Map::const_accessor acc;
-    if (!m_vars.find(acc, tag)) {
-      return false;
+  if (e == 1) {
+    // Treat as expired iff this thread was the one setting the 1.
+    if (sval->expireRequestId.load(std::memory_order_acquire) ==
+        RI().m_id) {
+      FTRACE(3, "Previously expired by us: {}\n", show(*sval));
+      return true;
     }
-    sval = &acc->second;
-    if (sval->expired()) {
-      // Because it only has a read lock on the data, deletion from
-      // expiration has to happen after the lock is released
-      expired = true;
-    } else {
-      if (auto const handle = sval->data().left()) {
-        svar = handle;
-      } else {
-        std::lock_guard<SmallLock> sval_lock(sval->lock);
-
-        if (auto const handle = sval->data().left()) {
-          svar = handle;
-        } else {
-          /*
-           * Note that unserialize can run arbitrary php code via a __wakeup
-           * routine, which could try to access this same key, and we're
-           * holding various locks here.  This is only for promoting primed
-           * values to in-memory values, so it's basically not a real
-           * problem, but ... :)
-           */
-          svar = unserialize(keyStr, const_cast<StoreValue*>(sval));
-          if (!svar) return false;
-        }
-      }
-      assertx(sval->data().left() == svar);
-      APCKind kind = sval->getKind();
-      if (apcExtension::AllowObj &&
-          (kind == APCKind::SerializedObject ||
-           kind == APCKind::SharedObject ||
-           kind == APCKind::SharedCollection) &&
-          !svar->objAttempted()) {
-        // Hold ref here for later promoting the object
-        svar->referenceNonRoot();
-        promoteObj = true;
-      }
-      value = sval->toLocal();
-      if (!promoteObj) {
-        /*
-         * Successful slow-case lookup => add value to cache (if key and kind
-         * are eligible and there is still room for it). Another thread may be
-         * updating the same key concurrently, but ConcurrentTableSharedStore's
-         * per-entry lock ensures it will agree on the value.
-         */
-        s_hotCache.store(hotIdx, keyStr.get(), svar, sval);
-      }
-    }
-  }
-  if (expired) {
-    eraseImpl(tag, true,
-              apcExtension::UseUncounted ?
-              HPHP::Treadmill::getOldestStartTime() : 0, nullptr);
+    FTRACE(5, "Expired by {}, we are {}\n",
+           sval->expireRequestId.load(std::memory_order_acquire).toString(),
+           RI().m_id.toString());
     return false;
   }
 
-  if (promoteObj)  {
-    handlePromoteObj(keyStr, svar, value);
-    // release the extra ref
-    svar->unreferenceNonRoot();
+  auto now = time(nullptr);
+  if (now >= e) {
+    // Try to mark entry as expired.
+    auto expected = RequestId();
+    auto const desired = RI().m_id;
+    if (!sval->expireRequestId.compare_exchange_strong(expected, desired)) {
+      // Another thread raced us and won, so not expired.
+      return false;
+    }
+
+    FTRACE(3, "Deferred expire: {}\n", show(*sval));
+    sval->expireTime.store(1, std::memory_order_release);
+    auto const key = intptr_t(acc->first);
+    // release acc so the m_expSet.erase won't deadlock with a
+    // concurrent purgeExpired.
+    acc.release();
+    // make sure purgeExpired doesn't kill it before we have a
+    // chance to refill it.
+    m_expSet.erase(key);
+    g_context->enqueueAPCDeferredExpire(keyStr);
+    return true;
   }
+
+  auto diff = e - now;
+  auto bumpTTL = sval->bumpTTL.load(std::memory_order_acquire);
+  if (bumpTTL != 0 && diff <= (bumpTTL / 2)) {
+    auto maxExpireTime = sval->maxExpireTime.load(std::memory_order_acquire);
+    if (e < maxExpireTime) {
+      uint32_t newExpire = now + bumpTTL;
+      newExpire = maxExpireTime == 0
+        ? newExpire : std::min(newExpire, maxExpireTime);
+      FTRACE(3, "Expire soon so extend to {}: {}\n", newExpire, show(*sval));
+      auto expected = e;
+      sval->expireTime.compare_exchange_strong(
+        expected, newExpire, std::memory_order_release);
+    }
+  }
+  return false;
+}
+
+bool ConcurrentTableSharedStore::get(const OptString& keyStr, Variant& value, bool pure) {
+  FTRACE(3, "Get {}\n", keyStr.get()->data());
+  HotCache::Idx hotIdx;
+  if (s_hotCache.get(keyStr.get(), value, hotIdx, pure)) return true;
+  const StoreValue *sval;
+  APCHandle *svar = nullptr;
+  std::shared_lock l(m_lock);
+  bool promoteObj = false;
+  bool needsToLocal = false;
+  {
+    Map::const_accessor acc;
+    if (checkExpire(keyStr, acc)) {
+      return false;
+    }
+    sval = &acc->second;
+    svar = sval->data();
+    APCKind kind = sval->getKind();
+    if (apcExtension::AllowObj &&
+        (kind == APCKind::SerializedObject ||
+         kind == APCKind::CopiedObject ||
+         kind == APCKind::CopiedCollection) &&
+        !svar->objAttempted()) {
+      // Hold ref here for later promoting the object
+      svar->referenceNonRoot();
+      needsToLocal = promoteObj = true;
+    } else if (svar->isTypedValue()) {
+      value = svar->toLocal(pure);
+    } else {
+      svar->referenceNonRoot();
+      needsToLocal = true;
+    }
+    if (!promoteObj) {
+      /*
+       * Successful slow-case lookup => add value to cache (if key and kind
+       * are eligible and there is still room for it). Another thread may be
+       * updating the same key concurrently, but ConcurrentTableSharedStore's
+       * per-entry lock ensures it will agree on the value.
+       */
+      s_hotCache.store(hotIdx, keyStr.get(), svar, sval);
+    }
+  }
+
+  if (needsToLocal) {
+    SCOPE_EXIT { svar->unreferenceNonRoot(); };
+
+    l.unlock(); // toLocal() may reenter the autoloader
+    value = svar->toLocal(pure);
+    if (promoteObj) handlePromoteObj(keyStr, svar, value, pure);
+  }
+
   return true;
 }
 
-int64_t ConcurrentTableSharedStore::inc(const String& key, int64_t step,
+int64_t ConcurrentTableSharedStore::inc(const OptString& key, int64_t step,
                                         bool& found) {
   found = false;
-  SharedMutex::ReadHolder l(m_lock);
+  std::shared_lock l(m_lock);
 
   Map::accessor acc;
   if (!m_vars.find(acc, tagStringData(key.get()))) {
@@ -688,7 +661,7 @@ int64_t ConcurrentTableSharedStore::inc(const String& key, int64_t step,
    * file-backed storage from priming.  So we don't need to try to deserialize
    * anything or handle the case that sval.data is file-backed.
    */
-  auto const oldHandle = sval.data().left();
+  auto const oldHandle = sval.data();
   if (oldHandle == nullptr) return 0;
   if (oldHandle->kind() != APCKind::Int &&
       oldHandle->kind() != APCKind::Double) {
@@ -699,12 +672,14 @@ int64_t ConcurrentTableSharedStore::inc(const String& key, int64_t step,
   assertx(sval.hotIndex == StoreValue::kHotCacheUnknown);
   s_hotCache.clearValue(sval);
 
-  auto const ret = oldHandle->toLocal().toInt64() + step;
-  auto const pair = APCHandle::Create(Variant(ret), false,
-    APCHandleLevel::Outer, false);
+  auto const ret = oldHandle->toLocal(true /* pure irrelevant for int */).toInt64() + step;
+  auto const pair = APCHandle::Create(VarNR{ret},
+                                      APCHandleLevel::Outer,
+                                      false,
+                                      true /* pure doesn't matter for ints */);
   APCStats::getAPCStats().updateAPCValue(pair.handle, pair.size,
                                          oldHandle, sval.dataSize,
-                                         sval.expire == 0, false);
+                                         false);
   oldHandle->unreferenceRoot(sval.dataSize);
   sval.setHandle(pair.handle);
   sval.dataSize = pair.size;
@@ -712,9 +687,9 @@ int64_t ConcurrentTableSharedStore::inc(const String& key, int64_t step,
   return ret;
 }
 
-bool ConcurrentTableSharedStore::cas(const String& key, int64_t old,
+bool ConcurrentTableSharedStore::cas(const OptString& key, int64_t old,
                                      int64_t val) {
-  SharedMutex::ReadHolder l(m_lock);
+  std::shared_lock l(m_lock);
 
   Map::accessor acc;
   if (!m_vars.find(acc, tagStringData(key.get()))) {
@@ -724,54 +699,56 @@ bool ConcurrentTableSharedStore::cas(const String& key, int64_t old,
   auto& sval = acc->second;
   if (sval.expired()) return false;
   s_hotCache.clearValue(sval);
-  auto const oldHandle =
-    sval.data().match([&](APCHandle* h) { return h; },
-                      [&](char* /*file*/) { return unserialize(key, &sval); });
-  if (!oldHandle || oldHandle->toLocal().toInt64() != old) {
+  auto const oldHandle = sval.data();
+  if ((oldHandle->kind() != APCKind::Int &&
+       oldHandle->kind() != APCKind::Double) ||
+      oldHandle->toLocal(false /* no pure cas variant */).toInt64() != old) {
     return false;
   }
 
-  auto const pair = APCHandle::Create(Variant(val), false,
-    APCHandleLevel::Outer, false);
+  auto const pair = APCHandle::Create(VarNR{val}, APCHandleLevel::Outer,
+                                      false, false /* no pure cas variant */);
   APCStats::getAPCStats().updateAPCValue(pair.handle, pair.size,
                                          oldHandle, sval.dataSize,
-                                         sval.expire == 0, false);
+                                         false);
   oldHandle->unreferenceRoot(sval.dataSize);
   sval.setHandle(pair.handle);
   sval.dataSize = pair.size;
   return true;
 }
 
-bool ConcurrentTableSharedStore::exists(const String& keyStr) {
+bool ConcurrentTableSharedStore::exists(const OptString& keyStr) {
   if (s_hotCache.hasValue(keyStr.get())) return true;
-  const StoreValue *sval;
-  SharedMutex::ReadHolder l(m_lock);
-  bool expired = false;
-  auto tag = tagStringData(keyStr.get());
+  std::shared_lock l(m_lock);
   {
     Map::const_accessor acc;
-    if (!m_vars.find(acc, tag)) {
+    if (checkExpire(keyStr, acc)) {
       return false;
-    } else {
-      sval = &acc->second;
-      if (sval->expired()) {
-        // Because it only has a read lock on the data, deletion from
-        // expiration has to happen after the lock is released
-        expired = true;
-      }
     }
-  }
-  if (expired) {
-    eraseImpl(tag, true,
-              apcExtension::UseUncounted ?
-              HPHP::Treadmill::getOldestStartTime() : 0, nullptr);
-    return false;
   }
   return true;
 }
 
-static int64_t adjust_ttl(int64_t ttl, bool overwritePrime) {
-  if (apcExtension::TTLLimit > 0 && !overwritePrime) {
+int64_t ConcurrentTableSharedStore::size(const OptString& key, bool& found) {
+  found = false;
+  std::shared_lock l(m_lock);
+
+  Map::accessor acc;
+  if (!m_vars.find(acc, tagStringData(key.get()))) {
+    return 0;
+  }
+  auto* sval = &acc->second;
+  if (sval->expired()) return 0;
+
+  // We no longer need to worry about expiration: we are reading the already
+  // computed dataSize field on APCHandle svals
+  found = true;
+  return sval->dataSize;
+}
+
+// Apply APC.TTLLimit, if it is configured.
+static int64_t apply_ttl_limit(int64_t ttl) {
+  if (apcExtension::TTLLimit > 0) {
     if (ttl == 0 || ttl > apcExtension::TTLLimit) {
       return apcExtension::TTLLimit;
     }
@@ -779,36 +756,76 @@ static int64_t adjust_ttl(int64_t ttl, bool overwritePrime) {
   return ttl;
 }
 
-bool ConcurrentTableSharedStore::add(const String& key,
+bool ConcurrentTableSharedStore::extendTTL(const OptString& key, int64_t new_ttl) {
+  std::shared_lock l(m_lock);
+  Map::accessor acc;
+  if (!m_vars.find(acc, tagStringData(key.get()))) {
+    return false;
+  }
+  auto& sval = acc->second;
+  if (sval.expired()) return false; // This can't resurrect a value
+  if (sval.c_time == 0) return false; // Time has no meaning for primed values
+  auto old_expire = sval.rawExpire();
+  if (!old_expire) return false; // Already infinite TTL
+
+  new_ttl = apply_ttl_limit(new_ttl);
+  // This API can't be used to breach the ttl cap.
+  if (new_ttl == 0) {
+    sval.expireTime.store(0, std::memory_order_release);
+    sval.bumpTTL.store(0, std::memory_order_release);
+    sval.maxExpireTime.store(0, std::memory_order_release);
+    return true;
+  }
+  auto new_expire = time(nullptr) + new_ttl;
+  if (new_expire > old_expire) {
+    sval.expireTime.store(new_expire, std::memory_order_release);
+    sval.bumpTTL.store(0, std::memory_order_release);
+    sval.maxExpireTime.store(new_expire, std::memory_order_release);
+    return true;
+  }
+  return false;
+}
+
+
+bool ConcurrentTableSharedStore::add(const OptString& key,
                                      const Variant& val,
-                                     int64_t ttl) {
-  return storeImpl(key, val, ttl, false, true);
+                                     int64_t max_ttl,
+                                     int64_t bump_ttl,
+                                     APCHandleLevel level,
+                                     bool pure) {
+  return storeImpl(key, val, max_ttl, bump_ttl, false, level, pure);
 }
 
-void ConcurrentTableSharedStore::set(const String& key,
+void ConcurrentTableSharedStore::set(const OptString& key,
                                      const Variant& val,
-                                     int64_t ttl) {
-  storeImpl(key, val, ttl, true, true);
+                                     int64_t max_ttl,
+                                     int64_t bump_ttl,
+                                     APCHandleLevel level,
+                                     bool pure) {
+  storeImpl(key, val, max_ttl, bump_ttl, true, level, pure);
 }
 
-void ConcurrentTableSharedStore::setWithoutTTL(const String& key,
-                                               const Variant& val) {
-  storeImpl(key, val, 0, true, false);
-}
-
-bool ConcurrentTableSharedStore::storeImpl(const String& key,
+bool ConcurrentTableSharedStore::storeImpl(const OptString& key,
                                            const Variant& value,
-                                           int64_t ttl,
+                                           int64_t max_ttl,
+                                           int64_t bump_ttl,
                                            bool overwrite,
-                                           bool limit_ttl) {
+                                           APCHandleLevel level,
+                                           bool pure) {
   StoreValue *sval;
   auto keyLen = key.size();
+
+  // We need to do this before we acquire any locks. Serializing objects can
+  // reenter the VM (__sleep) and certain operations may cause us to throw for
+  // types that cannot be serialized to APC.
+  auto svar = APCHandle::Create(value, level, false, pure);
+
   char* const kcp = strdup(key.data());
+
   {
-  SharedMutex::ReadHolder l(m_lock);
+  std::shared_lock l(m_lock);
   bool present;
   time_t expiry = 0;
-  bool overwritePrime = false;
   {
     Map::accessor acc;
     APCHandle* current = nullptr;
@@ -817,6 +834,7 @@ bool ConcurrentTableSharedStore::storeImpl(const String& key,
     if (present) {
       free(kcp);
       if (!overwrite && !sval->expired()) {
+        svar.handle->unreferenceRoot();
         return false;
       }
       /*
@@ -824,205 +842,66 @@ bool ConcurrentTableSharedStore::storeImpl(const String& key,
        * 'get' will soon update the entry with the new value.
        */
       s_hotCache.clearValue(*sval);
-      sval->data().match(
-        [&] (APCHandle* handle) {
-          current = handle;
-          // If ApcTTLLimit is set, then only primed keys can have
-          // expire == 0.
-          overwritePrime = sval->expire == 0;
-        },
-        [&] (char*) {
-          // Was inFile, but won't be anymore.
-          sval->clearData();
-          sval->dataSize = 0;
-          overwritePrime = true;
-        }
-      );
+      current = sval->data();
       FTRACE(2, "Update {} {}\n", acc->first, show(acc->second));
     } else {
       FTRACE(2, "Add {} {}\n", acc->first, show(acc->second));
       APCStats::getAPCStats().addKey(keyLen);
     }
 
-    int64_t adjustedTtl = adjust_ttl(ttl, overwritePrime || !limit_ttl);
-    if (adjustedTtl > apcExtension::TTLMaxFinite ||
-        check_noTTL(key.data(), key.size())) {
-      adjustedTtl = 0;
+    int64_t adjustedMaxTTL = apply_ttl_limit(max_ttl);
+    if (adjustedMaxTTL > apcExtension::TTLMaxFinite) {
+      adjustedMaxTTL = 0;
     }
 
-    auto svar = APCHandle::Create(value, false, APCHandleLevel::Outer, false);
+    if (bump_ttl < 0 || (adjustedMaxTTL != 0 && bump_ttl >= adjustedMaxTTL)) {
+      bump_ttl = 0;
+    }
+    bump_ttl = std::min(bump_ttl, (int64_t)std::numeric_limits<uint16_t>::max());
+
+    auto expire_ttl = bump_ttl;
+    if (expire_ttl <= 0 || (adjustedMaxTTL > 0 && expire_ttl >= adjustedMaxTTL)) {
+      expire_ttl = adjustedMaxTTL;
+    }
+
     if (current) {
-      if (sval->expire == 0 && adjustedTtl != 0) {
+      if (sval->rawExpire() == 0 && adjustedMaxTTL != 0) {
         APCStats::getAPCStats().removeAPCValue(
-          sval->dataSize, current, true, sval->expired());
-        APCStats::getAPCStats().addAPCValue(svar.handle, svar.size, false);
+          sval->dataSize, current, sval->expired());
+        APCStats::getAPCStats().addAPCValue(svar.handle, svar.size);
       } else {
         APCStats::getAPCStats().updateAPCValue(
           svar.handle, svar.size, current, sval->dataSize,
-          sval->expire == 0, sval->expired());
+          sval->expired());
       }
       current->unreferenceRoot(sval->dataSize);
     } else {
-      APCStats::getAPCStats().addAPCValue(svar.handle, svar.size, present);
+      APCStats::getAPCStats().addAPCValue(svar.handle, svar.size);
     }
 
-    sval->set(svar.handle, adjustedTtl);
+    sval->set(svar.handle, expire_ttl, adjustedMaxTTL, bump_ttl);
     sval->dataSize = svar.size;
-    expiry = sval->expire;
+    expiry = sval->queueExpire();
     if (expiry) {
       auto ikey = intptr_t(acc->first);
-      if (m_expMap.insert({ ikey, 0 })) {
+      if (m_expSet.insert({ ikey, ExpNil{} })) {
         m_expQueue.push({ ikey, expiry });
       }
     }
   }
   }  // m_lock
-  if (apcExtension::ExpireOnSets) {
+  if (!apcExtension::UseUncounted && apcExtension::ExpireOnSets) {
     purgeExpired();
   }
 
   return true;
 }
 
-void ConcurrentTableSharedStore::prime(std::vector<KeyValuePair>&& vars) {
-  SharedMutex::ReadHolder l(m_lock);
-  // we are priming, so we are not checking existence or expiration
-  for (unsigned int i = 0; i < vars.size(); i++) {
-    const KeyValuePair &item = vars[i];
-    Map::accessor acc;
-    auto const keyLen = strlen(item.key);
-    auto const copy = strdup(item.key);
-    if (m_vars.insert(acc, copy)) {
-      APCStats::getAPCStats().addPrimedKey(keyLen);
-    } else {
-      free(copy);
+///////////////////////////////////////////////////////////////////////////////
+// init
 
-      // We're going to overwrite what was there.
-      auto& sval = acc->second;
-      sval.data().match(
-        [&] (APCHandle* handle) {
-          handle->unreferenceRoot(sval.dataSize);
-        },
-        [&] (char*) {}
-      );
-      sval.clearData();
-      sval.dataSize = 0;
-      sval.expire   = 0;
-    }
-
-    acc->second.readOnly = apcExtension::EnableConstLoad && item.readOnly;
-    if (item.inMem()) {
-      APCStats::getAPCStats().addAPCValue(item.value, item.sSize, true);
-      acc->second.set(item.value, 0);
-      acc->second.dataSize = item.sSize;
-    } else {
-      acc->second.tagged_data.store(item.sAddr, std::memory_order_release);
-      acc->second.dataSize = item.sSize;
-      APCStats::getAPCStats().addInFileValue(std::abs(acc->second.dataSize));
-    }
-    FTRACE(2, "Primed key {} {}\n", acc->first, show(acc->second));
-  }
-}
-
-bool ConcurrentTableSharedStore::constructPrime(const String& v,
-                                                KeyValuePair& item,
-                                                bool serialized) {
-  if (s_apc_file_storage.getState() !=
-      APCFileStorage::StorageState::Invalid &&
-      (!v.get()->isStatic() || serialized)) {
-    // StaticString for non-object should consume limited amount of space,
-    // not worth going through the file storage
-
-    // TODO: currently we double serialize string for uniform handling later,
-    // hopefully the unserialize won't be called often. We could further
-    // optimize by storing more type info.
-    String s = apc_serialize(v);
-    char *sAddr = s_apc_file_storage.put(s.data(), s.size());
-    if (sAddr) {
-      item.sAddr = sAddr;
-      item.sSize = serialized ? 0 - s.size() : s.size();
-      return false;
-    }
-  }
-  auto pair = APCHandle::Create(v, serialized, APCHandleLevel::Outer, false);
-  item.value = pair.handle;
-  item.sSize = pair.size;
-  return true;
-}
-
-bool ConcurrentTableSharedStore::constructPrime(const Variant& v,
-                                                KeyValuePair& item) {
-  if (s_apc_file_storage.getState() !=
-      APCFileStorage::StorageState::Invalid &&
-      (isRefcountedType(v.getType()))) {
-    // Only do the storage for ref-counted type
-    String s = apc_serialize(v);
-    char *sAddr = s_apc_file_storage.put(s.data(), s.size());
-    if (sAddr) {
-      item.sAddr = sAddr;
-      item.sSize = s.size();
-      return false;
-    }
-  }
-  auto pair = APCHandle::Create(v, false, APCHandleLevel::Outer, false);
-  item.value = pair.handle;
-  item.sSize = pair.size;
-  return true;
-}
-
-void ConcurrentTableSharedStore::primeDone() {
+void ConcurrentTableSharedStore::init() {
   s_hotCache.initialize();
-  if (s_apc_file_storage.getState() !=
-      APCFileStorage::StorageState::Invalid) {
-    s_apc_file_storage.seal();
-    s_apc_file_storage.hashCheck();
-  }
-  // Schedule the adviseOut instead of doing it immediately, so that the
-  // initial accesses to the primed keys are not too bad. Still, for
-  // the keys in file, a deserialization from memory is required on first
-  // access.
-  ExpirationPair p(intptr_t(apcExtension::FileStorageFlagKey.c_str()),
-                   time(nullptr) + apcExtension::FileStorageAdviseOutPeriod);
-  m_expQueue.push(p);
-
-  for (auto iter = apcExtension::CompletionKeys.begin();
-       iter != apcExtension::CompletionKeys.end(); ++iter) {
-    Map::accessor acc;
-    auto const copy = strdup(iter->c_str());
-    if (!m_vars.insert(acc, copy)) {
-      free(copy);
-      return;
-    }
-    auto const pair =
-      APCHandle::Create(Variant(1), false, APCHandleLevel::Outer, false);
-    acc->second.set(pair.handle, 0);
-    acc->second.dataSize = pair.size;
-    APCStats::getAPCStats().addAPCValue(pair.handle, pair.size, true);
-  }
-}
-
-bool ConcurrentTableSharedStore::primeFromSnapshot(const char* filename) {
-  m_snapshotLoader = std::make_unique<SnapshotLoader>();
-  if (!m_snapshotLoader->tryInitializeFromFile(filename)) {
-    m_snapshotLoader.reset();
-    return false;
-  }
-  // TODO(9755815): APCFileStorage is redundant when using snapshot;
-  // disable it at module loading time in this case.
-  Logger::Info("Loading from snapshot file %s", filename);
-  m_snapshotLoader->load(*this);
-  primeDone();
-  return true;
-}
-
-void ConcurrentTableSharedStore::adviseOut() {
-  if (s_apc_file_storage.getState() !=
-      APCFileStorage::StorageState::Invalid) {
-    s_apc_file_storage.adviseOut();
-  }
-  if (m_snapshotLoader.get()) {
-    m_snapshotLoader->adviseOut();
-  }
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -1031,26 +910,20 @@ void ConcurrentTableSharedStore::adviseOut() {
 EntryInfo ConcurrentTableSharedStore::makeEntryInfo(const char* key,
                                                     StoreValue* sval,
                                                     int64_t curr_time) {
-  int32_t size;
-  auto type = EntryInfo::Type::Unknown;
-  auto const inMem = sval->data().match(
-      [&](APCHandle* handle) {
-        size = sval->dataSize;
-        type = EntryInfo::getAPCType(handle);
-        return true;
-      },
-      [&](char*) {
-        size = sval->getSerializedSize();
-        return false;
-      });
+  auto const handle = sval->data();
+  uint32_t size = sval->dataSize;
+  auto type = EntryInfo::getAPCType(handle);
+  auto calcTTL = [&](uint32_t expire) -> int64_t {
+    if (expire) {
+      return expire - curr_time;
+    }
+    return 0;
+  };
 
-  int64_t ttl = 0;
-  if (inMem && sval->expire) {
-    ttl = sval->expire - curr_time;
-    if (ttl == 0) ttl = 1; // don't want to confuse with primed keys
-  }
-
-  return EntryInfo(key, inMem, size, ttl, type, sval->c_time, sval->mtime);
+  auto ttl = calcTTL(sval->rawExpire());
+  auto maxTTL = calcTTL(sval->maxExpireTime.load(std::memory_order_acquire));
+  return EntryInfo(key, size, ttl, maxTTL, sval->bumpTTL.load(std::memory_order_acquire),
+                   type, sval->c_time, s_hotCache.hasValue(OptString(key).get()));
 }
 
 std::vector<EntryInfo> ConcurrentTableSharedStore::getEntriesInfo() {
@@ -1060,7 +933,7 @@ std::vector<EntryInfo> ConcurrentTableSharedStore::getEntriesInfo() {
   entries.reserve(m_vars.size() + 1000);
 
   {
-    SharedMutex::WriteHolder l(m_lock);
+    std::unique_lock l(m_lock);
     for (Map::iterator iter = m_vars.begin(); iter != m_vars.end(); ++iter) {
       entries.push_back(
           makeEntryInfo(iter->first, &iter->second, curr_time));
@@ -1079,48 +952,81 @@ std::vector<EntryInfo> ConcurrentTableSharedStore::getEntriesInfo() {
  * sval won't be invalidated while this is called.
  */
 static void dumpOneKeyAndValue(std::ostream &out,
-                               const char *key, const StoreValue *sval) {
+                               const std::string& key,
+                               const HPHP::Optional<std::string>& value) {
     out << key;
     out << " #### ";
-    if (!sval->expired()) {
-      auto const value = sval->data().match(
-        [&] (APCHandle* handle) {
-          return handle->toLocal();
-        },
-        [&] (char* sAddr) {
-          // we need unserialize and serialize again because the format was
-          // APCSerialize
-          return apc_unserialize(sAddr, sval->getSerializedSize());
-        }
-      );
-
-      try {
-        auto valS = internal_serialize(value);
-        out << valS.toCppString();
-      } catch (const Exception& e) {
-        out << "Exception: " << e.what();
-      }
+    if (value) {
+      out << "INMEMORY " << *value;
     }
     out << std::endl;
 }
 
 static void dumpEntriesInfo(std::vector<EntryInfo> entries, std::ostream& out) {
-  out << "key inmem size ttl type\n";
+  out << "key inmem size ttl type maxttl bumpttl inhotcache\n";
   for (auto entry : entries) {
     out << entry.key << " "
-        << static_cast<int32_t>(entry.inMem) << " "
+        << "1 " // If the value is in memory (before apc_prime could make it live on disk)
         << entry.size << " "
         << entry.ttl << " "
-        << static_cast<int32_t>(entry.type) << '\n';
+        << static_cast<int32_t>(entry.type) << " "
+        << entry.maxTTL << " "
+        << entry.bumpTTL << " "
+        << (entry.inHotCache ? "1" : "0") << '\n';
   }
 }
 
 void ConcurrentTableSharedStore::dumpKeyAndValue(std::ostream & out) {
-  SharedMutex::WriteHolder l(m_lock);
-  out << "Total " << m_vars.size() << std::endl;
-  for (Map::iterator iter = m_vars.begin(); iter != m_vars.end(); ++iter) {
-    dumpOneKeyAndValue(out, iter->first, &iter->second);
+  auto const entries = debugGetEntries(std::nullopt, std::nullopt);
+  out << "Total " << entries.size() << std::endl;
+  for (auto const& e : entries) {
+    dumpOneKeyAndValue(out, e.first, e.second);
   }
+}
+
+hphp_fast_string_set ConcurrentTableSharedStore::debugGetKeys() {
+  hphp_fast_string_set keys;
+  for (auto const& e: getEntriesInfo()) {
+    keys.emplace(e.key);
+  }
+
+  return keys;
+}
+
+hphp_fast_string_map<HPHP::Optional<std::string>>
+ConcurrentTableSharedStore::debugGetEntries(const HPHP::Optional<std::string>& prefix,
+                                                  HPHP::Optional<uint32_t> count,
+                                                  HPHP::Optional<uint32_t> minSize) {
+  hphp_fast_string_map<HPHP::Optional<std::string>> entries;
+  std::unique_lock l(m_lock);
+  for (auto const& iter : m_vars) {
+    if (prefix && strncmp(iter.first, prefix->c_str(), prefix->size()) != 0) {
+      // if we asked for a prefix filter, and it does not match, continue
+      continue;
+    }
+
+    if (minSize && iter.second.dataSize < *minSize) {
+      continue;
+    }
+
+    if (iter.second.expired()) {
+      entries.emplace(iter.first, std::nullopt);
+    } else {
+      auto const value = iter.second.data()->toLocal(false);
+      try {
+        auto valS = internal_serialize(value);
+        entries.emplace(iter.first, valS.toCppString());
+      } catch (const Exception& e) {
+        entries.emplace(iter.first, std::string{"Exception: ", e.what()});
+      }
+    }
+
+    if (count && entries.size() >= *count) {
+      break;
+    }
+  }
+
+  return entries;
 }
 
 void ConcurrentTableSharedStore::dump(std::ostream& out, DumpMode dumpMode) {
@@ -1132,8 +1038,8 @@ void ConcurrentTableSharedStore::dump(std::ostream& out, DumpMode dumpMode) {
     break;
 
   case DumpMode::KeyOnly:
-    for (auto& e : getEntriesInfo()) {
-      out << e.key << '\n';
+    for (auto& key : debugGetKeys()) {
+      out << key << '\n';
     }
     break;
 
@@ -1149,15 +1055,11 @@ void ConcurrentTableSharedStore::dumpPrefix(std::ostream& out,
                                             const std::string &prefix,
                                             uint32_t count) {
   Logger::Info("dumping apc prefix %s", prefix.c_str());
-  SharedMutex::WriteHolder l(m_lock);
 
-  uint32_t dumped = 0;
-  for (auto const &iter : m_vars) {
-    // dump key only if it matches the prefix
-    if (strncmp(iter.first, prefix.c_str(), prefix.size()) == 0) {
-      dumpOneKeyAndValue(out, iter.first, &iter.second);
-      if (++dumped >= count) break;
-    }
+  auto const entries = debugGetEntries(prefix, count);
+
+  for (auto const &iter : entries) {
+    dumpOneKeyAndValue(out, iter.first, iter.second);
   }
 
   Logger::Info("dumping apc prefix done");
@@ -1168,9 +1070,34 @@ void ConcurrentTableSharedStore::dumpRandomKeys(std::ostream& out,
   dumpEntriesInfo(sampleEntriesInfo(count), out);
 }
 
+void ConcurrentTableSharedStore::dumpKeysWithPrefixes(
+  BlobEncoder& sd,
+  const std::vector<std::string>& prefixes) {
+  if (prefixes.empty()) return;
+  std::unique_lock l(m_lock);
+  sd.lazyCount([&]() {
+    uint32_t count = 0;
+    for (auto const& iter : m_vars) {
+      const StoreValue& value = iter.second;
+      if (value.c_time == 0) continue;
+      if (value.expired()) continue;
+      auto const key = iter.first;
+      bool match = std::any_of(
+        prefixes.begin(), prefixes.end(),
+        [key] (const std::string& prefix) {
+          return !strncmp(key, prefix.c_str(), prefix.size());
+        });
+      if (!match) continue;
+      sd(std::string_view(key));
+      count++;
+    }
+    return count;
+  });
+}
+
 std::vector<EntryInfo>
 ConcurrentTableSharedStore::sampleEntriesInfo(uint32_t count) {
-  SharedMutex::WriteHolder l(m_lock);
+  std::unique_lock l(m_lock);
   if (m_vars.empty()) {
     Logger::Warning("No APC entries sampled (empty store)");
     return std::vector<EntryInfo>();
@@ -1185,6 +1112,35 @@ ConcurrentTableSharedStore::sampleEntriesInfo(uint32_t count) {
   return samples;
 }
 
+std::vector<std::tuple<EntryInfo, uint32_t>>
+ConcurrentTableSharedStore::sampleEntriesInfoBySize(uint32_t bytes) {
+  std::vector<std::tuple<EntryInfo, uint32_t>> samples;
+  if (bytes == 0) return samples;
+  int64_t next = folly::Random::rand32(bytes);
+  int64_t curr_time = time(nullptr);
+  samples.reserve(m_vars.size() / bytes * 128);
+  std::unique_lock l(m_lock);
+  for (auto& iter : m_vars) {
+    auto const key = iter.first;
+    StoreValue& value = iter.second;
+    if (value.expired()) continue;
+    int size = NodeSize + sizeof(StoreValue) + strlen(key) + 1 + value.dataSize;
+
+    if (size > next) {
+      uint32_t left = size - next;
+      uint32_t weight = ((left - 1) / bytes) + 1;
+
+      samples.push_back(std::make_tuple(makeEntryInfo(key, &value, curr_time),
+                                        weight));
+
+      next = weight * bytes - left;
+    } else {
+      next -= size;
+    }
+  }
+  return samples;
+}
+
 template<typename Key, typename T, typename HashCompare>
 bool ConcurrentTableSharedStore
       ::APCMap<Key,T,HashCompare>
@@ -1192,7 +1148,8 @@ bool ConcurrentTableSharedStore
   assertx(!this->empty());
 #if TBB_VERSION_MAJOR >= 4
   auto current = this->range();
-  for (auto rnd = rand(); rnd > 0 && current.is_divisible(); rnd >>= 1) {
+  for (auto rnd = folly::Random::rand32();
+       rnd != 0 && current.is_divisible(); rnd >>= 1) {
     // Split the range 'current' into two halves: 'current' and 'otherHalf'.
     decltype(current) otherHalf(current, tbb::split());
     // Randomly choose which half to keep.

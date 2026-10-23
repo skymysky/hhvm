@@ -1,22 +1,23 @@
-name: \meth_caller, kind: function, span: line 5, characters 5-27, is_declaration: false
+name: \HH\meth_caller, kind: function, span: line 5, characters 5-32, is_declaration: false
+affects_prod_build: true
 definition:
- meth_caller
+ HH\meth_caller
    kind: function
-   id: function::meth_caller
-   position: line 26, characters 10-20
-   span: line 26, character 1 - line 26, character 58
+   id: function::HH\meth_caller
+   position: line 52, characters 12-22
+   span: line 52, character 3 - line 55, character 35
    modifiers: 
    params:
      $cls_name
        kind: param
-       position: line 26, characters 29-37
-       span: line 26, character 22 - line 26, character 37
+       position: line 53, characters 18-26
+       span: line 53, character 5 - line 53, character 26
        modifiers: 
 
      $meth_name
        kind: param
-       position: line 26, characters 47-56
-       span: line 26, character 40 - line 26, character 56
+       position: line 54, characters 12-21
+       span: line 54, character 5 - line 54, character 21
        modifiers: 
 
 

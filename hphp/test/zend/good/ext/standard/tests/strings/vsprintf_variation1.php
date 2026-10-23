@@ -1,6 +1,6 @@
-<?php
+<?hh
 /* Prototype  : string vsprintf(string $format, array $args)
- * Description: Return a formatted string 
+ * Description: Return a formatted string
  * Source code: ext/standard/formatted_print.c
 */
 
@@ -9,29 +9,19 @@
  * the '$format' argument of the function
 */
 
+<<__EntryPoint>> function main(): void {
 echo "*** Testing vsprintf() : with unexpected values for format argument ***\n";
 
 // initialising the required variables
-$args = array(1, 2);
+$args = vec[1, 2];
 
-//get an unset variable
-$unset_var = 10;
-unset ($unset_var);
-
-// declaring a class
-class sample
-{
-  public function __toString() {
-  return "object";
-  }
-}
 
 // Defining resource
 $file_handle = fopen(__FILE__, 'r');
 
 
 //array of values to iterate over
-$values = array(
+$values = vec[
 
   // int data
   0,
@@ -47,11 +37,11 @@ $values = array(
   .5,
 
   // array data
-  array(),
-  array(0),
-  array(1),
-  array(1,2),
-  array('color' => 'red', 'item' => 'pen'),
+  'Array',
+  'Array',
+  'Array',
+  'Array',
+  'Array',
 
   // null data
   NULL,
@@ -67,18 +57,9 @@ $values = array(
   "",
   '',
 
-  // object data
-  new sample(),
-
-  // undefined data
-  @$undefined_var,
-
-  // unset data
-  @$unset_var,
- 
   // resource data
   $file_handle
-);
+];
 
 // loop through each element of the array for format
 
@@ -87,11 +68,11 @@ foreach($values as $value) {
   echo "\n -- Iteration $counter --\n";
   var_dump( vsprintf($value,$args) );
   $counter++;
-    
+
 };
 
 // closing the resource
 fclose($file_handle);
 
 echo "Done";
-?>
+}

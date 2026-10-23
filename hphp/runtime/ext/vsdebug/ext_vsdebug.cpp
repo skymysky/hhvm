@@ -14,25 +14,27 @@
    +----------------------------------------------------------------------+
 */
 
-#include <string>
 #include "hphp/runtime/ext/vsdebug/ext_vsdebug.h"
+
+#include <string>
+
 #include "hphp/runtime/ext/vsdebug/logging.h"
+#include "hphp/util/configs/debugger.h"
 
 namespace HPHP {
 namespace VSDEBUG {
 
 VSDebugExtension::~VSDebugExtension() {
+  std::atomic_thread_fence(std::memory_order_acquire);
   if (s_debugger != nullptr) {
     delete s_debugger;
     s_debugger = nullptr;
   }
+
+  std::atomic_thread_fence(std::memory_order_release);
 }
 
 void VSDebugExtension::moduleLoad(const IniSetting::Map& ini, const Hdf hdf) {
-  // This extension is ** disabled ** by default, unless the configuration
-  // says otherwise. When !m_enabled, the other hooks in this module no-op.
-  Config::Bind(s_configEnabled, ini, hdf, "Eval.Debugger.VSDebugEnable", false);
-
   // Set up logging for the extension.
   // Note: Logging for the extension is disabled by default, unless
   // VSDebugLogFile is explicitly defined in the configuration settings.
@@ -45,8 +47,21 @@ void VSDebugExtension::moduleLoad(const IniSetting::Map& ini, const Hdf hdf) {
     "Eval.Debugger.VSDebugListenPort",
     DefaultListenPort);
 
-  bool commandLineEnabled = RuntimeOption::EnableVSDebugger;
-  if (!s_configEnabled && !commandLineEnabled) {
+  Config::Bind(
+    getUnixSocketPath(),
+    ini,
+    hdf,
+    "Eval.Debugger.VSDebugDomainSocketPath",
+    "");
+
+  Config::Bind(
+    s_domainSocketGroup,
+    ini,
+    hdf,
+    "Eval.Debugger.VSDebugDomainSocketGroup",
+    "");
+
+  if (!Cfg::Debugger::EnableVSDebugger) {
    m_enabled = false;
    return;
   }
@@ -80,13 +95,20 @@ void VSDebugExtension::moduleInit() {
   }
 
   DebugTransport* transport = nullptr;
-  if (RuntimeOption::ServerExecutionMode()) {
+  SocketTransportOptions opts{};
+
+  if (Cfg::Server::Mode) {
     // If HHVM is running in server mode, start up the debugger socket server
     // and listen for debugger clients to connect.
     VSDebugLogger::Log(VSDebugLogger::LogLevelInfo,
                        "Extension started in SERVER mode");
 
-    transport = new SocketTransport(s_debugger, s_attachListenPort);
+    VSDebugLogger::Log(VSDebugLogger::LogLevelInfo,
+                       "Socket path: %s",
+                       getUnixSocketPath().c_str());
+    opts.domainSocketPath = getUnixSocketPath();
+    opts.tcpListenPort = s_attachListenPort;
+    transport = new SocketTransport(s_debugger, opts);
   } else {
     // Otherwise, HHVM is running in script or interactive mode. Communicate
     // with the debugger client locally via known file descriptors.
@@ -95,20 +117,22 @@ void VSDebugExtension::moduleInit() {
       "Extension started in SCRIPT mode."
     );
 
-    // If a listen port was specified on the command line, use the TCP socket
-    // transport even in script mode. Otherwise, fall back to using a pipe with
-    // our parent process.
-    if (RuntimeOption::VSDebuggerListenPort > 0) {
+    // If a listen port or domain socket was specified on the command line,
+    // use socket transport even in script mode. Otherwise, fall back to
+    // using a pipe with our parent process.
+    if (Cfg::Debugger::VSDebuggerListenPort > 0 ||
+        !Cfg::Debugger::VSDebuggerDomainSocketPath.empty()) {
       VSDebugLogger::Log(
         VSDebugLogger::LogLevelInfo,
-        "Blocking script startup. Waiting for debugger to attach on port: %d",
-        RuntimeOption::VSDebuggerListenPort
+        "Blocking script startup. Waiting for debugger to attach: %s",
+        Cfg::Debugger::VSDebuggerDomainSocketPath.empty()
+          ? std::to_string(Cfg::Debugger::VSDebuggerListenPort).c_str()
+          : Cfg::Debugger::VSDebuggerDomainSocketPath.c_str()
       );
 
-      transport = new SocketTransport(
-        s_debugger,
-        RuntimeOption::VSDebuggerListenPort
-      );
+      opts.tcpListenPort = Cfg::Debugger::VSDebuggerListenPort;
+      opts.domainSocketPath = Cfg::Debugger::VSDebuggerDomainSocketPath;
+      transport = new SocketTransport(s_debugger, opts);
     } else {
       try {
         transport = new FdTransport(s_debugger);
@@ -130,12 +154,21 @@ void VSDebugExtension::moduleInit() {
 }
 
 void VSDebugExtension::moduleShutdown() {
+  VSDebugLogger::Log(
+    VSDebugLogger::LogLevelInfo,
+    "VSDebugExtension::moduleShutdown called."
+  );
+  VSDebugLogger::LogFlush();
+
+  std::atomic_thread_fence(std::memory_order_acquire);
   if (s_debugger != nullptr) {
+    s_debugger->shutdown();
     delete s_debugger;
     s_debugger = nullptr;
   }
 
   VSDebugLogger::FinalizeLogging();
+  std::atomic_thread_fence(std::memory_order_release);
 }
 
 void VSDebugExtension::requestInit() {
@@ -148,13 +181,14 @@ void VSDebugExtension::requestInit() {
 
   assertx(s_debugger != nullptr);
 
-  // If we're in SCRIPT mode and a TCP listen port was specified on the command
+  // If we're in SCRIPT mode and a listen port/path was specified on the command
   // line, we need to block starting the script until the debugger client
   // connects.
-  if (!RuntimeOption::ServerExecutionMode() &&
-      RuntimeOption::VSDebuggerListenPort > 0) {
+  if (!Cfg::Server::Mode &&
+      (Cfg::Debugger::VSDebuggerListenPort > 0 ||
+        !Cfg::Debugger::VSDebuggerDomainSocketPath.empty())) {
 
-    if (!RuntimeOption::VSDebuggerNoWait) {
+    if (!Cfg::Debugger::VSDebuggerNoWait) {
       VSDebugLogger::Log(
         VSDebugLogger::LogLevelInfo,
         "Blocking script startup until debugger client connects..."
@@ -171,7 +205,9 @@ void VSDebugExtension::requestInit() {
 }
 
 void VSDebugExtension::requestShutdown() {
-  if (!m_enabled) {
+  // Barrier for m_enabled and s_debugger
+  std::atomic_thread_fence(std::memory_order_acquire);
+  if (!m_enabled || s_debugger == nullptr) {
     return;
   }
 
@@ -179,12 +215,32 @@ void VSDebugExtension::requestShutdown() {
   s_debugger->requestShutdown();
 }
 
+void VSDebugExtension::threadShutdown() {
+  // NB some threads may be in the list, but we never get a requestShutdown
+  // on them because they either never run PHP code or are done by the time
+  // we query the list. Catch those threads and clean them up.
+  // TODO(T40097246): hphp_thread_exit can currently run after moduleShutdown
+  // as a workaround until this is fixed, check to see if we've already shut
+  // down instead of asserting that we haven't
+  if (!m_enabled || s_debugger == nullptr) return;
+  s_debugger->requestShutdown();
+}
+
+std::string& VSDebugExtension::getUnixSocketPath() {
+  static std::string s_unixSocketPath;
+  return s_unixSocketPath;
+}
+
+std::string VSDebugExtension::getDomainSocketGroup() {
+  return s_domainSocketGroup;
+}
+
 // Linkage for the debugger extension.
 static VSDebugExtension s_vsdebug_extension;
 
 // Linkage for configuration options.
-bool VSDebugExtension::s_configEnabled {false};
-std::string VSDebugExtension::s_logFilePath {""};
+std::string VSDebugExtension::s_logFilePath;
+std::string VSDebugExtension::s_domainSocketGroup;
 int VSDebugExtension::s_attachListenPort {-1};
 bool VSDebugExtension::s_launchMode {false};
 Debugger* VSDebugExtension::s_debugger {nullptr};

@@ -17,11 +17,7 @@
 
 #include <algorithm>
 #include <vector>
-#include <fstream>
-
-#include <boost/filesystem.hpp>
-
-#include <sys/types.h>
+#include <filesystem>
 
 #include <folly/String.h>
 #include <folly/portability/Dirent.h>
@@ -31,10 +27,7 @@
 
 #include "hphp/runtime/base/file-util-defs.h"
 #include "hphp/runtime/base/runtime-error.h"
-#include "hphp/util/lock.h"
 #include "hphp/util/logger.h"
-#include "hphp/util/exception.h"
-#include "hphp/util/network.h"
 #include "hphp/util/compatibility.h"
 #include "hphp/util/process.h"
 
@@ -42,8 +35,6 @@ namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
 
 using std::string;
-using std::vector;
-namespace fs = boost::filesystem;
 
 bool FileUtil::mkdir(const std::string &path, int mode /* = 0777 */) {
   if (path.empty()) {
@@ -75,14 +66,14 @@ static bool same(const char *file1, const char *file2) {
     Logger::Error("unable to read %s", file1);
     return false;
   }
+  SCOPE_EXIT { fclose(f1); };
   FILE *f2 = fopen(file2, "r");
   if (f2 == nullptr) {
-    fclose(f1);
     Logger::Error("unable to read %s", file2);
     return false;
   }
+  SCOPE_EXIT { fclose(f2); };
 
-  bool ret = false;
   char buf1[8192];
   char buf2[sizeof(buf1)];
   int n1;
@@ -92,22 +83,19 @@ static bool same(const char *file1, const char *file2) {
     while (toread) {
       int n2 = fread(buf2 + pos, 1, toread, f2);
       if (n2 <= 0) {
-        goto exit_false;
+        return false;
       }
       toread -= n2;
       pos += n2;
     }
     if (memcmp(buf1, buf2, n1) != 0) {
-      goto exit_false;
+      return false;
     }
   }
   if (fread(buf2, 1, 1, f2) == 0) {
-    ret = true;
+    return true;
   }
- exit_false:
-  fclose(f2);
-  fclose(f1);
-  return ret;
+  return false;
 }
 
 void FileUtil::syncdir(const std::string &dest_, const std::string &src_,
@@ -124,13 +112,14 @@ void FileUtil::syncdir(const std::string &dest_, const std::string &src_,
     Logger::Error("syncdir: unable to open dest %s", dest.c_str());
     return;
   }
+  SCOPE_EXIT { closedir(ddest); };
 
   DIR *dsrc = opendir(src.c_str());
   if (dsrc == nullptr) {
-    closedir(ddest);
     Logger::Error("syncdir: unable to open src %s", src.c_str());
     return;
   }
+  SCOPE_EXIT { closedir(dsrc); };
 
   dirent *e;
 
@@ -180,7 +169,7 @@ void FileUtil::syncdir(const std::string &dest_, const std::string &src_,
     for (std::set<string>::const_iterator iter = todelete.begin();
          iter != todelete.end(); ++iter) {
       Logger::Info("sync: deleting %s", iter->c_str());
-      fs::remove_all(*iter);
+      std::filesystem::remove_all(*iter);
     }
   }
 
@@ -196,14 +185,12 @@ void FileUtil::syncdir(const std::string &dest_, const std::string &src_,
       }
     }
   }
-
-  closedir(dsrc);
-  closedir(ddest);
 }
 
 int FileUtil::copy(const char *srcfile, const char *dstfile) {
   int srcFd = open(srcfile, O_RDONLY);
   if (srcFd == -1) return -1;
+  SCOPE_EXIT { close(srcFd); };
 
   struct stat st;
   int ret = fstat(srcFd, &st);
@@ -218,43 +205,33 @@ int FileUtil::copy(const char *srcfile, const char *dstfile) {
 
   int dstFd = open(dstfile, O_WRONLY | O_CREAT | O_TRUNC, 0666);
   if (dstFd == -1) return -1;
+  SCOPE_EXIT { close(dstFd); };
 
   while (1) {
     char buf[8192];
-    bool err = false;
     ssize_t rbytes = read(srcFd, buf, sizeof(buf));
     ssize_t wbytes;
     if (rbytes == 0) break;
     if (rbytes == -1) {
-      err = true;
       Logger::Error("read failed: %s", folly::errnoStr(errno).c_str());
+      return -1;
     } else if ((wbytes = write(dstFd, buf, rbytes)) != rbytes) {
-      err = true;
       Logger::Error("write failed: %zd, %s", wbytes,
                     folly::errnoStr(errno).c_str());
-    }
-    if (err) {
-      close(srcFd);
-      close(dstFd);
       return -1;
     }
   }
-  close(srcFd);
-  close(dstFd);
   return 0;
 }
 
 static int force_sync(int fd) {
-#if defined(__FreeBSD__) || defined(__APPLE__) || defined(_MSC_VER)
-  return fsync(fd);
-#else
   return fdatasync(fd);
-#endif
 }
 
 int FileUtil::directCopy(const char *srcfile, const char *dstfile) {
   int srcFd = open(srcfile, O_RDONLY);
   if (srcFd == -1) return -1;
+  SCOPE_EXIT { close(srcFd); };
 
   struct stat st;
   int ret = fstat(srcFd, &st);
@@ -269,11 +246,7 @@ int FileUtil::directCopy(const char *srcfile, const char *dstfile) {
 
   int dstFd = open(dstfile, O_WRONLY | O_CREAT | O_TRUNC, 0666);
   if (dstFd == -1) return -1;
-
-#if defined(__APPLE__)
-  fcntl(srcFd, F_NOCACHE, 1);
-  fcntl(dstFd, F_NOCACHE, 1);
-#endif
+  SCOPE_EXIT { close(dstFd); };
 
   while (1) {
     char buf[1 << 20];
@@ -307,13 +280,9 @@ int FileUtil::directCopy(const char *srcfile, const char *dstfile) {
                     folly::errnoStr(errno).c_str());
     }
     if (err) {
-      close(srcFd);
-      close(dstFd);
       return -1;
     }
   }
-  close(srcFd);
-  close(dstFd);
   return 0;
 }
 
@@ -363,7 +332,7 @@ size_t dirname_impl(char *path, int len) {
   }
 
   /* Strip trailing slashes */
-  register char *end = path + len - 1;
+  char *end = path + len - 1;
   while (end >= path && FileUtil::isDirSeparator(*end)) {
     end--;
   }
@@ -401,22 +370,22 @@ size_t dirname_impl(char *path, int len) {
 
 }
 
-String FileUtil::dirname(const String& path) {
-  String str{path, CopyString};
+OptString FileUtil::dirname(const OptString& path) {
+  OptString str{path, CopyString};
   auto new_length = dirname_impl(str.mutableData(), str.length());
   str.setSize(new_length);
   return str;
 }
 
-String FileUtil::relativePath(const std::string& fromDir,
-                              const String& toFile) {
+OptString FileUtil::relativePath(const std::string& fromDir,
+                                 const OptString& toFile) {
 
   size_t maxlen = (fromDir.size() + toFile.size()) * 3;
 
   // Sanity checks
   if (!isAbsolutePath(fromDir) || !isAbsolutePath(toFile.slice()) ||
       !isDirSeparator(fromDir[fromDir.size() - 1])) {
-    return empty_string();
+    return String::Empty();
   }
 
   // Maybe we're lucky and this is an easy case
@@ -425,7 +394,7 @@ String FileUtil::relativePath(const std::string& fromDir,
     return toFile.substr(from_len);
   }
 
-  String ret(maxlen, ReserveString);
+  OptString ret(maxlen, ReserveString);
   char* path = ret.mutableData();
 
   const char* from_dir = fromDir.c_str();
@@ -478,11 +447,11 @@ String FileUtil::relativePath(const std::string& fromDir,
   return ret.setSize(strlen(path));
 }
 
-String FileUtil::canonicalize(const String &path) {
+OptString FileUtil::canonicalize(const OptString &path) {
   return canonicalize(path.data(), path.size());
 }
 
-String FileUtil::canonicalize(const std::string &path) {
+OptString FileUtil::canonicalize(const std::string &path) {
   return canonicalize(path.c_str(), path.size());
 }
 
@@ -502,8 +471,8 @@ String FileUtil::canonicalize(const std::string &path) {
  * limitations under the License.
  */
 
-String FileUtil::canonicalize(const char *addpath, size_t addlen,
-                              bool collapse_slashes /* = true */) {
+OptString FileUtil::canonicalize(const char *addpath, size_t addlen,
+                                 bool collapse_slashes /* = true */) {
   assertx(strlen(addpath) <= addlen);
   // 4 for slashes at start, after root, and at end, plus trailing
   // null
@@ -517,10 +486,9 @@ String FileUtil::canonicalize(const char *addpath, size_t addlen,
   if (!addpath)
     addpath = "";
 
-  String ret(maxlen-1, ReserveString);
+  OptString ret(maxlen-1, ReserveString);
   char *path = ret.mutableData();
 
-#ifndef _MSC_VER
   if (addpath[0] == '/' && collapse_slashes) {
     /* Ignore the given root path, strip off leading
      * '/'s to a single leading '/' from the addpath,
@@ -531,7 +499,6 @@ String FileUtil::canonicalize(const char *addpath, size_t addlen,
     path[0] = '/';
     pathlen = 1;
   }
-#endif
 
   while (*addpath) {
     /* Parse each segment, find the closing '/'
@@ -595,15 +562,6 @@ String FileUtil::canonicalize(const char *addpath, size_t addlen,
   // If there are null bytes in the path, treat it as the empty string
   if (addpath != pathend) pathlen = 0;
 
-#ifdef _MSC_VER
-  // Need to normalize to Windows directory separators, as the underlying
-  // system calls don't like unix path separators.
-  for (int i = 0; i < pathlen; i++) {
-    if (path[i] == '/') {
-      path[i] = '\\';
-    }
-  }
-#endif
   ret.setSize(pathlen);
   return ret;
 }
@@ -643,11 +601,12 @@ std::string FileUtil::normalizeDir(const std::string &dirname) {
 
 void FileUtil::find(std::vector<std::string> &out,
                     const std::string &root, const std::string& path, bool php,
-                    const std::set<std::string> *excludeDirs /* = NULL */,
-                    const std::set<std::string> *excludeFiles /* = NULL */) {
+                    bool failHard,
+                    const hphp_fast_string_set *excludeDirs /* = NULL */,
+                    const hphp_fast_string_set *excludeFiles /* = NULL */) {
 
-  find(root, path, php,
-       [&] (const std::string& rpath, bool isDir) {
+  find(root, path, php, failHard,
+       [&] (const std::string& rpath, bool isDir, size_t) {
          if (isDir) {
            return !excludeDirs || !excludeDirs->count(rpath);
          }
@@ -658,11 +617,11 @@ void FileUtil::find(std::vector<std::string> &out,
        });
 }
 
-bool FileUtil::isValidPath(const String& path) {
+bool FileUtil::isValidPath(const OptString& path) {
   return path.size() == strlen(path.data());
 }
 
-bool FileUtil::checkPathAndWarn(const String& path,
+bool FileUtil::checkPathAndWarn(const OptString& path,
                                 const char* func_name,
                                 int param_pos) {
   if (!FileUtil::isValidPath(path)) {
@@ -676,7 +635,7 @@ bool FileUtil::checkPathAndWarn(const String& path,
   return true;
 }
 
-void FileUtil::checkPathAndError(const String& path,
+void FileUtil::checkPathAndError(const OptString& path,
                                  const char* func_name,
                                  int param_pos) {
   if (!FileUtil::isValidPath(path)) {
@@ -686,6 +645,11 @@ void FileUtil::checkPathAndError(const String& path,
       param_pos
     );
   }
+}
+
+bool FileUtil::isSystemName(folly::StringPiece path) {
+  static const char prefix[] = "/:";
+  return !strncmp(path.begin(), prefix, sizeof prefix - 1);
 }
 
 ///////////////////////////////////////////////////////////////////////////////

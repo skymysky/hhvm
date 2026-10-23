@@ -1,26 +1,29 @@
-<?php
+<?hh
 
 final class X {
-  public static function getVal($val) {
+  public static function getVal($val) :mixed{
     $ym = self::getArr($val);
     return self::get($ym[0]);
   }
 
-  private static function check($val) {
+  private static function check($val) :mixed{
     if (!is_int($val)) throw new Exception;
   }
 
-  private static function get($a) {
+  private static function get($a) :mixed{
     return $a;
   }
 
-  private static function getArr($val) {
+  private static function getArr($val) :mixed{
     self::check($val);
-    return array(
+    return vec[
       (int)$val
-    );
+    ];
   }
-};
+}
+<<__EntryPoint>>
+function main_unreachable_inlining() :mixed{
+;
 
 for ($i = 0; $i < 10; $i++) {
   try {
@@ -29,3 +32,4 @@ for ($i = 0; $i < 10; $i++) {
   }
 }
 var_dump('done');
+}

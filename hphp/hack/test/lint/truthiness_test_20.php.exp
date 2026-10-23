@@ -1,0 +1,6 @@
+warning: Lint[5622] Invalid condition: a value of type `C` will always be truthy
+   --> truthiness_test_20.php
+  8 |   if ($x) {
+    |       ^^
+
+

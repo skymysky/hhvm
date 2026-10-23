@@ -1,10 +1,11 @@
-<?php
+<?hh <<__EntryPoint>> function main(): void {
 $zip = zip_open(dirname(__FILE__)."/test_procedural.zip");
-if (!is_resource($zip)) die("Failure");
+if (!is_resource($zip)) exit("Failure");
 $entries = 0;
-while ($entry = zip_read($zip)) {
+$entry = zip_read($zip);
+while ($entry) {
   echo zip_entry_name($entry)."\n";
+  $entry = zip_read($zip);
 }
 zip_close($zip);
-
-?>
+}

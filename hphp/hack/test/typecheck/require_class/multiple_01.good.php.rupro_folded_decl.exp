@@ -1,0 +1,184 @@
+--- ocaml
++++ rupro
+@@ -1,179 +1,179 @@
+ FoldedClass {
+     name: "\\T1",
+     pos: Pos(root|multiple_01.good.php, 4:7-9),
+     kind: Ctrait,
+     methods: {
+         "foo": FoldedElement {
+             flags: ClassEltFlags(
+                 0,
+             ),
+             origin: "\\T1",
+             visibility: Public,
+             deprecated: None,
+             sealed_allowlist: None,
+             overlapping_tparams: None,
+             package_requirement: Some(
+                 RPNormal,
+             ),
+         },
+     },
+     consts: {
+         "class": ClassConst {
+             is_synthesized: true,
+             kind: CCConcrete,
+             pos: Pos(root|multiple_01.good.php, 4:7-9),
+             ty: class<this>,
+             origin: "\\T1",
+             refs: [],
+             is_shape_key: false,
+             value: CVAbsent,
+         },
+     },
+     req_constraints_ancestors: [
+         CREqual(
+             Requirement(
+                 Pos(root|multiple_01.good.php, 5:17-18),
+                 C,
+             ),
+         ),
+     ],
+ }
+ FoldedClass {
+     name: "\\T2",
+     pos: Pos(root|multiple_01.good.php, 12:7-9),
+     kind: Ctrait,
+     methods: {
+         "bar": FoldedElement {
+             flags: ClassEltFlags(
+                 0,
+             ),
+             origin: "\\T2",
+             visibility: Public,
+             deprecated: None,
+             sealed_allowlist: None,
+             overlapping_tparams: None,
+             package_requirement: Some(
+                 RPNormal,
+             ),
+         },
+     },
+     consts: {
+         "class": ClassConst {
+             is_synthesized: true,
+             kind: CCConcrete,
+             pos: Pos(root|multiple_01.good.php, 12:7-9),
+             ty: class<this>,
+             origin: "\\T2",
+             refs: [],
+             is_shape_key: false,
+             value: CVAbsent,
+         },
+     },
+     req_constraints_ancestors: [
+         CREqual(
+             Requirement(
+                 Pos(root|multiple_01.good.php, 13:17-18),
+                 C,
+             ),
+         ),
+     ],
+ }
+ FoldedClass {
+     name: "\\C",
+     pos: Pos(root|multiple_01.good.php, 20:13-14),
+     kind: Cclass(
+         Concrete,
+     ),
+     is_final: true,
+     substs: {
+         "\\T1": SubstContext {
+             subst: Subst(
+                 {},
+             ),
+             class_context: "\\C",
+             from_req_extends: false,
+         },
+         "\\T2": SubstContext {
+             subst: Subst(
+                 {},
+             ),
+             class_context: "\\C",
+             from_req_extends: false,
+         },
+     },
+     ancestors: {
+         "\\T1": T1,
+         "\\T2": T2,
+     },
+     methods: {
+         "bar": FoldedElement {
+             flags: ClassEltFlags(
+                 0,
+             ),
+             origin: "\\T2",
+             visibility: Public,
+             deprecated: None,
+             sealed_allowlist: None,
+             overlapping_tparams: None,
+             package_requirement: Some(
+                 RPNormal,
+             ),
+         },
+         "foo": FoldedElement {
+             flags: ClassEltFlags(
+                 0,
+             ),
+             origin: "\\T1",
+             visibility: Public,
+             deprecated: None,
+             sealed_allowlist: None,
+             overlapping_tparams: None,
+             package_requirement: Some(
+                 RPNormal,
+             ),
+         },
+         "gee": FoldedElement {
+             flags: ClassEltFlags(
+                 0,
+             ),
+             origin: "\\C",
+             visibility: Public,
+             deprecated: None,
+             sealed_allowlist: None,
+             overlapping_tparams: None,
+             package_requirement: Some(
+                 RPNormal,
+             ),
+         },
+     },
+     consts: {
+         "class": ClassConst {
+             is_synthesized: true,
+             kind: CCConcrete,
+             pos: Pos(root|multiple_01.good.php, 20:13-14),
+             ty: class<this>,
+             origin: "\\C",
+             refs: [],
+             is_shape_key: false,
+             value: CVAbsent,
+         },
+     },
+     extends: {
+         "\\T1",
+         "\\T2",
+     },
+     req_constraints_ancestors: [
+         CREqual(
+             Requirement(
+-                Pos(root|multiple_01.good.php, 21:11-13),
++                Pos(root|multiple_01.good.php, 21:7-9),
+                 C,
+             ),
+         ),
+         CREqual(
+             Requirement(
+-                Pos(root|multiple_01.good.php, 21:7-9),
++                Pos(root|multiple_01.good.php, 21:11-13),
+                 C,
+             ),
+         ),
+     ],
+ }

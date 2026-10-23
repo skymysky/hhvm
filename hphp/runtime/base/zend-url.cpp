@@ -19,6 +19,7 @@
 #include "hphp/runtime/base/zend-string.h"
 #include "hphp/runtime/base/string-util.h"
 
+#include <folly/lang/CString.h>
 #include <folly/portability/String.h>
 
 namespace HPHP {
@@ -26,12 +27,12 @@ namespace HPHP {
 
 const StaticString s_file("file");
 
-static void replace_controlchars(String& output, const char *str, int len) {
+static void replace_controlchars(OptString& output, const char *str, int len) {
   if (!str) return;
 
   unsigned char *s = (unsigned char *)str;
   unsigned char *e = (unsigned char *)str + len;
-  output = String(str, len, CopyString);
+  output = OptString(str, len, CopyString);
   char *outbuf = output.mutableData();
   while (s < e) {
     if (iscntrl(*s)) {
@@ -109,7 +110,7 @@ bool url_parse(Url &output, const char *str, size_t length) {
 
       if (e + 2 < ue && *(e+2) == '/') {
         s = e + 3;
-        if (output.scheme.get()->isame(s_file.get())) {
+        if (output.scheme.get()->same_nocase(s_file.get())) {
           if (e + 3 < ue && *(e + 3) == '/') {
             /* support windows drive letters as in:
                file:///c:/somedir/file.txt
@@ -176,7 +177,7 @@ bool url_parse(Url &output, const char *str, size_t length) {
   }
 
   /* check for login and password */
-  if ((p = (const char*)memrchr(s, '@', (e-s)))) {
+  if ((p = (const char*)folly::memrchr(s, '@', (e-s)))) {
     if ((pp = (const char*)memchr(s, ':', (p-s)))) {
       replace_controlchars(output.user, s, (pp - s));
 
@@ -196,7 +197,7 @@ bool url_parse(Url &output, const char *str, size_t length) {
        IPv6 embedded address */
     p = nullptr;
   } else {
-    p = (const char*)memrchr(s, ':', e - s);
+    p = (const char*)folly::memrchr(s, ':', e - s);
   }
 
   if (p) {
@@ -296,18 +297,16 @@ static int php_htoi(char *s) {
 
 static unsigned char hexchars[] = "0123456789ABCDEF";
 
-String url_encode(const char *s, size_t len) {
-  String retString(safe_address(len, 3, 1), ReserveString);
-  register unsigned char c;
-  unsigned char *to, *start;
-  unsigned char const *from, *end;
+OptString url_encode(const char *s, size_t len) {
+  OptString retString(safe_address(len, 3, 1), ReserveString);
 
-  from = (unsigned char const *)s;
-  end = (unsigned char const *)s + len;
-  start = to = (unsigned char *)retString.mutableData();
+  auto from = (unsigned char const *)s;
+  auto end = (unsigned char const *)s + len;
+  auto start = (unsigned char *)retString.mutableData();
+  auto to = start;
 
   while (from < end) {
-    c = *from++;
+    auto c = *from++;
 
     if (c == ' ') {
       *to++ = '+';
@@ -327,8 +326,8 @@ String url_encode(const char *s, size_t len) {
   return retString;
 }
 
-String url_decode(const char *s, size_t len) {
-  String retString(s, len, CopyString);
+OptString url_decode(const char *s, size_t len) {
+  OptString retString(s, len, CopyString);
   char *str = retString.mutableData();
   char *dest = str;
   char *data = str;
@@ -378,8 +377,8 @@ size_t url_decode_ex(char *value, size_t len) {
   return o;
 }
 
-String url_raw_encode(const char *s, size_t len) {
-  String retString(safe_address(len, 3, 1), ReserveString);
+OptString url_raw_encode(const char *s, size_t len) {
+  OptString retString(safe_address(len, 3, 1), ReserveString);
   size_t x, y;
   unsigned char *str = (unsigned char *)retString.mutableData();
 
@@ -398,8 +397,8 @@ String url_raw_encode(const char *s, size_t len) {
   return retString;
 }
 
-String url_raw_decode(const char *s, size_t len) {
-  String retString(s, len, CopyString);
+OptString url_raw_decode(const char *s, size_t len) {
+  OptString retString(s, len, CopyString);
   char *str = retString.mutableData();
   char *dest = str;
   char *data = str;

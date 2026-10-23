@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 
 final class C {}
 
@@ -8,21 +8,29 @@ enum MyEnum: int {
 }
 
 function foo(mixed $x): void {
-  if ($x as C) {
-    expect_C($x);
-  } else if ($x as MyEnum) {
-    expect_MyEnum($x);
-  } else if ($x as mixed !== null) {
-    expect_mixed($x);
-  } else if ($x as ?string !== null) {
-    expect_nstring($x);
-  } else if ($x as int) {
-    expect_int($x);
-  } else if ($x as shape('foo' => int, ...)) {
-    expect_shape($x);
-  } else if ($x as (int, ?string)) {
-    expect_tuple($x);
+  $y = $x;
+  $y as C;
+  expect_C($y);
+  $y = $x;
+  $y as MyEnum;
+  expect_MyEnum($y);
+  $y = $x;
+  if ($y as mixed !== null) {
+    expect_mixed($y);
   }
+  $y = $x;
+  if ($y as ?string !== null) {
+    expect_nstring($y);
+  }
+  $y = $x;
+  $y as int;
+  expect_int($y);
+  $y = $x;
+  $y as shape('foo' => int, ...);
+  expect_shape($y);
+  $y = $x;
+  $y as (int, ?string);
+  expect_tuple($y);
 }
 
 function expect_C(C $x): void {}

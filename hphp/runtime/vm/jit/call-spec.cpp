@@ -20,9 +20,10 @@
 
 #include "hphp/util/abi-cxx.h"
 
+#include <fmt/format.h>
 #include <folly/Range.h>
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 
 namespace {
 std::string show_types(const std::vector<Type>& ts) {
@@ -38,9 +39,9 @@ std::string show_types(const std::vector<Type>& ts) {
 template<typename F>
 void verify_return_type(Type ret, const CallDest& dest, F fail) {
   if (dest.type == DestType::TV) {
-    // We really want equality here: TGen corresponds to a full TypedValue
+    // We really want equality here: TCell corresponds to a full TypedValue
     // being returned.
-    if (ret == TGen) return;
+    if (ret == TCell) return;
   } else {
     if (ret <= dest.valueType) return;
 
@@ -51,10 +52,9 @@ void verify_return_type(Type ret, const CallDest& dest, F fail) {
 
     // Some JIT types are much more specific than what we can express in C++,
     // so treat certain classes of types as equivalent.
-    static auto constexpr special_types = {
-      TPtrToGen,
-      TLvalToGen,
-      TBoxedInitCell,
+    static std::array<Type, 5> constexpr special_types = {
+      TPtr,
+      TLval,
       TObj,
       TStr,
       TArrLike,
@@ -83,7 +83,7 @@ bool CallSpec::verifySignature(const CallDest& dest,
   auto fail = [&](auto&&... fmt) {
     auto const why = folly::sformat(std::forward<decltype(fmt)>(fmt)...);
     auto const func = getNativeFunctionName(this->address());
-    auto msg = folly::sformat(
+    auto msg = fmt::format(
       "Failed to verify signature for call to {}: {}\n\n", func, why
     );
     folly::format(
@@ -99,28 +99,36 @@ bool CallSpec::verifySignature(const CallDest& dest,
   for (; parami < type->params.size() && argi < args.size();
        ++parami, ++argi) {
     auto const param = type->params[parami];
-    // TGen (for a TypedValue parameter) special: the value and type are passed
-    // as two separate entries. Make sure both are present.
-    if (param == TGen) {
-      if (!(args[argi] <= TGen)) {
-        fail("Incompatible type {} for Value half of TypedValue parameter {}",
-             args[argi], parami);
+    // TCell (for a TypedValue parameter) and wide TLval are special: one
+    // SSATmp represents two argument registers, and the latter is passed as a
+    // dummy TBottom argument. Make sure both are present.
+    if (param == TCell || param == TLval) {
+      if (!(args[argi] <= param)) {
+        fail("Incompatible type {} for first half of {} parameter {}",
+             args[argi], param, parami);
       }
       if (++argi == args.size()) break;
       if (args[argi] != TBottom) {
         fail(
-          "Incompatible type {} for DataType half of TypedValue parameter {}",
-          args[argi], parami
+          "Incompatible type {} for second half of {} parameter {}",
+          args[argi], param, parami
         );
       }
     } else if (!(args[argi] <= param)) {
       // A few instructions pass Cls|Nullptr to helpers that take
       // Class*. Handle that special case here.
-      if (!(param <= TCls && args[argi].maybe(TNullptr))) {
-        fail(
-          "Incompatible type {} for {} parameter {}", args[argi], param, parami
-        );
-      }
+      if (param <= TCls && args[argi].maybe(TNullptr)) continue;
+      // Similarly for ArrayData|Nullptr
+      if (param <= TArrLike && args[argi].maybe(TNullptr)) continue;
+      // Similarly for Obj|Nullptr
+      if (param <= TObj && args[argi].maybe(TNullptr)) continue;
+      // Similarly for TPtr|Nullptr
+      if (param <= TPtr && args[argi].maybe(TNullptr)) continue;
+      // LdObjMethodS takes a TSmashable as uintptr_t.
+      if (param <= TInt && args[argi] <= TSmashable) continue;
+      fail(
+        "Incompatible type {} for {} parameter {}", args[argi], param, parami
+      );
     }
   }
 
@@ -131,4 +139,4 @@ bool CallSpec::verifySignature(const CallDest& dest,
   return true;
 }
 
-}}
+}

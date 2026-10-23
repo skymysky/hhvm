@@ -1,0 +1,29 @@
+error: Typing[4110] Incompatible pair values [1]
+-> Expected `int` [2]
+-> But got `string` [3]
+
+pair-typehints.php:6:23
+3 | 
+4 | function badPair(): int {
+5 |   $s = "X";
+  |        ^^^ [3]
+6 |   $x = Pair<int, int>{$s, "Y"};
+  |             ^^^ [2]
+  |                       ^^ [1]
+7 |   return 0;
+8 | }
+
+error: Typing[4110] Incompatible pair values [1]
+-> Expected `int` [2]
+-> But got `string` [1]
+
+pair-typehints.php:6:27
+4 | function badPair(): int {
+5 |   $s = "X";
+6 |   $x = Pair<int, int>{$s, "Y"};
+  |                  ^^^ [2]
+  |                           ^^^ [1]
+7 |   return 0;
+8 | }
+
+2 errors found

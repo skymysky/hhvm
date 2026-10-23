@@ -1,4 +1,4 @@
-<?hh // decl /* -*- php -*- */
+<?hh /* -*- php -*- */
 /**
  * Copyright (c) 2014, Facebook, Inc.
  * All rights reserved.
@@ -8,31 +8,70 @@
  *
  */
 
-const string ICONV_IMPL = '';
-const string ICONV_VERSION = '';
+const string ICONV_IMPL;
+const string ICONV_VERSION;
 
-const int ICONV_MIME_DECODE_STRICT = 0b001;
-const int ICONV_MIME_DECODE_CONTINUE_ON_ERROR = 0b010;
+const int ICONV_MIME_DECODE_STRICT;
+const int ICONV_MIME_DECODE_CONTINUE_ON_ERROR;
 
 <<__PHPStdLib>>
-function iconv_mime_encode($field_name, $field_value, $preferences = null);
+function iconv_mime_encode(
+  string $field_name,
+  string $field_value,
+  HH\FIXME\MISSING_PARAM_TYPE $preferences = null,
+): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function iconv_mime_decode($encoded_string, $mode = 0, $charset = null);
+function iconv_mime_decode(
+  string $encoded_string,
+  int $mode = 0,
+  HH\FIXME\MISSING_PARAM_TYPE $charset = null,
+): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function iconv_mime_decode_headers($encoded_headers, $mode = 0, $charset = null);
+function iconv_mime_decode_headers(
+  string $encoded_headers,
+  int $mode = 0,
+  HH\FIXME\MISSING_PARAM_TYPE $charset = null,
+): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function iconv_get_encoding($type = "all");
+function iconv_get_encoding(string $type = "all"): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function iconv_set_encoding($type, $charset);
+function iconv_set_encoding(
+  string $type,
+  string $charset,
+): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function iconv($in_charset, $out_charset, $str);
+function iconv(
+  string $in_charset,
+  string $out_charset,
+  string $str,
+): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function iconv_strlen($str, $charset = null);
+function iconv_strlen(
+  string $str,
+  HH\FIXME\MISSING_PARAM_TYPE $charset = null,
+): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function iconv_strpos($haystack, $needle, $offset = 0, $charset = null);
+function iconv_strpos(
+  string $haystack,
+  string $needle,
+  int $offset = 0,
+  HH\FIXME\MISSING_PARAM_TYPE $charset = null,
+): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function iconv_strrpos($haystack, $needle, $charset = null);
+function iconv_strrpos(
+  string $haystack,
+  string $needle,
+  HH\FIXME\MISSING_PARAM_TYPE $charset = null,
+): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function iconv_substr($str, $offset, $length = PHP_INT_MAX, $charset = null);
+function iconv_substr(
+  string $str,
+  int $offset,
+  int $length = PHP_INT_MAX,
+  HH\FIXME\MISSING_PARAM_TYPE $charset = null,
+): HH\FIXME\MISSING_RETURN_TYPE;
 <<__PHPStdLib>>
-function ob_iconv_handler($contents, $status);
+function ob_iconv_handler(
+  string $contents,
+  int $status,
+): HH\FIXME\MISSING_RETURN_TYPE;

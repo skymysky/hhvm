@@ -1,0 +1,6 @@
+warning: Lint[5627] Unused trait: `MyClass` is overriding all the methods in `MyTrait`
+   --> class_overrides_trait_methods_bad.php
+ 13 | class MyClass {
+    |       ^^^^^^^
+
+

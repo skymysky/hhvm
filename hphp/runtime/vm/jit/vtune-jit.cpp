@@ -20,7 +20,7 @@
 #include <vector>
 #include <algorithm>
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 
 // Method ids reported to Vtune JIT API should not be less than 1000 (see
 // the comment in iJIT_Method_Load structure definition.) We use 1000 for
@@ -36,7 +36,7 @@ void reportTraceletToVtune(const Unit* unit,
 
   if (!unit) return;
 
-  methodInfo.method_id = tr.src.funcID() + MIN_METHOD_ID;
+  methodInfo.method_id = tr.src.funcID().toInt() + MIN_METHOD_ID;
 
   if (func && func->fullName()) {
     char *name = const_cast<char *>(func->fullName()->data());
@@ -50,33 +50,33 @@ void reportTraceletToVtune(const Unit* unit,
     methodInfo.method_name = const_cast<char *>("unknown");
   }
 
-  methodInfo.source_file_name = const_cast<char *>(unit->filepath()->data());
+  methodInfo.source_file_name =
+    const_cast<char *>(unit->origFilepath()->data());
 
   // aStart field of tr.bcmapping may point to cold range, so we need to
   // explicitly form mappings for main code and cold
 
-  size_t bcSize = tr.bcMapping.size();
   std::vector<LineNumberInfo> mainLineMap, coldLineMap;
 
-  for (size_t i = 0; i < bcSize; i++) {
+  for (auto& mapping : tr.bcMapping) {
     LineNumberInfo info;
 
-    info.LineNumber = unit->getLineNumber(tr.bcMapping[i].bcStart);
+    info.LineNumber = mapping.sk.lineNumber();
 
     // Note that main code may be generated in the cold code range (see
     // emitBlock in code-gen-x64 genCodeImpl()) so we need to explicitly check
     // the aStart value.
-    if (tr.bcMapping[i].aStart >= tr.aStart &&
-        tr.bcMapping[i].aStart < tr.aStart + tr.aLen) {
-      info.Offset = tr.bcMapping[i].aStart - tr.aStart;
+    if (mapping.aStart >= tr.aStart &&
+        mapping.aStart < tr.aStart + tr.aLen) {
+      info.Offset = mapping.aStart - tr.aStart;
       mainLineMap.push_back(info);
-    } else if (tr.bcMapping[i].aStart >= tr.acoldStart &&
-               tr.bcMapping[i].aStart < tr.acoldStart + tr.acoldLen) {
-      info.Offset = tr.bcMapping[i].aStart - tr.acoldStart;
+    } else if (mapping.aStart >= tr.acoldStart &&
+               mapping.aStart < tr.acoldStart + tr.acoldLen) {
+      info.Offset = mapping.aStart - tr.acoldStart;
       coldLineMap.push_back(info);
     }
 
-    info.Offset = tr.bcMapping[i].acoldStart - tr.acoldStart;
+    info.Offset = mapping.acoldStart - tr.acoldStart;
     coldLineMap.push_back(info);
   }
 
@@ -147,4 +147,4 @@ void reportHelperToVtune(const char *name,
   iJIT_NotifyEvent(iJVM_EVENT_TYPE_METHOD_LOAD_FINISHED, (void *)&methodInfo);
 }
 
-}}
+}

@@ -1,0 +1,37 @@
+error: Typing[4110] Invalid argument [1]
+-> Expected `null` or something of type `N<int>` [2]
+-> But got `N<num>` [3]
+
+nullable_newtype.php--file2.php:10:16
+ 1 | <?hh
+ 2 | 
+ 3 | function nullthrows<T>(?T $x): T {
+   |                        ^^ [2]
+ 4 |   throw new Exception();
+ 5 | }
+ 6 | 
+ 7 | function f(N<int> $_): void {}
+ 8 | 
+ 9 | function test(?N<num> $x): void {
+   |                ^^^^^^ [3]
+10 |   f(nullthrows($x));
+   |                ^^ [1]
+11 | }
+
+error: Typing[4110] Invalid argument [1]
+-> Expected `int` [2]
+-> But got `num` [3]
+
+nullable_newtype.php--file2.php:10:16
+ 5 | }
+ 6 | 
+ 7 | function f(N<int> $_): void {}
+   |              ^^^ [2]
+ 8 | 
+ 9 | function test(?N<num> $x): void {
+   |                  ^^^ [3]
+10 |   f(nullthrows($x));
+   |                ^^ [1]
+11 | }
+
+2 errors found

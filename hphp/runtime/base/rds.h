@@ -13,22 +13,23 @@
    | license@php.net so we can mail you a copy immediately.               |
    +----------------------------------------------------------------------+
 */
-#ifndef incl_HPHP_RUNTIME_RDS_H_
-#define incl_HPHP_RUNTIME_RDS_H_
+#pragma once
 
-#include <atomic>
-#include <cstdlib>
-#include <cinttypes>
-#include <string>
-#include <type_traits>
-#include <boost/variant.hpp>
-#include <folly/Range.h>
-#include <folly/Optional.h>
-
+#include "hphp/runtime/base/rds-symbol.h"
 #include "hphp/runtime/base/types.h"
 
 #include "hphp/util/alloc.h"
+#include "hphp/util/optional.h"
 #include "hphp/util/type-scan.h"
+
+#include <folly/Range.h>
+
+#include <atomic>
+#include <cinttypes>
+#include <cstdlib>
+#include <string>
+#include <type_traits>
+#include <vector>
 
 #ifndef RDS_FIXED_PERSISTENT_BASE
 // If RDS_FIXED_PERSISTENT_BASE is defined from compiler command line, don't
@@ -37,33 +38,14 @@
 #ifndef incl_HPHP_UTIL_ALLOC_H_
 #error "please include alloc.h before determining RDS implementation!"
 #endif
-#if USE_JEMALLOC_EXTENT_HOOKS
+#ifndef LOW_BUMP_ALLOCATOR
 #define RDS_FIXED_PERSISTENT_BASE 1
 #endif
 #endif
 
-namespace HPHP {
-struct Array;
-struct StringData;
-struct Class;
-
-namespace jit {
-struct ArrayKindProfile;
-struct ArrayOffsetProfile;
-struct CallTargetProfile;
-struct ClsCnsProfile;
-struct DecRefProfile;
-struct MethProfile;
-struct RefcountProfile;
-struct SwitchProfile;
-struct TypeProfile;
-struct ReleaseVVProfile;
-}
-
-}
 //////////////////////////////////////////////////////////////////////
 
-namespace HPHP { namespace rds {
+namespace HPHP::rds {
 
 //////////////////////////////////////////////////////////////////////
 
@@ -163,6 +145,10 @@ size_t usedBytes();
 size_t usedLocalBytes();
 size_t usedPersistentBytes();
 
+size_t capacityBytes();
+size_t capacityLocalBytes();
+size_t capacityPersistentBytes();
+
 folly::Range<const char*> normalSection();
 folly::Range<const char*> localSection();
 
@@ -177,87 +163,11 @@ template <typename F> void forEachLocalAlloc(F);
  */
 extern __thread void* tl_base;
 
-//////////////////////////////////////////////////////////////////////
-
 /*
- * RDS symbols are centrally registered here.
- *
- * All StringData*'s below must be static strings.
+ * An async signal safe way to determine if the current thread has a fully
+ * initialized RDS (including the initialization of rds::local).
  */
-
-/*
- * Symbol for function static locals.  These are RefData's allocated
- * in RDS.
- */
-struct StaticLocal { FuncId funcId;
-                     LowStringPtr name; };
-
-/*
- * Class constant values are TypedValue's stored in RDS.
- */
-struct ClsConstant { LowStringPtr clsName;
-                     LowStringPtr cnsName; };
-
-/*
- * StaticMethod{F,}Cache allocations.  These are used to cache static
- * method dispatch targets in a given class context.  The `name' field
- * here is a string that encodes the target class, property, and
- * source context.
- */
-struct StaticMethod  { LowStringPtr name; };
-struct StaticMethodF { LowStringPtr name; };
-
-/*
- * Profiling translations may store various kinds of junk under
- * symbols that are keyed on translation id.  These generally should
- * go in Mode::Local or Mode::Persistent, depending on the use case.
- */
-template<typename T>
-struct Profile { TransID transId;
-                 Offset bcOff;
-                 LowStringPtr name; };
-
-/*
- * Static class properties in Mode::Local
- */
-
-struct SPropCache { LowPtr<const Class> cls;
-                    Slot slot; };
-
-struct StaticMemoValue { FuncId funcId; };
-struct StaticMemoCache { FuncId funcId; };
-
-struct LSBMemoValue {
-  LowPtr<const Class> cls;
-  FuncId funcId;
-};
-
-struct LSBMemoCache {
-  LowPtr<const Class> cls;
-  FuncId funcId;
-};
-
-
-using Symbol = boost::variant< StaticLocal
-                             , ClsConstant
-                             , StaticMethod
-                             , StaticMethodF
-                             , Profile<jit::ArrayKindProfile>
-                             , Profile<jit::ArrayOffsetProfile>
-                             , Profile<jit::CallTargetProfile>
-                             , Profile<jit::ClsCnsProfile>
-                             , Profile<jit::DecRefProfile>
-                             , Profile<jit::MethProfile>
-                             , Profile<jit::RefcountProfile>
-                             , Profile<jit::ReleaseVVProfile>
-                             , Profile<jit::SwitchProfile>
-                             , Profile<jit::TypeProfile>
-                             , SPropCache
-                             , StaticMemoValue
-                             , StaticMemoCache
-                             , LSBMemoValue
-                             , LSBMemoCache
-                             >;
+bool isFullyInitialized();
 
 //////////////////////////////////////////////////////////////////////
 
@@ -286,6 +196,17 @@ template<Mode RHS> constexpr bool in(Mode LHS) {
 constexpr bool pure(Mode mask) {
   return !(static_cast<ModeU>(mask) & (static_cast<ModeU>(mask) - 1));
 }
+
+/*
+ * Per-category RDS usage breakdown.
+ */
+struct CategoryUsage {
+  std::string category;
+  size_t bytes;
+  size_t count;
+  Mode mode;
+};
+std::vector<CategoryUsage> usageByCategory();
 
 /*
  * Handles into Request Data Segment.
@@ -343,43 +264,32 @@ struct Link {
   Link<T,M>& operator=(const Link<T,M>&);
 
   template<Mode OM> /* implicit */ Link(
-    const typename std::enable_if<in<M>(OM), Link<T,OM>>::type&);
+      const Link<T,OM>&,
+      typename std::enable_if<in<M>(OM), bool>::type = false);
 
   template<Mode OM> typename std::enable_if<in<M>(OM),Link<T,M>>::type&
   operator=(const Link<T,OM>&);
 
   /*
-   * Ensure this Link is bound to an RDS allocation.  If it is not, allocate it
-   * using this Link itself as the symbol.
-   *
-   * This function internally synchronizes to avoid double-allocating.  It is
-   * legal to call it repeatedly with a link that may already be bound.  The
-   * `mode' parameter and `Align' parameters are ignored if the link is already
-   * bound, and only affects the call that allocates RDS memory.
-   *
-   * Post: bound()
-   */
-  template<size_t Align = alignof(T)> void bind(Mode mode);
-
-  /*
    * Ensure this Link is bound to an RDS allocation.
-   *  - if its already bound, do nothing;
-   *  - if another thread is already calling fun to bind it, wait until its
-   *    bound;
-   *  - otherwise call fun to obtain a handle.
-   *  - for persistent handles, value is used to initialize the corresponding
-   *    rds data; for normal handles its ignored.
    *
-   * The intent is to ensure that only one thread allocates the
-   * handle, and that in the case of persistent handles, fun has a
-   * chance to fill in the value before the Link is published (so that
-   * other threads only ever see an unbound handle, or a bound handle
-   * with a valid value.
+   * Allocation is atomic and idempotent.  This ensures that only one thread
+   * allocates the handle, and (in the case of persistent handles) that the
+   * value is initialized as part of the operation.  The effect is that other
+   * threads only ever see an unbound handle or a bound handle with a valid
+   * value.
+   *
+   * rds::Link's are "keyed" by context---generally meaning that they're owned
+   * by an object with an independent means of enforcing uniqueness.  The `sym`
+   * argument should also be unique, but is used only for optimizations.
+   *
+   * If the Link is already bound, both `mode` and `Align` are ignored.  If the
+   * mode is not persistent, `init_val` is ignored.
    *
    * Post: bound()
    */
-  template<typename F>
-  void bind(F fun, const T& value);
+  template<size_t Align = alignof(T)>
+  void bind(Mode mode, Symbol sym, const T* init_val = nullptr);
 
   /*
    * Dereference a Link and access its RDS memory for the current thread.
@@ -389,6 +299,7 @@ struct Link {
   T& operator*() const;
   T* operator->() const;
   T* get() const;
+  T* getNoProfile() const;
 
   /*
    * Whether this Link is bound to RDS memory or not (i.e., whether its
@@ -432,6 +343,7 @@ struct Link {
    * Pre: bound()
    */
   bool isInit() const;
+  bool isInitNoProfile() const;
 
   /*
    * Manually mark this element as initialized or uninitialized.
@@ -475,7 +387,7 @@ private:
 
   void checkSanity();
 
-  Handle raw() const { return m_handle.load(std::memory_order_relaxed); }
+  Handle raw() const { return m_handle.load(std::memory_order_acquire); }
   std::atomic<Handle> m_handle;
 };
 
@@ -530,7 +442,17 @@ Link<T,M> alloc();
 size_t allocBit();
 bool testAndSetBit(size_t bit);
 
-folly::Optional<Symbol> reverseLink(Handle handle);
+/*
+ * Table mapping handles to their symbols.  This excludes Profiling symbols.
+ */
+Optional<Symbol> reverseLink(Handle handle);
+
+/*
+ * Table mapping handles to their symbols.
+ * Only returns a symbol if the handle is exact, unlike reverseLink(),
+ * which returns true if the handle is within range of a symbol.
+ */
+Optional<Symbol> reverseLinkExact(Handle handle);
 
 //////////////////////////////////////////////////////////////////////
 
@@ -550,14 +472,14 @@ Handle currentGenNumberHandle();
  * Dereference an un-typed rds::Handle which is guaranteed to be in one of the
  * `modes`, optionally specifying a specific RDS base to use.
  */
-template<class T, Mode M> T& handleToRef(Handle h);
-template<class T, Mode M> T& handleToRef(void* base, Handle h);
+template<class T, Mode M, bool P = true> T& handleToRef(Handle h);
+template<class T, Mode M, bool P = true> T& handleToRef(void* base, Handle h);
 
 /*
  * Conversion between a pointer and an rds::Handle which is guaranteed to be in
  * one of the modes specified in `M`.
  */
-template<class T = void, Mode M> T* handleToPtr(Handle h);
+template<class T = void, Mode M, bool P = true> T* handleToPtr(Handle h);
 template<Mode M> Handle ptrToHandle(const void* ptr);
 template<Mode M> Handle ptrToHandle(uintptr_t ptr);
 
@@ -592,6 +514,7 @@ bool isPersistentHandle(Handle handle);
  *
  * Pre: isNormalHandle(handle)
  */
+template <bool P = true>
 GenNumber genNumberOf(Handle handle);
 
 /*
@@ -611,7 +534,8 @@ bool isHandleBound(Handle handle);
  */
 bool isHandleInit(Handle handle);
 bool isHandleInit(Handle handle, NormalTag);
-
+bool isHandleInitNoProfile(Handle handle);
+bool isHandleInitNoProfile(Handle handle, NormalTag);
 /*
  * Mark the element associated with `handle' as being initialized.
  *
@@ -628,10 +552,35 @@ void initHandle(Handle handle);
  */
 void uninitHandle(Handle handle);
 
+//////////////////////////////////////////////////////////////////////
+
+bool shouldProfileAccesses();
+
+Handle profileForHandle(Handle);
+
+void markAccess(Handle);
+
+struct Ordering {
+  struct Item {
+    std::string key;
+    size_t size;
+    size_t alignment;
+  };
+  std::vector<Item> persistent;
+  std::vector<Item> local;
+  std::vector<Item> normal;
+};
+
+Ordering profiledOrdering();
+
+void setPreAssignments(const Ordering&);
+
+//////////////////////////////////////////////////////////////////////
+
 /*
  * Used to record information about the rds handle h in the
  * perf-data-pid.map (if enabled).
- * The type indicates the type of entry (eg StaticLocal), and the
+ * The type indicates the type of entry (eg ClsConstant), and the
  * msg identifies this particular entry (eg function-name:local-name)
  */
 void recordRds(Handle h, size_t size,
@@ -645,18 +594,10 @@ void visitSymbols(std::function<void(const Symbol&,Handle,uint32_t)> fun);
  */
 std::vector<void*> allTLBases();
 
-/*
- * Values for dynamically defined constants are stored as key value
- * pairs in an array, accessible here.
- */
-Array& s_constants();
-
 //////////////////////////////////////////////////////////////////////
 
 extern rds::Link<bool, Mode::Persistent> s_persistentTrue;
 
-}}
+}
 
 #include "hphp/runtime/base/rds-inl.h"
-
-#endif

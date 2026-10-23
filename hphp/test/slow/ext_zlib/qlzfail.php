@@ -1,7 +1,7 @@
 <?hh
 
 
-function main() {
+function main() :mixed{
   $x = "the quick brown fox compressed the lazy dog with qlz\n";
   $cx = qlzcompress($x);
   $ux = qlzuncompress($cx);
@@ -14,4 +14,8 @@ function main() {
   var_dump($wx);
 }
 
+
+<<__EntryPoint>>
+function main_qlzfail() :mixed{
 main();
+}

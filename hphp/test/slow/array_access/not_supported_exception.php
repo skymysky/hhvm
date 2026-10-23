@@ -1,4 +1,4 @@
-<?php
+<?hh
 
 class Lal {
 }
@@ -10,14 +10,18 @@ class Foo {
     $this->x = new Lal;
   }
 
-  public function sup() {
+  public function sup() :mixed{
     $this->x[] = 2;
   }
 }
 
-function main() {
+function main() :mixed{
   $x = new Foo;
   $x->sup();
 }
 
+
+<<__EntryPoint>>
+function main_not_supported_exception() :mixed{
 main();
+}

@@ -5,17 +5,20 @@ class Bar {
     $this->base = $base;
   }
 
-  public function baz($a) {
+  <<__DynamicallyCallable>>
+  public function baz($a) :mixed{
     return $a + $this->base;
   }
-  public static function foo($a) {
+  <<__DynamicallyCallable>>
+  public static function foo($a) :mixed{
     return $a + 1;
   }
 }
-function foo($a) {
+<<__DynamicallyCallable>>
+function foo($a) :mixed{
   return $a + 2;
 }
-
+<<__EntryPoint>> function main(): void {
 $foo = function ($a) {
   return $a + 3;
 };
@@ -44,10 +47,7 @@ var_dump(call_user_func($rf->getClosure(), 1));
 $rf = new ReflectionMethod('Bar::foo');
 var_dump(call_user_func($rf->getClosure(), 1));
 
-// Function
-$rf = new ReflectionFunction('foo');
-var_dump(call_user_func($rf->getClosure(), 1));
-
 // Closure
 $rf = new ReflectionFunction($foo);
 var_dump(call_user_func($rf->getClosure(), 1));
+}

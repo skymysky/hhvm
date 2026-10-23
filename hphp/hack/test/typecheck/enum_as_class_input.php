@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 /**
  * Copyright (c) 2014, Facebook, Inc.
  * All rights reserved.
@@ -20,5 +20,5 @@ function bar(classname<NumbahsEnum> $test): int {
 }
 
 function foo(): int {
-  return bar(NumbahsEnum::class);
+  return bar(nameof NumbahsEnum);
 }

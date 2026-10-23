@@ -1,11 +1,15 @@
-<?php
+<?hh
 
 class A implements Serializable {
   public $__foo = true;
-  public function serialize() {
+  public function serialize() :mixed{
     return null;
   }
-  public function unserialize($serialized) {
+  public function unserialize($serialized) :mixed{
   }
 }
- var_dump(unserialize(serialize(new A())));
+
+ <<__EntryPoint>>
+function main_1539() :mixed{
+var_dump(unserialize(serialize(new A())));
+}

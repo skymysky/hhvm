@@ -7,7 +7,7 @@
 interface I<-T> {}
 
 function f<Tv>(Tv $_): I<Tv> {
-  // UNSAFE
+  throw new Exception();
 }
 
 type s = shape(

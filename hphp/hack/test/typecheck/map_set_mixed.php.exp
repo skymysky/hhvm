@@ -1,0 +1,16 @@
+error: Typing[4110] Invalid argument [1]
+-> Expected `arraykey` [2]
+-> But got `mixed` [3]
+
+map_set_mixed.php:5:11
+1 | <?hh
+2 | 
+3 | function f(mixed $x) : void {
+  |            ^^^^^ [3]
+4 |   $m = Map {};
+  |        ^^^^^^ [2]
+5 |   $m->set($x, $x);
+  |           ^^ [1]
+6 | }
+
+1 error found

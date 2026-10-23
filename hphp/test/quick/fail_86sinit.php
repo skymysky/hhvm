@@ -1,10 +1,13 @@
 <?hh
-function handler() { var_dump(func_get_args()); }
-set_error_handler('handler');
+function handler(...$args) :mixed{ var_dump($args); }
 class X {
   public static $s = Z::BAR;
 }
-function test() {
+function test() :mixed{
   var_dump(X::$s);
 }
-test();
+<<__EntryPoint>>
+function entrypoint_fail_86sinit(): void {
+  set_error_handler(handler<>);
+  test();
+}

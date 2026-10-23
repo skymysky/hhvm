@@ -1,0 +1,16 @@
+error: Typing[4403] Invalid return type [1]
+-> Expected a function that requires the capability set {} [2]
+-> But got a function that requires the capability WriteProperty [3]
+
+pretty_subtyping.php:6:10
+2 | 
+3 | function purification_fail(
+4 |   (function ()[write_props]: void) $f
+  |                ^^^^^^^^^^^ [3]
+5 | ): (function ()[]: void) {
+  |                ^^ [2]
+6 |   return $f;
+  |          ^^ [1]
+7 | }
+
+1 error found

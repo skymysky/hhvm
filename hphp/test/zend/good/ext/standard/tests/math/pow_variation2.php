@@ -1,14 +1,12 @@
-<?php
+<?hh
 /* Prototype  : number pow  ( number $base  , number $exp  )
  * Description: Exponential expression.
  * Source code: ext/standard/math.c
  */
 
+<<__EntryPoint>> function main(): void {
 echo "*** Testing pow() : usage variations ***\n";
 
-//get an unset variable
-$unset_var = 10;
-unset ($unset_var);
 
 // heredoc string
 $heredoc = <<<EOT
@@ -16,20 +14,15 @@ abc
 xyz
 EOT;
 
-// get a class
-class classA
-{
-}
-
 // get a resource variable
 $fp = fopen(__FILE__, "r");
 
-$inputs = array(
+$inputs = vec[
        // int data
 /*1*/  0,
        1,
        12345,
-       -2345,       
+       -2345,
        2147483647,
 
        // float data
@@ -48,37 +41,28 @@ $inputs = array(
        false,
        TRUE,
        FALSE,
-       
+
        // empty data
 /*17*/ "",
        '',
-       array(),
+       vec[],
 
        // string data
 /*20*/ "abcxyz",
        'abcxyz',
        $heredoc,
-       
-       // object data
-/*23*/ new classA(),       
-       
-       // undefined data
-/*24*/ @$undefined_var,
-
-       // unset data
-/*25*/ @$unset_var,
 
        // resource variable
-/*26*/ $fp
-);
+/*24*/ $fp
+];
 
 // loop through each element of $inputs to check the behaviour of pow()
 $iterator = 1;
 foreach($inputs as $input) {
-	echo "\n-- Iteration $iterator --\n";
-	var_dump(pow(20.3, $input));
-	$iterator++;
+    echo "\n-- Iteration $iterator --\n";
+    var_dump(pow(20.3, HH\Lib\Legacy_FIXME\cast_for_exponent($input)));
+    $iterator++;
 };
 fclose($fp);
-?>
-===Done===
+echo "===Done===";
+}

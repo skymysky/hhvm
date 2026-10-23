@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 // Copyright 2004-present Facebook. All Rights Reserved.
 
 final class Child extends Base<int> {
@@ -12,8 +12,7 @@ trait ATrait {
 }
 
 class Base<+T> {
-
   public function get(): T {
-    // UNSAFE
+    throw new Exception();
   }
 }

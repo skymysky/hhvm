@@ -15,8 +15,7 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_EXT_IMAGICK_CONSTANTS_H_
-#define incl_HPHP_EXT_IMAGICK_CONSTANTS_H_
+#pragma once
 
 #include "hphp/runtime/ext/extension.h"
 
@@ -117,9 +116,7 @@ extern const StaticString
   s_ImagickPixel,
   s_ImagickPixelIterator;
 
-void loadImagickConstants();
+void registerNativeImagickConstants();
 
 //////////////////////////////////////////////////////////////////////////////
 } // namespace HPHP
-
-#endif // incl_HPHP_EXT_IMAGICK_CONSTANTS_H_

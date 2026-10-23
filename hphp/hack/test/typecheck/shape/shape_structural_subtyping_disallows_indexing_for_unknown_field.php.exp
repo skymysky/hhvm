@@ -1,4 +1,15 @@
-File "shape_structural_subtyping_disallows_indexing_for_unknown_field.php", line 6, characters 10-12:
-The field b is undefined (Typing[4108])
-File "shape_structural_subtyping_disallows_indexing_for_unknown_field.php", line 5, characters 14-35:
-You might want to check this out
+error: Typing[4108] This shape doesn't have a field `b` [1]
+-> The shape is defined here [2]
+
+shape_structural_subtyping_disallows_indexing_for_unknown_field.php:6:10
+1 | <?hh
+2 | 
+3 | type ShapeWithOptionalField = shape(?'a' => int);
+  |                               ^^^^^^^^^^^^^^^^^^ [2]
+4 | 
+5 | function foo(ShapeWithOptionalField $shape): void {
+6 |   $shape['b'];
+  |          ^^^ [1]
+7 | }
+
+1 error found

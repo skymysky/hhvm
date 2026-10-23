@@ -13,37 +13,44 @@
    | license@php.net so we can mail you a copy immediately.               |
    +----------------------------------------------------------------------+
 */
-#ifndef incl_HPHP_RUNTIME_BASE_RDS_INL_H_
-#define incl_HPHP_RUNTIME_BASE_RDS_INL_H_
+#pragma once
 
-#include <tbb/concurrent_vector.h>
+#include "hphp/runtime/base/runtime-option.h"
+#include "hphp/runtime/vm/type-profile.h"
 #include "hphp/util/compilation-flags.h"
+#include "hphp/util/configs/eval.h"
 #include "hphp/util/safe-cast.h"
 
-namespace HPHP { namespace rds {
+#include <tbb/concurrent_vector.h>
+
+#include <atomic>
+
+namespace HPHP::rds {
 
 //////////////////////////////////////////////////////////////////////
 
 namespace detail {
 
 Handle alloc(Mode mode, size_t numBytes, size_t align,
-             type_scan::Index tyIndex);
+             type_scan::Index tyIndex, const Symbol* symbol,
+             folly::StringPiece typeName = {});
 Handle allocUnlocked(Mode mode, size_t numBytes, size_t align,
-                     type_scan::Index tyIndex);
+                     type_scan::Index tyIndex,
+                     const Symbol* symbol,
+                     folly::StringPiece typeName = {});
 Handle bindImpl(Symbol key, Mode mode, size_t sizeBytes,
-                size_t align, type_scan::Index tyIndex);
+                size_t align, type_scan::Index tyIndex,
+                folly::StringPiece typeName = {});
 Handle attachImpl(Symbol key);
-void bindOnLinkImpl(std::atomic<Handle>& handle, Mode mode,
-                    size_t sizeBytes, size_t align,
-                    type_scan::Index tyIndex);
-void bindOnLinkImpl(std::atomic<Handle>& handle,
-                    std::function<Handle()> fun,
-                    const void* init, size_t size,
-                    type_scan::Index tyIndex);
 
-extern size_t s_normal_frontier;
+void bindOnLinkImpl(std::atomic<Handle>& handle,
+                    Symbol key, Mode mode, size_t size, size_t align,
+                    type_scan::Index tsi, const void* init_val,
+                    folly::StringPiece typeName = {});
+
+extern std::atomic_size_t s_normal_frontier;
 extern size_t s_local_base;
-extern size_t s_local_frontier;
+extern std::atomic_size_t s_local_frontier;
 constexpr size_t size4g = 1ull << 32;
 #if RDS_FIXED_PERSISTENT_BASE
 constexpr uintptr_t s_persistent_base = 0;
@@ -61,13 +68,18 @@ using AllocDescriptorList = tbb::concurrent_vector<AllocDescriptor>;
 extern AllocDescriptorList s_normal_alloc_descs;
 extern AllocDescriptorList s_local_alloc_descs;
 
+// See comments in rds.cpp for why these are necessary.
+extern std::atomic<size_t> s_normal_alloc_descs_size;
+extern std::atomic<size_t> s_local_alloc_descs_size;
+
 }
 
 //////////////////////////////////////////////////////////////////////
 
-template<class T, Mode M>
+template<class T, Mode M, bool P>
 T* handleToPtr(void* base, Handle h) {
   using namespace detail;
+  if (P && UNLIKELY(shouldProfileAccesses())) markAccess(h);
   if (M == Mode::Persistent) {
     assertx(isPersistentHandle(h));
     return reinterpret_cast<T*>(s_persistent_base + h);
@@ -81,19 +93,19 @@ T* handleToPtr(void* base, Handle h) {
   return reinterpret_cast<T*>(vp);
 }
 
-template<class T, Mode M>
+template<class T, Mode M, bool P>
 T* handleToPtr(Handle h) {
-  return handleToPtr<T, M>(tl_base, h);
+  return handleToPtr<T, M, P>(tl_base, h);
 }
 
-template<class T, Mode M>
+template<class T, Mode M, bool P>
 T& handleToRef(void* base, Handle h) {
-  return *handleToPtr<T, M>(base, h);
+  return *handleToPtr<T, M, P>(base, h);
 }
 
-template<class T, Mode M>
+template<class T, Mode M, bool P>
 T& handleToRef(Handle h) {
-  return *handleToPtr<T, M>(h);
+  return *handleToPtr<T, M, P>(h);
 }
 
 template<Mode M>
@@ -142,18 +154,20 @@ Link<T,M>::Link(const Link<T,M>& l) : m_handle(l.raw()) {}
 
 template<class T, Mode M>
 template<Mode OM>
-Link<T,M>::Link(const typename std::enable_if<in<M>(OM), Link<T,OM>>::type& l)
+Link<T,M>::Link(
+    const Link<T,OM>& l,
+    typename std::enable_if<in<M>(OM), bool>::type)
   : m_handle(l.raw()) {}
 
 template<class T, Mode M>
 Link<T,M>& Link<T,M>::operator=(const Link<T,M>& l) {
   if (debug) {
     auto const DEBUG_ONLY old =
-      m_handle.exchange(l.raw(), std::memory_order_relaxed);
+      m_handle.exchange(l.raw(), std::memory_order_acq_rel);
     assertx(raw() != kBeingBound && raw() != kBeingBoundWithWaiters &&
             old != kBeingBound && old != kBeingBoundWithWaiters);
   } else {
-    m_handle.store(l.raw(), std::memory_order_relaxed);
+    m_handle.store(l.raw(), std::memory_order_release);
   }
   return *this;
 }
@@ -164,11 +178,11 @@ typename std::enable_if<in<M>(OM),Link<T,M>>::type&
 Link<T,M>::operator=(const Link<T,OM>& l) {
   if (debug) {
     auto const DEBUG_ONLY old =
-      m_handle.exchange(l.raw(), std::memory_order_relaxed);
+      m_handle.exchange(l.raw(), std::memory_order_acq_rel);
     assertx(raw() != kBeingBound && raw() != kBeingBoundWithWaiters &&
             old != kBeingBound && old != kBeingBoundWithWaiters);
   } else {
-    m_handle.store(l.raw(), std::memory_order_relaxed);
+    m_handle.store(l.raw(), std::memory_order_release);
   }
   return *this;
 }
@@ -182,6 +196,11 @@ T* Link<T,M>::operator->() const { return get(); }
 template<class T, Mode M>
 T* Link<T,M>::get() const {
   return handleToPtr<T, M>(handle());
+}
+
+template<class T, Mode M>
+T* Link<T,M>::getNoProfile() const {
+  return handleToPtr<T, M, false>(handle());
 }
 
 template<class T, Mode M>
@@ -217,6 +236,13 @@ bool Link<T,M>::isInit() const {
   return !maybe<Mode::Normal>(M) ||
     (M == Mode::Normal && isHandleInit(handle(), NormalTag{})) ||
     isHandleInit(handle());
+}
+
+template<class T, Mode M>
+bool Link<T,M>::isInitNoProfile() const {
+  return !maybe<Mode::Normal>(M) ||
+    (M == Mode::Normal && isHandleInitNoProfile(handle(), NormalTag{})) ||
+    isHandleInitNoProfile(handle());
 }
 
 template<class T, Mode M>
@@ -261,23 +287,14 @@ bool Link<T,M>::isPersistent() const {
 
 template<class T, Mode M>
 template<size_t Align>
-void Link<T,M>::bind(Mode mode) {
+void Link<T,M>::bind(Mode mode, Symbol sym, const T* init_val) {
   assertx(maybe<M>(mode));
   if (LIKELY(bound())) return;
-  detail::bindOnLinkImpl(
-    m_handle, mode, sizeof(T),
-    Align, type_scan::getIndexForScan<T>()
-  );
-  recordRds(m_handle, sizeof(T), "Unknown", __PRETTY_FUNCTION__);
-}
 
-template<class T, Mode M>
-template<typename F>
-void Link<T,M>::bind(F fun, const T& init) {
-  if (LIKELY(bound())) return;
   detail::bindOnLinkImpl(
-      m_handle, std::move(fun), &init, sizeof init,
-      type_scan::getIndexForScan<T>()
+    m_handle, sym, mode, sizeof(T), Align,
+    type_scan::getIndexForScan<T>(), init_val,
+    typeid(T).name()
   );
   checkSanity();
 }
@@ -302,7 +319,8 @@ Link<T,M> bind(Symbol key, size_t extraSize) {
   return Link<T,M>(
     detail::bindImpl(
       key, M, sizeof(T) + extraSize,
-      Align, type_scan::getIndexForScan<T>()
+      Align, type_scan::getIndexForScan<T>(),
+      typeid(T).name()
     )
   );
 }
@@ -318,7 +336,9 @@ Link<T,M> alloc() {
   return Link<T,M>(
     detail::allocUnlocked(
       M, sizeof(T), Align,
-      type_scan::getIndexForScan<T>()
+      type_scan::getIndexForScan<T>(),
+      nullptr,
+      typeid(T).name()
     )
   );
 }
@@ -327,12 +347,14 @@ Link<T,M> alloc() {
 
 inline bool isNormalHandle(Handle handle) {
   assertx(isValidHandle(handle));
-  return handle < safe_cast<uint32_t>(detail::s_normal_frontier);
+  auto const normalFrontier = detail::s_normal_frontier.load(std::memory_order_acquire);
+  return handle < safe_cast<uint32_t>(normalFrontier);
 }
 
 inline bool isLocalHandle(Handle handle) {
   assertx(isValidHandle(handle));
-  return handle >= safe_cast<uint32_t>(detail::s_local_frontier) &&
+  auto const localFrontier = detail::s_local_frontier.load(std::memory_order_acquire);
+  return handle >= safe_cast<uint32_t>(localFrontier) &&
     handle < safe_cast<uint32_t>(detail::s_local_base);
 }
 
@@ -343,9 +365,10 @@ inline bool isPersistentHandle(Handle handle) {
 
 ////////////////////////////////////////////////////////////////////
 
+template <bool P>
 inline GenNumber genNumberOf(Handle handle) {
   assertx(isNormalHandle(handle));
-  return handleToRef<GenNumber, Mode::Normal>(genNumberHandleFrom(handle));
+  return handleToRef<GenNumber, Mode::Normal, P>(genNumberHandleFrom(handle));
 }
 
 inline Handle genNumberHandleFrom(Handle handle) {
@@ -365,9 +388,19 @@ inline bool isHandleInit(Handle handle) {
          isHandleInit(handle, NormalTag{});
 }
 
+inline bool isHandleInitNoProfile(Handle handle) {
+  return !isNormalHandle(handle) ||
+         isHandleInitNoProfile(handle, NormalTag{});
+}
+
 inline bool isHandleInit(Handle handle, NormalTag) {
   assertx(isNormalHandle(handle));
   return genNumberOf(handle) == currentGenNumber();
+}
+
+inline bool isHandleInitNoProfile(Handle handle, NormalTag) {
+  assertx(isNormalHandle(handle));
+  return genNumberOf<false>(handle) == currentGenNumber();
 }
 
 inline void initHandle(Handle handle) {
@@ -384,21 +417,30 @@ inline void uninitHandle(Handle handle) {
 
 ////////////////////////////////////////////////////////////////////////////////
 
+inline bool shouldProfileAccesses() {
+  return isJitSerializing() && Cfg::Eval::ReorderRDS && isFullyInitialized() &&
+    isStandardRequest();
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
 template <typename F> inline void forEachNormalAlloc(F f) {
+  auto size = detail::s_normal_alloc_descs_size.load(std::memory_order_acquire);
   for (const auto& desc : detail::s_normal_alloc_descs) {
-    if (!isHandleInit(desc.handle, NormalTag{})) continue;
+    if (!(size--)) break;
+    if (!isHandleInitNoProfile(desc.handle, NormalTag{})) continue;
     f(static_cast<char*>(tl_base) + desc.handle, desc.size, desc.index);
   }
 }
 
 template <typename F> inline void forEachLocalAlloc(F f) {
+  auto size = detail::s_local_alloc_descs_size.load(std::memory_order_acquire);
   for (const auto& desc : detail::s_local_alloc_descs) {
+    if (!(size--)) break;
     f(static_cast<char*>(tl_base) + desc.handle, desc.size, desc.index);
   }
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 
-}}
-
-#endif
+}

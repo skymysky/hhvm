@@ -13,8 +13,9 @@
    | license@php.net so we can mail you a copy immediately.               |
    +----------------------------------------------------------------------+
 */
-#ifndef incl_HPHP_JIT_IRGEN_BUILTIN_H_
-#define incl_HPHP_JIT_IRGEN_BUILTIN_H_
+#pragma once
+
+#include <cstdint>
 
 namespace HPHP {
 
@@ -33,13 +34,6 @@ struct IRGS;
 
 SSATmp* optimizedCallIsObject(IRGS&, SSATmp*);
 
-// The builtin's inferred return type (without taking into account coercion
-// failures). Appropriate for CallBuiltin. For regular PHP calls to a builtin,
-// use callReturnType() instead.
-Type builtinReturnType(const Func* builtin);
-
 //////////////////////////////////////////////////////////////////////
 
 }}}
-
-#endif

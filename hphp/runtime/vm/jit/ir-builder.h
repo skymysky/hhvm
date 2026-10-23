@@ -14,8 +14,7 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_VM_IRBUILDER_H_
-#define incl_HPHP_VM_IRBUILDER_H_
+#pragma once
 
 #include "hphp/runtime/vm/jit/block.h"
 #include "hphp/runtime/vm/jit/cfg.h"
@@ -30,17 +29,16 @@
 #include "hphp/runtime/vm/jit/state-vector.h"
 #include "hphp/runtime/vm/jit/type.h"
 
-#include <folly/Optional.h>
 #include <folly/ScopeGuard.h>
 
 #include <functional>
 
-namespace HPHP { namespace jit { namespace irgen {
+namespace HPHP::jit::irgen {
 
 ///////////////////////////////////////////////////////////////////////////////
 
 struct ExnStackState {
-  FPInvOffset syncedSpLevel{0};
+  SBInvOffset syncedSpLevel{0};
 };
 
 /*
@@ -65,14 +63,14 @@ struct ExnStackState {
  *      copy propagation and strength reduction.  (See simplify.h.)
  */
 struct IRBuilder {
-  IRBuilder(IRUnit&, BCMarker);
+  IRBuilder(IRUnit&, const Func*);
 
   /*
    * Accessors.
    */
   IRUnit& unit() const { return m_unit; }
   FrameStateMgr& fs() { return m_state; }
-  BCMarker curMarker() const { return m_curBCContext.marker; }
+  const BCMarker& curMarker() const { return m_curBCContext.marker; }
 
   /*
    * Get the current BCContext, incrementing its `iroff'.
@@ -84,7 +82,7 @@ struct IRBuilder {
   /*
    * Update the current BCContext.
    */
-  void setCurMarker(BCMarker);
+  void setCurMarker(const BCMarker&);
   void resetCurIROff(uint16_t off = 0) { m_curBCContext.iroff = off; }
 
   /*
@@ -115,21 +113,10 @@ struct IRBuilder {
    *
    * These simply constrain the location, then delegate to fs().
    */
-  const LocalState& local(uint32_t id, GuardConstraint gc);
-  const StackState& stack(IRSPRelOffset offset, GuardConstraint gc);
-  const CSlotState& clsRefSlot(uint32_t slot);
+  LocalState local(uint32_t id, GuardConstraint gc);
+  StackState stack(IRSPRelOffset offset, GuardConstraint gc);
   SSATmp* valueOf(Location l, GuardConstraint gc);
   Type     typeOf(Location l, GuardConstraint gc);
-
-  /*
-   * Helper for unboxing predicted types.
-   *
-   * @returns: ldRefReturn(fs().predictedTypeOf(location).unbox())
-   */
-  Type predictedInnerType(Location l) const;
-  Type predictedLocalInnerType(uint32_t id) const;
-  Type predictedStackInnerType(IRSPRelOffset) const;
-  Type predictedMBaseInnerType() const;
 
   /////////////////////////////////////////////////////////////////////////////
   /*
@@ -148,25 +135,23 @@ struct IRBuilder {
   void enableConstrainGuards();
 
   /*
+   * Emit and register a tracelet guard assumption for an untracked location.
+   * TCell requires no guard. Only used while constraining guards for region
+   * selection; the emitted assertion does not perform a runtime check.
+   */
+  void guardType(Location, Type);
+
+  /*
    * All the guards in the managed IRUnit.
    */
   const GuardConstraints* guards() const { return &m_constraints; }
 
   /*
-   * Return true iff `gc' is more specific than the existing constraint for the
-   * guard `inst'.
-   *
-   * This does not necessarily constrain the guard, if `gc.weak' is true.
-   */
-  bool constrainGuard(const IRInstruction* inst, GuardConstraint gc);
-
-  /*
    * Trace back to the guard that provided the type of `val', if any, then
    * constrain it so that its type will not be relaxed beyond `gc'.
    *
-   * Like constrainGuard(), this returns true iff `gc' is more specific than
-   * the existing constraint, and does not constrain the guard if `gc.weak' is
-   * true.
+   * Returns true iff a guard needs a tighter constraint, and does not change
+   * constraints if `gc.weak' is true.
    */
   bool constrainValue(SSATmp* const val, GuardConstraint gc);
 
@@ -178,7 +163,7 @@ struct IRBuilder {
   bool constrainStack(IRSPRelOffset offset, GuardConstraint gc);
 
   /*
-   * Returns the number of instructions that have non-generic type constraints.
+   * Returns the number of registered guards with non-generic type constraints.
    */
   uint32_t numGuards() const;
 
@@ -215,33 +200,50 @@ struct IRBuilder {
   void setBlock(SrcKey sk, Block* block);
 
   /*
+   * Append `block' to the unit.
+   *
+   * This method is used to implement IR-level control-flow helpers. When doing
+   * control flow, we may simplify branching instructions into direct jumps to
+   * next or taken, in which case some blocks that we append are unreachable.
+   *
+   * We can detect this case by checking whether `block` has any predecessors -
+   * all incoming edges should be created before calling this method.
+   */
+  void appendBlock(Block* block);
+
+  /*
+   * If the final instruction in the current block is a block end and no next
+   * block has been assigned yet, create one.
+   */
+  void ensureBlockAppendable();
+
+  /*
    * Clear the SrcKey-to-block map.
    */
   void resetOffsetMapping();
 
   /*
-   * Append `block' to the unit.
-   *
-   * This is used by irgen in IR-level control-flow helpers.  In certain cases,
-   * these helpers may append unreachable blocks, which will not have a valid
-   * in-state in FrameStateMgr.
-   *
-   * Rather than implicitly propagating the out state for m_curBlock, which is
-   * the default behavior, `pred' can be set to indicate the logical
-   * predecessor, in case `block' is unreachable.  If `block' is reachable,
-   * `pred' is ignored.
+   * Save and restore the SrcKey-to-block map.
    */
-  void appendBlock(Block* block, Block* pred = nullptr);
+  using SkToBlockMap = jit::fast_map<SrcKey, Block*, SrcKey::Hasher>;
+  SkToBlockMap saveAndClearOffsetMapping();
+  void restoreOffsetMapping(SkToBlockMap&& offsetMapping);
 
   /*
-   * Get, set, or null out the block to branch to in case of a guard failure.
-   *
-   * A nullptr guard fail block indicates that guard failures should end the
-   * region and perform a service request.
+   * Get or set an exception handling block for a given EH at SrcKey assuming
+   * an empty stack, or a parent block, plus a value on top of the stack.
    */
-  Block* guardFailBlock() const;
-  void setGuardFailBlock(Block* block);
-  void resetGuardFailBlock();
+  Block* getEHBlock(SrcKey) const;
+  Block* getEHDecRefBlock(Block*, SSATmp*) const;
+  void setEHBlock(SrcKey, Block*);
+  void setEHDecRefBlock(Block*, SSATmp*, Block*);
+
+  /*
+   * Save and restore the m_skToEHBlockMap.
+   */
+  SkToBlockMap saveAndClearEHBlockMapping();
+  void restoreEHBlockMapping(SkToBlockMap&& skToEHBlockMap);
+
 
   /*
    * To emit code to a block other than the current block, call pushBlock(),
@@ -255,7 +257,7 @@ struct IRBuilder {
    * }
    * gen(CodeForMainBlock, ...);
    */
-  void pushBlock(BCMarker marker, Block* b);
+  void pushBlock(const BCMarker& marker, Block* b);
   void popBlock();
 
   /*
@@ -266,6 +268,12 @@ struct IRBuilder {
   SSATmp* optimizeInst(IRInstruction* inst,
                        CloneFlag doClone,
                        Block* srcBlock);
+
+  /*
+   * `inUnreachableState` will return true if IRBuilder has detected that our
+   * current position is unreachable from the unit entry.
+   */
+  bool inUnreachableState() const;
 
   /////////////////////////////////////////////////////////////////////////////
   // Internal API.
@@ -288,18 +296,12 @@ private:
    */
   Location loc(uint32_t) const;
   Location stk(IRSPRelOffset) const;
-  Location cslot(uint32_t) const;
 
   /*
    * preOptimize() and helpers.
    */
   SSATmp* preOptimizeCheckLocation(IRInstruction*, Location);
   SSATmp* preOptimizeCheckLoc(IRInstruction*);
-  SSATmp* preOptimizeCheckStk(IRInstruction*);
-  SSATmp* preOptimizeCheckMBase(IRInstruction*);
-  SSATmp* preOptimizeHintInner(IRInstruction*, Location);
-  SSATmp* preOptimizeHintLocInner(IRInstruction*);
-  SSATmp* preOptimizeHintMBaseInner(IRInstruction*);
   SSATmp* preOptimizeAssertTypeOp(IRInstruction* inst,
                                   Type oldType,
                                   SSATmp* oldVal,
@@ -308,23 +310,27 @@ private:
   SSATmp* preOptimizeAssertLocation(IRInstruction*, Location);
   SSATmp* preOptimizeAssertLoc(IRInstruction*);
   SSATmp* preOptimizeAssertStk(IRInstruction*);
-  SSATmp* preOptimizeLdARFuncPtr(IRInstruction*);
-  SSATmp* preOptimizeLdARIsDynamic(IRInstruction*);
-  SSATmp* preOptimizeCheckCtxThis(IRInstruction*);
-  SSATmp* preOptimizeLdCtxHelper(IRInstruction*);
-  SSATmp* preOptimizeLdCtx(IRInstruction* i) {
-    return preOptimizeLdCtxHelper(i);
-  }
-  SSATmp* preOptimizeLdCctx(IRInstruction* i) {
-    return preOptimizeLdCtxHelper(i);
-  }
+  SSATmp* preOptimizeAssertMBase(IRInstruction*);
   SSATmp* preOptimizeLdLocation(IRInstruction*, Location);
   SSATmp* preOptimizeLdLoc(IRInstruction*);
   SSATmp* preOptimizeLdStk(IRInstruction*);
-  SSATmp* preOptimizeLdClsRef(IRInstruction*);
-  SSATmp* preOptimizeCastStk(IRInstruction*);
-  SSATmp* preOptimizeCoerceStk(IRInstruction*);
+  SSATmp* preOptimizeLdMem(IRInstruction*);
   SSATmp* preOptimizeLdMBase(IRInstruction*);
+  SSATmp* preOptimizeLdClosureCtx(IRInstruction*);
+  SSATmp* preOptimizeLdClosureThis(IRInstruction*);
+  SSATmp* preOptimizeLdClosureCls(IRInstruction*);
+  SSATmp* preOptimizeLdFrameCtx(IRInstruction*);
+  SSATmp* preOptimizeLdFrameThis(IRInstruction*);
+  SSATmp* preOptimizeLdFrameCls(IRInstruction*);
+  SSATmp* preOptimizeStMem(IRInstruction*);
+  SSATmp* preOptimizeStMemMeta(IRInstruction*);
+  SSATmp* preOptimizeStMROProp(IRInstruction*);
+  SSATmp* preOptimizeCheckMROProp(IRInstruction*);
+  SSATmp* preOptimizeBaseTypeParam(IRInstruction*);
+  SSATmp* preOptimizeElemDictD(IRInstruction*);
+  SSATmp* preOptimizeElemDictU(IRInstruction*);
+  SSATmp* preOptimizeBespokeElem(IRInstruction*);
+  SSATmp* preOptimizeSetElem(IRInstruction*);
   SSATmp* preOptimize(IRInstruction*);
 
   void appendInstruction(IRInstruction* inst);
@@ -334,13 +340,14 @@ private:
    */
   bool constrainLocation(Location l, GuardConstraint gc,
                          const std::string& why);
-  bool constrainCheck(const IRInstruction* inst,
-                      GuardConstraint gc, Type srcType);
-  bool constrainAssert(const IRInstruction* inst,
-                       GuardConstraint gc, Type srcType,
-                       folly::Optional<Type> knownType = folly::none);
   bool constrainTypeSrc(TypeSource typeSrc, GuardConstraint gc);
+  bool constrainRefinement(const IRInstruction* inst,
+                           GuardConstraint gc, Type srcType);
+  bool constrainGuard(const IRInstruction* inst, GuardConstraint gc,
+                      Type srcType);
   bool shouldConstrainGuards() const;
+
+  bool isMBaseLoad(const IRInstruction*) const;
 
   /////////////////////////////////////////////////////////////////////////////
 
@@ -354,7 +361,6 @@ private:
 
 private:
   IRUnit& m_unit;
-  BCMarker m_initialMarker;
   BCContext m_curBCContext;
   FrameStateMgr m_state;
 
@@ -373,12 +379,14 @@ private:
   bool m_constrainGuards{false};
 
   // Keep track of blocks created to support bytecode control flow.
-  jit::flat_map<SrcKey,Block*> m_skToBlockMap;
+  SkToBlockMap m_skToBlockMap;
 
-  // Keeps the block to branch to (if any) in case a guard fails.
-  // This holds nullptr if the guard failures should perform a service
-  // request (REQ_RETRANSLATE or REQ_BIND_JMP).
-  Block* m_guardFailBlock{nullptr};
+  // A map from exception handler SKs to blocks implementing their handlers.
+  SkToBlockMap m_skToEHBlockMap;
+
+  // A map from a pair of EH block id and top of the stack value id to another
+  // EH block that is responsible for popping and decreffing that value.
+  jit::fast_map<std::pair<uint32_t, uint32_t>, Block*> m_skToEHDecRefBlockMap;
 };
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -388,7 +396,7 @@ private:
  * for usage.
  */
 struct BlockPusher {
-  BlockPusher(IRBuilder& irb, BCMarker marker, Block* block)
+  BlockPusher(IRBuilder& irb, const BCMarker& marker, Block* block)
     : m_irb(irb)
   {
     irb.pushBlock(marker, block);
@@ -404,6 +412,4 @@ struct BlockPusher {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-}}}
-
-#endif
+}

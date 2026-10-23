@@ -21,24 +21,25 @@
 #include "hphp/runtime/debugger/debugger_hook_handler.h"
 #include "hphp/runtime/debugger/cmd/cmd_interrupt.h"
 #include "hphp/runtime/base/program-functions.h"
-#include "hphp/runtime/vm/jit/debugger.h"
 #include "hphp/runtime/vm/jit/mcgen.h"
 #include "hphp/runtime/vm/jit/translator-inline.h"
 
-#include "hphp/util/text-color.h"
+#include "hphp/util/configs/debugger.h"
 #include "hphp/util/logger.h"
+#include "hphp/util/text-color.h"
 
 #include <memory>
 #include <set>
 #include <stack>
 #include <vector>
 
-namespace HPHP { namespace Eval {
+namespace HPHP::Eval {
 ///////////////////////////////////////////////////////////////////////////////
 
-TRACE_SET_MOD(debugger);
+TRACE_SET_MOD(debugger)
 
 bool Debugger::s_clientStarted = false;
+bool Debugger::s_disableJit = true;
 
 
 Debugger& Debugger::get() {
@@ -81,7 +82,7 @@ void Debugger::RegisterSandbox(const DSandboxInfo &sandbox) {
   get().registerSandbox(sandbox);
 }
 
-void Debugger::UnregisterSandbox(const String& id) {
+void Debugger::UnregisterSandbox(const OptString& id) {
   TRACE(2, "Debugger::UnregisterSandbox\n");
   get().unregisterSandbox(id.get());
 }
@@ -103,7 +104,7 @@ int Debugger::CountConnectedProxy() {
 
 DebuggerProxyPtr Debugger::GetProxy() {
   TRACE(7, "Debugger::GetProxy\n");
-  const String& sandboxId = g_context->getSandboxId();
+  const OptString& sandboxId = g_context->getSandboxId();
   return get().findProxy(sandboxId.get());
 }
 
@@ -222,12 +223,12 @@ void Debugger::InterruptRequestEnded(const char *url) {
   if (isDebuggerAttached()) {
     InterruptWithUrl(RequestEnded, url);
   }
-  const String& sandboxId = g_context->getSandboxId();
+  const OptString& sandboxId = g_context->getSandboxId();
   get().unregisterSandbox(sandboxId.get());
 }
 
 void Debugger::InterruptPSPEnded(const char *url) {
-  if (!RuntimeOption::EnableHphpdDebugger) return;
+  if (!Cfg::Debugger::EnableHphpd) return;
   try {
     TRACE(2, "Debugger::InterruptPSPEnded\n");
     if (isDebuggerAttached()) {
@@ -245,7 +246,7 @@ void Debugger::InterruptPSPEnded(const char *url) {
 void Debugger::Interrupt(int type, const char *program,
                          InterruptSite *site /* = NULL */,
                          const char *error /* = NULL */) {
-  assertx(RuntimeOption::EnableHphpdDebugger);
+  assertx(Cfg::Debugger::EnableHphpd);
   TRACE_RB(2, "Debugger::Interrupt type %d\n", type);
 
   DebuggerProxyPtr proxy = GetProxy();
@@ -313,32 +314,32 @@ void Debugger::SetTextColors() {
   s_stderr_color = ANSI_COLOR_RED;
 }
 
-String Debugger::ColorStdout(const String& s) {
+OptString Debugger::ColorStdout(const OptString& s) {
   TRACE(2, "Debugger::ColorStdout\n");
   if (s_stdout_color) {
-    return String(s_stdout_color) + s + String(ANSI_COLOR_END);
+    return OptString(s_stdout_color) + s + OptString(ANSI_COLOR_END);
   }
   return s;
 }
 
-String Debugger::ColorStderr(const String& s) {
+OptString Debugger::ColorStderr(const OptString& s) {
   TRACE(2, "Debugger::ColorStderr\n");
   if (s_stderr_color) {
-    return String(s_stderr_color) + s + String(ANSI_COLOR_END);
+    return OptString(s_stderr_color) + s + OptString(ANSI_COLOR_END);
   }
   return s;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 
-// The flag for this is in the VM's normal ThreadInfo, but we don't
+// The flag for this is in the VM's normal RequestInfo, but we don't
 // have a way to get that given just a tid. Use our own map to find it
 // and answer the question.
 bool Debugger::isThreadDebugging(int64_t tid) {
   TRACE(2, "Debugger::isThreadDebugging tid=%" PRIx64 "\n", tid);
   ThreadInfoMap::const_accessor acc;
   if (m_threadInfos.find(acc, tid)) {
-    ThreadInfo* ti = acc->second;
+    RequestInfo* ti = acc->second;
     auto isDebugging = isDebuggerAttached(ti);
     TRACE(2, "Is thread debugging? %d\n", isDebugging);
     return isDebugging;
@@ -347,7 +348,7 @@ bool Debugger::isThreadDebugging(int64_t tid) {
   return false;
 }
 
-// Remeber this thread's VM ThreadInfo so we can find it later via
+// Remeber this thread's VM RequestInfo so we can find it later via
 // isThreadDebugging(). This is called when a thread interrupts for
 // either session- or request-started, as these each signal the start
 // of debugging for request and other threads.
@@ -356,7 +357,7 @@ void Debugger::registerThread() {
   auto const tid = (int64_t)Process::GetThreadId();
   ThreadInfoMap::accessor acc;
   m_threadInfos.insert(acc, tid);
-  acc->second = &TI();
+  acc->second = &RI();
 }
 
 void Debugger::addOrUpdateSandbox(const DSandboxInfo &sandbox) {
@@ -395,7 +396,7 @@ void Debugger::registerSandbox(const DSandboxInfo &sandbox) {
 
   // add thread to m_sandboxThreadInfoMap
   const StringData* sid = makeStaticString(sandbox.id());
-  auto ti = &TI();
+  auto ti = &RI();
   {
     SandboxThreadInfoMap::accessor acc;
     m_sandboxThreadInfoMap.insert(acc, sid);
@@ -416,7 +417,7 @@ void Debugger::unregisterSandbox(const StringData* sandboxId) {
   TRACE(2, "Debugger::unregisterSandbox\n");
   SandboxThreadInfoMap::accessor acc;
   if (m_sandboxThreadInfoMap.find(acc, sandboxId)) {
-    acc->second.erase(&TI());
+    acc->second.erase(&RI());
   }
 }
 
@@ -425,7 +426,7 @@ void Debugger::unregisterSandbox(const StringData* sandboxId) {
   if (m_sandboxThreadInfoMap.find(acc, sid)) {                         \
     auto const& set = acc->second;                                     \
     for (auto ti : set) {                                              \
-      assertx(ThreadInfo::valid(ti));                                   \
+      assertx(RequestInfo::valid(ti));                                   \
 
 #define FOREACH_SANDBOX_THREAD_END()    } } }                          \
 
@@ -526,6 +527,14 @@ void Debugger::cleanupRetiredProxies() {
   }
 }
 
+bool Debugger::getDisableJit() {
+  return s_disableJit;
+}
+
+void Debugger::setDisableJit(bool disableJit) {
+  s_disableJit = disableJit;
+}
+
 // NB: when this returns, the Debugger class no longer has any references to the
 // given proxy. It will likely be destroyed when the caller's reference goes out
 // of scope.
@@ -539,10 +548,6 @@ void Debugger::removeProxy(DebuggerProxyPtr proxy) {
   const StringData* dummySid =
     makeStaticString(proxy->getDummyInfo().id());
   m_proxyMap.erase(dummySid);
-  // Clear the debugger blacklist PC upon last detach if JIT is used
-  if (RuntimeOption::EvalJit && countConnectedProxy() == 0) {
-    jit::clearDbgBL();
-  }
 
   if (countConnectedProxy() == 0) {
     auto instance = HphpdHook::GetInstance();
@@ -653,6 +658,11 @@ void Debugger::SetUsageLogger(DebuggerUsageLogger *usageLogger) {
   get().m_usageLogger = usageLogger;
 }
 
+DebuggerUsageLogger* Debugger::GetUsageLogger() {
+  TRACE(1, "Debugger::GetUsageLogger\n");
+  return get().m_usageLogger;
+}
+
 void Debugger::InitUsageLogging() {
   TRACE(1, "Debugger::InitUsageLogging\n");
   if (get().m_usageLogger) get().m_usageLogger->init();
@@ -660,7 +670,7 @@ void Debugger::InitUsageLogging() {
 
 void Debugger::UsageLog(const std::string &mode, const std::string &sandboxId,
                         const std::string &cmd, const std::string &data) {
-  if (get().m_usageLogger) get().m_usageLogger->log(mode, sandboxId,
+  if (get().m_usageLogger) get().m_usageLogger->log("hphpd", mode, sandboxId,
                                                     cmd, data);
 }
 
@@ -712,4 +722,4 @@ EvalBreakControl::~EvalBreakControl() {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-}}
+}

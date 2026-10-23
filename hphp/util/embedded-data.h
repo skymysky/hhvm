@@ -14,8 +14,7 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_UTIL_EMBEDDED_DATA_H_
-#define incl_HPHP_UTIL_EMBEDDED_DATA_H_
+#pragma once
 
 #ifdef __cplusplus
 
@@ -35,8 +34,7 @@ struct embedded_data {
 #endif
 };
 
-bool get_embedded_data(const char* section, embedded_data* desc,
-                       const std::string& filename = "");
+bool get_embedded_data(const char* section, embedded_data* desc);
 
 std::string read_embedded_data(const embedded_data& desc);
 
@@ -83,4 +81,3 @@ ssize_t hphp_read_embedded_data(const char* section, char* buf, size_t len);
 
 #endif //__cplusplus
 
-#endif

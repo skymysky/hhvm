@@ -1,0 +1,27 @@
+error: Typing[4323] Typing error [1]
+-> `T` is a constrained type parameter [2]
+-> This type constraint is violated [3]
+-> Expected `NotWidgetParent` [4]
+-> But got `WidgetParent` [3]
+-> This type argument to `MyWidget` must match exactly (it is invariant) [3]
+
+super_constraint_11.php:22:3
+ 9 | 
+10 | class MyWidgetA implements MyWidget<WidgetParent> {}
+11 | class MyWidgetB implements MyWidget<NotWidgetParent> {}
+   |                                     ^^^^^^^^^^^^^^^ [4]
+12 | 
+13 | class MyContainer {
+14 |   public function add<T super WidgetParent>(MyWidget<T> $task): void {}
+   |                       ^ [2]
+   |                               ^^^^^^^^^^^^ [3]
+15 | }
+16 | 
+   :
+20 |   $container->add(new MyWidgetA()); // this should pass the type checker
+21 |   // So T = NotWidgetParent
+22 |   $container->add(new MyWidgetB()); // this should be flagged as an error
+   |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ [1]
+23 | }
+
+1 error found

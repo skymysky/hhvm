@@ -13,18 +13,20 @@
    | license@php.net so we can mail you a copy immediately.               |
    +----------------------------------------------------------------------+
 */
-#ifndef incl_HPHP_OPTIMIZE_H_
-#define incl_HPHP_OPTIMIZE_H_
+#pragma once
 
-#include "hphp/runtime/base/typed-value.h"
+#include "hphp/hhbbc/context.h"
 
-namespace HPHP { namespace HHBBC {
+namespace HPHP::HHBBC {
 
 //////////////////////////////////////////////////////////////////////
 
-struct Index;
+struct IIndex;
 struct FuncAnalysis;
 struct Bytecode;
+struct BlockUpdateInfo;
+
+using BlockUpdates = CompactVector<std::pair<BlockId, CompressedBlockUpdate>>;
 
 /*
  * Use information from an analyze call to perform various
@@ -34,18 +36,25 @@ struct Bytecode;
  * the corresponding analyze_func call.
  *
  * This routine may modify the php::Blocks attached to the passed-in
- * php::Func, but it won't modify the top-level meta-data in the
- * php::Func itself.
+ * php::Func, and may renumber the php::Func's locals, but won't update
+ * any of the func's other metadata.
  */
-void optimize_func(const Index&, FuncAnalysis&&, bool isFinal);
+void optimize_func(const IIndex&, FuncAnalysis&&, php::WideFunc&);
+
+enum class UpdateBCResult {
+  None, // No changes
+  Changed, // Changes
+  ChangedAnalyze // Changes, and should analyze this function again
+};
+UpdateBCResult update_bytecode(php::WideFunc&,
+                               BlockUpdates,
+                               FuncAnalysis* = nullptr);
 
 /*
  * Return a bytecode to generate the value in cell
  */
-Bytecode gen_constant(const Cell& cell);
+Bytecode gen_constant(const TypedValue& cell);
 
 //////////////////////////////////////////////////////////////////////
 
-}}
-
-#endif
+}

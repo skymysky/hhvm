@@ -15,15 +15,14 @@
 */
 
 #include "hphp/runtime/base/http-client.h"
-#include "hphp/runtime/base/runtime-option.h"
 #include "hphp/runtime/server/server-stats.h"
 #include "hphp/runtime/base/curl-tls-workarounds.h"
 #include "hphp/runtime/base/execution-context.h"
+#include "hphp/util/configs/http.h"
 #include "hphp/util/timer.h"
 #include <curl/easy.h>
 #include <vector>
 #include "hphp/util/logger.h"
-#include "hphp/util/ssl-init.h"
 
 namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
@@ -32,7 +31,6 @@ namespace HPHP {
 struct StaticInitializer {
   StaticInitializer() {
     curl_global_init(CURL_GLOBAL_ALL);
-    SSLInit::Init();
   }
 };
 static StaticInitializer s_initCurl;
@@ -43,7 +41,7 @@ HttpClient::HttpClient(int timeout /* = 5 */, int maxRedirect /* = 1 */,
     m_decompress(decompress), m_response(nullptr), m_responseHeaders(nullptr),
     m_proxyPort(0) {
   if (m_timeout <= 0) {
-    m_timeout = ThreadInfo::s_threadInfo.getNoCheck()->
+    m_timeout = RequestInfo::s_requestInfo.getNoCheck()->
       m_reqInjectionData.getSocketDefaultTimeout();
   }
 }
@@ -68,7 +66,7 @@ size_t HttpClient::header(char *data, size_t size, size_t nmemb) {
   size_t length = size * nmemb;
   if (length > 2 && data[length - 2] == '\r' && data[length - 1] == '\n' &&
       m_responseHeaders) {
-    m_responseHeaders->push_back(String(data, length - 2, CopyString));
+    m_responseHeaders->push_back(OptString(data, length - 2, CopyString));
   }
   return length;
 }
@@ -89,9 +87,17 @@ void HttpClient::proxy(const std::string &host, int port,
   m_proxyPassword = password;
 }
 
+void HttpClient::setHttpsProxy(const std::string& proxyCaBundle,
+                      const std::string& proxySSLCertPath /* = "" */,
+                      const std::string& proxySSLKeyPath /* = "" */) {
+  m_proxyCaBundle = proxyCaBundle;
+  m_proxySSLCertPath = proxySSLCertPath;
+  m_proxySSLKeyPath = proxySSLKeyPath;
+}
+
 int HttpClient::get(const char *url, StringBuffer &response,
                     const HeaderMap *requestHeaders /* = NULL */,
-                    req::vector<String> *responseHeaders /* = NULL */) {
+                    req::vector<OptString> *responseHeaders /* = NULL */) {
   return request(nullptr,
                  url, nullptr, 0, response, requestHeaders, responseHeaders);
 }
@@ -99,7 +105,7 @@ int HttpClient::get(const char *url, StringBuffer &response,
 int HttpClient::post(const char *url, const char *data, size_t size,
                      StringBuffer &response,
                      const HeaderMap *requestHeaders /* = NULL */,
-                     req::vector<String> *responseHeaders /* = NULL */) {
+                     req::vector<OptString> *responseHeaders /* = NULL */) {
   return request(nullptr,
                  url, data, size, response, requestHeaders, responseHeaders);
 }
@@ -119,8 +125,8 @@ const StaticString
 int HttpClient::request(const char* verb,
                      const char *url, const char *data, size_t size,
                      StringBuffer &response, const HeaderMap *requestHeaders,
-                     req::vector<String> *responseHeaders) {
-  SlowTimer timer(RuntimeOption::HttpSlowQueryThreshold, "curl", url);
+                     req::vector<OptString> *responseHeaders) {
+  SlowTimer timer(Cfg::Http::SlowQueryThreshold, "curl", url);
 
   m_response = &response;
 
@@ -183,6 +189,19 @@ int HttpClient::request(const char* verb,
       curl_easy_setopt(cp, CURLOPT_PROXYUSERNAME, m_proxyUsername.c_str());
       curl_easy_setopt(cp, CURLOPT_PROXYPASSWORD, m_proxyPassword.c_str());
     }
+
+    if (!m_proxyCaBundle.empty()) {
+      curl_easy_setopt(cp, CURLOPT_PROXYTYPE, CURLPROXY_HTTPS);
+      curl_easy_setopt(
+          cp, CURLOPT_PROXY_CAINFO, m_proxyCaBundle.c_str());
+      if (!m_proxySSLCertPath.empty() && !m_proxySSLKeyPath.empty()) {
+        curl_easy_setopt(
+            cp, CURLOPT_PROXY_SSLCERT, m_proxySSLCertPath.c_str());
+        curl_easy_setopt(
+            cp, CURLOPT_PROXY_SSLKEY, m_proxySSLKeyPath.c_str());
+      }
+    }
+
   }
 
   curl_slist *slist = nullptr;
@@ -190,7 +209,7 @@ int HttpClient::request(const char* verb,
     for (HeaderMap::const_iterator iter = requestHeaders->begin();
          iter != requestHeaders->end(); ++iter) {
       for (unsigned int i = 0; i < iter->second.size(); i++) {
-        String header = iter->first + ": " + iter->second[i];
+        OptString header = iter->first + ": " + iter->second[i];
         slist = curl_slist_append(slist, header.data());
       }
     }

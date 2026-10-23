@@ -17,7 +17,9 @@
 #include "hphp/runtime/vm/jit/vasm.h"
 #include "hphp/runtime/vm/jit/vasm-simplify-internal.h"
 
+#include "hphp/runtime/vm/jit/abi.h"
 #include "hphp/runtime/vm/jit/containers.h"
+#include "hphp/runtime/vm/jit/reg-alloc.h"
 #include "hphp/runtime/vm/jit/vasm-gen.h"
 #include "hphp/runtime/vm/jit/vasm-info.h"
 #include "hphp/runtime/vm/jit/vasm-instr.h"
@@ -31,80 +33,13 @@
 
 #include <utility>
 
-TRACE_SET_MOD(vasm);
+TRACE_SET_MOD(vasm)
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 
 namespace {
 
 ///////////////////////////////////////////////////////////////////////////////
-
-enum class ResValid : uint8_t {
-  Empty,
-  Valid,
-  Invalid
-};
-
-struct GetMemOp {
-  template<class T> void imm (T) {}
-  template<class T> void def (T) {}
-  template<class T> void use (T) {}
-  void def (Vptr mem) {
-    if (rv != ResValid::Empty) {
-      rv = ResValid::Invalid;
-    } else {
-      mr = mem;
-      rv = ResValid::Valid;
-    }
-  }
-  void use (Vptr mem) { def(mem); }
-  template<class T> void across (T) {}
-  template<class T, class H> void useHint(T,H) {}
-  template<class T, class H> void defHint(T,H) {}
-
-  bool isValid() { return rv == ResValid::Valid;}
-
-  Vptr mr;
-  ResValid rv{ResValid::Empty};
-};
-
-/*
- * Return the Vptr and size for simple insts that read/write memory.
- *
- * Return a size zero to indicate a non-simple inst, e.g. a call.
- */
-std::pair<Vptr, uint8_t> getMemOpAndSize(const Vinstr& inst) {
-  GetMemOp g;
-  visitOperands(inst, g);
-
-  auto const vop = g.mr;
-  if (!g.isValid()) return {vop, 0};
-
-  auto sz = width(inst.op);
-  // workaround: load and store opcodes report a width of Octa,
-  // while in reality they are Quad.
-  if (inst.op == Vinstr::load || inst.op == Vinstr::store) {
-    sz = Width::Quad;
-  }
-  sz &= Width::AnyNF;
-
-  auto const size = [&] {
-    switch (sz) {
-      case Width::Byte:
-        return sz::byte;
-      case Width::Word: case Width::WordN:
-        return sz::word;
-      case Width::Long: case Width::LongN:
-        return sz::dword;
-      case Width::Quad: case Width::QuadN:
-        return sz::qword;
-      case Width::Octa: case Width::AnyNF:
-        return 16;
-      default: return 0;
-    }
-  }();
-  return {vop, size};
-}
 
 /*
  * Return true if we are sure that `inst1' does not write to the same memory
@@ -117,22 +52,7 @@ bool cannot_alias_write(const Vinstr& inst1, const Vinstr& inst2) {
   if (!writesMemory(inst1.op) && !writesMemory(inst2.op)) return true;
   auto const p1 = getMemOpAndSize(inst1);
   auto const p2 = getMemOpAndSize(inst2);
-  if (p1.second == 0 || p2.second == 0) return false;
-  auto const v1 = p1.first;
-  auto const v2 = p2.first;
-  auto const size1 = p1.second;
-  auto const size2 = p2.second;
-  if (v1.base != v2.base || v1.seg != v2.seg) return false;
-  if ((v1.index != v2.index) ||
-      (v1.index.isValid() && (v1.scale != v2.scale))) {
-    return false;
-  }
-  if (v1.disp == v2.disp) return false;
-  if (v1.disp < v2.disp) {
-    return v2.disp >= v1.disp + size1;
-  } else {
-    return v1.disp >= v2.disp + size2;
-  }
+  return memRangesDisjoint(p1.first, p1.second, p2.first, p2.second);
 }
 
 /*
@@ -179,10 +99,13 @@ FoldableLoadInfo foldable_load_helper(Env& env, Vreg reg, int size,
       break;
     case Vinstr::loadzbq:
     case Vinstr::loadzbl:
-      if (size != sz::byte) return { nullptr, 0, false };
+      if (size > sz::byte) return { nullptr, 0, false };
+      break;
+    case Vinstr::loadzwq:
+      if (size > sz::word) return { nullptr, 0, false };
       break;
     case Vinstr::loadzlq:
-      if (size != sz::dword) return { nullptr, 0, false };
+      if (size > sz::dword) return { nullptr, 0, false };
       break;
     case Vinstr::copy:
       break;
@@ -205,6 +128,7 @@ FoldableLoadInfo foldable_load_helper(Env& env, Vreg reg, int size,
         CHECK_LOAD(load);
         CHECK_LOAD(loadzbq);
         CHECK_LOAD(loadzbl);
+        CHECK_LOAD(loadzwq);
         CHECK_LOAD(loadzlq);
         case Vinstr::copy:
           if (inst.copy_.d != reg) break;
@@ -283,57 +207,15 @@ bool simplify(Env&, const Inst& /*inst*/, Vlabel /*b*/, size_t /*i*/) {
   return false;
 }
 
-///////////////////////////////////////////////////////////////////////////////
-/*
- * Arithmetic instructions.
- */
-
-template<typename Test, typename And>
-bool simplify_and(Env& env, const And& vandq, Vlabel b, size_t i) {
-  return if_inst<Vinstr::testq>(env, b, i + 1, [&] (const testq& vtestq) {
-    // And{s0, s1, tmp, _}; testq{tmp, tmp, sf} -> Test{s0, s1, sf}
-    // where And/Test is either andq/testq, or andqi/testqi.
-    if (!(env.use_counts[vandq.d] == 2 &&
-          env.use_counts[vandq.sf] == 0 &&
-          vtestq.s0 == vandq.d &&
-          vtestq.s1 == vandq.d)) return false;
-
-    return simplify_impl(env, b, i, [&] (Vout& v) {
-      v << Test{vandq.s0, vandq.s1, vtestq.sf};
-      return 2;
-    });
-  });
-}
-
-bool simplify(Env& env, const andq& vandq, Vlabel b, size_t i) {
-  return simplify_and<testq>(env, vandq, b, i);
-}
-
-bool simplify(Env& env, const andqi& vandqi, Vlabel b, size_t i) {
-  return simplify_and<testqi>(env, vandqi, b, i);
-}
-
-/*
- * Simplify masking values with -1 in andXi{}:
- *  andbi{0xff, s, d} -> copy{s, d}
- *  andli{0xffffffff, s, d} -> copy{s, d}
- */
-template<typename andi>
-bool simplify_andi(Env& env, const andi& inst, Vlabel b, size_t i) {
-  if (inst.s0.l() != -1 ||
-      env.use_counts[inst.sf] != 0) return false;
-  return simplify_impl(env, b, i, [&] (Vout& v) {
-    v << copy{inst.s1, inst.d};
-    return 1;
-  });
-}
-
-bool simplify(Env& env, const andbi& andbi, Vlabel b, size_t i) {
-  return simplify_andi(env, andbi, b, i);
-}
-
-bool simplify(Env& env, const andli& andli, Vlabel b, size_t i) {
-  return simplify_andi(env, andli, b, i);
+template <typename Inst>
+bool psimplify(
+  Env&,
+  const Abi& /*abi*/,
+  const Inst& /*inst*/,
+  Vlabel /*b*/,
+  size_t /*i*/
+) {
+  return false;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -350,13 +232,11 @@ bool simplify(Env& env, const andli& andli, Vlabel b, size_t i) {
  *  - otherwise return sz::qword.
  */
 int value_width(Env& env, Vreg reg) {
-  auto const it = env.unit.regToConst.find(reg);
-  if (it != env.unit.regToConst.end()) {
-    if (!it->second.isUndef &&
-        it->second.kind != Vconst::Double) {
-      if (it->second.val <= 0xff)       return sz::byte;
-      if (it->second.val <= 0xffff)     return sz::word;
-      if (it->second.val <= 0xffffffff) return sz::dword;
+  if (auto const c = env.consts[reg]) {
+    if (!c->isUndef && c->kind != Vconst::Double) {
+      if (c->val <= 0xff)       return sz::byte;
+      if (c->val <= 0xffff)     return sz::word;
+      if (c->val <= 0xffffffff) return sz::dword;
     }
     return sz::qword;
   }
@@ -371,6 +251,7 @@ int value_width(Env& env, Vreg reg) {
 
     case Vinstr::movzwl:
     case Vinstr::movzwq:
+    case Vinstr::loadzwq:
       return sz::word;
 
     case Vinstr::movzlq:
@@ -391,126 +272,124 @@ int value_width(Env& env, Vreg reg) {
  *    correct size, return the source of the move
  *  - if r is the result of a zero-extending load with one use,
  *    convert the load to a non-zero extending form
- *  - otherwise apply a movtq<sz> to the register, and return the dst.
+ *  - otherwise we should logically apply a movtq<sz> to the register,
+ *    and return the dst. we don't check widths after simplify, however,
+ *    and inserting them can prevent other patterns from being recognized,
+ *    so just leave them out.
  */
-Vreg narrow_reg(Env& env, int size, Vreg r, Vlabel b, size_t i, Vout& /*v*/) {
-  auto const it = env.unit.regToConst.find(r);
-  if (it != env.unit.regToConst.end()) {
-    assertx(!it->second.isUndef && it->second.kind != Vconst::Double);
+Vreg narrow_reg(Env& env, int size, Vreg r, Vlabel b, size_t i) {
+  if (auto const c = env.consts[r]) {
+    assertx(!c->isUndef && c->kind != Vconst::Double);
     return r;
   }
 
-  while (i--) {
-    auto replace = [&] (const Vinstr& rep) {
-      return simplify_impl(env, b, i, [&] (Vout& v) {
-        v << rep;
-        return 1;
-      });
-    };
-    auto match = [&] (int rsz, size_t rn) {
-      if (rsz != size) return Vreg{};
-      if (env.use_counts[r] == 1) {
-        replace(nop{});
-      }
-      return Vreg{ rn };
-    };
-
-    auto const& inst = env.unit.blocks[b].code[i];
-    switch (inst.op) {
-      case Vinstr::loadzbq: {
-        auto const& load = inst.get<Vinstr::loadzbq>();
-        if (load.d == r) {
-          if (size == sz::byte && env.use_counts[r] == 1) {
-            replace(loadb{load.s, r});
-            return r;
-          }
-          return {};
+  auto reg = [&] () -> Vreg {
+    while (i--) {
+      auto replace = [&] (const Vinstr& rep) {
+        return simplify_impl(env, b, i, [&] (Vout& v) {
+          v << rep;
+          return 1;
+        });
+      };
+      auto match = [&] (int rsz, size_t rn) {
+        if (rsz != size) return Vreg{};
+        if (env.use_counts[r] == 1) {
+          replace(nop{});
         }
-        break;
-      }
-      case Vinstr::loadzbl: {
-        auto const& load = inst.get<Vinstr::loadzbl>();
-        if (load.d == r) {
-          if (size == sz::byte && env.use_counts[r] == 1) {
-            replace(loadb{load.s, r});
-            return r;
+        return Vreg{ rn };
+      };
+
+      auto const& inst = env.unit.blocks[b].code[i];
+      switch (inst.op) {
+        case Vinstr::loadzbq: {
+          auto const& load = inst.get<Vinstr::loadzbq>();
+          if (load.d == r) {
+            if (size == sz::byte && env.use_counts[r] == 1) {
+              replace(loadb{load.s, r});
+              return r;
+            }
+            return {};
           }
-          return {};
+          break;
         }
-        break;
-      }
-      case Vinstr::movzbw:
-        if (inst.movzbw_.d == r) return match(sz::byte, inst.movzbw_.s);
-        break;
-      case Vinstr::movzbl:
-        if (inst.movzbl_.d == r) return match(sz::byte, inst.movzbl_.s);
-        break;
-      case Vinstr::movzbq:
-        if (inst.movzbq_.d == r) return match(sz::byte, inst.movzbq_.s);
-        break;
-
-      case Vinstr::movzwl:
-        if (inst.movzwl_.d == r) return match(sz::word, inst.movzwl_.s);
-        break;
-      case Vinstr::movzwq:
-        if (inst.movzwq_.d == r) return match(sz::word, inst.movzwq_.s);
-        break;
-
-      case Vinstr::movzlq:
-        if (inst.movzlq_.d == r) return match(sz::dword, inst.movzlq_.s);
-        break;
-
-      case Vinstr::loadzlq: {
-        auto const& load = inst.get<Vinstr::loadzlq>();
-        if (load.d == r) {
-          if (size == sz::dword && env.use_counts[r] == 1) {
-            replace(loadl{load.s, r});
-            return r;
+        case Vinstr::loadzbl: {
+          auto const& load = inst.get<Vinstr::loadzbl>();
+          if (load.d == r) {
+            if (size == sz::byte && env.use_counts[r] == 1) {
+              replace(loadb{load.s, r});
+              return r;
+            }
+            return {};
           }
-          return {};
+          break;
         }
-        break;
+        case Vinstr::movzbw:
+          if (inst.movzbw_.d == r) return match(sz::byte, inst.movzbw_.s);
+          break;
+        case Vinstr::movzbl:
+          if (inst.movzbl_.d == r) return match(sz::byte, inst.movzbl_.s);
+          break;
+        case Vinstr::movzbq:
+          if (inst.movzbq_.d == r) return match(sz::byte, inst.movzbq_.s);
+          break;
+
+        case Vinstr::movzwl:
+          if (inst.movzwl_.d == r) return match(sz::word, inst.movzwl_.s);
+          break;
+        case Vinstr::movzwq:
+          if (inst.movzwq_.d == r) return match(sz::word, inst.movzwq_.s);
+          break;
+        case Vinstr::loadzwq: {
+          auto const& load = inst.get<Vinstr::loadzwq>();
+          if (load.d == r) {
+            if (size == sz::word && env.use_counts[r] == 1) {
+              replace(loadw{load.s, r});
+              return r;
+            }
+            return {};
+          }
+          break;
+        }
+
+        case Vinstr::movzlq:
+          if (inst.movzlq_.d == r) return match(sz::dword, inst.movzlq_.s);
+          break;
+
+        case Vinstr::loadzlq: {
+          auto const& load = inst.get<Vinstr::loadzlq>();
+          if (load.d == r) {
+            if (size == sz::dword && env.use_counts[r] == 1) {
+              replace(loadl{load.s, r});
+              return r;
+            }
+            return {};
+          }
+          break;
+        }
+        default:
+          break;
       }
-      default:
-        break;
     }
-  }
-  return {};
+    return {};
+  }();
+
+  return reg.isValid() ? reg : r;
 }
 
-int narrow_cmp(Env& env, int size, const cmpq& vcmp, Vlabel b, size_t i,
-               Vout& v) {
-  auto getreg = [&] (Vreg reg, Vout& v) {
-    auto out = narrow_reg(env, size, reg, b, i, v);
-    if (!out.isValid()) {
-      out = v.makeReg();
-      switch (size) {
-        case sz::byte:
-          v << movtqb{reg, out};
-          break;
-        case sz::word:
-          v << movtqw{reg, out};
-          break;
-        case sz::dword:
-          v << movtql{reg, out};
-          break;
-        default:
-          always_assert(false);
-      }
-    }
-    return out;
-  };
-  auto const s0 = getreg(vcmp.s0, v);
-  auto const s1 = getreg(vcmp.s1, v);
+template<typename instb, typename instw, typename instl, typename instq>
+int narrow_inst(Env& env, int size, const instq& vinst, Vlabel b, size_t i,
+                Vout& v) {
+  auto const s0 = narrow_reg(env, size, vinst.s0, b, i);
+  auto const s1 = narrow_reg(env, size, vinst.s1, b, i);
   switch (size) {
     case sz::byte:
-      v << cmpb{s0, s1, vcmp.sf};
+      v << instb{s0, s1, vinst.sf};
       break;
     case sz::word:
-      v << cmpw{s0, s1, vcmp.sf};
+      v << instw{s0, s1, vinst.sf};
       break;
     case sz::dword:
-      v << cmpl{s0, s1, vcmp.sf};
+      v << instl{s0, s1, vinst.sf};
       break;
     default:
       always_assert(false);
@@ -677,7 +556,7 @@ storeq(Env& env, Vreg64 reg, Vlabel b, size_t i) {
 }
 
 bool is_reg_const(Env& env, Vreg reg) {
-  return env.unit.regToConst.find(reg) != env.unit.regToConst.end();
+  return env.consts[reg].has_value();
 }
 
 template <typename Op>
@@ -694,7 +573,7 @@ bool flip_operands_helper(Env& env, const Op& op, Vlabel b, size_t i) {
 }
 
 bool simplify(Env& env, const addq& vadd, Vlabel b, size_t i) {
-  if (arch_any(Arch::ARM, Arch::PPC64)) return false;
+  if (arch::any<arch::ARM>()) return false;
 
   auto stPair = storeq(env, vadd.d, b, i);
   auto const vptrs = stPair.first;
@@ -724,10 +603,84 @@ bool simplify(Env& env, const addq& vadd, Vlabel b, size_t i) {
   return false;
 }
 
+// find two lea that add an immediate to a register and fold into a
+// single operation.  given this lea, look for a subsequent lea
+// within the same block whose base reg is this lea's dest reg,
+// and it is the only use of this lea's dest reg.
+//
+// first, try to simplify lea (%r1), %r2 into copy %r1,%r2
+bool simplify(Env& env, const lea& vlea, Vlabel b, size_t i) {
+  if (vlea.s.disp == 0 && !vlea.s.index.isValid() && vlea.s.base.isValid()) {
+    simplify_impl(env, b, i, copy { vlea.s.base, vlea.d });
+    return true;
+  }
+  if (!vlea.s.index.isValid() && !vlea.s.base.isValid()) {
+    simplify_impl(env, b, i, copy { env.unit.makeConst(vlea.s.disp), vlea.d });
+    return true;
+  }
+  auto xinst = env.unit.blocks[b].code[i];
+  bool found_second = false;
+  size_t x;
+  int disp2;
+  if (vlea.d.isPhys()) {
+    bool found_interf = false;
+    for (x = i+1; x < env.unit.blocks[b].code.size(); ++x) {
+      xinst = env.unit.blocks[b].code[x];
+      if (xinst.op == Vinstr::lea && xinst.lea_.s.base == vlea.d &&
+          xinst.lea_.d == vlea.d && !(xinst.lea_.s.index.isValid())) {
+        found_second = true;
+        disp2 = xinst.lea_.s.disp;
+        break;
+      } else {
+        visitUses(env.unit, xinst,
+            [&] (Vreg r) { if (r == vlea.d) found_interf = true; });
+        if (found_interf) return false;
+        visitDefs(env.unit, xinst,
+            [&] (Vreg r) { if (r == vlea.d) found_interf = true; });
+        if (found_interf) return false;
+      }
+    }
+  } else {
+    if (env.use_counts[vlea.d] == 1) {
+      for (x = i+1 ; x < env.unit.blocks[b].code.size(); ++x) {
+        xinst = env.unit.blocks[b].code[x];
+        if ((xinst.op == Vinstr::lea) && (xinst.lea_.s.base == vlea.d) &&
+              !xinst.lea_.s.index.isValid()) {
+          found_second = true;
+          disp2 = xinst.lea_.s.disp;
+          break;
+        }
+      }
+    }
+  }
+
+  if (!found_second) return false;
+
+  const auto newDisp = (int64_t)(vlea.s.disp) + (int64_t)(disp2);
+
+  if (!deltaFits(newDisp, sz::dword)) return false;
+
+  simplify_impl(env, b, i, lea { vlea.s + disp2, xinst.lea_.d });
+  // update uses and delete the inst
+  simplify_impl(env, b, x, [&] (Vout& v) { return 1; });
+  return true;
+}
+
+// remove compares with unused results. This overlaps with removeDeadCode,
+// but does it earlier.
+template <typename Cmp>
+bool simplify_dead_cmp(Env& env, const Cmp& cmp, Vlabel b, size_t i) {
+  if (env.use_counts[cmp.sf] == 0) {
+    return simplify_impl(env, b, i, nop{});
+  }
+  return false;
+}
+
 bool simplify(Env& env, const cmpq& vcmp, Vlabel b, size_t i) {
+  if (simplify_dead_cmp(env, vcmp, b, i)) return true;
   if (flip_operands_helper(env, vcmp, b, i)) return true;
 
-  if (!arch_any(Arch::ARM, Arch::PPC64)) {
+  if (!arch::any<arch::ARM>()) {
     if (auto const vptr = foldable_load(env, vcmp.s1, b, i)) {
       return simplify_impl(env, b, i, cmpqm { vcmp.s0, *vptr, vcmp.sf });
     }
@@ -748,14 +701,15 @@ bool simplify(Env& env, const cmpq& vcmp, Vlabel b, size_t i) {
   if (!fix_signed_uses(env, vcmp.sf, b, i)) return false;
 
   return simplify_impl(env, b, i, [&] (Vout& v) {
-    return narrow_cmp(env, sz, vcmp, b, i, v);
+    return narrow_inst<cmpb, cmpw, cmpl>(env, sz, vcmp, b, i, v);
   });
 }
 
 bool simplify(Env& env, const cmpl& vcmp, Vlabel b, size_t i) {
+  if (simplify_dead_cmp(env, vcmp, b, i)) return true;
   if (flip_operands_helper(env, vcmp, b, i)) return true;
+  if (arch::any<arch::ARM>()) return false;
 
-  if (arch() == Arch::ARM) return false;
   if (auto const vptr = foldable_load(env, vcmp.s1, b, i)) {
     return simplify_impl(env, b, i,
                          cmplm { vcmp.s0, *vptr, vcmp.sf });
@@ -764,7 +718,9 @@ bool simplify(Env& env, const cmpl& vcmp, Vlabel b, size_t i) {
 }
 
 bool simplify(Env& env, const cmpw& vcmp, Vlabel b, size_t i) {
+  if (simplify_dead_cmp(env, vcmp, b, i))  return true;
   if (flip_operands_helper(env, vcmp, b, i)) return true;
+  if (arch::any<arch::ARM>()) return false;
 
   if (auto const vptr = foldable_load(env, vcmp.s1, b, i)) {
     return simplify_impl(env, b, i,
@@ -775,6 +731,8 @@ bool simplify(Env& env, const cmpw& vcmp, Vlabel b, size_t i) {
 
 bool simplify(Env& env, const cmpb& vcmp, Vlabel b, size_t i) {
   if (flip_operands_helper(env, vcmp, b, i)) return true;
+  if (simplify_dead_cmp(env, vcmp, b, i)) return true;
+  if (arch::any<arch::ARM>()) return false;
 
   if (auto const vptr = foldable_load(env, vcmp.s1, b, i)) {
     return simplify_impl(env, b, i,
@@ -784,7 +742,8 @@ bool simplify(Env& env, const cmpb& vcmp, Vlabel b, size_t i) {
 }
 
 bool simplify(Env& env, const cmpqi& vcmp, Vlabel b, size_t i) {
-  if (arch_any(Arch::ARM, Arch::PPC64)) return false;
+  if (simplify_dead_cmp(env, vcmp, b, i)) return true;
+  if (arch::any<arch::ARM>()) return false;
   if (auto const vptr = foldable_load(env, vcmp.s1, b, i)) {
     return simplify_impl(env, b, i,
                          cmpqim { vcmp.s0, *vptr, vcmp.sf });
@@ -793,7 +752,8 @@ bool simplify(Env& env, const cmpqi& vcmp, Vlabel b, size_t i) {
 }
 
 bool simplify(Env& env, const cmpli& vcmp, Vlabel b, size_t i) {
-  if (arch() == Arch::ARM) return false;
+  if (simplify_dead_cmp(env, vcmp, b, i)) return true;
+  if (arch::any<arch::ARM>()) return false;
   if (auto const vptr = foldable_load(env, vcmp.s1, b, i)) {
     return simplify_impl(env, b, i,
                          cmplim { vcmp.s0, *vptr, vcmp.sf });
@@ -802,7 +762,8 @@ bool simplify(Env& env, const cmpli& vcmp, Vlabel b, size_t i) {
 }
 
 bool simplify(Env& env, const cmpwi& vcmp, Vlabel b, size_t i) {
-  if (arch() == Arch::ARM) return false;
+  if (simplify_dead_cmp(env, vcmp, b, i)) return true;
+  if (arch::any<arch::ARM>()) return false;
   if (auto const vptr = foldable_load(env, vcmp.s1, b, i)) {
     return simplify_impl(env, b, i,
                          cmpwim { vcmp.s0, *vptr, vcmp.sf });
@@ -811,7 +772,8 @@ bool simplify(Env& env, const cmpwi& vcmp, Vlabel b, size_t i) {
 }
 
 bool simplify(Env& env, const cmpbi& vcmp, Vlabel b, size_t i) {
-  if (arch_any(Arch::ARM, Arch::PPC64)) return false;
+  if (simplify_dead_cmp(env, vcmp, b, i)) return true;
+  if (arch::any<arch::ARM>()) return false;
   if (auto const vptr = foldable_load(env, vcmp.s1, b, i)) {
     return simplify_impl(env, b, i,
                          cmpbim { vcmp.s0, *vptr, vcmp.sf });
@@ -819,6 +781,418 @@ bool simplify(Env& env, const cmpbi& vcmp, Vlabel b, size_t i) {
   return false;
 }
 
+bool simplify(Env& env, const cmpbim& vcmp, Vlabel b, size_t i) {
+  return (simplify_dead_cmp(env, vcmp, b, i));
+}
+
+bool simplify(Env& env, const cmpwim& vcmp, Vlabel b, size_t i) {
+  return (simplify_dead_cmp(env, vcmp, b, i));
+}
+
+bool simplify(Env& env, const cmplim& vcmp, Vlabel b, size_t i) {
+  return (simplify_dead_cmp(env, vcmp, b, i));
+}
+
+bool simplify(Env& env, const cmpqim& vcmp, Vlabel b, size_t i) {
+  return (simplify_dead_cmp(env, vcmp, b, i));
+}
+
+bool simplify(Env& env, const cmpbm& vcmp, Vlabel b, size_t i) {
+  return (simplify_dead_cmp(env, vcmp, b, i));
+}
+
+bool simplify(Env& env, const cmpwm& vcmp, Vlabel b, size_t i) {
+  return (simplify_dead_cmp(env, vcmp, b, i));
+}
+
+bool simplify(Env& env, const cmplm& vcmp, Vlabel b, size_t i) {
+  return (simplify_dead_cmp(env, vcmp, b, i));
+}
+
+bool simplify(Env& env, const cmpqm& vcmp, Vlabel b, size_t i) {
+  return (simplify_dead_cmp(env, vcmp, b, i));
+}
+
+// test sets C=O=0; shift sets them in unknown ways
+// Z,S and P are set the same way by both.
+bool fix_shift_test_flags(Env& env, Vreg sf, Vlabel b, size_t i) {
+  return check_sf_usage(
+    env, sf, b, i,
+    [] (ConditionCode cc) {
+      switch (cc) {
+        case CC_None:
+          always_assert(false);
+        case CC_E:
+        case CC_NE:
+        case CC_S:
+        case CC_NS:
+          // only test Z and S, no change
+          return cc;
+        case CC_A:
+          // C=0 && Z=0, but C is always zero
+          return CC_NE;
+        case CC_BE:
+          // C=1 || Z=1, but C is always zero
+          return CC_E;
+        case CC_L:
+          // S != OF, but OF is always zero
+          return CC_S;
+        case CC_GE:
+          // S == OF, but OF is always zero
+          return CC_NS;
+        case CC_O:
+        case CC_NO:
+        case CC_P:
+        case CC_NP:
+        case CC_LE:
+        case CC_G:
+        case CC_AE:
+        case CC_B:
+          // can't be fixed
+          return CC_None;
+      }
+      not_reached();
+    }
+  );
+}
+
+///////////////////////////////////////////////////////////////////////////////
+/*
+ * Test/And
+ */
+
+/*
+ * If inst (assumed to be an instruction that writes an output
+ * register d, and the status flags sf) is followed by a test
+ * instruction, see if we can drop the test and just use inst's sf
+ * flags.
+ *
+ * Depending on inst we may have to rewrite the uses of sf (see
+ * fix_shift_test_flags), and for some uses, we may have to give
+ * up. The caller provides fun to make these decisions.
+ */
+template<Vinstr::Opcode test, typename Inst, typename FlagsFunc>
+bool simplifyInstTest(Env& env, const Inst& inst, Vlabel b, size_t i,
+                      FlagsFunc fun) {
+  if (env.use_counts[inst.sf]) return false;
+  return if_inst<test>(
+    env, b, i + 1,
+    [&] (const op_type<test>& vtest) {
+      if (inst.d != vtest.s0 ||
+          inst.d != vtest.s1 ||
+          !fun(vtest.sf)) {
+        return false;
+      }
+
+      return simplify_impl(
+        env, b, i,
+        [&] (Vout& v) {
+          auto repl = inst;
+          repl.sf = vtest.sf;
+          v << repl;
+          return 2;
+        }
+      );
+    }
+  );
+}
+
+bool simplify(Env& env, const shrqi& vshr, Vlabel b, size_t i) {
+  return simplifyInstTest<Vinstr::testq>(
+    env, vshr, b, i,
+    [&] (Vreg sf) { return fix_shift_test_flags(env, sf, b, i); }
+  );
+}
+
+template<Vinstr::Opcode test, typename Test, typename And>
+bool simplify_and(Env& env, const And& vand, Vlabel b, size_t i) {
+  if (!env.use_counts[vand.d]) {
+    return simplify_impl(env, b, i, Test{ vand.s0, vand.s1, vand.sf });
+  }
+  return simplifyInstTest<test>(env, vand, b, i, [] (Vreg) { return true; });
+}
+
+bool simplify(Env& env, const andq& vandq, Vlabel b, size_t i) {
+  return simplify_and<Vinstr::testq, testq>(env, vandq, b, i);
+}
+
+bool simplify(Env& env, const andqi& vandqi, Vlabel b, size_t i) {
+  return simplify_and<Vinstr::testq, testqi>(env, vandqi, b, i);
+}
+
+/*
+ * Simplify masking values with -1 in andXi{}:
+ *  andbi{0xff, s, d} -> copy{s, d}
+ *  andwi{0xffff, s, d} -> copy{s, d}
+ *  andli{0xffffffff, s, d} -> copy{s, d}
+ */
+template<Vinstr::Opcode test, typename testi, typename andi>
+bool simplify_andi(Env& env, const andi& inst, Vlabel b, size_t i) {
+  if (inst.s0.l() == -1 && env.use_counts[inst.sf] == 0) {
+    return simplify_impl(env, b, i, copy{ inst.s1, inst.d });
+  }
+  return simplify_and<test, testi>(env, inst, b, i);
+}
+
+bool simplify(Env& env, const andbi& andbi, Vlabel b, size_t i) {
+  return simplify_andi<Vinstr::testb, testbi>(env, andbi, b, i);
+}
+
+bool simplify(Env& env, const andwi& andwi, Vlabel b, size_t i) {
+  return simplify_andi<Vinstr::testw, testwi>(env, andwi, b, i);
+}
+
+bool simplify(Env& env, const andli& andli, Vlabel b, size_t i) {
+  return simplify_andi<Vinstr::testl, testli>(env, andli, b, i);
+}
+
+template<typename Out, typename Long, typename In>
+bool simplify_signed_test(Env& env, const In& test, uint32_t val,
+                          Vlabel b, size_t i) {
+  if (val == 0x80000000 &&
+      check_sf_usage(
+        env, test.sf, b, i,
+        [] (ConditionCode cc) {
+          switch (cc) {
+            case CC_None:
+              always_assert(false);
+            case CC_E:   return CC_NS;
+            case CC_NE:  return CC_S;
+            case CC_S:
+            case CC_NS:
+              return cc;
+
+            case CC_A:
+            case CC_BE:
+            case CC_L:
+            case CC_GE:
+            case CC_O:
+            case CC_NO:
+            case CC_P:
+            case CC_NP:
+            case CC_LE:
+            case CC_G:
+            case CC_AE:
+            case CC_B:
+              // can't be fixed
+              return CC_None;
+          }
+          not_reached();
+        }
+      ) &&
+      simplify_impl(env, b, i, Out { test.s1, test.s1, test.sf })) {
+
+    // This looks like it belongs in shrqi itself. The problem with
+    // that is that it relies on the test optimizations already having
+    // been done when we reach the shrqi. We could solve that by
+    // iterating the simplify pass, but this should be cheaper, and
+    // almost as good.
+    if_inst<Vinstr::shrqi>(
+      env, b, i - 1,
+      [&] (const shrqi& vshr) {
+        if (vshr.s0.l() != 32) return false;
+        return simplify_impl(
+          env, b, i - 1,
+          [&] (Vout& v) {
+            v << Long{ vshr.s1, vshr.s1, test.sf };
+            return 2;
+          }
+        );
+      }
+    );
+    return true;
+  }
+
+  return false;
+}
+
+template<typename testm, typename test>
+bool simplify_testi(Env& env, const test& vtest, Vlabel b, size_t i) {
+  if (arch::any<arch::ARM>()) return false;
+
+  if (auto const vptr = foldable_load(env, vtest.s1, b, i)) {
+    return simplify_impl(env, b, i, testm { vtest.s0, *vptr, vtest.sf });
+  }
+
+  return false;
+}
+
+template<typename testm, typename cmpm, typename test>
+bool simplify_test(Env& env, const test& vtest, Vlabel b, size_t i) {
+  if (arch::any<arch::ARM>()) return false;
+  if (vtest.s0 == vtest.s1 && env.use_counts[vtest.s0] == 2) {
+    env.use_counts[vtest.s0]--;
+    auto const vptr = foldable_load(env, vtest.s0, b, i);
+    env.use_counts[vtest.s0]++;
+    if (vptr) {
+      return simplify_impl(env, b, i, cmpm { 0, *vptr, vtest.sf });
+    }
+  }
+
+  if (simplify_testi<testm>(env, vtest, b, i)) return true;
+  if (auto const vptr = foldable_load(env, vtest.s0, b, i)) {
+    return simplify_impl(env, b, i, testm { vtest.s1, *vptr, vtest.sf });
+  }
+
+  return false;
+}
+
+bool simplify(Env& env, const testqi& test, Vlabel b, size_t i) {
+  return simplify_testi<testqim>(env, test, b, i);
+}
+
+bool simplify(Env& env, const testli& test, Vlabel b, size_t i) {
+  if (simplify_testi<testlim>(env, test, b, i)) return true;
+
+  return simplify_signed_test<testl, testq>(env, test, test.s0.l(), b, i);
+}
+
+bool simplify(Env& env, const testwi& test, Vlabel b, size_t i) {
+  return simplify_testi<testwim>(env, test, b, i);
+}
+
+bool simplify(Env& env, const testbi& test, Vlabel b, size_t i) {
+  return simplify_testi<testbim>(env, test, b, i);
+}
+
+template<int size, typename testim>
+bool shrink_test_immediate(Env& env, uint64_t v, Vptr ptr, Vreg sf,
+                           Vlabel b, size_t i) {
+  if (!v) return simplify_impl(env, b, i, testbi{ 0, rarg(0), sf });
+
+  auto getNewVal = [&] (uint64_t val, int bits, bool top_bits, Vreg sf)
+      -> Optional<int> {
+    auto const mask = (1LL << bits) - 1;
+    auto const low = mask >> 1;
+    val &= mask;
+    if (val <= low) return val;
+    // If we're not looking at the top bit of the original result, and
+    // the top bit of the reduced mask is set, we'll have to give up
+    // if anyone cares about the sign bit.
+    if (!top_bits && !check_sf_usage(
+      env, sf, b, i,
+      [] (ConditionCode cc) {
+        switch (cc) {
+          case CC_None:
+            always_assert(false);
+          case CC_E:
+          case CC_NE:
+            return cc;
+          case CC_S:
+          case CC_NS:
+          case CC_A:
+          case CC_BE:
+          case CC_L:
+          case CC_GE:
+          case CC_O:
+          case CC_NO:
+          case CC_P:
+          case CC_NP:
+          case CC_LE:
+          case CC_G:
+          case CC_AE:
+          case CC_B:
+            // can't be fixed
+            return CC_None;
+        }
+        not_reached();
+      })) {
+      return std::nullopt;
+    }
+
+    return (val & low) - (mask - low);
+  };
+
+  if (size == 1) return false;
+  if (size == 2) {
+    if (!(v & 0xff)) {
+      auto const newVal = getNewVal(v >> 8, 8, true, sf);
+      return newVal && simplify_impl(
+        env, b, i, testbim{ *newVal, ptr + 1, sf });
+    }
+    if (!(v & 0xff00)) {
+      auto const newVal = getNewVal(v, 8, false, sf);
+      return newVal && simplify_impl(
+        env, b, i, testbim{ *newVal, ptr, sf });
+    }
+  }
+  if (size == 4) {
+    if (!(v & 0xffff)) {
+      auto const newVal = getNewVal(v >> 16, 16, true, sf);
+      return newVal && simplify_impl(
+        env, b, i, testwim{ *newVal, ptr + 2, sf });
+    }
+    if (!(v & 0xffff0000)) {
+      auto const newVal = getNewVal(v, 16, false, sf);
+      return newVal && simplify_impl(
+        env, b, i, testwim{ *newVal, ptr, sf });
+    }
+  }
+
+  if (size == 8) {
+    if (!(v & 0xffffffff)) {
+      auto const newVal = getNewVal(v >> 32, 32, true, sf);
+      return newVal && simplify_impl(
+        env, b, i, testlim{ *newVal, ptr + 4, sf });
+    }
+    if (!(v & 0xffffffff00000000)) {
+      auto const newVal = getNewVal(v, 32, false, sf);
+      return newVal && simplify_impl(
+        env, b, i, testlim{ *newVal, ptr, sf });
+    }
+  }
+
+  return false;
+}
+
+template<int size, typename testim>
+bool shrink_testim(Env& env, const testim& test, Vlabel b, size_t i) {
+  return shrink_test_immediate<size, testim>(
+    env, test.s0.q(), test.s1, test.sf, b, i
+  );
+}
+
+bool simplify(Env& env, const testqim& test, Vlabel b, size_t i) {
+  return shrink_testim<sz::qword>(env, test, b, i);
+}
+
+bool simplify(Env& env, const testlim& test, Vlabel b, size_t i) {
+  return shrink_testim<sz::dword>(env, test, b, i);
+}
+
+bool simplify(Env& env, const testwim& test, Vlabel b, size_t i) {
+  return shrink_testim<sz::word>(env, test, b, i);
+}
+
+bool simplify(Env& env, const testbim& test, Vlabel b, size_t i) {
+  return shrink_testim<sz::byte>(env, test, b, i);
+}
+
+bool simplify(Env& env, const testq& test, Vlabel b, size_t i) {
+  auto const sz0 = value_width(env, test.s0);
+  auto const sz1 = value_width(env, test.s1);
+
+  auto const size = sz1 < sz0 ? sz1 : sz0;
+  if (size >= sz::qword) return false;
+
+  return simplify_impl(env, b, i, [&] (Vout& v) {
+    return narrow_inst<testb, testw, testl>(env, size, test, b, i, v);
+  });
+
+  return simplify_test<testqm, cmpqim>(env, test, b, i);
+}
+
+bool simplify(Env& env, const testl& test, Vlabel b, size_t i) {
+  return simplify_test<testlm, cmplim>(env, test, b, i);
+}
+
+bool simplify(Env& env, const testw& test, Vlabel b, size_t i) {
+  return simplify_test<testwm, cmpwim>(env, test, b, i);
+}
+
+bool simplify(Env& env, const testb& test, Vlabel b, size_t i) {
+  return simplify_test<testbm, cmpbim>(env, test, b, i);
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 /*
@@ -845,31 +1219,62 @@ bool simplify(Env& env, const setcc& vsetcc, Vlabel b, size_t i) {
  * Or with constant values
  */
 
+namespace {
+
+template <typename Or>
+bool implOrSimplify(
+  Env& env, const Or& inst, Vlabel b, size_t i, size_t immed
+) {
+ if (env.use_counts[inst.sf] != 0) return false;
+ if (immed == 0) return simplify_impl(env, b, i, copy{inst.s1, inst.d});
+
+ auto const c = env.consts[inst.s1];
+ if (!c || c->isUndef) return false;
+ return simplify_impl(
+   env, b, i,
+   [&] (Vout& v) {
+     auto const s = v.cns(immed | c->val);
+     v << copy{s, inst.d};
+     return 1;
+   }
+ );
+}
+
+} // namespace
+
+bool simplify(Env& env, const orwi& inst, Vlabel b, size_t i) {
+  auto const immed = inst.s0.w();
+  return implOrSimplify(env, inst, b, i, immed);
+}
+
+bool simplify(Env& env, const orli& inst, Vlabel b, size_t i) {
+  auto const immed = inst.s0.l();
+  return implOrSimplify(env, inst, b, i, immed);
+}
+
 bool simplify(Env& env, const orqi& inst, Vlabel b, size_t i) {
-  if (inst.s0.q() == 0 && env.use_counts[inst.sf] == 0) {
-    return simplify_impl(env, b, i, copy{inst.s1, inst.d});
-  }
-  return false;
+  auto const immed = inst.s0.q();
+  return implOrSimplify(env, inst, b, i, immed);
 }
 
 bool simplify(Env& env, const orq& inst, Vlabel b, size_t i) {
   if (env.use_counts[inst.sf] != 0) return false;
 
-  auto it0 = env.unit.regToConst.find(inst.s0);
-  auto it1 = env.unit.regToConst.find(inst.s1);
-  if (it0 != env.unit.regToConst.end() && !it0->second.isUndef) {
-    if (it1 != env.unit.regToConst.end() && !it1->second.isUndef) {
+  auto const c0 = env.consts[inst.s0];
+  auto const c1 = env.consts[inst.s1];
+  if (c0 && !c0->isUndef) {
+    if (c1 && !c1->isUndef) {
       return simplify_impl(env, b, i, [&] (Vout& v) {
-        auto s = v.cns(it0->second.val | it1->second.val);
+        auto s = v.cns(c0->val | c1->val);
         v << copy{s, inst.d};
         return 1;
       });
     }
-    if (it0->second.val == 0) {
+    if (c0->val == 0) {
       return simplify_impl(env, b, i, copy{inst.s1, inst.d});
     }
-  } else if (it1 != env.unit.regToConst.end() && !it1->second.isUndef) {
-    if (it1->second.val == 0) {
+  } else if (c1 && c1->isUndef) {
+    if (c1->val == 0) {
       return simplify_impl(env, b, i, copy{inst.s0, inst.d});
     }
   }
@@ -891,17 +1296,10 @@ template <typename Inst>
 bool cmov_fold_impl(Env& env, const Inst& inst, Vlabel b, size_t i) {
   auto const equivalent = [&]{
     if (inst.t == inst.f) return true;
-
-    auto const t_it = env.unit.regToConst.find(inst.t);
-    if (t_it == env.unit.regToConst.end()) return false;
-    auto const f_it = env.unit.regToConst.find(inst.f);
-    if (f_it == env.unit.regToConst.end()) return false;
-
-    auto const t_const = t_it->second;
-    auto const f_const = f_it->second;
-    if (t_const.isUndef || f_const.isUndef) return false;
-    if (t_const.kind != f_const.kind) return false;
-    return t_const.val == f_const.val;
+    auto const ct = env.consts[inst.t];
+    auto const cf = env.consts[inst.f];
+    if (!ct || !cf) return false;
+    return *ct == *cf;
   }();
   if (!equivalent) return false;
 
@@ -921,10 +1319,9 @@ bool cmov_fold_impl(Env& env, const Inst& inst, Vlabel b, size_t i) {
 template <typename Inst, typename Extend>
 bool cmov_setcc_impl(Env& env, const Inst& inst, Vlabel b,
                      size_t i, Extend extend) {
-  auto const t_it = env.unit.regToConst.find(inst.t);
-  if (t_it == env.unit.regToConst.end()) return false;
-  auto const f_it = env.unit.regToConst.find(inst.f);
-  if (f_it == env.unit.regToConst.end()) return false;
+  auto const ct = env.consts[inst.t];
+  auto const cf = env.consts[inst.f];
+  if (!ct || !cf) return false;
 
   auto const check_const = [](Vconst c, bool& val) {
     if (c.isUndef) return false;
@@ -948,9 +1345,9 @@ bool cmov_setcc_impl(Env& env, const Inst& inst, Vlabel b,
   };
 
   bool t_val;
-  if (!check_const(t_it->second, t_val)) return false;
+  if (!check_const(*ct, t_val)) return false;
   bool f_val;
-  if (!check_const(f_it->second, f_val)) return false;
+  if (!check_const(*cf, f_val)) return false;
 
   return simplify_impl(env, b, i, [&] (Vout& v) {
     auto const d = env.unit.makeReg();
@@ -1003,33 +1400,30 @@ bool simplify(Env& env, const cmovq& inst, Vlabel b, size_t i) {
  * Copies, loads, and stores.
  */
 
-bool simplify(Env& env, const copyargs& inst, Vlabel b, size_t i) {
-  auto const& srcs = env.unit.tuples[inst.s];
-  auto const& dsts = env.unit.tuples[inst.d];
-  assertx(srcs.size() == dsts.size());
-
-  for (auto const src : srcs) {
-    for (auto const dst : dsts) {
-      if (src == dst) return false;
-    }
-  }
-
-  // If the srcs and dsts don't intersect, simplify to a sequence of copies.
-  return simplify_impl(env, b, i, [&] (Vout& v) {
-    for (auto i = 0; i < srcs.size(); ++i) {
-      v << copy{srcs[i], dsts[i]};
-    }
-    return 1;
-  });
-}
-
 /*
  * Simplify load followed by truncation:
+ *  load{s, tmp}; jmpr{tmp, args} -> jmpm{s, args}
  *  load{s, tmp}; movtqb{tmp, d} -> loadtqb{s, d}
  *  load{s, tmp}; movtql{tmp, d} -> loadtql{s, d}
  *  loadzbq{s, tmp}; movtqb{tmp, d} -> loadb{s, d}
+ *  loadzwq{s, tmp}; movtqw{tmp, d} -> loadw{s, d}
  *  loadzlq{s, tmp}; movtql{tmp, d} -> loadl{s, d}
  */
+bool simplify_load_jmpr(Env& env, const load& load, Vlabel b, size_t i) {
+  if (arch::any<arch::ARM>()) return false;
+  if (env.use_counts[load.d] != 1) return false;
+  auto const& code = env.unit.blocks[b].code;
+  if (i + 1 >= code.size()) return false;
+
+  return if_inst<Vinstr::jmpr>(env, b, i + 1, [&] (const jmpr& jmpr) {
+    if (load.d != jmpr.target) return false;
+    return simplify_impl(env, b, i, [&] (Vout& v) {
+      v << jmpm{load.s, jmpr.args};
+      return 2;
+    });
+  });
+}
+
 template<Vinstr::Opcode mov_op, typename loadt, typename load_in>
 bool simplify_load_truncate(Env& env, const load_in& load, Vlabel b, size_t i) {
   if (env.use_counts[load.d] != 1) return false;
@@ -1047,12 +1441,17 @@ bool simplify_load_truncate(Env& env, const load_in& load, Vlabel b, size_t i) {
 
 bool simplify(Env& env, const load& load, Vlabel b, size_t i) {
   return
+    simplify_load_jmpr(env, load, b, i) ||
     simplify_load_truncate<Vinstr::movtqb, loadtqb>(env, load, b, i) ||
     simplify_load_truncate<Vinstr::movtql, loadtql>(env, load, b, i);
 }
 
 bool simplify(Env& env, const loadzbq& load, Vlabel b, size_t i) {
   return simplify_load_truncate<Vinstr::movtqb, loadb>(env, load, b, i);
+}
+
+bool simplify(Env& env, const loadzwq& load, Vlabel b, size_t i) {
+  return simplify_load_truncate<Vinstr::movtqw, loadw>(env, load, b, i);
 }
 
 bool simplify(Env& env, const loadzlq& load, Vlabel b, size_t i) {
@@ -1077,6 +1476,253 @@ bool simplify(Env& env, const movzlq& inst, Vlabel b, size_t i) {
   });
 }
 
+struct regWidth {
+  explicit regWidth(Vreg r) { givenReg = r; }
+  template<class T> void imm (T) {}
+  template<class T> void def (T) {}
+  template<class T> void use (T) {}
+  void use (Vptr ptr) {
+    if (givenReg == ptr.base) {
+      has_vptr = true;
+      w = Width::Quad;
+    }
+    if (givenReg == ptr.index) {
+      has_vptr = true;
+      w = Width::Quad;
+    }
+  }
+  void use (Vreg8 r) { if (!has_vptr && r == givenReg) w = Width::Byte; }
+  void use (Vreg16 r) { if (!has_vptr && r == givenReg) w = Width::Word; }
+  void use (Vreg32 r) { if (!has_vptr && r == givenReg) w = Width::Long; }
+  void use (Vreg64 r) { if (r == givenReg) w = Width::Quad; }
+  void use (Vreg r) { if (r == givenReg) w = Width::Quad; }
+  void use (RegXMM r) { if (r == givenReg) w = Width::Octa; }
+
+  template<class T> void across (T) {}
+  template<class T, class H> void useHint(T s,H d) { use(s); }
+  template<class T, class H> void defHint(T,H) {}
+  template<Width w> void use(Vp<w>& m) { use(static_cast<Vptr>(m)); }
+
+  Vreg givenReg;
+  Width w {Width::None};
+  bool has_vptr {false};
+};
+
+Width usedWidth(Vreg reg, Vinstr inst) {
+  regWidth v{reg};
+  visitOperands(inst,v);
+  if (v.has_vptr) return Width::Quad;
+  if (v.w != Width::None) return v.w;
+  return Width::None;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+/*
+ * Post-RA copy fold for physical registers.
+ * Fold:
+ *   <def op>{..., s}
+ *   ...            (no reads of s, no reads/writes of d)
+ *   copy{s, d}
+ * =>
+ *   <def op>{..., d}
+ *   ...
+ *
+ * This runs after register allocation when all registers are physical.
+ * GP defs zero-extend to the full 64-bit register on both x64 and ARM64,
+ * so this is safe for any GP def width.  Restricted to GP registers only.
+ * Safety requires:
+ *  - No instruction between def and copy reads s (since s will no longer be
+ *    written by the def)
+ *  - No instruction between def and copy reads or writes d (since d will now
+ *    be written at the def point)
+ *  - The def instruction itself does not read d
+ *  - s is dead after the copy (not used in the rest of the block)
+ */
+
+/*
+ * Check whether an instruction has any explicit or implicit effect on register
+ * r (uses, defs, or across).  Explicit effects come from the instruction's
+ * operand list; implicit effects come from calling-convention side-effects
+ * (e.g. callr clobbering caller-saved registers).
+ */
+bool inst_touches_reg(
+  const Vunit& unit,
+  const Abi& abi,
+  const Vinstr& inst,
+  PhysReg r
+) {
+  // Explicit operand effects.
+  bool touches = false;
+  visitUses(unit, inst, [&] (Vreg v) {
+    if (v == Vreg{r}) touches = true;
+  });
+  if (touches) return true;
+  visitDefs(unit, inst, [&] (Vreg v) {
+    if (v == Vreg{r}) touches = true;
+  });
+  if (touches) return true;
+
+  // Implicit side-effects (calling conventions, etc.).
+  RegSet implicitUses, implicitAcross, implicitDefs;
+  getEffects(abi, inst, implicitUses, implicitAcross, implicitDefs);
+  return implicitUses.contains(r) ||
+         implicitAcross.contains(r) ||
+         implicitDefs.contains(r);
+}
+
+bool psimplify_copy_fold(
+  Env& env,
+  const Abi& abi,
+  const copy& cp,
+  Vlabel b,
+  size_t i
+) {
+  auto const& code = env.unit.blocks[b].code;
+  if (cp.s == cp.d) return false;
+
+  // The copy must operate on full registers (Vreg, not sub-register types).
+  if (width(code[i].op) != Width::AnyNF) return false;
+
+  // Restrict to GP registers.
+  if (!cp.s.isGP() || !cp.d.isGP()) return false;
+  // On ARM64, SP shares register encoding 31 with XZR and cannot be used as
+  // a destination in many instructions.
+  if (arch::any<arch::ARM>() &&
+      (PhysReg{cp.s} == rsp() || PhysReg{cp.d} == rsp())) return false;
+
+  // Scan backward to find the def of cp.s, checking no intervening instruction
+  // touches cp.s or cp.d (explicit or implicit effects).
+  ssize_t defI = -1;
+  for (ssize_t j = safe_cast<ssize_t>(i) - 1; j >= 0; --j) {
+    // Any touch of cp.d blocks the fold.
+    if (inst_touches_reg(env.unit, abi, code[j], PhysReg{cp.d})) break;
+
+    // If this instruction touches cp.s, it must be the defining instruction
+    // for the fold to proceed.
+    if (inst_touches_reg(env.unit, abi, code[j], PhysReg{cp.s})) {
+      bool definesSrc = false;
+      visitDefs(env.unit, code[j], [&] (Vreg r) {
+        if (r == cp.s) definesSrc = true;
+      });
+      if (definesSrc) defI = j;
+      break;
+    }
+  }
+  if (defI < 0) return false;
+
+  // cp.s must be dead after the copy.  For safety, require either:
+  // (a) cp.s is redefined later in this block (definitely dead), or
+  // (b) cp.s is not used in the rest of the block AND the block has no
+  //     successors (e.g., return blocks, or blocks ending with bindjmp/
+  //     ReqBindJmp like prologues).
+  bool redefInBlock = false;
+  for (auto j = i + 1; j < code.size(); ++j) {
+    RegSet implicitUses, implicitAcross, implicitDefs;
+    getEffects(abi, code[j], implicitUses, implicitAcross, implicitDefs);
+    if (implicitUses.contains(cp.s) || implicitAcross.contains(cp.s)) {
+      return false;
+    }
+
+    bool usesSrc = false;
+    visitUses(env.unit, code[j], [&] (Vreg r) {
+      if (r == cp.s) usesSrc = true;
+    });
+    if (usesSrc) return false;
+
+    bool defsSrc = false;
+    visitDefs(env.unit, code[j], [&] (Vreg r) {
+      if (r == cp.s) defsSrc = true;
+    });
+    if (defsSrc) { redefInBlock = true; break; }
+    if (implicitDefs.contains(cp.s)) { redefInBlock = true; break; }
+  }
+  if (!redefInBlock && !succs(env.unit.blocks[b]).empty()) return false;
+
+  FTRACE(1, "psimplify_copy_fold: folding copy{{{}, {}}} "
+            "into {} at B{}[{}]\n",
+         show(cp.s), show(cp.d),
+         show(env.unit, code[defI]), b, defI);
+
+  return simplify_impl(env, b, defI, [&] (Vout& v) {
+    auto const& blk = env.unit.blocks[b].code;
+    auto folded = blk[defI];
+    visitRegsMutable(
+      env.unit,
+      folded,
+      [] (Vreg r) { return r; },
+      [&] (Vreg r) { return r == cp.s ? cp.d : r; }
+    );
+    v << folded;
+    for (auto ii = defI + 1; ii < i; ++ii) {
+      v << blk[ii];
+    }
+    return i - defI + 1;
+  });
+}
+
+bool psimplify(
+  Env& env,
+  const Abi& abi,
+  const copy& cp,
+  Vlabel b,
+  size_t i
+) {
+  return psimplify_copy_fold(env, abi, cp, b, i);
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
+// change  loadb into a zero extending load of the dest reg is used as a wide
+// reg.  Do it only if there is a use of the reg is a wider width.
+// When there is an assignment to a byte reg followed by a use of the full reg,
+// the HW has is merge the new 8 bits with the old 24 / 56 bits, which is a penalty
+// in all HW we use. The magnitude of the penalty is HW specific, and currently it is not
+// huge. Most HW does it via an injection of a micro operation.
+// If there is no wide use then a loadb is preferable to a loadzx because the encoding is
+// smaller. So only do this if we can find the wide use.
+// If there is another def after the loadb then it eliminates the penalty, and therefore
+// we avoid the transformation.
+// Do not do this is there already is a wide store to this reg.
+// register allocation generates register copies and creates opportunities for
+// this optimization.
+
+bool psimplify(
+  Env& env,
+  const Abi& /*abi*/,
+  const loadb& vldb,
+  Vlabel b,
+  size_t i
+) {
+  bool found_wide_use = false;
+  bool found_def = false;
+  Vreg wide_reg;
+  for (auto x = i + 1; x < env.unit.blocks[b].code.size(); ++x) {
+    const auto xinst = env.unit.blocks[b].code[x];
+    if (Vinstr::phpret == xinst.op) continue;
+    visitDefs(env.unit, xinst, [&] (Vreg r) {
+      if (r == vldb.d) {
+        found_def = true;
+        return;
+      }
+    });
+    if (found_def) return false;
+    visitUses(env.unit, xinst, [&] (Vreg r) {
+      if (r == vldb.d) {
+        Width w = usedWidth(r, xinst);
+        if ((Width::Long == w) || (Width::Quad == w)) {
+          wide_reg = r;
+          found_wide_use = true;
+        }
+      }
+    });
+    if (found_wide_use) {
+      auto const zinst = loadzbl { vldb.s, wide_reg };
+      return vmodify(env.unit, b, i, [&] (Vout& v) { v << zinst; return 1; } );
+    }
+  }
+  return false;
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 /*
  * Pushes and pops.
@@ -1090,6 +1736,44 @@ bool simplify(Env& env, const pop& inst, Vlabel b, size_t i) {
     v << lea{reg::rsp[8], reg::rsp};
     return 1;
   });
+}
+
+bool simplify(Env& env, const orlim& vorlim, Vlabel b, size_t i) {
+  auto const orinst = env.unit.blocks[b].code[i];
+  auto orOperand = orinst.orlim_.s0.l();
+  const Vptr32 orDest = orinst.orlim_.m;
+  for (int x = i - 1; x >= 0; --x) {
+    auto xinst = env.unit.blocks[b].code[x];
+    if (Vinstr::storeli == xinst.op) {
+      const Vptr32 stDest = xinst.storeli_.m;
+      if (stDest == orDest) {
+        for (auto j = x+1; j < i; ++j) {
+          if (!cannot_alias_write(env.unit.blocks[b].code[j],xinst)) {
+            return false;
+          }
+        }
+        const auto stOperand = xinst.storeli_.s.l();
+        auto newOp = stOperand | orOperand;
+        return simplify_impl(env, b, i, storeli { newOp, stDest });
+      }
+    } else if (Vinstr::storel == xinst.op) {
+        const auto srcReg = xinst.storel_.s;
+        if (auto const c = env.consts[srcReg]) {
+          const Vptr32 stDest = xinst.storel_.m;
+          if (orDest == stDest) {
+            for (auto j = x + 1; j < i; ++j) {
+              if (!cannot_alias_write(env.unit.blocks[b].code[j],xinst)) {
+                return false;
+              }
+            }
+            const auto stOperand = c->val;
+            const int newOp = stOperand | orOperand;
+            return simplify_impl(env, b, i, storeli { newOp, stDest });
+          }
+        }
+    }
+  }
+  return false;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -1109,9 +1793,8 @@ struct SimplifyVptrVisit {
     // If the base is a constant, we can fold it into the displacement (if it
     // fits).
     if (ptr.base.isValid()) {
-      auto const it = env.unit.regToConst.find(ptr.base);
-      if (it != env.unit.regToConst.end()) {
-        auto const newDisp = static_cast<int64_t>(ptr.disp) + it->second.val;
+      if (auto const c = env.consts[ptr.base]) {
+        auto const newDisp = static_cast<int64_t>(ptr.disp) + c->val;
         if (deltaFits(newDisp, sz::dword)) {
           ptr.disp = newDisp;
           ptr.base = Vreg{};
@@ -1123,10 +1806,9 @@ struct SimplifyVptrVisit {
     // If the index is a constant, we can fold it into the displacement (if it
     // fits).
     if (ptr.index.isValid()) {
-      auto const it = env.unit.regToConst.find(ptr.index);
-      if (it != env.unit.regToConst.end()) {
+      if (auto const c = env.consts[ptr.index]) {
         auto const newDisp =
-          static_cast<int64_t>(ptr.disp) + it->second.val * ptr.scale;
+          static_cast<int64_t>(ptr.disp) + c->val * ptr.scale;
         if (deltaFits(newDisp, sz::dword)) {
           ptr.disp = newDisp;
           ptr.index = Vreg{};
@@ -1178,9 +1860,51 @@ bool simplify_arch(Env& env, Vlabel b, size_t i) {
   return ARCH_SWITCH_CALL(simplify, env, b, i);
 }
 
-///////////////////////////////////////////////////////////////////////////////
+bool psimplify(Env& env, const Abi& abi, Vlabel b, size_t i) {
+  assertx(i <= env.unit.blocks[b].code.size());
+  auto& inst = env.unit.blocks[b].code[i];
+
+  switch (inst.op) {
+#define O(name, ...)    \
+    case Vinstr::name:  \
+      return psimplify(env, abi, inst.name##_, b, i); \
+
+    VASM_OPCODES
+#undef O
+  }
+  not_reached();
+}
+
+/*
+ * Perform architecture-specific peephole simplification.
+ */
+bool psimplify_arch(Env& env, const Abi& abi, Vlabel b, size_t i) {
+  return ARCH_SWITCH_CALL(psimplify, env, abi, b, i);
+}
 
 }
+
+///////////////////////////////////////////////////////////////////////////////
+
+void Env::init(const jit::vector<Vlabel>& labels) {
+  use_counts.resize(unit.next_vr);
+  def_insts.resize(unit.next_vr, Vinstr::nop);
+  consts.resize(unit.next_vr);
+
+  for (auto const b : labels) {
+    assertx(!unit.blocks[b].code.empty());
+
+    for (auto const& inst : unit.blocks[b].code) {
+      visitDefs(unit, inst, [&] (Vreg r) { def_insts[r] = inst.op; });
+      visitUses(unit, inst, [&] (Vreg r) { ++use_counts[r]; });
+    }
+  };
+  for (auto const& p : unit.regToConst) {
+    consts[p.first] = p.second;
+  }
+}
+
+///////////////////////////////////////////////////////////////////////////////
 
 /*
  * Peephole simplification pass for a Vunit.
@@ -1188,22 +1912,8 @@ bool simplify_arch(Env& env, Vlabel b, size_t i) {
 void simplify(Vunit& unit) {
   assertx(check(unit));
   auto& blocks = unit.blocks;
-
-  Env env { unit };
-  env.use_counts.resize(unit.next_vr);
-  env.def_insts.resize(unit.next_vr, Vinstr::nop);
-
   auto const labels = sortBlocks(unit);
-
-  // Set up Env, only visiting reachable blocks.
-  for (auto const b : labels) {
-    assertx(!blocks[b].code.empty());
-
-    for (auto const& inst : blocks[b].code) {
-      visitDefs(unit, inst, [&] (Vreg r) { env.def_insts[r] = inst.op; });
-      visitUses(unit, inst, [&] (Vreg r) { ++env.use_counts[r]; });
-    }
-  };
+  Env env(unit, labels);
 
   // The simplify() implementations may allocate scratch blocks and modify
   // instruction streams, so we cannot use standard iterators here.
@@ -1220,6 +1930,31 @@ void simplify(Vunit& unit) {
   printUnit(kVasmSimplifyLevel, "after vasm simplify", unit);
 }
 
+/*
+ * Peephole simplification pass after register allocation, for opportunities
+ * that either require physical regs or are created by register allocator.
+ */
+void postRASimplify(Vunit& unit, const Abi& abi) {
+  assertx(check(unit));
+  auto& blocks = unit.blocks;
+  auto const labels = sortBlocks(unit);
+  Env env(unit, labels);
+
+  // The simplify() implementations may allocate scratch blocks and modify
+  // instruction streams, so we cannot use standard iterators here.
+  for (auto const b : labels) {
+    for (size_t i = 0; i < blocks[b].code.size(); ++i) {
+      // Simplify at this index until no changes are made.
+      while (psimplify(env, abi, b, i) || psimplify_arch(env, abi, b, i)) {
+        // Stop if we simplified away the tail of the block.
+        if (i >= blocks[b].code.size()) break;
+      }
+    }
+  };
+
+  printUnit(kVasmSimplifyLevel, "after vasm postRASimplify", unit);
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 
-}}
+}

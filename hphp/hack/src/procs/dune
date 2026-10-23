@@ -1,0 +1,42 @@
+(library
+ (name procs_bucket)
+ (wrapped false)
+ (modules
+  bucket)
+ (libraries core_kernel utils_core))
+
+(library
+ (name procs_procs)
+ (wrapped false)
+ (modules
+  mem_profile
+  multi_threaded_call
+  multi_worker
+  worker
+  worker_controller)
+ (libraries
+  core_kernel
+  heap_shared_mem
+  logging
+  marshal_tools
+  procs_bucket
+  procfs
+  relative_path
+  sys_utils
+  utils_exit
+  worker_cancel
+  worker_utils))
+
+(library
+ (name procs_entry_point)
+ (wrapped false)
+ (modules
+  worker_controller_entry_point)
+ (libraries procs_procs folly_stubs))
+
+(library
+ (name worker_utils)
+ (modules
+  worker_utils)
+ (libraries
+  str))

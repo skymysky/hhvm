@@ -1,0 +1,34 @@
+__ConsistentConstruct
+  INSERT __ConsistentConstruct
+  built-in attribute
+  Requires all child classes to have the same constructor signature.  This allows `new static(...)` and `new $the_class_name(...)`.
+__Docs
+  INSERT __Docs
+  built-in attribute
+  Shows the linked URL when hovering over this type.
+__DynamicallyConstructible
+  INSERT __DynamicallyConstructible
+  built-in attribute
+  Allows this class to be instantiated dynamically, based on a string of its name. HHVM will warn or error (depending on settings) on dynamic instantiations without this attribute.
+__DynamicallyReferenced
+  INSERT __DynamicallyReferenced
+  built-in attribute
+  Allows a user to get a pointer to this class from a string using `HH\classname_to_class()`. HHVM will raise a notice if this attribute is not present. For migration, this can also be set to soft logging by passing an integer sample rate (1 of N) as an argument.
+__EnableMethodTraitDiamond
+  INSERT __EnableMethodTraitDiamond
+  built-in attribute
+  Allows a trait to be `use`d more than once. This is useful in large class hierarchies, where you can end up using the same trait on via multiple paths, producing 'diamond inheritance'.
+  
+  This requires methods to unambiguous: each method definition must occur in exactly one trait.
+__Sealed
+  INSERT __Sealed
+  built-in attribute
+  Only the named classes can extend this class or interface, or override this method. Child classes may still be extended unless they are marked `final`.
+__TestsBypassVisibility
+  INSERT __TestsBypassVisibility
+  built-in attribute
+  Allows this member to be accessed as public from test contexts. When applied to an internal class, the class becomes visible from test contexts.
+__UNSAFE_AllowMultipleInstantiations
+  INSERT __UNSAFE_AllowMultipleInstantiations
+  built-in attribute
+  CLOWNY. Allows implementing this interface with multiple instantiations, e.g. `implements I<int>, I<string>`.

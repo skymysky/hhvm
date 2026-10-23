@@ -1,0 +1,18 @@
+error: Typing[4323] Some type arguments violate their constraints [1]
+-> `T` is a constrained type parameter [2]
+-> This type constraint is violated [3]
+-> Expected `arraykey` [3]
+-> But got `bool` [4]
+
+wellformedness_gconst.php:5:7
+1 | <?hh
+2 | 
+3 | newtype X<T as arraykey> = T;
+  |           ^ [2]
+  |                ^^^^^^^^ [3]
+4 | 
+5 | const X<bool> C = true;
+  |       ^^^^^^^ [1]
+  |         ^^^^ [4]
+
+1 error found

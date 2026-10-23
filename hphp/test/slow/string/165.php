@@ -1,6 +1,6 @@
-<?php
+<?hh
 
-function test($a, $b) {
+function test($a, $b) :mixed{
   $buf = 'hello';
   foreach ($a as $v) {
     $buf .= $v . ';';
@@ -10,8 +10,7 @@ function test($a, $b) {
   }
   var_dump($buf);
 }
-test(array('a', 'b', 'c'), array('u', 'v'));
-function test2($a, $b) {
+function test2($a, $b) :mixed{
   $buf = 'hello';
   foreach ($a as $v) {
     $buf .= $v . ';';
@@ -22,15 +21,20 @@ function test2($a, $b) {
   }
   var_dump($buf);
 }
-test2(array('a', 'b', 'c'), array('u', 'v'));
-function test3($a, $b) {
+function test3($a, $b) :mixed{
   $buf = 'hello';
   foreach ($a as $v) {
     $buf .= $v . ';';
     foreach ($b as $w) {
-      echo ($buf .= $w);
+      $buf .= $w; echo $buf;
     }
   }
   var_dump($buf);
 }
-test3(array('a', 'b', 'c'), array('u', 'v'));
+
+<<__EntryPoint>>
+function main_165() :mixed{
+test(vec['a', 'b', 'c'], vec['u', 'v']);
+test2(vec['a', 'b', 'c'], vec['u', 'v']);
+test3(vec['a', 'b', 'c'], vec['u', 'v']);
+}

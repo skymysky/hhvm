@@ -14,31 +14,15 @@
    +----------------------------------------------------------------------+
 */
 #include "hphp/runtime/base/builtin-functions.h"
+#include "hphp/runtime/base/type-array.h"
+#include "hphp/runtime/base/type-string.h"
 #include "hphp/runtime/ext/extension.h"
+#include "hphp/runtime/base/array-init.h"
+#include "hphp/runtime/vm/native.h"
 
+#include <cstring>
 #include <sodium.h>
-
-#include <limits>
-
-#ifndef crypto_pwhash_scryptsalsa208sha256_STRPREFIX
-#define crypto_pwhash_scryptsalsa208sha256_STRPREFIX "$7$"
-#endif
-
-#if defined(crypto_aead_chacha20poly1305_IETF_NPUBBYTES) \
- && !defined(crypto_aead_chacha20poly1305_ietf_NPUBBYTES)
-#define crypto_aead_chacha20poly1305_ietf_NPUBBYTES \
-  crypto_aead_chacha20poly1305_IETF_NPUBBYTES
-#endif
-
-#if defined(crypto_aead_chacha20poly1305_KEYBYTES) \
-  && !defined(crypto_aead_chacha20poly1305_ietf_KEYBYTES)
-#define crypto_aead_chacha20poly1305_ietf_KEYBYTES \
-  crypto_aead_chacha20poly1305_KEYBYTES
-#define crypto_aead_chacha20poly1305_ietf_NSECBYTES \
-  crypto_aead_chacha20poly1305_NSECBYTES
-#define crypto_aead_chacha20poly1305_ietf_ABYTES \
-  crypto_aead_chacha20poly1305_ABYTES
-#endif
+#include <usdt/usdt.h>
 
 namespace HPHP {
 
@@ -47,41 +31,43 @@ namespace {
 const StaticString s_arithmetic_overflow("arithmetic overflow");
 const StaticString s_internal_error("internal error");
 
+struct SodiumException : SystemLib::ClassLoader<"SodiumException"> {};
+
 [[noreturn]]
-void throwSodiumException(const String& message) {
-  Array params;
-  params.append(message);
-  throw_object("SodiumException", params, true /* init */);
+void throwSodiumException(const OptString& message) {
+  throw_object(SodiumException::classof(), make_vec_array(message));
 }
 
-const StaticString s_non_string_reference(
-  "ByRef parameter is not a string"
+const StaticString s_non_string_inout(
+  "inout parameter is not a string"
 );
 
-String sodium_separate_string(VRefParam string_ref) {
-  if (!string_ref.isString()) {
-    throwSodiumException(s_non_string_reference);
+OptString sodium_separate_string(Variant& string_inout) {
+  if (!string_inout.isString()) {
+    throwSodiumException(s_non_string_inout);
   }
-  auto string = string_ref.toString();
+  auto string = string_inout.toString();
   auto data = string.get();
-  if (!data->hasMultipleRefs()) {
+  if (!data->cowCheck()) {
+    USDT(hhvm, hhvm_mut_sodium, data->size());
     return string;
   }
-  String copy(string, CopyString);
-  string_ref.assignIfRef(copy);
+  USDT(hhvm, hhvm_cow_sodium, string.size());
+  OptString copy(string, CopyString);
+  string_inout = copy;
   return copy;
 }
 
 /* Not just wrapping bin2hex() because sodium_bin2hex() is resistant to timing
  * attacks, while the (faster) standard implementation isn't. */
-String HHVM_FUNCTION(sodium_bin2hex,
-                     const String& binary) {
+OptString HHVM_FUNCTION(sodium_bin2hex,
+                        const OptString& binary) {
   if (binary.size() > StringData::MaxSize / 2) {
     throwSodiumException(s_arithmetic_overflow);
   }
 
   size_t hex_len = binary.size() * 2;
-  String hex = String(hex_len, ReserveString);
+  OptString hex = OptString(hex_len, ReserveString);
   sodium_bin2hex(
     hex.mutableData(),
     hex_len + 1,
@@ -99,12 +85,12 @@ String HHVM_FUNCTION(sodium_bin2hex,
  *  - supports ignoring certain characters - eg for ipv6:
  *    `sodium_hex2bin('[::1]', '[:]')` === 1`
  */
-String HHVM_FUNCTION(sodium_hex2bin,
-                     const String& hex,
-                     const Variant& /* ?string */ ignore) {
+OptString HHVM_FUNCTION(sodium_hex2bin,
+                        const OptString& hex,
+                        const Variant& /* ?string */ ignore) {
   const size_t hex_len = hex.size();
   const size_t bin_len = hex_len / 2;
-  String binary(bin_len, ReserveString);
+  OptString binary(bin_len, ReserveString);
 
   const char* ignore_chars = nullptr;
   if (ignore.isString()) {
@@ -132,8 +118,7 @@ String HHVM_FUNCTION(sodium_hex2bin,
 
 const StaticString s_memzero_needs_string("memzero: a PHP string is required");
 
-void HHVM_FUNCTION(sodium_memzero,
-                   VRefParam buffer) {
+void HHVM_FUNCTION(sodium_memzero, Variant& buffer) {
   if (!buffer.isString()) {
     throwSodiumException(s_memzero_needs_string);
   }
@@ -153,22 +138,22 @@ void HHVM_FUNCTION(sodium_memzero,
    * $x) is now wiped.
    */
   if (data->hasExactlyOneRef() && !data->empty()) {
+    USDT(hhvm, hhvm_mut_sodium, data->size());
     sodium_memzero(data->mutableData(), data->size());
   }
-  buffer.assignIfRef(init_null());
+  buffer = init_null();
 }
 
 const StaticString s_increment_needs_string(
   "a PHP string is required"
 );
 
-void HHVM_FUNCTION(sodium_increment,
-                   VRefParam buffer_ref) {
-  if (!buffer_ref.isString()) {
+void HHVM_FUNCTION(sodium_increment, Variant& buffer_inout) {
+  if (!buffer_inout.isString()) {
     throwSodiumException(s_increment_needs_string);
   }
 
-  String buffer = sodium_separate_string(buffer_ref);
+  OptString buffer = sodium_separate_string(buffer_inout);
 
   if (buffer.empty()) {
     return;
@@ -185,13 +170,13 @@ const StaticString
   s_add_same_lengths("values must have the same length");
 
 void HHVM_FUNCTION(sodium_add,
-                   VRefParam value_ref,
-                   const String& add) {
-  if (!value_ref.isString()) {
+                   Variant& value_inout,
+                   const OptString& add) {
+  if (!value_inout.isString()) {
     throwSodiumException(s_add_needs_string);
   }
 
-  String value = sodium_separate_string(value_ref);
+  OptString value = sodium_separate_string(value_inout);
   if (value.size() != add.size()) {
     throwSodiumException(s_add_same_lengths);
   }
@@ -208,8 +193,8 @@ const StaticString s_memcmp_argument_sizes(
 );
 
 int64_t HHVM_FUNCTION(sodium_memcmp,
-                      const String& a,
-                      const String& b) {
+                      const OptString& a,
+                      const OptString& b) {
   if (a.size() != b.size()) {
     throwSodiumException(s_memcmp_argument_sizes);
   }
@@ -221,8 +206,8 @@ const StaticString s_compare_argument_sizes(
 );
 
 int64_t HHVM_FUNCTION(sodium_compare,
-                      const String& a,
-                      const String& b) {
+                      const OptString& a,
+                      const OptString& b) {
   if (a.size() != b.size()) {
     throwSodiumException(s_compare_argument_sizes);
   }
@@ -238,9 +223,9 @@ const StaticString s_crypto_scalarmult_size(
   "scalar and point must be CRYPTO_SCALARMULT_SCALARBYTES bytes"
 );
 
-String HHVM_FUNCTION(sodium_crypto_scalarmult,
-                     const String& n,
-                     const String& p) {
+OptString HHVM_FUNCTION(sodium_crypto_scalarmult,
+                        const OptString& n,
+                        const OptString& p) {
   if (
     n.size() != crypto_scalarmult_SCALARBYTES ||
     p.size() != crypto_scalarmult_BYTES
@@ -248,7 +233,7 @@ String HHVM_FUNCTION(sodium_crypto_scalarmult,
     throwSodiumException(s_crypto_scalarmult_size);
   }
 
-  String q(crypto_scalarmult_BYTES, ReserveString);
+  OptString q(crypto_scalarmult_BYTES, ReserveString);
   const auto result = crypto_scalarmult(
     reinterpret_cast<unsigned char*>(q.mutableData()),
     reinterpret_cast<const unsigned char*>(n.data()),
@@ -269,10 +254,10 @@ const StaticString
     "unsupported key length"
   );
 
-String HHVM_FUNCTION(sodium_crypto_generichash,
-                     const String& message,
-                     const Variant& /* ?string */ key,
-                     const Variant& /* ?int */ length) {
+OptString HHVM_FUNCTION(sodium_crypto_generichash,
+                        const OptString& message,
+                        const Variant& /* ?string */ key,
+                        const Variant& /* ?int */ length) {
   size_t hash_len(crypto_generichash_BYTES);
   if (length.isInteger()) {
     hash_len = length.asInt64Val();
@@ -300,7 +285,7 @@ String HHVM_FUNCTION(sodium_crypto_generichash,
     throwSodiumException(s_crypto_generichash_unsupported_key_len);
   }
 
-  String hash = String(hash_len, ReserveString);
+  OptString hash = OptString(hash_len, ReserveString);
   auto result = crypto_generichash(
     reinterpret_cast<unsigned char*>(hash.mutableData()),
     hash_len,
@@ -324,9 +309,9 @@ const StaticString
     "unsupported key length"
   );
 
-String HHVM_FUNCTION(sodium_crypto_generichash_init,
-                     const Variant& /* ?string */ key,
-                     const Variant& /* ?int */ length) {
+OptString HHVM_FUNCTION(sodium_crypto_generichash_init,
+                        const Variant& /* ?string */ key,
+                        const Variant& /* ?int */ length) {
   size_t hash_len(crypto_generichash_BYTES);
   if (length.isInteger()) {
     hash_len = length.asInt64Val();
@@ -355,6 +340,7 @@ String HHVM_FUNCTION(sodium_crypto_generichash_init,
   }
 
   crypto_generichash_state state_tmp;
+  memset(&state_tmp, 0, sizeof state_tmp);
   auto result = crypto_generichash_init(
     &state_tmp,
     key_data,
@@ -366,7 +352,7 @@ String HHVM_FUNCTION(sodium_crypto_generichash_init,
   }
 
   size_t state_len = sizeof(crypto_generichash_state);
-  String state(state_len, ReserveString);
+  OptString state(state_len, ReserveString);
   memcpy(state.mutableData(), &state_tmp, state_len);
   state.setSize(state_len);
   sodium_memzero(&state_tmp, state_len);
@@ -374,21 +360,21 @@ String HHVM_FUNCTION(sodium_crypto_generichash_init,
 }
 
 const StaticString
-  s_crypto_generichash_update_state_reference_required(
-    "a reference to a state is required"
+  s_crypto_generichash_update_state_string_required(
+    "incorrect state type, a string is required"
   ),
   s_crypto_generichash_update_incorrect_state_length(
     "incorrect state length"
   );
 
 bool HHVM_FUNCTION(sodium_crypto_generichash_update,
-                   VRefParam /* string& */ state_ref,
-                   const String& msg) {
-  if (!state_ref.isString()) {
-    throwSodiumException(s_crypto_generichash_update_state_reference_required);
+                   Variant& /* string& */ state_inout,
+                   const OptString& msg) {
+  if (!state_inout.isString()) {
+    throwSodiumException(s_crypto_generichash_update_state_string_required);
   }
 
-  auto state = sodium_separate_string(state_ref);
+  auto state = sodium_separate_string(state_inout);
   size_t state_len = sizeof(crypto_generichash_state);
   if (state.size() != state_len) {
     throwSodiumException(s_crypto_generichash_update_incorrect_state_length);
@@ -413,8 +399,8 @@ bool HHVM_FUNCTION(sodium_crypto_generichash_update,
 }
 
 const StaticString
-  s_crypto_generichash_final_state_reference_required(
-    "a reference to a state is required"
+  s_crypto_generichash_final_state_string_required(
+    "incorrect state type, a string is required"
   ),
   s_crypto_generichash_final_incorrect_state_length(
     "incorrect state length"
@@ -423,14 +409,14 @@ const StaticString
     "unsupported output length"
   );
 
-String HHVM_FUNCTION(sodium_crypto_generichash_final,
-                     VRefParam /* string& */ state_ref,
-                     const Variant& /* ?int */ length) {
-  if (!state_ref.isString()) {
-    throwSodiumException(s_crypto_generichash_final_state_reference_required);
+OptString HHVM_FUNCTION(sodium_crypto_generichash_final,
+                        Variant& /* string& */ state_inout,
+                        const Variant& /* ?int */ length) {
+  if (!state_inout.isString()) {
+    throwSodiumException(s_crypto_generichash_final_state_string_required);
   }
 
-  auto state = sodium_separate_string(state_ref);
+  auto state = sodium_separate_string(state_inout);
   size_t state_len = sizeof(crypto_generichash_state);
   if (state.size() != state_len) {
     throwSodiumException(s_crypto_generichash_final_incorrect_state_length);
@@ -447,7 +433,7 @@ String HHVM_FUNCTION(sodium_crypto_generichash_final,
     throwSodiumException(s_crypto_generichash_final_unsupported_output_length);
   }
 
-  String hash(hash_len, ReserveString);
+  OptString hash(hash_len, ReserveString);
   crypto_generichash_state state_tmp;
   SCOPE_EXIT {
     sodium_memzero(&state_tmp, state_len);
@@ -464,7 +450,7 @@ String HHVM_FUNCTION(sodium_crypto_generichash_final,
   hash.setSize(hash_len);
 
   sodium_memzero(state.mutableData(), state_len);
-  state_ref.assignIfRef(init_null());
+  state_inout = init_null();
 
   return hash;
 }
@@ -474,13 +460,13 @@ const StaticString
     "key size should be CRYPTO_SHORTHASH_KEYBYTES bytes"
   );
 
-String HHVM_FUNCTION(sodium_crypto_shorthash,
-                     const String& message,
-                     const String& key) {
+OptString HHVM_FUNCTION(sodium_crypto_shorthash,
+                        const OptString& message,
+                        const OptString& key) {
   if (key.size() != crypto_shorthash_KEYBYTES) {
     throwSodiumException(s_shorthash_key_size);
   }
-  String hash(crypto_shorthash_BYTES, ReserveString);
+  OptString hash(crypto_shorthash_BYTES, ReserveString);
   const auto result = crypto_shorthash(
     reinterpret_cast<unsigned char*>(hash.mutableData()),
     reinterpret_cast<const unsigned char*>(message.data()),
@@ -494,16 +480,15 @@ String HHVM_FUNCTION(sodium_crypto_shorthash,
   return hash;
 }
 
-#ifdef crypto_pwhash_SALTBYTES
 const StaticString
   s_pwhash_salt_size("salt should be CRYPTO_PWHASH_SALTBYTES bytes");
 
-String HHVM_FUNCTION(sodium_crypto_pwhash,
-                     int64_t hash_len,
-                     const String& password,
-                     const String& salt,
-                     int64_t opslimit,
-                     int64_t memlimit) {
+OptString HHVM_FUNCTION(sodium_crypto_pwhash,
+                        int64_t hash_len,
+                        const OptString& password,
+                        const OptString& salt,
+                        int64_t opslimit,
+                        int64_t memlimit) {
   if (password.empty()) {
     raise_warning("empty password");
   }
@@ -517,7 +502,7 @@ String HHVM_FUNCTION(sodium_crypto_pwhash,
     raise_warning("maximum memory for the argon2i function is low");
   }
 
-  String hash(hash_len, ReserveString);
+  OptString hash(hash_len, ReserveString);
   const auto result = crypto_pwhash(
     reinterpret_cast<unsigned char*>(hash.mutableData()),
     hash_len,
@@ -535,10 +520,10 @@ String HHVM_FUNCTION(sodium_crypto_pwhash,
   return hash;
 }
 
-String HHVM_FUNCTION(sodium_crypto_pwhash_str,
-                     const String& password,
-                     int64_t opslimit,
-                     int64_t memlimit) {
+OptString HHVM_FUNCTION(sodium_crypto_pwhash_str,
+                        const OptString& password,
+                        int64_t opslimit,
+                        int64_t memlimit) {
   if (password.empty()) {
     raise_warning("empty password");
   }
@@ -550,7 +535,7 @@ String HHVM_FUNCTION(sodium_crypto_pwhash_str,
   }
 
   const size_t hash_len = crypto_pwhash_STRBYTES - 1;
-  String hash(hash_len, ReserveString);
+  OptString hash(hash_len, ReserveString);
   const auto result = crypto_pwhash_str(
     reinterpret_cast<char*>(hash.mutableData()),
     password.data(),
@@ -568,8 +553,8 @@ String HHVM_FUNCTION(sodium_crypto_pwhash_str,
 }
 
 bool HHVM_FUNCTION(sodium_crypto_pwhash_str_verify,
-                   const String& hash,
-                   const String& password) {
+                   const OptString& hash,
+                   const OptString& password) {
   if (password.empty()) {
     raise_warning("empty password");
   }
@@ -580,19 +565,18 @@ bool HHVM_FUNCTION(sodium_crypto_pwhash_str_verify,
   );
   return result == 0;
 }
-#endif // crypto_pwhash_SALTBYTES
 
 const StaticString
   s_pwhash_scrypt_bad_salt_size(
     "salt should be CRYPTO_PWHASH_SCRYPTSALSA208SHA256_SALTBYTES bytes"
   );
 
-String HHVM_FUNCTION(sodium_crypto_pwhash_scryptsalsa208sha256,
-                     int64_t length,
-                     const String& password,
-                     const String& salt,
-                     int64_t opslimit,
-                     int64_t memlimit) {
+OptString HHVM_FUNCTION(sodium_crypto_pwhash_scryptsalsa208sha256,
+                        int64_t length,
+                        const OptString& password,
+                        const OptString& salt,
+                        int64_t opslimit,
+                        int64_t memlimit) {
   if (password.empty()) {
     raise_warning("empty password");
   }
@@ -606,7 +590,7 @@ String HHVM_FUNCTION(sodium_crypto_pwhash_scryptsalsa208sha256,
     raise_warning("maximum memory for the scrypt function is low");
   }
 
-  String hash(length, ReserveString);
+  OptString hash(length, ReserveString);
   const auto result = crypto_pwhash_scryptsalsa208sha256(
     reinterpret_cast<unsigned char*>(hash.mutableData()),
     length,
@@ -623,10 +607,10 @@ String HHVM_FUNCTION(sodium_crypto_pwhash_scryptsalsa208sha256,
   return hash;
 }
 
-String HHVM_FUNCTION(sodium_crypto_pwhash_scryptsalsa208sha256_str,
-                     const String& password,
-                     int64_t opslimit,
-                     int64_t memlimit) {
+OptString HHVM_FUNCTION(sodium_crypto_pwhash_scryptsalsa208sha256_str,
+                        const OptString& password,
+                        int64_t opslimit,
+                        int64_t memlimit) {
   if (password.empty()) {
     raise_warning("empty password");
   }
@@ -637,7 +621,7 @@ String HHVM_FUNCTION(sodium_crypto_pwhash_scryptsalsa208sha256_str,
     raise_warning("maximum memory for the scrypt function is low");
   }
 
-  String hash(crypto_pwhash_scryptsalsa208sha256_STRBYTES - 1, ReserveString);
+  OptString hash(crypto_pwhash_scryptsalsa208sha256_STRBYTES - 1, ReserveString);
   const auto result = crypto_pwhash_scryptsalsa208sha256_str(
     hash.mutableData(),
     password.data(),
@@ -654,8 +638,8 @@ String HHVM_FUNCTION(sodium_crypto_pwhash_scryptsalsa208sha256_str,
 
 bool HHVM_FUNCTION(
   sodium_crypto_pwhash_scryptsalsa208sha256_str_verify,
-  const String& hash,
-  const String& password
+  const OptString& hash,
+  const OptString& password
 ) {
   if (password.empty()) {
     raise_warning("empty password");
@@ -678,13 +662,13 @@ const StaticString
    "key must be CRYPTO_AUTH_KEYBYTES bytes"
   );
 
-String HHVM_FUNCTION(sodium_crypto_auth,
-                    const String& message,
-                    const String& key) {
+OptString HHVM_FUNCTION(sodium_crypto_auth,
+                    const OptString& message,
+                    const OptString& key) {
   if (key.size() != crypto_auth_KEYBYTES) {
    throwSodiumException(s_crypto_auth_key_size);
   }
-  String mac(crypto_auth_BYTES, ReserveString);
+  OptString mac(crypto_auth_BYTES, ReserveString);
   const auto result = crypto_auth(
    reinterpret_cast<unsigned char*>(mac.mutableData()),
    reinterpret_cast<const unsigned char*>(message.data()),
@@ -707,9 +691,9 @@ const StaticString
   );
 
 bool HHVM_FUNCTION(sodium_crypto_auth_verify,
-                   const String& mac,
-                   const String& message,
-                   const String& key) {
+                   const OptString& mac,
+                   const OptString& message,
+                   const OptString& key) {
   if (key.size() != crypto_auth_KEYBYTES) {
    throwSodiumException(s_crypto_auth_verify_key_size);
   }
@@ -733,10 +717,10 @@ const StaticString
     "key size should be CRYPTO_SECRETBOX_KEYBYTES bytes"
   );
 
-String HHVM_FUNCTION(sodium_crypto_secretbox,
-                     const String& plaintext,
-                     const String& nonce,
-                     const String& key) {
+OptString HHVM_FUNCTION(sodium_crypto_secretbox,
+                        const OptString& plaintext,
+                        const OptString& nonce,
+                        const OptString& key) {
   if (nonce.size() != crypto_secretbox_NONCEBYTES) {
     throwSodiumException(s_crypto_secretbox_nonce_size);
   }
@@ -751,7 +735,7 @@ String HHVM_FUNCTION(sodium_crypto_secretbox,
   }
 
   const size_t ciphertext_len = plaintext.size() + crypto_secretbox_MACBYTES;
-  String ciphertext(ciphertext_len, ReserveString);
+  OptString ciphertext(ciphertext_len, ReserveString);
   const auto result = crypto_secretbox_easy(
     reinterpret_cast<unsigned char*>(ciphertext.mutableData()),
     reinterpret_cast<const unsigned char*>(plaintext.data()),
@@ -777,9 +761,9 @@ const StaticString
   );
 
 Variant HHVM_FUNCTION(sodium_crypto_secretbox_open,
-                      const String& ciphertext,
-                      const String& nonce,
-                      const String& key) {
+                      const OptString& ciphertext,
+                      const OptString& nonce,
+                      const OptString& key) {
   if (nonce.size() != crypto_secretbox_NONCEBYTES) {
     throwSodiumException(s_crypto_secretbox_open_nonce_size);
   }
@@ -791,7 +775,7 @@ Variant HHVM_FUNCTION(sodium_crypto_secretbox_open,
   }
 
   size_t plaintext_len = ciphertext.size() - crypto_secretbox_MACBYTES;
-  String plaintext(plaintext_len, ReserveString);
+  OptString plaintext(plaintext_len, ReserveString);
   const auto result = crypto_secretbox_open_easy(
     reinterpret_cast<unsigned char*>(plaintext.mutableData()),
     reinterpret_cast<const unsigned char*>(ciphertext.data()),
@@ -806,12 +790,12 @@ Variant HHVM_FUNCTION(sodium_crypto_secretbox_open,
   return plaintext;
 }
 
-String HHVM_FUNCTION(sodium_crypto_box_keypair) {
+OptString HHVM_FUNCTION(sodium_crypto_box_keypair) {
   // Doing this construction to avoid leaving the secret key in memory
   // somewhere when using temporaries
   const size_t keypair_len =
     crypto_box_SECRETKEYBYTES + crypto_box_PUBLICKEYBYTES;
-  String keypair(keypair_len, ReserveString);
+  OptString keypair(keypair_len, ReserveString);
   auto secret_key = reinterpret_cast<unsigned char*>(
     keypair.mutableData()
   );
@@ -834,8 +818,8 @@ const StaticString
     "seed should be CRYPTO_BOX_SEEDBYTES bytes"
   );
 
-String HHVM_FUNCTION(sodium_crypto_box_seed_keypair,
-                     const String& seed) {
+OptString HHVM_FUNCTION(sodium_crypto_box_seed_keypair,
+                        const OptString& seed) {
   if (seed.size() != crypto_box_SEEDBYTES) {
     throwSodiumException(s_crypto_box_seed_keypair_seed_size);
   }
@@ -844,7 +828,7 @@ String HHVM_FUNCTION(sodium_crypto_box_seed_keypair,
   // somewhere when using temporaries
   const size_t keypair_len =
    crypto_box_SECRETKEYBYTES + crypto_box_PUBLICKEYBYTES;
-  String keypair(keypair_len, ReserveString);
+  OptString keypair(keypair_len, ReserveString);
   unsigned char* public_key = reinterpret_cast<unsigned char*>(
     keypair.mutableData() + crypto_box_SECRETKEYBYTES
   );
@@ -869,13 +853,13 @@ const StaticString s_crypto_box_publickey_from_secretkey_key_size(
   "CRYPTO_BOX_SECRETKEYBYTES bytes"
 );
 
-String HHVM_FUNCTION(sodium_crypto_box_publickey_from_secretkey,
-                     const String& secretkey) {
+OptString HHVM_FUNCTION(sodium_crypto_box_publickey_from_secretkey,
+                        const OptString& secretkey) {
   if (secretkey.size() != crypto_box_SECRETKEYBYTES) {
     throwSodiumException(s_crypto_box_publickey_from_secretkey_key_size);
   }
 
-  String publickey(crypto_box_PUBLICKEYBYTES, ReserveString);
+  OptString publickey(crypto_box_PUBLICKEYBYTES, ReserveString);
 
   static_assert(crypto_scalarmult_BYTES == crypto_box_PUBLICKEYBYTES, "");
   static_assert(crypto_scalarmult_SCALARBYTES == crypto_box_SECRETKEYBYTES, "");
@@ -888,10 +872,9 @@ String HHVM_FUNCTION(sodium_crypto_box_publickey_from_secretkey,
   return publickey;
 }
 
-#ifdef crypto_kx_SEEDBYTES
-String HHVM_FUNCTION(sodium_crypto_kx_keypair) {
-  String keypair(crypto_kx_SECRETKEYBYTES + crypto_kx_PUBLICKEYBYTES,
-                 ReserveString);
+OptString HHVM_FUNCTION(sodium_crypto_kx_keypair) {
+  OptString keypair(crypto_kx_SECRETKEYBYTES + crypto_kx_PUBLICKEYBYTES,
+                    ReserveString);
   unsigned char* sk = reinterpret_cast<unsigned char*>(keypair.mutableData());
   unsigned char* pk = sk + crypto_kx_SECRETKEYBYTES;
   const auto result = crypto_kx_keypair(pk, sk);
@@ -906,14 +889,14 @@ const StaticString s_kx_seed_bad_size(
   "seed must be CRYPTO_KX_SEEDBYTES bytes"
 );
 
-String HHVM_FUNCTION(sodium_crypto_kx_seed_keypair,
-                     const String& seed) {
+OptString HHVM_FUNCTION(sodium_crypto_kx_seed_keypair,
+                        const OptString& seed) {
   if (seed.size() != crypto_kx_SEEDBYTES) {
     throwSodiumException(s_kx_seed_bad_size);
   }
 
-  String keypair(crypto_kx_SECRETKEYBYTES + crypto_kx_PUBLICKEYBYTES,
-                 ReserveString);
+  OptString keypair(crypto_kx_SECRETKEYBYTES + crypto_kx_PUBLICKEYBYTES,
+                    ReserveString);
   unsigned char* sk = reinterpret_cast<unsigned char*>(keypair.mutableData());
   unsigned char* pk = sk + crypto_kx_SECRETKEYBYTES;
   const auto result = crypto_kx_seed_keypair(
@@ -934,8 +917,8 @@ const StaticString
 
 #define DEFINE_KX_SESSION_KEYS_FUNC(SIDE) \
 Array HHVM_FUNCTION(sodium_crypto_kx_##SIDE##_session_keys,\
-                     const String& keypair,\
-                     const String& pubkey) {\
+                     const OptString& keypair,\
+                     const OptString& pubkey) {\
   if (keypair.size() != crypto_kx_SECRETKEYBYTES + crypto_kx_PUBLICKEYBYTES) {\
     throwSodiumException(s_kx_keypair_bad_size);\
   }\
@@ -943,8 +926,8 @@ Array HHVM_FUNCTION(sodium_crypto_kx_##SIDE##_session_keys,\
     throwSodiumException(s_kx_publickey_bad_size);\
   }\
 \
-  String rx(crypto_kx_SESSIONKEYBYTES, ReserveString);\
-  String tx(crypto_kx_SESSIONKEYBYTES, ReserveString);\
+  OptString rx(crypto_kx_SESSIONKEYBYTES, ReserveString);\
+  OptString tx(crypto_kx_SESSIONKEYBYTES, ReserveString);\
 \
   auto sk = reinterpret_cast<const unsigned char*>(keypair.data());\
   auto pk = sk + crypto_kx_SECRETKEYBYTES;\
@@ -961,14 +944,10 @@ Array HHVM_FUNCTION(sodium_crypto_kx_##SIDE##_session_keys,\
   rx.setSize(crypto_kx_SESSIONKEYBYTES);\
   tx.setSize(crypto_kx_SESSIONKEYBYTES);\
 \
-  Array ret(Array::Create());\
-  ret.append(rx);\
-  ret.append(tx);\
-  return ret;\
+  return make_vec_array(rx, tx);\
 }
-DEFINE_KX_SESSION_KEYS_FUNC(client);
-DEFINE_KX_SESSION_KEYS_FUNC(server);
-#endif // crypto_kx_SEEDBYTES
+DEFINE_KX_SESSION_KEYS_FUNC(client)
+DEFINE_KX_SESSION_KEYS_FUNC(server)
 
 const StaticString
   s_crypto_box_nonce_size(
@@ -978,10 +957,10 @@ const StaticString
     "keypair size should be CRYPTO_BOX_KEYPAIRBYTES bytes"
   );
 
-String HHVM_FUNCTION(sodium_crypto_box,
-                     const String& plaintext,
-                     const String& nonce,
-                     const String& keypair) {
+OptString HHVM_FUNCTION(sodium_crypto_box,
+                        const OptString& plaintext,
+                        const OptString& nonce,
+                        const OptString& keypair) {
   if (nonce.size() != crypto_box_NONCEBYTES) {
     throwSodiumException(s_crypto_box_nonce_size);
   }
@@ -1000,7 +979,7 @@ String HHVM_FUNCTION(sodium_crypto_box,
     throwSodiumException(s_arithmetic_overflow);
   }
 
-  String ciphertext(plaintext.size() + crypto_box_MACBYTES, ReserveString);
+  OptString ciphertext(plaintext.size() + crypto_box_MACBYTES, ReserveString);
   const auto result = crypto_box_easy(
     reinterpret_cast<unsigned char*>(ciphertext.mutableData()),
     reinterpret_cast<const unsigned char*>(plaintext.data()),
@@ -1025,9 +1004,9 @@ const StaticString
   );
 
 Variant HHVM_FUNCTION(sodium_crypto_box_open,
-                     const String& ciphertext,
-                     const String& nonce,
-                     const String& keypair) {
+                     const OptString& ciphertext,
+                     const OptString& nonce,
+                     const OptString& keypair) {
   if (nonce.size() != crypto_box_NONCEBYTES) {
     throwSodiumException(s_crypto_box_open_nonce_size);
   }
@@ -1045,7 +1024,7 @@ Variant HHVM_FUNCTION(sodium_crypto_box_open,
     keypair.data() + crypto_box_SECRETKEYBYTES
   );
 
-  String plaintext(ciphertext.size() - crypto_box_MACBYTES, ReserveString);
+  OptString plaintext(ciphertext.size() - crypto_box_MACBYTES, ReserveString);
   const auto result = crypto_box_open_easy(
     reinterpret_cast<unsigned char*>(plaintext.mutableData()),
     reinterpret_cast<const unsigned char*>(ciphertext.data()),
@@ -1061,16 +1040,14 @@ Variant HHVM_FUNCTION(sodium_crypto_box_open,
   return plaintext;
 }
 
-#ifdef crypto_box_SEALBYTES
-
 const StaticString
   s_crypto_box_seal_key_size(
     "public key size should be "
     "CRYPTO_BOX_PUBLICKEYBYTES bytes"
   );
-String HHVM_FUNCTION(sodium_crypto_box_seal,
-                     const String& plaintext,
-                     const String& publickey) {
+OptString HHVM_FUNCTION(sodium_crypto_box_seal,
+                        const OptString& plaintext,
+                        const OptString& publickey) {
   if (publickey.size() != crypto_box_PUBLICKEYBYTES) {
     throwSodiumException(s_crypto_box_seal_key_size);
   }
@@ -1082,7 +1059,7 @@ String HHVM_FUNCTION(sodium_crypto_box_seal,
   }
 
   const size_t ciphertext_len = plaintext.size() + crypto_box_SEALBYTES;
-  String ciphertext(ciphertext_len, ReserveString);
+  OptString ciphertext(ciphertext_len, ReserveString);
   const auto result = crypto_box_seal(
     reinterpret_cast<unsigned char*>(ciphertext.mutableData()),
     reinterpret_cast<const unsigned char*>(plaintext.data()),
@@ -1103,8 +1080,8 @@ const StaticString
   );
 
 Variant HHVM_FUNCTION(sodium_crypto_box_seal_open,
-                     const String& ciphertext,
-                     const String& keypair) {
+                     const OptString& ciphertext,
+                     const OptString& keypair) {
   if (keypair.size() != crypto_box_SECRETKEYBYTES + crypto_box_PUBLICKEYBYTES) {
     throwSodiumException(s_crypto_box_seal_open_keypair_size);
   }
@@ -1120,7 +1097,7 @@ Variant HHVM_FUNCTION(sodium_crypto_box_seal_open,
   );
 
   const size_t plaintext_len = ciphertext.size() - crypto_box_SEALBYTES;
-  String plaintext(plaintext_len, ReserveString);
+  OptString plaintext(plaintext_len, ReserveString);
   const auto result = crypto_box_seal_open(
     reinterpret_cast<unsigned char*>(plaintext.mutableData()),
     reinterpret_cast<const unsigned char*>(ciphertext.data()),
@@ -1134,14 +1111,13 @@ Variant HHVM_FUNCTION(sodium_crypto_box_seal_open,
   plaintext.setSize(plaintext_len);
   return plaintext;
 }
-#endif // crypto_box_SEALBYTES
 
-String HHVM_FUNCTION(sodium_crypto_sign_keypair) {
+OptString HHVM_FUNCTION(sodium_crypto_sign_keypair) {
   // Using this construction to avoid leaving secretkey in memory somewhere from
   // a temporary variable
   const size_t keypair_size =
    crypto_sign_SECRETKEYBYTES + crypto_sign_PUBLICKEYBYTES;
-  String keypair(keypair_size, ReserveString);
+  OptString keypair(keypair_size, ReserveString);
   auto secretkey = reinterpret_cast<unsigned char*>(keypair.mutableData());
   auto publickey = secretkey + crypto_sign_SECRETKEYBYTES;
 
@@ -1161,8 +1137,8 @@ const StaticString
     "seed should be CRYPTO_SIGN_SEEDBYTES bytes"
   );
 
-String HHVM_FUNCTION(sodium_crypto_sign_seed_keypair,
-                     const String& seed) {
+OptString HHVM_FUNCTION(sodium_crypto_sign_seed_keypair,
+                        const OptString& seed) {
   if (seed.size() != crypto_sign_SEEDBYTES) {
     throwSodiumException(s_crypto_sign_seed_keypair_seed_size);
   }
@@ -1171,7 +1147,7 @@ String HHVM_FUNCTION(sodium_crypto_sign_seed_keypair,
   // a temporary variable
   const size_t keypair_size =
     crypto_sign_SECRETKEYBYTES + crypto_sign_PUBLICKEYBYTES;
-  String keypair(keypair_size, ReserveString);
+  OptString keypair(keypair_size, ReserveString);
   auto secretkey = reinterpret_cast<unsigned char*>(keypair.mutableData());
   auto publickey = secretkey + crypto_sign_SECRETKEYBYTES;
 
@@ -1193,13 +1169,13 @@ const StaticString
     "CRYPTO_SIGN_SECRETKEYBYTES bytes"
   );
 
-String HHVM_FUNCTION(sodium_crypto_sign_publickey_from_secretkey,
-                     const String& secretkey) {
+OptString HHVM_FUNCTION(sodium_crypto_sign_publickey_from_secretkey,
+                        const OptString& secretkey) {
   if (secretkey.size() != crypto_sign_SECRETKEYBYTES) {
     throwSodiumException(s_crypto_sign_publickey_from_secretkey_size);
   }
 
-  String publickey(crypto_sign_PUBLICKEYBYTES, ReserveString);
+  OptString publickey(crypto_sign_PUBLICKEYBYTES, ReserveString);
   const auto result = crypto_sign_ed25519_sk_to_pk(
     reinterpret_cast<unsigned char*>(publickey.mutableData()),
     reinterpret_cast<const unsigned char*>(secretkey.data())
@@ -1216,9 +1192,9 @@ const StaticString
     "secret key size should be CRYPTO_SIGN_SECRETKEYBYTES bytes"
   );
 
-String HHVM_FUNCTION(sodium_crypto_sign,
-                     const String& message,
-                     const String& secretkey) {
+OptString HHVM_FUNCTION(sodium_crypto_sign,
+                        const OptString& message,
+                        const OptString& secretkey) {
   if (secretkey.size() != crypto_sign_SECRETKEYBYTES) {
     throwSodiumException(s_crypto_sign_key_size);
   }
@@ -1230,7 +1206,7 @@ String HHVM_FUNCTION(sodium_crypto_sign,
 
   const size_t signed_message_buffer_size = message.size() + crypto_sign_BYTES;
   unsigned long long signed_message_len;
-  String signed_message(signed_message_buffer_size, ReserveString);
+  OptString signed_message(signed_message_buffer_size, ReserveString);
   const auto result = crypto_sign(
     reinterpret_cast<unsigned char*>(signed_message.mutableData()),
     &signed_message_len,
@@ -1259,13 +1235,13 @@ const StaticString s_crypto_sign_open_key_size(
 );
 
 Variant HHVM_FUNCTION(sodium_crypto_sign_open,
-                      const String& signed_message,
-                      const String& publickey) {
+                      const OptString& signed_message,
+                      const OptString& publickey) {
   if (publickey.size() != crypto_sign_PUBLICKEYBYTES) {
     throwSodiumException(s_crypto_sign_open_key_size);
   }
 
-  String message(signed_message.size(), ReserveString);
+  OptString message(signed_message.size(), ReserveString);
   unsigned long long message_len;
   const auto result = crypto_sign_open(
     reinterpret_cast<unsigned char*>(message.mutableData()),
@@ -1297,9 +1273,9 @@ const StaticString
     "signature has a bogus size"
   );
 
-String HHVM_FUNCTION(sodium_crypto_sign_detached,
-                     const String& message,
-                     const String& secretkey) {
+OptString HHVM_FUNCTION(sodium_crypto_sign_detached,
+                        const OptString& message,
+                        const OptString& secretkey) {
   if (secretkey.size() != crypto_sign_SECRETKEYBYTES) {
     throwSodiumException(s_crypto_sign_detached_key_size);
   }
@@ -1311,7 +1287,7 @@ String HHVM_FUNCTION(sodium_crypto_sign_detached,
 
   static_assert(crypto_sign_BYTES < StringData::MaxSize, "");
 
-  String signature(crypto_sign_BYTES, ReserveString);
+  OptString signature(crypto_sign_BYTES, ReserveString);
   signature.setSize(crypto_sign_BYTES);
   bzero(signature.mutableData(), crypto_sign_BYTES);
 
@@ -1353,9 +1329,9 @@ const StaticString
   );
 
 bool HHVM_FUNCTION(sodium_crypto_sign_verify_detached,
-                     const String& signature,
-                     const String& message,
-                     const String& publickey) {
+                     const OptString& signature,
+                     const OptString& message,
+                     const OptString& publickey) {
   if (signature.size() != crypto_sign_BYTES) {
     throwSodiumException(s_crypto_sign_verify_detached_signature_size);
   }
@@ -1378,13 +1354,13 @@ const StaticString
     "CRYPTO_SIGN_SECRETKEYBYTES bytes"
   );
 
-String HHVM_FUNCTION(sodium_crypto_sign_ed25519_sk_to_curve25519,
-                     const String& eddsakey) {
+OptString HHVM_FUNCTION(sodium_crypto_sign_ed25519_sk_to_curve25519,
+                        const OptString& eddsakey) {
   if (eddsakey.size() != crypto_sign_SECRETKEYBYTES) {
     throwSodiumException(s_sign_sk_to_box_sk_key_size);
   }
 
-  String ecdhkey(crypto_box_SECRETKEYBYTES, ReserveString);
+  OptString ecdhkey(crypto_box_SECRETKEYBYTES, ReserveString);
   const auto result = crypto_sign_ed25519_sk_to_curve25519(
     reinterpret_cast<unsigned char*>(ecdhkey.mutableData()),
     reinterpret_cast<const unsigned char*>(eddsakey.data())
@@ -1402,13 +1378,13 @@ const StaticString
     "CRYPTO_SIGN_PUBLICKEYBYTES bytes"
   );
 
-String HHVM_FUNCTION(sodium_crypto_sign_ed25519_pk_to_curve25519,
-                     const String& eddsakey) {
+OptString HHVM_FUNCTION(sodium_crypto_sign_ed25519_pk_to_curve25519,
+                        const OptString& eddsakey) {
   if (eddsakey.size() != crypto_sign_PUBLICKEYBYTES) {
     throwSodiumException(s_sign_pk_to_box_pk_key_size);
   }
 
-  String ecdhkey(crypto_box_PUBLICKEYBYTES, ReserveString);
+  OptString ecdhkey(crypto_box_PUBLICKEYBYTES, ReserveString);
   const auto result = crypto_sign_ed25519_pk_to_curve25519(
     reinterpret_cast<unsigned char*>(ecdhkey.mutableData()),
     reinterpret_cast<const unsigned char*>(eddsakey.data())
@@ -1429,10 +1405,10 @@ const StaticString
     "key should be CRYPTO_STREAM_KEYEBYTES bytes"
   );
 
-String HHVM_FUNCTION(sodium_crypto_stream,
-                     int64_t length,
-                     const String& nonce,
-                     const String& key) {
+OptString HHVM_FUNCTION(sodium_crypto_stream,
+                        int64_t length,
+                        const OptString& nonce,
+                        const OptString& key) {
   if (length <= 0 || length >= StringData::MaxSize) {
     throwSodiumException(s_crypto_stream_bad_length);
   }
@@ -1443,7 +1419,7 @@ String HHVM_FUNCTION(sodium_crypto_stream,
     throwSodiumException(s_crypto_stream_key_size);
   }
 
-  String ciphertext(length, ReserveString);
+  OptString ciphertext(length, ReserveString);
   const auto result = crypto_stream(
     reinterpret_cast<unsigned char*>(ciphertext.mutableData()),
     length,
@@ -1465,10 +1441,10 @@ const StaticString
     "key should be CRYPTO_STREAM_KEYEBYTES bytes"
   );
 
-String HHVM_FUNCTION(sodium_crypto_stream_xor,
-                     const String& message,
-                     const String& nonce,
-                     const String& key) {
+OptString HHVM_FUNCTION(sodium_crypto_stream_xor,
+                        const OptString& message,
+                        const OptString& nonce,
+                        const OptString& key) {
   if (nonce.size() != crypto_stream_NONCEBYTES) {
     throwSodiumException(s_crypto_stream_xor_nonce_size);
   }
@@ -1476,7 +1452,7 @@ String HHVM_FUNCTION(sodium_crypto_stream_xor,
     throwSodiumException(s_crypto_stream_xor_key_size);
   }
 
-  String ciphertext(message.size(), ReserveString);
+  OptString ciphertext(message.size(), ReserveString);
   const auto result = crypto_stream_xor(
     reinterpret_cast<unsigned char*>(ciphertext.mutableData()),
     reinterpret_cast<const unsigned char*>(message.data()),
@@ -1491,7 +1467,283 @@ String HHVM_FUNCTION(sodium_crypto_stream_xor,
   return ciphertext;
 }
 
-#ifdef crypto_kdf_KEYBYTES
+const StaticString s_crypto_core_ristretto255_point_size(
+  "point must be CRYPTO_CORE_RISTRETTO255_BYTES bytes"
+);
+
+OptString HHVM_FUNCTION(sodium_crypto_core_ristretto255_add,
+                        const OptString& p,
+                        const OptString& q) {
+  if (
+    p.size() != crypto_core_ristretto255_BYTES ||
+    q.size() != crypto_core_ristretto255_BYTES
+  ) {
+    throwSodiumException(s_crypto_core_ristretto255_point_size);
+  }
+
+  OptString r(crypto_core_ristretto255_BYTES, ReserveString);
+  crypto_core_ristretto255_add(
+    reinterpret_cast<uint8_t*>(r.mutableData()),
+    reinterpret_cast<const uint8_t*>(p.data()),
+    reinterpret_cast<const uint8_t*>(q.data())
+  );
+  r.setSize(crypto_core_ristretto255_BYTES);
+  return r;
+}
+
+OptString HHVM_FUNCTION(sodium_crypto_core_ristretto255_sub,
+                        const OptString& p,
+                        const OptString& q) {
+  if (
+    p.size() != crypto_core_ristretto255_BYTES ||
+    q.size() != crypto_core_ristretto255_BYTES
+  ) {
+    throwSodiumException(s_crypto_core_ristretto255_point_size);
+  }
+
+  OptString r(crypto_core_ristretto255_BYTES, ReserveString);
+  crypto_core_ristretto255_sub(
+    reinterpret_cast<uint8_t*>(r.mutableData()),
+    reinterpret_cast<const uint8_t*>(p.data()),
+    reinterpret_cast<const uint8_t*>(q.data())
+  );
+  r.setSize(crypto_core_ristretto255_BYTES);
+  return r;
+}
+
+bool HHVM_FUNCTION(sodium_crypto_core_ristretto255_is_valid_point,
+                   const OptString& s) {
+  if (
+    s.size() != crypto_core_ristretto255_BYTES
+  ) {
+    throwSodiumException(s_crypto_core_ristretto255_point_size);
+  }
+
+  int r = crypto_core_ristretto255_is_valid_point(
+    reinterpret_cast<const uint8_t*>(s.data()));
+  // libsodium docs: "returns 1 on success, and 0 if the checks didn't pass."
+  return r == 1;
+}
+
+OptString HHVM_FUNCTION(sodium_crypto_core_ristretto255_random) {
+  OptString r(crypto_core_ristretto255_BYTES, ReserveString);
+  crypto_core_ristretto255_random(
+    reinterpret_cast<uint8_t*>(r.mutableData())
+  );
+  r.setSize(crypto_core_ristretto255_BYTES);
+  return r;
+}
+
+const StaticString s_crypto_core_ristretto255_from_hash(
+  "scalar must be CRYPTO_CORE_RISTRETTO255_HASHBYTES bytes"
+);
+
+OptString HHVM_FUNCTION(sodium_crypto_core_ristretto255_from_hash,
+                        const OptString& r) {
+  if (
+    r.size() != crypto_core_ristretto255_HASHBYTES
+  ) {
+    throwSodiumException(s_crypto_core_ristretto255_from_hash);
+  }
+
+  OptString p(crypto_core_ristretto255_BYTES, ReserveString);
+  crypto_core_ristretto255_from_hash(
+    reinterpret_cast<unsigned char*>(p.mutableData()),
+    reinterpret_cast<const unsigned char*>(r.data())
+  );
+  p.setSize(crypto_core_ristretto255_BYTES);
+  return p;
+}
+
+const StaticString s_crypto_scalarmult_ristretto255(
+  "scalar and point must be CRYPTO_SCALARMULT_RISTRETTO255_SCALARBYTES bytes"
+);
+const StaticString s_crypto_scalarmult_ristretto255_fail(
+  "sodium_crypto_scalarmult_ristretto255 failed"
+);
+
+OptString HHVM_FUNCTION(sodium_crypto_scalarmult_ristretto255,
+                        const OptString& n,
+                        const OptString& p) {
+  if (
+    n.size() != crypto_scalarmult_ristretto255_SCALARBYTES ||
+    p.size() != crypto_scalarmult_ristretto255_BYTES
+  ) {
+    throwSodiumException(s_crypto_scalarmult_ristretto255);
+  }
+
+  OptString q(crypto_scalarmult_ristretto255_BYTES, ReserveString);
+  int ret = crypto_scalarmult_ristretto255(
+    reinterpret_cast<unsigned char*>(q.mutableData()),
+    reinterpret_cast<const unsigned char*>(n.data()),
+    reinterpret_cast<const unsigned char*>(p.data())
+  );
+  if (ret != 0) {
+    throwSodiumException(s_crypto_scalarmult_ristretto255_fail);
+  }
+  q.setSize(crypto_scalarmult_ristretto255_BYTES);
+  return q;
+}
+
+const StaticString s_crypto_core_ristretto255_scalar_reduce(
+  "scalar must be CRYPTO_CORE_RISTRETTO255_NONREDUCEDSCALARBYTES bytes"
+);
+
+OptString HHVM_FUNCTION(sodium_crypto_core_ristretto255_scalar_reduce,
+                        const OptString& s) {
+  if (
+    s.size() != crypto_core_ristretto255_NONREDUCEDSCALARBYTES
+  ) {
+    throwSodiumException(s_crypto_core_ristretto255_scalar_reduce);
+  }
+
+  OptString r(crypto_core_ristretto255_SCALARBYTES, ReserveString);
+  crypto_core_ristretto255_scalar_reduce(
+    reinterpret_cast<unsigned char*>(r.mutableData()),
+    reinterpret_cast<const unsigned char*>(s.data())
+  );
+  r.setSize(crypto_core_ristretto255_BYTES);
+  return r;
+}
+
+const StaticString s_crypto_core_ristretto255_scalar_invert(
+  "scalar must be CRYPTO_CORE_RISTRETTO255_SCALARBYTES bytes"
+);
+
+OptString HHVM_FUNCTION(sodium_crypto_core_ristretto255_scalar_invert,
+                        const OptString& s) {
+  if (
+    s.size() != crypto_core_ristretto255_SCALARBYTES
+  ) {
+    throwSodiumException(s_crypto_core_ristretto255_scalar_invert);
+  }
+
+  OptString r(crypto_core_ristretto255_SCALARBYTES, ReserveString);
+  const auto result = crypto_core_ristretto255_scalar_invert(
+    reinterpret_cast<unsigned char*>(r.mutableData()),
+    reinterpret_cast<const unsigned char*>(s.data())
+  );
+  if (result != 0) {
+    throwSodiumException(s_internal_error);
+  }
+  r.setSize(crypto_core_ristretto255_SCALARBYTES);
+  return r;
+}
+
+const StaticString s_crypto_core_ristretto255_scalar_negate(
+  "scalar must be CRYPTO_CORE_RISTRETTO255_SCALARBYTES bytes"
+);
+
+OptString HHVM_FUNCTION(sodium_crypto_core_ristretto255_scalar_negate,
+                        const OptString& s) {
+  if (
+    s.size() != crypto_core_ristretto255_SCALARBYTES
+  ) {
+    throwSodiumException(s_crypto_core_ristretto255_scalar_negate);
+  }
+
+  OptString r(crypto_core_ristretto255_SCALARBYTES, ReserveString);
+  crypto_core_ristretto255_scalar_negate(
+    reinterpret_cast<unsigned char*>(r.mutableData()),
+    reinterpret_cast<const unsigned char*>(s.data())
+  );
+  r.setSize(crypto_core_ristretto255_SCALARBYTES);
+  return r;
+}
+
+const StaticString s_crypto_core_ristretto255_scalar_complement(
+  "scalar must be CRYPTO_CORE_RISTRETTO255_SCALARBYTES bytes"
+);
+
+OptString HHVM_FUNCTION(sodium_crypto_core_ristretto255_scalar_complement,
+                        const OptString& s) {
+  if (
+    s.size() != crypto_core_ristretto255_SCALARBYTES
+  ) {
+    throwSodiumException(s_crypto_core_ristretto255_scalar_complement);
+  }
+
+  OptString r(crypto_core_ristretto255_SCALARBYTES, ReserveString);
+  crypto_core_ristretto255_scalar_complement(
+    reinterpret_cast<unsigned char*>(r.mutableData()),
+    reinterpret_cast<const unsigned char*>(s.data())
+  );
+  r.setSize(crypto_core_ristretto255_SCALARBYTES);
+  return r;
+}
+
+const StaticString s_crypto_core_ristretto255_scalar_add(
+  "scalars must be CRYPTO_CORE_RISTRETTO255_SCALARBYTES bytes"
+);
+
+OptString HHVM_FUNCTION(sodium_crypto_core_ristretto255_scalar_add,
+                        const OptString& x,
+                        const OptString& y) {
+  if (
+    x.size() != crypto_core_ristretto255_SCALARBYTES ||
+    y.size() != crypto_core_ristretto255_SCALARBYTES
+  ) {
+    throwSodiumException(s_crypto_core_ristretto255_scalar_add);
+  }
+
+  OptString r(crypto_core_ristretto255_SCALARBYTES, ReserveString);
+  crypto_core_ristretto255_scalar_add(
+    reinterpret_cast<unsigned char*>(r.mutableData()),
+    reinterpret_cast<const unsigned char*>(x.data()),
+    reinterpret_cast<const unsigned char*>(y.data())
+  );
+  r.setSize(crypto_core_ristretto255_SCALARBYTES);
+  return r;
+}
+
+const StaticString s_crypto_core_ristretto255_scalar_sub(
+  "scalars must be CRYPTO_CORE_RISTRETTO255_SCALARBYTES bytes"
+);
+
+OptString HHVM_FUNCTION(sodium_crypto_core_ristretto255_scalar_sub,
+                        const OptString& x,
+                        const OptString& y) {
+  if (
+    x.size() != crypto_core_ristretto255_SCALARBYTES ||
+    y.size() != crypto_core_ristretto255_SCALARBYTES
+  ) {
+    throwSodiumException(s_crypto_core_ristretto255_scalar_sub);
+  }
+
+  OptString r(crypto_core_ristretto255_SCALARBYTES, ReserveString);
+  crypto_core_ristretto255_scalar_sub(
+    reinterpret_cast<unsigned char*>(r.mutableData()),
+    reinterpret_cast<const unsigned char*>(x.data()),
+    reinterpret_cast<const unsigned char*>(y.data())
+  );
+  r.setSize(crypto_core_ristretto255_SCALARBYTES);
+  return r;
+}
+
+const StaticString s_crypto_core_ristretto255_scalar_mul(
+  "scalars must be CRYPTO_CORE_RISTRETTO255_SCALARBYTES bytes"
+);
+
+OptString HHVM_FUNCTION(sodium_crypto_core_ristretto255_scalar_mul,
+                        const OptString& x,
+                        const OptString& y) {
+  if (
+    x.size() != crypto_core_ristretto255_SCALARBYTES ||
+    y.size() != crypto_core_ristretto255_SCALARBYTES
+  ) {
+    throwSodiumException(s_crypto_core_ristretto255_scalar_mul);
+  }
+
+  OptString r(crypto_core_ristretto255_SCALARBYTES, ReserveString);
+  crypto_core_ristretto255_scalar_mul(
+    reinterpret_cast<unsigned char*>(r.mutableData()),
+    reinterpret_cast<const unsigned char*>(x.data()),
+    reinterpret_cast<const unsigned char*>(y.data())
+  );
+  r.setSize(crypto_core_ristretto255_SCALARBYTES);
+  return r;
+}
+
 const StaticString
   s_subkey_too_small(
     "subkey can not be smaller than sodium_crypto_kdf_BYTES_MIN"),
@@ -1503,11 +1755,11 @@ const StaticString
   s_kdf_key_bad_size(
     "key should be sodium_crypto_kdf_KEYBYTES bytes");
 
-String HHVM_FUNCTION(sodium_crypto_kdf_derive_from_key,
-                     int64_t subkey_len,
-                     int64_t subkey_id,
-                     const String& context,
-                     const String& key) {
+OptString HHVM_FUNCTION(sodium_crypto_kdf_derive_from_key,
+                        int64_t subkey_len,
+                        int64_t subkey_id,
+                        const OptString& context,
+                        const OptString& key) {
   if (subkey_len < crypto_kdf_BYTES_MIN) {
     throwSodiumException(s_subkey_too_small);
   }
@@ -1524,7 +1776,7 @@ String HHVM_FUNCTION(sodium_crypto_kdf_derive_from_key,
     throwSodiumException(s_kdf_key_bad_size);
   }
 
-  String subkey(subkey_len, ReserveString);
+  OptString subkey(subkey_len, ReserveString);
   const auto result = crypto_kdf_derive_from_key(
     reinterpret_cast<unsigned char*>(subkey.mutableData()),
     subkey_len,
@@ -1539,7 +1791,48 @@ String HHVM_FUNCTION(sodium_crypto_kdf_derive_from_key,
   subkey.setSize(subkey_len);
   return subkey;
 }
-#endif // crypto_kdf_KEYBYTES
+
+const StaticString
+  s_crypto_core_hchacha20_input_size(
+    "input must be CRYPTO_CORE_HCHACHA20_INPUTBYTES bytes"),
+  s_crypto_core_hchacha20_key_size(
+    "key must be CRYPTO_CORE_HCHACHA20_KEYBYTES bytes"),
+  s_crypto_core_hchacha20_constant_size(
+    "constant must be CRYPTO_CORE_HCHACHA20_CONSTBYTES bytes or null");
+
+OptString HHVM_FUNCTION(sodium_crypto_core_hchacha20,
+                        const OptString& in,
+                        const OptString& k,
+                        const Variant& /* ?string */ c) {
+  if (in.size() != crypto_core_hchacha20_INPUTBYTES) {
+    throwSodiumException(s_crypto_core_hchacha20_input_size);
+  }
+  if (k.size() != crypto_core_hchacha20_KEYBYTES) {
+    throwSodiumException(s_crypto_core_hchacha20_key_size);
+  }
+
+  const unsigned char* c_data = nullptr;
+  if (c.isString()) {
+    if (c.asCStrRef().size() != crypto_core_hchacha20_CONSTBYTES) {
+      throwSodiumException(s_crypto_core_hchacha20_constant_size);
+    }
+    c_data = reinterpret_cast<const unsigned char*>(c.asCStrRef().data());
+  }
+
+  OptString out(crypto_core_hchacha20_OUTPUTBYTES, ReserveString);
+  const auto result = crypto_core_hchacha20(
+    reinterpret_cast<unsigned char*>(out.mutableData()),
+    reinterpret_cast<const unsigned char*>(in.data()),
+    reinterpret_cast<const unsigned char*>(k.data()),
+    c_data
+  );
+  if (result != 0) {
+    sodium_memzero(out.mutableData(), crypto_core_hchacha20_OUTPUTBYTES);
+    throwSodiumException(s_internal_error);
+  }
+  out.setSize(crypto_core_hchacha20_OUTPUTBYTES);
+  return out;
+}
 
 #define HHVM_SODIUM_AEAD_DECRYPT_FUNCTION(lowercase, uppercase) \
 const StaticString\
@@ -1553,10 +1846,10 @@ const StaticString\
   );\
 \
 Variant HHVM_FUNCTION(sodium_crypto_aead_##lowercase##_decrypt,\
-                      const String& ciphertext,\
-                      const String& ad,\
-                      const String& pnonce,\
-                      const String& secretkey) {\
+                      const OptString& ciphertext,\
+                      const OptString& ad,\
+                      const OptString& pnonce,\
+                      const OptString& secretkey) {\
   if (pnonce.size() != crypto_aead_##lowercase##_NPUBBYTES) {\
     throwSodiumException(s_##lowercase##_decrypt_nonce_size);\
   }\
@@ -1568,7 +1861,7 @@ Variant HHVM_FUNCTION(sodium_crypto_aead_##lowercase##_decrypt,\
     return false;\
   }\
 \
-  String plaintext(ciphertext.size(), ReserveString);\
+  OptString plaintext(ciphertext.size(), ReserveString);\
   unsigned long long plaintext_len;\
   const auto result = crypto_aead_##lowercase##_decrypt(\
     reinterpret_cast<unsigned char*>(plaintext.mutableData()),\
@@ -1602,11 +1895,11 @@ const StaticString\
     "CRYPTO_AEAD_"#uppercase"_KEYBYTES bytes"\
   );\
 \
-String HHVM_FUNCTION(sodium_crypto_aead_##lowercase##_encrypt,\
-                     const String& plaintext,\
-                     const String& ad,\
-                     const String& pnonce,\
-                     const String& secretkey) {\
+OptString HHVM_FUNCTION(sodium_crypto_aead_##lowercase##_encrypt,\
+                        const OptString& plaintext,\
+                        const OptString& ad,\
+                        const OptString& pnonce,\
+                        const OptString& secretkey) {\
   if (pnonce.size() != crypto_aead_##lowercase##_NPUBBYTES) {\
     throwSodiumException(s_##lowercase##_encrypt_nonce_size);\
   }\
@@ -1621,7 +1914,7 @@ String HHVM_FUNCTION(sodium_crypto_aead_##lowercase##_encrypt,\
 \
   const size_t ciphertext_buf_size =\
    plaintext.size() + crypto_aead_##lowercase##_ABYTES;\
-  String ciphertext(ciphertext_buf_size, ReserveString);\
+  OptString ciphertext(ciphertext_buf_size, ReserveString);\
   unsigned long long ciphertext_len;\
   const auto result = crypto_aead_##lowercase##_encrypt(\
     reinterpret_cast<unsigned char*>(ciphertext.mutableData()),\
@@ -1644,28 +1937,22 @@ String HHVM_FUNCTION(sodium_crypto_aead_##lowercase##_encrypt,\
   return ciphertext;\
 }
 
-HHVM_SODIUM_AEAD_ENCRYPT_FUNCTION(chacha20poly1305, CHACHA20POLY1305);
-HHVM_SODIUM_AEAD_DECRYPT_FUNCTION(chacha20poly1305, CHACHA20POLY1305);
+HHVM_SODIUM_AEAD_ENCRYPT_FUNCTION(chacha20poly1305, CHACHA20POLY1305)
+HHVM_SODIUM_AEAD_DECRYPT_FUNCTION(chacha20poly1305, CHACHA20POLY1305)
 
-#ifdef crypto_aead_aes256gcm_KEYBYTES
 bool HHVM_FUNCTION(sodium_crypto_aead_aes256gcm_is_available) {
   return crypto_aead_aes256gcm_is_available();
 }
-HHVM_SODIUM_AEAD_ENCRYPT_FUNCTION(aes256gcm, AES256GCM);
-HHVM_SODIUM_AEAD_DECRYPT_FUNCTION(aes256gcm, AES256GCM);
-#endif
+HHVM_SODIUM_AEAD_ENCRYPT_FUNCTION(aes256gcm, AES256GCM)
+HHVM_SODIUM_AEAD_DECRYPT_FUNCTION(aes256gcm, AES256GCM)
 
-#ifdef crypto_aead_chacha20poly1305_IETF_NPUBBYTES
-HHVM_SODIUM_AEAD_ENCRYPT_FUNCTION(chacha20poly1305_ietf, CHACHA20POLY1305_IETF);
-HHVM_SODIUM_AEAD_DECRYPT_FUNCTION(chacha20poly1305_ietf, CHACHA20POLY1305_IETF);
-#endif
+HHVM_SODIUM_AEAD_ENCRYPT_FUNCTION(chacha20poly1305_ietf, CHACHA20POLY1305_IETF)
+HHVM_SODIUM_AEAD_DECRYPT_FUNCTION(chacha20poly1305_ietf, CHACHA20POLY1305_IETF)
 
-#ifdef crypto_aead_xchacha20poly1305_IETF_NPUBBYTES
 HHVM_SODIUM_AEAD_ENCRYPT_FUNCTION(xchacha20poly1305_ietf,
-                                  XCHACHA20POLY1305_IETF);
+                                  XCHACHA20POLY1305_IETF)
 HHVM_SODIUM_AEAD_DECRYPT_FUNCTION(xchacha20poly1305_ietf,
-                                  XCHACHA20POLY1305_IETF);
-#endif
+                                  XCHACHA20POLY1305_IETF)
 
 #define HHVM_REGISTER_AEAD_DEFINITIONS(lowercase, uppercase)\
     HHVM_RC_INT(\
@@ -1687,14 +1974,345 @@ HHVM_SODIUM_AEAD_DECRYPT_FUNCTION(xchacha20poly1305_ietf,
     HHVM_FE(sodium_crypto_aead_##lowercase##_decrypt);\
     HHVM_FE(sodium_crypto_aead_##lowercase##_encrypt)
 
+
+const StaticString s_crypto_secretstream_xchacha20poly130_state_string_required(
+  "incorrect state type, a string is required"
+),
+s_crypto_secretstream_xchacha20poly130_incorrect_key_size(
+  "key size should be crypto_secretstream_xchacha20poly1305_KEYBYTES bytes"
+),
+s_crypto_secretstream_xchacha20poly130_incorrect_header_size(
+  "header size should be crypto_secretstream_xchacha20poly1305_HEADERBYTES bytes"
+);
+
+OptString HHVM_FUNCTION(sodium_crypto_secretstream_xchacha20poly1305_keygen) {
+  OptString key(crypto_secretstream_xchacha20poly1305_KEYBYTES, ReserveString);
+  crypto_secretstream_xchacha20poly1305_keygen(reinterpret_cast<unsigned char*>(key.mutableData()));
+  key.setSize(crypto_secretstream_xchacha20poly1305_KEYBYTES);
+  return key;
+}
+
+Array HHVM_FUNCTION(sodium_crypto_secretstream_xchacha20poly1305_init_push,
+                    const OptString& key) {
+  // check key size
+  if (key.size() != crypto_secretstream_xchacha20poly1305_KEYBYTES) {
+    throwSodiumException(s_crypto_secretstream_xchacha20poly130_state_string_required);
+  }
+  // secret stream init push
+  size_t state_len = sizeof(crypto_secretstream_xchacha20poly1305_state);
+  OptString state(state_len, ReserveString);
+  OptString header(crypto_secretstream_xchacha20poly1305_HEADERBYTES, ReserveString);
+  crypto_secretstream_xchacha20poly1305_state st;
+  crypto_secretstream_xchacha20poly1305_init_push(&st,
+                                                  reinterpret_cast<unsigned char*>(header.mutableData()),
+                                                  reinterpret_cast<const unsigned char*>(key.data()));
+  header.setSize(crypto_secretstream_xchacha20poly1305_HEADERBYTES);
+  // copy state struct into String
+  memcpy(state.mutableData(), &st, state_len);
+  state.setSize(state_len);
+  sodium_memzero(&st, state_len);
+  return make_vec_array(state, header);
+}
+
+OptString HHVM_FUNCTION(sodium_crypto_secretstream_xchacha20poly1305_push,
+                        Variant& state_inout,
+                        const OptString& plaintext,
+                        const OptString& ad,
+                        int64_t tag) {
+  // parse state string into the struct
+  if (!state_inout.isString()) {
+    throwSodiumException(s_crypto_secretstream_xchacha20poly130_state_string_required);
+  }
+  auto state = sodium_separate_string(state_inout);
+  size_t state_len = sizeof(crypto_secretstream_xchacha20poly1305_state);
+  if (state.size() != state_len) {
+    throwSodiumException(s_crypto_generichash_update_incorrect_state_length);
+  }
+  crypto_secretstream_xchacha20poly1305_state st;
+  SCOPE_EXIT {
+    sodium_memzero(&st, state_len);
+  };
+  memcpy(&st, state.data(), state_len);
+  // secret stream push
+  OptString ciphertext(plaintext.size() + crypto_secretstream_xchacha20poly1305_ABYTES, ReserveString);
+  unsigned long long int ciphertext_len = 0;
+  crypto_secretstream_xchacha20poly1305_push(&st,
+                                             reinterpret_cast<unsigned char*>(ciphertext.mutableData()),
+                                             &ciphertext_len,
+                                             reinterpret_cast<const unsigned char*>(plaintext.data()),
+                                             plaintext.size(),
+                                             reinterpret_cast<const unsigned char*>(ad.data()),
+                                             ad.size(),
+                                             tag);
+  ciphertext.setSize(ciphertext_len);
+  // copy state back to string
+  memcpy(state.mutableData(), &st, state_len);
+  return ciphertext;
+}
+
+OptString HHVM_FUNCTION(sodium_crypto_secretstream_xchacha20poly1305_init_pull,
+                        const OptString& key,
+                        const OptString& header) {
+  // check key size
+  if (key.size() != crypto_secretstream_xchacha20poly1305_KEYBYTES) {
+    throwSodiumException(s_crypto_secretstream_xchacha20poly130_state_string_required);
+  }
+  // check header size
+  if (header.size() != crypto_secretstream_xchacha20poly1305_HEADERBYTES) {
+    throwSodiumException(s_crypto_secretstream_xchacha20poly130_incorrect_header_size);
+  }
+  // secret stream init pull
+  size_t state_len = sizeof(crypto_secretstream_xchacha20poly1305_state);
+  OptString state(state_len, ReserveString);
+  crypto_secretstream_xchacha20poly1305_state st;
+  crypto_secretstream_xchacha20poly1305_init_pull(&st,
+                                                  reinterpret_cast<const unsigned char*>(header.data()),
+                                                  reinterpret_cast<const unsigned char*>(key.data()));
+  // copy state struct to String
+  memcpy(state.mutableData(), &st, state_len);
+  state.setSize(state_len);
+  sodium_memzero(&st, state_len);
+  return state;
+}
+
+Array HHVM_FUNCTION(sodium_crypto_secretstream_xchacha20poly1305_pull,
+                    Variant& state_inout,
+                    const OptString& ciphertext,
+                    const OptString& ad)
+{
+  // parse state string into the struct
+  if (!state_inout.isString()) {
+    throwSodiumException(s_crypto_secretstream_xchacha20poly130_state_string_required);
+  }
+  auto state = sodium_separate_string(state_inout);
+  size_t state_len = sizeof(crypto_secretstream_xchacha20poly1305_state);
+  if (state.size() != state_len) {
+    throwSodiumException(s_crypto_generichash_update_incorrect_state_length);
+  }
+  crypto_secretstream_xchacha20poly1305_state st;
+  SCOPE_EXIT {
+    sodium_memzero(&st, state_len);
+  };
+  memcpy(&st, state.data(), state_len);
+  // secret stream pull
+  OptString plaintext(ciphertext.size(), ReserveString);
+  unsigned long long int plaintext_len = 0;
+  unsigned char tag;
+  int ret = crypto_secretstream_xchacha20poly1305_pull(
+              &st,
+              reinterpret_cast<unsigned char*>(plaintext.mutableData()),
+              &plaintext_len,
+              &tag,
+              reinterpret_cast<const unsigned char*>(ciphertext.data()),
+              ciphertext.size(),
+              reinterpret_cast<const unsigned char*>(ad.data()),
+              ad.size()
+            );
+  if (ret != 0) {
+    throwSodiumException(s_internal_error);
+  }
+  plaintext.setSize(plaintext_len);
+  // copy state back to string
+  memcpy(state.mutableData(), &st, state_len);
+  return make_vec_array(plaintext, tag);
+}
+
+void HHVM_FUNCTION(sodium_crypto_secretstream_xchacha20poly1305_rekey,
+                   Variant& state_inout) {
+  // parse state string into the struct
+  if (!state_inout.isString()) {
+    throwSodiumException(s_crypto_secretstream_xchacha20poly130_state_string_required);
+  }
+  auto state = sodium_separate_string(state_inout);
+  size_t state_len = sizeof(crypto_secretstream_xchacha20poly1305_state);
+  if (state.size() != state_len) {
+    throwSodiumException(s_crypto_generichash_update_incorrect_state_length);
+  }
+  crypto_secretstream_xchacha20poly1305_state st;
+  SCOPE_EXIT {
+    sodium_memzero(&st, state_len);
+  };
+  memcpy(&st, state.data(), state_len);
+  // secret stream rekey
+  crypto_secretstream_xchacha20poly1305_rekey(&st);
+  // copy state back to string
+  memcpy(state.mutableData(), &st, state_len);
+}
+
+const StaticString s_crypto_core_ed25519_scalar_size(
+  "Ed25519 scalars must be SODIUM_CRYPTO_CORE_ED25519_SCALARBYTES bytes in length"
+);
+
+static void validateEd25519Size(const OptString& x) {
+  if (
+    x.size() != crypto_core_ed25519_BYTES
+  ) {
+    throwSodiumException(
+     "Ed25519 elements must be SODIUM_CRYPTO_CORE_ED25519_BYTES bytes in length"
+    );
+  }
+}
+
+bool HHVM_FUNCTION(sodium_crypto_core_ed25519_is_valid_point,
+                     const OptString& y) {
+  validateEd25519Size(y);
+  int r = crypto_core_ed25519_is_valid_point(
+    reinterpret_cast<const unsigned char*>(y.data()));
+  // libsodium docs: "returns 1 on success, and 0 if the checks didn't pass."
+  return r == 1;
+}
+
+OptString HHVM_FUNCTION(sodium_crypto_core_ed25519_add,
+                        const OptString& x,
+                        const OptString& y) {
+  validateEd25519Size(x);
+  validateEd25519Size(y);
+  OptString r(crypto_core_ed25519_BYTES, ReserveString);
+  crypto_core_ed25519_add(
+    reinterpret_cast<unsigned char*>(r.mutableData()),
+    reinterpret_cast<const unsigned char*>(x.data()),
+    reinterpret_cast<const unsigned char*>(y.data())
+  );
+  r.setSize(crypto_core_ed25519_BYTES);
+  return r;
+}
+
+OptString HHVM_FUNCTION(sodium_crypto_core_ed25519_sub,
+                        const OptString& x,
+                        const OptString& y) {
+  validateEd25519Size(x);
+  validateEd25519Size(y);
+  OptString r(crypto_core_ed25519_BYTES, ReserveString);
+  crypto_core_ed25519_sub(
+    reinterpret_cast<unsigned char*>(r.mutableData()),
+    reinterpret_cast<const unsigned char*>(x.data()),
+    reinterpret_cast<const unsigned char*>(y.data())
+  );
+  r.setSize(crypto_core_ed25519_BYTES);
+  return r;
+}
+
+OptString HHVM_FUNCTION(sodium_crypto_scalarmult_ed25519_noclamp,
+                        const OptString& n,
+                        const OptString& p) {
+  if (n.size() != crypto_core_ed25519_SCALARBYTES) {
+    throwSodiumException(s_crypto_core_ed25519_scalar_size);
+  }
+  validateEd25519Size(p);
+  OptString r(crypto_core_ed25519_BYTES, ReserveString);
+  int rc = crypto_scalarmult_ed25519_noclamp(
+    reinterpret_cast<unsigned char*>(r.mutableData()),
+    reinterpret_cast<const unsigned char*>(n.data()),
+    reinterpret_cast<const unsigned char*>(p.data())
+  );
+  if (rc != 0) {
+    throwSodiumException(
+      "Invalid Ed25519 point. Points must be in compressed y coordinate form, in the main subgroup, and not have small order."
+    );
+  }
+  r.setSize(crypto_core_ed25519_BYTES);
+  return r;
+}
+
+
+OptString HHVM_FUNCTION(sodium_crypto_core_ed25519_scalar_add,
+                        const OptString& x,
+                        const OptString& y) {
+
+  if (
+    x.size() != crypto_core_ed25519_SCALARBYTES ||
+    y.size() != crypto_core_ed25519_SCALARBYTES
+  ) {
+    throwSodiumException(s_crypto_core_ed25519_scalar_size);
+  }
+
+  OptString r(crypto_core_ed25519_SCALARBYTES, ReserveString);
+  crypto_core_ed25519_scalar_add(
+    reinterpret_cast<unsigned char*>(r.mutableData()),
+    reinterpret_cast<const unsigned char*>(x.data()),
+    reinterpret_cast<const unsigned char*>(y.data())
+  );
+  r.setSize(crypto_core_ed25519_SCALARBYTES);
+  return r;
+}
+
+OptString HHVM_FUNCTION(sodium_crypto_core_ed25519_scalar_mul,
+                        const OptString& x,
+                        const OptString& y) {
+
+  if (
+    x.size() != crypto_core_ed25519_SCALARBYTES ||
+    y.size() != crypto_core_ed25519_SCALARBYTES
+  ) {
+    throwSodiumException(s_crypto_core_ed25519_scalar_size);
+  }
+
+  OptString r(crypto_core_ed25519_SCALARBYTES, ReserveString);
+  crypto_core_ed25519_scalar_mul(
+    reinterpret_cast<unsigned char*>(r.mutableData()),
+    reinterpret_cast<const unsigned char*>(x.data()),
+    reinterpret_cast<const unsigned char*>(y.data())
+  );
+  r.setSize(crypto_core_ed25519_SCALARBYTES);
+  return r;
+}
+
+const StaticString s_crypto_core_ed25519_scalar_nonreduced_size(
+  "non-reduced scalars must be crypto_core_ed25519_NONREDUCEDSCALARBYTES bytes"
+);
+
+OptString HHVM_FUNCTION(sodium_crypto_core_ed25519_scalar_reduce,
+                        const OptString& x) {
+  if (x.size() != crypto_core_ed25519_NONREDUCEDSCALARBYTES) {
+    throwSodiumException(s_crypto_core_ed25519_scalar_nonreduced_size);
+  }
+  OptString r(crypto_core_ed25519_SCALARBYTES, ReserveString);
+  crypto_core_ed25519_scalar_reduce(
+    reinterpret_cast<unsigned char*>(r.mutableData()),
+    reinterpret_cast<const unsigned char*>(x.data())
+  );
+  r.setSize(crypto_core_ed25519_SCALARBYTES);
+  return r;
+}
+
+OptString HHVM_FUNCTION(sodium_crypto_scalarmult_ed25519_base_noclamp,
+                        const OptString& x) {
+  if (x.size() != crypto_core_ed25519_SCALARBYTES) {
+    throwSodiumException(s_crypto_core_ed25519_scalar_size);
+  }
+  OptString r(crypto_core_ed25519_BYTES, ReserveString);
+  crypto_scalarmult_ed25519_base_noclamp(
+    reinterpret_cast<unsigned char*>(r.mutableData()),
+    reinterpret_cast<const unsigned char*>(x.data())
+  );
+  r.setSize(crypto_core_ed25519_BYTES);
+  return r;
+}
+
+OptString HHVM_FUNCTION(sodium_crypto_scalarmult_ed25519_base,
+                        const OptString& x) {
+  if (x.size() != crypto_core_ed25519_SCALARBYTES) {
+    throwSodiumException(s_crypto_core_ed25519_scalar_size);
+  }
+  OptString r(crypto_core_ed25519_BYTES, ReserveString);
+  crypto_scalarmult_ed25519_base_noclamp(
+    reinterpret_cast<unsigned char*>(r.mutableData()),
+    reinterpret_cast<const unsigned char*>(x.data())
+  );
+  r.setSize(crypto_core_ed25519_BYTES);
+  return r;
+}
+
 struct SodiumExtension final : Extension {
-  SodiumExtension() : Extension("sodium", "7.2-hhvm1") {}
+  SodiumExtension() : Extension("sodium", "7.2-hhvm1", "hphp_hphpi") {}
 
   void moduleInit() override {
-    if (sodium_init() != 0) {
+    if (sodium_init() == -1) {
       raise_error("sodium_init()");
     }
+  }
 
+  void moduleRegisterNative() override {
     HHVM_RC_STR(SODIUM_LIBRARY_VERSION, sodium_version_string());
     HHVM_RC_INT(SODIUM_LIBRARY_MAJOR_VERSION, sodium_library_version_major());
     HHVM_RC_INT(SODIUM_LIBRARY_MINOR_VERSION, sodium_library_version_minor());
@@ -1729,7 +2347,6 @@ struct SodiumExtension final : Extension {
     HHVM_RC_INT(SODIUM_CRYPTO_SHORTHASH_KEYBYTES,crypto_shorthash_KEYBYTES);
     HHVM_FE(sodium_crypto_shorthash);
 
-#ifdef crypto_pwhash_SALTBYTES
     HHVM_RC_INT(SODIUM_CRYPTO_PWHASH_SALTBYTES, crypto_pwhash_SALTBYTES);
     HHVM_RC_STR(SODIUM_CRYPTO_PWHASH_STRPREFIX, crypto_pwhash_STRPREFIX);
     HHVM_RC_INT(
@@ -1759,7 +2376,6 @@ struct SodiumExtension final : Extension {
     HHVM_FE(sodium_crypto_pwhash);
     HHVM_FE(sodium_crypto_pwhash_str);
     HHVM_FE(sodium_crypto_pwhash_str_verify);
-#endif
 
     HHVM_RC_STR(
       SODIUM_CRYPTO_PWHASH_SCRYPTSALSA208SHA256_STRPREFIX,
@@ -1821,11 +2437,9 @@ struct SodiumExtension final : Extension {
     HHVM_FE(sodium_crypto_box);
     HHVM_FE(sodium_crypto_box_open);
 
-#ifdef crypto_box_SEALBYTES
     HHVM_RC_INT(SODIUM_CRYPTO_BOX_SEALBYTES, crypto_box_SEALBYTES);
     HHVM_FE(sodium_crypto_box_seal);
     HHVM_FE(sodium_crypto_box_seal_open);
-#endif
 
     HHVM_RC_INT(SODIUM_CRYPTO_SIGN_BYTES, crypto_sign_BYTES);
     HHVM_RC_INT(SODIUM_CRYPTO_SIGN_SEEDBYTES, crypto_sign_SEEDBYTES);
@@ -1853,30 +2467,27 @@ struct SodiumExtension final : Extension {
     HHVM_FE(sodium_crypto_stream_xor);
 
     HHVM_REGISTER_AEAD_DEFINITIONS(chacha20poly1305, CHACHA20POLY1305);
-#ifdef crypto_aead_aes256gcm_KEYBYTES
     HHVM_FE(sodium_crypto_aead_aes256gcm_is_available);
-    if (crypto_aead_aes256gcm_is_available()) {
-      HHVM_REGISTER_AEAD_DEFINITIONS(aes256gcm, AES256GCM);
-    }
-#endif
-#ifdef crypto_aead_chacha20poly1305_IETF_NPUBBYTES
+    HHVM_REGISTER_AEAD_DEFINITIONS(aes256gcm, AES256GCM);
+
     HHVM_REGISTER_AEAD_DEFINITIONS(chacha20poly1305_ietf,
                                    CHACHA20POLY1305_IETF);
-#endif
-#ifdef crypto_aead_xchacha20poly1305_IETF_NPUBBYTES
+
     HHVM_REGISTER_AEAD_DEFINITIONS(xchacha20poly1305_ietf,
                                    XCHACHA20POLY1305_IETF);
-#endif
 
-#ifdef crypto_kdf_KEYBYTES
     HHVM_FE(sodium_crypto_kdf_derive_from_key);
     HHVM_RC_INT(SODIUM_CRYPTO_KDF_BYTES_MIN, crypto_kdf_BYTES_MIN);
     HHVM_RC_INT(SODIUM_CRYPTO_KDF_BYTES_MAX, crypto_kdf_BYTES_MAX);
     HHVM_RC_INT(SODIUM_CRYPTO_KDF_CONTEXTBYTES, crypto_kdf_CONTEXTBYTES);
     HHVM_RC_INT(SODIUM_CRYPTO_KDF_KEYBYTES, crypto_kdf_KEYBYTES);
-#endif
 
-#ifdef crypto_kx_SEEDBYTES
+    HHVM_FE(sodium_crypto_core_hchacha20);
+    HHVM_RC_INT(SODIUM_CRYPTO_CORE_HCHACHA20_INPUTBYTES, crypto_core_hchacha20_INPUTBYTES);
+    HHVM_RC_INT(SODIUM_CRYPTO_CORE_HCHACHA20_KEYBYTES, crypto_core_hchacha20_KEYBYTES);
+    HHVM_RC_INT(SODIUM_CRYPTO_CORE_HCHACHA20_OUTPUTBYTES, crypto_core_hchacha20_OUTPUTBYTES);
+    HHVM_RC_INT(SODIUM_CRYPTO_CORE_HCHACHA20_CONSTBYTES, crypto_core_hchacha20_CONSTBYTES);
+
     HHVM_RC_INT(SODIUM_CRYPTO_KX_PUBLICKEYBYTES, crypto_kx_PUBLICKEYBYTES);
     HHVM_RC_INT(SODIUM_CRYPTO_KX_SESSIONKEYBYTES, crypto_kx_SESSIONKEYBYTES);
     HHVM_RC_INT(SODIUM_CRYPTO_KX_SECRETKEYBYTES, crypto_kx_SECRETKEYBYTES);
@@ -1886,9 +2497,105 @@ struct SodiumExtension final : Extension {
     HHVM_FE(sodium_crypto_kx_seed_keypair);
     HHVM_FE(sodium_crypto_kx_client_session_keys);
     HHVM_FE(sodium_crypto_kx_server_session_keys);
-#endif
 
-    loadSystemlib();
+    HHVM_RC_INT(
+      SODIUM_CRYPTO_SCALARMULT_RISTRETTO255_BYTES,
+      crypto_scalarmult_ristretto255_BYTES
+    );
+    HHVM_RC_INT(
+      SODIUM_CRYPTO_SCALARMULT_RISTRETTO255_SCALARBYTES,
+      crypto_scalarmult_ristretto255_SCALARBYTES
+    );
+    HHVM_RC_INT(
+      SODIUM_CRYPTO_CORE_RISTRETTO255_BYTES,
+      crypto_core_ristretto255_BYTES
+    );
+    HHVM_RC_INT(
+      SODIUM_CRYPTO_CORE_RISTRETTO255_HASHBYTES,
+      crypto_core_ristretto255_HASHBYTES
+    );
+    HHVM_RC_INT(
+      SODIUM_CRYPTO_CORE_RISTRETTO255_SCALARBYTES,
+      crypto_core_ristretto255_SCALARBYTES
+    );
+    HHVM_RC_INT(
+      SODIUM_CRYPTO_CORE_RISTRETTO255_NONREDUCEDSCALARBYTES,
+      crypto_core_ristretto255_NONREDUCEDSCALARBYTES
+    );
+    HHVM_FE(sodium_crypto_core_ristretto255_add);
+    HHVM_FE(sodium_crypto_core_ristretto255_sub);
+    HHVM_FE(sodium_crypto_core_ristretto255_is_valid_point);
+    HHVM_FE(sodium_crypto_core_ristretto255_random);
+    HHVM_FE(sodium_crypto_core_ristretto255_from_hash);
+    HHVM_FE(sodium_crypto_scalarmult_ristretto255);
+    HHVM_FE(sodium_crypto_core_ristretto255_scalar_reduce);
+    HHVM_FE(sodium_crypto_core_ristretto255_scalar_invert);
+    HHVM_FE(sodium_crypto_core_ristretto255_scalar_negate);
+    HHVM_FE(sodium_crypto_core_ristretto255_scalar_complement);
+    HHVM_FE(sodium_crypto_core_ristretto255_scalar_add);
+    HHVM_FE(sodium_crypto_core_ristretto255_scalar_sub);
+    HHVM_FE(sodium_crypto_core_ristretto255_scalar_mul);
+
+    HHVM_RC_INT(
+      SODIUM_CRYPTO_SECRETSTREAM_XCHACHA20POLY1305_ABYTES,
+      crypto_secretstream_xchacha20poly1305_ABYTES
+    );
+    HHVM_RC_INT(
+      SODIUM_CRYPTO_SECRETSTREAM_XCHACHA20POLY1305_HEADERBYTES,
+      crypto_secretstream_xchacha20poly1305_HEADERBYTES
+    );
+    HHVM_RC_INT(
+      SODIUM_CRYPTO_SECRETSTREAM_XCHACHA20POLY1305_KEYBYTES,
+      crypto_secretstream_xchacha20poly1305_KEYBYTES
+    );
+    HHVM_RC_INT(
+      SODIUM_CRYPTO_SECRETSTREAM_XCHACHA20POLY1305_MESSAGEBYTES_MAX,
+      crypto_secretstream_xchacha20poly1305_MESSAGEBYTES_MAX
+    );
+    HHVM_RC_INT(
+      SODIUM_CRYPTO_SECRETSTREAM_XCHACHA20POLY1305_TAG_MESSAGE,
+      crypto_secretstream_xchacha20poly1305_TAG_MESSAGE
+    );
+    HHVM_RC_INT(
+      SODIUM_CRYPTO_SECRETSTREAM_XCHACHA20POLY1305_TAG_PUSH,
+      crypto_secretstream_xchacha20poly1305_TAG_PUSH
+    );
+    HHVM_RC_INT(
+      SODIUM_CRYPTO_SECRETSTREAM_XCHACHA20POLY1305_TAG_REKEY,
+      crypto_secretstream_xchacha20poly1305_TAG_REKEY
+    );
+    HHVM_RC_INT(
+      SODIUM_CRYPTO_SECRETSTREAM_XCHACHA20POLY1305_TAG_FINAL,
+      crypto_secretstream_xchacha20poly1305_TAG_FINAL
+    );
+    HHVM_FE(sodium_crypto_secretstream_xchacha20poly1305_keygen);
+    HHVM_FE(sodium_crypto_secretstream_xchacha20poly1305_init_push);
+    HHVM_FE(sodium_crypto_secretstream_xchacha20poly1305_push);
+    HHVM_FE(sodium_crypto_secretstream_xchacha20poly1305_init_pull);
+    HHVM_FE(sodium_crypto_secretstream_xchacha20poly1305_pull);
+    HHVM_FE(sodium_crypto_secretstream_xchacha20poly1305_rekey);
+
+    HHVM_RC_INT(
+      SODIUM_CRYPTO_CORE_ED25519_SCALARBYTES,
+      crypto_core_ed25519_SCALARBYTES
+    );
+    HHVM_RC_INT(
+      SODIUM_CRYPTO_CORE_ED25519_NONREDUCEDSCALARBYTES,
+      crypto_core_ed25519_NONREDUCEDSCALARBYTES
+    );
+    HHVM_RC_INT(
+      SODIUM_CRYPTO_CORE_ED25519_BYTES,
+      crypto_core_ed25519_BYTES
+    );
+    HHVM_FE(sodium_crypto_core_ed25519_is_valid_point);
+    HHVM_FE(sodium_crypto_core_ed25519_add);
+    HHVM_FE(sodium_crypto_core_ed25519_sub);
+    HHVM_FE(sodium_crypto_core_ed25519_scalar_reduce);
+    HHVM_FE(sodium_crypto_core_ed25519_scalar_mul);
+    HHVM_FE(sodium_crypto_core_ed25519_scalar_add);
+    HHVM_FE(sodium_crypto_scalarmult_ed25519_noclamp);
+    HHVM_FE(sodium_crypto_scalarmult_ed25519_base);
+    HHVM_FE(sodium_crypto_scalarmult_ed25519_base_noclamp);
   }
 } s_sodium_extension;
 

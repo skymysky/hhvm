@@ -1,0 +1,6 @@
+warning: Lint[5622] Invalid condition: a value of type `Bar` will always be truthy
+   --> truthiness_test_16.php
+ 17 |   if ($x) {
+    |       ^^
+
+

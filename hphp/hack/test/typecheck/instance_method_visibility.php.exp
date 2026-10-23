@@ -1,0 +1,17 @@
+error: Typing[4112] You cannot access this method [1]
+-> This member is private [2]
+
+instance_method_visibility.php:9:11
+ 2 | 
+ 3 | final class Foo {
+ 4 |   private function bar(): void {}
+   |                    ^^^ [2]
+ 5 | }
+ 6 | 
+ 7 | function baz(): void {
+ 8 |     $foo = new Foo();
+ 9 |     $foo->bar();
+   |           ^^^ [1]
+10 | }
+
+1 error found

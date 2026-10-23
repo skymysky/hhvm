@@ -1,4 +1,4 @@
-<?hh // decl /* -*- mode: php -*- */
+<?hh /* -*- mode: php -*- */
 /**
  * Copyright (c) 2014, Facebook, Inc.
  * All rights reserved.
@@ -8,11 +8,7 @@
  *
  */
 
-abstract class SplHeap<T>
-  implements
-    Iterator<T>,
-    Countable,
-    Traversable<T> {
+abstract class SplHeap<T> implements Iterator<T>, Countable, Traversable<T> {
 
   // Methods
   public function __construct();

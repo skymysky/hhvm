@@ -1,8 +1,8 @@
 <?hh
 
-function f() { return array(); }
+function f() :mixed{ return dict[]; }
 
-function populateArray($max) {
+function populateArray($max) :mixed{
   $a = f();
   for ($i = 0; $i < $max; ++$i) {
     $a[$i] = $i * 9;
@@ -17,12 +17,10 @@ function populateArray($max) {
   }
 }
 
-function main() {
+<<__EntryPoint>> function main(): void {
   $a = f();
-  echo "writing: "; echo ($a[1] = 66); echo "\n";
+  echo "writing: "; $a[1] = 66; echo $a[1]; echo "\n";
   echo "reading: "; echo $a[1]; echo "\n";
 
   populateArray(1000);
 }
-
-main();

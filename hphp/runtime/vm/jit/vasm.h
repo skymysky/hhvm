@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2013 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-present Facebook, Inc. (http://www.facebook.com)  |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -14,8 +14,7 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_JIT_VASM_H_
-#define incl_HPHP_JIT_VASM_H_
+#pragma once
 
 #include "hphp/runtime/base/rds.h"
 
@@ -28,7 +27,7 @@
 #include <folly/Range.h>
 #include <iosfwd>
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 ///////////////////////////////////////////////////////////////////////////////
 
 struct Abi;
@@ -40,13 +39,13 @@ struct Vtext;
 
 ///////////////////////////////////////////////////////////////////////////////
 
-#define DECLARE_VNUM(Vnum, check, prefix)                 \
+#define DECLARE_VNUM(Vnum, type, check, prefix)           \
 struct Vnum {                                             \
   Vnum() {}                                               \
-  explicit Vnum(size_t n) : n(safe_cast<uint32_t>(n)) {}  \
+  explicit Vnum(size_t n) : n(safe_cast<type>(n)) {}      \
                                                           \
   /* implicit */ operator size_t() const {                \
-    if (check) assertx(n != kInvalidId);                   \
+    if (check) assertx(n != kInvalidId);                  \
     return n;                                             \
   }                                                       \
                                                           \
@@ -60,26 +59,37 @@ struct Vnum {                                             \
   }                                                       \
                                                           \
 private:                                                  \
-  static constexpr uint32_t kInvalidId = 0xffffffff;      \
-  uint32_t n{kInvalidId};                                 \
+  static constexpr type kInvalidId =                      \
+    static_cast<type>(0xffffffff);                        \
+  type n{kInvalidId};                                     \
 }
 
 /*
  * Vlabel wraps a block number.
  */
-DECLARE_VNUM(Vlabel, true, "B");
+DECLARE_VNUM(Vlabel, uint32_t, true, "B");
+
+/*
+ * Vaddr is a reference to an address in the instruction stream.
+ */
+DECLARE_VNUM(Vaddr, uint32_t, false, "A");
 
 /*
  * Vtuple is an index to a tuple in Vunit::tuples.
  */
-DECLARE_VNUM(Vtuple, true, "T");
+DECLARE_VNUM(Vtuple, uint32_t, true, "T");
 
 /*
  * VcallArgsId is an index to a VcallArgs in Vunit::vcallArgs.
  */
-DECLARE_VNUM(VcallArgsId, true, "V");
+DECLARE_VNUM(VcallArgsId, uint32_t, true, "V");
 
 #undef DECLARE_VNUM
+
+///////////////////////////////////////////////////////////////////////////////
+
+using VinstrId = unsigned int;
+using MaybeVinstrId = Optional<VinstrId>;
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -103,20 +113,37 @@ bool checkWidths(Vunit& unit);
 bool checkBlockEnd(const Vunit& v, Vlabel b);
 
 /*
+ * Assert that the unit contains no instructions which can leave the
+ * unit implicitly (IE, jcci, fallbackcc, or bindjcc).
+ */
+bool checkNoSideExits(const Vunit& unit);
+
+/*
+ * Assert that the unit does not contain any critical edges.
+ */
+bool checkNoCriticalEdges(const Vunit& unit);
+
+/*
  * Passes.
  */
-void allocateRegisters(Vunit&, const Abi&);
+void allocateRegistersWithXLS(Vunit&, const Abi&);
+void allocateRegistersWithGraphColor(Vunit&, const Abi&);
 void annotateSFUses(Vunit&);
 void fuseBranches(Vunit&);
 void optimizeCopies(Vunit&, const Abi&);
 void optimizeExits(Vunit&);
-void optimizeJmps(Vunit&);
+void optimizeJmps(Vunit&, bool makeSideExits, bool trustWidths);
 void optimizePhis(Vunit&);
 void removeDeadCode(Vunit&);
 void removeTrivialNops(Vunit&);
 void reuseImmq(Vunit&);
+void sinkDefs(Vunit&, const Abi&);
+void eliminateRedundantLoads(Vunit&, const Abi&);
 template<typename Folder> void foldImms(Vunit&);
 void simplify(Vunit&);
+void postRASimplify(Vunit&, const Abi&);
+void sfPeepholes(Vunit&, const Abi&);
+void fixupVmfpUses(Vunit& unit);
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -135,12 +162,6 @@ folly::Range<const Vlabel*> succs(const Vblock& block);
 jit::vector<Vlabel> sortBlocks(const Vunit& unit);
 
 /*
- * Make block weights more consistent by enforcing that the weight of each block
- * doesn't exceed the sums of the weights of its predecessors or its successors.
- */
-void fixBlockWeights(Vunit& unit);
-
-/*
  * Order blocks for lowering to machine code.  May use different layout
  * algorithms depending on the TransKind of `unit'.
  *
@@ -156,6 +177,12 @@ boost::dynamic_bitset<> backedgeTargets(const Vunit& unit,
                                         const jit::vector<Vlabel>& rpoBlocks);
 
 ///////////////////////////////////////////////////////////////////////////////
-}}
+}
 
-#endif
+namespace std {
+template<> struct hash<HPHP::jit::Vlabel> {
+  size_t operator()(HPHP::jit::Vlabel l) const { return (size_t)l; }
+};
+}
+
+///////////////////////////////////////////////////////////////////////////////

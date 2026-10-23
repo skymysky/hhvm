@@ -1,0 +1,6 @@
+warning: Lint[5622] Invalid condition: a value of type `Foo` will always be truthy
+   --> truthiness_test_02.php
+  6 |   if ($x) {
+    |       ^^
+
+

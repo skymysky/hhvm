@@ -1,6 +1,6 @@
-<?php
-chdir(dirname(__FILE__));
-$dirpath = "./tmp/foo//bar/logs";
+<?hh
+<<__EntryPoint>> function main(): void {
+$dirpath = sys_get_temp_dir()."/baz/foo//bar/logs";
 mkdir($dirpath, 0777, true);
 
 if (is_dir($dirpath)) {
@@ -8,8 +8,8 @@ if (is_dir($dirpath)) {
 } else {
     echo "Failed.\n";
 }
-rmdir("./tmp/foo/bar/logs");
-rmdir("./tmp/foo/bar/");
-rmdir("./tmp/foo/");
-rmdir("./tmp/");
-?>
+rmdir(sys_get_temp_dir()."/baz/foo/bar/logs");
+rmdir(sys_get_temp_dir()."/baz/foo/bar/");
+rmdir(sys_get_temp_dir()."/baz/foo/");
+rmdir(sys_get_temp_dir()."/baz/");
+}

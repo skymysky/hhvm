@@ -14,19 +14,19 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_USER_ATTRIBUTES_H_
-#define incl_HPHP_USER_ATTRIBUTES_H_
-
-#include <cstdlib>
-#include <utility>
-
-#include "hphp/util/copy-ptr.h"
-#include "hphp/util/functional.h"
+#pragma once
 
 #include "hphp/runtime/base/string-data.h"
 #include "hphp/runtime/base/typed-value.h"
+#include "hphp/util/copy-ptr.h"
+#include "hphp/util/functional.h"
+
+#include <folly/FBVector.h>
+#include <folly/sorted_vector_types.h>
 
 namespace HPHP {
+
+struct Array;
 
 //////////////////////////////////////////////////////////////////////
 
@@ -36,17 +36,20 @@ namespace HPHP {
  * case that it's empty (minimizing sizeof(UserAttributeMap)).
  */
 struct UserAttributeMap {
+  using value_type = std::pair<PackedStringPtr, TypedValue>;
 private:
-  using Map = std::map<
-    LowStringPtr,
+  using Map = folly::sorted_vector_map<
+    PackedStringPtr,
     TypedValue,
-    string_data_lti
+    string_data_lt_type,
+    VMAllocator<value_type>,
+    void,
+    folly::fbvector<value_type, VMAllocator<value_type>>
   >;
 
 public:
   using mapped_type    = Map::mapped_type;
   using key_type       = Map::key_type;
-  using value_type     = Map::value_type;
   using size_type      = Map::size_type;
   using iterator       = Map::iterator;
   using const_iterator = Map::const_iterator;
@@ -67,6 +70,10 @@ public:
 
   const_iterator find(const key_type& k) const {
     return map().find(k);
+  }
+
+  bool contains(const key_type& k) const {
+    return map().contains(k);
   }
 
   // Note: non-const iteration is not allowed, since we don't want to allocate
@@ -98,6 +105,11 @@ public:
     sd(map());
   }
 
+  /*
+   * A hack representation of these user attributes as a dict
+   */
+  Array getArray() const;
+
 private:
   struct MapCompare;
   void lookup(Map&& map);
@@ -110,7 +122,8 @@ private:
   }
 
 private:
-  static Map s_empty_map; // so our iterators can be normal Map iterators
+  // Singleton empty map, so our iterators can be normal Map iterators
+  static Map s_empty_map;
   copy_ptr<Map> m_map;
   TYPE_SCAN_IGNORE_FIELD(m_map); // TypedValue in Map are never heap ptrs
 };
@@ -118,5 +131,3 @@ private:
 //////////////////////////////////////////////////////////////////////
 
 }
-
-#endif

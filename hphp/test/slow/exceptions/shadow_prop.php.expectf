@@ -1,0 +1,1 @@
+Catchable fatal error: MyException::file must have a type of string as defined in Exception in %s/shadow_prop.php on line 11

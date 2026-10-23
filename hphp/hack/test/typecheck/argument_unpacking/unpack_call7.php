@@ -5,7 +5,7 @@ class C1 {
 }
 
 function test(): void {
-  $args = array();
+  $args = vec[];
   // arity error
   new C1('string', ...$args);
 }

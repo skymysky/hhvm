@@ -21,10 +21,13 @@
 #include "hphp/runtime/server/xbox-server.h"
 #include "hphp/runtime/base/array-init.h"
 #include "hphp/runtime/base/comparisons.h"
-#include "hphp/runtime/base/runtime-option.h"
 #include "hphp/runtime/ext/std/ext_std_file.h"
+#include "hphp/util/configs/pageletserver.h"
+#include "hphp/util/configs/xbox.h"
 
 ///////////////////////////////////////////////////////////////////////////////
+
+using namespace HPHP;
 
 bool TestExtServer::RunTests(const std::string &which) {
   bool ret = true;
@@ -34,19 +37,17 @@ bool TestExtServer::RunTests(const std::string &which) {
   std::string root = std::string(HHVM_FN(getcwd)().toString().c_str()) +
                      "/test/ext/";
 
-  RuntimeOption::SourceRoot = root;
-  RuntimeOption::PageletServerThreadCount = 10;
+  HPHP::Cfg::Server::SourceRoot = root;
+  Cfg::PageletServer::ThreadCount = 10;
   PageletServer::Restart();
 
-  RuntimeOption::XboxServerThreadCount = 10;
-  RuntimeOption::XboxServerInfoReqInitDoc = root + "test_xbox_init.php";
+  Cfg::Xbox::ServerInfoThreadCount = 10;
+  Cfg::Xbox::ServerInfoRequestInitDocument = root + "test_xbox_init.php";
   XboxServer::Restart();
 
   RUN_TEST(test_pagelet_server_task_start);
   RUN_TEST(test_pagelet_server_task_status);
   RUN_TEST(test_pagelet_server_task_result);
-  RUN_TEST(test_xbox_send_message);
-  RUN_TEST(test_xbox_post_message);
   RUN_TEST(test_xbox_task_start);
   RUN_TEST(test_xbox_task_status);
   RUN_TEST(test_xbox_task_result);
@@ -71,17 +72,18 @@ bool TestExtServer::test_pagelet_server_task_status() {
 bool TestExtServer::test_pagelet_server_task_result() {
   const int TEST_SIZE = 20;
 
-  String baseurl("ext/pageletserver?getparam=");
-  String baseheader("MyHeader: ");
-  String basepost("postparam=");
+  OptString baseurl("ext/pageletserver?getparam=");
+  OptString baseheader("MyHeader: ");
+  OptString basepost("postparam=");
 
-  std::vector<Resource> tasks;
+  std::vector<OptResource> tasks;
+  tasks.reserve(TEST_SIZE);
   for (int i = 0; i < TEST_SIZE; ++i) {
-    String url = baseurl + String(i);
-    String header = baseheader + String(i);
-    String post = basepost + String(i);
-    Resource task = HHVM_FN(pagelet_server_task_start)(url,
-      make_packed_array(header), post);
+    OptString url = baseurl + OptString::FromInt64(i);
+    OptString header = baseheader + OptString::FromInt64(i);
+    OptString post = basepost + OptString::FromInt64(i);
+    OptResource task = HHVM_FN(pagelet_server_task_start)(url,
+      make_vec_array(header), post);
     tasks.push_back(task);
   }
 
@@ -91,39 +93,39 @@ bool TestExtServer::test_pagelet_server_task_result() {
 
   // Calls that time out (try 1 ms) should return a status code of -1
   for (int i = 0; i < TEST_SIZE; ++i) {
-    Variant code, headers;
-    VS("", HHVM_FN(pagelet_server_task_result)(tasks[i], ref(headers),
-                                               ref(code), 1));
+    Array headers;
+    int64_t code;
+    VS("", HHVM_FN(pagelet_server_task_result)(tasks[i], headers, code, 1));
     VS(code, -1);
   }
 
   for (int i = 0; i < TEST_SIZE; ++i)  {
-    String expected = "pagelet postparam: postparam=";
-    expected += String(i);
+    OptString expected = "pagelet postparam: postparam=";
+    expected += OptString::FromInt64(i);
     expected += "pagelet getparam: ";
-    expected += String(i);
+    expected += OptString::FromInt64(i);
     expected += "pagelet header: ";
-    expected += String(i);
+    expected += OptString::FromInt64(i);
 
     // A timeout of 0 indicates an infinite timeout that blocks.
-    Variant code, headers;
-    VS(expected, HHVM_FN(pagelet_server_task_result)(tasks[i], ref(headers),
-                                                     ref(code), 0));
+    Array headers;
+    int64_t code;
+    VS(expected, HHVM_FN(pagelet_server_task_result)(tasks[i], headers,
+                                                     code, 0));
     VS(code, 200);
 
-    Array headerArray = headers.toArray();
     bool hasResponseHeader = false;
-    String expectedHeader = String("ResponseHeader: okay");
+    auto const expectedHeader = OptString("ResponseHeader: okay");
 
-    for (int headerIdx = 0; headerIdx < headerArray.size(); headerIdx++) {
-      if (headerArray[headerIdx].toString() == expectedHeader) {
+    for (int headerIdx = 0; headerIdx < headers.size(); headerIdx++) {
+      if (headers[headerIdx].toString() == expectedHeader) {
         hasResponseHeader = true;
         break;
       }
     }
     VERIFY(hasResponseHeader);
-    VS(expected, HHVM_FN(pagelet_server_task_result)(tasks[i], ref(headers),
-                                                     ref(code), 1));
+    VS(expected, HHVM_FN(pagelet_server_task_result)(tasks[i], headers,
+                                                     code, 1));
     VS(code, 200);
   }
 
@@ -131,22 +133,6 @@ bool TestExtServer::test_pagelet_server_task_result() {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-
-bool TestExtServer::test_xbox_send_message() {
-  static const StaticString
-    s_code("code"),
-    s_response("response");
-  Variant ret;
-  VERIFY(HHVM_FN(xbox_send_message)("hello", ref(ret), 5000));
-  VS(ret.toArray()[s_code], 200);
-  VS(ret.toArray()[s_response], "olleh");
-  return Count(true);
-}
-
-bool TestExtServer::test_xbox_post_message() {
-  VERIFY(HHVM_FN(xbox_post_message)("hello"));
-  return Count(true);
-}
 
 bool TestExtServer::test_xbox_task_start() {
   // tested in test_xbox_task_result()
@@ -159,10 +145,10 @@ bool TestExtServer::test_xbox_task_status() {
 }
 
 bool TestExtServer::test_xbox_task_result() {
-  Resource task = HHVM_FN(xbox_task_start)("hello");
+  OptResource task = HHVM_FN(xbox_task_start)("hello");
   HHVM_FN(xbox_task_status)(task);
   Variant ret;
-  VS(HHVM_FN(xbox_task_result)(task, 0, ref(ret)), 200);
+  VS(HHVM_FN(xbox_task_result)(task, 0, ret), 200);
   VS(ret, "olleh");
   return Count(true);
 }

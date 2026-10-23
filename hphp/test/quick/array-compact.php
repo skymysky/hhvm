@@ -1,10 +1,12 @@
 <?hh
-function f($a) {
+function f(dict<arraykey, int> $a) :mixed{
   $a["four"] = 4;
   return $a;
 }
-$a = array(1=>1, 2=>2, 3=>3);
+<<__EntryPoint>> function main(): void {
+$a = dict[1=>1, 2=>2, 3=>3];
 unset($a[1]);
 unset($a[2]);
 unset($a[3]);
 var_dump(f($a));
+}

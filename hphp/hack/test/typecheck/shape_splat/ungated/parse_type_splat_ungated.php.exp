@@ -1,0 +1,11 @@
+error: Parsing[1002] Cannot use unstable feature: `shape_splat_concrete` [1]
+
+parse_type_splat_ungated.php:5:24
+3 | 
+4 | type TBase = shape('x' => int);
+5 | type TExtended = shape(...TBase, 'y' => string);
+  |                        ^^^^^^^^ [1]
+6 | 
+7 | function test(TExtended $s): void {}
+
+1 error found

@@ -1,6 +1,10 @@
-<?php
+<?hh
 
-function test($x, $v) {
+function test($x, $v) :mixed{
  var_dump($x->$v);
  }
-test(new stdclass, "\0foo");
+
+<<__EntryPoint>>
+function main_702() :mixed{
+test(new stdClass, "\0foo");
+}

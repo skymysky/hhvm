@@ -1,22 +1,22 @@
-<?php
+<?hh
 /* Prototype  : proto bool touch(string filename [, int time [, int atime]])
  * Description: Set modification time of file 
  * Source code: ext/standard/filestat.c
  * Alias to functions: 
  */
-
+<<__EntryPoint>> function main(): void {
 echo "*** Testing touch() : basic functionality ***\n";
 
-$filename = dirname(__FILE__)."/touch_basic.dat";
+$filename = sys_get_temp_dir().'/'.'touch_basic.dat';
 
 echo "\n--- testing touch creates a file ---\n";
-@unlink($filename);
+unlink($filename);
 if (file_exists($filename)) {
-   die("touch_basic failed");
+   exit("touch_basic failed");
 }
 var_dump( touch($filename) );
 if (file_exists($filename) == false) {
-   die("touch_basic failed");
+   exit("touch_basic failed");
 }
 
 echo "\n --- testing touch doesn't alter file contents ---\n";
@@ -35,9 +35,9 @@ clearstatcache();
 sleep(1);
 touch($filename);
 $next_meta = stat($filename);
-$type = array("dev", "ino", "mode", "nlink", "uid", "gid",
+$type = vec["dev", "ino", "mode", "nlink", "uid", "gid",
               "rdev", "size", "atime", "mtime", "ctime",
-              "blksize", "blocks");
+              "blksize", "blocks"];
 
 for ($i = 0; $i < count($type); $i++) {
    if ($init_meta[$i] != $next_meta[$i]) {
@@ -62,4 +62,4 @@ echo "atime=".$init_meta['atime']."\n";
 unlink($filename);
 
 echo "Done";
-?>
+}

@@ -1,0 +1,12 @@
+<?hh
+//
+class C {
+
+  <<__Deprecated("Use `renamed` instead")>>
+  public function original(inout int $x): void {
+    $this->renamed(inout $x);
+  }
+  public function renamed(inout int $x): void {
+    $x += 1;
+  }
+}

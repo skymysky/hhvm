@@ -1,2 +1,25 @@
-File "subclass_not_const.php", line 9, characters 7-7:
-Only __Const classes may extend a __Const class (Typing[4198])
+error: Parsing[1002] Classes, interfaces, traits and enums may not be declared `__Const` [1]
+
+subclass_not_const.php:3:1
+1 | <?hh
+2 | 
+3 | <<__Const>>
+  | ^^^^^^^^^^^ [1]
+4 | class A {}
+  | ^^^^^^^^^^ [1]
+5 | 
+6 | <<__Const>>
+
+error: Parsing[1002] Classes, interfaces, traits and enums may not be declared `__Const` [1]
+
+subclass_not_const.php:6:1
+4 | class A {}
+5 | 
+6 | <<__Const>>
+  | ^^^^^^^^^^^ [1]
+7 | class B extends A {}
+  | ^^^^^^^^^^^^^^^^^^^^ [1]
+8 | 
+9 | class C extends A {}
+
+2 errors found

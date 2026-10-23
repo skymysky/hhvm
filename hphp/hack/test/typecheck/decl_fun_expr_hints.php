@@ -1,4 +1,4 @@
-<?hh // decl
+<?hh
 /**
  * Copyright (c) 2014, Facebook, Inc.
  * All rights reserved.
@@ -10,7 +10,7 @@
  */
 
 function f(): void {
-  return function(array<int> $a): array<int> {
+  return function(varray<int> $a): varray<int> {
     // This statement will not parse in Hack, but we should not raise an error
     // in decl mode.
     break 100;

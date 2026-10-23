@@ -1,4 +1,5 @@
 include(Options)
+include(GNUInstallDirs)
 
 set_property(GLOBAL PROPERTY DEBUG_CONFIGURATIONS Debug DebugOpt RelWithDebInfo)
 
@@ -7,28 +8,44 @@ set(HHVM_WHOLE_ARCHIVE_LIBRARIES
     hphp_runtime_ext
    )
 
-if (LINUX)
-  set(HHVM_WRAP_SYMS -Wl,--wrap=pthread_create -Wl,--wrap=pthread_exit -Wl,--wrap=pthread_join)
-else ()
-  set(HHVM_WRAP_SYMS)
-endif ()
+set(HHVM_WRAP_SYMS)
 
+# Oniguruma ('onig') must be first:
+#
+# oniguruma has some of its own implementations of POSIX regex functions,
+# like regcomp() and regexec(). We use onig everywhere, for both its own
+# special functions and for the POSIX replacements. This means that the
+# linker needs to pick the implementations of the POSIX regex functions from
+# onig, not libc.
+#
+# On Linux, that works out fine, since the linker sees onig on the link
+# line before (implicitly) libc. However, on OS X, despite the manpage for
+# ld claiming otherwise about indirect dylib dependencies, as soon as we
+# include one of the libs here that pull in libSystem.B, the linker will
+# pick the implementations of those functions from libc, not from onig.
+# And since we've included the onig headers, which have very slightly
+# different definitions for some of the key data structures, things go
+# quite awry -- this manifests as infinite loops or crashes when calling
+# the PHP split() function.
+#
+# So make sure to link onig first, so its implementations are picked.
+#
+# Using the generator expression to explicitly pull the path in early, otherwise
+# it gets resolved later and put later in the build arguments, and makes
+# hphp/test/slow/ext_preg segfault.
 set(HHVM_LINK_LIBRARIES
+  $<TARGET_PROPERTY:onig,INTERFACE_LINK_LIBRARIES>
   ${HHVM_WRAP_SYMS}
+  hphp_process_init
   hphp_analysis
-  hphp_facts_parser
   hphp_system
-  hphp_parser
   hphp_zend
   hphp_util
   hphp_hhbbc
   jit_sort
-  ppc64-asm
   vixl neo)
 
 if(ENABLE_FASTCGI)
-  LIST(APPEND HHVM_LINK_LIBRARIES hphp_thrift)
-  LIST(APPEND HHVM_LINK_LIBRARIES hphp_proxygen)
   include(CheckCXXSourceCompiles)
   CHECK_CXX_SOURCE_COMPILES("#include <pthread.h>
   int main() {
@@ -43,7 +60,7 @@ if(HHVM_DYNAMIC_EXTENSION_DIR)
   add_definitions(-DHHVM_DYNAMIC_EXTENSION_DIR="${HHVM_DYNAMIC_EXTENSION_DIR}")
 else()
   if(UNIX)
-    add_definitions(-DHHVM_DYNAMIC_EXTENSION_DIR="${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}/hhvm/extensions")
+    add_definitions(-DHHVM_DYNAMIC_EXTENSION_DIR="${CMAKE_INSTALL_FULL_LIBDIR}/hhvm/extensions")
   endif()
 endif()
 
@@ -65,15 +82,7 @@ if(APPLE)
   endif()
 endif()
 
-include(HPHPCompiler)
 include(HPHPFunctions)
-include(HPHPFindLibs)
-
-# Ubuntu 15.10 and 14.04 have been failing to include a dependency on jemalloc
-# as a these linked flags force the dependency to be recorded
-if (JEMALLOC_ENABLED AND LINUX)
-  LIST(APPEND HHVM_LINK_LIBRARIES -Wl,--no-as-needed ${JEMALLOC_LIB} -Wl,--as-needed)
-endif()
 
 if (HHVM_VERSION_OVERRIDE)
   parse_version("HHVM_VERSION_" ${HHVM_VERSION_OVERRIDE})
@@ -90,32 +99,12 @@ if (LINUX)
   add_definitions(-D_GNU_SOURCE)
 endif()
 
-if(MSVC)
-  add_definitions(-DGLOG_NO_ABBREVIATED_SEVERITIES)
-  add_definitions(-DWIN32_LEAN_AND_MEAN)
-endif()
-
 if(CMAKE_CONFIGURATION_TYPES)
-  if(NOT MSVC)
-    message(FATAL_ERROR "Adding the appropriate defines for multi-config targets using anything other than MSVC is not yet supported!")
-  endif()
-  if (MSVC_NO_ASSERT_IN_DEBUG)
-    set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} /D RELEASE=1 /D NDEBUG")
-    set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} /D RELEASE=1 /D NDEBUG")
-  else()
-    set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} /D DEBUG")
-    set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} /D DEBUG")
-  endif()
-  foreach(flag_var
-      CMAKE_C_FLAGS_RELEASE CMAKE_C_FLAGS_MINSIZEREL CMAKE_C_FLAGS_RELWITHDEBINFO
-      CMAKE_CXX_FLAGS_RELEASE CMAKE_CXX_FLAGS_MINSIZEREL CMAKE_CXX_FLAGS_RELWITHDEBINFO)
-    set(${flag_var} "${${flag_var}} /D RELEASE=1 /D NDEBUG")
-  endforeach()
-elseif(${CMAKE_BUILD_TYPE} MATCHES "Debug")
-  add_definitions(-DDEBUG)
+  message(FATAL_ERROR "Adding the appropriate defines for multi-config targets is not yet supported!")
+elseif(${CMAKE_BUILD_TYPE} MATCHES "Debug" OR
+       ${CMAKE_BUILD_TYPE} MATCHES "DebugOpt")
   message("Generating DEBUG build")
 else()
-  add_definitions(-DRELEASE=1)
   add_definitions(-DNDEBUG)
   message("Generating Release build")
 endif()
@@ -124,7 +113,7 @@ if(ALWAYS_ASSERT)
   add_definitions(-DALWAYS_ASSERT=1)
 endif()
 
-if(APPLE OR FREEBSD OR MSVC)
+if(APPLE OR FREEBSD)
   add_definitions(-DSKIP_USER_CHANGE=1)
 endif()
 
@@ -161,10 +150,26 @@ add_definitions(-DDEFAULT_CONFIG_DIR="${DEFAULT_CONFIG_DIR}")
 
 add_definitions(-DHAVE_INTTYPES_H)
 
+# Load system tzdata if present
+# Works on Linux and Mac; given that we don't want to (and basically don't)
+# update the bundled tzdata, if this doesn't work on some platform, please
+# blacklist the platform rather than whitelisting others.
+option(USE_BUNDLED_TZDATA "Use bundled system tzdata instead of /usr/share/zoneinfo" OFF)
+if (NOT ${USE_BUNDLED_TZDATA})
+  if (NOT DEFINED HAVE_SYSTEM_TZDATA AND NOT EXISTS /usr/share/zoneinfo)
+    message(FATAL_ERROR "/usr/share/zoneinfo does not exist, and USE_BUNDLED_TZDATA not set")
+  endif()
+  add_definitions(-DHAVE_SYSTEM_TZDATA)
+endif()
+
 include_directories(${TP_DIR})
 if (THIRD_PARTY_INCLUDE_PATHS)
   include_directories(${THIRD_PARTY_INCLUDE_PATHS})
   add_definitions(${THIRD_PARTY_DEFINITIONS})
   include_directories(${HPHP_HOME}/hphp)
   include_directories(${HPHP_HOME})
+endif()
+
+if (ENABLE_SYSTEM_LOCALE_ARCHIVE)
+  add_definitions(-DENABLE_SYSTEM_LOCALE_ARCHIVE)
 endif()

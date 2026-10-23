@@ -1,11 +1,12 @@
-<?php
+<?hh
 
-function test() {
+function test() :mixed{
   try {
     $classes = get_declared_classes();
+    $t = 0;
     foreach ($classes as $class) {
       $r = new ReflectionClass($class);
-      $t += count($r->getMethods());
+      $t += HH\Lib\Legacy_FIXME\cast_for_arithmetic(count($r->getMethods()));
     }
     var_dump('ok');
   }
@@ -13,4 +14,8 @@ function test() {
     var_dump($e->getMessage());
   }
 }
+
+<<__EntryPoint>>
+function main_1344() :mixed{
 test();
+}

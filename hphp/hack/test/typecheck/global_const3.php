@@ -1,3 +1,3 @@
 <?hh
 
-const X = shape();
+const mixed X = shape();

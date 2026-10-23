@@ -17,6 +17,7 @@
 
 #include <iostream>
 
+#include <fmt/format.h>
 #include <folly/Format.h>
 
 #include "hphp/runtime/vm/jit/service-requests.h"
@@ -67,22 +68,27 @@ void dumpEntry(const RingBufferEntry* e) {
       indentDepth -= e->type == RBTypeFuncExit;
       if (indentDepth < 0) indentDepth = 0;
       auto const indentedName =
-        folly::sformat("{}{}", std::string(indentDepth * 4, ' '), info.msg);
+        fmt::format("{}{}", std::string(indentDepth * 4, ' '), info.msg);
       std::cerr << folly::format(msgFormat,
                                  indentedName, info.truncatedRip);
       indentDepth += e->type == RBTypeFuncEntry;
       break;
     }
-    case RBTypeServiceReq: {
-      auto& info = e->vmPoint;
-      auto req = static_cast<jit::ServiceRequest>(info.sk);
-      std::cerr << folly::format(msgFormat,
-                                 jit::svcreq::to_name(req), info.data);
-      break;
-    }
     case RBTypeGeneric: {
       auto& info = e->generic;
       std::cerr << folly::format(msgFormat, info.name, info.data);
+      break;
+    }
+    case RBTypeAPCHandleEnqueue:
+    {
+      auto& info = e->apcHandleInfo;
+      std::cerr << "  (" << info.handle << ", " << info.value << ")\n";
+      break;
+    }
+    case RBTypeAPCHandleDelete:
+    {
+      auto& info = e->apcHandleInfo;
+      std::cerr << "  (" << info.handle << ", " << info.value << ")\n";
       break;
     }
     default: {

@@ -1,12 +1,14 @@
 int(1)
 int(10)
-array(1) {
+dict(2) {
   [0]=>
   int(1)
+  [1]=>
+  int(10)
 }
 int(1)
 int(2)
-array(2) {
+dict(2) {
   [0]=>
   int(1)
   [1]=>
@@ -14,7 +16,7 @@ array(2) {
 }
 int(1)
 int(2)
-array(3) {
+dict(3) {
   [0]=>
   int(1)
   [1]=>

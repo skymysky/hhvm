@@ -1,0 +1,57 @@
+error: Typing[4323] Some type arguments violate their constraints [1]
+-> Expected `(mixed...)` [2]
+-> But got `T` [1]
+
+type_splat_bound.php:4:21
+2 | 
+3 | 
+4 | function foo<T>((...T) $x):void { }
+  |                 ^^^^^^ [2]
+  |                     ^ [1]
+5 | function bar<T>((function(int,...T):void) $f):void { }
+
+error: Typing[4323] Some type arguments violate their constraints [1]
+-> Expected `(mixed...)` [2]
+-> But got `mixed` [1]
+->   by the definition of `T` arising from an implicit `as mixed` constraint on this type [1]
+
+type_splat_bound.php:4:21
+2 | 
+3 | 
+4 | function foo<T>((...T) $x):void { }
+  |                 ^^^^^^ [2]
+  |                     ^ [1]
+5 | function bar<T>((function(int,...T):void) $f):void { }
+
+error: Typing[4366] This generic parameter is redundant because it only appears in a covariant (output) position. Consider replacing uses of generic parameter with `nothing` or specifying `<<__Explicit>>` on the generic parameter [1]
+
+type_splat_bound.php:5:14
+3 | 
+4 | function foo<T>((...T) $x):void { }
+5 | function bar<T>((function(int,...T):void) $f):void { }
+  |              ^ [1]
+
+error: Typing[4323] Some type arguments violate their constraints [1]
+-> Expected `(mixed...)` [2]
+-> But got `T` [1]
+
+type_splat_bound.php:5:34
+3 | 
+4 | function foo<T>((...T) $x):void { }
+5 | function bar<T>((function(int,...T):void) $f):void { }
+  |                 ^^^^^^^^^^^^^^^^^^^^^^^^^ [2]
+  |                                  ^ [1]
+
+error: Typing[4323] Some type arguments violate their constraints [1]
+-> Expected `(mixed...)` [2]
+-> But got `mixed` [1]
+->   by the definition of `T` arising from an implicit `as mixed` constraint on this type [1]
+
+type_splat_bound.php:5:34
+3 | 
+4 | function foo<T>((...T) $x):void { }
+5 | function bar<T>((function(int,...T):void) $f):void { }
+  |                 ^^^^^^^^^^^^^^^^^^^^^^^^^ [2]
+  |                                  ^ [1]
+
+5 errors found

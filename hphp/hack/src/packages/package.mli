@@ -1,0 +1,42 @@
+(*
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the "hack" directory of this source tree.
+ *
+ *)
+type pos_id = Pos.t * string [@@deriving eq, show]
+
+type t = {
+  name: pos_id;
+  includes: pos_id list;
+  soft_includes: pos_id list;
+  include_paths: pos_id list;
+  enable_strict_isolation: bool;
+      (** When true, this package opts into strict isolation: its presence
+          cannot be dynamically observed, and [package_exclude_patterns] do not
+          grant a typecheck exemption for references into it. *)
+  allow_deployed_packages_checking: bool;
+      (** Opt-in: when true, code may check at runtime whether this package is
+          deployed. Absent means it may not be checked for. Does not restrict
+          [__PackageOverride]. Contradicts [enable_strict_isolation]. *)
+  is_implicit: bool;
+      (** True for an implicit-package family entry (from an
+          [implicit_packages] stanza) and for the members synthesized from it. *)
+}
+[@@deriving eq, show]
+
+(* Represents how two packages are related *)
+type package_relationship =
+  | Unrelated
+  | Includes
+  | Soft_includes
+  | Equal
+
+val show_package : t -> string
+
+val get_package_name : t -> string
+
+val get_package_pos : t -> Pos.t
+
+val relationship : t -> t -> package_relationship

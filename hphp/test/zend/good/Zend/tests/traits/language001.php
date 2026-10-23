@@ -1,16 +1,17 @@
-<?php
-error_reporting(E_ALL);
+<?hh
 
 trait THello {
-  public function hello() {
+  public function hello() :mixed{
     echo 'Hello';
   }
 }
 
 class TraitsTest {
-	use THello;
+    use THello;
 }
 
+<<__EntryPoint>> function main(): void {
+error_reporting(E_ALL);
 $test = new TraitsTest();
 $test->hello();
-?>
+}

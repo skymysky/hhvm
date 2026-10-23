@@ -1,4 +1,4 @@
-(**
+(*
  * Copyright (c) 2016, Facebook, Inc.
  * All rights reserved.
  *
@@ -22,26 +22,21 @@ type t =
   | EndOfLine
   | DelimitedComment
   | SingleLineComment
-  | Unsafe
-  | UnsafeExpression
   | FixMe
+  | Ignore
   | IgnoreError
   | FallThrough
   | ExtraTokenError
-  | AfterHaltCompiler
-
-  [@@deriving show, enum]
+[@@deriving show, enum, eq, sexp_of]
 
 let to_string kind =
   match kind with
-  | WhiteSpace        -> "whitespace"
-  | EndOfLine         -> "end_of_line"
-  | DelimitedComment  -> "delimited_comment"
+  | WhiteSpace -> "whitespace"
+  | EndOfLine -> "end_of_line"
+  | DelimitedComment -> "delimited_comment"
   | SingleLineComment -> "single_line_comment"
-  | Unsafe            -> "unsafe"
-  | UnsafeExpression  -> "unsafe_expression"
-  | FixMe             -> "fix_me"
-  | IgnoreError       -> "ignore_error"
-  | FallThrough       -> "fall_through"
-  | ExtraTokenError   -> "extra_token_error"
-  | AfterHaltCompiler -> "after_halt_compiler"
+  | FixMe -> "fix_me"
+  | Ignore -> "ignore"
+  | IgnoreError -> "ignore_error"
+  | FallThrough -> "fall_through"
+  | ExtraTokenError -> "extra_token_error"

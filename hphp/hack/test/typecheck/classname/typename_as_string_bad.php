@@ -14,5 +14,3 @@ type C = string;
 function f(): int {
   return C::class;
 }
-
-f();

@@ -17,6 +17,7 @@
 #include "hphp/runtime/base/file.h"
 #include "hphp/runtime/base/unit-cache.h"
 #include "hphp/runtime/ext/vsdebug/debugger.h"
+#include "hphp/runtime/ext/vsdebug/debugger-request-info.h"
 #include "hphp/runtime/ext/vsdebug/command.h"
 
 namespace HPHP {
@@ -46,7 +47,7 @@ bool RunToLocationCommand::executeImpl(DebuggerSession* session,
   }
 
   const ClientPreferences& prefs = m_debugger->getClientPreferences();
-  const std::string& path = File::TranslatePath(String(filePath)).toCppString();
+  const std::string& path = File::TranslatePath(OptString(filePath)).toCppString();
   BreakpointManager* bpMgr = session->getBreakpointManager();
 
   int line = tryGetInt(args, "line", -1);
@@ -62,7 +63,7 @@ bool RunToLocationCommand::executeImpl(DebuggerSession* session,
   }
 
   // See if there's already a breakpoint at this file + line.
-  const auto bpIds = bpMgr->getBreakpointIdsByFile(path);
+  const auto bpIds = bpMgr->getBreakpointIdsForPath(path);
   for (auto it = bpIds.begin(); it != bpIds.end(); it++) {
     Breakpoint* bp = bpMgr->getBreakpointById(*it);
     if (bp->m_line == line) {
@@ -73,8 +74,9 @@ bool RunToLocationCommand::executeImpl(DebuggerSession* session,
   }
 
   // Find a compilation unit to place a temp bp in.
-  HPHP::String unitPath(path.c_str());
-  const auto compilationUnit = lookupUnit(unitPath.get(), "", nullptr);
+  HPHP::OptString unitPath(path.c_str());
+  const auto compilationUnit = lookupUnit(unitPath.get(), "", nullptr, nullptr,
+                                          false);
   if (compilationUnit == nullptr) {
     throw DebuggerCommandException(
       "Could not find a loaded compilation unit to run to location in!"
@@ -96,7 +98,7 @@ bool RunToLocationCommand::executeImpl(DebuggerSession* session,
     );
   }
 
-  RequestInfo* ri = m_debugger->getRequestInfo();
+  DebuggerRequestInfo* ri = m_debugger->getRequestInfo();
   ri->m_runToLocationInfo.path = path;
   ri->m_runToLocationInfo.line = line;
 

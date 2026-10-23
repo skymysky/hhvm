@@ -14,8 +14,7 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_VM_UNIT_EMITTER_H_
-#define incl_HPHP_VM_UNIT_EMITTER_H_
+#pragma once
 
 #include <list>
 #include <memory>
@@ -23,21 +22,24 @@
 #include <utility>
 #include <vector>
 
-#include "hphp/parser/location.h"
-
+#include "hphp/runtime/base/location.h"
+#include "hphp/runtime/base/repo-auth-type.h"
 #include "hphp/runtime/base/string-data.h"
 #include "hphp/runtime/base/typed-value.h"
-#include "hphp/runtime/base/repo-auth-type-array.h"
+#include "hphp/runtime/vm/constant.h"
+#include "hphp/runtime/vm/decl-dep.h"
+#include "hphp/runtime/vm/module.h"
+#include "hphp/runtime/vm/native.h"
 #include "hphp/runtime/vm/preclass.h"
-#include "hphp/runtime/vm/repo-helpers.h"
-#include "hphp/runtime/vm/repo-status.h"
+#include "hphp/runtime/vm/repo-file.h"
 #include "hphp/runtime/vm/type-alias.h"
 #include "hphp/runtime/vm/unit.h"
+#include "hphp/runtime/vm/unit-emitter-attributes.h"
 
 #include "hphp/util/functional.h"
 #include "hphp/util/hash-map.h"
 #include "hphp/util/hash-set.h"
-#include "hphp/util/md5.h"
+#include "hphp/util/sha1.h"
 
 namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
@@ -45,13 +47,16 @@ namespace HPHP {
 struct FuncEmitter;
 struct PreClassEmitter;
 struct StringData;
+struct TypeAliasEmitter;
+struct Extension;
 
 /*
- * Report capacity of RepoAuthoritative mode bytecode arena.
- *
- * Returns 0 if !RuntimeOption::RepoAuthoritative.
+ * Whether we need to keep the extended line table (for debugging, or
+ * dumping to hhas).
  */
-size_t hhbc_arena_capacity();
+bool needs_extended_line_table();
+
+const StaticString s_DEFAULT(Module::DEFAULT);
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -60,151 +65,121 @@ size_t hhbc_arena_capacity();
  * runtime Units.
  */
 struct UnitEmitter {
-  friend struct UnitRepoProxy;
-
   /////////////////////////////////////////////////////////////////////////////
   // Initialization and execution.
 
-  explicit UnitEmitter(const MD5& md5);
+  explicit UnitEmitter(const SHA1& sha1,
+                       const SHA1& bcSha1,
+                       const PackageInfo&,
+                       UnitEmitterAttributes);
+  static std::unique_ptr<UnitEmitter> makeForSerde(
+    const SHA1& sha1,
+    const SHA1& bcSha1,
+    const PackageInfo&
+  );
+  UnitEmitter(UnitEmitter&&) = delete;
   ~UnitEmitter();
 
-  /*
-   * Commit this unit to a repo.
-   */
-  void commit(UnitOrigin unitOrigin);
-
-  /*
-   * Insert this unit in a repo as part of transaction `txn'.
-   */
-  RepoStatus insert(UnitOrigin unitOrigin, RepoTxn& txn);
+  void setSha1(const SHA1& sha1) { m_sha1 = sha1; }
 
   /*
    * Instatiate a runtime Unit*.
    */
-  std::unique_ptr<Unit> create(bool saveLineTable = false);
+  std::unique_ptr<Unit> create() const;
 
-  template<class SerDe> void serdeMetaData(SerDe&);
+  template<typename SerDe> void serde(SerDe&, bool lazy);
 
+  /*
+   * Run the verifier on this unit.
+   */
+  bool check(bool verbose) const;
 
   /////////////////////////////////////////////////////////////////////////////
   // Basic data.
 
   /*
-   * The MD5 hash of the Unit.
+   * The SHA1 hash of the source for Unit.
    */
-  const MD5& md5() const;
+  const SHA1& sha1() const;
 
   /*
-   * Bytecode pointer and current emit position.
+   * The SHA1 hash of the bytecode for Unit.
    */
-  const unsigned char* bc() const;
-  Offset bcPos() const;
-  Offset offsetOf(const unsigned char* pc) const;
-
-  /*
-   * Set the bytecode pointer by allocating a copy of `bc' with size `bclen'.
-   *
-   * Not safe to call with m_bc as the argument because we free our current
-   * bytecode stream before allocating a copy of `bc'.
-   */
-  void setBc(const unsigned char* bc, size_t bclen);
+  const SHA1& bcSha1() const;
 
 
   /////////////////////////////////////////////////////////////////////////////
   // Litstrs and Arrays.
 
   /*
-   * Look up a static string or array/arraytype by ID.
+   * Look up a static string or array/arraytype by ID. This might load
+   * the data from the repo if lazy loading is enabled.
    */
-  const StringData* lookupLitstr(Id id) const;
-  const ArrayData* lookupArray(Id id) const;
-  const RepoAuthType::Array* lookupArrayType(Id id) const;
+  const StringData* lookupLitstrId(Id id) const;
+  const ArrayData* lookupArrayId(Id id) const;
+  const RepoAuthType::Array* lookupRATArray(Id id) const;
 
   /*
-   * Merge a literal string into either the global LitstrTable or the table for
-   * the Unit.
+   * Like the above lookup functions, but create ref-counted copies,
+   * and don't cache the result. This is meant for things like the
+   * verifier, where we want to lookup the values, but not keep them
+   * around.
    */
-  Id mergeLitstr(const StringData* litstr);
+  OptString lookupLitstrIdCopy(Id id) const;
+  Array lookupArrayIdCopy(Id id) const;
+
+  Id numArrays() const { return m_arrays.size(); }
+  Id numLitstrs() const { return m_litstrs.size(); }
 
   /*
-   * Merge a literal string into the table for the Unit.
+   * Merge a literal string into the Unit.
    */
-  Id mergeUnitLitstr(const StringData* litstr);
+  Id mergeLitstr(const StringData*);
 
   /*
    * Merge a scalar array into the Unit.
    */
-  Id mergeArray(const ArrayData* a);
+  Id mergeArray(const ArrayData*);
 
   /*
-   * Clear and rebuild the array type table from the builder.
+   * Merge a RAT array into the Unit.
    */
-   void repopulateArrayTypeTable(const ArrayTypeTable::Builder&);
+  Id mergeRATArray(const RepoAuthType::Array*);
+
+  /*
+   * Load literal array or strings from the repo. The data is loaded
+   * from the unit given by the SN, at the location given by the
+   * token. The token should be what was calculated when the
+   * unit-emitter was created.
+   */
+  static const ArrayData* loadLitarrayFromRepo(int64_t unitSn,
+                                               RepoFile::Token token,
+                                               bool makeStatic);
+  static const StringData* loadLitstrFromRepo(int64_t unitSn,
+                                              RepoFile::Token token,
+                                              bool makeStatic);
+  static const RepoAuthType::Array* loadRATArrayFromRepo(int64_t unitSn,
+                                                         RepoFile::Token token);
 
   /////////////////////////////////////////////////////////////////////////////
   // FuncEmitters.
 
   /*
-   * The Unit's pseudomain emitter.
-   */
-  FuncEmitter* getMain();
-
-  /*
    * Const reference to all of the Unit's FuncEmitters.
    */
-  const std::vector<FuncEmitter*>& fevec() const;
-
-  /*
-   * Create the pseudomain emitter for the Unit.
-   *
-   * @requires: fevec().size() == 0
-   */
-  void initMain(int line1, int line2);
-
-  /*
-   * Create a trivial (i.e., Int 1; RetC) pseudomain emitter for the Unit.
-   *
-   * @requires: fevec().size() == 0
-   */
-  void addTrivialPseudoMain();
+  auto const& fevec() const;
 
   /*
    * Create a new FuncEmitter and add it to the FE vector.
    */
-  FuncEmitter* newFuncEmitter(const StringData* name);
+  FuncEmitter* newFuncEmitter(const StringData* name, int64_t sn = -1);
 
   /*
    * Create a new FuncEmitter for the method given by `name' and `pce'.
    *
    * Does /not/ add it to the FE vector.
    */
-  FuncEmitter* newMethodEmitter(const StringData* name, PreClassEmitter* pce);
-
-  /*
-   * Add `fe' to the FE vector.
-   */
-  void appendTopEmitter(FuncEmitter* fe);
-
-  /*
-   * Finish adding a FuncEmitter to the Unit and record its bytecode range.
-   *
-   * This can only be done once for each FuncEmitter, after it is added to the
-   * FE vector.  None of the bytecode ranges of FuncEmitters added to the Unit
-   * are allowed to overlap.
-   *
-   * Takes logical ownership of `fe'.
-   */
-  void recordFunction(FuncEmitter* fe);
-
-  /*
-   * Create a new function for `fe'.
-   *
-   * This should only be called from fe->create(), and just constructs a new
-   * Func* and records it as emitted from `fe'.
-   */
-  Func* newFunc(const FuncEmitter* fe, Unit& unit, const StringData* name,
-                Attr attrs, int numParams);
-
+  FuncEmitter* newMethodEmitter(const StringData* name, PreClassEmitter* pce, int64_t sn = -1);
 
   /////////////////////////////////////////////////////////////////////////////
   // PreClassEmitters.
@@ -215,38 +190,14 @@ struct UnitEmitter {
   size_t numPreClasses() const;
 
   /*
-   * The PreClassEmitter for `preClassId'.
+   * All PreClassEmitters in the Unit.
    */
-  const PreClassEmitter* pce(Id preClassId) const;
-  PreClassEmitter* pce(Id preClassId);
-
-  /*
-   * The id for the pre-class named clsName, or -1 if
-   * there is no such pre-class
-   */
-  Id pceId(folly::StringPiece clsName);
-
-  /*
-   * Add a PreClassEmitter to the hoistability tracking data structures.
-   *
-   * @see: PreClass::Hoistable
-   */
-  void addPreClassEmitter(PreClassEmitter* pce);
+  folly::Range<PreClassEmitter* const*> preclasses() const;
 
   /*
    * Create a new PreClassEmitter and add it to all the PCE data structures.
-   *
-   * @see: PreClass::Hoistable
    */
-  PreClassEmitter* newPreClassEmitter(const std::string& name,
-                                      PreClass::Hoistable hoistable);
-  /*
-   * Create a new PreClassEmitter without adding it to the hoistability
-   * tracking data structures.
-   * It should be added later with addPreClassEmitter.
-   */
-  PreClassEmitter* newBarePreClassEmitter(const std::string& name,
-                                          PreClass::Hoistable hoistable);
+  PreClassEmitter* newPreClassEmitter(const std::string& name);
 
   /////////////////////////////////////////////////////////////////////////////
   // Type aliases.
@@ -254,102 +205,40 @@ struct UnitEmitter {
   /*
    * Const reference to all of the Unit's type aliases.
    */
-  const std::vector<TypeAlias>& typeAliases() const;
+  auto const& typeAliases() const;
 
   /*
    * Add a new type alias to the Unit.
    */
-  Id addTypeAlias(const TypeAlias& td);
-
-
-  /////////////////////////////////////////////////////////////////////////////
-  // Source locations.
-
-  /*
-   * Return a copy of the SrcLocTable for the Unit, if it has one; otherwise,
-   * return an empty table.
-   */
-  SourceLocTable createSourceLocTable() const;
-
-  /*
-   * Does this Unit contain full source location information?
-   *
-   * Generally, UnitEmitters loaded from a production repo will have a
-   * LineTable only instead of a full SourceLocTable.
-   */
-  bool hasSourceLocInfo() const;
-
-  /*
-   * Const reference to the Unit's LineTable.
-   */
-  const LineTable& lineTable() const;
-
-  /*
-   * Record source location information for the last chunk of bytecode added to
-   * this UnitEmitter.
-   *
-   * Adjacent regions associated with the same source line will be collapsed as
-   * this is created.
-   */
-  void recordSourceLocation(const Location::Range& sLoc, Offset start);
-
+  TypeAliasEmitter* newTypeAliasEmitter(const std::string& name);
 
   /////////////////////////////////////////////////////////////////////////////
-  // Mergeables.
-  //
-  // See unit.h for documentation of Unit merging.
+  // Constants.
 
   /*
-   * Append a PreClassEmitter to the UnitEmitter's list of mergeables.
+   * Reference to all of the Unit's type aliases.
    */
-  void pushMergeableClass(PreClassEmitter* e);
+  std::vector<Constant>& constants();
+  const std::vector<Constant>& constants() const;
 
   /*
-   * Add a Unit include to the UnitEmitter's list of mergeables.
-   *
-   * The `push' flavor first merges the litstr `unitName', and then appends the
-   * mergeable object reference to the list.  The `insert' flavor inserts the
-   * mergeable (kind, id) at `ix' in the list.
+   * Add a new constant to the Unit.
    */
-  void pushMergeableInclude(Unit::MergeKind kind, const StringData* unitName);
-  void insertMergeableInclude(int ix, Unit::MergeKind kind, Id id);
-
-  /*
-   * Add a constant definition to the UnitEmitter's list of mergeables.
-   *
-   * The `push' flavor first merges the litstr `unitName', and then appends the
-   * mergeable object reference to the list.  The `insert' flavor inserts the
-   * mergeable (kind, id) at `ix' in the list.
-   *
-   * The mergeable value is appended or inserted likewise.
-   */
-  void pushMergeableDef(Unit::MergeKind kind, const StringData* name,
-                        const TypedValue& tv);
-  void insertMergeableDef(int ix, Unit::MergeKind kind, Id id,
-                          const TypedValue& tv);
-
-  /*
-   * Add a TypeAlias to the UnitEmitter's list of mergeables.
-   */
-  void pushMergeableTypeAlias(Unit::MergeKind kind, const Id id);
-  void insertMergeableTypeAlias(int ix, Unit::MergeKind kind, const Id id);
+  Id addConstant(const Constant& c);
 
   /////////////////////////////////////////////////////////////////////////////
-  // Bytecode emit.
-  //
-  // These methods emit values to bc() at bcPos() (or pos, if given) and then
-  // update bcPos(), realloc-ing the bytecode region if necessary.
+  // Modules.
 
-  void emitOp(Op op);
-  void emitByte(unsigned char n, int64_t pos = -1);
+  /*
+   * Reference to all of the Unit's modules.
+   */
+  std::vector<Module>& modules();
+  const std::vector<Module>& modules() const;
 
-  void emitInt32(int n, int64_t pos = -1);
-  void emitInt64(int64_t n, int64_t pos = -1);
-  void emitDouble(double n, int64_t pos = -1);
-
-  void emitIVA(bool) = delete;
-  template<typename T> void emitIVA(T n);
-
+  /*
+   * Add a new module to the Unit.
+   */
+  Id addModule(const Module&);
 
   /////////////////////////////////////////////////////////////////////////////
   // Other methods.
@@ -357,224 +246,159 @@ struct UnitEmitter {
   /*
    * Is this a Unit for a systemlib?
    */
-  bool isASystemLib() const;
- private:
-  /*
-   * Bytecode emit implementation.
-   */
-  template<class T>
-  void emitImpl(T n, int64_t pos);
+  bool isSystemLib() const;
 
+  /*
+   * Use StructuredLog to record decl related information about this unit.
+   */
+  void logDeclInfo() const;
+
+  /////////////////////////////////////////////////////////////////////////////
+  // EntryPoint.
+
+  void finish();
+
+  void setEntryPointIdCalculated();
+
+  Id getEntryPointId() const;
+
+  /////////////////////////////////////////////////////////////////////////////
+  // Package info.
+
+  const PackageInfo& getPackageInfo() const;
+
+  const StringData* getPackageOverride() const;
+
+private:
+  void calculateEntryPointId();
+
+  static const ArrayData* loadLitarrayFromPtr(const char*, size_t);
 
   /////////////////////////////////////////////////////////////////////////////
   // Data members.
 
-private:
-  // Initial bytecode size.
-  static const size_t BCMaxInit = 4096;
-
 public:
-  int m_repoId{-1};
   int64_t m_sn{-1};
   const StringData* m_filepath{nullptr};
 
-  bool m_mergeOnly{false};
-  bool m_isHHFile{false};
-  bool m_useStrictTypes{false};
-  bool m_useStrictTypesForBuiltins{false};
-  bool m_returnSeen{false};
+  bool m_softDeployedRepoOnly{false}; // is it part of a soft package?
   bool m_ICE{false}; // internal compiler error
-  int m_preloadPriority{0};
-  TypedValue m_mainReturn;
+  bool m_fatalUnit{false}; // parse/runtime error
+  UnitEmitterAttributes m_attributes;
   UserAttributeMap m_metaData;
+  UserAttributeMap m_fileAttributes;
+
+  // A list of dependencies queried by the frontend while compiling
+  // this unit.
+  std::vector<DeclDep> m_deps;
+
+  // A list of symbols which will be required by this unit at runtime.
+  SymbolRefs m_symbol_refs;
+
+  /*
+   * Extension this unit is part of. Can be used to get the native func impl
+   */
+  const Extension* m_extension{nullptr};
+
+  Location::Range m_fatalLoc;
+  FatalOp m_fatalOp;
+  PackedStringPtr m_moduleName{s_DEFAULT.get()};
+  std::string m_fatalMsg;
+  PackageInfo m_packageInfo;
+
+  /*
+   * HackC may report a list of referenced symbols which either could not be
+   * looked up or did not exist while compiling the unit.
+   *
+   * These are initialized when either StressShallowDeclDeps or
+   * StressFoldedDeclDeps is true during compilation.
+   */
+  std::vector<const StringData*> m_missingSyms;
+  std::vector<const StringData*> m_errorSyms;
 
 private:
-  MD5 m_md5;
-
-  unsigned char* m_bc;
-  size_t m_bclen;
-  size_t m_bcmax;
+  SHA1 m_sha1;
+  SHA1 m_bcSha1;
 
   int m_nextFuncSn;
 
   /*
    * Litstr tables.
    */
-  hphp_hash_map<const StringData*, Id,
-                string_data_hash, string_data_same> m_litstr2id;
-  std::vector<const StringData*> m_litstrs;
+  hphp_fast_map<const StringData*, Id> m_litstr2id;
+  mutable std::vector<UnsafeLockFreePtrWrapper<StringOrToken>> m_litstrs;
 
   /*
    * Scalar array tables.
    */
-  hphp_hash_map<const ArrayData*, Id> m_array2id;
-  std::vector<const ArrayData*> m_arrays;
+  hphp_fast_map<const ArrayData*, Id> m_array2id;
+  mutable std::vector<UnsafeLockFreePtrWrapper<ArrayOrToken>> m_arrays;
 
   /*
-   * Unit local array type table.
+   * Repo-auth-type arrays.
    */
-  ArrayTypeTable m_arrayTypeTable;
+  hphp_fast_map<const RepoAuthType::Array*, Id> m_rat2id;
+  mutable std::vector<UnsafeLockFreePtrWrapper<RATArrayOrToken>> m_rats;
 
   /*
    * Type alias table.
    */
-  std::vector<TypeAlias> m_typeAliases;
+  std::vector<std::unique_ptr<TypeAliasEmitter>> m_typeAliases;
+
+  /*
+   * Constants table.
+   */
+  std::vector<Constant> m_constants;
+
+  /*
+   * Modules table.
+   */
+  std::vector<Module> m_modules;
 
   /*
    * FuncEmitter tables.
    */
-  std::vector<FuncEmitter*> m_fes;
-  hphp_hash_map<const FuncEmitter*, Func*,
-                pointer_hash<FuncEmitter>> m_fMap;
+  std::vector<std::unique_ptr<FuncEmitter> > m_fes;
 
   /*
    * PreClassEmitter table.
    */
   std::vector<PreClassEmitter*> m_pceVec;
 
-  /*
-   * Hoistability tables.
-   */
-  bool m_allClassesHoistable;
-  hphp_hash_set<const StringData*,
-                string_data_hash,
-                string_data_isame> m_hoistablePreClassSet;
-  std::list<Id> m_hoistablePceIdList;
+  mutable std::mutex m_verifyLock;
 
-  /*
-   * Mergeables tables.
-   */
-  std::vector<std::pair<Unit::MergeKind, Id>> m_mergeableStmts;
-  std::vector<std::pair<Id, TypedValue>> m_mergeableValues;
+  Id m_entryPointId{kInvalidId};
 
-  /*
-   * Source location tables.
-   *
-   * Each entry encodes an open-closed range of bytecode offsets.
-   *
-   * The m_sourceLocTab is keyed by the start of each half-open range.  This is
-   * to allow appending new bytecode offsets that are part of the same range to
-   * coalesce.
-   *
-   * The m_lineTable is keyed by the past-the-end offset.  This is the
-   * format we'll want it in when we go to create a Unit.
-   */
-  std::vector<std::pair<Offset,SourceLoc>> m_sourceLocTab;
-  std::vector<const FuncEmitter*> m_feTab;
-  LineTable m_lineTable;
+  bool m_entryPointIdCalculated{false};
+
+  // When deserializing, used to provide the location of raw array
+  // data to lookupArray.
+  const char* m_litarrayBuffer{nullptr};
+  size_t m_litarrayBufferSize{0};
 };
 
 ///////////////////////////////////////////////////////////////////////////////
 
-/*
- * Proxy for converting in-repo unit representations into UnitEmitters.
- */
-struct UnitRepoProxy : public RepoProxy {
-  friend struct Unit;
-  friend struct UnitEmitter;
-
-  explicit UnitRepoProxy(Repo& repo);
-  ~UnitRepoProxy();
-  void createSchema(int repoId, RepoTxn& txn); // throws(RepoExc)
-  std::unique_ptr<Unit> load(const std::string& name, const MD5& md5);
-  std::unique_ptr<UnitEmitter> loadEmitter(const std::string& name,
-                                           const MD5& md5);
-
-  void insertUnitLineTable(int repoId, RepoTxn& txn, int64_t unitSn,
-                           LineTable& lineTable); // throws(RepoExc)
-  void getUnitLineTable(int repoId, int64_t unitSn, LineTable& lineTable);
-  // throws(RepoExc)
-
-  struct InsertUnitStmt : public RepoProxy::Stmt {
-    InsertUnitStmt(Repo& repo, int repoId) : Stmt(repo, repoId) {}
-    void insert(const UnitEmitter& ue,
-                RepoTxn& txn,
-                int64_t& unitSn,
-                const MD5& md5,
-                const unsigned char* bc,
-                size_t bclen); // throws(RepoExc)
-  };
-  struct GetUnitStmt : public RepoProxy::Stmt {
-    GetUnitStmt(Repo& repo, int repoId) : Stmt(repo, repoId) {}
-    RepoStatus get(UnitEmitter& ue, const MD5& md5);
-  };
-  struct InsertUnitLitstrStmt : public RepoProxy::Stmt {
-    InsertUnitLitstrStmt(Repo& repo, int repoId) : Stmt(repo, repoId) {}
-    void insert(RepoTxn& txn, int64_t unitSn, Id litstrId,
-                const StringData* litstr); // throws(RepoExc)
-  };
-  struct GetUnitLitstrsStmt : public RepoProxy::Stmt {
-    GetUnitLitstrsStmt(Repo& repo, int repoId) : Stmt(repo, repoId) {}
-    void get(UnitEmitter& ue); // throws(RepoExc)
-  };
-  struct InsertUnitArrayTypeTableStmt : public RepoProxy::Stmt {
-    InsertUnitArrayTypeTableStmt(Repo& repo, int repoId) : Stmt(repo, repoId) {}
-    void insert(RepoTxn& txn, int64_t unitSn,
-                const ArrayTypeTable& att); // throws(RepoExc)
-  };
-  struct GetUnitArrayTypeTableStmt : public RepoProxy::Stmt {
-    GetUnitArrayTypeTableStmt(Repo& repo, int repoId) : Stmt(repo, repoId) {}
-    void get(UnitEmitter& ue); // throws(RepoExc)
-  };
-  struct InsertUnitArrayStmt : public RepoProxy::Stmt {
-    InsertUnitArrayStmt(Repo& repo, int repoId) : Stmt(repo, repoId) {}
-    void insert(RepoTxn& txn, int64_t unitSn, Id arrayId,
-                const std::string& array); // throws(RepoExc)
-  };
-  struct GetUnitArraysStmt : public RepoProxy::Stmt {
-    GetUnitArraysStmt(Repo& repo, int repoId) : Stmt(repo, repoId) {}
-    void get(UnitEmitter& ue); // throws(RepoExc)
-  };
-  struct InsertUnitMergeableStmt : public RepoProxy::Stmt {
-    InsertUnitMergeableStmt(Repo& repo, int repoId) : Stmt(repo, repoId) {}
-    void insert(RepoTxn& txn, int64_t unitSn,
-                int ix, Unit::MergeKind kind,
-                Id id, TypedValue* value); // throws(RepoExc)
-  };
-  struct GetUnitMergeablesStmt : public RepoProxy::Stmt {
-    GetUnitMergeablesStmt(Repo& repo, int repoId) : Stmt(repo, repoId) {}
-    void get(UnitEmitter& ue); // throws(RepoExc)
-  };
-  struct InsertUnitSourceLocStmt : public RepoProxy::Stmt {
-    InsertUnitSourceLocStmt(Repo& repo, int repoId) : Stmt(repo, repoId) {}
-    void insert(RepoTxn& txn, int64_t unitSn, Offset pastOffset, int line0,
-                int char0, int line1, int char1); // throws(RepoExc)
-  };
-  struct GetSourceLocTabStmt : public RepoProxy::Stmt {
-    GetSourceLocTabStmt(Repo& repo, int repoId) : Stmt(repo, repoId) {}
-    RepoStatus get(int64_t unitSn, SourceLocTable& sourceLocTab);
-  };
-
-#define URP_IOP(o) URP_OP(Insert##o, insert##o)
-#define URP_GOP(o) URP_OP(Get##o, get##o)
-#define URP_OPS \
-  URP_IOP(Unit) \
-  URP_GOP(Unit) \
-  URP_IOP(UnitLitstr) \
-  URP_GOP(UnitLitstrs) \
-  URP_IOP(UnitArrayTypeTable) \
-  URP_GOP(UnitArrayTypeTable) \
-  URP_IOP(UnitArray) \
-  URP_GOP(UnitArrays) \
-  URP_IOP(UnitMergeable) \
-  URP_GOP(UnitMergeables) \
-  URP_IOP(UnitSourceLoc) \
-  URP_GOP(SourceLocTab)
-
-#define URP_OP(c, o) \
-  c##Stmt o[RepoIdCount];
-  URP_OPS
-#undef URP_OP
-
-private:
-  RepoStatus loadHelper(UnitEmitter& ue, const std::string&, const MD5&);
+// UnitEmitter's serde implementation does not serialize all of the
+// UnitEmitter's data (it is sometimes stored elsewhere). This is a
+// wrapper around a UnitEmitter allowing for complete stand-alone
+// serializating and deserializing.
+struct UnitEmitterSerdeWrapper {
+  UnitEmitterSerdeWrapper() = default;
+  /* implicit */ UnitEmitterSerdeWrapper(std::unique_ptr<UnitEmitter> ue)
+      : m_ue{std::move(ue)} {}
+  std::unique_ptr<UnitEmitter> m_ue;
+  template <typename SerDe> void serde(SerDe& sd);
 };
 
+///////////////////////////////////////////////////////////////////////////////
+
 std::unique_ptr<UnitEmitter> createFatalUnit(
-  StringData* filename,
-  const MD5& md5,
+  const StringData* filename,
+  const SHA1& sha1,
   FatalOp op,
-  StringData* err
+  std::string err,
+  Location::Range loc = {-1,-1,-1,-1}
 );
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -583,5 +407,3 @@ std::unique_ptr<UnitEmitter> createFatalUnit(
 #define incl_HPHP_VM_UNIT_EMITTER_INL_H_
 #include "hphp/runtime/vm/unit-emitter-inl.h"
 #undef incl_HPHP_VM_UNIT_EMITTER_INL_H_
-
-#endif // incl_HPHP_VM_UNIT_EMITTER_H_

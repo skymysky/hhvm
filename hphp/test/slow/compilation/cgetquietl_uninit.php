@@ -1,33 +1,38 @@
 <?hh
 
-function test($a) {
-  $ret = varray[];
-  $s = varray[];
+function test($a) :mixed{
+  $ret = vec[];
+  $s = vec[];
   foreach ($a as $v) {
     foreach ($v as $t) {
+      $s = $s ?? vec[];
       $s[] = $t;
     }
-    $s = $s ?? varray[];
+    $s = $s ?? vec[];
     $ret[] = $s;
-    unset($s);
+    $s = null;
   }
   return $ret;
 }
 
+
+<<__EntryPoint>>
+function main_cgetquietl_uninit() :mixed{
 for ($i = 0; $i < 50; $i++) {
-  test(array(
-         array(1,2,3),
-         array(),
-         array(),
-         array(4,5,6),
-         array(),
-       ));
+  test(vec[
+         vec[1,2,3],
+         vec[],
+         vec[],
+         vec[4,5,6],
+         vec[],
+       ]);
 }
 
-var_dump(test(array(
-                array(1,2,3),
-                array(),
-                array(),
-                array(4,5,6),
-                array(),
-              )));
+var_dump(test(vec[
+                vec[1,2,3],
+                vec[],
+                vec[],
+                vec[4,5,6],
+                vec[],
+              ]));
+}

@@ -1,40 +1,40 @@
 <?hh
 
-function f(int $foo, ...$args): void {}
+function f(int $foo, mixed ...$args): void {}
 
-function g(string $foo, ...$args): void {}
+function g(string $foo, mixed ...$args): void {}
 
 class C1 {
   public function __construct(
     private int $foo,
-    private ...$args
+    private mixed ...$args
   ) {}
-  public function f(int $foo, ...$args): void {}
+  public function f(int $foo, mixed ...$args): void {}
 }
 
 class C2 extends C1 {
   public function __construct(
     private int $foo,
-    private ...$args
+    private mixed ...$args
   ) {
     parent::__construct($foo, ...$args);
   }
 }
 
 function make_int_args(): Container<int> {
-  // UNSAFE
+  return vec[];
 }
 
-function make_mixed_args(): array<mixed> {
-  // UNSAFE
+function make_mixed_args(): varray<mixed> {
+  return vec[];
 }
 
 function make_str_args(): Vector<string> {
-  // UNSAFE
+  return Vector {};
 }
 
 function test_basic(): void {
-  $args = array(1, 2, 3);
+  $args = vec[1, 2, 3];
   f(...$args);
   $inst = new C1(...$args);
   $inst->f(...$args);
@@ -49,11 +49,11 @@ function test_basic(): void {
   }
 
   f(...make_int_args());
-  $make = fun('make_int_args');
+  $make = make_int_args<>;
   f(...$make());
 
   f(1, ...make_mixed_args());
-  $make = fun('make_mixed_args');
+  $make = make_mixed_args<>;
   f(1, ...$make());
 
   g(
@@ -63,9 +63,9 @@ function test_basic(): void {
   );
 }
 
-function test_limitations() {
+function test_limitations(): void {
   // fails at runtime, but we don't track array arity!
-  $args = array();
+  $args = dict[];
   f(...$args);
 
   // fails at runtime, but we don't ensure that container doesn't have
@@ -77,12 +77,16 @@ function test_limitations() {
   $args = Map { 'a' => 1, 'b' => 2, };
   f(1, ...$args);
 
-  $args = array( 'a' => 1, 'b' => 2 );
+  $args = dict[ 'a' => 1, 'b' => 2 ];
   f(1, ...$args);
 
   // fails at runtime, but we don't unpack the container's content type
   // because issuing errors for mixed pretty much destroys the feature
-  f(...make_string_args());
-  $make = fun('make_string_args');
+  f(...make_mixed());
+  $make = make_mixed<>;
   f(...$make());
+}
+
+function make_mixed(): mixed {
+  throw new Exception('');
 }

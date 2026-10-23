@@ -16,55 +16,56 @@
 
 #include "hphp/runtime/vm/jit/ir-opcode.h"
 
-#include "hphp/runtime/base/string-data.h"
-#include "hphp/runtime/vm/jit/cfg.h"
 #include "hphp/runtime/vm/jit/extra-data.h"
-#include "hphp/runtime/vm/jit/ir-instruction.h"
-#include "hphp/runtime/vm/jit/ir-unit.h"
-#include "hphp/runtime/vm/jit/ssa-tmp.h"
-#include "hphp/runtime/vm/jit/print.h"
-#include "hphp/runtime/vm/jit/type.h"
-#include "hphp/runtime/vm/runtime.h"
 
+#include "hphp/util/configs/eval.h"
 #include "hphp/util/trace.h"
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 ///////////////////////////////////////////////////////////////////////////////
 
-TRACE_SET_MOD(hhir);
+TRACE_SET_MOD(hhir)
 
 #define NF     0
 #define PRc    ProducesRC
-#define CRc    ConsumesRC
+#define PNRc   (ProducesNewRC|ProducesRC)
 #define T      Terminal
 #define B      Branch
 #define P      Passthrough
-#define MProp  MInstrProp
-#define MElem  MInstrElem
+#define LA     LayoutAgnostic
+#define LP     (LayoutPreserving|LayoutAgnostic)
 
 #define ND             0
 #define D(n)           HasDest
 #define DofS(n)        HasDest
 #define DRefineS(n)    HasDest
-#define DParamMayRelax(t) HasDest
 #define DParam(t)      HasDest
-#define DParamPtr(k)   HasDest
 #define DLdObjCls      HasDest
-#define DUnboxPtr      HasDest
-#define DBoxPtr        HasDest
 #define DAllocObj      HasDest
-#define DArrElem       HasDest
+#define DBespokeElem   HasDest
+#define DBespokeElemUninit   HasDest
+#define DBespokePosKey HasDest
+#define DBespokePosVal HasDest
+#define DIterKey       HasDest
+#define DIterVal       HasDest
 #define DVecElem       HasDest
 #define DDictElem      HasDest
 #define DKeysetElem    HasDest
-#define DArrPacked     HasDest
-#define DArrMixed      HasDest
-#define DVArr          HasDest
-#define DDArr          HasDest
-#define DStaticDArr    HasDest
+#define DModified(n)   HasDest
+#define DArrLikeSet    HasDest
+#define DArrLikeSetPos HasDest
+#define DArrLikeUnset  HasDest
+#define DArrLikeAppend HasDest
+#define DEscalateToVanilla HasDest
+#define DVecKey           HasDest
+#define DFirstElem        HasDest
+#define DLastElem         HasDest
+#define DFirstKey         HasDest
+#define DLastKey          HasDest
+#define DLoggingArrLike   HasDest
+#define DStructDict    HasDest
+#define DTypeStructElem   HasDest
 #define DCol           HasDest
-#define DCtx           HasDest
-#define DCtxCls        HasDest
 #define DMulti         NaryDest
 #define DSetElem       HasDest
 #define DPtrToParam    HasDest
@@ -72,9 +73,40 @@ TRACE_SET_MOD(hhir);
 #define DCall          HasDest
 #define DGenIter       HasDest
 #define DSubtract(n,t) HasDest
-#define DCns           HasDest
 #define DUnion(...)    HasDest
 #define DMemoKey       HasDest
+#define DLvalOfPtr     HasDest
+#define DTypeCnsClsName HasDest
+#define DVerifyCoerce  HasDest
+#define DPropLval      HasDest
+#define DElemLval      HasDest
+#define DElemLvalPos   HasDest
+#define DCOW           HasDest
+#define DStructTypeBound HasDest
+#define DLdCls         HasDest
+
+#define CR    IRSrcFlag::Consume
+#define MMR   IRSrcFlag::Consume | IRSrcFlag::MayMove
+#define MR    IRSrcFlag::Consume | IRSrcFlag::MayMove | IRSrcFlag::Move
+
+constexpr auto processIRSrcFlags = [] (const vector<IRSrcFlag>& flags) {
+  if (flags.empty()) return IRSrcFlag::None;
+  assertx(flags.size() == 1);
+  return flags[0];
+};
+
+#define NA
+#define C(T, ...)                 processIRSrcFlags({__VA_ARGS__}),
+#define CStr(...)                 processIRSrcFlags({__VA_ARGS__}),
+#define SBespokeArr(...)          processIRSrcFlags({__VA_ARGS__}),
+#define SMonotypeVec(...)         processIRSrcFlags({__VA_ARGS__}),
+#define SMonotypeDict(...)        processIRSrcFlags({__VA_ARGS__}),
+#define STypeStructure(...)       processIRSrcFlags({__VA_ARGS__}),
+#define SNullptr(T, ...)          processIRSrcFlags({__VA_ARGS__}),
+#define SVar(T, ...)              processIRSrcFlags({__VA_ARGS__}),
+#define SStructDict(...)          processIRSrcFlags({__VA_ARGS__}),
+#define S(T, ...)                 processIRSrcFlags({__VA_ARGS__}),
+#define SCrossTrace               IRSrcFlag::None, IRSrcFlag::None, MMR,
 
 namespace {
 template<Opcode op, uint64_t flags>
@@ -89,9 +121,10 @@ struct op_flags {
 }
 
 OpInfo g_opInfo[] = {
-#define O(name, dsts, srcs, flags)                    \
-    { #name,                                          \
-       op_flags<name, dsts | flags>::value            \
+#define O(name, dsts, srcs, flags)                      \
+    { #name,                                            \
+      op_flags<name, dsts | flags>::value,              \
+      {srcs}                                            \
     },
   IR_OPCODES
 #undef O
@@ -102,38 +135,48 @@ OpInfo g_opInfo[] = {
 #undef C
 #undef E
 #undef PRc
-#undef CRc
+#undef PNRc
 #undef Er
 #undef T
 #undef B
 #undef P
 #undef K
-#undef MProp
-#undef MElem
 
 #undef ND
 #undef D
 #undef DofS
 #undef DRefineS
-#undef DParamMayRelax
 #undef DParam
-#undef DParamPtr
 #undef DLdObjCls
-#undef DUnboxPtr
-#undef DBoxPtr
-#undef DArrElem
+#undef DBespokeElemUninit
+#undef DBespokeElem
+#undef DBespokePosKey
+#undef DBespokePosVal
+#undef DIterKey
+#undef DIterVal
 #undef DVecElem
 #undef DDictElem
 #undef DKeysetElem
-#undef DArrPacked
-#undef DArrMixed
-#undef DVArr
-#undef DDArr
-#undef DStaticDArr
+#undef DModified
+#undef DArrLikeSet
+#undef DArrLikeSetPos
+#undef DArrLikeUnset
+#undef DArrLikeAppend
+#undef DEscalateToVanilla
+#undef DVecFirstElem
+#undef DVecLastElem
+#undef DVecKey
+#undef DDictFirstElem
+#undef DDictLastElem
+#undef DDictFirstKey
+#undef DDictLastKey
+#undef DKeysetFirstElem
+#undef DKeysetLastElem
+#undef DLoggingArrLike
+#undef DStructDict
+#undef DTypeStructElem
 #undef DCol
 #undef DAllocObj
-#undef DCtx
-#undef DCtxCls
 #undef DMulti
 #undef DSetElem
 #undef DPtrToParam
@@ -141,57 +184,38 @@ OpInfo g_opInfo[] = {
 #undef DCall
 #undef DGenIter
 #undef DSubtract
-#undef DCns
 #undef DUnion
 #undef DMemoKey
+#undef DLvalOfPtr
+#undef DTypeCnsClsName
+#undef DVerifyCoerce
+#undef DPropLval
+#undef DElemLval
+#undef DElemLvalPos
+#undef DCOW
+#undef DStructTypeBound
+#undef DLdCls
+
+#undef CR
+#undef MMR
+#undef MR
+
+#undef NA
+#undef S
+#undef SNullptr
+#undef C
+#undef CStr
+#undef SVar
+#undef SCrossTrace
+#undef SBespokeArr
+#undef SMonotypeVec
+#undef SMonotypeDict
+#undef STypeStructure
+#undef SStructDict
 
 ///////////////////////////////////////////////////////////////////////////////
 
-const StringData* findClassName(SSATmp* cls) {
-  assertx(cls->isA(TCls));
-
-  if (cls->hasConstVal()) {
-    return cls->clsVal()->preClass()->name();
-  }
-  // Try to get the class name from a LdCls
-  IRInstruction* clsInst = cls->inst();
-  if (clsInst->op() == LdCls || clsInst->op() == LdClsCached) {
-    SSATmp* clsName = clsInst->src(0);
-    assertx(clsName->isA(TStr));
-    if (clsName->hasConstVal()) {
-      return clsName->strVal();
-    }
-  }
-  return nullptr;
-}
-
-bool isCallOp(Opcode opc) {
-  // CallBuiltin doesn't count because it is not a php-level call.  (It will
-  // call a C++ helper and we can push/pop around it normally.)
-  switch (opc) {
-  case Call:
-  case CallUnpack:
-  case ContEnter:
-    return true;
-  default:
-    return false;
-  }
-}
-
-bool isGuardOp(Opcode opc) {
-  switch (opc) {
-    case CheckLoc:
-    case CheckStk:
-    case CheckType:
-    case CheckMBase:
-      return true;
-
-    default:
-      return false;
-  }
-}
-
-folly::Optional<Opcode> negateCmpOp(Opcode opc) {
+Optional<Opcode> negateCmpOp(Opcode opc) {
   switch (opc) {
     case GtBool:              return LteBool;
     case GteBool:             return LtBool;
@@ -220,13 +244,6 @@ folly::Optional<Opcode> negateCmpOp(Opcode opc) {
     case SameStr:             return NSameStr;
     case NSameStr:            return SameStr;
 
-    case GtStrInt:            return LteStrInt;
-    case GteStrInt:           return LtStrInt;
-    case LtStrInt:            return GteStrInt;
-    case LteStrInt:           return GtStrInt;
-    case EqStrInt:            return NeqStrInt;
-    case NeqStrInt:           return EqStrInt;
-
     // Objects can contain a property with NaN, so only equality comparisons can
     // be negated.
     case EqObj:               return NeqObj;
@@ -236,25 +253,10 @@ folly::Optional<Opcode> negateCmpOp(Opcode opc) {
 
     // Arrays/vec/dicts can contain an element with NaN, so only equality
     // comparisons can be negated.
-    case EqArr:               return NeqArr;
-    case NeqArr:              return EqArr;
-    case SameArr:             return NSameArr;
-    case NSameArr:            return SameArr;
-
-    case EqVec:               return NeqVec;
-    case NeqVec:              return EqVec;
-    case SameVec:             return NSameVec;
-    case NSameVec:            return SameVec;
-
-    case EqDict:              return NeqDict;
-    case NeqDict:             return EqDict;
-    case SameDict:            return NSameDict;
-    case NSameDict:           return SameDict;
-
-    case EqKeyset:            return NeqKeyset;
-    case NeqKeyset:           return EqKeyset;
-    case SameKeyset:          return NSameKeyset;
-    case NSameKeyset:         return SameKeyset;
+    case EqArrLike:           return NeqArrLike;
+    case NeqArrLike:          return EqArrLike;
+    case SameArrLike:         return NSameArrLike;
+    case NSameArrLike:        return SameArrLike;
 
     case GtRes:               return LteRes;
     case GteRes:              return LtRes;
@@ -263,68 +265,53 @@ folly::Optional<Opcode> negateCmpOp(Opcode opc) {
     case EqRes:               return NeqRes;
     case NeqRes:              return EqRes;
 
-    default:                  return folly::none;
+    default:                  return std::nullopt;
   }
 }
 
 bool opcodeMayRaise(Opcode opc) {
   switch (opc) {
-  // AKExistsArr, ArrayIdx, and ArrayIsset may only raise errors when the option
-  // EvalHackArrCompatNotices is set.
-  case AKExistsArr:
-  case ArrayIdx:
-  case ArrayIsset:
-    return RuntimeOption::EvalHackArrCompatNotices;
-
-  // Same thing for SameArr and NSameArr, but for EvalHackArrCompatDVCmpNotices.
-  case NSameArr:
-  case SameArr:
-    return RuntimeOption::EvalHackArrCompatDVCmpNotices;
-
-  // Same thing for IsTypeStruct, but for EvalHackArrCompatIsArrayNotices
-  // and EvalIsExprEnableUnresolvedWarning.
   case IsTypeStruct:
-    return RuntimeOption::EvalHackArrCompatIsArrayNotices
-      || RuntimeOption::EvalIsExprEnableUnresolvedWarning;
+  case IsTypeStructShallow:
+    return Cfg::Eval::IsExprEnableUnresolvedWarning ||
+           Cfg::Eval::IsVecNotices ||
+           Cfg::Eval::WarnOnImplicitCoercionOfEnumValue;
 
-  case AddElemIntKey:
-  case AddElemStrKey:
-  case AddNewElem:
-  case AddNewElemKeyset:
+  case StaticAnalysisError:
+    return !Cfg::Eval::CrashOnStaticAnalysisError;
+
   case AFWHPrepareChild:
   case AKExistsObj:
+  case AddNewElemKeyset:
   case AllocObj:
-  case ArrayAdd:
-  case ArrayGet:
-  case ArraySet:
-  case ArraySetRef:
-  case AsTypeStruct:
-  case BaseG:
-  case BindElem:
-  case BindNewElem:
-  case BindProp:
-  case Call:
-  case CallBuiltin:
-  case CallUnpack:
-  case CastMem:
-  case CastStk:
+  case ArrayMarkLegacyRecursive:
+  case ArrayMarkLegacyShallow:
+  case ArrayUnmarkLegacyRecursive:
+  case ArrayUnmarkLegacyShallow:
+  case BespokeAppend:
+  case BespokeElem:
+  case BespokeGetThrow:
+  case BespokeSet:
+  case BespokeUnset:
   case CGetElem:
   case CGetProp:
   case CGetPropQ:
+  case Call:
+  case CallBuiltin:
+  case CallFuncEntry:
+  case CheckClsMethFunc:
+  case CheckClsRGSoft:
+  case CheckClsReifiedGenericMismatch:
+  case CheckFunReifiedGenericMismatch:
+  case CheckFunReifiedGenericsWithNamedArgs:
+  case CheckFunNamedArgsMismatch:
+  case CheckInOutMismatch:
+  case CheckReadonlyMismatch:
   case CheckStackOverflow:
-  case CheckSurpriseAndStack:
-  case CheckSurpriseFlagsEnter:
   case Clone:
-  case CmpArr:
+  case CmpArrLike:
   case CmpObj:
-  case CmpVec:
-  case CoerceCellToBool:
-  case CoerceCellToDbl:
-  case CoerceCellToInt:
-  case CoerceMem:
-  case CoerceStk:
-  case CoerceStrToDbl:
-  case CoerceStrToInt:
+  case CmpRes:
   case ConcatIntStr:
   case ConcatStr3:
   case ConcatStr4:
@@ -332,439 +319,445 @@ bool opcodeMayRaise(Opcode opc) {
   case ConcatStrStr:
   case ConstructInstance:
   case ContEnter:
-  case ConvArrToDict:
-  case ConvArrToKeyset:
-  case ConvArrToVec:
-  case ConvCellToArr:
-  case ConvCellToDbl:
-  case ConvCellToInt:
-  case ConvCellToObj:
-  case ConvCellToStr:
-  case ConvDictToArr:
-  case ConvDictToDArr:
-  case ConvDictToKeyset:
-  case ConvKeysetToArr:
-  case ConvKeysetToDArr:
-  case ConvObjToArr:
-  case ConvObjToDArr:
+  case ConvArrLikeToDict:
+  case ConvArrLikeToKeyset:
+  case ConvArrLikeToVec:
+  case ConvObjToBool:
   case ConvObjToDbl:
   case ConvObjToDict:
   case ConvObjToInt:
   case ConvObjToKeyset:
   case ConvObjToStr:
-  case ConvObjToVArr:
   case ConvObjToVec:
-  case ConvResToStr:
-  case ConvVecToKeyset:
+  case ConvTVToBool:
+  case ConvTVToDbl:
+  case ConvTVToInt:
+  case ConvTVToStr:
   case Count:
-  case CreateAAWH:
-  case DecodeCufIter:
-  case DefCls:
-  case DictAddElemIntKey:
-  case DictAddElemStrKey:
+  case CreateCCWH:
   case DictGet:
   case DictSet:
-  case DictSetRef:
-  case ElemArrayD:
-  case ElemArrayU:
-  case ElemArrayX:
+  case ElemDX:
   case ElemDictD:
   case ElemDictU:
-  case ElemDictX:
-  case ElemDX:
-  case ElemKeysetU:
-  case ElemKeysetX:
   case ElemUX:
-  case ElemVecD:
-  case ElemVecU:
   case ElemX:
-  case EmptyElem:
-  case EmptyProp:
-  case EqArr:
-  case EqDict:
+  case EqArrLike:
   case EqObj:
-  case EqVec:
-  case FatalMissingThis:
+  case GetClsRGProp:
   case GetMemoKey:
-  case GtArr:
-  case GteArr:
-  case GteObj:
-  case GteVec:
+  case GtArrLike:
   case GtObj:
-  case GtVec:
+  case GtRes:
+  case GteArrLike:
+  case GteObj:
+  case GteRes:
+  case HandleRequestSurprise:
+  case HandleSurpriseEnter:
   case IncDecElem:
   case IncDecProp:
   case InitClsCns:
-  case InitExtraArgs:
   case InitProps:
   case InitSProps:
+  case InitSubClsCns:
+  case InlineSideExit:
   case InterpOne:
   case IssetElem:
   case IssetProp:
-  case IterInit:
-  case IterInitK:
-  case IterNext:
-  case IterNextK:
+  case IterExtractBase:
+  case IterInitObj:
+  case IterNextObj:
   case KeysetGet:
-  case LdArrFuncCtx:
   case LdCls:
   case LdClsCached:
   case LdClsCtor:
   case LdClsPropAddrOrNull:
   case LdClsPropAddrOrRaise:
-  case LdClsTypeCns:
+  case LdCoeffectFunParamNaive:
   case LdFunc:
   case LdFuncCached:
-  case LdFuncCachedU:
-  case LdObjMethod:
-  case LdSSwitchDestSlow:
-  case LdSwitchObjIndex:
+  case LdGblAddr:
+  case LdGblAddrDef:
+  case LdObjMethodD:
+  case LdObjMethodS:
+  case LdTypeCns:
+  case LdTypeCnsClsName:
+  case LdTypeCnsNoThrow:
+  case LookupClsCns:
+  case LookupClsCtxCns:
   case LookupClsMethod:
   case LookupClsMethodCache:
   case LookupClsMethodFCache:
-  case LookupCns:
   case LookupCnsE:
-  case LookupCnsU:
   case LookupFuncCached:
-  case LtArr:
-  case LteArr:
-  case LteObj:
-  case LteVec:
+  case LtArrLike:
   case LtObj:
-  case LtVec:
+  case LtRes:
+  case LteArrLike:
+  case LteObj:
+  case LteRes:
   case MapGet:
   case MapSet:
-  case MIterInit:
-  case MIterInitK:
+  case NSameArrLike:
   case NativeImpl:
-  case NeqArr:
-  case NeqDict:
+  case NeqArrLike:
   case NeqObj:
-  case NeqVec:
   case NewKeysetArray:
   case OODeclExists:
   case OrdStrIdx:
+  case OutlineSetOp:
   case PrintBool:
   case PrintInt:
   case PrintStr:
+  case ProfileSubClsCns:
   case PropDX:
   case PropQ:
+  case PropTypeRedefineCheck:
+  case PropTypeValid:
   case PropX:
-  case RaiseArrayIndexNotice:
-  case RaiseArrayKeyNotice:
+  case CheckStrictPackageDynamicReference:
+  case RaiseCoeffectsCallViolation:
+  case RaiseCoeffectsFunParamCoeffectRulesViolation:
+  case RaiseCoeffectsFunParamTypeViolation:
   case RaiseError:
+  case RaiseErrorOnInvalidIsAsExpressionType:
   case RaiseForbiddenDynCall:
-  case RaiseHackArrCompatNotice:
-  case RaiseHackArrParamNotice:
-  case RaiseMissingArg:
-  case RaiseMissingThis:
+  case RaiseForbiddenDynConstruct:
+  case RaiseMissingDynamicallyReferenced:
+  case RaiseModuleBoundaryViolation:
+  case RaiseModulePropertyViolation:
+  case ThrowMissingNamedParam:
+  case ThrowNamedArgumentNameMismatch:
+  case ThrowUnexpectedNamedArguments:
   case RaiseNotice:
-  case RaiseParamRefMismatchForFunc:
-  case RaiseParamRefMismatchForFuncName:
-  case RaiseUndefProp:
-  case RaiseUninitLoc:
-  case RaiseVarEnvDynCall:
+  case RaiseStrToClassNotice:
+  case RaiseTooManyArg:
   case RaiseWarning:
+  case RecordReifiedGenericsAndGetTSList:
+  case ReifiedInit:
   case ResolveTypeStruct:
   case ReturnHook:
+  case SameArrLike:
   case SetElem:
   case SetNewElem:
-  case SetNewElemArray:
-  case SetNewElemKeyset:
-  case SetNewElemVec:
-  case SetOpCell:
   case SetOpElem:
   case SetOpProp:
+  case SetOpTV:
   case SetProp:
-  case SetWithRefElem:
+  case SetRange:
+  case SetRangeRev:
   case StringGet:
   case SuspendHookAwaitEF:
   case SuspendHookAwaitEG:
   case SuspendHookAwaitR:
   case SuspendHookCreateCont:
   case SuspendHookYield:
-  case ThrowArithmeticError:
-  case ThrowDivisionByZeroError:
+  case ThrowArrayIndexException:
+  case ThrowArrayKeyException:
+  case ThrowAsTypeStructError:
+  case ThrowAsTypeStructException:
+  case ThrowCallReifiedFunctionWithoutGenerics:
+  case ThrowCannotModifyReadonlyCollection:
+  case ThrowDivisionByZeroException:
+  case ThrowHasThisNeedStatic:
+  case ThrowInOutMismatch:
   case ThrowInvalidArrayKey:
   case ThrowInvalidOperation:
+  case ThrowLateInitPropError:
+  case ThrowLocalMustBeValueTypeException:
+  case ThrowMissingArg:
+  case ThrowMissingThis:
+  case ThrowMustBeEnclosedInReadonly:
+  case ThrowMustBeMutableException:
+  case ThrowMustBeReadonlyException:
+  case ThrowMustBeValueTypeException:
   case ThrowOutOfBounds:
+  case ThrowReadonlyMismatch:
+  case ThrowUndefPropException:
+  case ThrowUninitLoc:
   case UnsetElem:
-  case UnsetProp:
-  case VecSet:
-  case VecSetRef:
+  case VectorSet:
+  case VerifyParam:
   case VerifyParamCallable:
   case VerifyParamCls:
+  case VerifyParamCoerce:
   case VerifyParamFail:
   case VerifyParamFailHard:
+  case VerifyProp:
+  case VerifyPropAll:
+  case VerifyPropCls:
+  case VerifyPropCoerce:
+  case VerifyPropCoerceAll:
+  case VerifyPropFail:
+  case VerifyPropFailHard:
+  case VerifyReifiedLocalType:
+  case VerifyReifiedReturnType:
+  case VerifyType:
+  case VerifyRet:
   case VerifyRetCallable:
   case VerifyRetCls:
+  case VerifyRetCoerce:
   case VerifyRetFail:
   case VerifyRetFailHard:
-  case VGetElem:
-  case VGetProp:
-  case WIterInit:
-  case WIterInitK:
-  case WIterNext:
-  case WIterNextK:
     return true;
 
+  case AFWHBlockOn:
+  case AFWHPushTailFrame:
+  case AKExistsDict:
+  case AKExistsKeyset:
   case AbsDbl:
   case AddDbl:
   case AddInt:
-  case AddIntO:
   case AddNewElemVec:
-  case AFWHBlockOn:
-  case AKExistsDict:
-  case AKExistsKeyset:
-  case AllocPackedArray:
-  case AllocVArray:
-  case AllocVecArray:
+  case AddOffset:
+  case AdvanceDictPtrIter:
+  case AdvanceKeysetPtrIter:
+  case AdvanceVecPtrIter:
+  case AllocBespokeStructDict:
+  case AllocInitROM:
+  case AllocStructDict:
+  case AllocVec:
   case AndInt:
   case AssertLoc:
   case AssertMBase:
   case AssertNonNull:
   case AssertStk:
   case AssertType:
-  case AssertARFunc:
   case AsyncFuncRet:
+  case AsyncFuncRetPrefetch:
   case AsyncFuncRetSlow:
+  case AsyncGenRetR:
+  case AsyncGenYieldR:
   case AsyncSwitchFast:
   case BeginCatch:
-  case BeginInlining:
-  case Box:
-  case BoxPtr:
+  case DefCalleeFP:
+  case BespokeEscalateToVanilla:
+  case BespokeGet:
+  case BespokeIterEnd:
+  case BespokeIterFirstPos:
+  case BespokeIterGetKey:
+  case BespokeIterGetVal:
+  case BespokeIterLastPos:
+  case BespokeSetPos:
+  case CallViolatesModuleBoundary:
   case Ceil:
-  case CheckARMagicFlag:
   case CheckArrayCOW:
   case CheckCold:
-  case CheckCtxThis:
-  case CheckDArray:
+  case CheckDictKeys:
   case CheckDictOffset:
-  case CheckFuncStatic:
-  case CheckInit:
-  case CheckInitMem:
-  case CheckInitProps:
-  case CheckInitSProps:
+  case CheckFuncNeedsCoverage:
   case CheckKeysetOffset:
   case CheckLoc:
-  case CheckMBase:
-  case CheckMixedArrayOffset:
+  case CheckMROProp:
+  case CheckMissingKeyInArrLike:
   case CheckNonNull:
   case CheckNullptr:
-  case CheckPackedArrayDataBounds:
+  case CheckPtrIterTombstone:
+  case CheckRDSInitialized:
   case CheckRange:
-  case CheckRefInner:
-  case CheckRefs:
-  case CheckStaticLoc:
-  case CheckStk:
+  case CheckSmashableClass:
   case CheckSubClsCns:
   case CheckSurpriseFlags:
+  case CheckSurpriseFlagsEnter:
   case CheckType:
-  case CheckTypeMem:
-  case CheckVArray:
+  case CheckVecBounds:
   case ChrInt:
+  case ClassHasAttr:
+  case ClassHasReifiedGenerics:
   case CmpBool:
   case CmpDbl:
   case CmpInt:
-  case CmpRes:
   case CmpStr:
-  case CmpStrInt:
   case ColIsEmpty:
   case ColIsNEmpty:
   case Conjure:
-  case ConjureUse:
+  case ConstructClosure:
   case ContArIncIdx:
   case ContArIncKey:
   case ContArUpdateIdx:
-  case ContPreNext:
-  case ContStarted:
-  case ContStartedCheck:
+  case ContCheckNext:
   case ContValid:
-  case ConvArrToBool:
-  case ConvArrToDArr:
-  case ConvArrToDbl:
-  case ConvArrToNonDVArr:
-  case ConvArrToVArr:
-  case ConvBoolToArr:
   case ConvBoolToDbl:
   case ConvBoolToInt:
-  case ConvCellToBool:
-  case ConvClsToCctx:
-  case ConvDblToArr:
   case ConvDblToBool:
   case ConvDblToInt:
   case ConvDblToStr:
-  case ConvDictToVArr:
-  case ConvDictToVec:
-  case ConvIntToArr:
+  case ConvFuncPrologueFlagsToARFlags:
   case ConvIntToBool:
   case ConvIntToDbl:
   case ConvIntToStr:
-  case ConvKeysetToDict:
-  case ConvKeysetToVArr:
-  case ConvKeysetToVec:
-  case ConvObjToBool:
+  case ConvPtrToLval:
   case ConvResToDbl:
   case ConvResToInt:
-  case ConvStrToArr:
   case ConvStrToBool:
   case ConvStrToDbl:
   case ConvStrToInt:
-  case ConvVecToArr:
-  case ConvVecToDArr:
-  case ConvVecToDict:
-  case ConvVecToVArr:
-  case CountArray:
-  case CountArrayFast:
+  case CopyArray:
   case CountCollection:
   case CountDict:
   case CountKeyset:
   case CountVec:
   case CountWHNotDone:
   case CreateAFWH:
-  case CreateAFWHNoVV:
-  case CreateAGen:
+  case CreateAFWHL:
   case CreateAGWH:
+  case CreateAGen:
+  case CreateFSWH:
   case CreateGen:
   case CreateSSWH:
   case DbgAssertFunc:
-  case DbgAssertARFunc:
   case DbgAssertRefCount:
+  case DbgCheckLocalsDecRefd:
   case DbgTraceCall:
   case DbgTrashFrame:
   case DbgTrashMem:
-  case DbgTrashRetVal:
+  case DbgTrap:
   case DbgTrashStk:
   case DblAsBits:
   case DebugBacktrace:
-  case DebugBacktraceFast:
   case DecRef:
   case DecRefNZ:
+  case DecReleaseCheck:
   case DefConst:
   case DefFP:
-  case DefInlineFP:
+  case DefFrameRelSP:
+  case DefFuncEntryArFlags:
+  case DefFuncEntryCalleeId:
+  case DefFuncEntryCtx:
+  case DefFuncEntryFP:
+  case DefFuncEntryPrevFP:
+  case DefFuncPrologueCallee:
+  case DefFuncPrologueCtx:
+  case DefFuncPrologueFlags:
+  case DefFuncPrologueNumArgs:
+  case DefFuncPrologueNamedArgs:
   case DefLabel:
-  case DefSP:
-  case DictEmptyElem:
+  case DefRegSP:
+  case DeserializeLazyProp:
+  case DictFirst:
+  case DictFirstKey:
   case DictGetK:
   case DictGetQuiet:
   case DictIdx:
   case DictIsset:
+  case DictIterEnd:
+  case DictLast:
+  case DictLastKey:
+  case DirFromFilepath:
   case DivDbl:
   case DivInt:
-  case EagerSyncVMRegs:
   case ElemDictK:
-  case ElemKeysetK:
-  case ElemMixedArrayK:
   case EndBlock:
   case EndCatch:
-  case EndGuards:
+  case LeaveInlineFrame:
   case EnterFrame:
+  case EnterInlineFrame:
+  case EnterPrologue:
+  case EnterTranslation:
   case EqArrayDataPtr:
   case EqBool:
+  case EqClassId:
   case EqCls:
   case EqDbl:
   case EqFunc:
+  case EqFuncId:
   case EqInt:
-  case EqKeyset:
+  case EqLazyCls:
+  case EqPtrIter:
   case EqRes:
   case EqStr:
-  case EqStrInt:
   case EqStrPtr:
-  case ExitPlaceholder:
+  case ExitPrologue:
   case ExtendsClass:
   case FinishMemberOp:
   case Floor:
-  case FuncGuard:
-  case FwdCtxStaticCall:
+  case FuncCred:
+  case FuncHasAttr:
+  case FuncHasReifiedGenerics:
   case GenericRetDecRefs:
+  case GetDictPtrIter:
+  case GetKeysetPtrIter:
   case GetMemoKeyScalar:
   case GetTime:
   case GetTimeNs:
+  case GetVecPtrIter:
   case GtBool:
   case GtDbl:
+  case GtInt:
+  case GtStr:
   case GteBool:
   case GteDbl:
   case GteInt:
-  case GteRes:
   case GteStr:
-  case GteStrInt:
-  case GtInt:
-  case GtRes:
-  case GtStr:
-  case GtStrInt:
+  case HasReifiedParent:
   case HasToString:
-  case HintLocInner:
-  case HintMBaseInner:
-  case HintStkInner:
+  case IncCallCounter:
   case IncProfCounter:
+  case IncStatCounter:
   case IncRef:
   case IncStat:
-  case InitCtx:
+  case InitDictElem:
+  case InitObjMemoSlots:
   case InitObjProps:
-  case InitPackedLayoutArray:
-  case InitPackedLayoutArrayLoop:
-  case InitStaticLoc:
+  case InitStructElem:
+  case InitStructPositions:
   case InitThrowableFileAndLine:
-  case InlineReturn:
-  case InlineReturnNoFrame:
+  case InitVecElem:
+  case InitVecElemLoop:
+  case InlineCall:
+  case InlineSideExitSyncStack:
   case InstanceOf:
   case InstanceOfBitmask:
   case InstanceOfIface:
   case InstanceOfIfaceVtable:
-  case InterfaceSupportsArr:
+  case IntAsPtrToElem:
+  case InterfaceSupportsArrLike:
   case InterfaceSupportsDbl:
-  case InterfaceSupportsDict:
   case InterfaceSupportsInt:
-  case InterfaceSupportsKeyset:
   case InterfaceSupportsStr:
-  case InterfaceSupportsVec:
   case InterpOneCF:
   case IsCol:
-  case IsDVArray:
-  case IsFuncDynCallable:
-  case IsNType:
-  case IsNTypeMem:
-  case IsType:
-  case IsTypeMem:
+  case IsFunReifiedGenericsMatched:
+  case IsLegacyArrLike:
+  case IsTypeStructCached:
   case IsWaitHandle:
-  case IterFree:
+  case IterGetKeyArr:
+  case IterGetValArr:
+  case IterInitArr:
+  case IterNextArr:
   case Jmp:
+  case JmpExit:
   case JmpNZero:
-  case JmpSSwitchDest:
-  case JmpSwitchDest:
   case JmpZero:
-  case KeysetEmptyElem:
+  case KeysetFirst:
   case KeysetGetK:
   case KeysetGetQuiet:
   case KeysetIdx:
   case KeysetIsset:
-  case KillClsRef:
-  case KillCufIter:
+  case KeysetIterEnd:
+  case KeysetLast:
+  case KillActRec:
+  case KillIter:
+  case KillLoc:
   case LdAFWHActRec:
-  case LdARCtx:
-  case LdARFuncPtr:
-  case LdARInvName:
-  case LdARIsDynamic:
-  case LdARNumArgsAndFlags:
-  case LdARNumParams:
+  case LdARFlags:
+  case LdARFunc:
   case LdBindAddr:
-  case LdCctx:
-  case LdClosure:
-  case LdClosureCtx:
-  case LdClosureStaticLoc:
-  case LdClsCachedSafe:
-  case LdClsCctx:
+  case LdClosureArg:
+  case LdClosureCls:
+  case LdClosureThis:
   case LdClsCns:
   case LdClsCnsVecLen:
-  case LdClsCtx:
+  case LdClsCtxCns:
+  case LdClsFromClsMeth:
+  case LdClsFromRClsMeth:
   case LdClsInitData:
+  case LdClsInitElem:
   case LdClsMethod:
   case LdClsMethodCacheCls:
   case LdClsMethodCacheFunc:
   case LdClsMethodFCacheFunc:
   case LdClsName:
-  case LdClsRef:
   case LdCns:
   case LdColDict:
   case LdColVec:
@@ -773,190 +766,226 @@ bool opcodeMayRaise(Opcode opc) {
   case LdContArValue:
   case LdContField:
   case LdContResumeAddr:
-  case LdCtx:
-  case LdCufIterCtx:
-  case LdCufIterDynamic:
-  case LdCufIterFunc:
-  case LdCufIterInvName:
-  case LdElem:
+  case LdEnumClassLabelName:
+  case LdFrameCls:
+  case LdFrameThis:
+  case LdFuncCls:
+  case LdFuncFromClsMeth:
+  case LdFuncFromRClsMeth:
+  case LdFuncFromRFunc:
+  case LdFuncInOutBits:
+  case LdFuncName:
   case LdFuncNumParams:
+  case LdFuncRequiredCoeffects:
   case LdFuncVecLen:
-  case LdGblAddr:
-  case LdGblAddrDef:
+  case LdGenericsFromRClsMeth:
+  case LdGenericsFromRFunc:
   case LdIfaceMethod:
+  case LdImplicitContext:
+  case LdImplicitContextMemoKey:
+  case LdMemoAgnosticIC:
+  case LdInitPropAddr:
+  case LdInitRDSAddr:
+  case LdIterEnd:
+  case LdIterPos:
+  case LdLazyClsName:
   case LdLoc:
   case LdLocAddr:
-  case LdLocPseudoMain:
+  case LdLocForeign:
   case LdMBase:
+  case LdMIStateTempBaseAddr:
   case LdMem:
-  case LdMIStateAddr:
+  case LdMethCallerName:
+  case LdMonotypeDictKey:
+  case LdMonotypeDictTombstones:
+  case LdMonotypeDictVal:
+  case LdMonotypeVecElem:
   case LdObjClass:
   case LdObjInvoke:
-  case LdPackedArrayDataElemAddr:
-  case LdPackedElem:
-  case LdPairBase:
+  case LdOutAddr:
+  case LdPairElem:
   case LdPropAddr:
+  case LdPtrIterKey:
+  case LdPtrIterVal:
+  case LdPublicFunc:
   case LdRDSAddr:
-  case LdRef:
+  case LdResolvedTypeCns:
+  case LdResolvedTypeCnsClsName:
+  case LdResolvedTypeCnsNoCheck:
   case LdRetVal:
-  case LdSSwitchDestFast:
-  case LdStaticLoc:
+  case LdSSwitchDest:
+  case LdSmashable:
+  case LdSmashableFunc:
   case LdStk:
   case LdStkAddr:
   case LdStrLen:
+  case LdStructDictKey:
+  case LdStructDictVal:
   case LdSubClsCns:
-  case LdSwitchDblIndex:
-  case LdSwitchStrIndex:
+  case LdSwitchDest:
   case LdTVAux:
-  case LdTypeCns:
+  case LdTVFromRDS:
+  case LdTypeStructureVal:
+  case LdTypeStructureValCns:
+  case LdUnitPerRequestFilepath:
   case LdUnwinderValue:
   case LdVecElem:
-  case LdVectorBase:
+  case LdVecElemAddr:
   case LdVectorSize:
   case LdWHNotDone:
   case LdWHResult:
   case LdWHState:
-  case LIterInit:
-  case LIterInitK:
-  case LIterNext:
-  case LIterNextK:
-  case LookupClsRDS:
+  case LoadBCSP:
+  case LockObj:
+  case LogArrayReach:
+  case LogClsSpeculation:
+  case LogGuardFailure:
+  case LookupCls:
+  case LookupClsCached:
+  case LookupSPropSlot:
+  case Lshr:
   case LtBool:
   case LtDbl:
+  case LtInt:
+  case LtStr:
   case LteBool:
   case LteDbl:
   case LteInt:
-  case LteRes:
   case LteStr:
-  case LteStrInt:
-  case LtInt:
-  case LtRes:
-  case LtStr:
-  case LtStrInt:
   case MapIsset:
+  case MarkRDSAccess:
+  case MarkRDSInitialized:
   case MemoGetInstanceCache:
   case MemoGetInstanceValue:
-  case MemoGetStaticCache:
-  case MemoGetStaticValue:
   case MemoGetLSBCache:
   case MemoGetLSBValue:
+  case MemoGetStaticCache:
+  case MemoGetStaticValue:
   case MemoSetInstanceCache:
   case MemoSetInstanceValue:
-  case MemoSetStaticCache:
-  case MemoSetStaticValue:
   case MemoSetLSBCache:
   case MemoSetLSBValue:
+  case MemoSetStaticCache:
+  case MemoSetStaticValue:
   case MethodExists:
-  case MIterFree:
-  case MIterNext:
-  case MIterNextK:
-  case MixedArrayGetK:
   case Mod:
   case Mov:
   case MulDbl:
   case MulInt:
   case MulIntO:
+  case NInstanceOfBitmask:
+  case NSameObj:
+  case NSameStr:
   case NeqBool:
   case NeqDbl:
   case NeqInt:
-  case NeqKeyset:
   case NeqRes:
   case NeqStr:
-  case NeqStrInt:
-  case NewArray:
+  case NewBespokeStructDict:
+  case NewClsMeth:
   case NewCol:
   case NewColFromArray:
-  case NewDArray:
   case NewDictArray:
   case NewInstanceRaw:
-  case NewLikeArray:
-  case NewMixedArray:
+  case NewLoggingArray:
   case NewPair:
-  case NewStructArray:
-  case NewStructDArray:
+  case NewRClsMeth:
+  case NewRFunc:
   case NewStructDict:
-  case NInstanceOfBitmask:
   case Nop:
-  case NSameDict:
-  case NSameKeyset:
-  case NSameObj:
-  case NSameStr:
-  case NSameVec:
-  case OrdStr:
   case OrInt:
-  case PackMagicArgs:
+  case OrdStr:
   case PairIsset:
-  case ProfileArrayKind:
-  case ProfileDictOffset:
+  case ProfileArrLikeProps:
+  case ProfileArrayCOW:
+  case ProfileCall:
+  case ProfileCoeffectFunParam:
+  case ProfileDecRef:
+  case ProfileDictAccess:
+  case ProfileGlobal:
   case ProfileInstanceCheck:
-  case ProfileKeysetOffset:
-  case ProfileFunc:
+  case ProfileIsTypeStruct:
+  case ProfileIterInit:
+  case ProfileKeysetAccess:
   case ProfileMethod:
-  case ProfileMixedArrayOffset:
-  case ProfileSubClsCns:
+  case ProfileProp:
   case ProfileSwitchDest:
   case ProfileType:
+  case PseudoRandomInt:
+  case PtrToElemAsInt:
+  case PushEmptyReifiedGenericsWithNamedArgs:
   case RBTraceEntry:
   case RBTraceMsg:
-  case RegisterLiveObj:
-  case ReleaseVVAndSkip:
+  case RecordFuncCall:
+  case ReleaseShallow:
   case ReqBindJmp:
+  case ReqInterpBBNoTranslate:
   case ReqRetranslate:
   case ReqRetranslateOpt:
-  case ReservePackedArrayDataNewElem:
-  case RestoreErrorLevel:
+  case ReserveVecNewElem:
+  case RetranslateOptAsync:
   case RetCtrl:
-  case SameDict:
-  case SameKeyset:
   case SameObj:
   case SameStr:
-  case SameVec:
   case Select:
   case Shl:
   case Shr:
-  case SpillFrame:
   case Sqrt:
-  case StARInvName:
-  case StARNumArgsAndFlags:
   case StArResumeAddr:
   case StClosureArg:
-  case StClosureCtx:
-  case StClsRef:
+  case StClsInitElem:
   case StContArKey:
   case StContArState:
   case StContArValue:
-  case StCufIterCtx:
-  case StCufIterDynamic:
-  case StCufIterFunc:
-  case StCufIterInvName:
-  case StElem:
+  case StFrameCtx:
+  case StFrameFunc:
+  case StFrameMeta:
+  case StImplicitContext:
+  case StIterEnd:
+  case StIterPos:
   case StLoc:
-  case StLocPseudoMain:
+  case StLocMeta:
   case StLocRange:
   case StMBase:
+  case StMROProp:
   case StMem:
+  case StMemMeta:
   case StOutValue:
-  case StRef:
+  case StPtrAt:
+  case StPtrIterVal:
+  case StStk:
+  case StStkMeta:
+  case StStkRange:
+  case StTVInRDS:
+  case StTypeAt:
+  case StUnwinderExn:
+  case StVMFP:
+  case StVMPC:
+  case StVMRegState:
+  case StVMReturnAddr:
+  case StVMSP:
   case StrictlyIntegerConv:
   case StringIsset:
-  case StStk:
+  case StructDictAddNextSlot:
+  case StructDictElemAddr:
+  case StructDictSlot:
+  case StructDictSlotInPos:
+  case StructDictTypeBoundCheck:
+  case StructDictUnset:
   case SubDbl:
   case SubInt:
-  case SubIntO:
-  case SyncReturnBC:
-  case UnboxPtr:
   case Unreachable:
   case UnwindCheckSideExit:
-  case VectorDoCow:
-  case VectorHasImmCopy:
+  case VecFirst:
+  case VecLast:
   case VectorIsset:
+  case VoidPtrAsDataType:
   case XorBool:
   case XorInt:
-  case ZeroErrorLevel:
     return false;
   }
   not_reached();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-}}
+}

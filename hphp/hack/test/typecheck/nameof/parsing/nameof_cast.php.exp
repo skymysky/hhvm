@@ -1,0 +1,21 @@
+error: Parsing[1002] `nameof` can only be used with a class [1]
+
+nameof_cast.php:6:12
+4 |   public static function f(): void {
+5 |     $foo = null;
+6 |     nameof (C)$foo;
+  |            ^^^ [1]
+7 |   }
+8 | }
+
+error: Parsing[1002] Encountered unexpected token `$foo`. [1]
+
+nameof_cast.php:6:15
+4 |   public static function f(): void {
+5 |     $foo = null;
+6 |     nameof (C)$foo;
+  |               ^^^^ [1]
+7 |   }
+8 | }
+
+2 errors found

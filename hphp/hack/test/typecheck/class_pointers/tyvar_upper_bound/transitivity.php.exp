@@ -1,0 +1,62 @@
+File "transitivity.php", line 24, characters 3-56:
+  (class<TransitivityC>, class<TransitivityC>)
+File "transitivity.php", line 25, characters 3-56:
+  (classname<TransitivityC>, classname<TransitivityC>)
+error: Typing[4323] A `where` type constraint is violated here [1]
+-> This is the method with `where` type constraints [2]
+-> `T` is a constrained type parameter [3]
+-> This type constraint is violated [4]
+-> Expected `class<TransitivityC>` [5]
+-> But got `string` [4]
+->   by the definition of `classname` [4]
+->   by the definition of `typename` [4]
+
+transitivity.php:24:11
+ 5 | class TransitivityC {}
+ 6 | 
+ 7 | function stale_order<T super class<TransitivityC>, TU>(
+   |          ^^^^^^^^^^^ [2]
+   |                      ^ [3]
+   |                              ^^^^^^^^^^^^^^^^^^^^ [4]
+ 8 |   T $value,
+ 9 | ): (T, TU) where T as TU, TU as class<TransitivityC>, T as string {
+   |                                 ^^^^^^^^^^^^^^^^^^^^ [5]
+10 |   return tuple($value, $value);
+11 | }
+   :
+22 | 
+23 | function test_transitivity(): void {
+24 |   hh_show(stale_order(get_transitivity_class_pointer()));
+   |           ^^^^^^^^^^^ [1]
+25 |   hh_show(fresh_order(get_transitivity_class_pointer()));
+26 | }
+
+error: Typing[4323] A `where` type constraint is violated here [1]
+-> This is the method with `where` type constraints [2]
+-> `T` is a constrained type parameter [3]
+-> This type constraint is violated [4]
+-> Expected `class<TransitivityC>` [5]
+-> But got `string` [4]
+->   by the definition of `classname` [4]
+->   by the definition of `typename` [4]
+
+transitivity.php:25:11
+11 | }
+12 | 
+13 | function fresh_order<T super class<TransitivityC>, TU>(
+   |          ^^^^^^^^^^^ [2]
+   |                      ^ [3]
+   |                              ^^^^^^^^^^^^^^^^^^^^ [4]
+14 |   T $value,
+15 | ): (T, TU) where T as string, T as TU, TU as class<TransitivityC> {
+   |                                              ^^^^^^^^^^^^^^^^^^^^ [5]
+16 |   return tuple($value, $value);
+17 | }
+   :
+23 | function test_transitivity(): void {
+24 |   hh_show(stale_order(get_transitivity_class_pointer()));
+25 |   hh_show(fresh_order(get_transitivity_class_pointer()));
+   |           ^^^^^^^^^^^ [1]
+26 | }
+
+2 errors found

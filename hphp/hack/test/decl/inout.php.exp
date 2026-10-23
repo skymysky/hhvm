@@ -1,0 +1,57 @@
+[("\\f",
+  (Shallow_decl_defs.Fun
+     { Typing_defs.fe_deprecated = None; fe_module = None; fe_package = None;
+       fe_internal = false;
+       fe_type =
+       (Rwitness_from_decl ([3:10-11]),
+        (Tfun
+           { ft_tparams = []; ft_where_constraints = [];
+             ft_params =
+             [{ fp_pos = [3:40-42]; fp_name = (Some "$f");
+                fp_type =
+                (Rhint ([3:12-39]),
+                 (Tfun
+                    { ft_tparams = []; ft_where_constraints = [];
+                      ft_params =
+                      [{ fp_pos = [3:28-31]; fp_name = None;
+                         fp_type = (Rhint ([3:28-31]), (Tprim Tint));
+                         fp_flags =
+                         { Typing_defs_flags.FunParam.accept_disposable =
+                           false; inout = true; is_optional = false;
+                           readonly = false; ignore_readonly_error = false;
+                           splat = false; named = false };
+                         fp_def_value = None }
+                        ];
+                      ft_implicit_params =
+                      { capability = (CapDefaults [3:12-39]) };
+                      ft_ret = (Rhint ([3:34-38]), (Tprim Tvoid));
+                      ft_flags =
+                      { Typing_defs_flags.Fun.return_disposable = false;
+                        async = false; generator = false; fun_kind = FSync;
+                        is_function_pointer = false;
+                        returns_readonly = false; readonly_this = false;
+                        support_dynamic_type = false; is_memoized = false;
+                        variadic = false; named_variadic = false };
+                      ft_instantiated = true }));
+                fp_flags =
+                { Typing_defs_flags.FunParam.accept_disposable = false;
+                  inout = false; is_optional = false; readonly = false;
+                  ignore_readonly_error = false; splat = false; named = false
+                  };
+                fp_def_value = None }
+               ];
+             ft_implicit_params = { capability = (CapDefaults [3:10-11]) };
+             ft_ret = (Rhint ([3:45-49]), (Tprim Tvoid));
+             ft_flags =
+             { Typing_defs_flags.Fun.return_disposable = false;
+               async = false; generator = false; fun_kind = FSync;
+               is_function_pointer = false; returns_readonly = false;
+               readonly_this = false; support_dynamic_type = false;
+               is_memoized = false; variadic = false; named_variadic = false
+               };
+             ft_instantiated = true }));
+       fe_pos = [3:10-11]; fe_php_std_lib = false;
+       fe_support_dynamic_type = false; fe_no_auto_dynamic = false;
+       fe_no_auto_likes = false; fe_gated_by_feature_flag = None;
+       fe_package_requirement = Typing_defs.RPNormal }))
+  ]

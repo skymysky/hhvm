@@ -1,4 +1,4 @@
-<?hh// strict
+<?hh
 
 bake_bread(
   // rye
@@ -65,14 +65,14 @@ slash_top(
    */
 );
 
-empty($oven /* yep */);
+emptee($oven /* yep */);
 
-empty(
+emptee(
   $tin
   /* nope */
 );
 
-empty(
+emptee(
   /* let */
   $bread
   /* rise */

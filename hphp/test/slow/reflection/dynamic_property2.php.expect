@@ -1,6 +1,5 @@
-array(1) {
-  [0]=>
-  object(ReflectionProperty)#4 (3) {
+vec(1) {
+  object(ReflectionProperty) (3) {
     ["name"]=>
     string(3) "foo"
     ["class"]=>

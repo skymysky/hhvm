@@ -1,3 +1,3 @@
-<?php
-print_r(["foo" => "orange", "bar" => "apple", "baz" => "lemon"]);
-?>
+<?hh <<__EntryPoint>> function main(): void {
+print_r(dict["foo" => "orange", "bar" => "apple", "baz" => "lemon"]);
+}

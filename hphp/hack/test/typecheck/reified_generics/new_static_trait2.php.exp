@@ -1,0 +1,11 @@
+error: Typing[4312] This class or one of its ancestors is annotated with `<<__ConsistentConstruct>>`. It cannot have reified generics. [1]
+
+new_static_trait2.php:15:7
+13 | }
+14 | 
+15 | class ChildClass<reify T> extends BaseClass<int> {
+   |       ^^^^^^^^^^ [1]
+16 |   use MyTrait;
+17 | }
+
+1 error found

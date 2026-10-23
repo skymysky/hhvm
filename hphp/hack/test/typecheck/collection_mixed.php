@@ -9,14 +9,14 @@
  *
  */
 
-function testmap(): Map<mixed, int> {
+function testmap(): Map<arraykey, mixed> {
   $m = Map{"s" => 1, "t" => 2};
   $m[2] = 100;
   return $m;
 }
 
-function testarray(): array<mixed, int> {
-  $a = array("s" => 1, "t" => 2);
+function testarray(): darray<mixed, int> {
+  $a = dict["s" => 1, "t" => 2];
   $a[2] = 100;
   return $a;
 }

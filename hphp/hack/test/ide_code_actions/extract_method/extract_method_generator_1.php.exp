@@ -1,0 +1,53 @@
+Code actions available:
+------------------------------------------
+Extract into method (CodeActionKind: "refactor") SELECTED
+
+JSON for selected code action:
+------------------------------------------
+{
+  "title": "Extract into method",
+  "kind": "refactor",
+  "diagnostics": [],
+  "edit": {
+    "changes": {
+      "FILE.php": [
+        {
+          "range": {
+            "start": { "line": 3, "character": 0 },
+            "end": { "line": 3, "character": 0 }
+          },
+          "newText": "  private function ${0:method0}(int $x): Iterator<_> {\n    $y = $x;\n    yield 1;\n  }\n\n"
+        },
+        {
+          "range": {
+            "start": { "line": 5, "character": 6 },
+            "end": { "line": 6, "character": 14 }
+          },
+          "newText": "foreach ($this->${0:method0}($x) as $value__) {\n        /* TODO: assign to $y */\n        \n      }"
+        }
+      ]
+    }
+  }
+}
+
+Applied edit for code action:
+------------------------------------------
+<?hh
+
+class Klass {
+  private function ${0:method0}(int $x): Iterator<_> {
+    $y = $x;
+    yield 1;
+  }
+
+  public function foo(int $x): void {
+      /*range-start*/
+      foreach ($this->${0:method0}($x) as $value__) {
+        /* TODO: assign to $y */
+        
+      }
+      /*range-end*/
+      $z = $y;
+  }
+}
+

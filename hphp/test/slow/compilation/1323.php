@@ -1,15 +1,16 @@
-<?php
+<?hh
 
 class Y {
-  function bar() {
+  function bar() :mixed{
 }
 }
 class X {
-  function foo() {
+  function foo() :mixed{
     $x = $this;
-    if ($this instanceof y) {
+    if ($this is y) {
       $this->bar();
     }
     return $x;
   }
 }
+<<__EntryPoint>> function main(): void { echo "Done.\n"; }

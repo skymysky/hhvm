@@ -13,12 +13,11 @@
    | license@php.net so we can mail you a copy immediately.               |
    +----------------------------------------------------------------------+
 */
-#ifndef incl_HHBBC_TYPE_ARITH_H_
-#define incl_HHBBC_TYPE_ARITH_H_
+#pragma once
 
 #include "hphp/runtime/vm/hhbc.h"
 
-namespace HPHP { namespace HHBBC {
+namespace HPHP::HHBBC {
 
 struct Type;
 
@@ -41,8 +40,8 @@ struct Type;
 Type typeToInt(Type ty);
 
 /*
- * Computes effects on types as for the effects at runtime of cellAdd,
- * cellSub, etc.
+ * Computes effects on types as for the effects at runtime of tvAdd,
+ * tvSub, etc.
  */
 Type typeAdd(Type, Type);
 Type typeSub(Type, Type);
@@ -50,13 +49,10 @@ Type typeMul(Type, Type);
 Type typeDiv(Type, Type);
 Type typeMod(Type, Type);
 Type typePow(Type, Type);
-Type typeAddO(Type, Type);
-Type typeSubO(Type, Type);
-Type typeMulO(Type, Type);
 
 /*
  * Bitwise operations on types.  Computes effects on types as for the
- * runtime effects of cellBitAnd, cellBitOr, etc.
+ * runtime effects of tvBitAnd, tvBitOr, etc.
  */
 Type typeBitAnd(Type, Type);
 Type typeBitOr(Type, Type);
@@ -83,6 +79,5 @@ Type typeNSame(const Type&, const Type&);
 
 //////////////////////////////////////////////////////////////////////
 
-}}
+}
 
-#endif

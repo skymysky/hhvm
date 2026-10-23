@@ -1,0 +1,53 @@
+Code actions available:
+------------------------------------------
+Extract into variable (CodeActionKind: "refactor")
+Inline method (CodeActionKind: "refactor") SELECTED
+slog variable (CodeActionKind: "refactor")
+Extract into method (CodeActionKind: "refactor")
+
+JSON for selected code action:
+------------------------------------------
+{
+  "title": "Inline method",
+  "kind": "refactor",
+  "diagnostics": [],
+  "edit": {
+    "changes": {
+      "FILE.php": [
+        {
+          "range": {
+            "start": { "line": 4, "character": 0 },
+            "end": { "line": 10, "character": 3 }
+          },
+          "newText": ""
+        },
+        {
+          "range": {
+            "start": { "line": 13, "character": 12 },
+            "end": { "line": 13, "character": 59 }
+          },
+          "newText": "$a = \"a\";\n            $b = \"b\";\n            $x = 3;\n            $z = $a.$b;\n            echo $z;"
+        }
+      ]
+    }
+  }
+}
+
+Applied edit for code action:
+------------------------------------------
+<?hh
+//
+
+class A {
+
+  public function foo(): void {
+    // We remove the call when it's to a void function.
+    $n = 1; $a = "a";
+            $b = "b";
+            $x = 3;
+            $z = $a.$b;
+            echo $z;
+    echo "done";
+  }
+}
+

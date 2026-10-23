@@ -1,5 +1,18 @@
-File "missing_init.php", line 7, characters 19-29:
-Class C does not initialize all of its members; y x are not always initialized.
-Make sure you systematically set $this->y $this->x when the method __construct is called.
-Alternatively, you can define the members as optional (?...)
- (NastCheck[3015])
+error: NastCheck[3015] Class `C` has properties that cannot be null and aren't always set in `__construct`. [1]
+-> `$this->x` is not initialized. [2]
+-> `$this->y` is not initialized. [3]
+
+missing_init.php:7:19
+2 | 
+3 | class C {
+4 |   private int $x;
+  |               ^^ [2]
+5 |   private string $y;
+  |                  ^^ [3]
+6 | 
+7 |   public function __construct() {
+  |                   ^^^^^^^^^^^ [1]
+8 |     // does nothing!
+9 |   }
+
+1 error found

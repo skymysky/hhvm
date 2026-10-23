@@ -18,17 +18,12 @@ function set(dict $d, mixed $k, mixed $v): dict {
   return $d;
 }
 
-function main() {
-  $foo = 12;
-  $ref =& $foo;
-  $bar = array();
-  $badref =& $bar;
-
+function run(inout $ref, inout $badref) :mixed{
   set(dict[], "1", "hello")
     |> set($$, 1, "goodbye")
     |> set($$, null, "null")
-    |> set($$, array(), "arr")
-    |> set($$, new stdclass, "cls")
+    |> set($$, dict[], "arr")
+    |> set($$, new stdClass, "cls")
     |> set($$, 1.2, "double")
     |> set($$, $ref, "num-ref")
     |> set($$, $badref, "arr-ref")
@@ -36,8 +31,8 @@ function main() {
     |> get($$, 1)
     |> get($$, "1")
     |> get($$, null)
-    |> get($$, array())
-    |> get($$, new stdclass)
+    |> get($$, dict[])
+    |> get($$, new stdClass)
     |> get($$, 1.2)
     |> get($$, $ref)
     |> get($$, $badref)
@@ -45,4 +40,9 @@ function main() {
     |> var_dump($$);
 }
 
-main();
+<<__EntryPoint>>
+function main() :mixed{
+  $foo = 12;
+  $bar = dict[];
+  run(inout $foo, inout $bar);
+}

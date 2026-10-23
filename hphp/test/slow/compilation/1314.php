@@ -1,9 +1,9 @@
-<?php
+<?hh
 
-function foo($a,$b,$c,$d) {
+function foo($a,$b,$c,$d) :mixed{
  return implode($a,$b);
  }
-function bar($values, $parent_fields) {
+function bar($values, $parent_fields) :mixed{
   $full_name = implode('___', $parent_fields);
   $body = '';
   $body .= '<div>';
@@ -25,3 +25,4 @@ function bar($values, $parent_fields) {
   }
   $body .= '</table>';
 }
+<<__EntryPoint>> function main(): void { echo "Done.\n"; }

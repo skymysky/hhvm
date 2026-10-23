@@ -1,22 +1,14 @@
 int(100)
+
+Warning: Method C::foo1 not marked dynamic in %s/prop_order_parens.php on line 31
 int(150)
 int(200)
+
+Warning: Method C::foo2 not marked dynamic in %s/prop_order_parens.php on line 35
 int(250)
 int(300)
 int(350)
-
-Notice: Array to string conversion in %s on line 40
-
-Notice: Undefined property: C::$Array in %s on line 40
-NULL
 int(450)
 int(500)
 int(550)
-
-Notice: Array to string conversion in %s on line 50
-
-Notice: Undefined property: C::$Array in %s on line 50
-
-Notice: Cannot access property on non-object in %s on line 50
-NULL
 int(650)

@@ -1,0 +1,49 @@
+Warning: Argument 1 passed to fclose() must be an instance of resource, bool given in %s/param_coerce_mode.php on line %d
+
+Warning: Not a valid stream resource in %s/param_coerce_mode.php on line %d
+
+Warning: Argument 1 passed to fseek() must be an instance of resource, bool given in %s/param_coerce_mode.php on line %d
+
+Warning: Argument 1 passed to rewind() must be an instance of resource, bool given in %s/param_coerce_mode.php on line %d
+
+Warning: Argument 1 passed to ftell() must be an instance of resource, bool given in %s/param_coerce_mode.php on line %d
+
+Warning: Argument 1 passed to feof() must be an instance of resource, bool given in %s/param_coerce_mode.php on line %d
+
+Warning: Argument 1 passed to fstat() must be an instance of resource, bool given in %s/param_coerce_mode.php on line %d
+
+Warning: Argument 1 passed to fread() must be an instance of resource, bool given in %s/param_coerce_mode.php on line %d
+
+Warning: Argument 1 passed to fgetc() must be an instance of resource, bool given in %s/param_coerce_mode.php on line %d
+
+Warning: Argument 1 passed to fgets() must be an instance of resource, bool given in %s/param_coerce_mode.php on line %d
+
+Warning: Argument 1 passed to fgetss() must be an instance of resource, bool given in %s/param_coerce_mode.php on line %d
+
+Warning: Argument 1 passed to fscanf() must be an instance of resource, bool given in %s/param_coerce_mode.php on line %d
+
+Warning: Argument 1 passed to fpassthru() must be an instance of resource, bool given in %s/param_coerce_mode.php on line %d
+
+Warning: Argument 1 passed to fwrite() must be an instance of resource, bool given in %s/param_coerce_mode.php on line %d
+
+Warning: Argument 1 passed to fputs() must be an instance of resource, bool given in %s/param_coerce_mode.php on line %d
+
+Warning: fprintf() expects parameter 1 to be resource, boolean given in %s/param_coerce_mode.php on line %d
+
+Warning: Not a valid stream resource in %s/param_coerce_mode.php on line %d
+
+Warning: Argument 1 passed to fflush() must be an instance of resource, bool given in %s/param_coerce_mode.php on line %d
+
+Warning: ftruncate() expects exactly 2 positional parameters, 1 given in %s/param_coerce_mode.php on line %d
+
+Warning: Argument 1 passed to fputcsv() must be an instance of resource, bool given in %s/param_coerce_mode.php on line %d
+
+Warning: Argument 1 passed to fgetcsv() must be an instance of resource, bool given in %s/param_coerce_mode.php on line %d
+
+Warning: Argument 1 passed to flock() must be an instance of resource, bool given in %s/param_coerce_mode.php on line %d
+
+Warning: Argument 1 to readdir() must be of type ?resource, bool given in %s/param_coerce_mode.php on line %d
+
+Warning: Argument 1 to rewinddir() must be of type ?resource, bool given in %s/param_coerce_mode.php on line %d
+
+Warning: Argument 1 to closedir() must be of type ?resource, bool given in %s/param_coerce_mode.php on line %d

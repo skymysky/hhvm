@@ -16,7 +16,6 @@
 */
 #include "hphp/runtime/ext/gd/ext_gd.h"
 
-#include <sys/types.h>
 #include <sys/stat.h>
 
 #include "hphp/runtime/base/array-init.h"
@@ -24,13 +23,13 @@
 #include "hphp/runtime/base/comparisons.h"
 #include "hphp/runtime/base/plain-file.h"
 #include "hphp/runtime/base/request-event-handler.h"
-#include "hphp/runtime/base/request-local.h"
-#include "hphp/runtime/base/runtime-option.h"
 #include "hphp/runtime/base/string-util.h"
 #include "hphp/runtime/base/zend-printf.h"
 #include "hphp/runtime/base/zend-string.h"
 #include "hphp/runtime/ext/std/ext_std_file.h"
 #include "hphp/runtime/vm/jit/translator-inline.h"
+#include "hphp/util/alloc.h"
+#include "hphp/util/rds-local.h"
 
 #include "hphp/runtime/ext/gd/libgd/gd.h"
 #include "hphp/runtime/ext/gd/libgd/gdfontt.h"  /* 1 Tiny font */
@@ -39,10 +38,11 @@
 #include "hphp/runtime/ext/gd/libgd/gdfontl.h"  /* 4 Large font */
 #include "hphp/runtime/ext/gd/libgd/gdfontg.h"  /* 5 Giant font */
 #include <zlib.h>
-#include <set>
 
+#include <folly/ScopeGuard.h>
 #include <folly/portability/Stdlib.h>
 #include <folly/portability/Unistd.h>
+#include <libheif/heif.h>
 
 /* Section Filters Declarations */
 /* IMPORTANT NOTE FOR NEW FILTER
@@ -70,11 +70,16 @@
 #define IMAGE_TYPE_JPEG 2
 #define IMAGE_TYPE_PNG 4
 #define IMAGE_TYPE_WBMP 8
-#define IMAGE_TYPE_XPM 16
 
-// #define IM_MEMORY_CHECK
+//#define IM_MEMORY_CHECK
 
 namespace HPHP {
+
+// libheif >= 1.13 renamed heif_reader_grow_status_error
+#if LIBHEIF_NUMERIC_VERSION >= ((1<<24) | (13<<16))
+static constexpr auto heif_reader_grow_status_error =
+    heif_reader_grow_status_size_beyond_eof;
+#endif
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -102,9 +107,6 @@ namespace HPHP {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-// sweep() { this->~Image(); }
-IMPLEMENT_RESOURCE_ALLOCATION(Image)
-
 void Image::reset() {
   if (m_gdImage) {
     gdImageDestroy(m_gdImage);
@@ -112,7 +114,6 @@ void Image::reset() {
   }
 }
 
-Image::~Image() { reset(); }
 
 struct ImageMemoryAlloc final : RequestEventHandler {
   ImageMemoryAlloc() : m_mallocSize(0) {}
@@ -140,59 +141,64 @@ struct ImageMemoryAlloc final : RequestEventHandler {
 , int ln
 #endif
   ) {
-    assertx(m_mallocSize < (size_t)RuntimeOption::ImageMemoryMaxBytes);
-    if (m_mallocSize + size < (size_t)RuntimeOption::ImageMemoryMaxBytes) {
-#ifdef IM_MEMORY_CHECK
-      void *ptr = malloc(sizeof(ln) + sizeof(size) + size);
-      if (!ptr) return nullptr;
-      memcpy(ptr, &ln, sizeof(ln));
-      memcpy((char*)ptr + sizeof(ln), &size, sizeof(size));
-      m_mallocSize += size;
-      m_alloced.insert(ptr);
-      return ((char *)ptr + sizeof(ln) + sizeof(size));
-#else
-      void *ptr = malloc(sizeof(size) + size);
-      if (!ptr) return nullptr;
-      memcpy(ptr, &size, sizeof(size));
-      m_mallocSize += size;
-      return ((char *)ptr + sizeof(size));
-#endif
+    assertx(m_mallocSize <= (size_t)Cfg::Server::ImageMemoryMaxBytes);
+    if (size > (size_t)Cfg::Server::ImageMemoryMaxBytes ||
+        m_mallocSize + size > (size_t)Cfg::Server::ImageMemoryMaxBytes) {
+      return nullptr;
     }
-    return nullptr;
+
+#ifdef IM_MEMORY_CHECK
+    void *ptr = local_malloc(sizeof(ln) + sizeof(size) + size);
+    if (!ptr) return nullptr;
+    memcpy(ptr, &ln, sizeof(ln));
+    memcpy((char*)ptr + sizeof(ln), &size, sizeof(size));
+    m_mallocSize += size;
+    m_alloced.insert(ptr);
+    return ((char *)ptr + sizeof(ln) + sizeof(size));
+#else
+    void *ptr = local_malloc(sizeof(size) + size);
+    if (!ptr) return nullptr;
+    memcpy(ptr, &size, sizeof(size));
+    m_mallocSize += size;
+    return ((char *)ptr + sizeof(size));
+#endif
   }
   void *imCalloc(size_t nmemb, size_t size
 #ifdef IM_MEMORY_CHECK
 , int ln
 #endif
   ) {
-    assertx(m_mallocSize < (size_t)RuntimeOption::ImageMemoryMaxBytes);
+    assertx(m_mallocSize <= (size_t)Cfg::Server::ImageMemoryMaxBytes);
     size_t bytes = nmemb * size;
-    if (m_mallocSize + bytes < (size_t)RuntimeOption::ImageMemoryMaxBytes) {
-#ifdef IM_MEMORY_CHECK
-      void *ptr = malloc(sizeof(ln) + sizeof(size) + bytes);
-      if (!ptr) return nullptr;
-      memset(ptr, 0, sizeof(ln) + sizeof(size) + bytes);
-      memcpy(ptr, &ln, sizeof(ln));
-      memcpy((char*)ptr + sizeof(ln), &bytes, sizeof(bytes));
-      m_mallocSize += bytes;
-      m_alloced.insert(ptr);
-      return ((char *)ptr + sizeof(ln) + sizeof(size));
-#else
-      void *ptr = malloc(sizeof(size) + bytes);
-      if (!ptr) return nullptr;
-      memcpy(ptr, &bytes, sizeof(bytes));
-      memset((char *)ptr + sizeof(size), 0, bytes);
-      m_mallocSize += bytes;
-      return ((char *)ptr + sizeof(size));
-#endif
+    if (bytes > (size_t)Cfg::Server::ImageMemoryMaxBytes ||
+        m_mallocSize + bytes > (size_t)Cfg::Server::ImageMemoryMaxBytes) {
+      return nullptr;
     }
-    return nullptr;
+
+#ifdef IM_MEMORY_CHECK
+    void *ptr = local_malloc(sizeof(ln) + sizeof(size) + bytes);
+    if (!ptr) return nullptr;
+    memset(ptr, 0, sizeof(ln) + sizeof(size) + bytes);
+    memcpy(ptr, &ln, sizeof(ln));
+    memcpy((char*)ptr + sizeof(ln), &bytes, sizeof(bytes));
+    m_mallocSize += bytes;
+    m_alloced.insert(ptr);
+    return ((char *)ptr + sizeof(ln) + sizeof(size));
+#else
+    void *ptr = local_malloc(sizeof(size) + bytes);
+    if (!ptr) return nullptr;
+    memcpy(ptr, &bytes, sizeof(bytes));
+    memset((char *)ptr + sizeof(size), 0, bytes);
+    m_mallocSize += bytes;
+    return ((char *)ptr + sizeof(size));
+#endif
   }
   void imFree(void *ptr
 #ifdef IM_MEMORY_CHECK
 , int ln
 #endif
   ) {
+    assertx(ptr);
     size_t size;
     void *sizePtr = (char *)ptr - sizeof(size);
     memcpy(&size, sizePtr, sizeof(size));
@@ -201,11 +207,11 @@ struct ImageMemoryAlloc final : RequestEventHandler {
     void *lnPtr = (char *)sizePtr - sizeof(ln);
     int count = m_alloced.erase((char*)sizePtr - sizeof(ln));
     assertx(count == 1); // double free on failure
-    assertx(m_mallocSize < (size_t)RuntimeOption::ImageMemoryMaxBytes);
-    free(lnPtr);
+    assertx(m_mallocSize <= (size_t)Cfg::Server::ImageMemoryMaxBytes);
+    local_free(lnPtr);
 #else
-    assertx(m_mallocSize < (size_t)RuntimeOption::ImageMemoryMaxBytes);
-    free(sizePtr);
+    assertx(m_mallocSize <= (size_t)Cfg::Server::ImageMemoryMaxBytes);
+    local_free(sizePtr);
 #endif
   }
 
@@ -215,7 +221,7 @@ struct ImageMemoryAlloc final : RequestEventHandler {
 , int ln
 #endif
   ) {
-    assertx(m_mallocSize < (size_t)RuntimeOption::ImageMemoryMaxBytes);
+    assertx(m_mallocSize <= (size_t)Cfg::Server::ImageMemoryMaxBytes);
 
 #ifdef IM_MEMORY_CHECK
     if (!ptr) return imMalloc(size, ln);
@@ -233,16 +239,17 @@ struct ImageMemoryAlloc final : RequestEventHandler {
     void *sizePtr = (char *)ptr - sizeof(size);
     size_t oldSize = 0;
     if (ptr) memcpy(&oldSize, sizePtr, sizeof(oldSize));
-    int diff = size - oldSize;
+    ssize_t diff = size - oldSize;
     void *tmp;
 
 #ifdef IM_MEMORY_CHECK
     void *lnPtr = (char *)sizePtr - sizeof(ln);
-    if (m_mallocSize + diff > (size_t)RuntimeOption::ImageMemoryMaxBytes ||
-        !(tmp = realloc(lnPtr, sizeof(ln) + sizeof(size) + size))) {
+    if (size > (size_t)Cfg::Server::ImageMemoryMaxBytes ||
+        m_mallocSize + diff > (size_t)Cfg::Server::ImageMemoryMaxBytes ||
+        !(tmp = local_realloc(lnPtr, sizeof(ln) + sizeof(size) + size))) {
       int count = m_alloced.erase(ptr);
       assertx(count == 1); // double free on failure
-      free(lnPtr);
+      local_free(lnPtr);
       return nullptr;
     }
     memcpy(tmp, &ln, sizeof(ln));
@@ -255,9 +262,10 @@ struct ImageMemoryAlloc final : RequestEventHandler {
     }
     return ((char *)tmp + sizeof(ln) + sizeof(size));
 #else
-    if (m_mallocSize + diff > (size_t)RuntimeOption::ImageMemoryMaxBytes ||
-        !(tmp = realloc(sizePtr, sizeof(size) + size))) {
-      free(sizePtr);
+    if (size > (size_t)Cfg::Server::ImageMemoryMaxBytes ||
+        m_mallocSize + diff > (size_t)Cfg::Server::ImageMemoryMaxBytes ||
+        !(tmp = local_realloc(sizePtr, sizeof(size) + size))) {
+      local_free(sizePtr);
       return nullptr;
     }
     memcpy(tmp, &size, sizeof(size));
@@ -269,8 +277,7 @@ struct ImageMemoryAlloc final : RequestEventHandler {
 #ifdef IM_MEMORY_CHECK
   void imDump(void *ptrs[], int &n) {
     int i = 0;
-    for (std::set<void*>::iterator iter = m_alloced.begin();
-         iter != m_alloced.end(); ++i, ++iter) {
+    for (auto iter = m_alloced.begin(); iter != m_alloced.end(); ++i, ++iter) {
       void *p = *iter;
       assertx(p);
       if (i < n) ptrs[i] = p;
@@ -398,7 +405,7 @@ static char *php_strdup_impl(const char* s
   } while (0)
 #endif
 
-typedef enum {
+enum image_filetype {
   IMAGE_FILETYPE_UNKNOWN=0,
   IMAGE_FILETYPE_GIF=1,
   IMAGE_FILETYPE_JPEG,
@@ -418,9 +425,12 @@ typedef enum {
   /* IMAGE_FILETYPE_JPEG2000 is a userland alias for IMAGE_FILETYPE_JPC */
   IMAGE_FILETYPE_XBM,
   IMAGE_FILETYPE_ICO,
+  IMAGE_FILETYPE_WEBP,
+  IMAGE_FILETYPE_AVIF,
+  IMAGE_FILETYPE_HEIC,
 
   IMAGE_FILETYPE_COUNT /* Must remain last */
-} image_filetype;
+};
 
 
 // PHP extension STANDARD: image.c
@@ -444,13 +454,15 @@ static const char php_sig_jp2[12] =
 static const char php_sig_iff[4] = {'F','O','R','M'};
 static const char php_sig_ico[4] = {(char)0x00, (char)0x00, (char)0x01,
                                     (char)0x00};
+static const char php_sig_riff[4] = {'R', 'I', 'F', 'F'};
+static const char php_sig_webp[4] = {'W', 'E', 'B', 'P'};
 
 static struct gfxinfo *php_handle_gif(const req::ptr<File>& stream) {
   struct gfxinfo *result = nullptr;
   const unsigned char *s;
 
   if (!stream->seek(3, SEEK_CUR)) return nullptr;
-  String dim = stream->read(5);
+  OptString dim = stream->read(5);
   if (dim.length() != 5) return nullptr;
   s = (unsigned char *)dim.c_str();
   result = (struct gfxinfo *)IM_CALLOC(1, sizeof(struct gfxinfo));
@@ -468,7 +480,7 @@ static struct gfxinfo *php_handle_psd(const req::ptr<File>& stream) {
 
   if (!stream->seek(11, SEEK_CUR)) return nullptr;
 
-  String dim = stream->read(8);
+  OptString dim = stream->read(8);
   if (dim.length() != 8) return nullptr;
   s = (unsigned char *)dim.c_str();
   result = (struct gfxinfo *)IM_CALLOC(1, sizeof(struct gfxinfo));
@@ -491,7 +503,7 @@ static struct gfxinfo *php_handle_bmp(const req::ptr<File>& stream) {
 
   if (!stream->seek(11, SEEK_CUR)) return nullptr;
 
-  String dim = stream->read(16);
+  OptString dim = stream->read(16);
   if (dim.length() != 16) return nullptr;
   s = (unsigned char *)dim.c_str();
 
@@ -549,8 +561,8 @@ static struct gfxinfo *php_handle_swc(const req::ptr<File>& stream) {
   int factor=1,maxfactor=16;
   int slength, status=0;
   unsigned char *b, *buf=nullptr;
-  String bufz;
-  String tmp;
+  OptString bufz;
+  OptString tmp;
 
   b = (unsigned char *)IM_CALLOC(1, len + 1);
   CHECK_ALLOC_R(b, (len + 1), nullptr);
@@ -560,7 +572,7 @@ static struct gfxinfo *php_handle_swc(const req::ptr<File>& stream) {
     return nullptr;
   }
 
-  String a = stream->read(64);
+  OptString a = stream->read(64);
   if (a.length() != 64) {
     IM_FREE(b);
     return nullptr;
@@ -627,7 +639,7 @@ static struct gfxinfo *php_handle_swf(const req::ptr<File>& stream) {
 
   if (!stream->seek(5, SEEK_CUR)) return nullptr;
 
-  String str = stream->read(32);
+  OptString str = stream->read(32);
   if (str.length() != 32) return nullptr;
   a = (unsigned char *)str.c_str();
   result = (struct gfxinfo *)IM_CALLOC(1, sizeof (struct gfxinfo));
@@ -656,7 +668,7 @@ static struct gfxinfo *php_handle_png(const req::ptr<File>& stream) {
 
   if (!stream->seek(8, SEEK_CUR)) return nullptr;
 
-  String dim = stream->read(9);
+  OptString dim = stream->read(9);
   if (dim.length() < 9) return nullptr;
 
   s = (unsigned char *)dim.c_str();
@@ -717,7 +729,7 @@ static struct gfxinfo *php_handle_png(const req::ptr<File>& stream) {
 
 static unsigned short php_read2(const req::ptr<File>& stream) {
   unsigned char *a;
-  String str = stream->read(2);
+  OptString str = stream->read(2);
   /* just return 0 if we hit the end-of-file */
   if (str.length() != 2) return 0;
   a = (unsigned char *)str.c_str();
@@ -781,16 +793,22 @@ static int php_read_APP(const req::ptr<File>& stream,
   }
   length -= 2;                /* length includes itself */
 
-  String buffer = stream->read(length);
-  if (buffer.empty()) {
+  OptString buffer;
+  if (length == 0) {
+    // avoid stream reads of length 0, they trigger a notice
+    buffer = String::Empty();
+  } else {
+    buffer = stream->read(length);
+  }
+  if (buffer.length() != length) {
     return 0;
   }
 
   snprintf((char*)markername, sizeof(markername), "APP%d", marker - M_APP0);
 
-  if (!info.exists(String((const char *)markername))) {
+  if (!info.exists(OptString((const char *)markername))) {
     /* XXX we only catch the 1st tag of it's kind! */
-    info.set(String((char*)markername, CopyString), buffer);
+    info.set(OptString((char*)markername, CopyString), buffer);
   }
 
   return 1;
@@ -890,7 +908,7 @@ struct gfxinfo *php_handle_jpeg(const req::ptr<File>& file, Array& info) {
 
 static unsigned short php_read4(const req::ptr<File>& stream) {
   unsigned char *a;
-  String str = stream->read(4);
+  OptString str = stream->read(4);
   /* just return 0 if we hit the end-of-file */
   if (str.length() != 4) return 0;
   a = (unsigned char *)str.c_str();
@@ -1013,7 +1031,7 @@ static struct gfxinfo *php_handle_jp2(const req::ptr<File>& stream) {
   {
     box_length = php_read4(stream); /* LBox */
     /* TBox */
-    String str = stream->read(sizeof(box_type));
+    OptString str = stream->read(sizeof(box_type));
     if (str.length() != sizeof(box_type)) {
       /* Use this as a general "out of stream" error */
       break;
@@ -1165,17 +1183,17 @@ static struct gfxinfo *php_handle_tiff(const req::ptr<File>& stream,
   size_t dir_size, entry_value, width=0, height=0, ifd_addr;
   int entry_tag , entry_type;
 
-  String ifd_ptr = stream->read(4);
+  OptString ifd_ptr = stream->read(4);
   if (ifd_ptr.length() != 4) return nullptr;
   ifd_addr = php_ifd_get32u((void*)ifd_ptr.c_str(), motorola_intel);
   if (!stream->seek(ifd_addr-8, SEEK_CUR)) return nullptr;
-  String ifd_data = stream->read(2);
+  OptString ifd_data = stream->read(2);
   if (ifd_data.length() != 2) return nullptr;
   num_entries = php_ifd_get16u((void*)ifd_data.c_str(), motorola_intel);
   dir_size = 2/*num dir entries*/ +12/*length of entry*/*
              num_entries +
              4/* offset to next ifd (points to thumbnail or NULL)*/;
-  String ifd_data2 = stream->read(dir_size-2);
+  OptString ifd_data2 = stream->read(dir_size-2);
   if ((size_t)ifd_data2.length() != dir_size-2) return nullptr;
   ifd_data += ifd_data2;
   /* now we have the directory we can look how long it should be */
@@ -1234,7 +1252,7 @@ static struct gfxinfo *php_handle_iff(const req::ptr<File>& stream) {
   int size;
   short width, height, bits;
 
-  String str = stream->read(8);
+  OptString str = stream->read(8);
   if (str.length() != 8) return nullptr;
   a = (char *)str.c_str();
   if (strncmp(a+4, "ILBM", 4) && strncmp(a+4, "PBM ", 4)) {
@@ -1353,7 +1371,7 @@ static struct gfxinfo *php_handle_wbmp(const req::ptr<File>& stream) {
 }
 
 static int php_get_xbm(const req::ptr<File>& stream, struct gfxinfo **result) {
-  String fline;
+  OptString fline;
   char *iname;
   char *type;
   int value;
@@ -1365,7 +1383,7 @@ static int php_get_xbm(const req::ptr<File>& stream, struct gfxinfo **result) {
   if (!stream->rewind()) {
     return 0;
   }
-  while (!(fline = HHVM_FN(fgets)(Resource(stream), 0).toString()).empty()) {
+  while (!(fline = HHVM_FN(fgets)(OptResource(stream), 0).toString()).empty()) {
     iname = (char *)IM_MALLOC(fline.size() + 1);
     CHECK_ALLOC_R(iname, (fline.size() + 1), 0);
     if (sscanf(fline.c_str(), "#define %s %d", iname, &value) == 2) {
@@ -1417,7 +1435,7 @@ static struct gfxinfo *php_handle_ico(const req::ptr<File>& stream) {
   const unsigned char *s;
   int num_icons = 0;
 
-  String dim = stream->read(2);
+  OptString dim = stream->read(2);
   if (dim.length() != 2) {
     return nullptr;
   }
@@ -1451,8 +1469,179 @@ static struct gfxinfo *php_handle_ico(const req::ptr<File>& stream) {
   return result;
 }
 
+static struct gfxinfo *php_handle_webp(const req::ptr<File>& stream) {
+  struct gfxinfo *result = nullptr;
+  const char sig[3] = {'V', 'P', '8'};
+  char format;
+
+  OptString buf_str = stream->read(18);
+  if (buf_str.length() != 18) {
+    return nullptr;
+  }
+
+  const unsigned char *buf = (unsigned char *)buf_str.c_str();
+  if (memcmp(buf, sig, 3)) {
+    return nullptr;
+  }
+  switch (buf[3]) {
+    case ' ':
+    case 'L':
+    case 'X':
+      format = buf[3];
+      break;
+    default:
+      return nullptr;
+  }
+
+  result = (struct gfxinfo *)IM_CALLOC(1, sizeof(struct gfxinfo));
+  CHECK_ALLOC_R(result, (sizeof(struct gfxinfo)), nullptr);
+
+  switch (format) {
+    case ' ':
+      result->width = buf[14] + ((buf[15] & 0x3F) << 8);
+      result->height = buf[16] + ((buf[17] & 0x3F) << 8);
+      break;
+    case 'L':
+      result->width = buf[9] + ((buf[10] & 0x3F) << 8) + 1;
+      result->height = (buf[10] >> 6) + (buf[11] << 2) + ((buf[12] & 0xF) << 10) + 1;
+      break;
+    case 'X':
+      result->width = buf[12] + (buf[13] << 8) + (buf[14] << 16) + 1;
+      result->height = buf[15] + (buf[16] << 8) + (buf[17] << 16) + 1;
+      break;
+  }
+  result->bits = 8; /* always 1 byte */
+
+  return result;
+}
+
+static int64_t heif_get_position(void* userdata) {
+  auto stream = static_cast<File*>(userdata);
+  return stream->tell();
+}
+
+static int heif_read(void* data, size_t size, void* userdata) {
+  auto stream = static_cast<File*>(userdata);
+
+  // Special handling as read doesn't like 0 passed in for size
+  if (size == 0) {
+    return heif_error_Ok;
+  }
+  // An attempt was made to use readImpl instead to avoid memcpy, but
+  // unfortunately, tell() returns wrong position if readImpl is used.
+  OptString result = stream->read(size);
+  if (result.length() != size) {
+    return 1; // Failure
+  }
+  memcpy(data, result.data(), size);
+  return heif_error_Ok;
+}
+
+static int heif_seek(int64_t position, void* userdata) {
+  auto stream = static_cast<File*>(userdata);
+  if (!stream->seekable()) {
+    return 1; // Failure
+  }
+  if (stream->seek(position, SEEK_SET)) {
+    return heif_error_Ok;
+  }
+  return 1; // Failure
+}
+
+static heif_reader_grow_status heif_wait_for_file_size(
+    int64_t targetSize,
+    void* userdata) {
+  const auto currentPos = heif_get_position(userdata);
+  if (targetSize <= currentPos) {
+    return heif_reader_grow_status_size_reached;
+  }
+
+  auto stream = static_cast<File*>(userdata);
+  if (!stream->seek(0, SEEK_END)) {
+    return heif_reader_grow_status_error;
+  }
+  const auto fileSize = stream->tell();
+  if (fileSize < 0) {
+    return heif_reader_grow_status_error;
+  }
+  // Restore current position
+  if (!stream->seek(currentPos, SEEK_SET)) {
+    return heif_reader_grow_status_error;
+  }
+  if (targetSize > fileSize) {
+    return heif_reader_grow_status_error;
+  }
+  return heif_reader_grow_status_size_reached;
+}
+
+static heif_reader create_heif_reader() {
+  return heif_reader{
+    .reader_api_version = 1,
+    .get_position = &heif_get_position,
+    .read = &heif_read,
+    .seek = &heif_seek,
+    .wait_for_file_size = &heif_wait_for_file_size};
+}
+
+static struct gfxinfo *php_handle_heif(const req::ptr<File>& stream) {
+  struct gfxinfo *result = nullptr;
+
+  if (!stream->rewind()) {
+    return nullptr;
+  }
+
+  heif_context* ctx = heif_context_alloc();
+  SCOPE_EXIT {
+    heif_context_free(ctx);
+  };
+
+  heif_reader reader = create_heif_reader();
+  auto err = heif_context_read_from_reader(ctx, &reader, stream.get(), nullptr);
+  if (err.code != 0) {
+    raise_notice("Heif context read failed: %s", err.message);
+    return nullptr;
+  }
+
+  heif_image_handle* handle;
+  err = heif_context_get_primary_image_handle(ctx, &handle);
+  if (err.code != 0) {
+    // Unable to get image handle
+    raise_notice("Failed to get primary image handle: %s", err.message);
+    return nullptr;
+  }
+
+  SCOPE_EXIT {
+    heif_image_handle_release(handle);
+  };
+
+  result = (struct gfxinfo *)IM_CALLOC(1, sizeof(struct gfxinfo));
+  CHECK_ALLOC_R(result, (sizeof(struct gfxinfo)), nullptr);
+
+  result->width = heif_image_handle_get_width(handle);
+  result->height = heif_image_handle_get_height(handle);
+  // It is easier to not set bits/channels because it will require actual
+  // decoding of the image bitstream to get the information using libheif.
+  result->bits = 0;
+  result->channels = 0;
+  return result;
+}
+
+static heif_brand2 php_get_heif(const req::ptr<File>& stream) {
+  if (!stream->rewind()) {
+    return heif_unknown_brand;
+  }
+
+  OptString fileType = stream->read(12);
+  if (fileType.length() != 12) {
+    return heif_unknown_brand;
+  }
+
+  return heif_read_main_brand(reinterpret_cast<const uint8_t*>(
+    fileType.c_str()), 12);
+}
+
 /* Convert internal image_type to mime type */
-static char *php_image_type_to_mime_type(int image_type) {
+static const char *php_image_type_to_mime_type(int image_type) {
   switch( image_type) {
   case IMAGE_FILETYPE_GIF:
     return "image/gif";
@@ -1482,6 +1671,12 @@ static char *php_image_type_to_mime_type(int image_type) {
     return "image/xbm";
   case IMAGE_FILETYPE_ICO:
     return "image/vnd.microsoft.icon";
+  case IMAGE_FILETYPE_WEBP:
+    return "image/webp";
+  case IMAGE_FILETYPE_AVIF:
+    return "image/avif";
+  case IMAGE_FILETYPE_HEIC:
+    return "image/heic";
   default:
   case IMAGE_FILETYPE_UNKNOWN:
     return "application/octet-stream"; /* suppose binary format */
@@ -1490,7 +1685,7 @@ static char *php_image_type_to_mime_type(int image_type) {
 
 /* detect filetype from first bytes */
 static int php_getimagetype(const req::ptr<File>& file) {
-  String fileType = file->read(3);
+  OptString fileType = file->read(3);
   if (fileType.length() != 3) {
     raise_notice("Read error!");
     return IMAGE_FILETYPE_UNKNOWN;
@@ -1502,7 +1697,7 @@ static int php_getimagetype(const req::ptr<File>& file) {
   } else if (!memcmp(fileType.c_str(), php_sig_jpg, 3)) {
     return IMAGE_FILETYPE_JPEG;
   } else if (!memcmp(fileType.c_str(), php_sig_png, 3)) {
-    String data = file->read(5);
+    OptString data = file->read(5);
     if (data.length() != 5) {
       raise_notice("Read error!");
       return IMAGE_FILETYPE_UNKNOWN;
@@ -1523,9 +1718,21 @@ static int php_getimagetype(const req::ptr<File>& file) {
     return IMAGE_FILETYPE_BMP;
   } else if (!memcmp(fileType.c_str(), php_sig_jpc, 3)) {
     return IMAGE_FILETYPE_JPC;
+  } else if (!memcmp(fileType.c_str(), php_sig_riff, 3)) {
+    OptString data = file->read(9);
+    if (data.length() != 9) {
+      raise_notice("Read error!");
+      return IMAGE_FILETYPE_UNKNOWN;
+    }
+    fileType += data;
+    if (!memcmp(fileType.c_str() + 8, php_sig_webp, 4)) {
+      return IMAGE_FILETYPE_WEBP;
+    } else {
+      return IMAGE_FILETYPE_UNKNOWN;
+    }
   }
 
-  String data = file->read(1);
+  OptString data = file->read(1);
   if (data.length() != 1) {
     raise_notice("Read error!");
     return IMAGE_FILETYPE_UNKNOWN;
@@ -1556,6 +1763,12 @@ static int php_getimagetype(const req::ptr<File>& file) {
   }
 
   /* AFTER ALL ABOVE FAILED */
+  auto heifBrand = php_get_heif(file);
+  if (heifBrand == heif_brand2_heic || heifBrand == heif_brand2_heix) {
+    return IMAGE_FILETYPE_HEIC;
+  } else if (heifBrand == heif_brand2_avif) {
+    return IMAGE_FILETYPE_AVIF;
+  }
   if (php_get_wbmp(file, nullptr, 1)) {
     return IMAGE_FILETYPE_WBMP;
   }
@@ -1565,7 +1778,7 @@ static int php_getimagetype(const req::ptr<File>& file) {
   return IMAGE_FILETYPE_UNKNOWN;
 }
 
-String HHVM_FUNCTION(image_type_to_mime_type, int64_t imagetype) {
+OptString HHVM_FUNCTION(image_type_to_mime_type, int64_t imagetype) {
   switch (imagetype) {
     case IMAGE_FILETYPE_GIF:
       return "image/gif";
@@ -1595,6 +1808,12 @@ String HHVM_FUNCTION(image_type_to_mime_type, int64_t imagetype) {
       return "image/xbm";
     case IMAGE_FILETYPE_ICO:
       return "image/vnd.microsoft.icon";
+    case IMAGE_FILETYPE_WEBP:
+      return "image/webp";
+    case IMAGE_FILETYPE_AVIF:
+      return "image/avif";
+    case IMAGE_FILETYPE_HEIC:
+      return "image/heic";
     default:
     case IMAGE_FILETYPE_UNKNOWN:
       return "application/octet-stream"; /* suppose binary format */
@@ -1605,36 +1824,42 @@ Variant HHVM_FUNCTION(image_type_to_extension,
                      int64_t imagetype, bool include_dot /*=true */) {
   switch (imagetype) {
   case IMAGE_FILETYPE_GIF:
-    return include_dot ? String(".gif") : String("gif");
+    return include_dot ? OptString(".gif") : OptString("gif");
   case IMAGE_FILETYPE_JPEG:
-    return include_dot ? String(".jpeg") : String("jpeg");
+    return include_dot ? OptString(".jpeg") : OptString("jpeg");
   case IMAGE_FILETYPE_PNG:
-    return include_dot ? String(".png") : String("png");
+    return include_dot ? OptString(".png") : OptString("png");
   case IMAGE_FILETYPE_SWF:
   case IMAGE_FILETYPE_SWC:
-    return include_dot ? String(".swf") : String("swf");
+    return include_dot ? OptString(".swf") : OptString("swf");
   case IMAGE_FILETYPE_PSD:
-    return include_dot ? String(".psd") : String("psd");
+    return include_dot ? OptString(".psd") : OptString("psd");
   case IMAGE_FILETYPE_BMP:
   case IMAGE_FILETYPE_WBMP:
-    return include_dot ? String(".bmp") : String("bmp");
+    return include_dot ? OptString(".bmp") : OptString("bmp");
   case IMAGE_FILETYPE_TIFF_II:
   case IMAGE_FILETYPE_TIFF_MM:
-    return include_dot ? String(".tiff") : String("tiff");
+    return include_dot ? OptString(".tiff") : OptString("tiff");
   case IMAGE_FILETYPE_IFF:
-    return include_dot ? String(".iff") : String("iff");
+    return include_dot ? OptString(".iff") : OptString("iff");
   case IMAGE_FILETYPE_JPC:
-    return include_dot ? String(".jpc") : String("jpc");
+    return include_dot ? OptString(".jpc") : OptString("jpc");
   case IMAGE_FILETYPE_JP2:
-    return include_dot ? String(".jp2") : String("jp2");
+    return include_dot ? OptString(".jp2") : OptString("jp2");
   case IMAGE_FILETYPE_JPX:
-    return include_dot ? String(".jpx") : String("jpx");
+    return include_dot ? OptString(".jpx") : OptString("jpx");
   case IMAGE_FILETYPE_JB2:
-    return include_dot ? String(".jb2") : String("jb2");
+    return include_dot ? OptString(".jb2") : OptString("jb2");
   case IMAGE_FILETYPE_XBM:
-    return include_dot ? String(".xbm") : String("xbm");
+    return include_dot ? OptString(".xbm") : OptString("xbm");
   case IMAGE_FILETYPE_ICO:
-    return include_dot ? String(".ico") : String("ico");
+    return include_dot ? OptString(".ico") : OptString("ico");
+  case IMAGE_FILETYPE_WEBP:
+    return include_dot ? OptString(".webp") : OptString("webp");
+  case IMAGE_FILETYPE_AVIF:
+    return include_dot ? OptString(".avif") : OptString("avif");
+  case IMAGE_FILETYPE_HEIC:
+    return include_dot ? OptString(".heic") : OptString("heic");
   default:
     return false;
   }
@@ -1647,7 +1872,7 @@ const StaticString
   s_linespacing("linespacing");
 
 
-gdImagePtr get_valid_image_resource(const Resource& image) {
+gdImagePtr get_valid_image_resource(const OptResource& image) {
   auto img_res = dyn_cast_or_null<Image>(image);
   if (!img_res || !img_res->get()) {
     raise_warning("supplied resource is not a valid Image resource");
@@ -1656,30 +1881,18 @@ gdImagePtr get_valid_image_resource(const Resource& image) {
   return img_res->get();
 }
 
-Variant getImageSize(const req::ptr<File>& stream, VRefParam imageinfo) {
+Variant getImageSize(const req::ptr<File>& stream, Array& imageinfo) {
   int itype = 0;
   struct gfxinfo *result = nullptr;
-  auto imageInfoPtr = imageinfo.getVariantOrNull();
-  if (imageInfoPtr) {
-    *imageInfoPtr = Array::Create();
-  }
 
+  imageinfo = Array::CreateDict();
   itype = php_getimagetype(stream);
   switch( itype) {
   case IMAGE_FILETYPE_GIF:
     result = php_handle_gif(stream);
     break;
   case IMAGE_FILETYPE_JPEG:
-    {
-      Array infoArr;
-      if (imageInfoPtr) {
-        infoArr = Array::Create();
-      }
-      result = php_handle_jpeg(stream, infoArr);
-      if (imageInfoPtr) {
-        *imageInfoPtr = infoArr;
-      }
-    }
+    result = php_handle_jpeg(stream, imageinfo);
     break;
   case IMAGE_FILETYPE_PNG:
     result = php_handle_png(stream);
@@ -1720,20 +1933,29 @@ Variant getImageSize(const req::ptr<File>& stream, VRefParam imageinfo) {
   case IMAGE_FILETYPE_ICO:
     result = php_handle_ico(stream);
     break;
+  case IMAGE_FILETYPE_WEBP:
+    result = php_handle_webp(stream);
+    break;
+  case IMAGE_FILETYPE_AVIF:
+    result = php_handle_heif(stream);
+    break;
+  case IMAGE_FILETYPE_HEIC:
+    result = php_handle_heif(stream);
+    break;
   default:
   case IMAGE_FILETYPE_UNKNOWN:
     break;
   }
 
   if (result) {
-    ArrayInit ret(7, ArrayInit::Mixed{});
-    ret.set(0, (int64_t)result->width);
-    ret.set(1, (int64_t)result->height);
+    DictInit ret(7);
+    ret.set((int64_t)0, (int64_t)result->width);
+    ret.set((int64_t)1, (int64_t)result->height);
     ret.set(2, itype);
     char *temp;
     php_vspprintf(&temp, 0, "width=\"%d\" height=\"%d\"",
                   result->width, result->height);
-    ret.set(3, String(temp, CopyString));
+    ret.set(3, OptString(temp, CopyString));
     if (temp) IM_FREE(temp);
     if (result->bits != 0) {
       ret.set(s_bits, (int64_t)result->bits);
@@ -1749,32 +1971,23 @@ Variant getImageSize(const req::ptr<File>& stream, VRefParam imageinfo) {
   }
 }
 
-Variant HHVM_FUNCTION(getimagesize, const String& filename,
-                      VRefParam imageinfo /*=null */) {
+Variant HHVM_FUNCTION(getimagesize, const OptString& filename,
+                      Array& imageinfo) {
   if (auto stream = File::Open(filename, "rb")) {
     return getImageSize(stream, imageinfo);
   }
   return false;
 }
 
-Variant HHVM_FUNCTION(getimagesizefromstring, const String& imagedata,
-                      VRefParam imageinfo /*=null */) {
-  String data = "data://text/plain;base64,";
+Variant HHVM_FUNCTION(getimagesizefromstring, const OptString& imagedata,
+                      Array& imageinfo) {
+  OptString data = "data://text/plain;base64,";
   data += StringUtil::Base64Encode(imagedata);
   if (auto stream = File::Open(data, "r")) {
     return getImageSize(stream, imageinfo);
   }
   return false;
 }
-
-// PHP extension gd.c
-#define HAVE_GDIMAGECREATEFROMPNG 1
-
-#if HAVE_LIBTTF|HAVE_LIBFREETYPE
-#ifndef ENABLE_GD_TTF
-#define ENABLE_GD_TTF
-#endif
-#endif
 
 #define PHP_GDIMG_TYPE_GIF      1
 #define PHP_GDIMG_TYPE_PNG      2
@@ -1798,7 +2011,7 @@ Variant HHVM_FUNCTION(getimagesizefromstring, const String& imagedata,
 #endif
 
 static req::ptr<File>
-php_open_plain_file(const String& filename, const char *mode, FILE **fpp) {
+php_open_plain_file(const OptString& filename, const char *mode, FILE **fpp) {
   auto file = File::Open(filename, mode);
   auto plain_file = dyn_cast_or_null<PlainFile>(file);
   if (!plain_file) return nullptr;
@@ -1834,7 +2047,7 @@ static void _php_image_output_ctxfree(struct gdIOCtx *ctx) {
     IM_FREE(ctx);
   }
 }
-static bool _php_image_output_ctx(const Resource& image, const String& filename,
+static bool _php_image_output_ctx(const OptResource& image, const OptString& filename,
                                   int quality, int basefilter, int image_type,
                                   char* /*tn*/, void (*func_p)()) {
   gdImagePtr im = get_valid_image_resource(image);
@@ -1872,6 +2085,7 @@ static bool _php_image_output_ctx(const Resource& image, const String& filename,
       raise_warning("Invalid threshold value '%d'. "
                       "It must be between 0 and 255", q);
     }
+    [[fallthrough]];
   case PHP_GDIMG_TYPE_JPG:
     ((void(*)(gdImagePtr, gdIOCtx *, int))(func_p))(im, ctx, q);
     break;
@@ -1967,7 +2181,7 @@ static void _php_image_bw_convert(gdImagePtr im_org, gdIOCtx *out,
 /*
  * converts jpeg/png images to wbmp and resizes them as needed
  */
-static bool _php_image_convert(const String& f_org, const String& f_dest,
+static bool _php_image_convert(const OptString& f_org, const OptString& f_dest,
                                int dest_height, int dest_width,
                                int threshold, int image_type) {
   gdImagePtr im_org, im_dest, im_tmp;
@@ -1978,9 +2192,6 @@ static bool _php_image_convert(const String& f_org, const String& f_dest,
   int color, color_org, median;
   int x, y;
   float x_ratio, y_ratio;
-#ifdef HAVE_GD_JPG
-  // long ignore_warning;
-#endif
 
   /* Check threshold value */
   if (threshold < 0 || threshold > 8) {
@@ -2010,7 +2221,6 @@ static bool _php_image_convert(const String& f_org, const String& f_dest,
     }
     break;
 
-#ifdef HAVE_GD_JPG
   case PHP_GDIMG_TYPE_JPG:
     im_org = gdImageCreateFromJpeg(org);
     if (im_org == nullptr) {
@@ -2019,10 +2229,8 @@ static bool _php_image_convert(const String& f_org, const String& f_dest,
       return false;
     }
     break;
-#endif /* HAVE_GD_JPG */
 
 
-#ifdef HAVE_GD_PNG
   case PHP_GDIMG_TYPE_PNG:
     im_org = gdImageCreateFromPng(org);
     if (im_org == nullptr) {
@@ -2031,18 +2239,6 @@ static bool _php_image_convert(const String& f_org, const String& f_dest,
       return false;
     }
     break;
-#endif /* HAVE_GD_PNG */
-
-#ifdef HAVE_LIBVPX
-  case PHP_GDIMG_TYPE_WEBP:
-    im_org = gdImageCreateFromWebp(org);
-    if (im_org == nullptr) {
-      raise_warning("Unable to open '%s' Not a valid webp file",
-                      f_org.c_str());
-      return false;
-    }
-    break;
-#endif /* HAVE_LIBVPX */
 
   default:
     raise_warning("Format not supported");
@@ -2140,7 +2336,7 @@ static bool _php_image_convert(const String& f_org, const String& f_dest,
 
 // For quality and type, -1 means that the argument does not exist
 static bool
-_php_image_output(const Resource& image, const String& filename, int quality,
+_php_image_output(const OptResource& image, const OptString& filename, int quality,
                   int type, int image_type, char* /*tn*/, void (*func_p)()) {
   gdImagePtr im = get_valid_image_resource(image);
   if (!im) return false;
@@ -2274,17 +2470,14 @@ _php_image_output(const Resource& image, const String& filename, int quality,
   return true;
 }
 
-static gdImagePtr _php_image_create_from(const String& filename,
+static gdImagePtr _php_image_create_from(const OptString& filename,
                                          int srcX, int srcY,
                                          int width, int height,
-                                         int image_type, char *tn,
+                                         int image_type, const char *tn,
                                          gdImagePtr(*func_p)(),
                                          gdImagePtr(*ioctx_func_p)()) {
   VMRegAnchor _;
   gdImagePtr im = nullptr;
-#ifdef HAVE_GD_JPG
-  // long ignore_warning;
-#endif
 
   if (image_type == PHP_GDIMG_TYPE_GD2PART) {
     if (width < 1 || height < 1) {
@@ -2307,8 +2500,8 @@ static gdImagePtr _php_image_create_from(const String& filename,
     gdIOCtx* io_ctx;
 
     // copy all
-    String buff = file->read(8192);
-    String str;
+    OptString buff = file->read(8192);
+    OptString str;
     do {
       str = file->read(8192);
       buff += str;
@@ -2345,17 +2538,10 @@ static gdImagePtr _php_image_create_from(const String& filename,
       im = ((gdImagePtr(*)(FILE *, int, int, int, int))(func_p))
              (fp, srcX, srcY, width, height);
       break;
-#if defined(HAVE_GD_XPM) && defined(HAVE_GD_BUNDLED)
-    case PHP_GDIMG_TYPE_XPM:
-      im = gdImageCreateFromXpm(filename);
-      break;
-#endif
 
-#ifdef HAVE_GD_JPG
     case PHP_GDIMG_TYPE_JPG:
       im = gdImageCreateFromJpeg(fp);
       break;
-#endif
 
     default:
       im = ((gdImagePtr(*)(FILE*))(func_p))(fp);
@@ -2447,7 +2633,7 @@ static int _php_image_type (char data[8]) {
   return -1;
 }
 
-gdImagePtr _php_image_create_from_string(const String& image, char *tn,
+gdImagePtr _php_image_create_from_string(const OptString& image, const char *tn,
                                          gdImagePtr (*ioctx_func_p)()) {
   VMRegAnchor _;
   gdIOCtx *io_ctx;
@@ -2533,8 +2719,8 @@ static void php_gdimagecharup(gdImagePtr im, gdFontPtr f, int x, int y,
  * arg = 2  ImageString
  * arg = 3  ImageStringUp
  */
-static bool php_imagechar(const Resource& image, int size, int x, int y,
-                          const String& c, int color, int mode) {
+static bool php_imagechar(const OptResource& image, int size, int x, int y,
+                          const OptString& c, int color, int mode) {
   gdImagePtr im = get_valid_image_resource(image);
   if (!im) return false;
   int ch = 0;
@@ -2571,7 +2757,7 @@ static bool php_imagechar(const Resource& image, int size, int x, int y,
 
 /* arg = 0  normal polygon
    arg = 1  filled polygon */
-static bool php_imagepolygon(const Resource& image,
+static bool php_imagepolygon(const OptResource& image,
                              const Array& points, int num_points,
                              int color, int filled) {
   gdImagePtr im = get_valid_image_resource(image);
@@ -2596,10 +2782,10 @@ static bool php_imagepolygon(const Resource& image,
 
   for (i = 0; i < num_points; i++) {
     if (points.exists(i * 2)) {
-      pts[i].x = points[i * 2].toInt32();
+      pts[i].x = (int)points[i * 2].toInt64();
     }
     if (points.exists(i * 2 + 1)) {
-      pts[i].y = points[i * 2 + 1].toInt32();
+      pts[i].y = (int)points[i * 2 + 1].toInt64();
     }
   }
 
@@ -2714,12 +2900,8 @@ static int php_imagefontsize(int size, int arg) {
   return (arg ? font->h : font->w);
 }
 
-#ifdef ENABLE_GD_TTF
 #define TTFTEXT_DRAW 0
 #define TTFTEXT_BBOX 1
-#endif
-
-#ifdef ENABLE_GD_TTF
 
 static Variant php_imagettftext_common(int mode, int extended,
                                        const Variant& arg1,
@@ -2735,8 +2917,8 @@ static Variant php_imagettftext_common(int mode, int extended,
   long col = -1, x = -1, y = -1;
   int brect[8];
   double ptsize, angle;
-  String str;
-  String fontname;
+  OptString str;
+  OptString fontname;
   Array extrainfo;
   char *error = nullptr;
   gdFTStringExtra strex = {0};
@@ -2748,7 +2930,7 @@ static Variant php_imagettftext_common(int mode, int extended,
     str = arg4.toString();
     extrainfo = arg5;
   } else {
-    Resource image = arg1.toResource();
+    OptResource image = arg1.toResource();
     ptsize = arg2.toDouble();
     angle = arg3.toDouble();
     x = arg4.toInt64();
@@ -2771,7 +2953,7 @@ static Variant php_imagettftext_common(int mode, int extended,
       Variant key = iter.first();
       if (!key.isString()) continue;
       Variant item = iter.second();
-      if (equal(key, s_linespacing)) {
+      if (equal(key, s_linespacing.get())) {
         strex.flags |= gdFTEX_LINESPACE;
         strex.linespacing = item.toDouble();
       }
@@ -2779,8 +2961,8 @@ static Variant php_imagettftext_common(int mode, int extended,
   }
 
   FILE *fp = nullptr;
-  if (!RuntimeOption::FontPath.empty()) {
-    fontname = String(RuntimeOption::FontPath.c_str()) +
+  if (!Cfg::Server::FontPath.empty()) {
+    fontname = OptString(Cfg::Server::FontPath.c_str()) +
                HHVM_FN(basename)(fontname);
   }
   auto stream = php_open_plain_file(fontname, "rb", &fp);
@@ -2790,7 +2972,6 @@ static Variant php_imagettftext_common(int mode, int extended,
   }
   stream->close();
 
-#ifdef USE_GD_IMGSTRTTF
   if (extended) {
     error = gdImageStringFTEx(im, brect, col, (char*)fontname.c_str(),
                               ptsize, angle, x, y, (char*)str.c_str(),
@@ -2800,10 +2981,6 @@ static Variant php_imagettftext_common(int mode, int extended,
     error = gdImageStringFT(im, brect, col, (char*)fontname.c_str(),
                             ptsize, angle, x, y, (char*)str.c_str());
   }
-#else /* !USE_GD_IMGSTRTTF */
-  error = gdttf(im, brect, col, fontname.c_str(),
-                ptsize, angle, x, y, str.c_str());
-#endif
 
   if (error) {
     raise_warning("%s", error);
@@ -2811,13 +2988,17 @@ static Variant php_imagettftext_common(int mode, int extended,
   }
 
   /* return array with the text's bounding box */
-  Array ret;
-  for (int i = 0; i < 8; i++) {
-    ret.set(i, brect[i]);
-  }
-  return ret;
+  return make_vec_array(
+    brect[0],
+    brect[1],
+    brect[2],
+    brect[3],
+    brect[4],
+    brect[5],
+    brect[6],
+    brect[7]
+  );
 }
-#endif  /* ENABLE_GD_TTF */
 
 const StaticString
   s_GD_Version("GD Version"),
@@ -2837,22 +3018,12 @@ const StaticString
   s_JIS_mapped_Japanese_Font_Support("JIS-mapped Japanese Font Support");
 
 Array HHVM_FUNCTION(gd_info) {
-  Array ret;
+  Array ret = Array::CreateDict();
 
   ret.set(s_GD_Version, PHP_GD_VERSION_STRING);
 
-#ifdef ENABLE_GD_TTF
   ret.set(s_FreeType_Support, true);
-#if HAVE_LIBFREETYPE
   ret.set(s_FreeType_Linkage, s_with_freetype);
-#elif HAVE_LIBTTF
-  ret.set(s_FreeType_Linkage, s_with_TTF_library);
-#else
-  ret.set(s_FreeType_Linkage, s_with_unknown_library);
-#endif
-#else
-  ret.set(s_FreeType_Support, false);
-#endif
 
 #ifdef HAVE_LIBT1
   ret.set(s_T1Lib_Support, true);
@@ -2861,22 +3032,10 @@ Array HHVM_FUNCTION(gd_info) {
 #endif
   ret.set(s_GIF_Read_Support, true);
   ret.set(s_GIF_Create_Support, true);
-#ifdef HAVE_GD_JPG
   ret.set(s_JPG_Support, true);
-#else
-  ret.set(s_JPG_Support, false);
-#endif
-#ifdef HAVE_GD_PNG
   ret.set(s_PNG_Support, true);
-#else
-  ret.set(s_PNG_Support, false);
-#endif
   ret.set(s_WBMP_Support, true);
-#if defined(HAVE_GD_XPM) && defined(HAVE_GD_BUNDLED)
-  ret.set(s_XPM_Support, true);
-#else
   ret.set(s_XPM_Support, false);
-#endif
   ret.set(s_XBM_Support, true);
 #if defined(USE_GD_JISX0208) && defined(HAVE_GD_BUNDLED)
   ret.set(s_JIS_mapped_Japanese_Font_Support, true);
@@ -2891,116 +3050,13 @@ Array HHVM_FUNCTION(gd_info) {
                      ((a & 0x0000ff00) << 8) | \
                      ((a & 0x000000ff) << 24))
 
-Variant HHVM_FUNCTION(imageloadfont, const String& /*file*/) {
-  // TODO: ind = 5 + zend_list_insert(font, le_gd_font);
+Variant HHVM_FUNCTION(imageloadfont, const OptString& /*file*/) {
   throw_not_supported(__func__, "NYI");
-#ifdef NEVER
-  Variant stream;
-  zval **file;
-  int hdr_size = sizeof(gdFont) - sizeof(char *);
-  int ind, body_size, n = 0, b, i, body_size_check;
-  gdFontPtr font;
-  php_stream *stream;
-
-
-  stream = File::Open(file, "rb");
-  if (!stream) {
-    raise_warning("failed to open file: %s", file.c_str());
-    return false;
-  }
-
-  /* Only supports a architecture-dependent binary dump format
-   * at the moment.
-   * The file format is like this on machines with 32-byte integers:
-   *
-   * byte 0-3:   (int) number of characters in the font
-   * byte 4-7:   (int) value of first character in the font (often 32, space)
-   * byte 8-11:  (int) pixel width of each character
-   * byte 12-15: (int) pixel height of each character
-   * bytes 16-:  (char) array with character data, one byte per pixel
-   *                    in each character, for a total of
-   *                    (nchars*width*height) bytes.
-   */
-  font = (gdFontPtr) IM_MALLOC(sizeof(gdFont));
-  CHECK_ALLOC_R(font, sizeof(gdFont), false);
-  b = 0;
-  String hdr = stream->read(hdr_size);
-  if (hdr.length() < hdr_size) {
-    IM_FREE(font);
-    if (stream->eof()) {
-      raise_warning("End of file while reading header");
-    } else {
-      raise_warning("Error while reading header");
-    }
-    stream->close();
-    return false;
-  }
-  memcpy((void*)font, hdr.c_str(), hdr.length());
-  i = int64_t(f_tell(stream));
-  stream->seek(0, SEEK_END);
-  body_size_check = int64_t(f_tell(stream)) - hdr_size;
-  stream->seek(i, SEEK_SET);
-
-  body_size = font->w * font->h * font->nchars;
-  if (body_size != body_size_check) {
-    font->w = FLIPWORD(font->w);
-    font->h = FLIPWORD(font->h);
-    font->nchars = FLIPWORD(font->nchars);
-    body_size = font->w * font->h * font->nchars;
-  }
-
-  if (font->nchars <= 0 ||
-      font->h <= 0 ||
-      font->nchars >= INT_MAX || font->h >= INT_MAX) {
-    raise_warning("Error reading font, invalid font header");
-    IM_FREE(font);
-    stream->close();
-    return false;
-  }
-
-  if ((font->nchars * font->h) <= 0 ||
-      font->w <= 0 ||
-      (font->nchars * font->h) >= INT_MAX || font->w >= INT_MAX) {
-    raise_warning("Error reading font, invalid font header");
-    IM_FREE(font);
-    stream->close();
-    return false;
-  }
-
-  if (body_size != body_size_check) {
-    raise_warning("Error reading font");
-    IM_FREE(font);
-    stream->close();
-    return false;
-  }
-
-  String body = stream->read(body_size);
-  if (body.length() < body_size) {
-    IM_FREE(font);
-    if (stream->eof()) {
-      raise_warning("End of file while reading body");
-    } else {
-      raise_warning("Error while reading body");
-    }
-    stream->close();
-    return false;
-  }
-  font->data = IM_MALLOC(body_size);
-  CHECK_ALLOC_R(font->data, body_size, false);
-  memcpy((void*)font->data, body.c_str(), body.length());
-  stream->close();
-
-  /* Adding 5 to the font index so we will never have font indices
-   * that overlap with the old fonts (with indices 1-5).  The first
-   * list index given out is always 1.
-   */
-  // ind = 5 + zend_list_insert(font, le_gd_font);
-
-  return ind;
-#endif
+  // If you decide to implement this, be careful to avoid the crash from
+  // https://github.com/php/php-src/commit/9a60aed6d1925c98b1b40c19b40f5b4b65baa
 }
 
-bool HHVM_FUNCTION(imagesetstyle, const Resource& image, const Array& style) {
+bool HHVM_FUNCTION(imagesetstyle, const OptResource& image, const Array& style) {
   gdImagePtr im = get_valid_image_resource(image);
   if (!im) return false;
   int *stylearr;
@@ -3010,7 +3066,7 @@ bool HHVM_FUNCTION(imagesetstyle, const Resource& image, const Array& style) {
   CHECK_ALLOC_R(stylearr, malloc_size, false);
   index = 0;
   for (ArrayIter iter(style); iter; ++iter) {
-    stylearr[index++] = cellToInt(tvToCell(iter.secondVal()));
+    stylearr[index++] = tvToInt(iter.secondVal());
   }
   gdImageSetStyle(im, stylearr, index);
   IM_FREE(stylearr);
@@ -3023,7 +3079,7 @@ const StaticString
   s_width("width"),
   s_height("height");
 
-Variant HHVM_FUNCTION(imagecrop, const Resource& image, const Array& rect) {
+Variant HHVM_FUNCTION(imagecrop, const OptResource& image, const Array& rect) {
   gdImagePtr im = get_valid_image_resource(image);
   if (!im) return false;
   gdImagePtr imcropped = nullptr;
@@ -3062,7 +3118,7 @@ Variant HHVM_FUNCTION(imagecrop, const Resource& image, const Array& rect) {
 }
 
 Variant HHVM_FUNCTION(imagecropauto,
-                      const Resource& image,
+                      const OptResource& image,
                       int64_t mode /* = -1 */,
                       double threshold /* = 0.5f */,
                       int64_t color /* = -1 */) {
@@ -3072,6 +3128,7 @@ Variant HHVM_FUNCTION(imagecropauto,
   switch (mode) {
     case -1:
       mode = GD_CROP_DEFAULT;
+      [[fallthrough]];
     case GD_CROP_DEFAULT:
     case GD_CROP_TRANSPARENT:
     case GD_CROP_BLACK:
@@ -3115,13 +3172,13 @@ Variant HHVM_FUNCTION(imagecreatetruecolor, int64_t width, int64_t height) {
   return Variant(req::make<Image>(im));
 }
 
-bool f_imageistruecolor(const Resource& image) {
+bool HHVM_FUNCTION(imageistruecolor, const OptResource& image) {
   gdImagePtr im = get_valid_image_resource(image);
   if (!im) return false;
   return im->trueColor;
 }
 
-Variant HHVM_FUNCTION(imagetruecolortopalette, const Resource& image,
+Variant HHVM_FUNCTION(imagetruecolortopalette, const OptResource& image,
     bool dither, int64_t ncolors) {
   gdImagePtr im = get_valid_image_resource(image);
   if (!im) return false;
@@ -3134,8 +3191,8 @@ Variant HHVM_FUNCTION(imagetruecolortopalette, const Resource& image,
   return true;
 }
 
-Variant HHVM_FUNCTION(imagecolormatch, const Resource& image1,
-                                       const Resource& image2) {
+Variant HHVM_FUNCTION(imagecolormatch, const OptResource& image1,
+                                       const OptResource& image2) {
   gdImagePtr im1 = get_valid_image_resource(image1);
   if (!im1) return false;
   gdImagePtr im2 = get_valid_image_resource(image2);
@@ -3162,14 +3219,14 @@ Variant HHVM_FUNCTION(imagecolormatch, const Resource& image1,
 }
 
 bool HHVM_FUNCTION(imagesetthickness,
-    const Resource& image, int64_t thickness) {
+    const OptResource& image, int64_t thickness) {
   gdImagePtr im = get_valid_image_resource(image);
   if (!im) return false;
   gdImageSetThickness(im, thickness);
   return true;
 }
 
-bool HHVM_FUNCTION(imagefilledellipse, const Resource& image,
+bool HHVM_FUNCTION(imagefilledellipse, const OptResource& image,
     int64_t cx, int64_t cy, int64_t width, int64_t height, int64_t color) {
   gdImagePtr im = get_valid_image_resource(image);
   if (!im) return false;
@@ -3177,7 +3234,7 @@ bool HHVM_FUNCTION(imagefilledellipse, const Resource& image,
   return true;
 }
 
-bool HHVM_FUNCTION(imagefilledarc, const Resource& image,
+bool HHVM_FUNCTION(imagefilledarc, const OptResource& image,
     int64_t cx, int64_t cy, int64_t width, int64_t height,
     int64_t start, int64_t end, int64_t color, int64_t style) {
   gdImagePtr im = get_valid_image_resource(image);
@@ -3189,7 +3246,7 @@ bool HHVM_FUNCTION(imagefilledarc, const Resource& image,
 }
 
 Variant HHVM_FUNCTION(imageaffine,
-                      const Resource& image,
+                      const OptResource& image,
                       const Array& affine /* = Array() */,
                       const Array& clip /* = Array() */) {
   gdImagePtr src = get_valid_image_resource(image);
@@ -3265,7 +3322,7 @@ Variant HHVM_FUNCTION(imageaffinematrixconcat,
   double dm1[6];
   double dm2[6];
   double dmr[6];
-  Array ret = Array::Create();
+  Array ret = Array::CreateDict();
 
   if (nelem1 != 6 || nelem2 != 6) {
     raise_warning("imageaffinematrixconcat(): Affine array must "
@@ -3298,7 +3355,7 @@ Variant HHVM_FUNCTION(imageaffinematrixconcat,
   }
 
   for (i = 0; i < 6; i++) {
-    ret.set(String(i, CopyString), dmr[i]);
+    ret.set(OptString::FromInt64(i), dmr[i]);
   }
   return ret;
 }
@@ -3306,7 +3363,7 @@ Variant HHVM_FUNCTION(imageaffinematrixconcat,
 Variant HHVM_FUNCTION(imageaffinematrixget,
                       int64_t type,
                       const Variant& options /* = Array() */) {
-  Array ret = Array::Create();
+  Array ret = Array::CreateDict();
   double affine[6];
   int res = GD_FALSE, i;
 
@@ -3372,13 +3429,13 @@ Variant HHVM_FUNCTION(imageaffinematrixget,
     return false;
   } else {
     for (i = 0; i < 6; i++) {
-      ret.set(String(i, CopyString), affine[i]);
+      ret.set(OptString::FromInt64(i), affine[i]);
     }
   }
   return ret;
 }
 
-bool HHVM_FUNCTION(imagealphablending, const Resource& image,
+bool HHVM_FUNCTION(imagealphablending, const OptResource& image,
                                        bool blendmode) {
   gdImagePtr im = get_valid_image_resource(image);
   if (!im) return false;
@@ -3386,14 +3443,14 @@ bool HHVM_FUNCTION(imagealphablending, const Resource& image,
   return true;
 }
 
-bool HHVM_FUNCTION(imagesavealpha, const Resource& image, bool saveflag) {
+bool HHVM_FUNCTION(imagesavealpha, const OptResource& image, bool saveflag) {
   gdImagePtr im = get_valid_image_resource(image);
   if (!im) return false;
   gdImageSaveAlpha(im, saveflag);
   return true;
 }
 
-bool HHVM_FUNCTION(imagelayereffect, const Resource& image, int64_t effect) {
+bool HHVM_FUNCTION(imagelayereffect, const OptResource& image, int64_t effect) {
   gdImagePtr im = get_valid_image_resource(image);
   if (!im) return false;
   gdImageAlphaBlending(im, effect);
@@ -3401,7 +3458,7 @@ bool HHVM_FUNCTION(imagelayereffect, const Resource& image, int64_t effect) {
 }
 
 Variant HHVM_FUNCTION(imagecolorallocatealpha,
-    const Resource& image,
+    const OptResource& image,
     int64_t red, int64_t green, int64_t blue, int64_t alpha) {
   gdImagePtr im = get_valid_image_resource(image);
   if (!im) return false;
@@ -3412,7 +3469,7 @@ Variant HHVM_FUNCTION(imagecolorallocatealpha,
   return ct;
 }
 
-Variant HHVM_FUNCTION(imagecolorresolvealpha, const Resource& image,
+Variant HHVM_FUNCTION(imagecolorresolvealpha, const OptResource& image,
     int64_t red, int64_t green, int64_t blue, int64_t alpha) {
   gdImagePtr im = get_valid_image_resource(image);
   if (!im) return false;
@@ -3420,14 +3477,14 @@ Variant HHVM_FUNCTION(imagecolorresolvealpha, const Resource& image,
 }
 
 Variant HHVM_FUNCTION(imagecolorclosestalpha,
-    const Resource& image,
+    const OptResource& image,
     int64_t red, int64_t green, int64_t blue, int64_t alpha) {
   gdImagePtr im = get_valid_image_resource(image);
   if (!im) return false;
   return gdImageColorClosestAlpha(im, red, green, blue, alpha);
 }
 
-Variant HHVM_FUNCTION(imagecolorexactalpha, const Resource& image,
+Variant HHVM_FUNCTION(imagecolorexactalpha, const OptResource& image,
     int64_t red, int64_t green, int64_t blue, int64_t alpha) {
   gdImagePtr im = get_valid_image_resource(image);
   if (!im) return false;
@@ -3435,7 +3492,7 @@ Variant HHVM_FUNCTION(imagecolorexactalpha, const Resource& image,
 }
 
 bool HHVM_FUNCTION(imagecopyresampled,
-    const Resource& dst_im, const Resource& src_im,
+    const OptResource& dst_im, const OptResource& src_im,
     int64_t dst_x, int64_t dst_y, int64_t src_x, int64_t src_y,
     int64_t dst_w, int64_t dst_h, int64_t src_w, int64_t src_h) {
   gdImagePtr im_src = get_valid_image_resource(src_im);
@@ -3448,7 +3505,7 @@ bool HHVM_FUNCTION(imagecopyresampled,
 }
 
 Variant
-HHVM_FUNCTION(imagerotate, const Resource& source_image, double angle,
+HHVM_FUNCTION(imagerotate, const OptResource& source_image, double angle,
               int64_t bgd_color, int64_t /*ignore_transparent*/ /* = 0 */) {
   gdImagePtr im_src = get_valid_image_resource(source_image);
   if (!im_src) return false;
@@ -3457,27 +3514,30 @@ HHVM_FUNCTION(imagerotate, const Resource& source_image, double angle,
   return Variant(req::make<Image>(im_dst));
 }
 
-bool HHVM_FUNCTION(imagesettile, const Resource& image, const Resource& tile) {
+bool HHVM_FUNCTION(imagesettile, const OptResource& image, const OptResource& tile) {
   gdImagePtr im = get_valid_image_resource(image);
   if (!im) return false;
   gdImagePtr til = get_valid_image_resource(tile);
   if (!til) return false;
   gdImageSetTile(im, til);
+  unsafe_cast_or_null<Image>(image)->m_tile = unsafe_cast_or_null<Image>(tile);
   return true;
 }
 
 bool HHVM_FUNCTION(imagesetbrush,
-    const Resource& image, const Resource& brush) {
+    const OptResource& image, const OptResource& brush) {
   gdImagePtr im = get_valid_image_resource(image);
   if (!im) return false;
   gdImagePtr tile = get_valid_image_resource(brush);
   if (!tile) return false;
   gdImageSetBrush(im, tile);
+  unsafe_cast_or_null<Image>(image)->m_brush =
+    unsafe_cast_or_null<Image>(brush);
   return true;
 }
 
 bool HHVM_FUNCTION(imagesetinterpolation,
-    const Resource& image, int64_t method /*=GD_BILINEAR_FIXED*/) {
+    const OptResource& image, int64_t method /*=GD_BILINEAR_FIXED*/) {
   gdImagePtr im = get_valid_image_resource(image);
   if (!im) return false;
   if (method == -1) method = GD_BILINEAR_FIXED;
@@ -3500,20 +3560,13 @@ Variant HHVM_FUNCTION(imagecreate, int64_t width, int64_t height) {
 int64_t HHVM_FUNCTION(imagetypes) {
   int ret=0;
   ret = IMAGE_TYPE_GIF;
-#ifdef HAVE_GD_JPG
   ret |= IMAGE_TYPE_JPEG;
-#endif
-#ifdef HAVE_GD_PNG
   ret |= IMAGE_TYPE_PNG;
-#endif
   ret |= IMAGE_TYPE_WBMP;
-#if defined(HAVE_GD_XPM) && defined(HAVE_GD_BUNDLED)
-  ret |= IMAGE_TYPE_XPM;
-#endif
   return ret;
 }
 
-Variant HHVM_FUNCTION(imagecreatefromstring, const String& data) {
+Variant HHVM_FUNCTION(imagecreatefromstring, const OptString& data) {
   gdImagePtr im;
   int imtype;
   char sig[8];
@@ -3526,33 +3579,13 @@ Variant HHVM_FUNCTION(imagecreatefromstring, const String& data) {
   imtype = _php_image_type(sig);
   switch (imtype) {
   case PHP_GDIMG_TYPE_JPG:
-#ifdef HAVE_GD_JPG
     im = _php_image_create_from_string(data, "JPEG",
       (gdImagePtr(*)())gdImageCreateFromJpegCtx);
-#else
-    raise_warning("No JPEG support");
-    return false;
-#endif
     break;
 
   case PHP_GDIMG_TYPE_PNG:
-#ifdef HAVE_GD_PNG
     im = _php_image_create_from_string(data, "PNG",
       (gdImagePtr(*)())gdImageCreateFromPngCtx);
-#else
-    raise_warning("No PNG support");
-    return false;
-#endif
-    break;
-
-  case PHP_GDIMG_TYPE_WEBP:
-#ifdef HAVE_LIBVPX
-    im = _php_image_create_from_string(data, "WEBP",
-      (gdImagePtr(*)())gdImageCreateFromWebpCtx);
-#else
-    raise_warning("No webp support (libvpx is needed)");
-    return false;
-#endif
     break;
 
   case PHP_GDIMG_TYPE_GIF:
@@ -3582,7 +3615,7 @@ Variant HHVM_FUNCTION(imagecreatefromstring, const String& data) {
   return Variant(req::make<Image>(im));
 }
 
-Variant HHVM_FUNCTION(imagecreatefromgif, const String& filename) {
+Variant HHVM_FUNCTION(imagecreatefromgif, const OptString& filename) {
   gdImagePtr im =
     _php_image_create_from(filename, -1, -1, -1, -1,
                            PHP_GDIMG_TYPE_GIF, "GIF",
@@ -3594,8 +3627,7 @@ Variant HHVM_FUNCTION(imagecreatefromgif, const String& filename) {
   return Variant(req::make<Image>(im));
 }
 
-#ifdef HAVE_GD_JPG
-Variant HHVM_FUNCTION(imagecreatefromjpeg, const String& filename) {
+Variant HHVM_FUNCTION(imagecreatefromjpeg, const OptString& filename) {
   gdImagePtr im =
     _php_image_create_from(filename, -1, -1, -1, -1,
                            PHP_GDIMG_TYPE_JPG, "JPEG",
@@ -3606,10 +3638,8 @@ Variant HHVM_FUNCTION(imagecreatefromjpeg, const String& filename) {
   }
   return Variant(req::make<Image>(im));
 }
-#endif
 
-#ifdef HAVE_GD_PNG
-Variant HHVM_FUNCTION(imagecreatefrompng, const String& filename) {
+Variant HHVM_FUNCTION(imagecreatefrompng, const OptString& filename) {
   gdImagePtr im =
     _php_image_create_from(filename, -1, -1, -1, -1,
                            PHP_GDIMG_TYPE_PNG, "PNG",
@@ -3620,23 +3650,8 @@ Variant HHVM_FUNCTION(imagecreatefrompng, const String& filename) {
   }
   return Variant(req::make<Image>(im));
 }
-#endif
 
-#ifdef HAVE_LIBVPX
-Variant HHVM_FUNCTION(imagecreatefromwebp, const String& filename) {
-  gdImagePtr im =
-    _php_image_create_from(filename, -1, -1, -1, -1,
-                           PHP_GDIMG_TYPE_WEBP, "WEBP",
-                           (gdImagePtr(*)())gdImageCreateFromWebp,
-                           (gdImagePtr(*)())gdImageCreateFromWebpCtx);
-  if (im == nullptr) {
-    return false;
-  }
-  return Variant(req::make<Image>(im));
-}
-#endif
-
-Variant HHVM_FUNCTION(imagecreatefromxbm, const String& filename) {
+Variant HHVM_FUNCTION(imagecreatefromxbm, const OptString& filename) {
   gdImagePtr im =
     _php_image_create_from(filename, -1, -1, -1, -1,
                            PHP_GDIMG_TYPE_XBM, "XBM",
@@ -3648,21 +3663,7 @@ Variant HHVM_FUNCTION(imagecreatefromxbm, const String& filename) {
   return Variant(req::make<Image>(im));
 }
 
-#if defined(HAVE_GD_XPM) && defined(HAVE_GD_BUNDLED)
-Variant HHVM_FUNCTION(imagecreatefromxpm, const String& filename) {
-  gdImagePtr im =
-    _php_image_create_from(filename, -1, -1, -1, -1,
-                           PHP_GDIMG_TYPE_XPM, "XPM",
-                           (gdImagePtr(*)())gdImageCreateFromXpm,
-                           (gdImagePtr(*)())nullptr);
-  if (im == nullptr) {
-    return false;
-  }
-  return Variant(req::make<Image>(im));
-}
-#endif
-
-Variant HHVM_FUNCTION(imagecreatefromwbmp, const String& filename) {
+Variant HHVM_FUNCTION(imagecreatefromwbmp, const OptString& filename) {
   gdImagePtr im =
     _php_image_create_from(filename, -1, -1, -1, -1,
                            PHP_GDIMG_TYPE_WBM, "WBMP",
@@ -3674,7 +3675,7 @@ Variant HHVM_FUNCTION(imagecreatefromwbmp, const String& filename) {
   return Variant(req::make<Image>(im));
 }
 
-Variant HHVM_FUNCTION(imagecreatefromgd, const String& filename) {
+Variant HHVM_FUNCTION(imagecreatefromgd, const OptString& filename) {
   gdImagePtr im =
     _php_image_create_from(filename, -1, -1, -1, -1,
                            PHP_GDIMG_TYPE_GD, "GD",
@@ -3686,7 +3687,7 @@ Variant HHVM_FUNCTION(imagecreatefromgd, const String& filename) {
   return Variant(req::make<Image>(im));
 }
 
-Variant HHVM_FUNCTION(imagecreatefromgd2, const String& filename) {
+Variant HHVM_FUNCTION(imagecreatefromgd2, const OptString& filename) {
   gdImagePtr im =
     _php_image_create_from(filename, -1, -1, -1, -1,
                            PHP_GDIMG_TYPE_GD2, "GD2",
@@ -3699,7 +3700,7 @@ Variant HHVM_FUNCTION(imagecreatefromgd2, const String& filename) {
 }
 
 Variant HHVM_FUNCTION(imagecreatefromgd2part,
-    const String& filename,
+    const OptString& filename,
     int64_t srcx, int64_t srcy, int64_t width, int64_t height) {
   gdImagePtr im =
     _php_image_create_from(filename, srcx, srcy, width, height,
@@ -3712,65 +3713,51 @@ Variant HHVM_FUNCTION(imagecreatefromgd2part,
   return Variant(req::make<Image>(im));
 }
 
-bool HHVM_FUNCTION(imagegif, const Resource& image,
-    const String& filename /* = null_string */) {
+bool HHVM_FUNCTION(imagegif, const OptResource& image,
+    const OptString& filename /* = null_string */) {
   return _php_image_output_ctx(image, filename, -1, -1,
                                PHP_GDIMG_TYPE_GIF, "GIF",
                                (void (*)())gdImageGifCtx);
 }
 
-#ifdef HAVE_GD_PNG
-bool HHVM_FUNCTION(imagepng, const Resource& image,
-    const String& filename /* = null_string */,
+bool HHVM_FUNCTION(imagepng, const OptResource& image,
+    const OptString& filename /* = null_string */,
     int64_t quality /* = -1 */, int64_t filters /* = -1 */) {
   return _php_image_output_ctx(image, filename, quality, filters,
                                PHP_GDIMG_TYPE_PNG, "PNG",
                                (void (*)())gdImagePngCtxEx);
 }
-#endif
 
-#ifdef HAVE_LIBVPX
-bool HHVM_FUNCTION(imagewebp, const Resource& image,
-    const String& filename /* = null_string */,
-    int64_t quality /* = 80 */) {
-  return _php_image_output_ctx(image, filename, quality, -1,
-                               PHP_GDIMG_TYPE_WEBP, "WEBP",
-                               (void (*)())gdImageWebpCtx);
-}
-#endif
-
-#ifdef HAVE_GD_JPG
-bool HHVM_FUNCTION(imagejpeg, const Resource& image,
-    const String& filename /* = null_string */, int64_t quality /* = -1 */) {
+bool HHVM_FUNCTION(imagejpeg, const OptResource& image,
+    const OptString& filename /* = null_string */, int64_t quality /* = -1 */) {
   return _php_image_output_ctx(image, filename, quality, -1,
                                PHP_GDIMG_TYPE_JPG, "JPEG",
                                (void (*)())gdImageJpegCtx);
 }
-#endif
 
-bool HHVM_FUNCTION(imagewbmp, const Resource& image,
-    const String& filename /* = null_string */,
+bool HHVM_FUNCTION(imagewbmp, const OptResource& image,
+    const OptString& filename /* = null_string */,
     int64_t foreground /* = -1 */) {
   return _php_image_output_ctx(image, filename, foreground, -1,
                                PHP_GDIMG_TYPE_WBM, "WBMP",
                                (void (*)())gdImageWBMPCtx);
 }
 
-bool HHVM_FUNCTION(imagegd, const Resource& image,
-    const String& filename /* = null_string */) {
+bool HHVM_FUNCTION(imagegd, const OptResource& image,
+    const OptString& filename /* = null_string */) {
   return _php_image_output(image, filename, -1, -1, PHP_GDIMG_TYPE_GD, "GD",
                            (void (*)())gdImageGd);
 }
 
-bool HHVM_FUNCTION(imagegd2, const Resource& image,
-    const String& filename /* = null_string */,
+bool HHVM_FUNCTION(imagegd2, const OptResource& image,
+    const OptString& filename /* = null_string */,
     int64_t chunk_size /* = 0 */, int64_t type /* = 0 */) {
   return _php_image_output(image, filename, chunk_size, type,
                            PHP_GDIMG_TYPE_GD2, "GD2",
                            (void (*)())gdImageGd2);
 }
 
-bool HHVM_FUNCTION(imagedestroy, const Resource& image) {
+bool HHVM_FUNCTION(imagedestroy, const OptResource& image) {
   auto img_res = cast<Image>(image);
   gdImagePtr im = img_res->get();
   if (!im) return false;
@@ -3779,7 +3766,7 @@ bool HHVM_FUNCTION(imagedestroy, const Resource& image) {
 }
 
 Variant HHVM_FUNCTION(imagecolorallocate,
-    const Resource& image,
+    const OptResource& image,
     int64_t red, int64_t green, int64_t blue) {
   gdImagePtr im = get_valid_image_resource(image);
   if (!im) return false;
@@ -3791,8 +3778,8 @@ Variant HHVM_FUNCTION(imagecolorallocate,
 }
 
 Variant HHVM_FUNCTION(imagepalettecopy,
-    const Resource& dst,
-    const Resource& src) {
+    const OptResource& dst,
+    const OptResource& src) {
   gdImagePtr dstim = cast<Image>(dst)->get();
   gdImagePtr srcim = cast<Image>(src)->get();
   if (!dstim || !srcim)
@@ -3802,7 +3789,7 @@ Variant HHVM_FUNCTION(imagepalettecopy,
 }
 
 Variant HHVM_FUNCTION(imagecolorat,
-    const Resource& image, int64_t x, int64_t y) {
+    const OptResource& image, int64_t x, int64_t y) {
   gdImagePtr im = get_valid_image_resource(image);
   if (!im) return false;
   if (gdImageTrueColor(im)) {
@@ -3823,20 +3810,20 @@ Variant HHVM_FUNCTION(imagecolorat,
 }
 
 Variant HHVM_FUNCTION(imagecolorclosest,
-    const Resource& image, int64_t red, int64_t green, int64_t blue) {
+    const OptResource& image, int64_t red, int64_t green, int64_t blue) {
   gdImagePtr im = get_valid_image_resource(image);
   if (!im) return false;
   return gdImageColorClosest(im, red, green, blue);
 }
 
-Variant HHVM_FUNCTION(imagecolorclosesthwb, const Resource& image,
+Variant HHVM_FUNCTION(imagecolorclosesthwb, const OptResource& image,
     int64_t red, int64_t green, int64_t blue) {
   gdImagePtr im = get_valid_image_resource(image);
   if (!im) return false;
   return gdImageColorClosestHWB(im, red, green, blue);
 }
 
-bool HHVM_FUNCTION(imagecolordeallocate, const Resource& image,
+bool HHVM_FUNCTION(imagecolordeallocate, const OptResource& image,
                                          int64_t color) {
   gdImagePtr im = get_valid_image_resource(image);
   if (!im) return false;
@@ -3853,21 +3840,21 @@ bool HHVM_FUNCTION(imagecolordeallocate, const Resource& image,
   }
 }
 
-Variant HHVM_FUNCTION(imagecolorresolve, const Resource& image,
+Variant HHVM_FUNCTION(imagecolorresolve, const OptResource& image,
     int64_t red, int64_t green, int64_t blue) {
   gdImagePtr im = get_valid_image_resource(image);
   if (!im) return false;
   return gdImageColorResolve(im, red, green, blue);
 }
 
-Variant HHVM_FUNCTION(imagecolorexact, const Resource& image,
+Variant HHVM_FUNCTION(imagecolorexact, const OptResource& image,
     int64_t red, int64_t green, int64_t blue) {
   gdImagePtr im = get_valid_image_resource(image);
   if (!im) return false;
   return gdImageColorExact(im, red, green, blue);
 }
 
-Variant HHVM_FUNCTION(imagecolorset, const Resource& image,
+Variant HHVM_FUNCTION(imagecolorset, const OptResource& image,
     int64_t index, int64_t red, int64_t green, int64_t blue) {
   gdImagePtr im = get_valid_image_resource(image);
   if (!im) return false;
@@ -3887,13 +3874,13 @@ const StaticString
   s_blue("blue"),
   s_alpha("alpha");
 
-Variant HHVM_FUNCTION(imagecolorsforindex, const Resource& image,
+Variant HHVM_FUNCTION(imagecolorsforindex, const OptResource& image,
                                            int64_t index) {
   gdImagePtr im = get_valid_image_resource(image);
   if (!im) return false;
   if (index >= 0 &&
       (gdImageTrueColor(im) || index < gdImageColorsTotal(im))) {
-    return make_map_array(
+    return make_dict_array(
       s_red,  gdImageRed(im,index),
       s_green, gdImageGreen(im,index),
       s_blue, gdImageBlue(im,index),
@@ -3904,7 +3891,7 @@ Variant HHVM_FUNCTION(imagecolorsforindex, const Resource& image,
   return false;
 }
 
-bool HHVM_FUNCTION(imagegammacorrect, const Resource& image,
+bool HHVM_FUNCTION(imagegammacorrect, const OptResource& image,
     double inputgamma, double outputgamma) {
   gdImagePtr im = get_valid_image_resource(image);
   if (!im) return false;
@@ -3941,7 +3928,7 @@ bool HHVM_FUNCTION(imagegammacorrect, const Resource& image,
   return true;
 }
 
-bool HHVM_FUNCTION(imagesetpixel, const Resource& image,
+bool HHVM_FUNCTION(imagesetpixel, const OptResource& image,
     int64_t x, int64_t y, int64_t color) {
   gdImagePtr im = get_valid_image_resource(image);
   if (!im) return false;
@@ -3949,7 +3936,7 @@ bool HHVM_FUNCTION(imagesetpixel, const Resource& image,
   return true;
 }
 
-bool HHVM_FUNCTION(imageline, const Resource& image,
+bool HHVM_FUNCTION(imageline, const OptResource& image,
     int64_t x1, int64_t y1, int64_t x2, int64_t y2, int64_t color) {
   gdImagePtr im = get_valid_image_resource(image);
   if (!im) return false;
@@ -3959,7 +3946,7 @@ bool HHVM_FUNCTION(imageline, const Resource& image,
 }
 
 bool HHVM_FUNCTION(imagedashedline,
-    const Resource& image,
+    const OptResource& image,
     int64_t x1, int64_t y1, int64_t x2, int64_t y2, int64_t color) {
   gdImagePtr im = get_valid_image_resource(image);
   if (!im) return false;
@@ -3967,7 +3954,7 @@ bool HHVM_FUNCTION(imagedashedline,
   return true;
 }
 
-bool HHVM_FUNCTION(imagerectangle, const Resource& image,
+bool HHVM_FUNCTION(imagerectangle, const OptResource& image,
     int64_t x1, int64_t y1, int64_t x2, int64_t y2, int64_t color) {
   gdImagePtr im = get_valid_image_resource(image);
   if (!im) return false;
@@ -3975,7 +3962,7 @@ bool HHVM_FUNCTION(imagerectangle, const Resource& image,
   return true;
 }
 
-bool HHVM_FUNCTION(imagefilledrectangle, const Resource& image,
+bool HHVM_FUNCTION(imagefilledrectangle, const OptResource& image,
     int64_t x1, int64_t y1, int64_t x2, int64_t y2, int64_t color) {
   gdImagePtr im = get_valid_image_resource(image);
   if (!im) return false;
@@ -3983,7 +3970,7 @@ bool HHVM_FUNCTION(imagefilledrectangle, const Resource& image,
   return true;
 }
 
-bool HHVM_FUNCTION(imagearc, const Resource& image,
+bool HHVM_FUNCTION(imagearc, const OptResource& image,
     int64_t cx, int64_t cy, int64_t width, int64_t height,
     int64_t start, int64_t end, int64_t color) {
   gdImagePtr im = get_valid_image_resource(image);
@@ -3995,7 +3982,7 @@ bool HHVM_FUNCTION(imagearc, const Resource& image,
   return true;
 }
 
-bool HHVM_FUNCTION(imageellipse, const Resource& image,
+bool HHVM_FUNCTION(imageellipse, const OptResource& image,
     int64_t cx, int64_t cy, int64_t width, int64_t height, int64_t color) {
   gdImagePtr im = get_valid_image_resource(image);
   if (!im) return false;
@@ -4004,7 +3991,7 @@ bool HHVM_FUNCTION(imageellipse, const Resource& image,
   return true;
 }
 
-bool HHVM_FUNCTION(imagefilltoborder, const Resource& image,
+bool HHVM_FUNCTION(imagefilltoborder, const OptResource& image,
     int64_t x, int64_t y, int64_t border, int64_t color) {
   gdImagePtr im = get_valid_image_resource(image);
   if (!im) return false;
@@ -4012,7 +3999,7 @@ bool HHVM_FUNCTION(imagefilltoborder, const Resource& image,
   return true;
 }
 
-bool HHVM_FUNCTION(imagefill, const Resource& image,
+bool HHVM_FUNCTION(imagefill, const OptResource& image,
     int64_t x, int64_t y, int64_t color) {
   gdImagePtr im = get_valid_image_resource(image);
   if (!im) return false;
@@ -4020,13 +4007,13 @@ bool HHVM_FUNCTION(imagefill, const Resource& image,
   return true;
 }
 
-Variant HHVM_FUNCTION(imagecolorstotal, const Resource& image) {
+Variant HHVM_FUNCTION(imagecolorstotal, const OptResource& image) {
   gdImagePtr im = get_valid_image_resource(image);
   if (!im) return false;
   return (gdImageColorsTotal(im));
 }
 
-Variant HHVM_FUNCTION(imagecolortransparent, const Resource& image,
+Variant HHVM_FUNCTION(imagecolortransparent, const OptResource& image,
                                              int64_t color /* = -1 */) {
   gdImagePtr im = get_valid_image_resource(image);
   if (!im) return false;
@@ -4037,23 +4024,23 @@ Variant HHVM_FUNCTION(imagecolortransparent, const Resource& image,
   return gdImageGetTransparent(im);
 }
 
-Variant HHVM_FUNCTION(imageinterlace, int64_t argc, const Resource& image,
-    int64_t interlace /* = 0 */) {
+TypedValue HHVM_FUNCTION(imageinterlace, const OptResource& image,
+                         TypedValue interlace /* = 0 */) {
   gdImagePtr im = get_valid_image_resource(image);
-  if (!im) return false;
-  if (argc > 1) {
+  if (!im) return make_tv<KindOfBoolean>(false);
+  if (!tvIsNull(interlace)) {
     // has interlace argument
-    gdImageInterlace(im, interlace);
+    gdImageInterlace(im, tvAssertInt(interlace));
   }
-  return gdImageGetInterlaced(im);
+  return make_tv<KindOfInt64>(gdImageGetInterlaced(im));
 }
 
-bool HHVM_FUNCTION(imagepolygon, const Resource& image,
+bool HHVM_FUNCTION(imagepolygon, const OptResource& image,
     const Array& points, int64_t num_points, int64_t color) {
   return php_imagepolygon(image, points, num_points, color, 0);
 }
 
-bool HHVM_FUNCTION(imagefilledpolygon, const Resource& image,
+bool HHVM_FUNCTION(imagefilledpolygon, const OptResource& image,
     const Array& points, int64_t num_points, int64_t color) {
   return php_imagepolygon(image, points, num_points, color, 1);
 }
@@ -4066,31 +4053,31 @@ int64_t HHVM_FUNCTION(imagefontheight, int64_t font) {
   return php_imagefontsize(font, 1);
 }
 
-bool HHVM_FUNCTION(imagechar, const Resource& image,
+bool HHVM_FUNCTION(imagechar, const OptResource& image,
     int64_t font, int64_t x, int64_t y,
-    const String& c, int64_t color) {
+    const OptString& c, int64_t color) {
   return php_imagechar(image, font, x, y, c, color, 0);
 }
 
-bool HHVM_FUNCTION(imagecharup, const Resource& image,
+bool HHVM_FUNCTION(imagecharup, const OptResource& image,
     int64_t font, int64_t x, int64_t y,
-    const String& c, int64_t color) {
+    const OptString& c, int64_t color) {
   return php_imagechar(image, font, x, y, c, color, 1);
 }
 
-bool HHVM_FUNCTION(imagestring, const Resource& image,
+bool HHVM_FUNCTION(imagestring, const OptResource& image,
     int64_t font, int64_t x, int64_t y,
-    const String& str, int64_t color) {
+    const OptString& str, int64_t color) {
   return php_imagechar(image, font, x, y, str, color, 2);
 }
 
-bool HHVM_FUNCTION(imagestringup, const Resource& image,
+bool HHVM_FUNCTION(imagestringup, const OptResource& image,
     int64_t font, int64_t x, int64_t y,
-    const String& str, int64_t color) {
+    const OptString& str, int64_t color) {
   return php_imagechar(image, font, x, y, str, color, 3);
 }
 
-bool HHVM_FUNCTION(imagecopy, const Resource& dst_im, const Resource& src_im,
+bool HHVM_FUNCTION(imagecopy, const OptResource& dst_im, const OptResource& src_im,
     int64_t dst_x, int64_t dst_y,
     int64_t src_x, int64_t src_y, int64_t src_w, int64_t src_h) {
   gdImagePtr im_src = cast<Image>(src_im)->get();
@@ -4101,8 +4088,8 @@ bool HHVM_FUNCTION(imagecopy, const Resource& dst_im, const Resource& src_im,
   return true;
 }
 
-bool HHVM_FUNCTION(imagecopymerge, const Resource& dst_im,
-    const Resource& src_im,
+bool HHVM_FUNCTION(imagecopymerge, const OptResource& dst_im,
+    const OptResource& src_im,
     int64_t dst_x, int64_t dst_y, int64_t src_x, int64_t src_y,
     int64_t src_w, int64_t src_h, int64_t pct) {
   gdImagePtr im_src = cast<Image>(src_im)->get();
@@ -4114,8 +4101,8 @@ bool HHVM_FUNCTION(imagecopymerge, const Resource& dst_im,
   return true;
 }
 
-bool HHVM_FUNCTION(imagecopymergegray, const Resource& dst_im,
-    const Resource& src_im,
+bool HHVM_FUNCTION(imagecopymergegray, const OptResource& dst_im,
+    const OptResource& src_im,
     int64_t dst_x, int64_t dst_y,
     int64_t src_x, int64_t src_y,
     int64_t src_w, int64_t src_h, int64_t pct) {
@@ -4128,8 +4115,8 @@ bool HHVM_FUNCTION(imagecopymergegray, const Resource& dst_im,
   return true;
 }
 
-bool HHVM_FUNCTION(imagecopyresized, const Resource& dst_im,
-    const Resource& src_im,
+bool HHVM_FUNCTION(imagecopyresized, const OptResource& dst_im,
+    const OptResource& src_im,
     int64_t dst_x, int64_t dst_y, int64_t src_x, int64_t src_y,
     int64_t dst_w, int64_t dst_h, int64_t src_w, int64_t src_h) {
   gdImagePtr im_src = cast<Image>(src_im)->get();
@@ -4146,75 +4133,71 @@ bool HHVM_FUNCTION(imagecopyresized, const Resource& dst_im,
   return true;
 }
 
-Variant HHVM_FUNCTION(imagesx, const Resource& image) {
+Variant HHVM_FUNCTION(imagesx, const OptResource& image) {
   gdImagePtr im = get_valid_image_resource(image);
   if (!im) return false;
   return gdImageSX(im);
 }
 
-Variant HHVM_FUNCTION(imagesy, const Resource& image) {
+Variant HHVM_FUNCTION(imagesy, const OptResource& image) {
   gdImagePtr im = get_valid_image_resource(image);
   if (!im) return false;
   return gdImageSY(im);
 }
 
-#if defined(ENABLE_GD_TTF) && HAVE_LIBFREETYPE
 Variant HHVM_FUNCTION(imageftbbox, double size, double angle,
-    const String& font_file, const String& text,
+    const OptString& font_file, const OptString& text,
     const Array& extrainfo /*=[] */) {
   return php_imagettftext_common(TTFTEXT_BBOX, 1,
                                  size, angle, font_file, text, extrainfo);
 }
 
 Variant HHVM_FUNCTION(imagefttext,
-    const Resource& image,
+    const OptResource& image,
     const Variant& size, const Variant& angle,
     int64_t x, int64_t y, int64_t col,
-    const String& font_file, const String& text,
+    const OptString& font_file, const OptString& text,
     const Array& extrainfo) {
   return php_imagettftext_common(TTFTEXT_DRAW, 1,
     image, size, angle, x, y, col, font_file, text, extrainfo);
 }
-#endif
 
-#ifdef ENABLE_GD_TTF
 Variant HHVM_FUNCTION(imagettfbbox, double size, double angle,
-                     const String& fontfile, const String& text) {
+                     const OptString& fontfile, const OptString& text) {
   return php_imagettftext_common(TTFTEXT_BBOX, 0,
                                  size, angle, fontfile, text);
 }
 
-Variant HHVM_FUNCTION(imagettftext, const Resource& image,
+Variant HHVM_FUNCTION(imagettftext, const OptResource& image,
     const Variant& size, const Variant& angle,
     int64_t x, int64_t y, int64_t color,
-    const String& fontfile, const String& text) {
+    const OptString& fontfile, const OptString& text) {
   return php_imagettftext_common(TTFTEXT_DRAW, 0,
                                  image, size.toDouble(), angle.toDouble(),
                                  x, y, color, fontfile, text);
 }
-#endif
 
-bool HHVM_FUNCTION(image2wbmp, const Resource& image,
-                   const String& filename /* = null_string */,
+bool HHVM_FUNCTION(image2wbmp, const OptResource& image,
+                   const OptString& filename /* = null_string */,
                    int64_t threshold /* = -1 */) {
   return _php_image_output(image, filename, threshold, -1,
                            PHP_GDIMG_CONVERT_WBM, "WBMP",
                            (void (*)())_php_image_bw_convert);
 }
 
-bool HHVM_FUNCTION(jpeg2wbmp, const String& jpegname, const String& wbmpname,
+bool HHVM_FUNCTION(jpeg2wbmp, const OptString& jpegname, const OptString& wbmpname,
     int64_t dest_height, int64_t dest_width, int64_t threshold) {
   return _php_image_convert(jpegname, wbmpname, dest_height, dest_width,
                             threshold, PHP_GDIMG_TYPE_JPG);
 }
 
-bool HHVM_FUNCTION(png2wbmp, const String& pngname, const String& wbmpname,
+bool HHVM_FUNCTION(png2wbmp, const OptString& pngname, const OptString& wbmpname,
     int64_t dest_height, int64_t dest_width, int64_t threshold) {
   return _php_image_convert(pngname, wbmpname, dest_height, dest_width,
                             threshold, PHP_GDIMG_TYPE_PNG);
 }
 
-bool HHVM_FUNCTION(imagefilter, const Resource& res,
+bool HHVM_FUNCTION(imagefilter, const OptResource& res,
     int64_t filtertype,
     const Variant& arg1 /*=0*/, const Variant& arg2 /*=0*/,
     const Variant& arg3 /*=0*/, const Variant& arg4 /*=0*/) {
@@ -4257,7 +4240,7 @@ bool HHVM_FUNCTION(imagefilter, const Resource& res,
   return false;
 }
 
-bool HHVM_FUNCTION(imageflip, const Resource& image, int64_t mode /* = -1 */) {
+bool HHVM_FUNCTION(imageflip, const OptResource& image, int64_t mode /* = -1 */) {
   gdImagePtr im = get_valid_image_resource(image);
   if (!im) return false;
   if (mode == -1) mode = GD_FLIP_HORINZONTAL;
@@ -4346,7 +4329,7 @@ static int hphp_gdImageConvolution(gdImagePtr src, float filter[3][3],
   return 1;
 }
 
-bool HHVM_FUNCTION(imageconvolution, const Resource& image,
+bool HHVM_FUNCTION(imageconvolution, const OptResource& image,
     const Array& matrix, double div, double offset) {
   gdImagePtr im_src = cast<Image>(image)->get();
   if (!im_src) return false;
@@ -4384,14 +4367,14 @@ bool HHVM_FUNCTION(imageconvolution, const Resource& image,
   }
 }
 
-bool HHVM_FUNCTION(imageantialias, const Resource& image, bool on) {
+bool HHVM_FUNCTION(imageantialias, const OptResource& image, bool on) {
   gdImagePtr im = get_valid_image_resource(image);
   if (!im) return false;
   SetAntiAliased(im, on);
   return true;
 }
 
-Variant HHVM_FUNCTION(imagescale, const Resource& image, int64_t newwidth,
+Variant HHVM_FUNCTION(imagescale, const OptResource& image, int64_t newwidth,
   int64_t newheight /* =-1 */, int64_t method /*=GD_BILINEAR_FIXED*/) {
   gdImagePtr im = get_valid_image_resource(image);
   if (!im) return false;
@@ -4520,8 +4503,8 @@ int php_iptc_next_marker(const req::ptr<File>& file,
 
 const StaticString s_size("size");
 
-Variant HHVM_FUNCTION(iptcembed, const String& iptcdata,
-    const String& jpeg_file_name, int64_t spool /* = 0 */) {
+Variant HHVM_FUNCTION(iptcembed, const OptString& iptcdata,
+    const OptString& jpeg_file_name, int64_t spool /* = 0 */) {
   char psheader[] = "\xFF\xED\0\0Photoshop 3.0\08BIM\x04\x04\0\0\0";
   static_assert(sizeof(psheader) == 28, "psheader must be 28 bytes");
   unsigned int iptcdata_len = iptcdata.length();
@@ -4537,7 +4520,7 @@ Variant HHVM_FUNCTION(iptcembed, const String& iptcdata,
   }
 
   if (spool < 2) {
-    auto stat = HHVM_FN(fstat)(Resource(file));
+    auto stat = HHVM_FN(fstat)(OptResource(file));
     // TODO(t7561579) until we can properly handle non-file streams here, don't
     // pretend we can and crash.
     if (!stat.isArray()) {
@@ -4545,7 +4528,7 @@ Variant HHVM_FUNCTION(iptcembed, const String& iptcdata,
       return false;
     }
 
-    auto& stat_arr = stat.toCArrRef();
+    auto& stat_arr = stat.asCArrRef();
     auto st_size = stat_arr[s_size].toInt64();
     if (st_size < 0) {
       raise_warning("unsupported stream type");
@@ -4642,12 +4625,12 @@ Variant HHVM_FUNCTION(iptcembed, const String& iptcdata,
   file->close();
 
   if (spool < 2) {
-    return String((char *)spoolbuf, poi - spoolbuf, AttachString);
+    return OptString((char *)spoolbuf, poi - spoolbuf, AttachString);
   }
   return true;
 }
 
-Variant HHVM_FUNCTION(iptcparse, const String& iptcblock) {
+Variant HHVM_FUNCTION(iptcparse, const OptString& iptcblock) {
   unsigned int inx = 0, len, tagsfound = 0;
   unsigned char *buffer, recnum, dataset, key[16];
   unsigned int str_len = iptcblock.length();
@@ -4697,10 +4680,13 @@ Variant HHVM_FUNCTION(iptcparse, const String& iptcblock) {
       break;
     }
 
-    String skey((const char *)key, CopyString);
-    auto const lval = ret.lvalAt(skey);
+    OptString skey((const char *)key, CopyString);
+    if (!ret.exists(skey)) {
+      ret.set(skey, Array::CreateVec());
+    }
+    auto const lval = ret.lval(skey);
     forceToArray(lval).append(
-      String((const char *)(buffer+inx), len, CopyString));
+      OptString((const char *)(buffer+inx), len, CopyString));
     inx += len;
     tagsfound++;
   }
@@ -4941,13 +4927,14 @@ Variant HHVM_FUNCTION(iptcparse, const String& iptcblock) {
 #define PMI_YCBCR               6
 #define PMI_CIELAB              8
 
-typedef const struct {
+struct _tag_info_type {
   unsigned short Tag;
-  char *Desc;
-} tag_info_type;
+  const char *Desc;
+};
+using tag_info_type = const struct _tag_info_type;
 
-typedef tag_info_type tag_info_array[];
-typedef tag_info_type *tag_table_type;
+using tag_info_array = tag_info_type[];
+using tag_table_type = tag_info_type *;
 
 #define TAG_TABLE_END \
   {((unsigned short)TAG_NONE),           "No tag value"},\
@@ -5344,28 +5331,28 @@ static const tag_info_array tag_table_VND_OLYMPUS = {
   TAG_TABLE_END
 };
 
-typedef enum mn_byte_order_t {
+enum mn_byte_order_t {
   MN_ORDER_INTEL = 0,
   MN_ORDER_MOTOROLA = 1,
   MN_ORDER_NORMAL
-} mn_byte_order_t;
+};
 
-typedef enum mn_offset_mode_t {
+enum mn_offset_mode_t {
   MN_OFFSET_NORMAL,
   MN_OFFSET_MAKER,
   MN_OFFSET_GUESS
-} mn_offset_mode_t;
+};
 
-typedef struct {
+struct maker_note_type {
   tag_table_type tag_table;
-  char *make;
-  char *model;
-  char *id_string;
+  const char *make;
+  const char *model;
+  const char *id_string;
   int id_string_len;
   int offset;
   mn_byte_order_t byte_order;
   mn_offset_mode_t offset_mode;
-} maker_note_type;
+};
 
 static const maker_note_type maker_note_array[] = {
   { tag_table_VND_CANON, "Canon", nullptr, nullptr,
@@ -5385,7 +5372,7 @@ static const maker_note_type maker_note_array[] = {
 };
 
 /* Get headername for tag_num or nullptr if not defined */
-static char * exif_get_tagname(int tag_num, char *ret, int len,
+static const char * exif_get_tagname(int tag_num, char *ret, int len,
                                tag_table_type tag_table) {
   int i, t;
   char tmp[32];
@@ -5425,17 +5412,17 @@ static char * exif_get_tagname(int tag_num, char *ret, int len,
 #define DWORD unsigned int
 #endif
 
-typedef struct {
+struct signed_rational {
   int num;
   int den;
-} signed_rational;
+};
 
-typedef struct {
+struct unsigned_rational {
   unsigned int num;
   unsigned int den;
-} unsigned_rational;
+};
 
-typedef union _image_info_value {
+union image_info_value {
   char *s;
   unsigned u;
   int i;
@@ -5443,22 +5430,22 @@ typedef union _image_info_value {
   double d;
   signed_rational sr;
   unsigned_rational ur;
-  union _image_info_value *list;
-} image_info_value;
+  union image_info_value *list;
+};
 
-typedef struct {
+struct image_info_data {
   WORD tag;
   WORD format;
   DWORD length;
   DWORD dummy;  /* value ptr of tiff directory entry */
   char *name;
   image_info_value value;
-} image_info_data;
+};
 
-typedef struct {
+struct image_info_list {
   int count;
   image_info_data *list;
-} image_info_list;
+};
 
 #define SECTION_FILE        0
 #define SECTION_COMPUTED    1
@@ -5507,7 +5494,7 @@ const StaticString
   s_WINXP("WINXP"),
   s_MAKERNOTE("MAKERNOTE");
 
-static String exif_get_sectionname(int section) {
+static OptString exif_get_sectionname(int section) {
   switch(section) {
   case SECTION_FILE:      return s_FILE;
   case SECTION_COMPUTED:  return s_COMPUTED;
@@ -5524,7 +5511,7 @@ static String exif_get_sectionname(int section) {
   case SECTION_WINXP:     return s_WINXP;
   case SECTION_MAKERNOTE: return s_MAKERNOTE;
   }
-  return empty_string();
+  return String::Empty();
 }
 
 static tag_table_type exif_get_tag_table(int section) {
@@ -5576,40 +5563,40 @@ static char *exif_get_sectionlist(int sectionlist) {
    Used to store camera data as extracted from the various ways that
    it can be stored in a nexif header
 */
-typedef struct {
+struct file_section {
   int type;
   size_t size;
   unsigned char *data;
-} file_section;
+};
 
-typedef struct {
+struct file_section_list {
   int count;
   file_section *list;
-} file_section_list;
+};
 
-typedef struct {
+struct thumbnail_data {
   image_filetype filetype;
   size_t width, height;
   size_t size;
   size_t offset;
   char *data;
-} thumbnail_data;
+};
 
-typedef struct {
+struct xp_field_type {
   char *value;
   size_t size;
   int tag;
-} xp_field_type;
+};
 
-typedef struct {
+struct xp_field_list {
   int count;
   xp_field_type *list;
-} xp_field_list;
+};
 
 /* This structure is used to store a section of a Jpeg file. */
-typedef struct {
+struct image_info_type {
   req::ptr<File> infile;
-  String FileName;
+  OptString FileName;
   time_t FileDateTime;
   size_t FileSize;
   image_filetype  FileType;
@@ -5656,14 +5643,14 @@ typedef struct {
   int ifd_nesting_level;
   /* internal */
   file_section_list file;
-} image_info_type;
+};
 
-typedef struct {
-    int     bits_per_sample;
-    size_t  width;
-    size_t  height;
-    int     num_components;
-} jpeg_sof_info;
+struct jpeg_sof_info {
+  int     bits_per_sample;
+  size_t  width;
+  size_t  height;
+  int     num_components;
+};
 
 /* forward declarations */
 static int exif_process_IFD_in_JPEG(image_info_type *ImageInfo,
@@ -5687,6 +5674,12 @@ static int exif_file_sections_add(image_info_type *ImageInfo, int type,
   int count = ImageInfo->file.count;
   size_t realloc_size = (count+1) * sizeof(file_section);
   tmp = (file_section *)IM_REALLOC(ImageInfo->file.list, realloc_size);
+  if (!tmp) {
+    // IM_REALLOC freed the old buffer on failure; null out the stale pointer
+    // to prevent use-after-free in exif_file_sections_free (CVE-2026-23867).
+    ImageInfo->file.list = nullptr;
+    ImageInfo->file.count = 0;
+  }
   CHECK_ALLOC_R(tmp, realloc_size, -1);
   ImageInfo->file.list = tmp;
   ImageInfo->file.list[count].type = 0xFFFF;
@@ -5697,7 +5690,12 @@ static int exif_file_sections_add(image_info_type *ImageInfo, int type,
     data = nullptr;
   } else if (data == nullptr) {
     data = (unsigned char *)IM_MALLOC(size);
-    if (data == nullptr) IM_FREE(tmp);
+    if (data == nullptr) {
+      IM_FREE(tmp);
+      // Null out the stale pointer to prevent use-after-free during cleanup.
+      ImageInfo->file.list = nullptr;
+      ImageInfo->file.count = 0;
+    }
     CHECK_ALLOC_R(data, size, -1);
   }
   ImageInfo->file.list[count].type = type;
@@ -5720,7 +5718,7 @@ static size_t php_strnlen(char* str, size_t maxlen) {
 
 /* Add a value to image_info */
 static void exif_iif_add_value(image_info_type *image_info, int section_index,
-                               char *name, int tag, int format, int length,
+                               const char *name, int tag, int format, int length,
                                void* value, int motorola_intel) {
   size_t idex;
   void *vptr;
@@ -5736,6 +5734,13 @@ static void exif_iif_add_value(image_info_type *image_info, int section_index,
                         sizeof(image_info_data);
   list = (image_info_data*)
     IM_REALLOC(image_info->info_list[section_index].list, realloc_size);
+  if (!list) {
+    // IM_REALLOC frees the old buffer on failure; null the stale pointer and
+    // reset the count so subsequent exif_iif_add_* calls and exif_iif_free
+    // cleanup do not use-after-free / double-free it (CVE-2026-23867 sibling).
+    image_info->info_list[section_index].list = nullptr;
+    image_info->info_list[section_index].count = 0;
+  }
   CHECK_ALLOC(list, realloc_size);
   image_info->info_list[section_index].list = list;
 
@@ -5772,12 +5777,14 @@ static void exif_iif_add_value(image_info_type *image_info, int section_index,
      * return;
      */
     info_data->tag = TAG_FMT_UNDEFINED;/* otherwise not freed from memory */
+    [[fallthrough]];
   case TAG_FMT_SBYTE:
   case TAG_FMT_BYTE:
     /* in contrast to strings bytes do not need to allocate buffer for
        nullptr if length==0 */
     if (!length)
       break;
+    [[fallthrough]];
   case TAG_FMT_UNDEFINED:
     if (value) {
       /* do not recompute length here */
@@ -5845,6 +5852,7 @@ static void exif_iif_add_value(image_info_type *image_info, int section_index,
 
       case TAG_FMT_SINGLE:
         info_value->f = *(float *)value;
+        break;
 
       case TAG_FMT_DOUBLE:
         info_value->d = *(double *)value;
@@ -5858,7 +5866,7 @@ static void exif_iif_add_value(image_info_type *image_info, int section_index,
 
 /* Add a tag from IFD to image_info */
 static void exif_iif_add_tag(image_info_type *image_info, int section_index,
-                             char *name, int tag, int format,
+                             const char *name, int tag, int format,
                              size_t length, void* value) {
   exif_iif_add_value(image_info, section_index, name, tag, format,
                      (int)length, value, image_info->motorola_intel);
@@ -6115,6 +6123,13 @@ static void exif_thumbnail_build(image_info_type *ImageInfo) {
     new_move = new_size;
     new_data = (char *)IM_REALLOC(ImageInfo->Thumbnail.data,
                                   ImageInfo->Thumbnail.size + new_size);
+    if (!new_data) {
+      // IM_REALLOC frees the old buffer on failure; null the stale pointer and
+      // reset the size so exif_discard_imageinfo cleanup does not double-free it
+      // (CVE-2026-23867 sibling).
+      ImageInfo->Thumbnail.data = nullptr;
+      ImageInfo->Thumbnail.size = 0;
+    }
     CHECK_ALLOC(new_data, ImageInfo->Thumbnail.size + new_size);
     ImageInfo->Thumbnail.data = new_data;
     memmove(ImageInfo->Thumbnail.data + new_move,
@@ -6184,7 +6199,9 @@ static void exif_thumbnail_extract(image_info_type *ImageInfo,
     return;
   }
   /* Check to make sure we are not going to go past the ExifLength */
-  if ((ImageInfo->Thumbnail.offset + ImageInfo->Thumbnail.size) > length) {
+  if (((ImageInfo->Thumbnail.offset + ImageInfo->Thumbnail.size) <
+       ImageInfo->Thumbnail.offset) ||
+      ((ImageInfo->Thumbnail.offset + ImageInfo->Thumbnail.size) > length)) {
     raise_warning("Thumbnail goes IFD boundary or end of file reached");
     return;
   }
@@ -6210,7 +6227,6 @@ static int exif_process_undefined(char **result, char *value,
 
 /* Copy a string in Exif header to a character string returns length of
    allocated buffer if any. */
-#if !EXIF_USE_MBSTRING
 static int exif_process_string_raw(char **result, char *value,
                                    size_t byte_count) {
   /* we cannot use strlcpy - here the problem is that we have to copy NUL
@@ -6227,7 +6243,6 @@ static int exif_process_string_raw(char **result, char *value,
   }
   return 0;
 }
-#endif
 
 /*
  * Copy a string in Exif header to a character string and return length of
@@ -6254,12 +6269,6 @@ static int
 exif_process_user_comment(image_info_type* /*ImageInfo*/, char** pszInfoPtr,
                           char** pszEncoding, char* szValuePtr, int ByteCount) {
   int   a;
-
-#if EXIF_USE_MBSTRING
-  char  *decode;
-  size_t len;
-#endif
-
   *pszEncoding = nullptr;
   /* Copy the comment */
   if (ByteCount>=8) {
@@ -6267,30 +6276,7 @@ exif_process_user_comment(image_info_type* /*ImageInfo*/, char** pszInfoPtr,
       PHP_STRDUP(*pszEncoding, (const char*)szValuePtr);
       szValuePtr = szValuePtr+8;
       ByteCount -= 8;
-#if EXIF_USE_MBSTRING
-      /* First try to detect BOM: ZERO WIDTH NOBREAK SPACE (FEFF 16)
-       * since we have no encoding support for the BOM yet we skip that.
-       */
-      if (!memcmp(szValuePtr, "\xFE\xFF", 2)) {
-        decode = "UCS-2BE";
-        szValuePtr = szValuePtr+2;
-        ByteCount -= 2;
-      } else if (!memcmp(szValuePtr, "\xFF\xFE", 2)) {
-        decode = "UCS-2LE";
-        szValuePtr = szValuePtr+2;
-        ByteCount -= 2;
-      } else if (ImageInfo->motorola_intel) {
-        decode = ImageInfo->decode_unicode_be;
-      } else {
-        decode = ImageInfo->decode_unicode_le;
-      }
-      *pszInfoPtr = php_mb_convert_encoding(szValuePtr, ByteCount,
-                                            ImageInfo->encode_unicode,
-                                            decode, &len);
-      return len;
-#else
       return exif_process_string_raw(pszInfoPtr, szValuePtr, ByteCount);
-#endif
     } else
     if (!memcmp(szValuePtr, "ASCII\0\0\0", 8)) {
       PHP_STRDUP(*pszEncoding, (const char*)szValuePtr);
@@ -6302,20 +6288,7 @@ exif_process_user_comment(image_info_type* /*ImageInfo*/, char** pszInfoPtr,
       PHP_STRDUP(*pszEncoding, (const char*)szValuePtr);
       szValuePtr = szValuePtr+8;
       ByteCount -= 8;
-#if EXIF_USE_MBSTRING
-      if (ImageInfo->motorola_intel) {
-        *pszInfoPtr = php_mb_convert_encoding(szValuePtr, ByteCount,
-                                              ImageInfo->encode_jis,
-                                              ImageInfo->decode_jis_be, &len);
-      } else {
-        *pszInfoPtr = php_mb_convert_encoding(szValuePtr, ByteCount,
-                                              ImageInfo->encode_jis,
-                                              ImageInfo->decode_jis_le, &len);
-      }
-      return len;
-#else
       return exif_process_string_raw(pszInfoPtr, szValuePtr, ByteCount);
-#endif
     } else
     if (!memcmp(szValuePtr, "\0\0\0\0\0\0\0\0", 8)) {
       /* 8 NULL means undefined and should be ASCII... */
@@ -6345,16 +6318,9 @@ exif_process_unicode(image_info_type* /*ImageInfo*/, xp_field_type* xp_field,
   xp_field->value = nullptr;
 
   /* Copy the comment */
-#if EXIF_USE_MBSTRING
-  xp_field->value =
-    php_mb_convert_encoding(szValuePtr, ByteCount, ImageInfo->encode_unicode,
-                            ImageInfo->decode_unicode_le, &xp_field->size);
-  return xp_field->size;
-#else
   xp_field->size =
     exif_process_string_raw(&xp_field->value, szValuePtr, ByteCount);
   return xp_field->size;
-#endif
 }
 
 /* Process nested IFDs directories in Maker Note. */
@@ -6391,7 +6357,10 @@ static int exif_process_IFD_in_MAKERNOTE(image_info_type *ImageInfo,
     break;
   }
 
-  if (maker_note->offset >= value_len) return 0;
+  if (value_len < 2 || maker_note->offset >= value_len - 1) {
+    raise_warning("IFD data too short: 0x%04X offset 0x%04X", value_len, maker_note->offset);
+    return 0;
+  }
 
   dir_start = value_ptr + maker_note->offset;
   ImageInfo->sections_found |= FOUND_MAKERNOTE;
@@ -6432,6 +6401,12 @@ static int exif_process_IFD_in_MAKERNOTE(image_info_type *ImageInfo,
                     NumDirEntries, 2+NumDirEntries*12, value_len);
     return 0;
   }
+  if ((dir_start - value_ptr) > value_len - (2+NumDirEntries*12)) {
+    raise_warning("Illegal IFD size: 0x%04lX > 0x%04X",
+                  (dir_start - value_ptr) + (2+NumDirEntries*12),
+                  value_len);
+    return 0;
+  }
 
   for (de=0;de<NumDirEntries;de++) {
     if (!exif_process_IFD_TAG(ImageInfo, dir_start + 2 + 12 * de,
@@ -6444,6 +6419,13 @@ static int exif_process_IFD_in_MAKERNOTE(image_info_type *ImageInfo,
   return 0;
 }
 
+#define REQUIRE_NON_EMPTY() do { \
+  if (byte_count == 0) { \
+    raise_warning("Process tag(x%04X=%s): Cannot be empty", tag, exif_get_tagname(tag, tagname, -12, tag_table)); \
+    return 0; \
+  } \
+} while (0)
+
 /* Process one of the nested IFDs directories. */
 static int exif_process_IFD_TAG(image_info_type *ImageInfo, char *dir_entry,
                                 char *offset_base, char *end, size_t IFDlength,
@@ -6451,7 +6433,7 @@ static int exif_process_IFD_TAG(image_info_type *ImageInfo, char *dir_entry,
                                 int ReadNextIFD, tag_table_type tag_table) {
   size_t length;
   int tag, format, components;
-  char *value_ptr, tagname[64], cbuf[32], *outside=nullptr;
+  char *value_ptr, *value_ptr_end, tagname[64], cbuf[32], *outside=nullptr;
   size_t byte_count, offset_val, fpos, fgot;
   int64_t byte_count_signed;
   xp_field_type *tmp_xp;
@@ -6502,6 +6484,7 @@ static int exif_process_IFD_TAG(image_info_type *ImageInfo, char *dir_entry,
     offset_val = php_ifd_get32u(dir_entry+8, ImageInfo->motorola_intel);
     /* If its bigger than 4 bytes, the dir entry contains an offset. */
     value_ptr = offset_base+offset_val;
+    value_ptr_end = end;
     if (byte_count > IFDlength ||
         offset_val > IFDlength-byte_count ||
         value_ptr < dir_entry ||
@@ -6539,6 +6522,7 @@ static int exif_process_IFD_TAG(image_info_type *ImageInfo, char *dir_entry,
         /* mark as outside range and get buffer */
         value_ptr = (char *)IM_MALLOC(byte_count);
         CHECK_ALLOC_R(value_ptr, byte_count, 0);
+        value_ptr_end = value_ptr + byte_count;
         outside = value_ptr;
       } else {
         /*
@@ -6550,6 +6534,7 @@ static int exif_process_IFD_TAG(image_info_type *ImageInfo, char *dir_entry,
         */
         memset(&cbuf, 0, sizeof(cbuf));
         value_ptr = cbuf;
+        value_ptr_end = value_ptr + sizeof(cbuf);
       }
 
       fpos = ImageInfo->infile->tell();
@@ -6561,7 +6546,7 @@ static int exif_process_IFD_TAG(image_info_type *ImageInfo, char *dir_entry,
                         fgot, displacement+offset_val);
         return 0;
       }
-      String str = ImageInfo->infile->read(byte_count);
+      OptString str = ImageInfo->infile->read(byte_count);
       fgot = str.length();
       memcpy(value_ptr, str.c_str(), fgot);
       ImageInfo->infile->seek(fpos, SEEK_SET);
@@ -6574,12 +6559,14 @@ static int exif_process_IFD_TAG(image_info_type *ImageInfo, char *dir_entry,
   } else {
     /* 4 bytes or less and value is in the dir entry itself */
     value_ptr = dir_entry+8;
+    value_ptr_end = end;
     offset_val= value_ptr-offset_base;
   }
 
   ImageInfo->sections_found |= FOUND_ANY_TAG;
   if (section_index==SECTION_THUMBNAIL) {
     if (!ImageInfo->Thumbnail.data) {
+      REQUIRE_NON_EMPTY();
       switch(tag) {
         case TAG_IMAGEWIDTH:
         case TAG_COMP_IMAGE_WIDTH:
@@ -6670,6 +6657,11 @@ static int exif_process_IFD_TAG(image_info_type *ImageInfo, char *dir_entry,
           IM_REALLOC(ImageInfo->xp_fields.list, realloc_size);
         if (!tmp_xp) {
           if (outside) IM_FREE(outside);
+          // IM_REALLOC frees the old buffer on failure; null the stale pointer
+          // and reset the count so exif_discard_imageinfo cleanup does not
+          // use-after-free / double-free it (CVE-2026-23867 sibling).
+          ImageInfo->xp_fields.list = nullptr;
+          ImageInfo->xp_fields.count = 0;
         }
         CHECK_ALLOC_R(tmp_xp, realloc_size, 0);
         ImageInfo->sections_found |= FOUND_WINXP;
@@ -6683,6 +6675,7 @@ static int exif_process_IFD_TAG(image_info_type *ImageInfo, char *dir_entry,
       case TAG_FNUMBER:
         /* Simplest way of expressing aperture, so I trust it the most.
            (overwrite previously computed value if there is one) */
+        REQUIRE_NON_EMPTY();
         ImageInfo->ApertureFNumber =
           (float)exif_convert_any_format(value_ptr, format,
                                          ImageInfo->motorola_intel);
@@ -6693,6 +6686,7 @@ static int exif_process_IFD_TAG(image_info_type *ImageInfo, char *dir_entry,
         /* More relevant info always comes earlier, so only use this
            field if we don't have appropriate aperture information yet. */
         if (ImageInfo->ApertureFNumber == 0) {
+          REQUIRE_NON_EMPTY();
           ImageInfo->ApertureFNumber
             = (float)exp(exif_convert_any_format(value_ptr, format,
                            ImageInfo->motorola_intel)*log(2)*0.5);
@@ -6705,6 +6699,7 @@ static int exif_process_IFD_TAG(image_info_type *ImageInfo, char *dir_entry,
            SHUTTERSPEED comes after EXPOSURE TIME
           */
         if (ImageInfo->ExposureTime == 0) {
+          REQUIRE_NON_EMPTY();
           ImageInfo->ExposureTime
             = (float)(1/exp(exif_convert_any_format(value_ptr, format,
                               ImageInfo->motorola_intel)*log(2)));
@@ -6715,12 +6710,14 @@ static int exif_process_IFD_TAG(image_info_type *ImageInfo, char *dir_entry,
         break;
 
       case TAG_COMP_IMAGE_WIDTH:
+        REQUIRE_NON_EMPTY();
         ImageInfo->ExifImageWidth =
           exif_convert_any_to_int(value_ptr, format,
                                   ImageInfo->motorola_intel);
         break;
 
       case TAG_FOCALPLANE_X_RES:
+        REQUIRE_NON_EMPTY();
         ImageInfo->FocalplaneXRes =
           exif_convert_any_format(value_ptr, format,
                                   ImageInfo->motorola_intel);
@@ -6729,12 +6726,14 @@ static int exif_process_IFD_TAG(image_info_type *ImageInfo, char *dir_entry,
       case TAG_SUBJECT_DISTANCE:
         /* Inidcates the distacne the autofocus camera is focused to.
            Tends to be less accurate as distance increases. */
+        REQUIRE_NON_EMPTY();
         ImageInfo->Distance =
           (float)exif_convert_any_format(value_ptr, format,
                                          ImageInfo->motorola_intel);
         break;
 
       case TAG_FOCALPLANE_RESOLUTION_UNIT:
+        REQUIRE_NON_EMPTY();
         switch((int)exif_convert_any_format(value_ptr, format,
                                             ImageInfo->motorola_intel)) {
           case 1: ImageInfo->FocalplaneUnits = 25.4; break; /* inch */
@@ -6778,6 +6777,7 @@ static int exif_process_IFD_TAG(image_info_type *ImageInfo, char *dir_entry,
       case TAG_GPS_IFD_POINTER:
       case TAG_INTEROP_IFD_POINTER:
         if (ReadNextIFD) {
+          REQUIRE_NON_EMPTY();
           char *Subdir_start;
           int sub_section_index = 0;
           switch(tag) {
@@ -6794,7 +6794,7 @@ static int exif_process_IFD_TAG(image_info_type *ImageInfo, char *dir_entry,
               sub_section_index = SECTION_INTEROP;
               break;
           }
-          CHECK_BUFFER_R(value_ptr, end, 4, 0);
+          CHECK_BUFFER_R(value_ptr, value_ptr_end, 4, 0);
           Subdir_start = offset_base +
                          php_ifd_get32u(value_ptr, ImageInfo->motorola_intel);
           if (Subdir_start < offset_base ||
@@ -6961,7 +6961,7 @@ static void exif_process_APP12(image_info_type *ImageInfo,
     exif_iif_add_tag(ImageInfo, SECTION_APP12, "Company",
                      TAG_NONE, TAG_FMT_STRING, l1, buffer+2);
     if (length > 2+l1+1) {
-      l2 = php_strnlen(buffer+2+l1+1, length-2-l1+1);
+      l2 = php_strnlen(buffer+2+l1+1, length-2-l1-1);
       exif_iif_add_tag(ImageInfo, SECTION_APP12, "Info",
                        TAG_NONE, TAG_FMT_STRING, l2, buffer+2+l1+1);
     }
@@ -6979,14 +6979,14 @@ exif_process_SOFn(unsigned char* Data, int /*marker*/, jpeg_sof_info* result) {
 
 /* Parse the marker stream until SOS or EOI is seen; */
 static int exif_scan_JPEG_header(image_info_type *ImageInfo) {
-  int section, sn;
+  int sn;
   int marker = 0, last_marker = M_PSEUDO, comment_correction=1;
   int ll, lh;
   unsigned char *Data;
   size_t fpos, size, got, itemlen;
   jpeg_sof_info  sof_info;
 
-  for(section=0;;section++) {
+  while(true) {
     // get marker byte, swallowing possible padding
     // some software does not count the length bytes of COM section
     // one company doing so is very much envolved in JPEG...
@@ -7050,7 +7050,7 @@ static int exif_scan_JPEG_header(image_info_type *ImageInfo) {
     Data[0] = (unsigned char)lh;
     Data[1] = (unsigned char)ll;
 
-    String str = ImageInfo->infile->read(itemlen-2);
+    OptString str = ImageInfo->infile->read(itemlen-2);
     got = str.length();
     if (got != itemlen-2) {
       raise_warning("Error reading from file: "
@@ -7114,6 +7114,10 @@ static int exif_scan_JPEG_header(image_info_type *ImageInfo) {
       case M_SOF13:
       case M_SOF14:
       case M_SOF15:
+        if ((itemlen - 2) < 6) {
+          return 0;
+        }
+
         exif_process_SOFn(Data, marker, &sof_info);
         ImageInfo->Width  = sof_info.width;
         ImageInfo->Height = sof_info.height;
@@ -7147,6 +7151,13 @@ static int exif_file_sections_realloc(image_info_type *ImageInfo,
     return -1;
   }
   tmp = IM_REALLOC(ImageInfo->file.list[section_index].data, size);
+  if (!tmp) {
+    // IM_REALLOC frees the old buffer on failure; null the stale pointer and
+    // reset the size so exif_file_sections_free cleanup does not double-free it
+    // (CVE-2026-23867 sibling).
+    ImageInfo->file.list[section_index].data = nullptr;
+    ImageInfo->file.list[section_index].size = 0;
+  }
   CHECK_ALLOC_R(tmp, size, -1);
   ImageInfo->file.list[section_index].data = (unsigned char *)tmp;
   ImageInfo->file.list[section_index].size = size;
@@ -7173,7 +7184,7 @@ static int exif_process_IFD_in_TIFF(image_info_type *ImageInfo,
     if (sn == -1) return 0;
     /* we do not know the order of sections */
     ImageInfo->infile->seek(dir_offset, SEEK_SET);
-    String snData = ImageInfo->infile->read(2);
+    OptString snData = ImageInfo->infile->read(2);
     memcpy(ImageInfo->file.list[sn].data, snData.c_str(), 2);
     num_entries = php_ifd_get16u(ImageInfo->file.list[sn].data,
                                  ImageInfo->motorola_intel);
@@ -7334,9 +7345,11 @@ static int exif_process_IFD_in_TIFF(image_info_type *ImageInfo,
                 if (!ImageInfo->Thumbnail.data) {
                   ImageInfo->Thumbnail.data =
                     (char *)IM_MALLOC(ImageInfo->Thumbnail.size);
+                  CHECK_ALLOC_R(ImageInfo->Thumbnail.data,
+                                ImageInfo->Thumbnail.size, 0);
                   ImageInfo->infile->seek(ImageInfo->Thumbnail.offset,
                                           SEEK_SET);
-                  String str =
+                  OptString str =
                     ImageInfo->infile->read(ImageInfo->Thumbnail.size);
                   fgot = str.length();
                   if (fgot < ImageInfo->Thumbnail.size) {
@@ -7375,7 +7388,7 @@ static int exif_process_IFD_in_TIFF(image_info_type *ImageInfo,
             CHECK_ALLOC_R(ImageInfo->Thumbnail.data,
                           ImageInfo->Thumbnail.size, 0);
             ImageInfo->infile->seek(ImageInfo->Thumbnail.offset, SEEK_SET);
-            String str = ImageInfo->infile->read(ImageInfo->Thumbnail.size);
+            OptString str = ImageInfo->infile->read(ImageInfo->Thumbnail.size);
             fgot = str.length();
             if (fgot < ImageInfo->Thumbnail.size) {
               raise_warning("Thumbnail goes IFD boundary or "
@@ -7419,7 +7432,7 @@ static int exif_scan_FILE_header(image_info_type *ImageInfo) {
 
   if (ImageInfo->FileSize >= 2) {
     ImageInfo->infile->seek(0, SEEK_SET);
-    String fileHeader = ImageInfo->infile->read(2);
+    OptString fileHeader = ImageInfo->infile->read(2);
     if (fileHeader.length() != 2) {
       return 0;
     }
@@ -7432,7 +7445,7 @@ static int exif_scan_FILE_header(image_info_type *ImageInfo) {
         raise_warning("Invalid JPEG file");
       }
     } else if (ImageInfo->FileSize >= 8) {
-      String str = ImageInfo->infile->read(6);
+      OptString str = ImageInfo->infile->read(6);
       if (str.length() != 6) {
         return 0;
       }
@@ -7471,7 +7484,7 @@ static int exif_scan_FILE_header(image_info_type *ImageInfo) {
   return ret;
 }
 
-static int exif_read_file(image_info_type *ImageInfo, String FileName,
+static int exif_read_file(image_info_type *ImageInfo, OptString FileName,
                           bool read_thumbnail, bool read_all) {
   struct stat st;
 
@@ -7543,6 +7556,7 @@ static void exif_iif_free(image_info_type *image_info, int section_index) {
            buffer for nullptr if length==0 */
         if (image_info->info_list[section_index].list[i].length<1)
           break;
+        [[fallthrough]];
       default:
       case TAG_FMT_UNDEFINED:
       case TAG_FMT_STRING:
@@ -7641,6 +7655,13 @@ static void exif_iif_add_int(image_info_type *image_info, int section_index,
                         sizeof(image_info_data);
   list = (image_info_data *)
     IM_REALLOC(image_info->info_list[section_index].list, realloc_size);
+  if (!list) {
+    // IM_REALLOC frees the old buffer on failure; null the stale pointer and
+    // reset the count so subsequent exif_iif_add_* calls and exif_iif_free
+    // cleanup do not use-after-free / double-free it (CVE-2026-23867 sibling).
+    image_info->info_list[section_index].list = nullptr;
+    image_info->info_list[section_index].count = 0;
+  }
   CHECK_ALLOC(list, realloc_size);
   image_info->info_list[section_index].list = list;
 
@@ -7658,7 +7679,7 @@ static void exif_iif_add_int(image_info_type *image_info, int section_index,
 
 /* Add a string value to image_info MUST BE NUL TERMINATED */
 static void exif_iif_add_str(image_info_type *image_info,
-                             int section_index, char *name, char *value) {
+                             int section_index, const char *name, char *value) {
   image_info_data  *info_data;
   image_info_data  *list;
 
@@ -7667,6 +7688,13 @@ static void exif_iif_add_str(image_info_type *image_info,
                           sizeof(image_info_data);
     list = (image_info_data *)
       IM_REALLOC(image_info->info_list[section_index].list, realloc_size);
+    if (!list) {
+      // IM_REALLOC frees the old buffer on failure; null the stale pointer and
+      // reset the count so subsequent exif_iif_add_* calls and exif_iif_free
+      // cleanup do not use-after-free / double-free it (CVE-2026-23867 sibling).
+      image_info->info_list[section_index].list = nullptr;
+      image_info->info_list[section_index].count = 0;
+    }
     CHECK_ALLOC(list, realloc_size);
     image_info->info_list[section_index].list = list;
     info_data = &image_info->info_list[section_index].
@@ -7713,6 +7741,13 @@ static void exif_iif_add_buffer(image_info_type *image_info,
                           sizeof(image_info_data);
     list = (image_info_data *)
       IM_REALLOC(image_info->info_list[section_index].list, realloc_size);
+    if (!list) {
+      // IM_REALLOC frees the old buffer on failure; null the stale pointer and
+      // reset the count so subsequent exif_iif_add_* calls and exif_iif_free
+      // cleanup do not use-after-free / double-free it (CVE-2026-23867 sibling).
+      image_info->info_list[section_index].list = nullptr;
+      image_info->info_list[section_index].count = 0;
+    }
     CHECK_ALLOC(list, realloc_size);
     image_info->info_list[section_index].list = list;
     info_data = &image_info->info_list[section_index].
@@ -7743,7 +7778,7 @@ static int exif_scan_thumbnail(image_info_type *ImageInfo) {
   size_t length=2, pos=0;
   jpeg_sof_info sof_info;
 
-  if (!data) {
+  if (!data || ImageInfo->Thumbnail.size < 4) {
     return 0; /* nothing to do here */
   }
   if (memcmp(data, "\xFF\xD8\xFF", 3)) {
@@ -7771,8 +7806,9 @@ static int exif_scan_thumbnail(image_info_type *ImageInfo) {
     if (c == 0xFF)
       return 0;
     marker = c;
+    if (ImageInfo->Thumbnail.size - 2 < pos) return 0;
     length = php_jpg_get16(data+pos);
-    if (pos+length>=ImageInfo->Thumbnail.size) {
+    if (length > ImageInfo->Thumbnail.size || pos >= ImageInfo->Thumbnail.size - length) {
       return 0;
     }
     switch (marker) {
@@ -7790,6 +7826,10 @@ static int exif_scan_thumbnail(image_info_type *ImageInfo) {
       case M_SOF14:
       case M_SOF15:
         /* handle SOFn block */
+        if (length < 8 || ImageInfo->Thumbnail.size - 8 < pos) {
+          /* exif_process_SOFn needs 8 bytes */
+          return 0;
+        }
         exif_process_SOFn(data+pos, marker, &sof_info);
         ImageInfo->Thumbnail.height   = sof_info.height;
         ImageInfo->Thumbnail.width    = sof_info.width;
@@ -7836,7 +7876,7 @@ static void add_assoc_image_info(Array &value, bool sub_array,
         name = uname;
       }
       if (info_data->length==0) {
-        tmpi->set(String(name, CopyString), uninit_null());
+        tmpi->set(OptString(name, CopyString), uninit_null());
       } else {
         switch (info_data->format) {
         default:
@@ -7849,10 +7889,10 @@ static void add_assoc_image_info(Array &value, bool sub_array,
         case TAG_FMT_SBYTE:
         case TAG_FMT_UNDEFINED:
           if (!info_value->s) {
-            tmpi->set(String(name, CopyString), "");
+            tmpi->set(OptString(name, CopyString), "");
           } else {
-            tmpi->set(String(name, CopyString),
-                      String(info_value->s, info_data->length, CopyString));
+            tmpi->set(OptString(name, CopyString),
+                      OptString(info_value->s, info_data->length, CopyString));
           }
           break;
 
@@ -7861,9 +7901,9 @@ static void add_assoc_image_info(Array &value, bool sub_array,
             val = "";
           }
           if (section_index==SECTION_COMMENT) {
-            tmpi->set(idx++, String(val, CopyString));
+            tmpi->set(idx++, OptString(val, CopyString));
           } else {
-            tmpi->set(String(name, CopyString), String(val, CopyString));
+            tmpi->set(OptString(name, CopyString), OptString(val, CopyString));
           }
           break;
 
@@ -7894,23 +7934,24 @@ static void add_assoc_image_info(Array &value, bool sub_array,
                 }
                 break;
               }
+              [[fallthrough]];
             case TAG_FMT_USHORT:
             case TAG_FMT_ULONG:
               if (l==1) {
-                tmpi->set(String(name, CopyString), (int)info_value->u);
+                tmpi->set(OptString(name, CopyString), (int)info_value->u);
               } else {
                 array.set(ap, (int)info_value->u);
               }
               break;
 
             case TAG_FMT_URATIONAL:
-              snprintf(buffer, sizeof(buffer), "%i/%i",
+              snprintf(buffer, sizeof(buffer), "%u/%u",
                        info_value->ur.num, info_value->ur.den);
               if (l==1) {
-                tmpi->set(String(name, CopyString),
-                          String(buffer, CopyString));
+                tmpi->set(OptString(name, CopyString),
+                          OptString(buffer, CopyString));
               } else {
-                array.set(ap, String(buffer, CopyString));
+                array.set(ap, OptString(buffer, CopyString));
               }
               break;
 
@@ -7922,10 +7963,11 @@ static void add_assoc_image_info(Array &value, bool sub_array,
                 }
                 break;
               }
+              [[fallthrough]];
             case TAG_FMT_SSHORT:
             case TAG_FMT_SLONG:
               if (l==1) {
-                tmpi->set(String(name, CopyString), info_value->i);
+                tmpi->set(OptString(name, CopyString), info_value->i);
               } else {
                 array.set(ap, info_value->i);
               }
@@ -7935,16 +7977,16 @@ static void add_assoc_image_info(Array &value, bool sub_array,
               snprintf(buffer, sizeof(buffer), "%i/%i",
                        info_value->sr.num, info_value->sr.den);
               if (l==1) {
-                tmpi->set(String(name, CopyString),
-                          String(buffer, CopyString));
+                tmpi->set(OptString(name, CopyString),
+                          OptString(buffer, CopyString));
               } else {
-                array.set(ap, String(buffer, CopyString));
+                array.set(ap, OptString(buffer, CopyString));
               }
               break;
 
             case TAG_FMT_SINGLE:
               if (l==1) {
-                tmpi->set(String(name, CopyString), info_value->f);
+                tmpi->set(OptString(name, CopyString), info_value->f);
               } else {
                 array.set(ap, info_value->f);
               }
@@ -7952,7 +7994,7 @@ static void add_assoc_image_info(Array &value, bool sub_array,
 
             case TAG_FMT_DOUBLE:
               if (l==1) {
-                tmpi->set(String(name, CopyString), info_value->d);
+                tmpi->set(OptString(name, CopyString), info_value->d);
               } else {
                 array.set(ap, info_value->d);
               }
@@ -7961,7 +8003,7 @@ static void add_assoc_image_info(Array &value, bool sub_array,
             info_value = &info_data->value.list[ap];
           }
           if (l>1) {
-            tmpi->set(String(name, CopyString), array);
+            tmpi->set(OptString(name, CopyString), array);
           }
           break;
         }
@@ -7974,18 +8016,16 @@ static void add_assoc_image_info(Array &value, bool sub_array,
 }
 
 Variant HHVM_FUNCTION(exif_tagname, int64_t index) {
-  char *szTemp;
-
-  szTemp = exif_get_tagname(index, nullptr, 0, tag_table_IFD);
+  auto szTemp = exif_get_tagname(index, nullptr, 0, tag_table_IFD);
   if (index <0 || !szTemp || !szTemp[0]) {
     return false;
   } else {
-    return String(szTemp, CopyString);
+    return OptString(szTemp, CopyString);
   }
 }
 
 Variant HHVM_FUNCTION(exif_read_data,
-    const String& filename, const String& sections /*="" */,
+    const OptString& filename, const OptString& sections /*="" */,
     bool arrays /*=false */, bool thumbnail /*=false */) {
   int i, ret, sections_needed=0;
   image_info_type ImageInfo;
@@ -8063,10 +8103,10 @@ Variant HHVM_FUNCTION(exif_read_data,
                      "%dmm", (int)ImageInfo.CCDWidth);
   }
   if (ImageInfo.ExposureTime>0) {
-    if (ImageInfo.ExposureTime <= 0.5) {
-      exif_iif_add_fmt(&ImageInfo, SECTION_COMPUTED, "ExposureTime",
-                       "%0.3F s (1/%d)", ImageInfo.ExposureTime,
-                       (int)(0.5 + 1/ImageInfo.ExposureTime));
+    float recip_exposure_time = 0.5f + 1.0f/ImageInfo.ExposureTime;
+    if (ImageInfo.ExposureTime <= 0.5 && recip_exposure_time < INT_MAX) {
+      exif_iif_add_fmt(&ImageInfo, SECTION_COMPUTED, "ExposureTime", "%0.3F s (1/%d)",
+                       ImageInfo.ExposureTime, (int) recip_exposure_time);
     } else {
       exif_iif_add_fmt(&ImageInfo, SECTION_COMPUTED, "ExposureTime",
                        "%0.3F s", ImageInfo.ExposureTime);
@@ -8164,10 +8204,10 @@ Variant HHVM_FUNCTION(exif_read_data,
   return retarr;
 }
 
-Variant HHVM_FUNCTION(exif_thumbnail, const String& filename,
-                         VRefParam width /* = null */,
-                         VRefParam height /* = null */,
-                         VRefParam imagetype /* = null */) {
+Variant HHVM_FUNCTION(exif_thumbnail, const OptString& filename,
+                         int64_t& width,
+                         int64_t& height,
+                         int64_t& imagetype) {
   image_info_type ImageInfo;
 
   memset(&ImageInfo, 0, sizeof(ImageInfo));
@@ -8184,17 +8224,19 @@ Variant HHVM_FUNCTION(exif_thumbnail, const String& filename,
   }
 
   if (!ImageInfo.Thumbnail.width || !ImageInfo.Thumbnail.height) {
-    exif_scan_thumbnail(&ImageInfo);
+    if (!exif_scan_thumbnail(&ImageInfo)) {
+      ImageInfo.Thumbnail.width = ImageInfo.Thumbnail.height = 0;
+    }
   }
-  width.assignIfRef((int64_t)ImageInfo.Thumbnail.width);
-  height.assignIfRef((int64_t)ImageInfo.Thumbnail.height);
-  imagetype.assignIfRef(ImageInfo.Thumbnail.filetype);
-  String str(ImageInfo.Thumbnail.data, ImageInfo.Thumbnail.size, CopyString);
+  width = ImageInfo.Thumbnail.width;
+  height = ImageInfo.Thumbnail.height;
+  imagetype = ImageInfo.Thumbnail.filetype;
+  OptString str(ImageInfo.Thumbnail.data, ImageInfo.Thumbnail.size, CopyString);
   exif_discard_imageinfo(&ImageInfo);
   return str;
 }
 
-Variant HHVM_FUNCTION(exif_imagetype, const String& filename) {
+Variant HHVM_FUNCTION(exif_imagetype, const OptString& filename) {
   auto stream = File::Open(filename, "rb");
   if (!stream) {
     return false;
@@ -8208,24 +8250,20 @@ Variant HHVM_FUNCTION(exif_imagetype, const String& filename) {
 ///////////////////////////////////////////////////////////////////////////////
 
 struct ExifExtension final : Extension {
-  ExifExtension() : Extension("exif", NO_EXTENSION_VERSION_YET) {}
+  ExifExtension() : Extension("exif", "1.0", "images_infra_backend") {}
 
-  void moduleInit() override {
+  void moduleRegisterNative() override {
     HHVM_FE(exif_imagetype);
     HHVM_FE(exif_read_data);
     HHVM_FE(exif_tagname);
     HHVM_FE(exif_thumbnail);
-
-    HHVM_RC_INT(EXIF_USE_MBSTRING, 0);
-
-    loadSystemlib();
   }
 } s_exif_extension;
 
 struct GdExtension final : Extension {
-  GdExtension() : Extension("gd", NO_EXTENSION_VERSION_YET) {}
+  GdExtension() : Extension("gd", "1.0", "images_infra_backend") {}
 
-  void moduleInit() override {
+  void moduleRegisterNative() override {
     HHVM_FE(gd_info);
     HHVM_FE(getimagesize);
     HHVM_FE(getimagesizefromstring);
@@ -8267,21 +8305,11 @@ struct GdExtension final : Extension {
     HHVM_FE(imagecreatefromgd);
     HHVM_FE(imagecreatefromgd2);
     HHVM_FE(imagecreatefromgif);
-#ifdef HAVE_GD_JPG
     HHVM_FE(imagecreatefromjpeg);
-#endif
-#ifdef HAVE_GD_PNG
     HHVM_FE(imagecreatefrompng);
-#endif
-#ifdef HAVE_LIBVPX
-    HHVM_FE(imagecreatefromwebp);
-#endif
     HHVM_FE(imagecreatefromstring);
     HHVM_FE(imagecreatefromwbmp);
     HHVM_FE(imagecreatefromxbm);
-#if defined(HAVE_GD_XPM) && defined(HAVE_GD_BUNDLED)
-    HHVM_FE(imagecreatefromxpm);
-#endif
     HHVM_FE(imagecreatetruecolor);
     HHVM_FE(imagecrop);
     HHVM_FE(imagecropauto);
@@ -8302,28 +8330,19 @@ struct GdExtension final : Extension {
     HHVM_FE(imageflip);
     HHVM_FE(imagefontheight);
     HHVM_FE(imagefontwidth);
-#if defined(ENABLE_GD_TTF) && HAVE_LIBFREETYPE
     HHVM_FE(imageftbbox);
     HHVM_FE(imagefttext);
-#endif
     HHVM_FE(imagegammacorrect);
     HHVM_FE(imagegd2);
     HHVM_FE(imagegd);
     HHVM_FE(imagegif);
     HHVM_FE(imageinterlace);
     HHVM_FE(imageistruecolor);
-#ifdef HAVE_GD_JPG
     HHVM_FE(imagejpeg);
-#endif
     HHVM_FE(imagelayereffect);
     HHVM_FE(imageline);
     HHVM_FE(imageloadfont);
-#ifdef HAVE_GD_PNG
     HHVM_FE(imagepng);
-#endif
-#ifdef HAVE_LIBVPX
-    HHVM_FE(imagewebp);
-#endif
     HHVM_FE(imagepolygon);
     HHVM_FE(imagerectangle);
     HHVM_FE(imagerotate);
@@ -8340,10 +8359,8 @@ struct GdExtension final : Extension {
     HHVM_FE(imagesx);
     HHVM_FE(imagesy);
     HHVM_FE(imagetruecolortopalette);
-#ifdef ENABLE_GD_TTF
     HHVM_FE(imagettfbbox);
     HHVM_FE(imagettftext);
-#endif
     HHVM_FE(imagetypes);
     HHVM_FE(imagewbmp);
 
@@ -8360,7 +8377,6 @@ struct GdExtension final : Extension {
     HHVM_RC_INT(IMG_JPEG, IMAGE_TYPE_JPEG);
     HHVM_RC_INT(IMG_PNG, IMAGE_TYPE_PNG);
     HHVM_RC_INT(IMG_WBMP, IMAGE_TYPE_WBMP);
-    HHVM_RC_INT(IMG_XPM, IMAGE_TYPE_XPM);
 
     /* special colours for gd */
     HHVM_RC_INT(IMG_COLOR_TILED, gdTiled);
@@ -8451,24 +8467,21 @@ struct GdExtension final : Extension {
     HHVM_RC_INT(IMAGETYPE_WBMP, IMAGE_FILETYPE_WBMP);
     HHVM_RC_INT(IMAGETYPE_XBM, IMAGE_FILETYPE_XBM);
     HHVM_RC_INT(IMAGETYPE_ICO, IMAGE_FILETYPE_ICO);
+    HHVM_RC_INT(IMAGETYPE_WEBP, IMAGE_FILETYPE_WEBP);
+    HHVM_RC_INT(IMAGETYPE_AVIF, IMAGE_FILETYPE_AVIF);
+    HHVM_RC_INT(IMAGETYPE_HEIC, IMAGE_FILETYPE_HEIC);
     HHVM_RC_INT(IMAGETYPE_UNKNOWN, IMAGE_FILETYPE_UNKNOWN);
     HHVM_RC_INT(IMAGETYPE_COUNT, IMAGE_FILETYPE_COUNT);
     HHVM_RC_INT(IMAGETYPE_SWC, IMAGE_FILETYPE_SWC);
     HHVM_RC_INT(IMAGETYPE_JPEG2000, IMAGE_FILETYPE_JPC);
 
-#ifdef GD_VERSION_STRING
     HHVM_RC_STR(GD_VERSION, GD_VERSION_STRING);
-#endif
 
-#if defined(GD_MAJOR_VERSION) && defined(GD_MINOR_VERSION) && \
-    defined(GD_RELEASE_VERSION) && defined(GD_EXTRA_VERSION)
     HHVM_RC_INT_SAME(GD_MAJOR_VERSION);
     HHVM_RC_INT_SAME(GD_MINOR_VERSION);
     HHVM_RC_INT_SAME(GD_RELEASE_VERSION);
     HHVM_RC_STR_SAME(GD_EXTRA_VERSION);
-#endif
 
-#ifdef HAVE_GD_PNG
     HHVM_RC_INT(PNG_NO_FILTER, 0x00);
     HHVM_RC_INT(PNG_FILTER_NONE, 0x08);
     HHVM_RC_INT(PNG_FILTER_SUB, 0x10);
@@ -8476,11 +8489,6 @@ struct GdExtension final : Extension {
     HHVM_RC_INT(PNG_FILTER_AVG, 0x40);
     HHVM_RC_INT(PNG_FILTER_PAETH, 0x80);
     HHVM_RC_INT(PNG_ALL_FILTERS, 0x08 | 0x10 | 0x20 | 0x40 | 0x80);
-#endif
-
-    HHVM_RC_BOOL(GD_BUNDLED, true);
-
-    loadSystemlib();
   }
 } s_gd_extension;
 

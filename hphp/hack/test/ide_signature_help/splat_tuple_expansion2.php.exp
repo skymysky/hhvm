@@ -1,0 +1,18 @@
+textDocument/signatureHelp response:
+
+{
+  "signatures": [
+    {
+      "label": "public static function genericSplatMethod(\n  Splat<(int, optional bool, string...)> $splat,\n  int $args[0],\n  optional bool $args[1],\n  string $args[2]...\n): void",
+      "documentation": "Generic instance method with type splat",
+      "parameters": [
+        { "label": "$splat" },
+        { "label": "$args[0]" },
+        { "label": "$args[1]" },
+        { "label": "$args[2]" }
+      ]
+    }
+  ],
+  "activeSignature": 0,
+  "activeParameter": 2
+}

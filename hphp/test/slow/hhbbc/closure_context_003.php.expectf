@@ -1,31 +1,11 @@
-array(3) {
-  [0]=>
+vec(3) {
   int(1)
-  [1]=>
   int(2)
-  [2]=>
   int(3)
 }
-object(Closure%s)#3 (1) {
-  ["this"]=>
-  object(Foo)#1 (1) {
-    ["prop":"Foo":private]=>
-    array(3) {
-      [0]=>
-      int(1)
-      [1]=>
-      int(2)
-      [2]=>
-      int(3)
-    }
-  }
+object(Closure%s) (0) {
 }
 NULL
-object(Closure%s)#3 (1) {
-  ["this"]=>
-  object(Foo)#1 (1) {
-    ["prop":"Foo":private]=>
-    NULL
-  }
+object(Closure%s) (0) {
 }
 NULL

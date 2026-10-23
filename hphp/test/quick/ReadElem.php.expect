@@ -1,7 +1,9 @@
 10
 20
 30
-10
+Out of bounds vec access: invalid index 3
+Invalid vec key: expected a key of type int, string given
+Invalid vec key: expected a key of type int, string given
 a
 b
 c

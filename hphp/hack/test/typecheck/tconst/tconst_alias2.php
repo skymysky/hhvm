@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 // Copyright 2004-present Facebook. All Rights Reserved.
 interface I<TGeneric as num> {}
 
@@ -17,6 +17,6 @@ abstract class Bar {
   const type Tnum = this::Talias;
 
   final public function go(I<this::Tnum> $x): this {
-    // UNSAFE
+    return $this;
   }
 }

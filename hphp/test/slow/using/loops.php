@@ -5,20 +5,21 @@ class Logger implements IDisposable {
   private $id;
 
   function __construct() {
-    $this->id = self::$nextId++;
+    $this->id = self::$nextId; self::$nextId++;
     printf("Logger %d constructing\n", $this->id);
   }
-  function __dispose() {
+  function __dispose() :mixed{
     printf("Logger %d disposing\n", $this->id);
   }
 }
-function main() {
+function main() :mixed{
   echo "Entering loop\n";
   $loop = true;
   while (true) {
     using (new Logger()) {
       using (new Logger()) {
-        echo "loop: $loop\n";
+        $loop__str = (string)($loop);
+        echo "loop: $loop__str\n";
         if ($loop) {
           $loop = false;
           continue;
@@ -45,4 +46,8 @@ function main() {
   }
   echo "Done with main\n";
 }
+
+<<__EntryPoint>>
+function main_loops() :mixed{
 main();
+}

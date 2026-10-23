@@ -1,0 +1,18 @@
+error: Typing[4135] In `strict` mode, `unset` is banned except on dynamic, darray, keyset, or dict indexing [1]
+-> This is an object of type Map<string, int> because the type of this return is implicitly a like-type due to unenforced generic type arguments [2]
+
+no_map_unset.php:11:3
+ 1 | <?hh
+ 2 | 
+ 3 | function get_map(): Map<string, int> {
+   |                     ^^^^^^^^^^^^^^^^ [2]
+ 4 |   return Map {};
+ 5 | }
+   :
+ 9 |   if ($a->contains("lol")) {
+10 |   }
+11 |   unset($a['hi']);
+   |   ^^^^^^^^^^^^^^^^ [1]
+12 | }
+
+1 error found

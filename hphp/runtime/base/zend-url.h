@@ -15,8 +15,7 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_ZEND_URL_H_
-#define incl_HPHP_ZEND_URL_H_
+#pragma once
 
 #include "hphp/runtime/base/type-string.h"
 
@@ -27,14 +26,14 @@ namespace HPHP {
  * Helper struct storing parsed result from url_parse().
  */
 struct Url {
-  String scheme;
-  String user;
-  String pass;
-  String host;
+  OptString scheme;
+  OptString user;
+  OptString pass;
+  OptString host;
   unsigned short port = 0;
-  String path;
-  String query;
-  String fragment;
+  OptString path;
+  OptString query;
+  OptString fragment;
 };
 
 bool url_parse(Url &output, const char *str, size_t length);
@@ -42,13 +41,12 @@ bool url_parse(Url &output, const char *str, size_t length);
 /**
  * raw_ versions ignore "+" or " ".
  */
-String url_encode(const char *s, size_t len);
-String url_decode(const char *s, size_t len);
+OptString url_encode(const char *s, size_t len);
+OptString url_decode(const char *s, size_t len);
 size_t url_decode_ex(char *value, size_t len);
-String url_raw_encode(const char *s, size_t len);
-String url_raw_decode(const char *s, size_t len);
+OptString url_raw_encode(const char *s, size_t len);
+OptString url_raw_decode(const char *s, size_t len);
 
 ///////////////////////////////////////////////////////////////////////////////
 }
 
-#endif // incl_HPHP_ZEND_URL_H_

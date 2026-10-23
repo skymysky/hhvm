@@ -10,4 +10,8 @@ class XYZ {
   ): MyOptions { return $options; }
 }
 
+
+<<__EntryPoint>>
+function main_type_param() :mixed{
 var_dump((new XYZ)->getWidget());
+}

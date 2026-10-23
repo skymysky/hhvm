@@ -16,16 +16,12 @@
 
 #include "hphp/runtime/vm/jit/smashable-instr-x64.h"
 
-#include "hphp/runtime/vm/jit/code-cache.h"
-#include "hphp/runtime/vm/jit/tc.h"
-#include "hphp/runtime/vm/jit/tc-internal.h"
-
 #include "hphp/util/asm-x64.h"
 #include "hphp/util/data-block.h"
 
 #include <folly/MicroSpinLock.h>
 
-namespace HPHP { namespace jit { namespace x64 {
+namespace HPHP::jit::x64 {
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -47,13 +43,14 @@ namespace HPHP { namespace jit { namespace x64 {
           Alignment::Smash##Inst,       \
           AlignContext::Live);          \
     auto const theStart = cb.frontier();\
-    X64Assembler a { cb };              \
+    X64Assembler a(cb);                 \
     a.inst(__VA_ARGS__);                \
     return theStart;                    \
   }())
 
+// Far-literal encodings are ARM-only; x64 movq embeds its immediate directly.
 TCA emitSmashableMovq(CodeBlock& cb, CGMeta& fixups, uint64_t imm,
-                      PhysReg d) {
+                      PhysReg d, bool /*emitFarLiteral*/) {
   auto const start =
     EMIT_BODY(cb, movq, Movq, 0xdeadbeeffeedface, d);
 
@@ -64,11 +61,6 @@ TCA emitSmashableMovq(CodeBlock& cb, CGMeta& fixups, uint64_t imm,
   *immp = imm;
 
   return start;
-}
-
-TCA emitSmashableCmpq(CodeBlock& cb, CGMeta& fixups, int32_t imm,
-                      PhysReg r, int8_t disp) {
-  return EMIT_BODY(cb, cmpq, Cmpq, imm, r[disp]);
 }
 
 TCA emitSmashableCall(CodeBlock& cb, CGMeta& fixups, TCA target) {
@@ -154,6 +146,14 @@ void smashJcc(TCA inst, TCA target) {
   X64Assembler::patchJcc(inst, inst, target);
 }
 
+void smashInterceptJcc(TCA inst) {
+  X64Assembler::patchInterceptJcc(inst);
+}
+
+void smashInterceptJmp(TCA inst) {
+  X64Assembler::patchInterceptJmp(inst);
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 
 uint64_t smashableMovqImm(TCA inst) {
@@ -167,6 +167,12 @@ uint32_t smashableCmpqImm(TCA inst) {
 TCA smashableCallTarget(TCA inst) {
   if (inst[0] != 0xE8) return nullptr;
   return inst + 5 + ((int32_t*)(inst + 5))[-1];
+}
+
+TCA smashableCallLiteral(TCA /*inst*/) {
+  // A smashable call on x64 holds its target in the displacement, so there is
+  // no separate pointer to hand out.
+  return nullptr;
 }
 
 TCA smashableJmpTarget(TCA inst) {
@@ -207,4 +213,4 @@ bool optimizeSmashedJcc(TCA inst) {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-}}}
+}

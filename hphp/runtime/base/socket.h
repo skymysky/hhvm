@@ -14,8 +14,7 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_SOCKET_H_
-#define incl_HPHP_SOCKET_H_
+#pragma once
 
 #include "hphp/runtime/base/file.h"
 
@@ -59,16 +58,15 @@ struct SocketData : FileData {
  * TCP/UDP sockets.
  */
 struct Socket : File {
-  DECLARE_RESOURCE_ALLOCATION(Socket);
+  DECLARE_RESOURCE_ALLOCATION(Socket)
 
   ~Socket() override;
 
   // overriding ResourceData
-  const String& o_getClassNameHook() const override { return classnameof(); }
+  const OptString& o_getClassNameHook() const override { return classnameof(); }
 
   // implementing File
-  bool open(const String& filename, const String& mode) override;
-  bool close() override;
+  bool open(const OptString& filename, const OptString& mode) override;
   int64_t readImpl(char *buffer, int64_t length) override;
   int64_t writeImpl(const char *buffer, int64_t length) override;
   bool eof() override;
@@ -80,8 +78,8 @@ struct Socket : File {
 
   void setError(int err);
   int getError() const { return m_data->m_error;}
-  static int getLastError() { return s_lastErrno; }
-  static void clearLastError() { s_lastErrno = 0; }
+  static int getLastError() { return *s_lastErrno; }
+  static void clearLastError() {*s_lastErrno = 0; }
   int getType() const { return m_data->m_type;}
 
   // This is only for updating a local copy of timeouts set by setsockopt()
@@ -119,14 +117,14 @@ protected:
 private:
   void inferStreamType();
   SocketData* m_data;
-  static __thread int s_lastErrno;
+  static RDS_LOCAL(int, s_lastErrno);
 };
 
 // This class provides exactly the same functionality as Socket but reports as a
 // class/resource of 'Socket' instead of 'stream'.
 struct ConcreteSocket final : Socket {
-  CLASSNAME_IS("Socket");
-  RESOURCENAME_IS("Socket");
+  CLASSNAME_IS("Socket")
+  RESOURCENAME_IS("Socket")
 
   explicit ConcreteSocket(bool nonblocking = true)
     : Socket(nonblocking)
@@ -140,8 +138,8 @@ struct ConcreteSocket final : Socket {
   explicit ConcreteSocket(std::shared_ptr<SocketData> data) : Socket(data) { }
 
   // overriding ResourceData
-  const String& o_getClassNameHook() const override { return classnameof(); }
-  const String& o_getResourceName() const override { return resourcenameof(); }
+  const OptString& o_getClassNameHook() const override { return classnameof(); }
+  const OptString& o_getResourceName() const override { return resourcenameof(); }
 };
 
 // This class provides exactly the same functionality as ConcreteSocket but
@@ -161,5 +159,3 @@ struct StreamSocket final : Socket {
 
 ///////////////////////////////////////////////////////////////////////////////
 }
-
-#endif // incl_HPHP_SOCKET_H_

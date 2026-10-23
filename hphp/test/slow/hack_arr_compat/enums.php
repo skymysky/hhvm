@@ -13,12 +13,12 @@ enum Enum2 : int {
   THREE = 3;
 }
 
-enum Enum3 : mixed {
+enum Enum3 : arraykey {
   ONE = '1';
   TWO = '2';
   THREE = '3';
 }
-
+<<__EntryPoint>> function main(): void {
 var_dump(Enum1::getNames());
 var_dump(Enum1::getValues());
 var_dump(Enum1::isValid('1'));
@@ -55,3 +55,4 @@ var_dump(Enum3::assert('1'));
 var_dump(Enum3::assert(1));
 var_dump(Enum3::assertAll(vec['1']));
 var_dump(Enum3::assertAll(vec[1]));
+}

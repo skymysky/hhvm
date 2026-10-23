@@ -27,8 +27,8 @@ class Meh {
     return "hello";
   }
 
-  public function foo() {
-    $b = array("blah" => new Other());
+  public function foo(): void {
+    $b = dict["blah" => new Other()];
     print "$b[blah]$this";
   }
 }

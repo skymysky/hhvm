@@ -1,7 +1,10 @@
-<?php
-
+<?hh
+<<__EntryPoint>> function main(): void {
 $i = 0;
-while(100000 > $i++) {
+while(true) {
+	$t = $i;
+	$i++;
+	if (!(100000 > $t)) break;
 	$m0 = microtime(true);
 	$m1 = microtime(true);
 	$d = $m1 - $m0;
@@ -9,9 +12,9 @@ while(100000 > $i++) {
 	/*echo "$d\n";*/
 
 	if ($d < 0) {
-		die("failed in {$i}th iteration");
+		exit("failed in {$i}th iteration");
 	}
 }
 echo "ok\n";
-?>
-===DONE===
+echo "===DONE===\n";
+}

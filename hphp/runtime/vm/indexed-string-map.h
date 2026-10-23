@@ -14,8 +14,7 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_VM_INDEXED_STRING_MAP_H_
-#define incl_HPHP_VM_INDEXED_STRING_MAP_H_
+#pragma once
 
 #include "hphp/runtime/base/string-data.h"
 #include "hphp/runtime/vm/fixed-string-map.h"
@@ -36,7 +35,6 @@ namespace HPHP {
  * (since we use a FixedStringMap internally).
  */
 template<class T,
-         bool CaseSensitive,
          class Index,
          Index InvalidIndex = Index(-1)>
 struct IndexedStringMap {
@@ -74,11 +72,7 @@ struct IndexedStringMap {
     }
 
     std::copy(b.m_list.begin(), b.m_list.end(), mutableAccessList());
-    for (typename Builder::const_iterator it = b.begin();
-        it != b.end();
-        ++it) {
-      m_map.add(it->first, it->second);
-    }
+    m_map.addFrom(b.begin(), b.end());
   }
 
   const T* accessList() const {
@@ -122,21 +116,21 @@ struct IndexedStringMap {
 
   static constexpr ptrdiff_t vecOff() {
     return offsetof(IndexedStringMap, m_map) +
-      FixedStringMap<Index,CaseSensitive,Index>::tableOff();
+      FixedStringMap<Index,Index>::tableOff();
   }
   static constexpr ptrdiff_t sizeOff() {
     return offsetof(IndexedStringMap, m_map) +
-      FixedStringMap<Index,CaseSensitive,Index>::sizeOff();
+      FixedStringMap<Index,Index>::sizeOff();
   }
   static constexpr size_t sizeSize() {
-    return FixedStringMap<Index,CaseSensitive,Index>::sizeSize();
+    return FixedStringMap<Index,Index>::sizeSize();
   }
 
 private:
   uint32_t byteSize() const { return size() * sizeof(T); }
   void setSize(Index size) { m_map.extra() = size; }
 
-  FixedStringMap<Index,CaseSensitive,Index> m_map;
+  FixedStringMap<Index,Index> m_map;
 };
 
 //////////////////////////////////////////////////////////////////////
@@ -145,25 +139,19 @@ private:
  * Builder object for creating IndexedStringMaps.  Fill one of these
  * up, and then pass it to IndexedStringMap::create.
  */
-template<class T, bool CaseSensitive, class Index, Index InvalidIndex>
-struct IndexedStringMap<T,CaseSensitive,Index,InvalidIndex>::Builder {
+template<class T, class Index, Index InvalidIndex>
+struct IndexedStringMap<T,Index,InvalidIndex>::Builder {
 private:
-  using EqObject = typename std::conditional<
-    CaseSensitive,
-    string_data_same,
-    string_data_isame
-  >::type;
-
   using Map = hphp_hash_map<
     const StringData*,
     Index,
     string_data_hash,
-    EqObject
+    string_data_same
   >;
 
 public:
-  typedef typename Map::const_iterator const_iterator;
-  typedef typename Map::iterator iterator;
+  using const_iterator = typename Map::const_iterator;
+  using iterator = typename Map::iterator;
 
   iterator find(const StringData* key) { return m_map.find(key); }
   iterator begin()                     { return m_map.begin(); }
@@ -175,6 +163,8 @@ public:
   }
   const_iterator begin() const { return m_map.begin(); }
   const_iterator end()   const { return m_map.end(); }
+
+  auto& ordered_range() const { return m_list; }
 
   bool contains(const StringData* key) const { return m_map.count(key); }
 
@@ -218,15 +208,16 @@ public:
    */
 
   // Deserialization version.
-  template<class SerDe>
-  typename std::enable_if<SerDe::deserializing>::type serde(SerDe& sd) {
+  template<class SerDe, class F>
+  typename std::enable_if<SerDe::deserializing>::type serde(SerDe& sd,
+                                                            F lambda) {
     uint32_t size;
     sd(size);
     for (uint32_t i = 0; i < size; ++i) {
-      const StringData* name;
       T t;
-      sd(name)(t);
+      sd(t);
 
+      auto name = lambda(t);
       if (name) {
         add(name, t);
       } else {
@@ -236,19 +227,17 @@ public:
   }
 
   // Serialization version.
-  template<class SerDe>
-  typename std::enable_if<!SerDe::deserializing>::type serde(SerDe& sd) {
-    std::vector<const StringData*> names(m_list.size());
-    for (typename Map::const_iterator it = m_map.begin();
-        it != m_map.end();
-        ++it) {
-      names[it->second] = it->first;
-    }
-
+  template<class SerDe, class F>
+  typename std::enable_if<!SerDe::deserializing>::type serde(SerDe& sd,
+                                                             F lambda) {
     sd(uint32_t(m_list.size()));
     for (uint32_t i = 0; i < m_list.size(); ++i) {
-      sd(names[i])(m_list[i]);
+      sd(m_list[i]);
     }
+  }
+
+  const std::vector<T>& list() const {
+    return m_list;
   }
 
 private:
@@ -261,4 +250,3 @@ private:
 
 }
 
-#endif

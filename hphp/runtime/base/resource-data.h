@@ -14,8 +14,7 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_RESOURCE_DATA_H_
-#define incl_HPHP_RESOURCE_DATA_H_
+#pragma once
 
 #include <iostream>
 #include "hphp/runtime/base/countable.h"
@@ -28,7 +27,7 @@
 namespace HPHP {
 
 struct Array;
-struct String;
+struct OptString;
 struct ResourceData;
 
 namespace req {
@@ -141,18 +140,22 @@ struct ResourceData : type_scan::MarkCollectable<ResourceData> {
 
   void operator delete(void* /*p*/) { always_assert(false); }
 
-  const String& o_getClassName() const;
-  virtual const String& o_getClassNameHook() const;
-  virtual const String& o_getResourceName() const;
+  const OptString& o_getClassName() const;
+  virtual const OptString& o_getClassNameHook() const;
+  virtual const OptString& o_getResourceName() const;
   virtual bool isInvalid() const { return false; }
 
   template <typename T>
-  bool instanceof() const { return dynamic_cast<const T*>(this) != nullptr; }
+  typename std::enable_if<!std::is_same<ResourceData,T>::value, bool>::type
+  instanceof() const { return dynamic_cast<const T*>(this) != nullptr; }
 
-  bool o_toBoolean() const { return true; }
+  template <typename T>
+  typename std::enable_if<std::is_same<ResourceData,T>::value, bool>::type
+  instanceof() const { return true; }
+
   int64_t o_toInt64() const { return hdr()->getId(); }
   double o_toDouble() const { return hdr()->getId(); }
-  String o_toString() const;
+  OptString o_toString() const;
   Array o_toArray() const;
 
  private:
@@ -194,7 +197,7 @@ inline const ResourceHdr* safehdr(const ResourceData* data) {
  *    Then, the best choice is to use this macro to make sure the object
  *    is always collected during request shutdown time:
  *
- *       DECLARE_RESOURCE_ALLOCATION_NO_SWEEP(T);
+ *       DECLARE_RESOURCE_ALLOCATION_NO_SWEEP(T)
  *
  *    This object doesn't participate in sweep(), as object allocator doesn't
  *    have any callback installed.
@@ -215,7 +218,7 @@ inline const ResourceHdr* safehdr(const ResourceData* data) {
  *    When deriving from SweepableResourceData, either "new" or "NEW" can
  *    be used, but we prefer people use NEW with these macros:
  *
- *       DECLARE_RESOURCE_ALLOCATION(T);
+ *       DECLARE_RESOURCE_ALLOCATION(T)
  *       IMPLEMENT_RESOURCE_ALLOCATION(T);
  *
  * 3. If a ResourceData is a mix of request allocated data members and globally
@@ -239,7 +242,7 @@ inline const ResourceHdr* safehdr(const ResourceData* data) {
  *       HANDLE ptr; // raw pointers that need to be free-d somehow
  *       String str; // request-allocated objects are fine
  *
- *       DECLARE_RESOURCE_ALLOCATION(T);
+ *       DECLARE_RESOURCE_ALLOCATION(T)
  *    };
  *    void MixedRequestAllocated::sweep() {
  *       delete stdstr;
@@ -314,4 +317,3 @@ typename std::enable_if<
 ///////////////////////////////////////////////////////////////////////////////
 }
 
-#endif // incl_HPHP_RESOURCE_DATA_H_

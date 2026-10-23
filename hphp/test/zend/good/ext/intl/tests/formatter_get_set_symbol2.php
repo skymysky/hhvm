@@ -1,4 +1,4 @@
-<?php
+<?hh
 
 /*
  * Get/set symbol.
@@ -6,30 +6,30 @@
 
 
 function ut_main()
-{
-	$longstr = str_repeat("blah", 10);
-    $symbols = array(
-        'DECIMAL_SEPARATOR_SYMBOL' => array( NumberFormatter::DECIMAL_SEPARATOR_SYMBOL, '_._', 12345.123456, NumberFormatter::DECIMAL ),
-        'GROUPING_SEPARATOR_SYMBOL' => array( NumberFormatter::GROUPING_SEPARATOR_SYMBOL, '_,_', 12345.123456, NumberFormatter::DECIMAL ),
-        'PATTERN_SEPARATOR_SYMBOL' => array( NumberFormatter::PATTERN_SEPARATOR_SYMBOL, '_;_', 12345.123456, NumberFormatter::DECIMAL ),
-        'PERCENT_SYMBOL' => array( NumberFormatter::PERCENT_SYMBOL, '_%_', 12345.123456, NumberFormatter::PERCENT ),
-        'ZERO_DIGIT_SYMBOL' => array( NumberFormatter::ZERO_DIGIT_SYMBOL, '_ZD_', 12345.123456, NumberFormatter::DECIMAL ),
-        'DIGIT_SYMBOL' => array( NumberFormatter::DIGIT_SYMBOL, '_DS_', 12345.123456, NumberFormatter::DECIMAL ),
-        'MINUS_SIGN_SYMBOL' => array( NumberFormatter::MINUS_SIGN_SYMBOL, '_-_', -12345.123456, NumberFormatter::DECIMAL ),
-        'PLUS_SIGN_SYMBOL' => array( NumberFormatter::PLUS_SIGN_SYMBOL, '_+_', 12345.123456, NumberFormatter::SCIENTIFIC ),
-        'CURRENCY_SYMBOL' => array( NumberFormatter::CURRENCY_SYMBOL, '_$_', 12345.123456, NumberFormatter::CURRENCY ),
-        'INTL_CURRENCY_SYMBOL' => array( NumberFormatter::INTL_CURRENCY_SYMBOL, '_$_', 12345.123456, NumberFormatter::CURRENCY ),
-        'MONETARY_SEPARATOR_SYMBOL' => array( NumberFormatter::MONETARY_SEPARATOR_SYMBOL, '_MS_', 12345.123456, NumberFormatter::CURRENCY ),
-        'EXPONENTIAL_SYMBOL' => array( NumberFormatter::EXPONENTIAL_SYMBOL, '_E_', 12345.123456, NumberFormatter::SCIENTIFIC ),
-        'PERMILL_SYMBOL' => array( NumberFormatter::PERMILL_SYMBOL, '_PS_', 12345.123456, NumberFormatter::DECIMAL ),
-        'PAD_ESCAPE_SYMBOL' => array( NumberFormatter::PAD_ESCAPE_SYMBOL, '_PE_', 12345.123456, NumberFormatter::DECIMAL ),
-        'INFINITY_SYMBOL' => array( NumberFormatter::INFINITY_SYMBOL, '_IS_', 12345.123456, NumberFormatter::DECIMAL ),
-        'NAN_SYMBOL' => array( NumberFormatter::NAN_SYMBOL, '_N_', 12345.123456, NumberFormatter::DECIMAL ),
-        'SIGNIFICANT_DIGIT_SYMBOL' => array( NumberFormatter::SIGNIFICANT_DIGIT_SYMBOL, '_SD_', 12345.123456, NumberFormatter::DECIMAL ),
-        'MONETARY_GROUPING_SEPARATOR_SYMBOL' => array( NumberFormatter::MONETARY_GROUPING_SEPARATOR_SYMBOL, '_MG_', 12345.123456, NumberFormatter::CURRENCY ),
-	'MONETARY_GROUPING_SEPARATOR_SYMBOL-2' => array( NumberFormatter::MONETARY_GROUPING_SEPARATOR_SYMBOL, "&nbsp;", 12345.123456, NumberFormatter::CURRENCY ),
-	'MONETARY_GROUPING_SEPARATOR_SYMBOL-3' => array( NumberFormatter::MONETARY_GROUPING_SEPARATOR_SYMBOL, $longstr, 12345.123456, NumberFormatter::CURRENCY ),
-    );
+:mixed{
+    $longstr = str_repeat("blah", 10);
+    $symbols = dict[
+        'DECIMAL_SEPARATOR_SYMBOL' => vec[ NumberFormatter::DECIMAL_SEPARATOR_SYMBOL, '_._', 12345.123456, NumberFormatter::DECIMAL ],
+        'GROUPING_SEPARATOR_SYMBOL' => vec[ NumberFormatter::GROUPING_SEPARATOR_SYMBOL, '_,_', 12345.123456, NumberFormatter::DECIMAL ],
+        'PATTERN_SEPARATOR_SYMBOL' => vec[ NumberFormatter::PATTERN_SEPARATOR_SYMBOL, '_;_', 12345.123456, NumberFormatter::DECIMAL ],
+        'PERCENT_SYMBOL' => vec[ NumberFormatter::PERCENT_SYMBOL, '_%_', 12345.123456, NumberFormatter::PERCENT ],
+        'ZERO_DIGIT_SYMBOL' => vec[ NumberFormatter::ZERO_DIGIT_SYMBOL, '_ZD_', 12345.123456, NumberFormatter::DECIMAL ],
+        'DIGIT_SYMBOL' => vec[ NumberFormatter::DIGIT_SYMBOL, '_DS_', 12345.123456, NumberFormatter::DECIMAL ],
+        'MINUS_SIGN_SYMBOL' => vec[ NumberFormatter::MINUS_SIGN_SYMBOL, '_-_', -12345.123456, NumberFormatter::DECIMAL ],
+        'PLUS_SIGN_SYMBOL' => vec[ NumberFormatter::PLUS_SIGN_SYMBOL, '_+_', 12345.123456, NumberFormatter::SCIENTIFIC ],
+        'CURRENCY_SYMBOL' => vec[ NumberFormatter::CURRENCY_SYMBOL, '_$_', 12345.123456, NumberFormatter::CURRENCY ],
+        'INTL_CURRENCY_SYMBOL' => vec[ NumberFormatter::INTL_CURRENCY_SYMBOL, '_$_', 12345.123456, NumberFormatter::CURRENCY ],
+        'MONETARY_SEPARATOR_SYMBOL' => vec[ NumberFormatter::MONETARY_SEPARATOR_SYMBOL, '_MS_', 12345.123456, NumberFormatter::CURRENCY ],
+        'EXPONENTIAL_SYMBOL' => vec[ NumberFormatter::EXPONENTIAL_SYMBOL, '_E_', 12345.123456, NumberFormatter::SCIENTIFIC ],
+        'PERMILL_SYMBOL' => vec[ NumberFormatter::PERMILL_SYMBOL, '_PS_', 12345.123456, NumberFormatter::DECIMAL ],
+        'PAD_ESCAPE_SYMBOL' => vec[ NumberFormatter::PAD_ESCAPE_SYMBOL, '_PE_', 12345.123456, NumberFormatter::DECIMAL ],
+        'INFINITY_SYMBOL' => vec[ NumberFormatter::INFINITY_SYMBOL, '_IS_', 12345.123456, NumberFormatter::DECIMAL ],
+        'NAN_SYMBOL' => vec[ NumberFormatter::NAN_SYMBOL, '_N_', 12345.123456, NumberFormatter::DECIMAL ],
+        'SIGNIFICANT_DIGIT_SYMBOL' => vec[ NumberFormatter::SIGNIFICANT_DIGIT_SYMBOL, '_SD_', 12345.123456, NumberFormatter::DECIMAL ],
+        'MONETARY_GROUPING_SEPARATOR_SYMBOL' => vec[ NumberFormatter::MONETARY_GROUPING_SEPARATOR_SYMBOL, '_MG_', 12345.123456, NumberFormatter::CURRENCY ],
+    'MONETARY_GROUPING_SEPARATOR_SYMBOL-2' => vec[ NumberFormatter::MONETARY_GROUPING_SEPARATOR_SYMBOL, "&nbsp;", 12345.123456, NumberFormatter::CURRENCY ],
+    'MONETARY_GROUPING_SEPARATOR_SYMBOL-3' => vec[ NumberFormatter::MONETARY_GROUPING_SEPARATOR_SYMBOL, $longstr, 12345.123456, NumberFormatter::CURRENCY ],
+    ];
 
     $res_str = '';
 
@@ -68,16 +68,16 @@ function ut_main()
         // Restore attribute's symbol.
         ut_nfmt_set_symbol( $fmt, $symb, $orig_val );
     }
-    $badvals = array(2147483648, -2147483648, -1, 4294901761);
+    $badvals = vec[2147483648, -2147483648, -1, 4294901761];
     foreach($badvals as $badval) {
-	    if(ut_nfmt_get_symbol( $fmt, 2147483648 ))  {
-		$res_str .= "Bad value $badval should return false!\n";
-	    }
+        if(ut_nfmt_get_symbol( $fmt, 2147483648 ))  {
+        $res_str .= "Bad value $badval should return false!\n";
+        }
     }
     return $res_str;
 }
 
-include_once( 'ut_common.inc' );
-ut_run();
-
-?>
+<<__EntryPoint>> function main_entry(): void {
+    include_once( 'ut_common.inc' );
+    ut_run();
+}

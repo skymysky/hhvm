@@ -1,7 +1,11 @@
-<?php
+<?hh
 
-$x = 1;
-switch ($x++ ?: -1) {
+<<__EntryPoint>>
+function main_1316() :mixed{
+  $x = 1;
+  $t = $x; $x++;
+  switch ($t ?: -1) {
+    default: break;
+  }
+  var_dump($x);
 }
-;
-var_dump($x);

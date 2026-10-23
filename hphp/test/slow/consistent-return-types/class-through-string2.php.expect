@@ -1,0 +1,8 @@
+lazyclass(C)
+lazyclass(C)
+string(112) "Warning: Value returned from method Derived1::baz() must be of inherited type @StringishObject, lazy class given"
+lazyclass(C)
+class(C)
+class(C)
+string(107) "Warning: Value returned from method Derived2::baz() must be of inherited type @StringishObject, class given"
+class(C)

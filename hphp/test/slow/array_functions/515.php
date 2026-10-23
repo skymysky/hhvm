@@ -1,9 +1,13 @@
-<?php
+<?hh
 
 class A implements Countable {
- public function count() {
+ public function count() :mixed{
  return 1;
 }
 }
- $obj = new A();
+
+ <<__EntryPoint>>
+function main_515() :mixed{
+$obj = new A();
  var_dump(count($obj));
+}

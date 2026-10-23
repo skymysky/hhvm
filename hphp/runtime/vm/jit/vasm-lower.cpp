@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2013 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-present Facebook, Inc. (http://www.facebook.com)  |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -19,17 +19,14 @@
 #include "hphp/runtime/vm/jit/types.h"
 #include "hphp/runtime/vm/jit/abi.h"
 #include "hphp/runtime/vm/jit/code-gen-helpers.h"
-#include "hphp/runtime/vm/jit/containers.h"
 #include "hphp/runtime/vm/jit/phys-reg.h"
-#include "hphp/runtime/vm/jit/timer.h"
 #include "hphp/runtime/vm/jit/vasm-instr.h"
 #include "hphp/runtime/vm/jit/vasm-unit.h"
 #include "hphp/runtime/vm/jit/vasm-util.h"
-#include "hphp/runtime/vm/jit/vasm-visit.h"
 
 #include <folly/ScopeGuard.h>
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -111,41 +108,100 @@ void lower_vcall(Vunit& unit, Inst& inst, Vlabel b, size_t i) {
   SCOPE_EXIT { unit.freeScratchBlock(scratch); };
   Vout v(unit, scratch, vinstr.irctx());
 
-  // Push stack arguments, in reverse order. Push in pairs without padding
-  // except for the last argument (pushed first) which should be padded if
-  // there are an odd number of arguments.
+  // Total amount of space (in 64-bit words) we've pushed onto the
+  // stack.
+  int32_t spDelta = 0;
+  // If we're going to spill a TypedValue onto the stack, the map of
+  // indices of the VregList to their offset (from spDelta) on the
+  // stack.
+  using SpillOffsets = folly::sorted_vector_map<size_t, int32_t>;
+  SpillOffsets argSpillOffsets;
+  SpillOffsets stkSpillOffsets;
+
+  // First, if we need to spilled any TypedValues to the stack, do
+  // that first. Record their offset in the stack so we can emit the
+  // appropriate leas later.
+  static_assert(TVOFF(m_data) == 0, "");
+  static_assert(TVOFF(m_type) == 8, "");
+  for (auto const& p : vargs.argSpills) {
+    v << pushp{vargs.args[p.first], p.second};
+    spDelta += 2;
+    argSpillOffsets.emplace(p.first, spDelta);
+  }
+  for (auto const& p : vargs.stkSpills) {
+    v << pushp{vargs.stkArgs[p.first], p.second};
+    spDelta += 2;
+    stkSpillOffsets.emplace(p.first, spDelta);
+  }
+
+  // If this parameter is actually a spilled TypedValue, pass its
+  // address on the stack to the function instead, not its Vreg (we
+  // already pushed its Vregs onto the stack). Otherwise use the Vreg
+  // as usual.
+  auto const spillOverride = [&] (Vreg r,
+                                  size_t idx,
+                                  const SpillOffsets& spills) {
+    auto const it = spills.find(idx);
+    if (it == spills.end()) return r;
+    auto const temp = v.makeReg();
+    v << lea{rsp()[(spDelta - it->second) * sizeof(uintptr_t)], temp};
+    return temp;
+  };
+
+  // Now push stack arguments, in reverse order. Push in pairs without
+  // padding except for the last argument (pushed first) which should
+  // be padded if there are an odd number of arguments.
   auto numArgs = vargs.stkArgs.size();
   int32_t const adjust = (numArgs & 0x1) ? sizeof(uintptr_t) : 0;
   if (adjust) {
     // Using InvalidReg below fails SSA checks and simplify pass, so just
     // push the arg twice. It's on the same cacheline and will actually
     // perform faster than an explicit lea.
-    v << pushp{vargs.stkArgs[numArgs - 1], vargs.stkArgs[numArgs - 1]};
+    auto const r =
+      spillOverride(vargs.stkArgs[numArgs - 1], numArgs - 1, stkSpillOffsets);
+    v << pushp{r, r};
+    spDelta += 2;
     --numArgs;
   }
   for (auto i2 = numArgs; i2 >= 2; i2 -= 2) {
-    v << pushp{vargs.stkArgs[i2 - 1], vargs.stkArgs[i2 - 2]};
+    auto const r1 =
+      spillOverride(vargs.stkArgs[i2 - 1], i2 - 1, stkSpillOffsets);
+    auto const r2 =
+      spillOverride(vargs.stkArgs[i2 - 2], i2 - 2, stkSpillOffsets);
+    v << pushp{r1, r2};
+    spDelta += 2;
   }
 
   // Get the arguments in the proper registers.
   RegSet argRegs;
-  auto doArgs = [&] (const VregList& srcs, PhysReg (*r)(size_t)) {
+  auto doArgs = [&] (const VregList& srcs,
+                     PhysReg (*r)(size_t),
+                     const SpillOffsets* spills) {
+    VregList argSrcs;
     VregList argDests;
     for (size_t i2 = 0, n = srcs.size(); i2 < n; ++i2) {
-      auto const reg = r(i2);
-      argDests.push_back(reg);
-      argRegs |= reg;
+      auto const src = spills ? spillOverride(srcs[i2], i2, *spills) : srcs[i2];
+      auto const dst = r(i2);
+      argSrcs.push_back(src);
+      argDests.push_back(dst);
+      argRegs |= dst;
     }
     if (argDests.size()) {
-      v << copyargs{v.makeTuple(srcs),
+      v << copyargs{v.makeTuple(std::move(argSrcs)),
                     v.makeTuple(std::move(argDests))};
     }
   };
-  doArgs(vargs.indRetArgs, rarg_ind_ret);
-  doArgs(vargs.args, rarg);
-  doArgs(vargs.simdArgs, rarg_simd);
+  doArgs(vargs.indRetArgs, rarg_ind_ret, nullptr);
+  doArgs(vargs.args, rarg, &argSpillOffsets);
+  doArgs(vargs.simdArgs, rarg_simd, nullptr);
 
   // Emit the appropriate call instruction sequence.
+#ifdef HHVM_RECORD_JIT_CFA
+  if (inst.fixup.isValid() && inst.fixup.isIndirect()) {
+    emitStoreCFAForIndirectFixup(v);
+  }
+  // Do not adjust rsp between saving the CFA above and emitting the call.
+#endif
   emitCall(v, inst.call, argRegs);
 
   // Handle fixup and unwind information.
@@ -159,13 +215,15 @@ void lower_vcall(Vunit& unit, Inst& inst, Vlabel b, size_t i) {
 
     // Insert an lea fixup for any stack args at the beginning of the catch
     // block.
-    if (auto rspOffset = ((vargs.stkArgs.size() + 1) & ~1) *
-                         sizeof(uintptr_t)) {
+    if (spDelta > 0) {
       auto& taken = unit.blocks[targets[1]].code;
       assertx(taken.front().op == Vinstr::landingpad ||
               taken.front().op == Vinstr::jmp);
 
-      Vinstr vi { lea{rsp()[rspOffset], rsp()}, taken.front().irctx() };
+      Vinstr vi {
+        lea{rsp()[spDelta*sizeof(uintptr_t)], rsp()},
+        taken.front().irctx()
+      };
 
       if (taken.front().op == Vinstr::jmp) {
         taken.insert(taken.begin(), vi);
@@ -189,12 +247,14 @@ void lower_vcall(Vunit& unit, Inst& inst, Vlabel b, size_t i) {
       static_assert(offsetof(TypedValue, m_type) == 8, "");
 
       if (dests.size() == 2) {
-        switch (arch()) {
-          case Arch::X64: // fall through
-          case Arch::PPC64:
-            v << copy2{rret(0), rret(1), dests[0], dests[1]};
-            break;
-          case Arch::ARM:
+        ARCH_MATCH(
+          ([&](arch::X64) {
+            v << copyargs{
+              v.makeTuple({rret(0), rret(1)}),
+              v.makeTuple({dests[0], dests[1]})
+            };
+          }),
+          ([&](arch::ARM) {
             // For ARM64 we need to clear the bits 8..31 from the type value.
             // That allows us to use the resulting register values in
             // type comparisons without the need for truncation there.
@@ -202,8 +262,8 @@ void lower_vcall(Vunit& unit, Inst& inst, Vlabel b, size_t i) {
             v << copy{rret(0), dests[0]};
             v << andq{v.cns(0xffffffff000000ff),
                       rret(1), dests[1], v.makeReg()};
-            break;
-        }
+          })
+        );
       } else {
         // We have cases where we statically know the type but need the value
         // from native call.  Even if the type does not really need a register
@@ -224,20 +284,20 @@ void lower_vcall(Vunit& unit, Inst& inst, Vlabel b, size_t i) {
 
     case DestType::SSA:
     case DestType::Byte:
-      assertx(dests.size() == 1);
+      assertx(dests.size() == 1 || dests.size() == 2);
       assertx(dests[0].isValid());
 
-      // Copy the single-register result to dests[0].
-      v << copy{rret(0), dests[0]};
-      break;
-
-    case DestType::SSAPair:
-      assertx(dests.size() == 2);
-      assertx(dests[0].isValid());
-      assertx(dests[1].isValid());
-
-      // Copy the result pair to dests.
-      v << copy2{rret(0), rret(1), dests[0], dests[1]};
+      if (dests.size() == 1) {
+        // Copy the single-register result to dests[0].
+        v << copy{rret(0), dests[0]};
+      } else {
+        assertx(dests[1].isValid());
+        // Copy the result pair to dests.
+        v << copyargs{
+          v.makeTuple({rret(0), rret(1)}),
+          v.makeTuple({dests[0], dests[1]})
+        };
+      }
       break;
 
     case DestType::Dbl:
@@ -256,11 +316,8 @@ void lower_vcall(Vunit& unit, Inst& inst, Vlabel b, size_t i) {
       break;
   }
 
-  if (vargs.stkArgs.size() > 0) {
-    auto const delta = safe_cast<int32_t>(
-      vargs.stkArgs.size() * sizeof(uintptr_t) + adjust
-    );
-    v << lea{rsp()[delta], rsp()};
+  if (spDelta > 0) {
+    v << lea{rsp()[spDelta * sizeof(uintptr_t)], rsp()};
   }
 
   // Insert new instructions to the appropriate block.
@@ -284,29 +341,14 @@ void lower(VLS& env, vinvoke& inst, Vlabel b, size_t i) {
   lower_vcall(env.unit, inst, b, i);
 }
 
-void lower(VLS& env, vcallunpack& inst, Vlabel b, size_t i) {
-  // vcallunpack can only appear at the end of a block.
-  assertx(i == env.unit.blocks[b].code.size() - 1);
-
-  lower_impl(env.unit, b, i, [&] (Vout& v) {
-    auto const& srcs = env.unit.tuples[inst.extraArgs];
-    auto args = inst.args;
-    auto dsts = jit::vector<Vreg>{};
-
-    for (auto i = 0; i < srcs.size(); ++i) {
-      dsts.emplace_back(rarg(i));
-      args |= rarg(i);
-    }
-
-    v << copyargs{env.unit.makeTuple(srcs),
-                  env.unit.makeTuple(std::move(dsts))};
-    v << callunpack{inst.target, args};
-    v << unwind{{inst.targets[0], inst.targets[1]}};
-  });
-}
-
 void lower(VLS& env, defvmsp& inst, Vlabel b, size_t i) {
   env.unit.blocks[b].code[i] = copy{rvmsp(), inst.d};
+}
+void lower(VLS& env, defvmfp& inst, Vlabel b, size_t i) {
+  env.unit.blocks[b].code[i] = copy{rvmfp(), inst.d};
+}
+void lower(VLS& env, pushvmfp& inst, Vlabel b, size_t i) {
+  env.unit.blocks[b].code[i] = copy{inst.s, rvmfp()};
 }
 void lower(VLS& env, syncvmsp& inst, Vlabel b, size_t i) {
   env.unit.blocks[b].code[i] = copy{inst.s, rvmsp()};
@@ -316,12 +358,11 @@ void lower(VLS& env, defvmretdata& inst, Vlabel b, size_t i) {
   env.unit.blocks[b].code[i] = copy{rret_data(), inst.data};
 }
 void lower(VLS& env, defvmrettype& inst, Vlabel b, size_t i) {
-  switch (arch()) {
-    case Arch::X64: // fall through
-    case Arch::PPC64:
+  ARCH_MATCH(
+    ([&](arch::X64) {
       env.unit.blocks[b].code[i] = copy{rret_type(), inst.type};
-      break;
-    case Arch::ARM:
+    }),
+    ([&](arch::ARM) {
       // For ARM64 we need to clear the bits 8..31 from the type value.
       // That allows us to use the resulting register values in
       // type comparisons without the need for truncation there.
@@ -329,36 +370,33 @@ void lower(VLS& env, defvmrettype& inst, Vlabel b, size_t i) {
       env.unit.blocks[b].code[i] = andq{
         env.unit.makeConst(Vconst{0xffffffff000000ff}),
         rret_type(), inst.type, env.unit.makeReg()};
-      break;
-  }
+    })
+  );
 }
 void lower(VLS& env, syncvmret& inst, Vlabel b, size_t i) {
-  switch (arch()) {
-    case Arch::X64: // fall through
-    case Arch::PPC64:
-      env.unit.blocks[b].code[i] = copy2{inst.data,   inst.type,
-                                         rret_data(), rret_type()};
-      break;
-    case Arch::ARM:
-      // For ARM64 we need to clear the bits 8..31 from the type value.
-      // That allows us to use the resulting register values in
-      // type comparisons without the need for truncation there.
-      // We must not touch bits 63..32 as they contain the AUX data.
+  ARCH_MATCH(
+    ([&](arch::X64) {
+      env.unit.blocks[b].code[i] = copyargs{
+        env.unit.makeTuple({inst.data, inst.type}),
+        env.unit.makeTuple({rret_data(), rret_type()})
+      };
+    }),
+    ([&](arch::ARM) {
+      // prepare_return_regs() already normalizes ARM return types with aux in
+      // bits [63:32] and the middle bits cleared for narrow type operations.
       lower_impl(env.unit, b, i, [&] (Vout& v) {
         v << copy{inst.data, rret_data()};
-        v << andq{v.cns(0xffffffff000000ff),
-                  inst.type, rret_type(), v.makeReg()};
+        v << copy{inst.type, rret_type()};
       });
-      break;
-  }
+    })
+  );
 }
 void lower(VLS& env, syncvmrettype& inst, Vlabel b, size_t i) {
-  switch (arch()) {
-    case Arch::X64: // fall through
-    case Arch::PPC64:
+  ARCH_MATCH(
+    ([&](arch::X64) {
       env.unit.blocks[b].code[i] = copy{inst.type, rret_type()};
-      break;
-    case Arch::ARM:
+    }),
+    ([&](arch::ARM) {
       // For ARM64 we need to clear the bits 8..31 from the type value.
       // That allows us to use the resulting register values in
       // type comparisons without the need for truncation there.
@@ -367,8 +405,8 @@ void lower(VLS& env, syncvmrettype& inst, Vlabel b, size_t i) {
         v << andq{v.cns(0xffffffff000000ff),
                   inst.type, rret_type(), v.makeReg()};
       });
-      break;
-  }
+    })
+  );
 }
 void lower(VLS& env, vregrestrict& /*inst*/, Vlabel b, size_t i) {
   env.vreg_restrict_level--;
@@ -401,4 +439,4 @@ void vlower(VLS& env, Vlabel b, size_t i) {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-}}
+}

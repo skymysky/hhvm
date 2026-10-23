@@ -1,5 +1,17 @@
 <?hh
 
+/* Constants not found in ICU library */
+const int IDNA_CONTAINS_ACE_PREFIX = 8;
+const int IDNA_CONTAINS_MINUS = 4;
+const int IDNA_CONTAINS_NON_LDH = 3;
+const int IDNA_ICONV_ERROR = 9;
+const int IDNA_INVALID_LENGTH = 5;
+const int IDNA_MALLOC_ERROR = 201;
+const int IDNA_NO_ACE_PREFIX = 6;
+const int IDNA_PUNYCODE_ERROR = 2;
+const int IDNA_ROUNDTRIP_VERIFY_ERROR = 7;
+const int IDNA_STRINGPREP_ERROR = 1;
+
 /**
  * Useful to handle errors occurred in static methods when there's no object
  * to get error code from.
@@ -16,7 +28,7 @@ function intl_get_error_code(): int;
  * call.
  */
 <<__Native>>
-function intl_get_error_message(): string;
+function intl_get_error_message(): ?string;
 
 /**
  * Return ICU error code name.
@@ -26,7 +38,7 @@ function intl_get_error_message(): string;
  *                  error code constant.
  */
 <<__Native>>
-function intl_error_name(int $errorCode): string;
+function intl_error_name(int $errorCode): ?string;
 
 /**
  * @param int $errorCode - Value returned by intl_get_error_code()
@@ -43,18 +55,6 @@ function intl_is_failure(int $errorCode): bool;
  *                       (except IDNA_ERROR_* constants).
  * @param int $varaitn - Either INTL_IDNA_VARIANT_2003 for IDNA 2003 or
  *                       INTL_IDNA_VARIANT_UTS46 for UTS #46.
- * @param mixed &$info - This parameter can be used only if
- *                       INTL_IDNA_VARIANT_UTS46 was used for variant.
- *                       In that case, it will be filled with an array with
- *                       the keys 'result', the possibly illegal result of
- *                       the transformation, 'isTransitionalDifferent', a
- *                       boolean indicating whether the usage of the
- *                       transitional mechanisms of UTS #46 either has or
- *                       would have changed the result and 'errors',
- *                       which is an int representing a bitset of the error
- *                       constants IDNA_ERROR_*. In exceptional cases this
- *                       parameter can be empty array, then use
- *                       intl_get_error_code() to get info about error.
  *
  * @return mixed - Domain name encoded in ASCII-compatible form
  *                 or FALSE on failure.
@@ -62,8 +62,7 @@ function intl_is_failure(int $errorCode): bool;
 <<__Native>>
 function idn_to_ascii(string $domain,
                       int $options = 0,
-                      int $variant = 0,
-                      mixed &$info = null): mixed;
+                      int $variant = 0): mixed;
 
 /**
  * @param string $domain
@@ -71,34 +70,19 @@ function idn_to_ascii(string $domain,
  *                       (except IDNA_ERROR_* constants).
  * @param int $variant - Either INTL_IDNA_VARIANT_2003 for IDNA 2003 or
  *                       INTL_IDNA_VARIANT_UTS46 for UTS #46.
- * @param mixed &$info - This parameter can be used only if
- *                       INTL_IDNA_VARIANT_UTS46 was used for variant.
- *                       In that case, it will be filled with an array with
- *                       the keys 'result', the possibly illegal result of
- *                       the transformation, 'isTransitionalDifferent', a
- *                       boolean indicating whether the usage of the
- *                       transitional mechanisms of UTS #46 either has or
- *                       would have changed the result and 'errors',
- *                       which is an int representing a bitset of the error
- *                       constants IDNA_ERROR_*. In exceptional cases this
- *                       parameter can be empty array, then use
- *                       intl_get_error_code() to get info about error.
  *
  * @return mixed - Domain name in unicode or FALSE on failure.
  */
 <<__Native>>
 function idn_to_utf8(string $domain,
                      int $options = 0,
-                     int $variant = 0,
-                     mixed &$info = null): mixed;
+                     int $variant = 0): mixed;
 
 /**
  * @alias idn_to_utf8
  */
 function idn_to_unicode(string $domain,
                         int $options = 0,
-                        int $variant = 0,
-                        mixed &$info = null): mixed {
-  return idn_to_utf8($domain, $options, $variant, $info);
+                        int $variant = 0): mixed {
+  return idn_to_utf8($domain, $options, $variant);
 }
-

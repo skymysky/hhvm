@@ -1,8 +1,19 @@
-File "constructor_error.php", line 14, characters 26-27:
-Invalid argument (Typing[4110])
-File "constructor_error.php", line 12, characters 31-37:
-This is an array key (int/string)
-File "constructor_error.php", line 4, characters 19-26:
-  resulting from expanding the type constant X::T
-File "constructor_error.php", line 14, characters 26-27:
-It is incompatible with a string
+error: Typing[4060] Can't use `new static()` for `X`; `__construct` arguments are not guaranteed to be consistent in child classes [1]
+-> This declaration is neither `final` nor uses the `<<__ConsistentConstruct>>` attribute [2]
+
+constructor_error.php:15:19
+ 1 | <?hh
+ 2 | 
+ 3 | class X {
+   |       ^ [2]
+ 4 |   const type T = string;
+ 5 | 
+   :
+13 |   public static function test(this::T $t): void {
+14 |     // Valid because T cannot be overridden
+15 |     $static = new static('');
+   |                   ^^^^^^ [1]
+16 |   }
+17 | }
+
+1 error found

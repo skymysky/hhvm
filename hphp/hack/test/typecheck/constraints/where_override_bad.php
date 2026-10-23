@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 // Copyright 2004-present Facebook. All Rights Reserved.
 
 class Base { }
@@ -31,5 +31,6 @@ function TestIt():void {
   BreakIt($x);
 }
 
-/* HH_FIXME[1002] */
-TestIt();
+function main(): void {
+  TestIt();
+}

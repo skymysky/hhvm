@@ -1,11 +1,11 @@
-<?php
+<?hh
 
-function haricow($a = 'one') {
-	var_dump($a);
-	$a = 'two';
+function haricow($a = 'one') :mixed{
+    var_dump($a);
+    $a = 'two';
 }
-
+<<__EntryPoint>> function main(): void {
 haricow();
 haricow();
-?>
-===DONE===
+echo "===DONE===\n";
+}

@@ -1,0 +1,1 @@
+Fatal error: Class 'D' uses trait 'T', but trait 'T' may only be used from class 'C' in %s/requireclass_hierarchy_03.bad.php on line 10

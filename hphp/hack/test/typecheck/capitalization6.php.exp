@@ -1,0 +1,15 @@
+error: Naming[2006] Could not find `CamelCAse`. [1]
+-> Did you mean `CamelC~~a~~se` instead (which only differs by case)? [2]
+
+capitalization6.php:6:7
+1 | <?hh
+2 | 
+3 | class CamelCase {}
+  |       ^^^^^^^^^ [2]
+4 | 
+5 | function foo(): void {
+6 |   new CamelCAse();
+  |       ^^^^^^^^^ [1]
+7 | }
+
+1 error found

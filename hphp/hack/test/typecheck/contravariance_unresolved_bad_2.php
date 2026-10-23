@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 // Copyright 2004-present Facebook. All Rights Reserved.
 
 interface I1<-T> {
@@ -39,5 +39,6 @@ class Foo {
   }
 }
 
-/* HH_FIXME[1002] */
-(new Foo())->BreakIt();
+function main(): void {
+  (new Foo())->BreakIt();
+}

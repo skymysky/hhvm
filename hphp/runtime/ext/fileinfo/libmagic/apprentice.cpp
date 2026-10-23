@@ -29,14 +29,14 @@
  * apprentice - make one pass through /etc/magic, learning its secrets.
  */
 
-#include "file.h"
+#include "hphp/runtime/ext/fileinfo/libmagic/file.h"
 
 #ifndef  lint
 FILE_RCSID("@(#)$File: apprentice.c,v 1.191 2013/02/26 21:02:48 christos Exp $")
 #endif  /* lint */
 
-#include "magic.h"
-#include "patchlevel.h"
+#include "hphp/runtime/ext/fileinfo/libmagic/magic.h"
+#include "hphp/runtime/ext/fileinfo/libmagic/patchlevel.h"
 #include <stdlib.h>
 
 #if defined(__hpux) && !defined(HAVE_STRTOULL)
@@ -148,7 +148,7 @@ private struct {
   { NULL, 0, NULL }
 };
 
-#include "data_file.inc"
+#include "hphp/runtime/ext/fileinfo/libmagic/data_file.inc"
 
 struct type_tbl_s {
   const char name[16];
@@ -553,13 +553,14 @@ file_apprentice(struct magic_set *ms, const char *fn, int action)
     return apprentice_1(ms, fn, action);
   }
 
-  mfn = (char*) emalloc(strlen(fn) + 1);
+  size_t fn_len = strlen(fn);
+  mfn = (char*) emalloc(fn_len + 1);
   if (mfn == NULL) {
-    file_oomem(ms, strlen(fn));
+    file_oomem(ms, fn_len);
     return -1;
   }
-  strncpy(mfn, fn, strlen(fn));
-  mfn[strlen(fn)] = '\0';
+  strncpy(mfn, fn, fn_len);
+  mfn[fn_len] = '\0';
 
   for (i = 0; i < MAGIC_SETS; i++) {
     mlist_free(ms->mlist[i]);
@@ -949,7 +950,7 @@ load_1(struct magic_set *ms, int action, const char *fn, int *errs,
 
   memset(&me, 0, sizeof(me));
   /* read and parse this file */
-  HPHP::String strline;
+  HPHP::OptString strline;
   for (ms->line = 1; (strline = file->readLine()); ms->line++) {
     line = strline.data();
     len = strline.size();
@@ -995,7 +996,7 @@ load_1(struct magic_set *ms, int action, const char *fn, int *errs,
         }
         continue;
       }
-      /*FALLTHROUGH*/
+      [[fallthrough]];
     default:
     again:
       switch (parse(ms, &me, line, lineno, action)) {
@@ -1171,7 +1172,7 @@ apprentice_load(struct magic_set *ms, const char *fn, int action)
       if (!d.toBoolean()) {
         break;
       }
-      HPHP::String s = d.toString();
+      HPHP::OptString s = d.toString();
       if ((mflen = snprintf(mfn, sizeof(mfn), "%s/%s", fn, s.data())) < 0) {
         file_oomem(ms,
         strlen(fn) + s.size() + 2);
@@ -1198,7 +1199,13 @@ apprentice_load(struct magic_set *ms, const char *fn, int action)
       tmp[tmplen] = '\0';
       filearr[files++] = tmp;
     }
-    qsort(filearr, files, sizeof(*filearr), cmpstrp);
+    /*
+     * An empty directory leaves filearr null, which qsort() is not allowed to
+     * take
+     */
+    if (files > 1) {
+      qsort(filearr, files, sizeof(*filearr), cmpstrp);
+    }
     for (i = 0; i < files; i++) {
       load_1(ms, action, filearr[i], &errs, mentry,
           mentrycount);
@@ -1219,8 +1226,11 @@ apprentice_load(struct magic_set *ms, const char *fn, int action)
       }
       i = set_text_binary(ms, mentry[j], mentrycount[j], i);
     }
-    qsort(mentry[j], mentrycount[j], sizeof(*mentry[j]),
-        apprentice_sort);
+    /* An empty set has a null array, which qsort() is not allowed to take. */
+    if (mentrycount[j] > 1) {
+      qsort(mentry[j], mentrycount[j], sizeof(*mentry[j]),
+          apprentice_sort);
+    }
 
     /*
      * Make sure that any level 0 "default" line is last
@@ -2089,7 +2099,7 @@ check_format_type(const char *ptr, int type)
   switch (type) {
   case FILE_FMT_QUAD:
     quad = 1;
-    /*FALLTHROUGH*/
+    [[fallthrough]];
   case FILE_FMT_NUM:
     if (*ptr == '-')
       ptr++;
@@ -2355,7 +2365,7 @@ getstr(struct magic_set *ms, struct magic *m, const char *s, int warn)
               "escaped tab found, use \\t instead");
           warn = 0;  /* already did */
         }
-        /*FALLTHROUGH*/
+        [[fallthrough]];
       default:
         if (warn) {
           if (isprint((unsigned char)c)) {
@@ -2375,7 +2385,7 @@ getstr(struct magic_set *ms, struct magic *m, const char *s, int warn)
                 "\\%03o", c);
           }
         }
-        /*FALLTHROUGH*/
+        [[fallthrough]];
       /* space, perhaps force people to use \040? */
       case ' ':
 #if 0
@@ -2573,7 +2583,7 @@ eatsize(const char **p)
   case 'b':    /* char/byte */
   case 'c':    /* char/byte */
     l++;
-    /*FALLTHROUGH*/
+    [[fallthrough]];
   default:
     break;
   }

@@ -1,17 +1,22 @@
-<?php
+<?hh
 
 class X {
-  static function foo() {
- global$g;
- return $g;
+ public static $g;
+ public static function foo() :mixed{
+ return self::$g;
  }
 }
-function bar() {
+function bar($_1, $_2, inout $_3) :mixed{
   var_dump('Intercepted');
+  return shape('value' => null);
 }
-function test() {
+function test() :mixed{
   X::foo();
-  fb_intercept('X::foo', 'bar', 'bar');
+  fb_intercept2('X::foo', bar<>);
   X::foo();
 }
+
+<<__EntryPoint>>
+function main_1200() :mixed{
 test();
+}

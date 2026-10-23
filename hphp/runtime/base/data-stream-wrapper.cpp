@@ -17,8 +17,6 @@
 
 #include <memory>
 
-#include <folly/ScopeGuard.h>
-
 #include "hphp/runtime/base/mem-file.h"
 #include "hphp/runtime/base/runtime-error.h"
 #include "hphp/runtime/base/zend-url.h"
@@ -28,7 +26,7 @@ namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
 
 req::ptr<File>
-DataStreamWrapper::open(const String& filename, const String& /*mode*/,
+DataStreamWrapper::open(const OptString& filename, const OptString& /*mode*/,
                         int /*options*/,
                         const req::ptr<StreamContext>& /*context*/) {
 
@@ -118,7 +116,7 @@ DataStreamWrapper::open(const String& filename, const String& /*mode*/,
   }
   data = comma + 1;
   data_len -= 1;
-  String decoded;
+  OptString decoded;
 
   if (base64) {
     decoded = string_base64_decode(data, data_len, true);

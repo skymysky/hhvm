@@ -1,0 +1,17 @@
+error: Typing[4110] The constraint on this type constant is inconsistent with its parent [1]
+-> Expected `arraykey` [2]
+-> But got `mixed` [1]
+
+subsume_tconst1.php:8:23
+2 | 
+3 | interface P {
+4 |   abstract const type T as arraykey;
+  |                            ^^^^^^^^ [2]
+5 | }
+6 | 
+7 | interface C extends P {
+8 |   abstract const type T;
+  |                       ^ [1]
+9 | }
+
+1 error found

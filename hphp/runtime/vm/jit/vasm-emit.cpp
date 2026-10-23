@@ -14,30 +14,38 @@
    +----------------------------------------------------------------------+
 */
 
+#include <fmt/format.h>
+
 #include "hphp/runtime/vm/jit/vasm-emit.h"
 
 #include "hphp/runtime/vm/jit/align.h"
 #include "hphp/runtime/vm/jit/asm-info.h"
 #include "hphp/runtime/vm/jit/cg-meta.h"
-#include "hphp/runtime/vm/jit/func-guard.h"
 #include "hphp/runtime/vm/jit/ir-unit.h"
 #include "hphp/runtime/vm/jit/print.h"
 #include "hphp/runtime/vm/jit/relocation.h"
 #include "hphp/runtime/vm/jit/tc.h"
 #include "hphp/runtime/vm/jit/timer.h"
+#ifdef __aarch64__
+#include "hphp/runtime/vm/jit/vasm-emit-arm.h"
+#else
+#include "hphp/runtime/vm/jit/vasm-emit-x64.h"
+#endif
 #include "hphp/runtime/vm/jit/vasm-print.h"
 #include "hphp/runtime/vm/jit/vasm-text.h"
 #include "hphp/runtime/vm/jit/vasm-unit.h"
 #include "hphp/runtime/vm/jit/vasm-visit.h"
 
-#include "hphp/runtime/base/runtime-option.h"
+#include "hphp/runtime/base/tracing.h"
 
 #include "hphp/util/arch.h"
+#include "hphp/util/blob-store.h"
+#include "hphp/util/configs/jit.h"
 #include "hphp/util/trace.h"
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 
-TRACE_SET_MOD(vasm);
+TRACE_SET_MOD(vasm)
 
 namespace {
 
@@ -82,7 +90,7 @@ private:
 void bindDataPtrs(Vunit& vunit, DataBlock& data) {
   if (vunit.dataBlocks.empty()) return;
 
-  Timer timer(Timer::vasm_bind_ptrs);
+  Timer timer(Timer::vasm_bind_ptrs, vunit.log_entry);
   FTRACE(1, "{:-^80}\n", "binding VdataPtrs");
 
   DataBlockMap blocks;
@@ -106,25 +114,25 @@ void bindDataPtrs(Vunit& vunit, DataBlock& data) {
   });
 }
 
+std::atomic<size_t> s_uploadId;
+
+}
+
+void optimize(Vunit& vunit, const Abi& abi, bool regalloc) {
+  ARCH_SWITCH_CALL(optimize, vunit, abi, regalloc);
+}
+
 void emit(Vunit& vunit, Vtext& vtext, CGMeta& meta, AsmInfo* ai) {
-  switch (arch()) {
-    case Arch::X64:
-      emitX64(vunit, vtext, meta, ai);
-      break;
-    case Arch::ARM:
-      emitARM(vunit, vtext, meta, ai);
-      break;
-    case Arch::PPC64:
-      emitPPC64(vunit, vtext, meta, ai);
-      break;
-  }
+  ARCH_SWITCH_CALL(emit, vunit, vtext, meta, ai);
 }
 
-}
-
-void emitVunit(Vunit& vunit, const IRUnit& unit,
+void emitVunit(Vunit& vunit, const IRUnit* unit,
                CodeCache::View code, CGMeta& meta, Annotations* annotations) {
-  Timer _t(Timer::vasm_emit);
+  Timer _t(Timer::vasm_emit, vunit.log_entry);
+
+  tracing::Block _{"vasm-emit", [&] { return traceProps(vunit); }};
+
+  SCOPE_ASSERT_DETAIL("hhir unit") { return unit ? show(*unit) : ""; };
   SCOPE_ASSERT_DETAIL("vasm unit") { return show(vunit); };
   tc::assertOwnsCodeLock(code);
 
@@ -138,9 +146,10 @@ void emitVunit(Vunit& vunit, const IRUnit& unit,
   CodeBlock& cold = code.isLocal() ? code.cold() : coldLocal;
   CodeBlock* frozen = &code.frozen();
 
-  auto const do_relocate = !RuntimeOption::EvalEnableReusableTC &&
-    RuntimeOption::EvalJitRelocationSize &&
-    cold_in.canEmit(RuntimeOption::EvalJitRelocationSize * 3) &&
+  assertx(IMPLIES(Cfg::Eval::EnableReusableTC, code.isLocal()));
+  auto const do_relocate =
+    Cfg::Jit::RelocationSize &&
+    cold_in.canEmit(Cfg::Jit::RelocationSize * 3) &&
     !code.isLocal();
 
   // If code relocation is supported and enabled, set up temporary code blocks.
@@ -149,23 +158,19 @@ void emitVunit(Vunit& vunit, const IRUnit& unit,
     // emitted cold code.
     static unsigned seed = 42;
     auto code_alignment = [](void) -> uint8_t {
-      switch (arch()) {
-        case Arch::X64:
-          return 1;
-        case Arch::PPC64:
-        case Arch::ARM:
-          return 4;
-      }
-      not_reached();
+      return ARCH_MATCH(
+        [](arch::X64) { return 1; },
+        [](arch::ARM) { return 4; }
+      );
     }();
     auto off = rand_r(&seed) & (cache_line_size() - code_alignment);
 
     cold.init(cold_in.frontier() +
-              RuntimeOption::EvalJitRelocationSize + off,
-              RuntimeOption::EvalJitRelocationSize - off, "cgRelocCold");
+              Cfg::Jit::RelocationSize + off,
+              Cfg::Jit::RelocationSize - off, "cgRelocCold");
     main.init(cold.frontier() +
-              RuntimeOption::EvalJitRelocationSize + off,
-              RuntimeOption::EvalJitRelocationSize - off, "cgRelocMain");
+              Cfg::Jit::RelocationSize + off,
+              Cfg::Jit::RelocationSize - off, "cgRelocMain");
   } else if (!code.isLocal()) {
     // Use separate code blocks, so that attempts to use code's blocks
     // directly will fail (e.g., by overwriting the same memory being written
@@ -184,25 +189,43 @@ void emitVunit(Vunit& vunit, const IRUnit& unit,
   DEBUG_ONLY auto cold_start = cold_in.frontier();
   auto frozen_start = frozen->frontier();
 
-  folly::Optional<AsmInfo> optAI;
-  if (dumpIREnabled()) optAI.emplace(unit);
+  auto const func = unit ? unit->initSrcKey().func() : nullptr;
+  auto const uploadUnit =
+    func &&
+    !Cfg::Jit::TraceUploadBucket.empty() &&
+    Cfg::Jit::TraceUploadFunctions.count(func->fullName()->toCppString());
+
+  Optional<AsmInfo> optAI;
+  if (unit && (uploadUnit ||
+               dumpIREnabled(unit->context().kind))) {
+    optAI.emplace(*unit);
+  }
   auto ai = optAI.get_pointer();
+
+  if (arch::any<arch::ARM>()) {
+    // Local buffers are relocated before publication. Keep the ADRP
+    // literal-load form available there so relocation can shrink it when the
+    // final literal is close enough.
+    if (do_relocate || code.isLocal() || Cfg::Jit::ArmForceFarLiteral) {
+      vunit.enableFarLiteral();
+    }
+  }
 
   Vtext vtext{main, cold, *frozen, code.data()};
   bindDataPtrs(vunit, vtext.data());
   emit(vunit, vtext, meta, ai);
 
+  if (annotations != nullptr) {
+    annotations->insert(annotations->end(),
+                        vunit.annotations.begin(),
+                        vunit.annotations.end());
+  }
+
   assertx(code.isLocal() || cold_in.frontier() == cold_start);
   assertx(code.isLocal() || main_in.frontier() == main_start);
 
-  assertx(!isPrologue(unit.context().kind) ||
-          funcGuardMatches(
-            funcGuardFromPrologue(unit.prologueStart, unit.context().func),
-            unit.context().func
-          ));
-
   if (do_relocate) {
-    tc::relocateTranslation(&unit,
+    tc::relocateTranslation(unit,
                             main, main_in, main_start,
                             cold, cold_in, cold_start,
                             *frozen, frozen_start, ai, meta);
@@ -220,9 +243,24 @@ void emitVunit(Vunit& vunit, const IRUnit& unit,
       ai->frozenInstRanges.offset =
         frozen->toDestAddress(frozen->frontier()) - frozen->frontier();
     }
-    printUnit(kCodeGenLevel, unit, " after code gen ",
+    printUnit(kCodeGenLevel, *unit, " after code gen ",
              ai, nullptr, annotations);
+    if (uploadUnit) {
+      BlobStore::Key k;
+      std::ostringstream str;
+      k.name = fmt::format(
+        "{}:{}:{}",
+        func->fullName()->slice(),
+        unit->initSrcKey().lineNumber(),
+        s_uploadId.fetch_add(1, std::memory_order_relaxed)
+      );
+      k.bucket = Cfg::Jit::TraceUploadBucket;
+      k.dir = Cfg::Jit::TraceUploadPath;
+
+      print(str, *unit, ai, nullptr);
+      BlobStore::put(k, str.str());
+    }
   }
 }
 
-}}
+}

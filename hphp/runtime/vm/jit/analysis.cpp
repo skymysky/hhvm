@@ -16,12 +16,13 @@
 #include "hphp/runtime/vm/jit/analysis.h"
 
 #include "hphp/util/assertions.h"
+#include "hphp/runtime/vm/jit/cfg.h"
 #include "hphp/runtime/vm/jit/ssa-tmp.h"
 #include "hphp/runtime/vm/jit/ir-instruction.h"
 #include "hphp/runtime/vm/jit/block.h"
 #include "hphp/runtime/vm/jit/id-set.h"
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 
 //////////////////////////////////////////////////////////////////////
 
@@ -34,11 +35,40 @@ SSATmp* canonical(SSATmp* value) {
 
   auto inst = value->inst();
 
-  while (inst->isPassthrough()) {
-    value = inst->getPassthroughValue();
+  while (true) {
+    if (inst->isPassthrough()) {
+      value = inst->getPassthroughValue();
+    } else if (inst->is(ConvPtrToLval)) {
+      // ConvPtrToLval is special in that its not a passthrough instruction
+      // (because the dest has a type incompatible with the source and might not
+      // be a nop), but we still want to peer through it in order to find the
+      // value's utimate origin.
+      value = inst->src(0);
+    } else {
+      break;
+    }
     inst = value->inst();
   }
   return value;
+}
+
+//////////////////////////////////////////////////////////////////////
+
+Block* ultimateDst(Block* blk) {
+  if (blk == nullptr) return nullptr;
+
+  auto constexpr kMaxSteps = 10;
+
+  for (auto i = 0; i < kMaxSteps; ++i) {
+    if (blk->empty()) return blk;
+    auto jmp = blk->begin();
+    if (!jmp->is(Jmp) || jmp->numSrcs() != 0 || jmp->taken() == nullptr) {
+      return blk;
+    }
+    blk = jmp->taken();
+  }
+
+  return blk;
 }
 
 //////////////////////////////////////////////////////////////////////
@@ -55,6 +85,10 @@ Block* findDefiningBlock(const SSATmp* t, const IdomVector& idoms) {
       "hasEdges instruction defining a dst had no edges:\n  {}\n",
       srcInst->toString()
     );
+    // A branch which goes to the same block on both edges will pass
+    // the below dominance check, but the SSATmp it produces is never
+    // usable.
+    if (next == taken) return nullptr;
     for (const auto& arc : next->preds()) {
       auto pred = arc.from();
       if (pred != srcInst->block() && !dominates(next, pred, idoms)) {
@@ -111,4 +145,64 @@ SSATmp* least_common_ancestor(SSATmp* s1, SSATmp* s2) {
 
 //////////////////////////////////////////////////////////////////////
 
-}}
+const Func* funcFromFP(const SSATmp* fp) {
+  auto const inst = canonical(fp)->inst();
+  if (inst->is(DefCalleeFP)) return inst->extra<DefCalleeFP>()->func;
+  always_assert(inst->is(DefFP, DefFuncEntryFP, EnterFrame));
+  return inst->marker().func();
+}
+
+uint32_t frameDepthIndex(const SSATmp* fp) {
+  always_assert(fp->isA(TFramePtr));
+  fp = canonical(fp);
+  if (fp->inst()->is(DefCalleeFP)) {
+    auto const extra = fp->inst()->extra<DefCalleeFP>();
+    return extra->depth;
+  }
+  return 0;
+}
+
+Optional<IRSPRelOffset> offsetOfFrame(const SSATmp *fp) {
+  assertx(fp->isA(TFramePtr));
+  auto const inst = canonical(fp)->inst();
+  if (inst->is(DefCalleeFP)) return inst->extra<DefCalleeFP>()->spOffset;
+  if (inst->is(DefFP)) return inst->extra<DefFP>()->offset;
+  if (inst->is(EnterFrame)) return IRSPRelOffset { 0 };
+  always_assert(false);
+}
+
+//////////////////////////////////////////////////////////////////////
+
+std::pair<const IRInstruction*, const SSATmp*>
+EveryDefiningInstVisitor::next() {
+  if (m_stack.empty()) return {nullptr, nullptr};
+  auto const t = m_stack.back();
+  m_stack.pop_back();
+
+  if (t->isA(TBottom)) return next();
+
+  auto const canonT = canonical(t);
+  auto const inst = canonT->inst();
+
+  if (!inst->is(DefLabel)) return {inst, t};
+  if (m_visited.contains(inst)) return next();
+  m_visited.emplace(inst);
+
+  auto const dsts = inst->dsts();
+  auto const dstIdx =
+    std::find(dsts.begin(), dsts.end(), canonT) - dsts.begin();
+  always_assert(dstIdx >= 0 && dstIdx < inst->numDsts());
+
+  inst->block()->forEachSrc(
+    dstIdx,
+    [&] (const IRInstruction*, const SSATmp* s) {
+      m_stack.emplace_back(s);
+    }
+  );
+
+  return next();
+}
+
+//////////////////////////////////////////////////////////////////////
+
+}

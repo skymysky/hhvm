@@ -1,0 +1,37 @@
+error: Typing[4444] Cannot access an internal element from module `A` in module `B` [1]
+-> This is from module `A` [2]
+
+basic_fun_call.php--B.php:6:22
+4 | module B;
+5 | 
+6 | function b(): void { a(); /* error */ }
+  |                      ^ [1]
+7 | 
+8 | function b2(): void { a2(); /* ok */ }
+
+basic_fun_call.php--A.php:5:19
+3 | module A;
+4 | 
+5 | internal function a(): void {}
+  |                   ^ [2]
+6 | 
+7 | function a2(): void { a(); /* ok */ }
+
+error: Typing[4444] Cannot access an internal element from module `A` in the default module [1]
+-> This is from module `A` [2]
+
+basic_fun_call.php--main.php:3:25
+1 | <?hh
+2 | 
+3 | function main(): void { a(); /* error */ }
+  |                         ^ [1]
+
+basic_fun_call.php--A.php:5:19
+3 | module A;
+4 | 
+5 | internal function a(): void {}
+  |                   ^ [2]
+6 | 
+7 | function a2(): void { a(); /* ok */ }
+
+2 errors found

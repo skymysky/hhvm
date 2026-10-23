@@ -1,0 +1,12 @@
+error: Typing[4120] Illegal usage of a covariant type parameter [1]
+-> This is where the parameter was declared as covariant `+` [2]
+-> The type parameter was declared as contravariant (-) [1]
+
+covariance_decl_conflict_3.php:7:45
+5 | interface Bar<-T> {}
+6 | 
+7 | class Baz<+T> extends Foo<T> implements Bar<T> {}
+  |            ^ [2]
+  |                                             ^ [1]
+
+1 error found

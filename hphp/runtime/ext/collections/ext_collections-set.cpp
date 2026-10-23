@@ -1,34 +1,19 @@
 #include "hphp/runtime/ext/collections/ext_collections-set.h"
 
+#include "hphp/runtime/base/container-functions.h"
+#include "hphp/runtime/base/vanilla-dict.h"
 #include "hphp/runtime/ext/collections/ext_collections.h"
 #include "hphp/runtime/ext/collections/ext_collections-map.h"
-#include "hphp/runtime/ext/collections/ext_collections-pair.h"
 #include "hphp/runtime/ext/collections/ext_collections-vector.h"
 #include "hphp/runtime/ext/collections/hash-collection.h"
-#include "hphp/runtime/base/container-functions.h"
-#include "hphp/runtime/base/execution-context.h"
-#include "hphp/runtime/base/mixed-array.h"
-#include "hphp/runtime/vm/vm-regs.h"
+#include "hphp/runtime/vm/native.h"
 
 namespace HPHP {
-/////////////////////////////////////////////////////////////////////////////
-
-Class* c_Set::s_cls;
-Class* c_ImmSet::s_cls;
-
-inline
-bool invokeAndCastToBool(const CallCtx& ctx, int argc,
-                         const TypedValue* argv) {
-  auto ret = Variant::attach(
-    g_context->invokeFuncFew(ctx, argc, argv)
-  );
-  return ret.toBoolean();
-}
 
 /////////////////////////////////////////////////////////////////////////////
 // BaseSet
 
-void BaseSet::addAllKeysOf(const Cell container) {
+void BaseSet::addAllKeysOf(const TypedValue container) {
   assertx(isContainer(container));
 
   decltype(cap()) oldCap = 0;
@@ -44,7 +29,7 @@ void BaseSet::addAllKeysOf(const Cell container) {
                 mutate();
                 return false;
               },
-              [this](Cell k, TypedValue /*v*/) { addRaw(k); },
+              [this](TypedValue k, TypedValue /*v*/) { addRaw(k); },
               [this](ObjectData* coll) {
                 if (!m_size && coll->collectionType() == CollectionType::Set) {
                   auto hc = static_cast<HashCollection*>(coll);
@@ -55,7 +40,8 @@ void BaseSet::addAllKeysOf(const Cell container) {
                   mutate();
                 }
                 return false;
-              });
+              },
+              false);
 
   if (UNLIKELY(!ok)) {
     throw_invalid_collection_parameter();
@@ -67,6 +53,7 @@ void BaseSet::addAllKeysOf(const Cell container) {
 void BaseSet::addAll(const Variant& t) {
   if (t.isNull()) { return; } // nothing to do
 
+  CoeffectsAutoGuard _;
   decltype(cap()) oldCap = 0;
   bool ok = IterateV(
     *t.asTypedValue(),
@@ -81,7 +68,7 @@ void BaseSet::addAll(const Variant& t) {
       return false;
     },
     [this](TypedValue v) {
-      addRaw(tvToCell(v));
+      addRaw(v);
     },
     [this](ObjectData* coll) {
       if (!m_size && coll->collectionType() == CollectionType::Set) {
@@ -111,26 +98,7 @@ void BaseSet::addImpl(int64_t k) {
   if (!raw) {
     mutate();
   }
-  auto h = hash_int64(k);
-  auto p = findForInsert(k, h);
-  assertx(MixedArray::isValidIns(p));
-  if (MixedArray::isValidPos(*p)) {
-    // When there is a conflict, the add() API is supposed to replace the
-    // existing element with the new element in place. However since Sets
-    // currently only support integer and string elements, there is no way
-    // user code can really tell whether the existing element was replaced
-    // so for efficiency we do nothing.
-    return;
-  }
-  if (UNLIKELY(isFull())) {
-    makeRoom();
-    p = findForInsert(k, h);
-  }
-  auto& e = allocElm(p);
-  e.setIntKey(k, h);
-  e.data.m_type = KindOfInt64;
-  e.data.m_data.num = k;
-  updateNextKI(k);
+  SetIntMoveSkipConflict(k, make_tv<KindOfInt64>(k));
 }
 
 template<bool raw>
@@ -139,21 +107,7 @@ void BaseSet::addImpl(StringData *key) {
   if (!raw) {
     mutate();
   }
-  strhash_t h = key->hash();
-  auto p = findForInsert(key, h);
-  assertx(MixedArray::isValidIns(p));
-  if (MixedArray::isValidPos(*p)) {
-    return;
-  }
-  if (UNLIKELY(isFull())) {
-    makeRoom();
-    p = findForInsert(key, h);
-  }
-  auto& e = allocElm(p);
-  // This increments the string's refcount twice, once for
-  // the key and once for the value
-  e.setStrKey(key, h);
-  cellDup(make_tv<KindOfString>(key), e.data);
+  SetStrMoveSkipConflict(key, make_tv<KindOfString>(key));
 }
 
 void BaseSet::addRaw(int64_t k) {
@@ -176,8 +130,8 @@ void BaseSet::addFront(int64_t k) {
   mutate();
   auto h = hash_int64(k);
   auto p = findForInsert(k, h);
-  assertx(MixedArray::isValidIns(p));
-  if (MixedArray::isValidPos(*p)) {
+  assertx(VanillaDict::isValidIns(p));
+  if (VanillaDict::isValidPos(*p)) {
     // When there is a conflict, the addFront() API is supposed to replace
     // the existing element with the new element in place. However since
     // Sets currently only support integer and string elements, there is
@@ -191,17 +145,35 @@ void BaseSet::addFront(int64_t k) {
   }
   auto& e = allocElmFront(p);
   e.setIntKey(k, h);
+  arrayData()->mutableKeyTypes()->recordInt();
   e.data.m_type = KindOfInt64;
   e.data.m_data.num = k;
   updateNextKI(k);
+}
+
+void BaseSet::SetIntMoveSkipConflict(int64_t k, TypedValue v) {
+  auto ad = VanillaDict::SetIntMoveSkipConflict(arrayData(), k, v);
+  setArrayData(VanillaDict::as(ad));
+  m_size = arrayData()->m_size;
+}
+
+void BaseSet::SetStrMoveSkipConflict(StringData* k, TypedValue v) {
+  // This increments the string's refcount twice, once for
+  // the key and once for the value
+  auto ad = VanillaDict::SetStrMoveSkipConflict(arrayData(), k, v);
+  setArrayData(VanillaDict::as(ad));
+  if (m_size != arrayData()->m_size) {
+    k->incRefCount();
+    m_size = arrayData()->m_size;
+  }
 }
 
 void BaseSet::addFront(StringData *key) {
   mutate();
   strhash_t h = key->hash();
   auto p = findForInsert(key, h);
-  assertx(MixedArray::isValidIns(p));
-  if (MixedArray::isValidPos(*p)) {
+  assertx(VanillaDict::isValidIns(p));
+  if (VanillaDict::isValidPos(*p)) {
     return;
   }
   if (UNLIKELY(isFull())) {
@@ -212,7 +184,8 @@ void BaseSet::addFront(StringData *key) {
   // This increments the string's refcount twice, once for
   // the key and once for the value
   e.setStrKey(key, h);
-  cellDup(make_tv<KindOfString>(key), e.data);
+  arrayData()->mutableKeyTypes()->recordStr(key);
+  tvDup(make_tv<KindOfString>(key), e.data);
 }
 
 Variant BaseSet::pop() {
@@ -220,11 +193,7 @@ Variant BaseSet::pop() {
     SystemLib::throwInvalidOperationExceptionObject("Cannot pop empty Set");
   }
   mutate();
-  auto e = elmLimit() - 1;
-  for (;; --e) {
-    assertx(e >= data());
-    if (!isTombstone(e)) break;
-  }
+  auto e = data() + nthElmPos(m_size - 1);
   Variant ret = tvAsCVarRef(&e->data);
   auto h = e->hash();
   auto ei = e->hasIntKey() ? findForRemove(e->ikey, h) :
@@ -238,11 +207,7 @@ Variant BaseSet::popFront() {
     SystemLib::throwInvalidOperationExceptionObject("Cannot pop empty Set");
   }
   mutate();
-  auto e = data();
-  for (;; ++e) {
-    assertx(e != elmLimit());
-    if (!isTombstone(e)) break;
-  }
+  auto e = data() + nthElmPos(0);
   Variant ret = tvAsCVarRef(&e->data);
   auto h = e->hash();
   auto ei = e->hasIntKey() ? findForRemove(e->ikey, h) :
@@ -260,26 +225,13 @@ Variant BaseSet::firstValue() {
 
 Variant BaseSet::lastValue() {
   if (!m_size) return init_null();
-  // TODO Task# 4281431: If nthElmPos(n) is optimized to
-  // walk backward from the end when n > m_size/2, then
-  // we could use that here instead of having to use a
-  // manual while loop.
-  uint32_t pos = posLimit() - 1;
-  while (isTombstone(pos)) {
-    assertx(pos > 0);
-    --pos;
-  }
+  uint32_t pos = nthElmPos(m_size - 1);
   return tvAsCVarRef(&data()[pos].data);
 }
 
 void BaseSet::throwNoMutableIndexAccess() {
   SystemLib::throwInvalidOperationExceptionObject(
     "[] operator cannot be used to modify elements of a Set");
-}
-
-Array BaseSet::ToArray(const ObjectData* obj) {
-  check_collection_cast_to_array();
-  return const_cast<BaseSet*>(static_cast<const BaseSet*>(obj))->toArray();
 }
 
 bool BaseSet::ToBool(const ObjectData* obj) {
@@ -292,7 +244,7 @@ Object c_Set::getImmutableCopy() {
   if (m_immCopy.isNull()) {
     auto set = req::make<c_ImmSet>();
     set->m_size = m_size;
-    set->m_arr = m_arr;
+    set->setArrayData(arrayData());
     m_immCopy = std::move(set);
     arrayData()->incRefCount();
   }
@@ -305,13 +257,13 @@ Object c_Set::getImmutableCopy() {
 bool BaseSet::Equals(const ObjectData* obj1, const ObjectData* obj2) {
   auto st1 = static_cast<const BaseSet*>(obj1);
   auto st2 = static_cast<const BaseSet*>(obj2);
-  return MixedArray::DictEqual(st1->arrayData(), st2->arrayData());
+  return VanillaDict::DictEqual(st1->arrayData(), st2->arrayData());
 }
 
 BaseSet::~BaseSet() {
-  auto const mixed = MixedArray::asMixed(arrayData());
-  // Avoid indirect call, as we know it is a MixedArray
-  if (mixed->decReleaseCheck()) MixedArray::ReleaseDict(mixed);
+  auto const mixed = VanillaDict::as(arrayData());
+  // Avoid indirect call, as we know it is a VanillaDict
+  if (mixed->decReleaseCheck()) VanillaDict::Release(mixed);
 }
 
 void BaseSet::throwBadValueType() {
@@ -330,133 +282,48 @@ BaseSet::Clone(ObjectData* obj) {
   }
   thiz->arrayData()->incRefCount();
   target->m_size = thiz->m_size;
-  target->m_arr = thiz->m_arr;
+  target->setArrayData(thiz->arrayData());
   return target.detach();
 }
 
 bool BaseSet::OffsetIsset(ObjectData* obj, const TypedValue* key) {
-  assertx(!isRefType(key->m_type));
   auto set = static_cast<BaseSet*>(obj);
-  if (key->m_type == KindOfInt64) {
-    return set->contains(key->m_data.num);
+  auto const ktv = tvClassToString(*key);
+  if (ktv.m_type == KindOfInt64) {
+    return set->contains(ktv.m_data.num);
   }
-  if (isStringType(key->m_type)) {
-    return set->contains(key->m_data.pstr);
+  if (isStringType(ktv.m_type)) {
+    return set->contains(ktv.m_data.pstr);
   }
   throwBadValueType();
   return false;
 }
 
-bool BaseSet::OffsetEmpty(ObjectData* obj, const TypedValue* key) {
-  assertx(!isRefType(key->m_type));
-  auto set = static_cast<BaseSet*>(obj);
-  if (key->m_type == KindOfInt64) {
-    return set->contains(key->m_data.num) ? !cellToBool(*key) : true;
-  }
-  if (isStringType(key->m_type)) {
-    return set->contains(key->m_data.pstr) ? !cellToBool(*key) : true;
-  }
-  throwBadValueType();
-  return true;
-}
-
 bool BaseSet::OffsetContains(ObjectData* obj, const TypedValue* key) {
-  assertx(!isRefType(key->m_type));
   auto set = static_cast<BaseSet*>(obj);
-  if (key->m_type == KindOfInt64) {
-    return set->contains(key->m_data.num);
+  auto const ktv = tvClassToString(*key);
+  if (ktv.m_type == KindOfInt64) {
+    return set->contains(ktv.m_data.num);
   }
-  if (isStringType(key->m_type)) {
-    return set->contains(key->m_data.pstr);
+  if (isStringType(ktv.m_type)) {
+    return set->contains(ktv.m_data.pstr);
   }
   throwBadValueType();
   return false;
 }
 
 void BaseSet::OffsetUnset(ObjectData* obj, const TypedValue* key) {
-  assertx(!isRefType(key->m_type));
   auto set = static_cast<BaseSet*>(obj);
-  if (key->m_type == KindOfInt64) {
-    set->remove(key->m_data.num);
+  auto const ktv = tvClassToString(*key);
+  if (ktv.m_type == KindOfInt64) {
+    set->remove(ktv.m_data.num);
     return;
   }
-  if (isStringType(key->m_type)) {
-    set->remove(key->m_data.pstr);
+  if (isStringType(ktv.m_type)) {
+    set->remove(ktv.m_data.pstr);
     return;
   }
   throwBadValueType();
-}
-
-template<typename TSet, bool useKey>
-typename std::enable_if<
-  std::is_base_of<BaseSet, TSet>::value, Object>::type
-BaseSet::php_map(const Variant& callback) {
-  VMRegGuard _;
-  CallCtx ctx;
-  vm_decode_function(callback, nullptr, false, ctx);
-  if (!ctx.func) {
-    SystemLib::throwInvalidArgumentExceptionObject(
-      "Parameter must be a valid callback");
-  }
-  auto set = req::make<TSet>();
-  if (!m_size) return Object{std::move(set)};
-  assertx(posLimit() != 0);
-  assertx(set->arrayData() == staticEmptyDictArrayAsMixed());
-  auto oldCap = set->cap();
-  set->reserve(posLimit()); // presume minimum collisions ...
-  assertx(set->canMutateBuffer());
-  constexpr int64_t argc = useKey ? 2 : 1;
-  TypedValue argv[argc];
-  for (ssize_t pos = iter_begin(); iter_valid(pos); pos = iter_next(pos)) {
-    auto e = iter_elm(pos);
-    if (useKey) {
-      argv[0] = e->data;
-    }
-    argv[argc-1] = e->data;
-    auto cbRet = Variant::attach(
-      g_context->invokeFuncFew(ctx, argc, argv)
-    );
-    set->addRaw(*cbRet.asTypedValue());
-  }
-  // ... and shrink back if that was incorrect
-  set->shrinkIfCapacityTooHigh(oldCap);
-  return Object{std::move(set)};
-}
-
-template<typename TSet, bool useKey>
-typename std::enable_if<
-  std::is_base_of<BaseSet, TSet>::value, Object>::type
-BaseSet::php_filter(const Variant& callback) {
-  VMRegGuard _;
-  CallCtx ctx;
-  vm_decode_function(callback, nullptr, false, ctx);
-  if (!ctx.func) {
-    SystemLib::throwInvalidArgumentExceptionObject(
-      "Parameter must be a valid callback");
-  }
-  auto set = req::make<TSet>();
-  if (!m_size) return Object(std::move(set));
-  // we don't reserve(), because we don't know how selective callback will be
-  set->mutate();
-  constexpr int64_t argc = useKey ? 2 : 1;
-  TypedValue argv[argc];
-  for (ssize_t pos = iter_begin(); iter_valid(pos); pos = iter_next(pos)) {
-    auto e = iter_elm(pos);
-    if (useKey) {
-      argv[0] = e->data;
-    }
-    argv[argc-1] = e->data;
-    bool b = invokeAndCastToBool(ctx, argc, argv);
-    if (!b) continue;
-    e = iter_elm(pos);
-    if (e->hasIntKey()) {
-      set->addRaw(e->data.m_data.num);
-    } else {
-      assertx(e->hasStrKey());
-      set->addRaw(e->data.m_data.pstr);
-    }
-  }
-  return Object(std::move(set));
 }
 
 template<class TSet>
@@ -472,38 +339,6 @@ BaseSet::php_zip(const Variant& iterable) {
     throwBadValueType();
   }
   return Object(req::make<TSet>());
-}
-
-template<bool useKey>
-Object BaseSet::php_retain(const Variant& callback) {
-  CallCtx ctx;
-  vm_decode_function(callback, nullptr, false, ctx);
-  if (!ctx.func) {
-    SystemLib::throwInvalidArgumentExceptionObject(
-               "Parameter must be a valid callback");
-  }
-  auto size = m_size;
-  if (!size) { return Object{this}; }
-  constexpr int64_t argc = useKey ? 2 : 1;
-  TypedValue argv[argc];
-  for (ssize_t pos = iter_begin(); iter_valid(pos); pos = iter_next(pos)) {
-    auto e = iter_elm(pos);
-    if (useKey) {
-      argv[0] = e->data;
-    }
-    argv[argc-1] = e->data;
-    bool b = invokeAndCastToBool(ctx, argc, argv);
-    if (b) { continue; }
-    mutate();
-    e = iter_elm(pos);
-    auto h = e->hash();
-    auto pp = e->hasIntKey() ? findForRemove(e->ikey, h) :
-              findForRemove(e->skey, h);
-    eraseNoCompact(pp);
-  }
-  assertx(m_size <= size);
-  compactOrShrinkIfDensityTooLow();
-  return Object{this};
 }
 
 template<class TSet>
@@ -530,6 +365,8 @@ BaseSet::php_take(const Variant& n) {
   set->reserve(sz);
   set->setSize(sz);
   set->setPosLimit(sz);
+  set->arrayData()->mutableKeyTypes()->copyFrom(
+    arrayData()->keyTypes(), /*compact=*/true);
   auto table = set->hashTab();
   auto mask = set->tableMask();
   for (uint32_t frPos = 0, toPos = 0; toPos < sz; ++toPos, ++frPos) {
@@ -544,36 +381,6 @@ BaseSet::php_take(const Variant& n) {
     }
   }
   return Object{std::move(set)};
-}
-
-template<class TSet>
-typename std::enable_if<
-  std::is_base_of<BaseSet, TSet>::value, Object>::type
-BaseSet::php_takeWhile(const Variant& fn) {
-  CallCtx ctx;
-  vm_decode_function(fn, nullptr, false, ctx);
-  if (!ctx.func) {
-    SystemLib::throwInvalidArgumentExceptionObject(
-               "Parameter must be a valid callback");
-  }
-  auto set = req::make<TSet>();
-  if (!m_size) return Object(std::move(set));
-  set->mutate();
-  uint32_t used = posLimit();
-  for (uint32_t i = 0; i < used; ++i) {
-    if (isTombstone(i)) continue;
-    Elm* e = &data()[i];
-    bool b = invokeAndCastToBool(ctx, 1, &e->data);
-    if (!b) break;
-    e = &data()[i];
-    if (e->hasIntKey()) {
-      set->addRaw(e->data.m_data.num);
-    } else {
-      assertx(e->hasStrKey());
-      set->addRaw(e->data.m_data.pstr);
-    }
-  }
-  return Object(std::move(set));
 }
 
 template<class TSet>
@@ -601,6 +408,8 @@ BaseSet::php_skip(const Variant& n) {
   set->reserve(sz);
   set->setSize(sz);
   set->setPosLimit(sz);
+  set->arrayData()->mutableKeyTypes()->copyFrom(
+    arrayData()->keyTypes(), /*compact=*/true);
   uint32_t frPos = nthElmPos(len);
   auto table = set->hashTab();
   auto mask = set->tableMask();
@@ -624,41 +433,6 @@ BaseSet::php_skip(const Variant& n) {
 template<class TSet>
 typename std::enable_if<
   std::is_base_of<BaseSet, TSet>::value, Object>::type
-BaseSet::php_skipWhile(const Variant& fn) {
-  CallCtx ctx;
-  vm_decode_function(fn, nullptr, false, ctx);
-  if (!ctx.func) {
-    SystemLib::throwInvalidArgumentExceptionObject(
-               "Parameter must be a valid callback");
-  }
-  auto set = req::make<TSet>();
-  if (!m_size) return Object(std::move(set));
-  // we don't reserve(), because we don't know how selective fn will be
-  set->mutate();
-  uint32_t used = posLimit();
-  uint32_t i = 0;
-  for (; i < used; ++i) {
-    if (isTombstone(i)) continue;
-    Elm& e = data()[i];
-    bool b = invokeAndCastToBool(ctx, 1, &e.data);
-    if (!b) break;
-  }
-  for (; i < used; ++i) {
-    if (isTombstone(i)) continue;
-    Elm& e = data()[i];
-    if (e.hasIntKey()) {
-      set->addRaw(e.data.m_data.num);
-    } else {
-      assertx(e.hasStrKey());
-      set->addRaw(e.data.m_data.pstr);
-    }
-  }
-  return Object(std::move(set));
-}
-
-template<class TSet>
-typename std::enable_if<
-  std::is_base_of<BaseSet, TSet>::value, Object>::type
 BaseSet::php_slice(const Variant& start, const Variant& len) {
   int64_t istart;
   int64_t ilen;
@@ -676,6 +450,8 @@ BaseSet::php_slice(const Variant& start, const Variant& len) {
   set->reserve(sz);
   set->setSize(sz);
   set->setPosLimit(sz);
+  set->arrayData()->mutableKeyTypes()->copyFrom(
+    arrayData()->keyTypes(), /*compact=*/true);
   uint32_t frPos = nthElmPos(skipAmt);
   auto table = set->hashTab();
   auto mask = set->tableMask();
@@ -710,7 +486,7 @@ BaseSet::php_concat(const Variant& iterable) {
     if (isTombstone(i)) {
       continue;
     }
-    cellDup(data()[i].data, vec->data()[j]);
+    tvDup(data()[i].data, vec->lvalAt(j));
     ++j;
   }
   for (; iter; ++iter) {
@@ -731,7 +507,7 @@ Object BaseSet::getIterator() {
 void c_Set::clear() {
   dropImmCopy();
   decRefArr(arrayData());
-  m_arr = staticEmptyDictArrayAsMixed();
+  setArrayData(CreateDictAsMixed());
   m_size = 0;
 }
 
@@ -747,12 +523,6 @@ c_ImmSet* c_ImmSet::Clone(ObjectData* obj) {
 }
 
 namespace collections {
-/////////////////////////////////////////////////////////////////////////////
-
-const StaticString
-  s_HH_Set("HH\\Set"),
-  s_HH_ImmSet("HH\\ImmSet"),
-  s_SetIterator("SetIterator");
 
 /////////////////////////////////////////////////////////////////////////////
 // SetIterator
@@ -779,17 +549,14 @@ static void HHVM_METHOD(SetIterator, rewind) {
 
 /////////////////////////////////////////////////////////////////////////////
 
-void CollectionsExtension::initSet() {
+void CollectionsExtension::registerNativeSet() {
   HHVM_ME(SetIterator, current);
   HHVM_ME(SetIterator, key);
   HHVM_ME(SetIterator, valid);
   HHVM_ME(SetIterator, next);
   HHVM_ME(SetIterator, rewind);
 
-  Native::registerNativeDataInfo<SetIterator>(
-    s_SetIterator.get(),
-    Native::NDIFlags::NO_SWEEP
-  );
+  Native::registerNativeDataInfo<SetIterator>(Native::NDIFlags::NO_SWEEP);
 
 #define BASE_ME(mn, impl) \
   HHVM_NAMED_ME(HH\\Set,    mn, impl); \
@@ -797,9 +564,6 @@ void CollectionsExtension::initSet() {
   BASE_ME(__construct,   &BaseSet::init);
   BASE_ME(count,         &BaseSet::size);
   BASE_ME(contains,      &BaseSet::php_contains);
-  BASE_ME(toArray,       &BaseSet::toArray);
-  BASE_ME(toVArray,      &BaseSet::toVArray);
-  BASE_ME(toDArray,      &BaseSet::toDArray);
   BASE_ME(toKeysArray,   &BaseSet::toKeysArray);
   BASE_ME(toValuesArray, &BaseSet::toValuesArray);
   BASE_ME(getIterator,   &BaseSet::getIterator);
@@ -820,31 +584,11 @@ void CollectionsExtension::initSet() {
   HHVM_NAMED_ME(HH\\ImmSet, mn, impl<c_Imm##ret>);
   TMPL_ME(zip,       &BaseSet::php_zip,       Set);
   TMPL_ME(take,      &BaseSet::php_take,      Set);
-  TMPL_ME(takeWhile, &BaseSet::php_takeWhile, Set);
   TMPL_ME(skip,      &BaseSet::php_skip,      Set);
-  TMPL_ME(skipWhile, &BaseSet::php_skipWhile, Set);
   TMPL_ME(slice,     &BaseSet::php_slice,     Set);
   TMPL_ME(values,    &BaseSet::php_values,    Vector);
   TMPL_ME(concat,    &BaseSet::php_concat,    Vector);
 #undef TMPL_ME
-
-  auto const m     = &BaseSet::php_map<c_Set, false>;
-  auto const mk    = &BaseSet::php_map<c_Set, true>;
-  auto const immm  = &BaseSet::php_map<c_ImmSet, false>;
-  auto const immmk = &BaseSet::php_map<c_ImmSet, true>;
-  HHVM_NAMED_ME(HH\\Set,    map,        m);
-  HHVM_NAMED_ME(HH\\Set,    mapWithKey, mk);
-  HHVM_NAMED_ME(HH\\ImmSet, map,        immm);
-  HHVM_NAMED_ME(HH\\ImmSet, mapWithKey, immmk);
-
-  auto const f     = &BaseSet::php_filter<c_Set, false>;
-  auto const fk    = &BaseSet::php_filter<c_Set, true>;
-  auto const immf  = &BaseSet::php_filter<c_ImmSet, false>;
-  auto const immfk = &BaseSet::php_filter<c_ImmSet, true>;
-  HHVM_NAMED_ME(HH\\Set,    filter,        f);
-  HHVM_NAMED_ME(HH\\Set,    filterWithKey, fk);
-  HHVM_NAMED_ME(HH\\ImmSet, filter,        immf);
-  HHVM_NAMED_ME(HH\\ImmSet, filterWithKey, immfk);
 
   HHVM_NAMED_ME(HH\\Set,    toVector,    materialize<c_Vector>);
   HHVM_NAMED_ME(HH\\Set,    toImmVector, materialize<c_ImmVector>);
@@ -856,26 +600,22 @@ void CollectionsExtension::initSet() {
   HHVM_NAMED_ME(HH\\ImmSet, toImmMap,    materialize<c_ImmMap>);
   HHVM_NAMED_ME(HH\\ImmSet, toSet,       materialize<c_Set>);
 
-  HHVM_NAMED_ME(HH\\Set, add,            &c_Set::php_add);
-  HHVM_NAMED_ME(HH\\Set, addAll,         &c_Set::php_addAll);
-  HHVM_NAMED_ME(HH\\Set, addAllKeysOf,   &c_Set::php_addAllKeysOf);
-  HHVM_NAMED_ME(HH\\Set, clear,          &c_Set::php_clear);
-  HHVM_NAMED_ME(HH\\Set, remove,         &c_Set::php_remove);
-  HHVM_NAMED_ME(HH\\Set, removeAll,      &c_Set::php_removeAll);
-  HHVM_NAMED_ME(HH\\Set, reserve,        &c_Set::php_reserve);
-  HHVM_NAMED_ME(HH\\Set, retain,         &c_Set::php_retain<false>);
-  HHVM_NAMED_ME(HH\\Set, retainWithKey,  &c_Set::php_retain<true>);
-  HHVM_NAMED_ME(HH\\Set, toImmSet,       &c_Set::getImmutableCopy);
+  // We don't need a wrapper function for `clear` as it's not overloaded.
+  HHVM_NAMED_ME(HH\\Set, clearNative,         &c_Set::clear);
+  HHVM_NAMED_ME(HH\\Set, removeNative,        &c_Set::php_remove);
+  HHVM_NAMED_ME(HH\\Set, removeAllNative,     &c_Set::php_removeAll);
+  HHVM_NAMED_ME(HH\\Set, addNative,           &c_Set::php_add);
+  HHVM_NAMED_ME(HH\\Set, addAllNative,        &c_Set::php_addAll);
+  HHVM_NAMED_ME(HH\\Set, addAllKeysOfNative,  &c_Set::php_addAllKeysOf);
 
-  loadSystemlib("collections-set");
+  HHVM_NAMED_ME(HH\\Set, reserve,  &c_Set::php_reserve);
+  HHVM_NAMED_ME(HH\\Set, toImmSet, &c_Set::getImmutableCopy);
 
-  c_Set::s_cls = Unit::lookupClass(s_HH_Set.get());
-  assertx(c_Set::s_cls);
-  finishClass<c_Set>();
+  Native::registerNativePropHandler<CollectionPropHandler>(c_Set::className());
+  Native::registerNativePropHandler<CollectionPropHandler>(c_ImmSet::className());
 
-  c_ImmSet::s_cls = Unit::lookupClass(s_HH_ImmSet.get());
-  assertx(c_ImmSet::s_cls);
-  finishClass<c_ImmSet>();
+  Native::registerClassExtraDataHandler(c_Set::className(), finish_class<c_Set>);
+  Native::registerClassExtraDataHandler(c_ImmSet::className(), finish_class<c_ImmSet>);
 }
 
 /////////////////////////////////////////////////////////////////////////////

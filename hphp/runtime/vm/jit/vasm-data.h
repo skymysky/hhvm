@@ -14,8 +14,7 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_JIT_VASM_DATA_H_
-#define incl_HPHP_JIT_VASM_DATA_H_
+#pragma once
 
 #include "hphp/runtime/vm/jit/containers.h"
 
@@ -25,7 +24,7 @@
 #include <memory>
 #include <string>
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 
 /*
  * VdataPtr represents a pointer to a value that will end up in the JIT's
@@ -44,6 +43,13 @@ struct VdataPtr {
 
   VdataPtr(const VdataPtr& other) = default;
   VdataPtr& operator=(const VdataPtr& other) = default;
+
+  bool operator==(const VdataPtr& o) const {
+    return m_ptr == o.m_ptr && m_bound == o.m_bound;
+  }
+  bool operator!=(const VdataPtr& o) const {
+    return m_ptr != o.m_ptr || m_bound != o.m_bound;
+  }
 
   bool bound() const {
     return m_bound;
@@ -81,6 +87,5 @@ struct VdataBlock {
   size_t align;
 };
 
-}}
+}
 
-#endif

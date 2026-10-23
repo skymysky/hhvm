@@ -26,27 +26,22 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-// If we have json-c then don't use this library since that one has a more
-// permissive licence
-#ifndef HAVE_JSONC
-
 #include "hphp/runtime/ext/json/JSON_parser.h"
 
-#include <vector>
+#include <folly/FBVector.h>
 
 #include "hphp/runtime/base/builtin-functions.h"
 #include "hphp/runtime/base/collections.h"
-#include "hphp/runtime/base/string-buffer.h"
-#include "hphp/runtime/base/thread-info.h"
+#include "hphp/runtime/base/request-info.h"
 #include "hphp/runtime/base/tv-refcount.h"
 #include "hphp/runtime/base/init-fini-node.h"
 #include "hphp/runtime/base/utf8-decode.h"
-#include "hphp/runtime/base/zend-strtod.h"
 #include "hphp/runtime/ext/json/ext_json.h"
 #include "hphp/runtime/ext/collections/ext_collections-map.h"
 #include "hphp/runtime/ext/collections/ext_collections-vector.h"
 #include "hphp/system/systemlib.h"
 #include "hphp/util/fast_strtoll_base10.h"
+#include "hphp/zend/zend-strtod.h"
 
 #define MAX_LENGTH_OF_LONG 20
 static const char long_min_digits[] = "9223372036854775808";
@@ -301,13 +296,69 @@ enum class Mode {
 
 namespace {
 
+int dehexchar(char c) {
+  if (c >= '0' && c <= '9') return c - '0';
+  if (c >= 'A' && c <= 'F') return c - ('A' - 10);
+  if (c >= 'a' && c <= 'f') return c - ('a' - 10);
+  return -1;
+}
+
+bool isSpace(char ch) {
+  return ch == ' ' || ch == '\n' || ch == '\t' || ch == '\r';
+}
+
+const char* skipSpace(const char* p) {
+  while (isSpace(*p)) p++;
+  return p;
+}
+
+/*
+ * Skip whitespace, then if next char is 'ch', consume it and return true,
+ * otherwise let it be and return false.
+ */
+bool matchSeparator(const char** pp, char ch) {
+  const char* p = *pp;
+  if (LIKELY(*p == ch)) { *pp = p + 1; return true; };
+  p = skipSpace(p);
+  if (LIKELY(*p == ch)) { *pp = p + 1; return true; }
+  return false;
+}
+
 NEVER_INLINE
-static void tvDecRefRange(TypedValue* begin, TypedValue* end) {
+void tvDecRefRange(TypedValue* begin, TypedValue* end) {
   assertx(begin <= end);
   for (auto tv = begin; tv != end; ++tv) {
     tvDecRefGen(tv);
   }
 }
+
+void appendToContainer(JSONContainerType container_type,
+                       Variant& base, Variant& value) {
+  if (container_type == JSONContainerType::COLLECTIONS) {
+    collections::append(base.getObjectData(), value.asTypedValue());
+  } else {
+    auto& arr = base.asArrRef();
+    if (arr.isDict()) {
+      arr.set(safe_cast<int64_t>(arr.size()), value);
+    } else {
+      arr.append(value);
+    }
+  }
+}
+
+/* Holds a pair indicating success of parsing and the new position of the
+ * buffer pointer. */
+struct ParseResult {
+  bool ok;
+  const char* p;
+};
+
+/* Holds a pair with the length of the parsed string and the new position of
+ * the buffer pointer. Length will be set to -1 in case of failure. */
+struct ParseStringResult {
+  int len;
+  const char* p;
+};
 
 /*
  * Parses a subset of JSON. Currently unsupported:
@@ -330,12 +381,13 @@ struct SimpleParser {
    * Returns false for unsupported or malformed input (does not distinguish).
    */
   static bool TryParse(const char* inp, int length,
-                       TypedValue* buf,
-                       Variant& out) {
-    SimpleParser parser(inp, length, buf);
-    bool ok = parser.parseValue();
-    parser.skipSpace();
-    if (!ok || parser.p != inp + length) {
+                       TypedValue* buf, Variant& out,
+                       JSONContainerType container_type, bool is_tsimplejson) {
+    assertx(inp[length] == 0);  // Parser relies on sentinel to avoid checks.
+    SimpleParser parser(buf, container_type, is_tsimplejson);
+    ParseResult result = parser.parseValue(inp);
+    const char* p = result.p;
+    if (!result.ok || (p = skipSpace(p), p != inp + length)) {
       // Unsupported, malformed, or trailing garbage. Release entire stack.
       tvDecRefRange(buf, parser.top);
       return false;
@@ -345,137 +397,286 @@ struct SimpleParser {
   }
 
  private:
-  SimpleParser(const char* input, int length, TypedValue* buffer)
-      : p(input),
-        top(buffer),
-        array_depth(-kMaxArrayDepth) /* Start negative to simplify check. */ {
-    assertx(input[length] == 0);  // Parser relies on sentinel to avoid checks.
-  }
+  SimpleParser(TypedValue* buffer, JSONContainerType container_type,
+               bool is_tsimplejson)
+    : top(buffer)
+    , container_type(container_type)
+    , is_tsimplejson(is_tsimplejson)
+  { }
 
   /*
-   * Skip whitespace, then if next char is 'ch', consume it and return true,
-   * otherwise let it be and return false.
+   * Variant parser.
    */
-  bool matchSeparator(char ch) {
-    if (LIKELY(*p++ == ch)) return true;
-    return matchSeparatorSlow(ch);
-  }
-  NEVER_INLINE
-  bool matchSeparatorSlow(char ch) {
-    --p;
-    skipSpace();
-    if (LIKELY(*p++ == ch)) return true;
-    --p;
-    return false;
-  }
-  NEVER_INLINE
-  void skipSpace() { while (isSpace(*p)) p++; }
-  bool isSpace(char ch) const {
-    return ch == ' ' || ch == '\n' || ch == '\t' || ch == '\f';
-  }
+  ParseResult parseValue(const char* p) {
+    for (;;) {
+      char ch = *p++;
+      switch (ch) {
+        case '{': {
+          if (matchSeparator(&p, '}')) {
+            if (!pushMixed(top)) return {false, p};  // push empty.
+            break;
+          }
+          if (!beginMixed()) return {false, p};
+          ParseResult result = parseMixedKey(p);
+          p = result.p;
+          if (!result.ok) return result;
+          continue;
+        }
+        case '[': {
+          if (matchSeparator(&p, ']')) {
+            pushPacked(top);
+            break;
+          }
+          if (!beginPacked()) return {false, p};
+          continue;
+        }
+        case '\"': {
+          ParseResult result = parseString(p);
+          p = result.p;
+          if (!result.ok) return result;
+          break;
+        }
+        case '-':
+        case '0':
+        case '1':
+        case '2':
+        case '3':
+        case '4':
+        case '5':
+        case '6':
+        case '7':
+        case '8':
+        case '9': {
+          ParseResult result = parseNumber(p, ch);
+          p = result.p;
+          if (!result.ok) return result;
+          break;
+        }
+        case 't': {
+          ParseResult result = parseRue(p);
+          p = result.p;
+          if (!result.ok) return result;
+          break;
+        }
+        case 'f': {
+          ParseResult result = parseAlse(p);
+          p = result.p;
+          if (!result.ok) return result;
+          break;
+        }
+        case 'n': {
+          ParseResult result = parseUll(p);
+          p = result.p;
+          if (!result.ok) return result;
+          break;
+        }
+        case ' ':
+        case '\t':
+        case '\n':
+        case '\r':
+          p = skipSpace(p);
+          continue;
+        default:
+          return {false, p};
+      }
 
-  bool parseValue() {
-    auto const ch = *p++;
-    if (ch == '{') return parseMixed();
-    else if (ch == '[') return parsePacked();
-    else if (ch == '\"') return parseString();
-    else if ((ch >= '0' && ch <= '9') || ch == '-') return parseNumber(ch);
-    else if (ch == 't') return parseRue();
-    else if (ch == 'f') return parseAlse();
-    else if (ch == 'n') return parseUll();
-    else if (isSpace(ch)) {
-      skipSpace();
-      return parseValue();
+      // We parsed a JSON element at this point, add it to the surrounding list,
+      // dictionary or return.
+      for (;;) {
+        if (stack_top == 0) {
+          return {true, p};
+        } else if (stack[stack_top - 1].is_packed) {
+          if (matchSeparator(&p, ',')) break;
+          if (!matchSeparator(&p, ']')) return {false, p};
+          finishPacked();
+          continue;
+        } else {
+          if (matchSeparator(&p, ',')) {
+            ParseResult result = parseMixedKey(p);
+            p = result.p;
+            if (!result.ok) return {false, p};
+            break;
+          }
+          if (!matchSeparator(&p, '}')) return {false, p};
+          if (!finishMixed()) return {false, p};
+          continue;
+        }
+      }
     }
-    else return false;
   }
 
-  bool parseRue() {
-    if (*p++ != 'r') return false;
-    if (*p++ != 'u') return false;
-    if (*p++ != 'e') return false;
+  ParseResult parseRue(const char* p) {
+    if (*p++ != 'r') return {false, p};
+    if (*p++ != 'u') return {false, p};
+    if (*p++ != 'e') return {false, p};
     auto const tv = top++;
     tv->m_type = KindOfBoolean;
     tv->m_data.num = true;
-    return true;
+    return {true, p};
   }
 
-  bool parseAlse() {
-    if (*p++ != 'a') return false;
-    if (*p++ != 'l') return false;
-    if (*p++ != 's') return false;
-    if (*p++ != 'e') return false;
+  ParseResult parseAlse(const char* p) {
+    if (*p++ != 'a') return {false, p};
+    if (*p++ != 'l') return {false, p};
+    if (*p++ != 's') return {false, p};
+    if (*p++ != 'e') return {false, p};
     auto const tv = top++;
     tv->m_type = KindOfBoolean;
     tv->m_data.num = false;
-    return true;
+    return {true, p};
   }
 
-  bool parseUll() {
-    if (*p++ != 'u') return false;
-    if (*p++ != 'l') return false;
-    if (*p++ != 'l') return false;
+  ParseResult parseUll(const char* p) {
+    if (*p++ != 'u') return {false, p};
+    if (*p++ != 'l') return {false, p};
+    if (*p++ != 'l') return {false, p};
     top++->m_type = KindOfNull;
-    return true;
+    return {true, p};
   }
 
-  bool parseString() {
+  ParseResult handleBackslash(const char* p, signed char& out) {
+    char ch = *p++;
+    switch (ch) {
+      case 0: return {false, p};
+      case '"': out = ch; return {true, p};
+      case '\\': out = ch; return {true, p};
+      case '/': out = ch; return {true, p};
+      case 'b': out = '\b'; return {true, p};
+      case 'f': out = '\f'; return {true, p};
+      case 'n': out = '\n'; return {true, p};
+      case 'r': out = '\r'; return {true, p};
+      case 't': out = '\t'; return {true, p};
+      case 'u': {
+        if (UNLIKELY(is_tsimplejson)) {
+          auto const ch1 = *p++;
+          if (UNLIKELY(ch1 != '0')) return {false, p};
+          auto const ch2 = *p++;
+          if (UNLIKELY(ch2 != '0')) return {false, p};
+          auto const dch3 = dehexchar(*p++);
+          if (UNLIKELY(dch3 < 0)) return {false, p};
+          auto const dch4 = dehexchar(*p++);
+          if (UNLIKELY(dch4 < 0)) return {false, p};
+          out = (dch3 << 4) | dch4;
+          return {true, p};
+        } else {
+          uint16_t u16cp = 0;
+          for (int i = 0; i < 4; i++) {
+            auto const hexv = dehexchar(*p++);
+            if (hexv < 0) return {false, p}; // includes check for end of string
+            u16cp <<= 4;
+            u16cp |= hexv;
+          }
+          if (u16cp > 0x7f) {
+            return {false, p};
+          } else {
+            out = u16cp;
+            return {true, p};
+          }
+        }
+      }
+      default: return {false, p};
+    }
+  }
+
+  ParseStringResult parseRawString(const char* p) {
+    assertx(p[-1] == '"'); // SimpleParser only handles "-quoted strings
     int len = 0;
     auto const charTop = reinterpret_cast<signed char*>(top);
     for (signed char ch = *p++; ch != '\"'; ch = *p++) {
-      charTop[len++] = ch;
-      // Signed char means less than ' ' also catches non-ASCII.
-      if (ch < ' ' || ch == '\\' || ch == '\'') return false;
+      charTop[len++] = ch; // overwritten later if `ch == '\\'`
+      if (ch < ' ') {
+        // `ch < ' '` catches null and also non-ASCII (since signed char)
+        return {-1, p};
+      } else if (ch == '\\') {
+        ParseResult result = handleBackslash(p, charTop[len - 1]);
+        p = result.p;
+        if (!result.ok) return {-1, p};
+      }
     }
-    pushStringData(StringData::Make(
-      reinterpret_cast<char*>(charTop), len, CopyString));
-    return true;
+    return {len, p};
   }
 
-  bool parsePacked() {
-    auto const fp = top;
-    if (!matchSeparator(']')) {
-      if (++array_depth >= 0) return false;
-      do {
-        if (!parseValue()) return false;
-      } while (matchSeparator(','));
-      --array_depth;
-      if (!matchSeparator(']')) return false;  // Trailing ',' not supported.
+  ParseResult parseString(const char* p) {
+    ParseStringResult result = parseRawString(p);
+    p = result.p;
+    if (result.len < 0) return {false, p};
+    auto const start = reinterpret_cast<char*>(top);
+    pushStringData(StringData::Make(start, result.len, CopyString));
+    return {true, p};
+  }
+
+  ParseResult parseMixedKey(const char* p) {
+    if (!matchSeparator(&p, '\"')) return {false, p};
+    ParseStringResult result = parseRawString(p);
+    p = result.p;
+    int len = result.len;
+    if (len < 0) return {false, p};
+    auto const start = reinterpret_cast<char*>(top);
+    auto const slice = folly::StringPiece(start, len);
+    start[len] = '\0';
+    int64_t num;
+    if (container_type != JSONContainerType::HACK_ARRAYS &&
+        is_strictly_integer(start, len, num)) {
+      pushInt64(num);
+    } else if (auto const str = lookupStaticString(slice)) {
+      auto const tv = top++;
+      tv->m_type = KindOfPersistentString;
+      tv->m_data.pstr = str;
+    } else {
+      pushStringData(StringData::Make(start, len, CopyString));
     }
-    auto arr = top == fp ? staticEmptyArray() :
-                           PackedArray::MakePackedNatural(top - fp, fp);
+    if (!matchSeparator(&p, ':')) return {false, p};
+    return {true, p};
+  }
+
+  void pushPacked(TypedValue* fp) {
+    auto arr = [&] {
+      if (container_type == JSONContainerType::HACK_ARRAYS) {
+        return top == fp
+          ? staticEmptyVec()
+          : VanillaVec::MakeVecNatural(top - fp, fp);
+      }
+      if (container_type == JSONContainerType::DARRAYS_AND_VARRAYS) {
+        return top == fp
+          ? staticEmptyVec()
+          : VanillaVec::MakeVecNatural(top - fp, fp);
+      }
+      assertx(container_type == JSONContainerType::DARRAYS);
+      return top == fp
+        ? staticEmptyDictArray()
+        : VanillaDict::MakeDictNatural(top - fp, fp);
+    }();
     top = fp;
     pushArrayData(arr);
     check_non_safepoint_surprise();
+  }
+
+  bool beginPacked() {
+    if (stack_top >= kMaxArrayDepth) return false;
+    stack[stack_top++] = StackEntry{top, true};
     return true;
   }
 
-  bool parseMixed() {
-    auto const fp = top;
-    if (!matchSeparator('}')) {
-      if (++array_depth >= 0) return false;
-      do {
-        if (!matchSeparator('\"')) return false;  // Only support string keys.
-        if (!parseString()) return false;
-        TypedValue& tv = top[-1];
-        // PHP array semantics: integer-like keys are converted.
-        int64_t num;
-        if (tv.m_data.pstr->isStrictlyInteger(num)) {
-          tv.m_type = KindOfInt64;
-          tv.m_data.pstr->release();
-          tv.m_data.num = num;
-        }
-        // TODO(14491721): Precompute and save hash to avoid deref in MakeMixed.
-        if (!matchSeparator(':')) return false;
-        if (!parseValue()) return false;
-      } while (matchSeparator(','));
-      --array_depth;
-      if (!matchSeparator('}')) return false;  // Trailing ',' not supported.
-    }
-    auto const arr = top == fp ?
-      staticEmptyArray() :
-      MixedArray::MakeMixed((top - fp) >> 1, fp)->asArrayData();
-    // MixedArray::MakeMixed can return nullptr if there are duplicate keys
+  void finishPacked() {
+    assertx(stack_top > 0 && stack[stack_top - 1].is_packed);
+    TypedValue* fp = stack[--stack_top].values;
+    pushPacked(fp);
+  }
+
+  bool pushMixed(TypedValue* fp) {
+    auto arr = [&] {
+      if (container_type == JSONContainerType::HACK_ARRAYS) {
+        return top == fp
+          ? staticEmptyDictArray()
+          : VanillaDict::MakeDict((top - fp) >> 1, fp)->asArrayData();
+      }
+      assertx(container_type == JSONContainerType::DARRAYS ||
+              container_type == JSONContainerType::DARRAYS_AND_VARRAYS);
+      return top == fp
+        ? staticEmptyDictArray()
+        : VanillaDict::MakeDict((top - fp) >> 1, fp)->asArrayData();
+    }();
+    // VanillaDict::MakeMixed can return nullptr if there are duplicate keys
     if (!arr) return false;
     top = fp;
     pushArrayData(arr);
@@ -483,15 +684,29 @@ struct SimpleParser {
     return true;
   }
 
+  bool beginMixed() {
+    // Register on stack.
+    if (stack_top >= kMaxArrayDepth) return false;
+    stack[stack_top++] = StackEntry{top, false};
+    return true;
+  }
+
+  bool finishMixed() {
+    assertx(stack_top > 0 && !stack[stack_top - 1].is_packed);
+    TypedValue* fp = stack[--stack_top].values;
+    return pushMixed(fp);
+  }
+
   /*
    * Parse remainder of number after initial character firstChar (maybe '-').
    */
-  bool parseNumber(char firstChar) {
+  ParseResult parseNumber(const char* p, char firstChar) {
     uint64_t x = 0;
     bool neg = false;
     const char* begin = p - 1;
     if (firstChar == '-') {
       neg = true;
+      firstChar = *p;
     } else {
       x = firstChar - '0';  // first digit
     }
@@ -502,25 +717,32 @@ struct SimpleParser {
     }
     if (*p == '.' || *p == 'e' || *p == 'E') {
       pushDouble(zend_strtod(begin, &p));
-      return true;
+      return {true, p};
     }
+
+    auto len = p - begin;
+
+    // JSON does not permit leading 0's in numbers.
+    if (UNLIKELY(len > 1 && firstChar == '0')) {
+      return {false, p};
+    }
+
     // Now 'x' is the usigned absolute value of a naively parsed integer, but
     // potentially overflowed mod 2^64.
-    auto len = p - begin;
     if (LIKELY(len < 19) || (len == 19 && firstChar <= '8')) {
       int64_t sx = x;
       pushInt64(neg ? -sx : sx);
     } else {
-      parseBigInt(len);
+      p = parseBigInt(p, len);
     }
-    return true;
+    return {true, p};
   }
 
   /*
    * Assuming 'len' characters ('0'-'9', maybe prefix '-') have been read,
    * re-parse and push as an int64_t if possible, otherwise as a double.
    */
-  void parseBigInt(int len) {
+  const char* parseBigInt(const char* p, int len) {
     assertx(*p > '9' || *p < '0');  // Aleady read maximal digit sequence.
     errno = 0;
     const int64_t sx = strtoll(p - len, nullptr, 10);
@@ -531,6 +753,7 @@ struct SimpleParser {
     } else {
       pushInt64(sx);
     }
+    return p;
   }
 
   void pushDouble(double data) {
@@ -553,13 +776,20 @@ struct SimpleParser {
 
   void pushArrayData(ArrayData* data) {
     auto const tv = top++;
-    tv->m_type = KindOfArray;
+    tv->m_type = data->toDataType();
     tv->m_data.parr = data;
   }
 
-  const char* p;
   TypedValue* top;
-  int array_depth;
+  JSONContainerType container_type;
+  bool is_tsimplejson;
+
+  int stack_top = 0;
+  struct StackEntry {
+    TypedValue *values;
+    bool is_packed;
+  };
+  StackEntry stack[kMaxArrayDepth];
 };
 
 /*
@@ -571,7 +801,7 @@ struct UncheckedBuffer {
   // Use given buffer with space for 'cap' chars, including '\0'.
   void setBuf(char* buf, size_t cap) {
     begin = p = buf;
-#ifdef DEBUG
+#ifndef NDEBUG
     end = begin + cap;
 #endif
   }
@@ -590,11 +820,11 @@ struct UncheckedBuffer {
     *p = 0;
     return begin;
   }
-  String copy() { return String(data(), size(), CopyString); }
+  OptString copy() { return OptString(data(), size(), CopyString); }
 
   char* p{nullptr};
   char* begin{nullptr};
-#ifdef DEBUG
+#ifndef NDEBUG
   char* end{nullptr};
 #endif
 };
@@ -607,12 +837,10 @@ struct UncheckedBuffer {
 struct json_parser {
   struct json_state {
     Mode mode;
-    String key;
+    OptString key;
     Variant val;
   };
-  std::vector<json_state> stack;
-  // check_non_safepoint_surprise() above will not trigger gc
-  TYPE_SCAN_IGNORE_FIELD(stack);
+  req::vector<json_state> stack;
   int top;
   int mark; // the watermark
   int depth;
@@ -632,16 +860,16 @@ struct json_parser {
     if (UNLIKELY(length >= sb_cap)) {
       // No decoded string in the output can use more bytes than input size.
       const auto new_cap = length + 1;
-      size_t bufSize = length <= RuntimeOption::EvalSimpleJsonMaxLength ?
+      size_t bufSize = length <= Cfg::Eval::SimpleJsonMaxLength ?
         SimpleParser::BufferBytesForLength(length) :
         new_cap * 2;
       if (tl_buffer.raw) {
-        free(tl_buffer.raw);
+        json_free(tl_buffer.raw);
         tl_buffer.raw = nullptr;
       }
       sb_cap = 0;
       if (!tl_heap->preAllocOOM(bufSize)) {
-        tl_buffer.raw = (char*)malloc(bufSize);
+        tl_buffer.raw = (char*)json_malloc(bufSize);
         if (!tl_buffer.raw) tl_heap->forceOOM();
       }
       check_non_safepoint_surprise();
@@ -657,16 +885,43 @@ struct json_parser {
   }
   void flushSb() {
     if (tl_buffer.raw) {
-      free(tl_buffer.raw);
+      json_free(tl_buffer.raw);
       tl_buffer.raw = nullptr;
     }
     sb_cap = 0;
     sb_buf.setBuf(nullptr, 0);
     sb_key.setBuf(nullptr, 0);
   }
+ private:
+  static void* json_malloc(size_t size) {
+    if (Cfg::Eval::JsonParserUseLocalArena) {
+      return local_malloc(size);
+    } else {
+      return malloc(size);
+    }
+  }
+  static void json_free(void* ptr) {
+    if (Cfg::Eval::JsonParserUseLocalArena) {
+      return local_free(ptr);
+    } else {
+      return free(ptr);
+    }
+  }
 };
 
-THREAD_LOCAL(json_parser, s_json_parser);
+namespace {
+
+RDS_LOCAL(json_parser, s_json_parser);
+
+InitFiniNode r_shutdown(
+  [] {
+    // Ensure request memory is released
+    s_json_parser->stack = decltype(s_json_parser->stack){};
+  },
+  InitFiniNode::When::RequestFini
+);
+
+}
 
 // In Zend, the json_parser struct is publicly
 // accessible. Thus the fields could be accessed
@@ -743,15 +998,8 @@ static int pop(json_parser *json, Mode mode) {
   return true;
 }
 
-static int dehexchar(char c) {
-  if (c >= '0' && c <= '9') return c - '0';
-  if (c >= 'A' && c <= 'F') return c - ('A' - 10);
-  if (c >= 'a' && c <= 'f') return c - ('a' - 10);
-  return -1;
-}
-
-static String copy_and_clear(UncheckedBuffer &buf) {
-  auto ret = buf.size() > 0 ? buf.copy() : empty_string();
+static OptString copy_and_clear(UncheckedBuffer &buf) {
+  auto ret = buf.size() > 0 ? buf.copy() : String::Empty();
   buf.clear();
   return ret;
 }
@@ -820,8 +1068,6 @@ static void json_create_zval(Variant &z, UncheckedBuffer &buf, DataType type,
     case KindOfUninit:
     case KindOfNull:
     case KindOfPersistentString:
-    case KindOfPersistentArray:
-    case KindOfArray:
     case KindOfPersistentVec:
     case KindOfVec:
     case KindOfPersistentDict:
@@ -830,8 +1076,13 @@ static void json_create_zval(Variant &z, UncheckedBuffer &buf, DataType type,
     case KindOfKeyset:
     case KindOfObject:
     case KindOfResource:
-    case KindOfRef:
+    case KindOfRFunc:
     case KindOfFunc:
+    case KindOfClass:
+    case KindOfLazyClass:
+    case KindOfClsMeth:
+    case KindOfRClsMeth:
+    case KindOfEnumClassLabel:
       z = uninit_null();
       return;
   }
@@ -878,34 +1129,38 @@ void utf16_to_utf8(UncheckedBuffer &buf, unsigned short utf16) {
 
 StaticString s__empty_("_empty_");
 
-static void object_set(Variant &var,
-                       const String& key,
+static void object_set(const json_parser* json,
+                       Variant &var,
+                       const OptString& key,
                        const Variant& value,
                        int assoc,
                        JSONContainerType container_type) {
   if (!assoc) {
     // We know it is stdClass, and everything is public (and dynamic).
     if (key.empty()) {
-      var.getObjectData()->setProp(nullptr, s__empty_.get(), *value.asCell());
+      var.getObjectData()->setProp(nullctx, s__empty_.get(), *value.asTypedValue());
     } else {
       var.getObjectData()->o_set(key, value);
     }
   } else {
     if (container_type == JSONContainerType::COLLECTIONS) {
       auto keyTV = make_tv<KindOfString>(key.get());
-      collections::set(var.getObjectData(), &keyTV, value.asCell());
+      collections::set(var.getObjectData(), &keyTV, value.asTypedValue());
     } else if (container_type == JSONContainerType::HACK_ARRAYS) {
       forceToDict(var).set(key, value);
-    } else if (container_type == JSONContainerType::DARRAYS) {
-      forceToDArray(var).set(key, value);
     } else {
-      forceToArray(var).set(key, value);
+      int64_t i;
+      if (key.get()->isStrictlyInteger(i)) {
+        forceToDict(var).set(i, value);
+      } else {
+        forceToDict(var).set(key, value);
+      }
     }
   }
 }
 
 static void attach_zval(json_parser *json,
-                        const String& key,
+                        const OptString& key,
                         int assoc,
                         JSONContainerType container_type) {
   if (json->top < 1) {
@@ -917,13 +1172,9 @@ static void attach_zval(json_parser *json,
   auto up_mode = json->stack[json->top - 1].mode;
 
   if (up_mode == Mode::ARRAY) {
-    if (container_type == JSONContainerType::COLLECTIONS) {
-      collections::append(root.getObjectData(), child.asCell());
-    } else {
-      root.toArrRef().append(child);
-    }
+    appendToContainer(container_type, root, child);
   } else if (up_mode == Mode::OBJECT) {
-    object_set(root, key, child, assoc, container_type);
+    object_set(json, root, key, child, assoc, container_type);
   }
 }
 
@@ -941,7 +1192,11 @@ JSONContainerType get_container_type_from_options(int64_t options) {
     return JSONContainerType::DARRAYS;
   }
 
-  return JSONContainerType::PHP_ARRAYS;
+  if (options & k_JSON_FB_DARRAYS_AND_VARRAYS) {
+    return JSONContainerType::DARRAYS_AND_VARRAYS;
+  }
+
+  return JSONContainerType::DARRAYS;
 }
 
 /**
@@ -952,27 +1207,27 @@ JSONContainerType get_container_type_from_options(int64_t options) {
  * machine with a stack.
  *
  * The behavior is as follows:
- * Container Type | is_assoc | JSON input => output type
+ * Container Type       | is_assoc | JSON input => output type
  *
- * COLLECTIONS    | true     | "{}"       => c_Map
- * COLLECTIONS    | false    | "{}"       => c_Map
- * COLLECTIONS    | true     | "[]"       => c_Vector
- * COLLECTIONS    | false    | "[]"       => c_Vector
+ * COLLECTIONS          | true     | "{}"       => c_Map
+ * COLLECTIONS          | false    | "{}"       => c_Map
+ * COLLECTIONS          | true     | "[]"       => c_Vector
+ * COLLECTIONS          | false    | "[]"       => c_Vector
  *
- * HACK_ARRAYS    | true     | "{}"       => dict
- * HACK_ARRAYS    | false    | "{}"       => stdClass
- * HACK_ARRAYS    | true     | "[]"       => vec
- * HACK_ARRAYS    | false    | "[]"       => stdClass
+ * HACK_ARRAYS          | true     | "{}"       => dict
+ * HACK_ARRAYS          | false    | "{}"       => stdClass
+ * HACK_ARRAYS          | true     | "[]"       => vec
+ * HACK_ARRAYS          | false    | "[]"       => stdClass
  *
- * DARRAYS        | true     | "{}"       => darray
- * DARRAYS        | false    | "{}"       => stdClass
- * DARRAYS        | true     | "[]"       => darray
- * DARRAYS        | false    | "[]"       => stdClass
+ * DARRAYS              | true     | "{}"       => darray
+ * DARRAYS              | false    | "{}"       => stdClass
+ * DARRAYS              | true     | "[]"       => darray
+ * DARRAYS              | false    | "[]"       => stdClass
  *
- * PHP_ARRAYS     | true     | "{}"       => array
- * PHP_ARRAYS     | false    | "{}"       => stdClass
- * PHP_ARRAYS     | true     | "[]"       => array
- * PHP_ARRAYS     | false    | "[]"       => stdClass
+ * DARRAYS_AND_VARRAYS  | true     | "{}"       => darray
+ * DARRAYS_AND_VARRAYS  | false    | "{}"       => stdClass
+ * DARRAYS_AND_VARRAYS  | true     | "[]"       => varray
+ * DARRAYS_AND_VARRAYS  | false    | "[]"       => stdClass
  */
 bool JSON_parser(Variant &z, const char *p, int length, bool const assoc,
                  int depth, int64_t options) {
@@ -984,15 +1239,29 @@ bool JSON_parser(Variant &z, const char *p, int length, bool const assoc,
   // they exceed kMaxPersistentStringBufferCapacity at exit or if the thread
   // is explicitly flushed (e.g., due to being idle).
   json->initSb(length);
-
+  if (depth <= 0) {
+    json->error_code = json_error_codes::JSON_ERROR_DEPTH;
+    return false;
+  }
+  SCOPE_EXIT {
+    constexpr int kMaxPersistentStringBufferCapacity = 256 * 1024;
+    if (json->sb_cap > kMaxPersistentStringBufferCapacity) json->flushSb();
+  };
   // SimpleParser only handles the most common set of options. Also, only use it
   // if its array nesting depth check is *more* restrictive than what the user
   // asks for, to ensure that the precise semantics of the general case is
   // applied for all nesting overflows.
-  if (assoc && options == k_JSON_FB_LOOSE &&
+  if (assoc &&
+      options == (options & (k_JSON_FB_LOOSE |
+                             k_JSON_FB_DARRAYS |
+                             k_JSON_FB_DARRAYS_AND_VARRAYS |
+                             k_JSON_FB_HACK_ARRAYS |
+                             k_JSON_FB_THRIFT_SIMPLE_JSON)) &&
       depth >= SimpleParser::kMaxArrayDepth &&
-      length <= RuntimeOption::EvalSimpleJsonMaxLength &&
-      SimpleParser::TryParse(p, length, json->tl_buffer.tv, z)) {
+      length <= Cfg::Eval::SimpleJsonMaxLength &&
+      SimpleParser::TryParse(p, length, json->tl_buffer.tv, z,
+                             get_container_type_from_options(options),
+                             options & k_JSON_FB_THRIFT_SIMPLE_JSON)) {
     return true;
   }
 
@@ -1019,10 +1288,9 @@ bool JSON_parser(Variant &z, const char *p, int length, bool const assoc,
 
   UncheckedBuffer *buf = &json->sb_buf;
   UncheckedBuffer *key = &json->sb_key;
-  static const int kMaxPersistentStringBufferCapacity = 256 * 1024;
 
   DataType type = kInvalidDataType;
-  unsigned short utf16 = 0;
+  unsigned short escaped_bytes = 0;
 
   auto reset_type = [&] { type = kInvalidDataType; };
 
@@ -1031,10 +1299,13 @@ bool JSON_parser(Variant &z, const char *p, int length, bool const assoc,
   // reasons, it only makes sense to expand if necessary and cycles are wasted
   // contracting. Calls with a depth other than default should be rare.
   if (depth > json->stack.size()) {
+    auto const newSize = sizeof(json_parser::json_state) * depth;
+    if (newSize > kMaxSmallSize && tl_heap->preAllocOOM(newSize)) {
+      check_non_safepoint_surprise();
+    }
     json->stack.resize(depth);
   }
   SCOPE_EXIT {
-    if (json->sb_cap > kMaxPersistentStringBufferCapacity) json->flushSb();
     if (json->stack.empty()) return;
     for (int i = 0; i <= json->mark; i++) {
       json->stack[i].key.reset();
@@ -1099,7 +1370,14 @@ bool JSON_parser(Variant &z, const char *p, int length, bool const assoc,
           empty }
         */
       case -9:
-        attach_zval(json, json->stack[json->top].key, assoc, container_type);
+        /*<fb>*/
+        if (json->top == 1) z = json->stack[json->top].val;
+        else {
+        /*</fb>*/
+          attach_zval(json, json->stack[json->top].key, assoc, container_type);
+        /*<fb>*/
+        }
+        /*</fb>*/
         if (!pop(json, Mode::KEY)) {
           return false;
         }
@@ -1117,11 +1395,6 @@ bool JSON_parser(Variant &z, const char *p, int length, bool const assoc,
         state = 1;
         if (json->top > 0) {
           Variant &top = json->stack[json->top].val;
-          if (json->top == 1) {
-            top.assignRef(z);
-          } else {
-            top.unset();
-          }
           /*<fb>*/
           if (container_type == JSONContainerType::COLLECTIONS) {
             // stable_maps is meaningless
@@ -1133,11 +1406,13 @@ bool JSON_parser(Variant &z, const char *p, int length, bool const assoc,
             /* <fb> */
             } else if (container_type == JSONContainerType::HACK_ARRAYS) {
               top = Array::CreateDict();
-            } else if (container_type == JSONContainerType::DARRAYS) {
-              top = Array::CreateDArray();
+            } else if (container_type == JSONContainerType::DARRAYS ||
+                       container_type == JSONContainerType::DARRAYS_AND_VARRAYS)
+            {
+              top = Array::CreateDict();
             /* </fb> */
             } else {
-              top = Array::Create();
+              top = Array::CreateDict();
             }
           /*<fb>*/
           }
@@ -1169,14 +1444,21 @@ bool JSON_parser(Variant &z, const char *p, int length, bool const assoc,
           Variant mval;
           json_create_zval(mval, *buf, type, options);
           Variant &top = json->stack[json->top].val;
-          object_set(top, copy_and_clear(*key), mval, assoc, container_type);
+          object_set(json, top, copy_and_clear(*key),
+                     mval, assoc, container_type);
           buf->clear();
           reset_type();
         }
 
-        attach_zval(json, json->stack[json->top].key,
-          assoc, container_type);
-
+        /*<fb>*/
+        if (json->top == 1) z = json->stack[json->top].val;
+        else {
+        /*</fb>*/
+          attach_zval(json, json->stack[json->top].key,
+            assoc, container_type);
+        /*<fb>*/
+        }
+        /*</fb>*/
         if (!pop(json, Mode::OBJECT)) {
           s_json_parser->error_code = JSON_ERROR_STATE_MISMATCH;
           return false;
@@ -1195,20 +1477,17 @@ bool JSON_parser(Variant &z, const char *p, int length, bool const assoc,
 
         if (json->top > 0) {
           Variant &top = json->stack[json->top].val;
-          if (json->top == 1) {
-            top.assignRef(z);
-          } else {
-            top.unset();
-          }
           /*<fb>*/
           if (container_type == JSONContainerType::COLLECTIONS) {
             top = req::make<c_Vector>();
           } else if (container_type == JSONContainerType::HACK_ARRAYS) {
             top = Array::CreateVec();
+          } else if (container_type == JSONContainerType::DARRAYS_AND_VARRAYS) {
+            top = Array::CreateVec();
           } else if (container_type == JSONContainerType::DARRAYS) {
-            top = Array::CreateDArray();
+            top = Array::CreateDict();
           } else {
-            top = Array::Create();
+            top = Array::CreateDict();
           }
           /*</fb>*/
           json->stack[json->top].key = copy_and_clear(*key);
@@ -1225,17 +1504,20 @@ bool JSON_parser(Variant &z, const char *p, int length, bool const assoc,
             Variant mval;
             json_create_zval(mval, *buf, type, options);
             auto& top = json->stack[json->top].val;
-            if (container_type == JSONContainerType::COLLECTIONS) {
-              collections::append(top.getObjectData(), mval.asCell());
-            } else {
-              top.toArrRef().append(mval);
-            }
+            appendToContainer(container_type, top, mval);
             buf->clear();
             reset_type();
           }
 
-          attach_zval(json, json->stack[json->top].key, assoc, container_type);
-
+          /*<fb>*/
+          if (json->top == 1) z = json->stack[json->top].val;
+          else {
+          /*</fb>*/
+            attach_zval(json, json->stack[json->top].key, assoc,
+              container_type);
+          /*<fb>*/
+          }
+          /*</fb>*/
           if (!pop(json, Mode::ARRAY)) {
             s_json_parser->error_code = JSON_ERROR_STATE_MISMATCH;
             return false;
@@ -1263,7 +1545,7 @@ bool JSON_parser(Variant &z, const char *p, int length, bool const assoc,
             state = 9;
             break;
           }
-          /* fall through if not KindOfString */
+          [[fallthrough]];
         default:
           s_json_parser->error_code = JSON_ERROR_SYNTAX;
           return false;
@@ -1288,6 +1570,7 @@ bool JSON_parser(Variant &z, const char *p, int length, bool const assoc,
               if (type != kInvalidDataType) {
                 Variant &top = json->stack[json->top].val;
                 object_set(
+                  json,
                   top,
                   copy_and_clear(*key),
                   mval,
@@ -1301,11 +1584,7 @@ bool JSON_parser(Variant &z, const char *p, int length, bool const assoc,
           case Mode::ARRAY:
             if (type != kInvalidDataType) {
               auto& top = json->stack[json->top].val;
-              if (container_type == JSONContainerType::COLLECTIONS) {
-                collections::append(top.getObjectData(), mval.asCell());
-              } else {
-                top.toArrRef().append(mval);
-              }
+              appendToContainer(container_type, top, mval);
             }
             state = 28;
             break;
@@ -1334,6 +1613,7 @@ bool JSON_parser(Variant &z, const char *p, int length, bool const assoc,
           break;
         }
         /*</fb>*/
+        [[fallthrough]];
 
         /*
           :
@@ -1343,6 +1623,7 @@ bool JSON_parser(Variant &z, const char *p, int length, bool const assoc,
           state = 28;
           break;
         }
+        [[fallthrough]];
         /*
           syntax error
         */
@@ -1354,6 +1635,7 @@ bool JSON_parser(Variant &z, const char *p, int length, bool const assoc,
       /*
         Change the state and iterate.
       */
+      bool is_tsimplejson = options & k_JSON_FB_THRIFT_SIMPLE_JSON;
       if (type == KindOfString) {
         if (/*<fb>*/(/*</fb>*/s == 3/*<fb>*/ || s == 30)/*</fb>*/ &&
             state != 8) {
@@ -1372,14 +1654,33 @@ bool JSON_parser(Variant &z, const char *p, int length, bool const assoc,
             }
           }
         } else if (s == 6) {
-          utf16 = dehexchar(b) << 12;
+          if (UNLIKELY(is_tsimplejson)) {
+            if (UNLIKELY(b != '0'))  {
+              s_json_parser->error_code = JSON_ERROR_SYNTAX;
+              return false;
+            }
+            escaped_bytes = 0;
+          } else {
+            escaped_bytes = dehexchar(b) << 12;
+          }
         } else if (s == 7) {
-          utf16 += dehexchar(b) << 8;
+          if (UNLIKELY(is_tsimplejson)) {
+            if (UNLIKELY(b != '0'))  {
+              s_json_parser->error_code = JSON_ERROR_SYNTAX;
+              return false;
+            }
+          } else {
+            escaped_bytes += dehexchar(b) << 8;
+          }
         } else if (s == 8) {
-          utf16 += dehexchar(b) << 4;
+          escaped_bytes += dehexchar(b) << 4;
         } else if (s == 3 && state == 8) {
-          utf16 += dehexchar(b);
-          utf16_to_utf8(*buf, utf16);
+          escaped_bytes += dehexchar(b);
+          if (UNLIKELY(is_tsimplejson)) {
+            buf->append((char)escaped_bytes);
+          } else {
+            utf16_to_utf8(*buf, escaped_bytes);
+          }
         }
       } else if ((type == kInvalidDataType || type == KindOfNull) &&
                  (c == S_DIG || c == S_ZER)) {
@@ -1420,5 +1721,3 @@ bool JSON_parser(Variant &z, const char *p, int length, bool const assoc,
   return false;
 }
 }
-
-#endif /* HAVE_JSONC */

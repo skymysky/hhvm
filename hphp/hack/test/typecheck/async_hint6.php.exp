@@ -1,1 +1,11 @@
-No errors
+error: Typing[4030] Was expecting a return type hint [1]
+
+async_hint6.php:9:16
+ 7 | 
+ 8 | // Testing function
+ 9 | async function no_hint() {
+   |                ^^^^^^^ [1]
+10 |   throw new Exception();
+11 | }
+
+1 error found

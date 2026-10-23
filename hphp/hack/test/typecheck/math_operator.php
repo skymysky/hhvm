@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 /**
  * Copyright (c) 2014, Facebook, Inc.
  * All rights reserved.
@@ -55,8 +55,8 @@ function foo(): void {
   $d = ($a <= $b);
   $d = ($a >= $b);
   $d = !$e;
-  $d = $a && $b;
-  $d = $a || $b;
+  $d = $e && $f;
+  $d = $e || $f;
 
   // Spaceship operator
   $i = $a <=> $b;

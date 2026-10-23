@@ -1,0 +1,354 @@
+(library
+ (name server_files)
+ (wrapped false)
+ (modules server_files)
+ (libraries core_kernel hhi global_config sys_utils utils_core)
+ (preprocess
+  (pps lwt_ppx ppx_deriving.std)))
+
+(library
+ (name server_utils)
+ (wrapped false)
+ (modules server_utils)
+ (libraries
+  core_kernel
+  find
+  decl
+  decl_class
+  decl_provider
+  hhi
+  procs_bucket
+  procs_procs
+  relative_path
+  server_files
+  sys_utils
+  tast_env
+  typing_deps
+  utils_core
+  watchman)
+ (preprocess
+  (pps lwt_ppx ppx_deriving.std)))
+
+(library
+ (name server_file_outline)
+ (wrapped false)
+ (modules file_outline)
+ (libraries search utils_core)
+ (preprocess
+  (pps lwt_ppx ppx_deriving.std)))
+
+(library
+  (name server_symbol_definition)
+  (wrapped false)
+  (modules
+    identify_symbol_service
+    server_find_locals
+    server_find_type_var
+    server_symbol_definition)
+  (libraries
+    annotated_ast
+    hint_print
+    parser
+    provider_context
+    provider_utils
+    server_file_outline
+    tast_provider))
+
+(library
+ (name server_services)
+ (wrapped false)
+ (modules find_refs_service method_jumps server_error server_identify_function)
+ (libraries
+  ast
+  cgroupprofiler
+  decl
+  decl_compare
+  decl_export
+  fileutils
+  heap_shared_mem
+  hint_print
+  parser
+  provider_context
+  provider_utils
+  server_command_types
+  server_env
+  server_file_outline
+  server_infer_type
+  server_symbol_definition
+  sys_utils
+  tast_check
+  tast_provider
+  tast_type_collector
+  typechecker_options
+  typing
+  typing_check
+  typing_deps
+  typing_json
+  utils_core)
+ (preprocess
+  (pps lwt_ppx ppx_deriving.std)))
+
+
+(library
+ (name server_codemod_type_printer)
+ (wrapped false)
+ (modules codemod_type_printer)
+ (libraries typing_defs tast_env utils_core)
+ (preprocess
+  (pps lwt_ppx ppx_deriving.std)))
+
+
+(library
+ (name server_revision_tracker)
+ (wrapped false)
+ (modules server_revision_tracker)
+ (libraries hg hg_states server_config watchman_utils)
+ (preprocess
+  (pps lwt_ppx ppx_deriving.std)))
+
+(library
+ (name server_prechecked_files)
+ (wrapped false)
+ (modules server_prechecked_files)
+ (libraries provider_utils server_env server_revision_tracker)
+ (preprocess
+  (pps lwt_ppx ppx_deriving.std)))
+
+(library
+ (name server_find_refs)
+ (wrapped false)
+ (modules server_find_refs)
+ (libraries
+  package_info
+  package_provider
+  procs_procs
+  provider_context
+  server_command_types
+  server_env
+  server_prechecked_files
+  server_services
+  typechecker_options
+  utils_core)
+ (preprocess
+  (pps lwt_ppx ppx_deriving.std)))
+
+(library
+ (name server_go_to)
+ (wrapped false)
+ (modules server_go_to_impl)
+ (libraries provider_context server_find_refs server_services)
+ (preprocess
+  (pps lwt_ppx ppx_deriving.std)))
+
+(library
+ (name server_infer_type)
+ (wrapped false)
+ (modules server_infer_type)
+ (libraries
+  annotated_ast
+  ast
+  hh_json
+  naming_provider
+  pos
+  provider_context
+  server_command_types
+  tast_env
+  tast_provider
+  typing
+  typing_defs
+  utils_core)
+ (preprocess
+  (pps lwt_ppx ppx_deriving.std)))
+
+(library
+ (name server_rewrite)
+ (wrapped false)
+ (modules server_rename server_rewrite_lambda_parameters)
+ (libraries
+  server_codemod_type_printer
+  server_env
+  server_find_refs
+  full_fidelity
+  tast_check
+  typing
+  utils_core)
+ (preprocess
+  (pps lwt_ppx ppx_deriving.std)))
+
+(library
+ (name filter_diagnostics)
+ (modules
+  filter_diagnostics)
+ (libraries
+  error_codes
+  errors
+  re
+  user_error
+  utils_core))
+
+(library
+ (name server_command_types)
+ (wrapped false)
+ (modules
+  autocomplete_types
+  docblock_service
+  find_refs_wire_format
+  infer_at_pos_service
+  infer_error_at_pos_service
+  save_state_service_types
+  server_command_types
+  server_command_types_utils
+  server_format_types
+  server_isolation_types
+  server_lint_types
+  server_rage_types
+  Server_rename_types
+  tast_holes_service)
+ (libraries
+  base64
+  connection_tracker
+  filter_diagnostics
+  full_fidelity
+  hh_json
+  ide_rpc_api_types
+  lsp
+  lwt
+  marshal_tools
+  pos
+  search_utils
+  server_notifier_types
+  symbol
+  typing_defs
+  typing_deps
+  utils_lint
+  version
+  warnings_saved_state)
+ (preprocess
+  (pps lwt_ppx ppx_deriving.std ppx_deriving.show ppx_deriving.enum ppx_yojson_conv)))
+
+(library
+ (name server_args)
+ (wrapped false)
+ (modules server_args)
+ (libraries
+   ai_options
+   cli_args
+   string
+   sys_utils
+   utils_core
+   utils_exit
+   utils_www_root
+   version))
+
+(library
+  (name monitor_rpc)
+  (wrapped false)
+  (modules monitor_rpc)
+  (libraries
+    connection_tracker
+    hh_json
+    logging
+    sys_utils)
+  (preprocess
+   (pps ppx_deriving.std)))
+
+
+(library
+ (name server_progress)
+ (wrapped false)
+ (modules server_progress)
+ (libraries
+   errors
+   server_command_types
+   server_files
+   server_notifier_types)
+ (preprocess
+  (pps
+   lwt_ppx
+   ppx_deriving.std
+   ppx_yojson_conv)))
+
+(library
+ (name server_notifier)
+ (wrapped false)
+ (modules server_notifier)
+ (libraries
+   edenfs_watcher_stubs
+   hg_states
+   server_command_types
+   server_files
+   server_notifier_types
+   server_revision_tracker
+   dfind
+   watchman)
+ (preprocess
+  (pps lwt_ppx ppx_deriving.std)))
+
+(library
+ (name server_notifier_types)
+ (wrapped false)
+ (modules server_notifier_types)
+ (libraries
+   edenfs_watcher_stubs watchman)
+ (preprocess
+  (pps lwt_ppx ppx_deriving.std)))
+
+
+(library
+  (name server_config)
+  (wrapped false)
+  (modules
+   config_keys
+   server_config
+   server_local_config
+   server_local_config_load)
+  (libraries
+   custom_error_config
+   server_args
+   collections
+   errors
+   experiments_config_file
+   heap_shared_mem
+   typechecker_options
+   glean_options
+   hg_states
+   ai_options
+   build_options
+   symbol_write_options
+   parser_options
+   procs_bucket
+   server_local_config_knobs_stubs
+   server_local_config_sandbox_experiment_stubs
+   config_file
+   package_config
+   )
+ (preprocess
+  (pps lwt_ppx ppx_deriving.std)))
+
+(library
+ (name server_env)
+ (wrapped false)
+ (modules server_env )
+ (libraries
+  ci_util
+  client_provider
+  sandcastle
+  server_config
+  server_notifier)
+ (preprocess
+  (pps
+   lwt_ppx
+   ppx_deriving.std
+   ppx_yojson_conv)))
+
+(library
+  (name custom_error_config)
+  (wrapped false)
+  (modules custom_error_config_loader)
+  (libraries
+    custom_error_types
+    relative_path
+    sys_utils
+    utils_exit
+  )
+)

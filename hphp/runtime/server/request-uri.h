@@ -14,8 +14,7 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_REQUEST_URI_H_
-#define incl_HPHP_REQUEST_URI_H_
+#pragma once
 
 #include "hphp/runtime/base/type-string.h"
 
@@ -31,39 +30,41 @@ struct RequestURI {
              const std::string &sourceRoot);
   explicit RequestURI(const std::string & rpcFunc);
 
-  const String& originalURL() const { return m_originalURL; }
-  const String& resolvedURL() const { return m_resolvedURL; }
-  const String& queryString() const { return m_queryString; }
+  const OptString& originalURL() const { return m_originalURL; }
+  const OptString& resolvedURL() const { return m_resolvedURL; }
+  const OptString& queryString() const { return m_queryString; }
 
-  const String& path() const { return m_path; }
+  const OptString& path() const { return m_path; }
   const char *ext() const { return m_ext; }
-  const String& absolutePath() const { return m_absolutePath; }
-  const String& pathInfo() const { return m_pathInfo; }
-  const String& origPathInfo() const { return m_origPathInfo; }
+  const OptString& absolutePath() const { return m_absolutePath; }
+  const OptString& pathInfo() const { return m_pathInfo; }
+  const OptString& origPathInfo() const { return m_origPathInfo; }
 
   bool rewritten() const { return m_rewritten; }
   bool defaultDoc() const { return m_defaultDoc; }
+  bool globalDoc() const { return m_globalDoc; }
   bool done() const { return m_done; }
   bool forbidden() const { return m_forbidden; }
 
   void dump();
   void clear();
 
-  static void splitURL(String url, String &base, String &query);
+  static void splitURL(OptString url, OptString &base, OptString &query);
 private:
-  String m_originalURL;  // without being rewritten, without query string
-  String m_queryString;
-  String m_rewrittenURL; // possibly rewritten
-  String m_resolvedURL;  // possibly appended with default document and
+  OptString m_originalURL;  // without being rewritten, without query string
+  OptString m_queryString;
+  OptString m_rewrittenURL; // possibly rewritten
+  OptString m_resolvedURL;  // possibly appended with default document and
                          // without pathinfo
 
-  String m_pathInfo;
-  String m_origPathInfo;
-  String m_absolutePath;
-  String m_path;  // path relative to SourceRoot
+  OptString m_pathInfo;
+  OptString m_origPathInfo;
+  OptString m_absolutePath;
+  OptString m_path;  // path relative to SourceRoot
 
   bool m_rewritten;  // whether rewrite rules have applied
   bool m_defaultDoc; // whether DefaultDocument was appended
+  bool m_globalDoc; // whether GlobalDocument was used
   bool m_done;
   bool m_forbidden;
   const char *m_ext;   // file extension
@@ -74,28 +75,36 @@ private:
   bool rewriteURL(const VirtualHost *vhost, Transport *transport,
                   const std::string &pathTranslation,
                   const std::string &sourceRoot);
+  bool rewriteURLNoDirCheck(const VirtualHost *vhost, Transport *transport,
+                            const std::string &pathTranslation,
+                            const std::string &sourceRoot);
+  bool rewriteURLForDir(const VirtualHost *vhost, Transport *transport,
+                             const std::string &pathTranslation,
+                             const std::string &sourceRoot);
+  bool resolveGlobalURL(const VirtualHost *vhost,
+                        const std::string &pathTranslation,
+                        const std::string &sourceRoot);
   bool resolveURL(const VirtualHost *vhost,
                   const std::string &pathTranslation,
                   const std::string &sourceRoot);
   bool virtualFileExists(const VirtualHost *vhost,
                          const std::string &pathTranslation,
                          const std::string &sourceRoot,
-                         const String& filename);
+                         const OptString& filename);
   bool virtualFolderExists(const VirtualHost *vhost,
                            const std::string &pathTranslation,
                            const std::string &sourceRoot,
-                           const String& foldername);
+                           const OptString& foldername);
   void processExt();
 
   std::vector<std::string> m_triedURLs;
   const std::string getDefault404();
 
-  static const char *parseExt(const String& s);
-  static void PrependSlash(String &s);
+  static const char *parseExt(const OptString& s);
+  static void PrependSlash(OptString &s);
 
 };
 
 ///////////////////////////////////////////////////////////////////////////////
 }
 
-#endif // incl_HPHP_REQUEST_URI_H_

@@ -1,4 +1,4 @@
-<?hh // strict
+<?hh
 /**
  * Copyright (c) 2014, Facebook, Inc.
  * All rights reserved.
@@ -10,16 +10,17 @@
  */
 
 const int X = 1;
+const bool B = true;
 
 function f(int $a): int {
-  $b = (X) ? $a : 2;
+  $b = (B) ? $a : 2;
   $b = (X) * 2;
   $b = (X) / 2;
   $b = (X) % 2;
   $b = (X) >> 2;
   $b = (X) << 2;
   $b = (X) ^ 2;
-  $b = array(1, 2)[(X)];
+  $b = vec[1, 2][(X)];
   $b = (X);
   return $b;
 }

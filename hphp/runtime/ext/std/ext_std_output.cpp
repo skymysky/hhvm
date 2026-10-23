@@ -19,9 +19,9 @@
 
 #include "hphp/runtime/base/array-init.h"
 #include "hphp/runtime/base/builtin-functions.h"
-#include "hphp/runtime/base/runtime-option.h"
+#include "hphp/runtime/base/unit-cache.h"
 #include "hphp/runtime/base/zend-url.h"
-#include "hphp/runtime/vm/vm-regs.h"
+#include "hphp/runtime/vm/func.h"
 
 #include "hphp/runtime/vm/jit/perf-counters.h"
 
@@ -30,8 +30,6 @@
 #include "hphp/runtime/server/server-stats.h"
 
 #include "hphp/util/hardware-counter.h"
-#include "hphp/util/lock.h"
-#include "hphp/util/logger.h"
 #include "hphp/util/stack-trace.h"
 
 namespace HPHP {
@@ -52,13 +50,13 @@ const int64_t k_PHP_OUTPUT_HANDLER_STDFLAGS =
   k_PHP_OUTPUT_HANDLER_REMOVABLE;
 
 bool HHVM_FUNCTION(ob_start, const Variant& callback /* = null */,
-                             int chunk_size /* = 0 */,
-                             int flags /* = k_PHP_OUTPUT_HANDLER_STDFLAGS */) {
+                             int64_t chunk_size /* = 0 */,
+                             int64_t flags /* = k_PHP_OUTPUT_HANDLER_STDFLAGS */) {
   // Note: the only flag which is implemented is FLUSHABLE
 
   if (!callback.isNull()) {
     CallCtx ctx;
-    vm_decode_function(callback, nullptr, false, ctx);
+    vm_decode_function(callback, ctx);
     if (!ctx.func) {
       return false;
     }
@@ -101,12 +99,6 @@ bool HHVM_FUNCTION(ob_end_flush) {
 void HHVM_FUNCTION(flush) {
   g_context->flush();
 }
-Variant HHVM_FUNCTION(ob_get_contents) {
-  if (HHVM_FN(ob_get_level)() == 0) {
-    return false;
-  }
-  return g_context->obCopyContents();
-}
 Variant HHVM_FUNCTION(ob_get_clean) {
   auto output = HHVM_FN(ob_get_contents)();
   if (!HHVM_FN(ob_end_clean)()) {
@@ -115,7 +107,7 @@ Variant HHVM_FUNCTION(ob_get_clean) {
   return output;
 }
 Variant HHVM_FUNCTION(ob_get_flush) {
-  String output = g_context->obCopyContents();
+  OptString output = g_context->obCopyContents();
   if (!HHVM_FN(ob_end_flush)()) {
     return false;
   }
@@ -127,7 +119,13 @@ int64_t HHVM_FUNCTION(ob_get_length) {
 int64_t HHVM_FUNCTION(ob_get_level) {
   return g_context->obGetLevel();
 }
-Array HHVM_FUNCTION(ob_get_status, bool full_status /* = false */) {
+Variant HHVM_FUNCTION(ob_get_contents) {
+  if (HHVM_FN(ob_get_level)() == 0) {
+    return false;
+  }
+  return g_context->obCopyContents();
+}
+Variant HHVM_FUNCTION(ob_get_status, bool full_status /* = false */) {
   return g_context->obGetStatus(full_status);
 }
 void HHVM_FUNCTION(ob_implicit_flush, bool flag /* = true */) {
@@ -136,47 +134,46 @@ void HHVM_FUNCTION(ob_implicit_flush, bool flag /* = true */) {
 Array HHVM_FUNCTION(ob_list_handlers) {
   return g_context->obGetHandlers();
 }
-bool HHVM_FUNCTION(output_add_rewrite_var, const String& /*name*/,
-                   const String& /*value*/) {
-  throw_not_supported(__func__, "bad coding style");
-}
-bool HHVM_FUNCTION(output_reset_rewrite_vars) {
-  throw_not_supported(__func__, "bad coding style");
-}
 
-void HHVM_FUNCTION(hphp_crash_log, const String& name, const String& value) {
+void HHVM_FUNCTION(hphp_crash_log, const OptString& name, const OptString& value) {
   StackTraceNoHeap::AddExtraLogging(name.data(), value.data());
 }
 
-void HHVM_FUNCTION(hphp_stats, const String& name, int64_t value) {
+void HHVM_FUNCTION(hphp_stats, const OptString& name, int64_t value) {
   ServerStats::Log(name.data(), value);
 }
-int64_t HHVM_FUNCTION(hphp_get_stats, const String& name) {
+int64_t HHVM_FUNCTION(hphp_get_stats, const OptString& name) {
+  if (strcmp(name.c_str(), "units") == 0) {
+    return numLoadedUnits();
+  }
+  if (strcmp(name.c_str(), "funcs") == 0) {
+    return Func::maxFuncIdNum();
+  }
   return ServerStats::Get(name.data());
 }
 Array HHVM_FUNCTION(hphp_get_status) {
-  std::string out;
-  ServerStats::ReportStatus(out, Writer::Format::JSON);
-  return Variant::attach(HHVM_FN(json_decode)(String(out))).toArray();
+  auto const out = ServerStats::ReportStatus(Writer::Format::JSON);
+  auto result = HHVM_FN(json_decode)(
+    OptString(out),
+    false,
+    512,
+    HPHP::k_JSON_FB_DARRAYS_AND_VARRAYS);
+  return Variant::attach(result).toArray().toDict();
 }
 Array HHVM_FUNCTION(hphp_get_iostatus) {
   return ServerStats::GetThreadIOStatuses();
 }
-void HHVM_FUNCTION(hphp_set_iostatus_address, const String& name) {
-  return ServerStats::SetThreadIOStatusAddress(name.c_str());
+void HHVM_FUNCTION(hphp_set_iostatus_address, const OptString& name) {
 }
-
-
-
 
 static double ts_float(const timespec &ts) {
   return (double)ts.tv_sec + (double)ts.tv_nsec / 1000000000;
 }
 
-static String ts_microtime(const timespec &ts) {
+static OptString ts_microtime(const timespec &ts) {
   char ret[100];
   snprintf(ret, 100, "%.8F %ld", (double)ts.tv_nsec / 1000000000, ts.tv_sec);
-  return String(ret, CopyString);
+  return OptString(ret, CopyString);
 }
 
 const StaticString
@@ -205,7 +202,7 @@ Variant HHVM_FUNCTION(hphp_get_timers, bool get_as_float /* = true */) {
   const int64_t &nsleep_time_s = transport->getnSleepTimeS();
   const int32_t &nsleep_time_n = transport->getnSleepTimeN();
 
-  ArrayInit ret(7, ArrayInit::Map{});
+  DictInit ret(7);
   if (get_as_float) {
     ret.set(s_queue,        ts_float(tsQueue));
     ret.set(s_process_wall, ts_float(tsWall));
@@ -226,7 +223,7 @@ Variant HHVM_FUNCTION(hphp_get_timers, bool get_as_float /* = true */) {
 Variant HHVM_FUNCTION(hphp_output_global_state, bool serialize /* = true */) {
   Array r = Array();
   if (serialize) {
-    return f_serialize(r);
+    return HHVM_FN(serialize)(r);
   } else {
     return r;
   }
@@ -237,18 +234,18 @@ int64_t HHVM_FUNCTION(hphp_instruction_counter) {
 }
 
 Variant HHVM_FUNCTION(hphp_get_hardware_counters) {
-  Array ret;
+  Array ret = Array::CreateDict();
 
   HardwareCounter::GetPerfEvents(
     [] (const std::string& key, int64_t value, void* data) {
       Array& ret = *reinterpret_cast<Array*>(data);
-      ret.set(String(key), value);
+      ret.set(OptString(key), value);
     },
     &ret
   );
   jit::getPerfCounters(ret);
 
-  return ret;
+  return ret.empty() ? init_null() : ret;
 }
 
 bool HHVM_FUNCTION(hphp_set_hardware_events,
@@ -262,22 +259,9 @@ void HHVM_FUNCTION(hphp_clear_hardware_events) {
   HardwareCounter::ClearPerfEvents();
 }
 
-// __SystemLib\print_hashbang
-void HHVM_FUNCTION(SystemLib_print_hashbang, const String& hashbang) {
-  auto const ar = GetCallerFrame();
-
-  if (ar->m_func->name()->empty() && (!RuntimeOption::ServerExecutionMode() ||
-      is_cli_mode())) {
-    // If run in cli mode, print nothing in the lowest pseudomain
-    if (!g_context->getPrevFunc(ar)) return;
-  }
-
-  g_context->write(hashbang);
-}
-
 ///////////////////////////////////////////////////////////////////////////////
 
-void StandardExtension::initOutput() {
+void StandardExtension::registerNativeOutput() {
   HHVM_FE(ob_start);
   HHVM_FE(ob_clean);
   HHVM_FE(ob_flush);
@@ -292,8 +276,6 @@ void StandardExtension::initOutput() {
   HHVM_FE(ob_get_status);
   HHVM_FE(ob_implicit_flush);
   HHVM_FE(ob_list_handlers);
-  HHVM_FE(output_add_rewrite_var);
-  HHVM_FE(output_reset_rewrite_vars);
   HHVM_FE(hphp_crash_log);
   HHVM_FE(hphp_stats);
   HHVM_FE(hphp_get_stats);
@@ -306,7 +288,6 @@ void StandardExtension::initOutput() {
   HHVM_FE(hphp_get_hardware_counters);
   HHVM_FE(hphp_set_hardware_events);
   HHVM_FE(hphp_clear_hardware_events);
-  HHVM_FALIAS(__SystemLib\\print_hashbang, SystemLib_print_hashbang);
 
   HHVM_RC_INT(PHP_OUTPUT_HANDLER_CONT, k_PHP_OUTPUT_HANDLER_CONT);
   HHVM_RC_INT(PHP_OUTPUT_HANDLER_WRITE, k_PHP_OUTPUT_HANDLER_WRITE);
@@ -319,8 +300,6 @@ void StandardExtension::initOutput() {
   HHVM_RC_INT(PHP_OUTPUT_HANDLER_FLUSHABLE, k_PHP_OUTPUT_HANDLER_FLUSHABLE);
   HHVM_RC_INT(PHP_OUTPUT_HANDLER_REMOVABLE, k_PHP_OUTPUT_HANDLER_REMOVABLE);
   HHVM_RC_INT(PHP_OUTPUT_HANDLER_STDFLAGS, k_PHP_OUTPUT_HANDLER_STDFLAGS);
-
-  loadSystemlib("std_output");
 }
 
 }

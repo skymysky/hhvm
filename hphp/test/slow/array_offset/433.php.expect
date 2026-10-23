@@ -1,15 +1,12 @@
 int(9)
-array(0) {
+vec(0) {
 }
-array(3) {
-  [0]=>
+vec(3) {
   int(1)
-  [1]=>
   int(2)
-  [2]=>
   int(3)
 }
 int(5)
 int(1)
-string(1) "5"
+Out of bounds dict access: invalid index "123"
 string(1) "6"

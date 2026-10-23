@@ -1,30 +1,32 @@
-<?php
+<?hh
 /* Prototype: int filegroup ( string $filename )
  * Description: Returns the group ID of the file, or FALSE in case of an error.
  */
 
-/* Creating soft and hard links to a file and applying filegroup() on links */ 
-
-$file_path = dirname(__FILE__);
-fclose( fopen($file_path."/filegroup_variation1.tmp", "w") );
+/* Creating soft and hard links to a file and applying filegroup() on links */
+<<__EntryPoint>> function main(): void {
+fclose( fopen(sys_get_temp_dir().'/'.'filegroup_variation1.tmp', "w")) ;
 
 echo "*** Testing filegroup() with links ***\n";
 /* With symlink */
-symlink($file_path."/filegroup_variation1.tmp", $file_path."/filegroup_variation1_symlink.tmp");
-var_dump( filegroup($file_path."/filegroup_variation1_symlink.tmp") ); //expected true
+symlink(
+  sys_get_temp_dir().'/'.'filegroup_variation1.tmp',
+  sys_get_temp_dir().'/'.'filegroup_variation1_symlink.tmp'
+);
+var_dump( filegroup(sys_get_temp_dir().'/'.'filegroup_variation1_symlink.tmp')) ; //expected true
 clearstatcache();
 
 /* With hardlink */
-link($file_path."/filegroup_variation1.tmp", $file_path."/filegroup_variation1_link.tmp");
-var_dump( filegroup($file_path."/filegroup_variation1_link.tmp") );  // expected: true
+link(
+  sys_get_temp_dir().'/'.'filegroup_variation1.tmp',
+  sys_get_temp_dir().'/'.'filegroup_variation1_link.tmp'
+);
+var_dump( filegroup(sys_get_temp_dir().'/'.'filegroup_variation1_link.tmp')) ;  // expected: true
 clearstatcache();
 
 echo "\n*** Done ***";
-?>
-<?php error_reporting(0); ?>
-<?php
-$file_path = dirname(__FILE__);
-unlink($file_path."/filegroup_variation1_symlink.tmp");
-unlink($file_path."/filegroup_variation1_link.tmp");
-unlink($file_path."/filegroup_variation1.tmp");
-?>
+
+unlink(sys_get_temp_dir().'/'.'filegroup_variation1_symlink.tmp');
+unlink(sys_get_temp_dir().'/'.'filegroup_variation1_link.tmp');
+unlink(sys_get_temp_dir().'/'.'filegroup_variation1.tmp');
+}

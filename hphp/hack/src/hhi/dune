@@ -1,0 +1,30 @@
+(library
+  (name hhi_get)
+  (wrapped false)
+  (modules hhi_get)
+  (preprocess (pps lwt_ppx ppx_deriving.std ppx_deriving.enum))
+)
+
+(library
+  (name hhi)
+  (wrapped false)
+  (libraries
+    global_config
+    relative_path
+    sys_utils)
+  (modules hhi)
+  (preprocessor_deps
+    (source_tree %{project_root}/hack/hhi)
+    ;; This one is critical to work with the `dir` in hphp/hsl/dune
+    (file %{project_root}/hsl/generated_hhis)
+    (glob_files_rec ${project_root}/hsl/generated_hhis/**hhi)
+    ;; TODO: that last one could probably be removed
+    (file %{project_root}/hsl/hsl_generated_hhis.stamp)
+  )
+  ;; the hhi-dir and hsl-dir must be local paths from the project_root
+  ;; since this is where the ppx.exe will be run from
+  (preprocess (pps ppx_gen_hhi --
+    -hhi-dir hack/hhi
+    -hsl-dir hsl/generated_hhis)
+  )
+)

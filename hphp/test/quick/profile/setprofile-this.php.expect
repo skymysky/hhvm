@@ -1,0 +1,28 @@
+
+  exit fb_setprofile: D:1:{s:6:"return";N;}
+
+  enter C::__construct: D:1:{s:4:"args";v:0:{}}
+
+C constructing
+
+  exit C::__construct: D:1:{s:6:"return";N;}
+
+  enter C::__construct: D:1:{s:4:"args";v:0:{}}
+
+C constructing
+
+  exit C::__construct: D:1:{s:6:"return";N;}
+
+  enter C::method: D:1:{s:4:"args";v:0:{}}
+
+C method
+
+    enter A::__construct: D:1:{s:4:"args";v:0:{}}
+
+A constructing
+
+    exit A::__construct: D:1:{s:6:"return";N;}
+
+  exit C::method: D:1:{s:6:"return";O:1:"A":0:{}}
+
+exit setprofile_this: D:1:{s:6:"return";N;}

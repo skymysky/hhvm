@@ -19,6 +19,7 @@
 #include "hphp/runtime/vm/jit/ssa-tmp.h"
 #include "hphp/runtime/vm/jit/type.h"
 
+#include "hphp/util/optional.h"
 #include "hphp/util/trace.h"
 
 #include <folly/ScopeGuard.h>
@@ -26,7 +27,7 @@
 #include <type_traits>
 #include <utility>
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 ///////////////////////////////////////////////////////////////////////////////
 
 namespace irunit_detail {
@@ -48,13 +49,17 @@ struct InstructionBuilder {
   Ret go(Opcode op, BCContext bcctx, Args&&... args) {
     std::aligned_storage<sizeof(IRInstruction)>::type buffer;
     void* const vpBuffer = &buffer;
-    SCOPE_EXIT { if (debug) memset(&buffer, 0xc0, sizeof(buffer)); };
     Edge edges[2];
 
-    new (vpBuffer) IRInstruction(op, bcctx, hasEdges(op) ? edges : nullptr);
+    new (vpBuffer) IRInstruction(op, std::move(bcctx), hasEdges(op) ? edges : nullptr);
     auto const inst = static_cast<IRInstruction*>(vpBuffer);
 
-    SCOPE_EXIT { inst->clearExtra(); };
+    SCOPE_EXIT {
+      inst->clearExtra();
+      inst->marker().reset();
+      if (debug) memset(&buffer, 0xc0, sizeof(buffer));
+    };
+
     return go2(inst, std::forward<Args>(args)...);
   }
 
@@ -101,7 +106,6 @@ private:
    * Call the lambda on the initialized IRInstruction.
    */
   Ret stop(IRInstruction* inst) {
-    assertx(checkOperandTypes(inst));
     return func(inst);
   }
 
@@ -114,8 +118,8 @@ private:
   void setter(IRInstruction* inst, Type t) {
     inst->setTypeParam(t);
   }
-  void setter(IRInstruction* inst, folly::Optional<Type> t) {
-    if (t.hasValue()) {
+  void setter(IRInstruction* inst, Optional<Type> t) {
+    if (t.has_value()) {
       inst->setTypeParam(t.value());
     }
   }
@@ -124,7 +128,12 @@ private:
    * Setter for exit label.
    */
   void setter(IRInstruction* inst, Block* target) {
-    assertx(!target || inst->hasEdges());
+    assert_flog(!target || inst->hasEdges(),
+      fmt::format(
+        "{}: Mismatch between declared edges and specified target",
+        opcodeName(inst->op())
+      )
+    );
     inst->setTaken(target);
   }
 
@@ -160,10 +169,10 @@ private:
 }
 
 template<class Func, class... Args>
-typename std::result_of<Func(IRInstruction*)>::type
+typename std::invoke_result<Func, IRInstruction*>::type
 makeInstruction(Func func, Args&&... args) {
-  typedef typename std::result_of<Func(IRInstruction*)>::type Ret;
-  return irunit_detail::InstructionBuilder<Ret,Func>(func).go(args...);
+  typedef typename std::invoke_result<Func, IRInstruction*>::type Ret;
+  return irunit_detail::InstructionBuilder<Ret,Func>(func).go(std::forward<Args>(args)...);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -204,7 +213,13 @@ SSATmp* IRUnit::newSSATmp(Args&&... args) {
 
 inline IRInstruction* IRUnit::clone(const IRInstruction* old,
                                     SSATmp* dst /* = nullptr */) {
-  auto inst = new (m_arena) IRInstruction(
+  auto instMem = m_arena.allocD<IRInstruction>(
+    [] (void* p) {
+      auto i = (IRInstruction*)p;
+      i->marker().reset();
+    }
+  );
+  auto inst = new (instMem) IRInstruction(
     m_arena, old, IRInstruction::Id(m_nextInstId++));
 
   if (dst) {
@@ -233,12 +248,8 @@ inline Block* IRUnit::entry() const {
   return m_entry;
 }
 
-inline uint32_t IRUnit::bcOff() const {
-  return m_context.initBcOffset;
-}
-
 inline SrcKey IRUnit::initSrcKey() const {
-  return m_context.srcKey();
+  return m_context.initSrcKey;
 }
 
 inline uint32_t IRUnit::numTmps() const {
@@ -270,24 +281,11 @@ inline SSATmp* IRUnit::findSSATmp(uint32_t id) const {
   return m_ssaTmps[id];
 }
 
-inline SSATmp* IRUnit::mainFP() const {
-  assertx(!entry()->empty() && entry()->begin()->is(DefFP));
-  return entry()->begin()->dst();
-}
-
-inline SSATmp* IRUnit::mainSP() const {
-  assertx(!entry()->empty() && entry()->begin()->is(DefFP));
-  auto it = ++entry()->begin();
-  if (it != entry()->end() && it->is(FuncGuard)) ++it;
-  assertx(it != entry()->end() && it->is(DefSP));
-  return it->dst();
-}
-
 inline int64_t IRUnit::startNanos() const {
   return m_startNanos;
 }
 
-inline folly::Optional<StructuredLogEntry>& IRUnit::logEntry() const {
+inline Optional<StructuredLogEntry>& IRUnit::logEntry() const {
   return m_logEntry;
 }
 
@@ -298,4 +296,4 @@ template<typename T> SSATmp* IRUnit::cns(T val) {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-}}
+}

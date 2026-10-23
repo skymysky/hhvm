@@ -1,6 +1,6 @@
 Testing: keyset(0) {
 }
-array_pad (after): array(10) {
+array_pad (after): dict(10) {
   [0]=>
   string(3) "pad"
   [1]=>
@@ -22,7 +22,7 @@ array_pad (after): array(10) {
   [9]=>
   string(3) "pad"
 }
-array_pad (before): array(10) {
+array_pad (before): dict(10) {
   [0]=>
   string(3) "pad"
   [1]=>
@@ -44,7 +44,7 @@ array_pad (before): array(10) {
   [9]=>
   string(3) "pad"
 }
-array_pad (just one): array(1) {
+array_pad (just one): dict(1) {
   [0]=>
   string(3) "pad"
 }
@@ -71,7 +71,7 @@ keyset(2) {
   string(8) "prepend1"
   string(8) "prepend2"
 }
-array_values: array(0) {
+array_values: vec(0) {
 }
 count: int(0)
 empty: bool(true)
@@ -91,9 +91,9 @@ keyset(0) {
 krsort: bool(true)
 keyset(0) {
 }
-array_slice (0): array(0) {
+array_slice (0): dict(0) {
 }
-array_slice (1): array(0) {
+array_slice (1): dict(0) {
 }
 Testing: keyset(5) {
   int(1)
@@ -102,7 +102,7 @@ Testing: keyset(5) {
   int(4)
   int(5)
 }
-array_pad (after): array(10) {
+array_pad (after): dict(10) {
   [1]=>
   int(1)
   [2]=>
@@ -124,7 +124,7 @@ array_pad (after): array(10) {
   [10]=>
   string(3) "pad"
 }
-array_pad (before): array(10) {
+array_pad (before): dict(10) {
   [0]=>
   string(3) "pad"
   [1]=>
@@ -146,7 +146,7 @@ array_pad (before): array(10) {
   [9]=>
   int(5)
 }
-array_pad (just one): array(5) {
+array_pad (just one): dict(5) {
   [1]=>
   int(1)
   [2]=>
@@ -180,7 +180,7 @@ keyset(8) {
 array_search (2): int(2)
 array_search ("not-found"): bool(false)
 array_search (false): bool(false)
-array_search ("2"): int(2)
+array_search ("2"): bool(false)
 array_shift: int(1)
 keyset(4) {
   int(2)
@@ -199,16 +199,11 @@ keyset(7) {
   int(4)
   int(5)
 }
-array_values: array(5) {
-  [0]=>
+array_values: vec(5) {
   int(1)
-  [1]=>
   int(2)
-  [2]=>
   int(3)
-  [3]=>
   int(4)
-  [4]=>
   int(5)
 }
 count: int(5)
@@ -216,7 +211,7 @@ empty: bool(false)
 in_array (3): bool(true)
 in_array ("not-found"): bool(false)
 in_array (false): bool(false)
-in_array ("3"): bool(true)
+in_array ("3"): bool(false)
 asort: bool(true)
 keyset(5) {
   int(1)
@@ -249,7 +244,7 @@ keyset(5) {
   int(2)
   int(1)
 }
-array_slice (0): array(5) {
+array_slice (0): dict(5) {
   [0]=>
   int(1)
   [1]=>
@@ -261,7 +256,7 @@ array_slice (0): array(5) {
   [4]=>
   int(5)
 }
-array_slice (1): array(4) {
+array_slice (1): dict(4) {
   [0]=>
   int(2)
   [1]=>
@@ -278,7 +273,7 @@ Testing: keyset(5) {
   int(2)
   int(1)
 }
-array_pad (after): array(10) {
+array_pad (after): dict(10) {
   [5]=>
   int(5)
   [4]=>
@@ -300,7 +295,7 @@ array_pad (after): array(10) {
   [10]=>
   string(3) "pad"
 }
-array_pad (before): array(10) {
+array_pad (before): dict(10) {
   [0]=>
   string(3) "pad"
   [1]=>
@@ -322,7 +317,7 @@ array_pad (before): array(10) {
   [9]=>
   int(1)
 }
-array_pad (just one): array(5) {
+array_pad (just one): dict(5) {
   [5]=>
   int(5)
   [4]=>
@@ -356,7 +351,7 @@ keyset(8) {
 array_search (2): int(2)
 array_search ("not-found"): bool(false)
 array_search (false): bool(false)
-array_search ("2"): int(2)
+array_search ("2"): bool(false)
 array_shift: int(5)
 keyset(4) {
   int(4)
@@ -375,16 +370,11 @@ keyset(7) {
   int(2)
   int(1)
 }
-array_values: array(5) {
-  [0]=>
+array_values: vec(5) {
   int(5)
-  [1]=>
   int(4)
-  [2]=>
   int(3)
-  [3]=>
   int(2)
-  [4]=>
   int(1)
 }
 count: int(5)
@@ -392,7 +382,7 @@ empty: bool(false)
 in_array (3): bool(true)
 in_array ("not-found"): bool(false)
 in_array (false): bool(false)
-in_array ("3"): bool(true)
+in_array ("3"): bool(false)
 asort: bool(true)
 keyset(5) {
   int(1)
@@ -425,7 +415,7 @@ keyset(5) {
   int(2)
   int(1)
 }
-array_slice (0): array(5) {
+array_slice (0): dict(5) {
   [0]=>
   int(5)
   [1]=>
@@ -437,7 +427,7 @@ array_slice (0): array(5) {
   [4]=>
   int(1)
 }
-array_slice (1): array(4) {
+array_slice (1): dict(4) {
   [0]=>
   int(4)
   [1]=>
@@ -452,7 +442,7 @@ Testing: keyset(3) {
   string(1) "b"
   string(1) "c"
 }
-array_pad (after): array(10) {
+array_pad (after): dict(10) {
   ["a"]=>
   string(1) "a"
   ["b"]=>
@@ -474,7 +464,7 @@ array_pad (after): array(10) {
   [6]=>
   string(3) "pad"
 }
-array_pad (before): array(10) {
+array_pad (before): dict(10) {
   [0]=>
   string(3) "pad"
   [1]=>
@@ -496,7 +486,7 @@ array_pad (before): array(10) {
   ["c"]=>
   string(1) "c"
 }
-array_pad (just one): array(3) {
+array_pad (just one): dict(3) {
   ["a"]=>
   string(1) "a"
   ["b"]=>
@@ -537,12 +527,9 @@ keyset(5) {
   string(1) "b"
   string(1) "c"
 }
-array_values: array(3) {
-  [0]=>
+array_values: vec(3) {
   string(1) "a"
-  [1]=>
   string(1) "b"
-  [2]=>
   string(1) "c"
 }
 count: int(3)
@@ -575,7 +562,7 @@ keyset(3) {
   string(1) "b"
   string(1) "a"
 }
-array_slice (0): array(3) {
+array_slice (0): dict(3) {
   ["a"]=>
   string(1) "a"
   ["b"]=>
@@ -583,7 +570,7 @@ array_slice (0): array(3) {
   ["c"]=>
   string(1) "c"
 }
-array_slice (1): array(2) {
+array_slice (1): dict(2) {
   ["b"]=>
   string(1) "b"
   ["c"]=>
@@ -593,7 +580,7 @@ Testing: keyset(2) {
   string(1) "b"
   string(1) "a"
 }
-array_pad (after): array(10) {
+array_pad (after): dict(10) {
   ["b"]=>
   string(1) "b"
   ["a"]=>
@@ -615,7 +602,7 @@ array_pad (after): array(10) {
   [7]=>
   string(3) "pad"
 }
-array_pad (before): array(10) {
+array_pad (before): dict(10) {
   [0]=>
   string(3) "pad"
   [1]=>
@@ -637,7 +624,7 @@ array_pad (before): array(10) {
   ["a"]=>
   string(1) "a"
 }
-array_pad (just one): array(2) {
+array_pad (just one): dict(2) {
   ["b"]=>
   string(1) "b"
   ["a"]=>
@@ -672,10 +659,8 @@ keyset(4) {
   string(1) "b"
   string(1) "a"
 }
-array_values: array(2) {
-  [0]=>
+array_values: vec(2) {
   string(1) "b"
-  [1]=>
   string(1) "a"
 }
 count: int(2)
@@ -704,20 +689,20 @@ keyset(2) {
   string(1) "b"
   string(1) "a"
 }
-array_slice (0): array(2) {
+array_slice (0): dict(2) {
   ["b"]=>
   string(1) "b"
   ["a"]=>
   string(1) "a"
 }
-array_slice (1): array(1) {
+array_slice (1): dict(1) {
   ["a"]=>
   string(1) "a"
 }
 Testing: keyset(1) {
   int(100)
 }
-array_pad (after): array(10) {
+array_pad (after): dict(10) {
   [100]=>
   int(100)
   [101]=>
@@ -739,7 +724,7 @@ array_pad (after): array(10) {
   [109]=>
   string(3) "pad"
 }
-array_pad (before): array(10) {
+array_pad (before): dict(10) {
   [0]=>
   string(3) "pad"
   [1]=>
@@ -761,7 +746,7 @@ array_pad (before): array(10) {
   [9]=>
   int(100)
 }
-array_pad (just one): array(1) {
+array_pad (just one): dict(1) {
   [100]=>
   int(100)
 }
@@ -790,8 +775,7 @@ keyset(3) {
   string(8) "prepend2"
   int(100)
 }
-array_values: array(1) {
-  [0]=>
+array_values: vec(1) {
   int(100)
 }
 count: int(1)
@@ -816,9 +800,9 @@ krsort: bool(true)
 keyset(1) {
   int(100)
 }
-array_slice (0): array(1) {
+array_slice (0): dict(1) {
   [0]=>
   int(100)
 }
-array_slice (1): array(0) {
+array_slice (1): dict(0) {
 }

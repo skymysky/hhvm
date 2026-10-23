@@ -1,6 +1,6 @@
 <?hh
 
-function print_keyed_iterable($iterable) {
+function print_keyed_iterable($iterable) :mixed{
   echo get_class($iterable) . "[\n";
   foreach ($iterable as $k => $v) {
     echo $k . " => " . $v . "\n";
@@ -8,7 +8,7 @@ function print_keyed_iterable($iterable) {
   echo "]\n";
 }
 
-function main() {
+function main() :mixed{
   echo "******** Vector ********\n";
   $x = Vector {1, 2, 3, 4};
   $y = $x->mapWithKey(function ($k,$v) {
@@ -129,4 +129,8 @@ function main() {
   echo "========\n";
   print_keyed_iterable($y);
 }
+
+<<__EntryPoint>>
+function main_with_key_apis() :mixed{
 main();
+}

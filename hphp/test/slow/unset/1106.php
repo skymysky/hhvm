@@ -1,8 +1,12 @@
-<?php
+<?hh
 
 class A {
- static $foo = array(123);
+  public static $foo = vec[123];
 }
- $a = 'A';
- unset($a::$foo[0]);
- unset(A::$foo[0]);
+
+<<__EntryPoint>>
+function main_1106() :mixed{
+  $a = 'A';
+  unset($a::$foo[0]);
+  unset(A::$foo[0]);
+}

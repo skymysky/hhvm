@@ -1,15 +1,44 @@
+Errors:
+  [2:3-7] Unrecognized user attribute: `__Rx` starts with __ but is not a standard attribute
+  [4:18-22] Unbound name: `Pure`
 [(Fun
-    { Aast.AnnotatedAST.f_annotation = (); f_mode = <opaque>;
-      f_ret =
-      (Some ([3:18-20],
-             (Hfun (FReactive, false, [([3:32-35], (Hprim Tint))], [None],
-                Hnon_variadic, ([3:39-43], (Hprim Tvoid))))));
-      f_name = ([3:10-13], "\\foo"); f_tparams = [];
-      f_where_constraints = []; f_variadic = FVnonVariadic; f_params = [];
-      f_body =
-      (NamedBody { Aast.AnnotatedAST.fnb_nast = [Noop]; fnb_unsafe = true });
-      f_fun_kind = FSync;
-      f_user_attributes =
-      [{ Aast.AnnotatedAST.ua_name = ([2:3-7], "__Rx"); ua_params = [] }];
-      f_ret_by_ref = false })
-  ]
+    { fd_namespace =
+      { Namespace_env.ns_ns_uses = <opaque>; ns_class_uses = <opaque>; 
+        ns_fun_uses = <opaque>; ns_const_uses = <opaque>; ns_name = None; 
+        ns_mode = Namespace_env.ForTypecheck; ns_disable_xhp_element_mangling = false };
+      fd_file_attributes = []; fd_mode = Mstrict; fd_name = ([4:10-13], "\\foo");
+      fd_fun =
+      { f_span = [2:1-6:2]; f_readonly_this = None; f_annotation = (); 
+        f_readonly_ret = None; f_tparams = [];
+        f_ret =
+        ((~Pure<(function(int): ~void)>),
+         (Some ([4:18-47],
+                (Happly (([4:18-22], "\\Pure"),
+                   [([4:23-46],
+                     (Happly (([4:23-46], "\\HH\\supportdyn"),
+                        [([4:23-46],
+                          (Hfun
+                             { hf_is_readonly = None; hf_tparams = []; 
+                               hf_param_tys = [([4:34-37], (Hprim Tint))];
+                               hf_param_info = [(Some { hfparam_kind = Pnormal; hfparam_readonlyness = None; hfparam_optional = None; hfparam_splat = None; hfparam_named = None })];
+                               hf_variadic_ty = None; hf_named_variadic_ty = None; 
+                               hf_ctxs = None; hf_return_ty = ([4:41-45], (Hlike ([4:41-45], (Hprim Tvoid)))); 
+                               hf_is_readonly_return = None }))
+                          ]
+                        )))
+                     ]
+                   )))));
+        f_params = []; f_ctxs = None; f_unsafe_ctxs = None;
+        f_body =
+        { fb_ast =
+          [([5:3-25],
+            (Throw
+               ((exact Exception), [5:9-24],
+                (New (((exact Exception), [5:13-22], (CI ([5:13-22], "\\Exception"))), 
+                   [], [], None, ((function(optional string $message, optional int $code, optional ?Exception $previous)[]: void)))))))
+            ]
+          };
+        f_fun_kind = FSync; f_user_attributes = [{ ua_name = ([4:10-13], "__SupportDynamicType"); ua_params = [] }; { ua_name = ([2:3-7], "__Rx"); ua_params = [] }]; 
+        f_external = false; f_hidden = false; f_doc_comment = None };
+      fd_internal = false; fd_module = None; fd_tparams = []; fd_where_constraints = []; 
+      fd_package = None })

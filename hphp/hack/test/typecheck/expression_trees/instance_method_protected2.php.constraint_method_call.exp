@@ -1,0 +1,36 @@
+error: Typing[4041] Typing error [1]
+-> Too many mandatory arguments (expected 0 but got 1) [2]
+-> Because of this definition [1]
+
+instance_method_protected2.php:8:7
+ 6 |   public function test(): void {
+ 7 |     ExampleDsl`(MyClass $x) ==> {
+ 8 |       $x->foo();
+   |       ^^^^^^^^^ [1]
+ 9 |     }`;
+10 |   }
+11 | }
+12 | 
+13 | abstract class MyClass extends MyParent {
+14 |   protected function foo(ExampleInt $x): void {}
+   |                      ^^^ [2]
+15 | }
+
+error: Typing[4448] Cannot access non-public members within expression trees. [1]
+-> Member defined here [2]
+
+instance_method_protected2.php:8:11
+ 6 |   public function test(): void {
+ 7 |     ExampleDsl`(MyClass $x) ==> {
+ 8 |       $x->foo();
+   |           ^^^ [1]
+ 9 |     }`;
+10 |   }
+11 | }
+12 | 
+13 | abstract class MyClass extends MyParent {
+14 |   protected function foo(ExampleInt $x): void {}
+   |                      ^^^ [2]
+15 | }
+
+2 errors found

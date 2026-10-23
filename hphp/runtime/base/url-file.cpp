@@ -16,19 +16,15 @@
 
 #include "hphp/runtime/base/url-file.h"
 #include <vector>
-#include "hphp/runtime/base/runtime-error.h"
+#include "hphp/runtime/base/array-iterator.h"
 #include "hphp/runtime/ext/pcre/ext_pcre.h"
 #include "hphp/runtime/ext/stream/ext_stream.h"
 #include "hphp/runtime/ext/url/ext_url.h"
-#include "hphp/runtime/base/php-globals.h"
-#include "hphp/runtime/vm/runtime.h"
-#include "hphp/runtime/vm/jit/translator-inline.h"
 
 namespace HPHP {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-const StaticString s_http_response_header("http_response_header");
 const StaticString s_http("http");
 const StaticString s_tcp_socket("tcp_socket");
 
@@ -36,7 +32,7 @@ const StaticString s_tcp_socket("tcp_socket");
 
 UrlFile::UrlFile(const char *method /* = "GET" */,
                  const Array& headers /* = null_array */,
-                 const String& postData /* = null_string */,
+                 const OptString& postData /* = null_string */,
                  int maxRedirect /* = 20 */,
                  int timeout /* = -1 */,
                  bool ignoreErrors /* = false */)
@@ -61,16 +57,16 @@ const StaticString
   s_remove_user_pass_pattern("#://[^@]+@#"),
   s_remove_user_pass_replace("://");
 
-void UrlFile::setProxy(const String& proxy_host, int proxy_port,
-                       const String& proxy_user, const String& proxy_pass) {
+void UrlFile::setProxy(const OptString& proxy_host, int proxy_port,
+                       const OptString& proxy_user, const OptString& proxy_pass) {
   m_proxyHost = proxy_host.c_str();
   m_proxyPort = proxy_port;
   m_proxyUsername = proxy_user.c_str();
   m_proxyPassword = proxy_pass.c_str();
 }
 
-bool UrlFile::open(const String& input_url, const String& mode) {
-  String url = input_url;
+bool UrlFile::open(const OptString& input_url, const OptString& mode) {
+  OptString url = input_url;
   const char* modestr = mode.c_str();
   if (strchr(modestr, '+') || strchr(modestr, 'a') || strchr(modestr, 'w')) {
     std::string msg = "cannot open a url stream for write/append operation: ";
@@ -99,9 +95,9 @@ bool UrlFile::open(const String& input_url, const String& mode) {
     }
   }
 
-  Variant user = f_parse_url(url, k_PHP_URL_USER);
+  Variant user = HHVM_FN(parse_url)(url, k_PHP_URL_USER);
   if (user.isString()) {
-    Variant pass = f_parse_url(url, k_PHP_URL_PASS);
+    Variant pass = HHVM_FN(parse_url)(url, k_PHP_URL_PASS);
     http.auth(user.toString().c_str(), pass.toString().c_str());
     url = HHVM_FN(preg_replace)(
       s_remove_user_pass_pattern,
@@ -112,7 +108,7 @@ bool UrlFile::open(const String& input_url, const String& mode) {
   }
 
   int code;
-  req::vector<String> responseHeaders;
+  req::vector<OptString> responseHeaders;
   if (m_get) {
     code = http.get(url.c_str(), m_response, pHeaders, &responseHeaders);
   } else {
@@ -124,22 +120,6 @@ bool UrlFile::open(const String& input_url, const String& mode) {
   m_responseHeaders.reset();
   for (unsigned int i = 0; i < responseHeaders.size(); i++) {
     m_responseHeaders.append(responseHeaders[i]);
-  }
-  VMRegAnchor vra;
-  ActRec* fp = vmfp();
-  if (fp->skipFrame()) fp = g_context->getPrevVMStateSkipFrame(fp);
-  auto id = fp->func()->lookupVarId(s_http_response_header.get());
-  if (id != kInvalidId) {
-    auto tvTo = frame_local(fp, id);
-    Variant varFrom(m_responseHeaders);
-    const auto tvFrom(varFrom.asTypedValue());
-    if (isRefType(tvTo->m_type)) {
-      tvTo = tvTo->m_data.pref->tv();
-    }
-    tvDup(*tvFrom, *tvTo);
-  } else if ((fp->func()->attrs() & AttrMayUseVV) && fp->hasVarEnv()) {
-    fp->getVarEnv()->set(s_http_response_header.get(),
-                         Variant(m_responseHeaders).asTypedValue());
   }
 
   /*
@@ -174,7 +154,7 @@ bool UrlFile::flush() {
                              getName()).c_str());
 }
 
-String UrlFile::getLastError() {
+OptString UrlFile::getLastError() {
   return m_error;
 }
 

@@ -1,5 +1,5 @@
 <?hh
 
-function test(): array<string, string> {
-  return varray[];
+function test(): darray<string, string> {
+  return vec[];
 }

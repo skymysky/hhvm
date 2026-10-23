@@ -1,24 +1,21 @@
-<?php
+<?hh
 
-function foo($a) {
+function foo($a) :mixed{
   print "foo $a\n";
 }
 
-function bar(&$a) {
+function bar(inout $a) :mixed{
   $a = 2;
   return $a;
 }
 
-function baz($a) {
+function baz($a) :mixed{
   return 2;
 }
+<<__EntryPoint>> function main(): void {
+$a = vec[1, 2];
+array_map(foo<>, $a);
 
-$a = array(1, 2);
-array_map("foo", $a);
-
-$b = array(1);
-array_walk(&$b, "bar");
-var_dump($b);
-
-$a = call_user_func("baz", $a);
+$a = call_user_func(baz<>, $a);
 var_dump($a);
+}

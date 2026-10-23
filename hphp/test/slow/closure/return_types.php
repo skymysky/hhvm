@@ -1,33 +1,19 @@
 <?hh
 
-function good() {
+function good() :mixed{
   $x = 1;
 
   $f_hack = function (): int use ($x) {
     return $x + 1;
   };
 
-  $f_php7 = function () use ($x): int {
-    return $x + 1;
-  };
-
-  var_dump($f_hack() + $f_php7());
+  var_dump($f_hack());
 }
 
-good();
-
-set_error_handler(function ($no, $str) {
-  throw new Exception($str);
-});
-
-function bad() {
+function bad() :mixed{
   $x = 1;
 
   $f_hack = function (): string use ($x) {
-    return $x + 1;
-  };
-
-  $f_php7 = function () use ($x): string {
     return $x + 1;
   };
 
@@ -38,12 +24,16 @@ function bad() {
     var_dump($e->getMessage());
   }
 
-  try {
-    $f_php7();
-    echo "Should have thrown!\n";
-  } catch (Exception $e) {
-    var_dump($e->getMessage());
-  }
 }
 
+
+<<__EntryPoint>>
+function main_return_types() :mixed{
+good();
+
+set_error_handler(function ($no, $str) {
+  throw new Exception($str);
+});
+
 bad();
+}

@@ -16,19 +16,17 @@
 
 #include "hphp/runtime/vm/jit/target-profile.h"
 
-#include "hphp/runtime/base/rds.h"
-
 #include "hphp/runtime/vm/jit/prof-data.h"
 
 #include <string>
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 
 namespace detail {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-void addTargetProfileInfo(const rds::Profile<void>& key,
+void addTargetProfileInfo(const rds::Profile& key,
                           const std::string& dbgInfo) {
   if (auto profD = profData()) {
     ProfData::TargetProfileInfo info{key, dbgInfo};
@@ -38,4 +36,4 @@ void addTargetProfileInfo(const rds::Profile<void>& key,
 
 ///////////////////////////////////////////////////////////////////////////////
 
-}}}
+}}

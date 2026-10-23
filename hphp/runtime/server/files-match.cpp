@@ -15,10 +15,8 @@
 */
 
 #include "hphp/runtime/server/files-match.h"
-#include "hphp/runtime/server/virtual-host.h"
 #include "hphp/runtime/base/preg.h"
 #include "hphp/runtime/base/config.h"
-#include "hphp/runtime/base/array-iterator.h"
 #include "hphp/util/text-util.h"
 
 namespace HPHP {
@@ -33,10 +31,10 @@ FilesMatch::FilesMatch(const IniSetting::Map& ini, const Hdf& vh) {
 
 bool FilesMatch::match(const std::string &filename) const {
   if (!m_pattern.empty()) {
-    Variant ret = preg_match(String(m_pattern.c_str(), m_pattern.size(),
-                                    CopyString),
-                             String(filename.c_str(), filename.size(),
-                                    CopyString));
+    Variant ret = preg_match(OptString(m_pattern.c_str(), m_pattern.size(),
+                                       CopyString),
+                             OptString(filename.c_str(), filename.size(),
+                                       CopyString));
     return ret.toInt64() > 0;
   }
   return false;

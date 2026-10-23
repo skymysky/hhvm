@@ -1,0 +1,16 @@
+error: Typing[4142] Cannot re-declare this method as abstract [1]
+-> Previously defined here [2]
+
+override_abstract_concrete.php:8:28
+2 | 
+3 | class C {
+4 |   public function f(): void {}
+  |                   ^ [2]
+5 | }
+6 | 
+7 | abstract class D extends C {
+8 |   abstract public function f(): void;
+  |                            ^ [1]
+9 | }
+
+1 error found

@@ -1,0 +1,27 @@
+error: Typing[4439] Class `C` inherits trait method `foo` via multiple traits.  Add the __EnableMethodTraitDiamond attribute to `C`, remove the multiple paths, or override the method [1]
+-> Trait method is defined here [2]
+-> `C` uses `E1` [3]
+-> `E1` uses `E` [4]
+-> `C` uses `E` [5]
+
+name_order1.php:16:13
+ 7 | 
+ 8 | trait E {
+ 9 |   protected function foo(): void {}
+   |                      ^^^ [2]
+10 | }
+11 | 
+12 | trait E1 {
+13 |   use E;
+   |       ^ [4]
+14 | }
+15 | 
+16 | final class C implements I  {
+   |             ^ [1]
+17 |   use E;
+   |       ^ [5]
+18 |   use E1;
+   |       ^^ [3]
+19 | }
+
+1 error found

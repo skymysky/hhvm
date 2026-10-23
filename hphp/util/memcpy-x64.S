@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2015 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-present Facebook, Inc. (http://www.facebook.com)  |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -96,9 +96,9 @@ ETCH_NAME(_memcpy8):
  * void* memcpy(void* dst, void* src, size_t length);
  */
               ETCH_ALIGN16
-              .globl ETCH_NAME(memcpy)
-              ETCH_TYPE(ETCH_NAME(memcpy), @function)
-ETCH_NAME(memcpy):
+              .globl ETCH_NAME(_hhvm_memcpy)
+              ETCH_TYPE(ETCH_NAME(_hhvm_memcpy), @function)
+ETCH_NAME(_hhvm_memcpy):
               CFI(startproc)
 
               mov   %rdx, %rcx
@@ -110,7 +110,7 @@ ETCH_NAME(memcpy):
 ETCH_LABEL(L8):
               mov   (%rsi), %r9
               //    This stores garbage if coming from _memcpy8, but it won't
-              //    cause corretness problem. The address is writable, and the
+              //    cause correctness problem. The address is writable, and the
               //    data there will be overwritten later. I don't want to move
               //    this store before L8 because that will slow down the
               //    loading of (%rsi).
@@ -234,7 +234,7 @@ ETCH_NAME(_memcpy16):
 
 ETCH_LABEL(32_OR_0):
               //    The path for length == 16 comes through several conditional
-              //    jumps. We expect (and should make) such sitatuions rare
+              //    jumps. We expect (and should make) such situations rare
               //    when this is invoked.
               jnc   ETCH_LABEL(END16)
               movdqu 16(%rsi), %xmm1
@@ -246,7 +246,15 @@ ETCH_LABEL(END16):
               ret
 
               CFI(endproc)
-              ETCH_SIZE(memcpy)
+              ETCH_SIZE(_hhvm_memcpy)
+
+// When AVX2 is enabled, we use folly's memcpy instead of _hhvm_memcpy.
+              .globl    ETCH_NAME(memcpy)
+#ifdef __AVX2__
+              ETCH_NAME(memcpy) = ETCH_NAME(_folly_memcpy)
+#else
+              ETCH_NAME(memcpy) = ETCH_NAME(_hhvm_memcpy)
+#endif
 
               .ident "GCC: (GNU) 4.8.2"
 #ifdef __linux__

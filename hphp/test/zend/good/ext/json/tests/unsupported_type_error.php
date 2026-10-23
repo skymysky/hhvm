@@ -1,13 +1,22 @@
-<?php
+<?hh
 
-$resource = fopen(__FILE__, "r");
+<<__EntryPoint>>
+function main(): void {
+  $resource = fopen(__FILE__, "r");
 
-var_dump($resource);
+  var_dump($resource);
 
-var_dump(json_encode($resource));
-var_dump(json_last_error(), json_last_error_msg());
+  $error = null;
+  $result = json_encode_with_error($resource, inout $error);
+  var_dump($result);
+  var_dump($error[0] ?? 0, $error[1] ?? 'No error');
 
-var_dump(json_encode($resource, JSON_PARTIAL_OUTPUT_ON_ERROR));
-var_dump(json_last_error(), json_last_error_msg());
-
-?>
+  $error = null;
+  $result = json_encode_with_error(
+    $resource,
+    inout $error,
+    JSON_PARTIAL_OUTPUT_ON_ERROR,
+  );
+  var_dump($result);
+  var_dump($error[0] ?? 0, $error[1] ?? 'No error');
+}

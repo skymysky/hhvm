@@ -14,8 +14,7 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_PROXYGEN_SERVER_TRANSPORT_H_
-#define incl_HPHP_PROXYGEN_SERVER_TRANSPORT_H_
+#pragma once
 
 #include "hphp/runtime/server/transport.h"
 #include <algorithm>
@@ -24,11 +23,12 @@
 #include "hphp/util/lock.h"
 #include "hphp/util/synchronizable.h"
 #include <proxygen/lib/http/session/HTTPTransaction.h>
-#include <thrift/lib/cpp/async/TAsyncTransport.h>
+#include <folly/io/async/ssl/OpenSSLTransportCertificate.h>
 #include <folly/IntrusiveList.h>
 #include <folly/IPAddress.h>
 
 namespace HPHP {
+struct HPHPWorkerThread;
 struct ProxygenServer;
 struct ProxygenTransport;
 
@@ -60,7 +60,7 @@ struct ResponseMessage {
         // sad panda copy.  TODO (t4362832): change sendImpl to take IOBuf
         m_chunk = folly::IOBuf::copyBuffer(data, size);
       }
-    };
+    }
 
   ResponseMessage(ResponseMessage&& m) noexcept
   : m_transport(std::move(m.m_transport)),
@@ -82,7 +82,9 @@ struct ResponseMessage {
   bool m_eom{false};
 };
 
-struct PushTxnHandler;
+namespace stream_transport {
+struct HttpStreamServerTransport;
+}
 
 const StaticString s_proxygen("proxygen");
 
@@ -101,7 +103,7 @@ struct ProxygenTransport final
   , std::enable_shared_from_this<ProxygenTransport>
   , Synchronizable
 {
-  explicit ProxygenTransport(ProxygenServer *server);
+  explicit ProxygenTransport(ProxygenServer *server, HPHPWorkerThread *worker);
   ~ProxygenTransport() override;
 
   ///////////////////////////////////////////////////////////////////////////
@@ -109,10 +111,10 @@ struct ProxygenTransport final
 
   const std::string& getServerAddr() override {
     return m_localAddr;
-  };
+  }
   uint16_t getServerPort() override {
     return m_localPort;
-  };
+  }
 
   /**
    * Request URI.
@@ -123,10 +125,17 @@ struct ProxygenTransport final
 
   /**
    * POST request's data.
+   * These APIs return empty data for streaming transports.
    */
   const void *getPostData(size_t &size) override;
   bool hasMorePostData() override;
   const void *getMorePostData(size_t &size) override;
+
+  /**
+   * This callback should be called when the StreamTransport
+   * is ready to receive data.
+   */
+  void onStreamReady() override;
 
   // TODO: is get getFiles required?
 
@@ -148,6 +157,8 @@ struct ProxygenTransport final
 
   /**
    * Get http request size.
+   * For non-buffering requests, this method returns
+   * the size of request data received so far.
    */
   size_t getRequestSize() const override;
 
@@ -155,14 +166,22 @@ struct ProxygenTransport final
    * Get request header(s).
    */
   std::string getHeader(const char *name) override;
-  void getHeaders(HeaderMap &headers) override;
+  const HeaderMap& getHeaders() override;
+
+  const proxygen::HTTPHeaders* getProxygenHeaders() override;
+
+  folly::ssl::X509UniquePtr getPeerCertificate();
 
   /**
    * Get a description of the type of transport.
    */
-  String describe() const override {
+  OptString describe() const override {
     return s_proxygen;
   }
+
+  std::shared_ptr<stream_transport::StreamTransport>
+    getStreamTransport() const override;
+  bool isStreamTransport() const override;
 
   /**
    * Add/remove a response header.
@@ -183,21 +202,13 @@ struct ProxygenTransport final
    */
   void sendImpl(const void *data, int size, int code,
                 bool chunked, bool eom) override;
+  void sendStreamResponse(const void* data, int size) override;
+  void sendStreamEOM() override;
 
   /**
    * Override to implement more send end logic.
    */
   void onSendEndImpl() override;
-
-  bool supportsServerPush() override;
-
-  int64_t pushResource(const char *host, const char *path,
-                       uint8_t priority, const Array &promiseHeaders,
-                       const Array &responseHeaders,
-                       const void *data, int size, bool eom) override;
-
-  void pushResourceBody(int64_t id,
-                        const void *data, int size, bool eom) override;
 
   /**
    * Need this implementation to break keep-alive connections.
@@ -232,7 +243,20 @@ struct ProxygenTransport final
     folly::IPAddress ipAddr(localAddr.getIPAddress());
     m_localAddr = ipAddr.toFullyQualified();
     m_localPort = localAddr.getPort();
-  };
+    // Save a reference to the peer's certificate eagerly, while we have
+    // access to the HTTP transaction and its underlying transport. We lose
+    // this access once the transaction is detached, which is why we don't
+    // do this lazily in getPeerCertificate.
+    m_peerCert = folly::OpenSSLTransportCertificate::tryExtractX509(
+        m_clientTxn->getTransport()
+            .getUnderlyingTransport()
+            ->getPeerCertificate());
+  }
+
+  proxygen::HTTPTransaction* getTransaction() noexcept {
+    Lock lock(this);
+    return m_clientTxn;
+  }
 
   void detachTransaction() noexcept override {
     VLOG(5) << "detachTransaction ProxygenTransport=" << (uint64_t) this;
@@ -248,9 +272,9 @@ struct ProxygenTransport final
 
   void onBody(std::unique_ptr<folly::IOBuf> chain) noexcept override;
 
-  void onChunkHeader(size_t /*length*/) noexcept override{};
+  void onChunkHeader(size_t /*length*/) noexcept override{}
 
-  void onChunkComplete() noexcept override {};
+  void onChunkComplete() noexcept override {}
 
   void onTrailers(
     std::unique_ptr<proxygen::HTTPHeaders> /*trailers*/) noexcept override {
@@ -289,11 +313,6 @@ struct ProxygenTransport final
    */
   void abort();
 
-  void removePushTxn(uint64_t id) {
-    Lock lock(this);
-    m_pushHandlers.erase(id);
-  }
-
   void setEnqueued() {
     m_enqueued = true;
     unlink();
@@ -303,32 +322,47 @@ struct ProxygenTransport final
 
   void trySetMaxThreadCount(int max) override;
 
- private:
-  bool bufferRequest() const;
+  void setMaxPost(int64_t maxPost, int64_t maxBuffer) {
+    m_maxPost = maxPost;
+    m_bodyLengthPastLimit = maxBuffer;
+  }
+
+  folly::SocketAddress getClientAddress() {
+    return m_clientAddress;
+  }
+
+
+  // Pending transport list methods.
+  bool is_linked() const {
+    return m_listHook.is_linked();
+  }
 
   void unlink() {
     m_listHook.unlink();
   }
 
+ private:
+  bool bufferRequest() const;
+
   void sendErrorResponse(uint32_t code) noexcept;
 
-  void requestDoneLocking() {
-    Lock lock(this);
-    m_clientComplete = true;
-    notify();
-  }
+  void requestDoneLocking();
+
+  bool handlePOST(const proxygen::HTTPHeaders& headers);
 
   proxygen::HTTPTransaction* getTransaction(
-    uint64_t id, proxygen::HTTPMessage **msg, bool newPushOk);
+    uint64_t id, proxygen::HTTPMessage **msg);
 
   // Tracks HTTPTransaction's reference to this object
   std::shared_ptr<ProxygenTransport> m_transactionReference;
   ProxygenServer *m_server;
+  HPHPWorkerThread *m_worker;
   proxygen::HTTPTransaction *m_clientTxn{nullptr}; // locked
   folly::SocketAddress m_clientAddress;
   std::string m_addressStr;
   std::unique_ptr<proxygen::HTTPMessage> m_request;
-  size_t m_requestBodyLength{0};
+  std::atomic<size_t> m_requestBodyLength{0};
+  int64_t m_bodyLengthPastLimit{128 * 1024};
 
   // There are two modes of operation for reading POST bodies.  When
   // RequestBodyReadLimit is set, the request is enqueued for a worker thread
@@ -342,16 +376,15 @@ struct ProxygenTransport final
   // access m_bodyData and m_clientComplete at one time.
   folly::IOBufQueue m_bodyData{folly::IOBufQueue::cacheChainLength()};
   bool m_clientComplete{false};
-
   bool m_firstBody{false};
   bool m_enqueued{false};
   // Set to true when sending a partial post back to
   // the slb due to impending server death
   bool m_reposting{false};
   bool m_shouldRepost{false};
+  bool m_egressError{false};
   std::unique_ptr<folly::IOBuf> m_currentBodyBuf;
   proxygen::HTTPMessage m_response;
-  bool m_sendStarted{false};
   Method m_method{Method::GET};
   const char *m_extended_method{nullptr};
   HeaderMap m_requestHeaders;
@@ -359,9 +392,11 @@ struct ProxygenTransport final
   std::string m_localAddr;
   uint16_t m_localPort{0};
   int64_t m_nextPushId{1};
-  std::map<uint64_t, PushTxnHandler*> m_pushHandlers; // locked
-  bool m_egressError{false};
-
+  int64_t m_maxPost{-1};
+  const proxygen::HTTPHeaders* m_proxygenHeaders = nullptr;
+  std::shared_ptr<stream_transport::HttpStreamServerTransport>
+    m_streamTransport;
+  folly::ssl::X509UniquePtr m_peerCert{nullptr};
  public:
   // List of ProxygenTransport not yet handed to the server will sit
   // in a list, so that we can abort them if they take too long.
@@ -382,5 +417,3 @@ using ProxygenTransportList =
 
 ///////////////////////////////////////////////////////////////////////////////
 }
-
-#endif

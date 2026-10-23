@@ -14,14 +14,15 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_JIT_UNIQUE_STUBS_H_
-#define incl_HPHP_JIT_UNIQUE_STUBS_H_
+#pragma once
 
 #include "hphp/runtime/vm/hhbc.h"
 
+#include "hphp/runtime/vm/jit/code-cache.h"
 #include "hphp/runtime/vm/jit/containers.h"
 #include "hphp/runtime/vm/jit/types.h"
 #include "hphp/runtime/vm/jit/phys-reg.h"
+#include "hphp/runtime/vm/jit/srcdb.h"
 #include "hphp/runtime/vm/jit/stack-offsets.h"
 
 #include <string>
@@ -35,8 +36,6 @@ struct SrcKey;
 namespace Debug { struct DebugInfo; }
 
 namespace jit {
-
-struct CodeCache;
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -94,7 +93,7 @@ struct UniqueStubs {
    *  +---------+---------------------+---------+-----------+
    *  | native  | call{,r,m,s}        | ret     | N/A       |
    *  +---------+---------------------+---------+-----------+
-   *  | PHP     | phpcall, callunpack | phpret  | phplogue  |
+   *  | PHP     | phpcall             | phpret  | phplogue  |
    *  +---------+---------------------+---------+----------+
    *  | stub    | callstub            | stubret | stublogue |
    *  +---------+---------------------+---------+-----------+
@@ -116,13 +115,20 @@ struct UniqueStubs {
   // Function entry.
 
   /*
-   * Dynamically dispatch to the appropriate func prologue, when the called
-   * function fails the prologue's func guard.
+   * Dynamically dispatch to the appropriate func prologue based on the
+   * information in func_prologue_regs, while repacking arguments as needed.
+   * The base variant assumes no unpack or named args are present.
+   * The NamedArgs variant assumes that named args are present, but no unpacking
+   * is involved.
+   * The Unpack variant assumes that an unpack is present, and checks
+   * for the presence of named args.
    *
-   * @reached:  jmp from func guard
+   * @reached:  callphp from TC
    * @context:  func guard
    */
   TCA funcPrologueRedispatch;
+  TCA funcPrologueRedispatchNamedArgs;
+  TCA funcPrologueRedispatchUnpack;
 
   /*
    * Look up or emit a func prologue and jump to it---or, failing that, call
@@ -133,27 +139,15 @@ struct UniqueStubs {
    * prologue succeeds, we update the prologue table to point to the new
    * prologue instead of this stub.
    *
-   * @reached:  callphp from TC
-   *            jmp from bindCallStub
+   * @reached:  callphpr from TC
+   *            callphps from TC
+   *            jmp from immutableBindCallStub
    *            jmp from funcPrologueRedispatch
+   *            jmp from funcPrologueRedispatchUnpack
    * @context:  func prologue
    */
   TCA fcallHelperThunk;
-
-  /*
-   * Look up or emit a func body entry point and jump to it---or, failing that,
-   * fall back to the interpreter.
-   *
-   * This func body is just the translation for Func::base(), for functions
-   * with no DV init funclets.  For functions with DV funclets, the func body
-   * first dispatches to any necessary funclets before jumping to the base()
-   * translation.
-   *
-   * @reached:  call from enterTCHelper$callTC
-   *            jmp from fcallUnpackHelper
-   * @context:  func body
-   */
-  TCA funcBodyHelperThunk;
+  TCA fcallHelperNoTranslateThunk;
 
   /*
    * Call EventHook::onFunctionCall() and handle the case where it requests
@@ -163,7 +157,7 @@ struct UniqueStubs {
    *            jmp from functionSurprisedOrStackOverflow
    * @context:  stub
    */
-  TCA functionEnterHelper;
+  TCA functionSurprised;
 
   /*
    * Handle either a surprise condition or a stack overflow.
@@ -178,14 +172,28 @@ struct UniqueStubs {
 
 
   /////////////////////////////////////////////////////////////////////////////
+  // Inlining.
+
+  /*
+   * Handle side exit from an inlined frame to a translation given by rarg(0).
+   * Initializes the native frame portion of the ActRec, sets m_funcId to
+   * rarg(1), m_callOffAndFlags to rarg(2), then jumps to rarg(0).
+   *
+   * @reached:  inlinesideexit from TC
+   * @context:  func body
+   */
+  TCA inlineSideExit;
+
+
+  /////////////////////////////////////////////////////////////////////////////
   // Function return.
 
   /*
    * Return from a function when the ActRec was pushed by the interpreter.
    *
    * The return IP on the ActRec will be set to one of these stubs, so if
-   * someone tries to execute a return instruction, we get a chance to set up
-   * state for a POST_INTERP_RET service request.
+   * someone tries to execute a return instruction, handlePostInterpRet() gets
+   * a chance to translate the code starting at the return address.
    *
    * Generators need a different stub because the ActRec for a generator is in
    * the heap.
@@ -196,30 +204,6 @@ struct UniqueStubs {
   TCA retHelper;
   TCA genRetHelper;       // version for generator
   TCA asyncGenRetHelper;  // version for async generators
-
-  /*
-   * Return from a function when the ActRec was pushed by an inlined call.
-   *
-   * This is the same as retHelper, but is kept separate to aid in debugging.
-   *
-   * @reached:  phpret from TC
-   * @context:  func body (after returning to caller)
-   */
-  TCA retInlHelper;
-
-  /*
-   * Return from a function when the ActRec was called from jitted code but
-   * had its m_savedRip smashed by the debugger.
-   *
-   * These stubs call a helper that looks up the original catch trace from the
-   * call, executes it, then executes a REQ_POST_DEBUGGER_RET.
-   *
-   * @reached:  phpret from TC
-   * @context:  func body (after returning to caller)
-   */
-  TCA debuggerRetHelper;
-  TCA debuggerGenRetHelper;
-  TCA debuggerAsyncGenRetHelper;
 
   /*
    * Return from a resumed async function.
@@ -242,6 +226,23 @@ struct UniqueStubs {
   TCA asyncFuncRetSlow;
 
   /*
+   * Return or yield from a resumed async generator.
+   *
+   * Compute the result (null for return, tuple($k, $v) for yield $k => $v),
+   * store it into the AsyncGeneratorWaitHandle, mark it as finished and
+   * unblock its parents. Then jump to asyncSwitchCtrl.
+   *
+   * rvmfp() should point to the ActRec of the AsyncGenerator that is
+   * returning or yielding, rvmsp() should point to an uninitialized cell on
+   * the stack containing garbage.
+   *
+   * @reached:  jmp from TC
+   * @context:  func body
+   */
+  TCA asyncGenRetR;
+  TCA asyncGenYieldR;
+
+  /*
    * Async function finish-suspend-and-resume stub.
    *
    * Check for fast resumables on the AsioContext runnable queue.  If one is
@@ -260,24 +261,12 @@ struct UniqueStubs {
   // Function calls.
 
   /*
-   * Stubs for immutable/non-immutable PHP calls.
+   * Stub for immutable PHP calls.
    *
-   * @reached:  callphp from TC
+   * @reached:  callphps from TC
    * @context:  func prologue
    */
-  TCA bindCallStub;
   TCA immutableBindCallStub;
-
-  /*
-   * Use interpreter functions to enter the pre-live ActRec that we place on
-   * the stack (along with the Array of parameters) in a CallUnpack instruction.
-   * The last arg specifies the total number of args, including the array
-   * parameter (which must be the last one).
-   *
-   * @reached:  callunpack from TC
-   * @context:  func prologue
-   */
-  TCA fcallUnpackHelper;
 
 
   /////////////////////////////////////////////////////////////////////////////
@@ -287,47 +276,52 @@ struct UniqueStubs {
    * Restart execution based on the value of vmpc.  Used, e.g., to resume
    * execution after an InterpOne.
    *
-   * Expects that all VM registers are synced.
+   * The NoTranslate variants will continue interpreting basic blocks until
+   * encountering a basic block with an already existing translation.
    *
-   * @reached:  jmp from funcBodyHelperThunk
+   * The interpHelper variants will interpret a basic block first to ensure
+   * we make forward progress.
+   *
+   * The FromInterp variants expect a state like in the interpreter, with all
+   * VM registers synced.
+   *
+   * The FromTC variants expect a state compatible with entering a translation.
+   * However, vmpc is required to be synced and rvmsp to point to the top
+   * of the stack.
+   *
+   * @reached:  entry from jit::enterTC
+   *            jmp from fcallHelperThunk
+   *            jmp from TC
    *            call from enterTCHelper
    * @context:  func body
    */
-  TCA resumeHelper;
+  TCA resumeHelperFromInterp;
+  TCA resumeHelperFromTC;
+  TCA resumeHelperFuncEntryFromInterp;
+  TCA resumeHelperFuncEntryFromTC;
+  TCA resumeHelperNoTranslateFromInterp;
+  TCA resumeHelperNoTranslateFromTC;
+  TCA resumeHelperNoTranslateFuncEntryFromInterp;
+  TCA resumeHelperNoTranslateFuncEntryFromTC;
+  TCA interpHelperFromInterp;
+  TCA interpHelperFromTC;
+  TCA interpHelperFuncEntryFromInterp;
+  TCA interpHelperFuncEntryFromTC;
+  TCA interpHelperNoTranslateFromInterp;
+  TCA interpHelperNoTranslateFromTC;
+  TCA interpHelperNoTranslateFuncEntryFromInterp;
+  TCA interpHelperNoTranslateFuncEntryFromTC;
 
   /*
-   * Like resumeHelper, but specifically for an interpreted FCall.
+   * JitResumeAddr handlers that convert a state compatible with an interpreter
+   * to one that is compatible with TC, then transfers control to the TC
+   * at rret(1). Assumes that reenterTC already synced rvmfp() and rvmsp().
    *
-   * @reached:  jmp from fcallHelperThunk
-   * @context:  func prologue
+   * interpToTCFuncEntry: pops frame into func entry registers
+   * interpToTCRet: loads caller's return value to rret_data() and rret_type()
    */
-  TCA resumeHelperRet;
-
-  /*
-   * Finish suspending a stack of FCallAwaits.  See comments for
-   * handleFCallAwaitSuspend.
-   *
-   * Expects that all VM registers are synced.
-   *
-   * @reached:  phpret from TC
-   * @context:  func body (after returning to caller)
-   */
-  TCA fcallAwaitSuspendHelper;
-
-  /*
-   * Like resumeHelper, but interpret a basic block first to ensure we make
-   * forward progress.
-   *
-   * interpHelper expects the correct value of vmpc to be in the first argument
-   * register and syncs it, whereas interpHelperSyncedPC expects vmpc to be
-   * synced a priori.  Both stubs will sync the vmsp and vmfp registers to
-   * vmRegs before passing control to the interpreter.
-   *
-   * @reached:  jmp from TC
-   * @context:  func body
-   */
-  TCA interpHelper;
-  TCA interpHelperSyncedPC;
+  TCA interpToTCFuncEntry;
+  TCA interpToTCRet;
 
   /*
    * Stubs for each bytecode with the CF flag, which InterpOne the bytecode and
@@ -386,8 +380,7 @@ struct UniqueStubs {
    *
    * enterTCExit is the address returned to when we leave the TC.
    */
-  void (*enterTCHelper)(Cell* sp, ActRec* fp, TCA start,
-                        ActRec* firstAR, void* tl, ActRec* stashedAR);
+  void (*enterTCHelper)(TCA handler, TCA arg, void* tl, ActRec* firstAR);
   TCA enterTCExit;
 
   /*
@@ -405,43 +398,86 @@ struct UniqueStubs {
   /*
    * Perform dispatch at the end of a catch block.
    *
+   * The endCatchHelper passes the current vmfp() to the unwinder to determine
+   * the catch trace of the return address of the parent frame.
+   *
+   * The endCatchStublogueHelper passes the current vmfp() and RIP saved in
+   * the stublogue header. Unwinder uses it to determine the catch trace of
+   * the return address belonging to the same logical vmfp().
+   *
+   * The endCatchStubloguePrologueHelper initializes the ActRec space pointed
+   * to by the rvmsp() to uninits and continues at endCatchStublogueHelper.
+   *
    * If the unwinder has set state indicating a return address to jump to, we
    * load vmfp and vmsp and jump there.  Otherwise, we call _Unwind_Resume.
    */
+  TCA resumeCPPUnwind;
+  TCA endCatchSyncVMSPHelper;
+  TCA endCatchSkipTeardownSyncVMSP;
+  TCA endCatchSkipTeardownHelper;
+  TCA endCatchTeardownThisSyncVMSP;
+  TCA endCatchTeardownThisHelper;
   TCA endCatchHelper;
   TCA endCatchHelperPast;
+  TCA endCatchStublogueHelper;
+  TCA endCatchStubloguePrologueHelper;
+  TCA unwinderAsyncRet;
+  TCA unwinderAsyncNullRet;
 
   /*
-   * Handle unknown exceptions that are thrown across php code
+   * Throws an exception from the unwinder to enter the itanium unwinder
    */
-  TCA unknownExceptionHandler;
-  TCA unknownExceptionHandlerPast;
+  TCA throwExceptionWhileUnwinding;
 
   /*
-   * Service request helper.
-   *
-   * Packs service request arguments into a struct on the stack before calling
-   * the C++ service request handler.
+   * Handle a request to translate the code at the given current location.
+   * See svcreq::handleTranslate() for more details.
    *
    * @reached:  jmp from TC
    * @context:  func body
    */
-  TCA handleSRHelper;
+  TCA handleTranslate;
+  TCA handleTranslateFuncEntry;
+  TCA handleTranslateNamedParamsFuncEntry;
+  /*
+   * Same as `handleTranslateFuncEntry`, but serves as the entry stub for
+   * func entries, and assumes that the caller knows that it's calling the
+   * main func entry, i.e. that numArgs == numNonVariadicParams. Responsible
+   * for creating a translation and setting the funcEntry appropriately.
+   */
+   TCA handleTranslateMainFuncEntry;
+  /*
+   * Same as `handleTranslateMainFuncEntry`, but does not attempt to create a
+   * translation. Installed as a Func's funcEntry once we know we can no longer
+   * translate it.
+   *
+   * Must not be confused with `interpHelperNoTranslateFuncEntryFromTC`, which
+   * looks equivalent but additionally requires vmpc() to have been synced by
+   * its caller. Callers reaching a funcEntry from the TC have not synced it.
+   */
+   TCA handleInterpMainFuncEntryNoTranslate;
 
   /*
-   * Throw a VMSwitchMode exception.  Used in switchModeForDebugger().
+   * Handle a request to retranslate the code at the given current location.
+   * See svcreq::handleRetranslate() for more details.
+   *
+   * @reached:  jmp from TC
+   * @context:  func body
    */
-  TCA throwSwitchMode;
+  TCA handleRetranslate;
+  TCA handleRetranslateFuncEntry;
+  TCA handleRetranslateNamedParamsFuncEntry;
 
   /*
-   * Method lookup helpers. Normally point to the corresponding c++
-   * functions, but may be generated stubs if the c++ code is too far
-   * from the translation cache.
+   * Handle a request to retranslate the current function in optimized mode.
+   * See svcreq::handleRetranslateOpt() for more details.
+   * The NamedFE variant retranslates the named parameters func entry.
+   *
+   * @reached:  jmp from TC
+   * @context:  func body
    */
-  TCA handlePrimeCacheInit;
-  TCA handlePrimeCacheInitFatal;
-  TCA handleSlowPath;
-  TCA handleSlowPathFatal;
+  TCA handleRetranslateOpt;
+  TCA handleRetranslateOptNamedFE;
 
   /////////////////////////////////////////////////////////////////////////////
 
@@ -454,8 +490,12 @@ struct UniqueStubs {
    * Utility for logging stub addresses during startup and registering the gdb
    * symbols.  It's often useful to know where they were when debugging.
    */
-  TCA add(const char* name, TCA start, const CodeCache& code,
-          Debug::DebugInfo& dbg);
+  void add(const char* name,
+           const CodeCache& code,
+           TCA start,
+           CodeCache::View view,
+           TransLoc loc,
+           Debug::DebugInfo& dbg);
 
   /*
    * If the given address is within one of the registered stubs, return a
@@ -497,17 +537,16 @@ RegSet interp_one_cf_regs();
 /*
  * Emit code to `v' which jumps to interpHelper with the proper arguments.
  */
-void emitInterpReq(Vout& v, SrcKey sk, FPInvOffset spOff);
+void emitInterpReq(Vout& v, SrcKey sk, SBInvOffset spOff);
+void emitInterpReqNoTranslate(Vout& v, SrcKey sk, SBInvOffset spOff);
 
 ///////////////////////////////////////////////////////////////////////////////
 
 /*
- * Wrapper around the enterTCHelper stub, called from enterTC().
+ * Wrappers around the enterTC*Helper stubs, called from enterTC*().
  */
-void enterTCImpl(TCA start, ActRec* stashedAR);
+void enterTCImpl(TCA start);
 
 ///////////////////////////////////////////////////////////////////////////////
 
 }}
-
-#endif

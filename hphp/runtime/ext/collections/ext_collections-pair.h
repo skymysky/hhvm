@@ -1,5 +1,4 @@
-#ifndef incl_HPHP_EXT_COLLECTIONS_PAIR_H
-#define incl_HPHP_EXT_COLLECTIONS_PAIR_H
+#pragma once
 
 #include "hphp/runtime/ext/collections/ext_collections.h"
 #include "hphp/runtime/vm/native-data.h"
@@ -13,12 +12,12 @@ struct BaseMap;
 struct c_Vector;
 
 namespace collections {
-void deepCopy(TypedValue*);
+void deepCopy(tv_lval);
 struct PairIterator;
 }
 
-struct c_Pair : ObjectData {
-  DECLARE_COLLECTIONS_CLASS_NOCTOR(Pair);
+struct c_Pair : c_Collection, SystemLib::ClassLoader<"HH\\Pair"> {
+  DECLARE_COLLECTIONS_CLASS_NOCTOR(Pair)
 
   static ObjectData* instanceCtor(Class* /*cls*/) {
     SystemLib::throwInvalidOperationExceptionObject(
@@ -28,21 +27,19 @@ struct c_Pair : ObjectData {
 
   c_Pair() = delete;
   explicit c_Pair(const TypedValue& e0, const TypedValue& e1)
-    : ObjectData(c_Pair::classof(), NoInit{}, collections::objectFlags,
-                 HeaderKind::Pair)
+    : c_Collection(c_Pair::classof(), HeaderKind::Pair)
     , m_size(2)
   {
-    cellDup(e0, elm0);
-    cellDup(e1, elm1);
+    tvDup(e0, elm0);
+    tvDup(e1, elm1);
   }
   enum class NoIncRef {};
   explicit c_Pair(const TypedValue& e0, const TypedValue& e1, NoIncRef)
-    : ObjectData(c_Pair::classof(), NoInit{}, collections::objectFlags,
-                 HeaderKind::Pair)
+    : c_Collection(c_Pair::classof(), HeaderKind::Pair)
     , m_size(2)
   {
-    cellCopy(e0, elm0);
-    cellCopy(e1, elm1);
+    tvCopy(e0, elm0);
+    tvCopy(e1, elm1);
   }
   ~c_Pair();
 
@@ -78,10 +75,15 @@ struct c_Pair : ObjectData {
     assertx(obj->getVMClass() == c_Pair::classof());
     return true;
   }
-  static Array ToArray(const ObjectData* obj);
+  template <IntishCast intishCast = IntishCast::None>
+  static Array ToArray(const ObjectData* obj) {
+    auto pair = static_cast<const c_Pair*>(obj);
+    check_collection_cast_to_array();
+    return pair->toPHPArrayImpl();
+  }
+
   template <bool throwOnMiss>
   static TypedValue* OffsetAt(ObjectData* obj, const TypedValue* key) {
-    assertx(!isRefType(key->m_type));
     auto pair = static_cast<c_Pair*>(obj);
     if (key->m_type == KindOfInt64) {
       return throwOnMiss ? pair->at(key->m_data.num)
@@ -91,7 +93,6 @@ struct c_Pair : ObjectData {
     return nullptr;
   }
   static bool OffsetIsset(ObjectData* obj, const TypedValue* key);
-  static bool OffsetEmpty(ObjectData* obj, const TypedValue* key);
   static bool OffsetContains(ObjectData* obj, const TypedValue* key);
   static bool Equals(const ObjectData* obj1, const ObjectData* obj2);
 
@@ -103,17 +104,17 @@ struct c_Pair : ObjectData {
 
  private:
   Variant php_at(const Variant& key) const {
-    auto* k = key.asCell();
+    auto* k = key.asTypedValue();
     if (k->m_type == KindOfInt64) {
-      return Variant(tvAsCVarRef(at(k->m_data.num)), Variant::CellDup());
+      return Variant(tvAsCVarRef(at(k->m_data.num)), Variant::TVDup());
     }
     throwBadKeyType();
   }
   Variant php_get(const Variant& key) const {
-    auto* k = key.asCell();
+    auto* k = key.asTypedValue();
     if (k->m_type == KindOfInt64) {
       if (auto tv = get(k->m_data.num)) {
-        return Variant(tvAsCVarRef(tv), Variant::CellDup());
+        return Variant(tvAsCVarRef(tv), Variant::TVDup());
       } else {
         return init_null_variant;
       }
@@ -121,9 +122,7 @@ struct c_Pair : ObjectData {
     throwBadKeyType();
   }
 
-  Array toArrayImpl() const;
-  Array toVArrayImpl() const;
-  Array toDArrayImpl() const;
+  Array toPHPArrayImpl() const;
 
   Object getIterator();
 
@@ -132,17 +131,15 @@ struct c_Pair : ObjectData {
   TypedValue* getElms() { return &elm0; }
   const TypedValue* getElms() const { return &elm0; }
 
-#ifndef USE_LOWPTR
-  // Add 4 bytes here to keep m_size aligned the same way as in BaseVector and
-  // HashCollection.
-  UNUSED uint32_t dummy;
-#endif
-  uint32_t m_size;
+  // make sure we're aligned to 8 bytes, otherwise in non-lowptr
+  // builds, m_size will fill a hole in ObjectData, and won't be at
+  // collections::FAST_SIZE_OFFSET (see static_assert below).
+  alignas(8) uint32_t m_size;
 
   TypedValue elm0;
   TypedValue elm1;
 
-  friend void collections::deepCopy(TypedValue*);
+  friend void collections::deepCopy(tv_lval);
   friend struct collections::PairIterator;
   friend struct collections::CollectionsExtension;
   friend struct c_Vector;
@@ -160,10 +157,7 @@ struct c_Pair : ObjectData {
 namespace collections {
 /////////////////////////////////////////////////////////////////////////////
 
-extern const StaticString
-  s_PairIterator, s_HH_Pair;
-
-struct PairIterator {
+struct PairIterator : SystemLib::ClassLoader<"PairIterator"> {
   PairIterator() {}
   PairIterator(const PairIterator& src) = delete;
   PairIterator& operator=(const PairIterator& src) {
@@ -174,9 +168,7 @@ struct PairIterator {
   ~PairIterator() {}
 
   static Object newInstance() {
-    static Class* cls = Unit::lookupClass(s_PairIterator.get());
-    assertx(cls);
-    return Object{cls};
+    return Object{ classof() };
   }
 
   void setPair(c_Pair* pr) {
@@ -216,4 +208,3 @@ struct PairIterator {
 
 /////////////////////////////////////////////////////////////////////////////
 }}
-#endif

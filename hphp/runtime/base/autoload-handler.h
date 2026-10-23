@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2013 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-present Facebook, Inc. (http://www.facebook.com)  |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -13,16 +13,18 @@
    | license@php.net so we can mail you a copy immediately.               |
    +----------------------------------------------------------------------+
 */
-#ifndef incl_HPHP_AUTOLOAD_HANDLER_H_
-#define incl_HPHP_AUTOLOAD_HANDLER_H_
+#pragma once
 
+#include <memory>
 #include <utility>
 
+#include "hphp/runtime/base/autoload-map.h"
+#include "hphp/runtime/base/execution-context.h"
 #include "hphp/runtime/base/req-deque.h"
 #include "hphp/runtime/base/request-event-handler.h"
 #include "hphp/runtime/base/type-variant.h"
 #include "hphp/runtime/base/type-array.h"
-#include "hphp/runtime/base/request-local.h"
+#include "hphp/util/rds-local.h"
 
 namespace HPHP {
 
@@ -30,135 +32,124 @@ namespace HPHP {
 
 bool is_valid_class_name(folly::StringPiece className);
 
+struct RepoAutoloadMap;
+
 struct AutoloadHandler final : RequestEventHandler {
-private:
-  enum Result {
-    Failure,
-    Success,
-    StopAutoloading,
-    ContinueAutoloading,
-    RetryAutoloading
-  };
 
-  struct HandlerBundle {
-    HandlerBundle() = delete;
-    HandlerBundle(const Variant& handler,
-                  req::unique_ptr<CufIter>& cufIter) :
-      m_handler(handler) {
-      m_cufIter = std::move(cufIter);
+  /*
+   * RAII helper to prevent autoloading within a particular scope.
+   */
+  struct Inhibit {
+    Inhibit(bool suppress = true)
+      : prev(s_suppressAutoloading ? *s_suppressAutoloading : false)
+    {
+      *s_suppressAutoloading = suppress;
     }
-    Variant m_handler; // used to respond to f_spl_autoload_functions
-    req::unique_ptr<CufIter> m_cufIter; // used to invoke handlers
+    ~Inhibit() { *s_suppressAutoloading = prev; }
+
+    Inhibit(Inhibit&&) = delete;
+    Inhibit& operator=(Inhibit&&) = delete;
+
+  private:
+    bool prev;
   };
 
-  struct CompareBundles {
-    explicit CompareBundles(CufIter* cufIter) : m_cufIter(cufIter) { }
-    bool operator()(const HandlerBundle& hb);
-   private:
-    CufIter* m_cufIter;
-  };
-
-public:
-  AutoloadHandler() { }
-
-  ~AutoloadHandler() {
-    m_map.detach();
-    m_map_root.detach();
-    // m_handlers won't run a destructor so nothing to do here
-    m_loading.detach();
-  }
+  AutoloadHandler() = default;
+  AutoloadHandler(const AutoloadHandler&) = delete;
+  AutoloadHandler(AutoloadHandler&&) = delete;
+  AutoloadHandler& operator=(const AutoloadHandler&) = delete;
+  AutoloadHandler& operator=(AutoloadHandler&&) noexcept = delete;
+  ~AutoloadHandler() = default;
 
   void requestInit() override;
   void requestShutdown() override;
 
-  Array getHandlers();
-  bool addHandler(const Variant& handler, bool prepend);
-  void removeHandler(const Variant& handler);
-  void removeAllHandlers();
-  bool isRunning();
-
-  bool autoloadClass(const String& className, bool forceSplStack = false);
-  bool autoloadClassPHP5Impl(const String& className, bool forceSplStack);
-
   /**
-   * autoloadClassOrType() tries to autoload either a class or a type alias
-   * with the specified name. This method avoids calling the failure callback
-   * until one of the following happens: (1) we tried to autoload the specified
-   * name from both the 'class' and 'type' maps but for each map either nothing
-   * was found or the file we included did not define a class or type alias
-   * with the specified name, or (2) there was an uncaught exception or fatal
-   * error during an include operation.
+   * autoloadTypeOrTypeAlias() tries to autoload either a type or a type
+   * alias with the specified name.
    */
-  bool autoloadClassOrType(const String& className);
+  bool autoloadTypeOrTypeAlias(const OptString& className);
 
+  bool autoloadType(const OptString& className);
   bool autoloadFunc(StringData* name);
   bool autoloadConstant(StringData* name);
-  bool autoloadType(const String& name);
-  bool setMap(const Array& map, const String& root);
-  DECLARE_STATIC_REQUEST_LOCAL(AutoloadHandler, s_instance);
+  bool autoloadTypeAlias(const OptString& name);
+  bool autoloadModule(StringData* name);
+  static RDS_LOCAL(AutoloadHandler, s_instance);
 
-private:
-  /**
-   * This method may return Success or Failure.
-   */
-  template <class T>
-  Result loadFromMapImpl(const String& name, const String& kind, bool toLower,
-                         const T &checkExists, Variant& err);
-
-  /**
-   * This method may return ContinueAutoloading, StopAutoloading, or
-   * RetryAutoloading.
-   */
-  Result invokeFailureCallback(const_variant_ref func, const String& kind,
-                               const String& name, const Variant& err);
-
-  /**
-   * loadFromMap() will call the failure callback if the specified name is not
-   * present in the specified map, or if there is an entry in the map but there
-   * was an error during the include operation. loadFromMap() will also retry
-   * loading the specified name from the map if the failure callback returned
-   * boolean true. Note that calling this method may throw if the failure
-   * callback throws an exception or raises a fatal error.
-   *
-   * This method may return Success, Failure, ContinueAutoloading, or
-   * StopAutoloading. If the failure callback was called, this method will not
-   * return Failure.
-   */
-  template <class T>
-  Result loadFromMap(const String& name, const String& kind, bool toLower,
-                     const T &checkExists);
-
-  /**
-   * loadFromMapPartial() will call the failure callback if there is an error
-   * during the include operation, but otherwise it will not call the failure
-   * callback.
-   *
-   * This method may return Success, Failure, ContinueAutoloading,
-   * StopAutoloading, or RetryAutoloading. If the failure callback was called,
-   * this method will not return Failure.
-   */
-  template <class T>
-  Result loadFromMapPartial(const String& className, const String& kind,
-                            bool toLower, const T &checkExists, Variant& err);
-
-  static String getSignature(const Variant& handler);
-
-private:
-  Array m_map;
-  String m_map_root;
-  bool m_spl_stack_inited{false};
-  union {
-    req::deque<HandlerBundle> m_handlers;
-  };
-  bool m_handlers_valid{false};
-  Array m_loading;
-  TYPE_SCAN_CUSTOM_FIELD(m_handlers) {
-    if (m_handlers_valid) { scanner.scan(m_handlers); }
+  const AutoloadMap* getAutoloadMap() const {
+    return m_map;
   }
+
+  AutoloadMap* getAutoloadMap() {
+    return m_map;
+  }
+
+  FactsStore* getFacts() {
+    return m_facts;
+  }
+
+  Optional<AutoloadMap::FileResult> getFile(const OptString& name,
+                                            AutoloadMap::KindOf kind);
+
+  static void setRepoAutoloadMap(std::unique_ptr<RepoAutoloadMap>);
+
+private:
+  /**
+   * This method may return true on success or false on failure.
+   */
+  template <class T>
+  bool loadFromMapImpl(const OptString& name, AutoloadMap::KindOf kind,
+                       const T &checkExists, Variant& err);
+
+  /**
+   * This method attempts to load the unit containing the given symbol,
+   * and will return true on success.
+   */
+  template <class T>
+  bool loadFromMap(const OptString& name, AutoloadMap::KindOf kind,
+                   const T &checkExists);
+
+private:
+
+  // The value of m_map determines which data structure, if any, we'll be
+  // using for autoloading within this request. m_map may have the same value
+  // as m_facts, a statically-scoped native AutoloadMap that can answer
+  // queries (aka Facts) about the codebase.
+  FactsStore* m_facts = nullptr;
+  AutoloadMap* m_map = nullptr;
+
+  // When true disables the various autoload functions. The map itself remains
+  // accessible.
+  static RDS_LOCAL(bool, s_suppressAutoloading);
+
+  static std::unique_ptr<RepoAutoloadMap> s_repoAutoloadMap;
 };
 
 //////////////////////////////////////////////////////////////////////
 
-}
+/**
+ * Set this inside of an extension's moduleLoad() to provide an
+ * implementation for a native AutoloadMap/Facts.
+ */
+struct FactsFactory {
 
-#endif
+  static FactsFactory* getInstance();
+  static void setInstance(FactsFactory* instance);
+
+  FactsFactory() = default;
+  FactsFactory(const FactsFactory&) = default;
+  FactsFactory(FactsFactory&&) noexcept = default;
+  FactsFactory& operator=(const FactsFactory&) = default;
+  FactsFactory& operator=(FactsFactory&&) noexcept = default;
+  virtual ~FactsFactory() = default;
+
+  /**
+   * Return a Facts corresponding to the given options. If one doesn't exist
+   * yet, create it.
+   */
+  virtual FactsStore* getForOptions(const RepoOptions& options) = 0;
+  virtual bool canFork() const { return true; }
+};
+
+}

@@ -1,6 +1,6 @@
-<?php
+<?hh
 
-function foo() {
+function foo() :mixed{
   try {
     try {
       throw new Exception("foo");
@@ -11,4 +11,8 @@ function foo() {
     var_dump("oops");
   }
 }
+
+<<__EntryPoint>>
+function main_catch_outside() :mixed{
 foo();
+}

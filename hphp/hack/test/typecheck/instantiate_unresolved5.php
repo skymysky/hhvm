@@ -12,8 +12,8 @@
 function any() {
 }
 
-function arr<T>(array<T> $x): array<array<T>> {
-  return array($x);
+function arr<T>(varray<T> $x): varray<varray<T>> {
+  return vec[$x];
 }
 
 function f(): void {

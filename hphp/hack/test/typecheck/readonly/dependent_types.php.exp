@@ -1,0 +1,50 @@
+error: Typing[4409] This value is readonly, its properties cannot be modified [1]
+
+dependent_types.php:13:5
+11 |   public function foo(this::T $x) : void {
+12 |     // error $this->foo is readonly
+13 |     $this->foo->bar = readonly new Bar();
+   |     ^^^^^^^^^^ [1]
+14 |     // error bar is mutable prop
+15 |     $x->bar = readonly new Bar();
+
+error: Typing[4411] Invalid property assignment [1]
+-> This expression is readonly [2]
+-> But it's being assigned to a mutable property [3]
+
+dependent_types.php:13:5
+ 6 |   public function __construct(
+ 7 |     public readonly this::T $foo,
+ 8 |     public Bar $bar,
+   |            ^^^ [3]
+ 9 |     public readonly Bar $ro_bar
+10 |   ) {}
+11 |   public function foo(this::T $x) : void {
+12 |     // error $this->foo is readonly
+13 |     $this->foo->bar = readonly new Bar();
+   |     ^^^^^^^^^^^^^^^ [1]
+   |                       ^^^^^^^^^^^^^^^^^^ [2]
+14 |     // error bar is mutable prop
+15 |     $x->bar = readonly new Bar();
+
+error: Typing[4411] Invalid property assignment [1]
+-> This expression is readonly [2]
+-> But it's being assigned to a mutable property [3]
+
+dependent_types.php:15:5
+ 6 |   public function __construct(
+ 7 |     public readonly this::T $foo,
+ 8 |     public Bar $bar,
+   |            ^^^ [3]
+ 9 |     public readonly Bar $ro_bar
+10 |   ) {}
+   :
+13 |     $this->foo->bar = readonly new Bar();
+14 |     // error bar is mutable prop
+15 |     $x->bar = readonly new Bar();
+   |     ^^^^^^^ [1]
+   |               ^^^^^^^^^^^^^^^^^^ [2]
+16 |     // ok
+17 |     $x->ro_bar = readonly new Bar();
+
+3 errors found

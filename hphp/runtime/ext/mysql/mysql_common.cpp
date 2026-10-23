@@ -19,47 +19,40 @@
 
 #include <algorithm>
 #include <cassert>
-#include <unordered_set>
 #include <vector>
 
 #include <folly/Conv.h>
-#include <folly/ScopeGuard.h>
-#include <folly/String.h>
+#include <fmt/core.h>
 #include <folly/portability/Sockets.h>
 
 #include "hphp/util/network.h"
+#include "hphp/util/rds-local.h"
 #include "hphp/util/text-util.h"
 #include "hphp/util/timer.h"
 
 #include "hphp/system/systemlib.h"
 
+#include "hphp/runtime/base/array-iterator.h"
 #include "hphp/runtime/base/builtin-functions.h"
 #include "hphp/runtime/base/comparisons.h"
 #include "hphp/runtime/base/extended-logger.h"
 #include "hphp/runtime/base/preg.h"
-#include "hphp/runtime/base/request-local.h"
 #include "hphp/runtime/base/runtime-option.h"
 #include "hphp/runtime/base/socket.h"
-#include "hphp/runtime/base/tv-refcount.h"
 #include "hphp/runtime/vm/jit/translator-inline.h"
 #include "hphp/runtime/vm/native-data.h"
 
 #include "hphp/runtime/ext/mysql/ext_mysql.h"
 #include "hphp/runtime/ext/mysql/mysql_stats.h"
-#include "hphp/runtime/ext/pcre/ext_pcre.h"
 #include "hphp/runtime/ext/std/ext_std_network.h"
 #include "hphp/runtime/server/server-stats.h"
 
-#ifdef ENABLE_ASYNC_MYSQL
 #include "hphp/runtime/ext/async_mysql/ext_async_mysql.h"
-#endif
 
 
 namespace HPHP {
 
-#ifdef ENABLE_ASYNC_MYSQL
 using facebook::common::mysql_client::SSLOptionsProviderBase;
-#endif
 
 const StaticString s_mysqli_result("mysqli_result");
 
@@ -75,13 +68,6 @@ static MySQLStaticInitializer s_mysql_initializer;
 int MySQLUtil::set_mysql_timeout(MYSQL *mysql,
                                  MySQLUtil::TimeoutType type,
                                  int ms) {
-#ifdef __APPLE__
-  // Work around a bug in webscalesql where setting a read or write timeout
-  // causes most mysql connections to fail (depending on the exact timing of
-  // packets). See https://github.com/webscalesql/webscalesql-5.6/issues/23
-  return 0;
-#endif
-
   mysql_option opt = MYSQL_OPT_CONNECT_TIMEOUT;
 #ifdef MYSQL_MILLISECOND_TIMEOUT
   switch (type) {
@@ -141,8 +127,8 @@ MYSQL* MySQL::GetConn(const Variant& link_identifier,
     raise_warning("supplied argument is not a valid MySQL-Link resource");
   }
   // Don't return a connection where mysql_real_connect() failed to most
-  // f_mysql_* APIs (the ones that deal with errno where we do want to do this
-  // anyway use MySQL::Get instead) as mysqlclient doesn't support passing
+  // native mysql_* APIs (the ones that deal with errno where we do want to do
+  // this anyway use MySQL::Get instead) as mysqlclient doesn't support passing
   // connections in that state and it can crash.
   if (mySQL && mySQL->m_last_error_set) {
     ret = nullptr;
@@ -173,22 +159,22 @@ int MySQL::GetDefaultPort() {
     } else {
       Variant ret = HHVM_FN(getservbyname)("mysql", "tcp");
       if (!same(ret, false)) {
-        s_default_port = ret.toInt16();
+        s_default_port = (short)ret.toInt64();
       }
     }
   }
   return s_default_port;
 }
 
-String MySQL::GetDefaultSocket() {
+OptString MySQL::GetDefaultSocket() {
   if (!mysqlExtension::Socket.empty()) {
     return mysqlExtension::Socket;
   }
   return MYSQL_UNIX_ADDR;
 }
 
-std::string MySQL::GetHash(const String& host, int port, const String& socket,
-                           const String& username, const String& password,
+std::string MySQL::GetHash(const OptString& host, int port, const OptString& socket,
+                           const OptString& username, const OptString& password,
                            int client_flags) {
   char buf[1024];
   snprintf(buf, sizeof(buf), "%s:%d:%s:%s:%s:%d",
@@ -198,31 +184,31 @@ std::string MySQL::GetHash(const String& host, int port, const String& socket,
 }
 
 namespace {
-thread_local std::unordered_map<std::string,
-                                std::shared_ptr<MySQL>> s_connections;
+using StorageT = std::unordered_map<std::string, std::shared_ptr<MySQL>>;
+RDS_LOCAL(StorageT, s_connections);
 }
 
-std::shared_ptr<MySQL> MySQL::GetCachedImpl(const String& host, int port,
-                                            const String& socket,
-                                            const String& username,
-                                            const String& password,
+std::shared_ptr<MySQL> MySQL::GetCachedImpl(const OptString& host, int port,
+                                            const OptString& socket,
+                                            const OptString& username,
+                                            const OptString& password,
                                             int client_flags) {
   auto key = GetHash(host, port, socket, username, password, client_flags);
-  return s_connections[key];
+  return (*s_connections)[key];
 }
 
-void MySQL::SetCachedImpl(const String& host, int port,
-                          const String& socket,
-                          const String& username,
-                          const String& password,
+void MySQL::SetCachedImpl(const OptString& host, int port,
+                          const OptString& socket,
+                          const OptString& username,
+                          const OptString& password,
                           int client_flags,
                           std::shared_ptr<MySQL> conn) {
   auto key = GetHash(host, port, socket, username, password, client_flags);
-  s_connections[key] = conn;
+  (*s_connections)[key] = conn;
 }
 
 size_t MySQL::NumCachedConnections() {
-  return s_connections.size();
+  return s_connections->size();
 }
 
 std::shared_ptr<MySQL> MySQL::GetDefaultConn() {
@@ -316,9 +302,9 @@ void MySQL::close() {
   m_state = MySQLState::CLOSED;
 }
 
-bool MySQL::connect(const String& host, int port, const String& socket,
-                    const String& username, const String& password,
-                    const String& database, int client_flags,
+bool MySQL::connect(const OptString& host, int port, const OptString& socket,
+                    const OptString& username, const OptString& password,
+                    const OptString& database, int client_flags,
                     int connect_timeout) {
   if (m_conn == nullptr) {
     m_conn = create_new_conn();
@@ -327,7 +313,7 @@ bool MySQL::connect(const String& host, int port, const String& socket,
     MySQLUtil::set_mysql_timeout(m_conn, MySQLUtil::ConnectTimeout,
                                  connect_timeout);
   }
-  if (RuntimeOption::EnableStats && RuntimeOption::EnableSQLStats) {
+  if (Cfg::Stats::Enable && Cfg::Stats::SQL) {
     ServerStats::Log("sql.conn", 1);
   }
   IOStatusHelper io("mysql::connect", host.data(), port);
@@ -345,8 +331,8 @@ bool MySQL::connect(const String& host, int port, const String& socket,
                             socket.empty() ? nullptr : socket.data(),
                             client_flags);
   if (ret && mysqlExtension::WaitTimeout > 0) {
-    String query("set session wait_timeout=");
-    query += String((int64_t)(mysqlExtension::WaitTimeout / 1000));
+    OptString query("set session wait_timeout=");
+    query += OptString::FromInt64((int64_t)(mysqlExtension::WaitTimeout / 1000));
     if (mysql_real_query(m_conn, query.data(), query.size())) {
       raise_notice("MySQL::connect: failed setting session wait timeout: %s",
                    mysql_error(m_conn));
@@ -356,9 +342,9 @@ bool MySQL::connect(const String& host, int port, const String& socket,
   return ret;
 }
 
-bool MySQL::reconnect(const String& host, int port, const String& socket,
-                      const String& username, const String& password,
-                      const String& database, int client_flags,
+bool MySQL::reconnect(const OptString& host, int port, const OptString& socket,
+                      const OptString& username, const OptString& password,
+                      const OptString& database, int client_flags,
                       int connect_timeout) {
   bool ret = false;
   if (m_conn == nullptr) {
@@ -367,7 +353,7 @@ bool MySQL::reconnect(const String& host, int port, const String& socket,
       MySQLUtil::set_mysql_timeout(m_conn, MySQLUtil::ConnectTimeout,
                                    connect_timeout);
     }
-    if (RuntimeOption::EnableStats && RuntimeOption::EnableSQLStats) {
+    if (Cfg::Stats::Enable && Cfg::Stats::SQL) {
       ServerStats::Log("sql.reconn_new", 1);
     }
     IOStatusHelper io("mysql::connect", host.data(), port);
@@ -376,7 +362,7 @@ bool MySQL::reconnect(const String& host, int port, const String& socket,
                              (database.empty() ? nullptr : database.data()),
                              port, socket.data(), client_flags);
   } else if (m_state == MySQLState::CONNECTED && !mysql_ping(m_conn)) {
-    if (RuntimeOption::EnableStats && RuntimeOption::EnableSQLStats) {
+    if (Cfg::Stats::Enable && Cfg::Stats::SQL) {
       ServerStats::Log("sql.reconn_ok", 1);
     }
     if (!database.empty()) {
@@ -388,7 +374,7 @@ bool MySQL::reconnect(const String& host, int port, const String& socket,
       MySQLUtil::set_mysql_timeout(m_conn, MySQLUtil::ConnectTimeout,
                                    connect_timeout);
     }
-    if (RuntimeOption::EnableStats && RuntimeOption::EnableSQLStats) {
+    if (Cfg::Stats::Enable && Cfg::Stats::SQL) {
       ServerStats::Log("sql.reconn_old", 1);
     }
     IOStatusHelper io("mysql::connect", host.data(), port);
@@ -425,7 +411,7 @@ req::ptr<MySQLResult> php_mysql_extract_result_helper(const T& result) {
 
 }
 
-req::ptr<MySQLResult> php_mysql_extract_result(const Resource& result) {
+req::ptr<MySQLResult> php_mysql_extract_result(const OptResource& result) {
   return php_mysql_extract_result_helper(result);
 }
 
@@ -479,7 +465,7 @@ const char *php_mysql_get_field_name(int field_type) {
   return "unknown";
 }
 
-Variant php_mysql_field_info(const Resource& result, int field,
+Variant php_mysql_field_info(const OptResource& result, int field,
                              int entry_type) {
   auto res = php_mysql_extract_result(result);
   if (!res) return false;
@@ -570,7 +556,7 @@ Variant php_mysql_field_info(const Resource& result, int field,
         len--;
       }
 
-      return String(buf, len, CopyString);
+      return OptString(buf, len, CopyString);
     }
   default:
     break;
@@ -579,13 +565,12 @@ Variant php_mysql_field_info(const Resource& result, int field,
 }
 
 Variant php_mysql_do_connect(
-    const String& server,
-    const String& username,
-    const String& password,
-    const String& database,
+    const OptString& server,
+    const OptString& username,
+    const OptString& password,
+    const OptString& database,
     int client_flags,
     bool persistent,
-    bool async,
     int connect_timeout_ms,
     int query_timeout_ms,
     const Array* conn_attrs) {
@@ -597,30 +582,39 @@ Variant php_mysql_do_connect(
       database,
       client_flags,
       persistent,
-      async,
       connect_timeout_ms,
       query_timeout_ms,
       conn_attrs);
 }
 
 Variant php_mysql_do_connect_with_ssl(
-    const String& server,
-    const String& username,
-    const String& password,
-    const String& database,
+    const OptString& server,
+    const OptString& username,
+    const OptString& password,
+    const OptString& database,
     int client_flags,
     int connect_timeout_ms,
     int query_timeout_ms,
     const Array* conn_attrs /* = nullptr */,
     const Variant& sslContextProvider /* = null */) {
-#ifdef ENABLE_ASYNC_MYSQL
   std::shared_ptr<SSLOptionsProviderBase> ssl_provider;
+
   if (!sslContextProvider.isNull()) {
+    auto ctx = sslContextProvider.toObject();
+    if (!ctx.instanceof(MySSLContextProvider::className())) {
+       SystemLib::throwInvalidArgumentExceptionObject(
+         fmt::format(
+           "Invalid argument. Expected {}, received {}",
+           MySSLContextProvider::className().c_str(),
+           ctx->getClassName().c_str()
+         )
+       );
+    }
+
     auto* obj =
-        Native::data<HPHP::MySSLContextProvider>(sslContextProvider.toObject());
+        Native::data<HPHP::MySSLContextProvider>(ctx);
     ssl_provider = obj->getSSLProvider();
   }
-#endif
 
   return php_mysql_do_connect_on_link(
       nullptr,
@@ -630,17 +624,13 @@ Variant php_mysql_do_connect_with_ssl(
       database,
       client_flags,
       false,
-      false,
       connect_timeout_ms,
       query_timeout_ms,
-      conn_attrs
-#ifdef ENABLE_ASYNC_MYSQL
-      , ssl_provider
-#endif
+      conn_attrs,
+      ssl_provider
   );
 }
 
-#ifdef ENABLE_ASYNC_MYSQL
 static void mysql_set_ssl_options(
     std::shared_ptr<MySQL> mySQL,
     std::shared_ptr<SSLOptionsProviderBase> ssl_provider) {
@@ -649,10 +639,9 @@ static void mysql_set_ssl_options(
   }
   ssl_provider->setMysqlSSLOptions(mySQL->get());
 }
-#endif
 
-static void mysql_set_conn_attr(MYSQL* mysql, const String& key,
-                                const String& value) {
+static void mysql_set_conn_attr(MYSQL* mysql, const OptString& key,
+                                const OptString& value) {
   if (key.empty()) {
     raise_warning("MySQL: Invalid connection attribute - empty key");
   }
@@ -674,7 +663,8 @@ static void mysql_set_conn_attrs(
 
   for (auto itr = conn_attrs->begin(); !itr.end(); itr.next()) {
     const auto& key = itr.first();
-    const auto& value = itr.secondRef();
+    const auto tv = itr.secondVal();
+    const auto value = tvAsCVarRef(tv);
     if (!key.isString()) {
       raise_warning(
           "MySQL: Invalid connection attribute - key is not a string");
@@ -691,7 +681,6 @@ static void mysql_set_conn_attrs(
   }
 }
 
-#ifdef ENABLE_ASYNC_MYSQL
 static void mysql_store_ssl_session(
     std::shared_ptr<MySQL> mySQL,
     std::shared_ptr<SSLOptionsProviderBase> ssl_provider) {
@@ -700,23 +689,19 @@ static void mysql_store_ssl_session(
   }
   ssl_provider->storeMysqlSSLSession(mySQL->get());
 }
-#endif
 
 Variant php_mysql_do_connect_on_link(
     std::shared_ptr<MySQL> mySQL,
-    String server,
-    String username,
-    String password,
-    String database,
+    OptString server,
+    OptString username,
+    OptString password,
+    OptString database,
     int client_flags,
     bool persistent,
-    bool async,
     int connect_timeout_ms,
     int query_timeout_ms,
-    const Array *conn_attrs
-#ifdef ENABLE_ASYNC_MYSQL
-    , std::shared_ptr<SSLOptionsProviderBase> ssl_provider
-#endif
+    const Array *conn_attrs,
+    std::shared_ptr<SSLOptionsProviderBase> ssl_provider
 ) {
   if (connect_timeout_ms < 0) {
     connect_timeout_ms = mysqlExtension::ConnectTimeout;
@@ -731,7 +716,7 @@ Variant php_mysql_do_connect_on_link(
 
   // server format: hostname[:port][:/path/to/socket]
   // ipv6 hostname:port is of the form [1:2:3:4:5]:port
-  String host, socket;
+  OptString host, socket;
   int port;
   int savePersistent = false;
 
@@ -781,30 +766,15 @@ Variant php_mysql_do_connect_on_link(
     mysql_set_conn_attrs(mySQL, conn_attrs);
   }
 
-#ifdef ENABLE_ASYNC_MYSQL
   // set SSL Options
   mysql_set_ssl_options(mySQL, ssl_provider);
-#endif
 
   if (mySQL->getState() == MySQLState::INITED) {
-    if (async) {
-#ifdef FACEBOOK
-      if (!mySQL->async_connect(host, port, socket, username, password,
-                                database)) {
-        MySQL::SetDefaultConn(mySQL); // so we can report errno by mysql_errno()
-        mySQL->setLastError("mysql_real_connect_nonblocking_init");
-        return false;
-      }
-#else
-      throw_not_implemented("mysql_async_connect_start");
-#endif
-    } else {
-      if (!mySQL->connect(host, port, socket, username, password,
-                          database, client_flags, connect_timeout_ms)) {
-        MySQL::SetDefaultConn(mySQL); // so we can report errno by mysql_errno()
-        mySQL->setLastError("mysql_connect");
-        return false;
-      }
+    if (!mySQL->connect(host, port, socket, username, password,
+                        database, client_flags, connect_timeout_ms)) {
+      MySQL::SetDefaultConn(mySQL); // so we can report errno by mysql_errno()
+      mySQL->setLastError("mysql_connect");
+      return false;
     }
   } else {
     if (!MySQL::IsAllowReconnect()) {
@@ -819,10 +789,8 @@ Variant php_mysql_do_connect_on_link(
     }
   }
 
-#ifdef ENABLE_ASYNC_MYSQL
   // store SSL Session
   mysql_store_ssl_session(mySQL, ssl_provider);
-#endif
 
   if (savePersistent) {
     MySQL::SetPersistent(
@@ -883,12 +851,12 @@ void MySQLResult::setFieldCount(int64_t fields) {
 
 void MySQLResult::setFieldInfo(int64_t f, MYSQL_FIELD *field) {
   MySQLFieldInfo &info = m_fields[f];
-  info.name       = String(field->name, CopyString);
-  info.org_name   = String(field->org_name, CopyString);
-  info.table      = String(field->table, CopyString);
-  info.org_table  = String(field->org_table, CopyString);
-  info.def        = String(field->def, CopyString);
-  info.db         = String(field->db, CopyString);
+  info.name       = OptString(field->name, CopyString);
+  info.org_name   = OptString(field->org_name, CopyString);
+  info.table      = OptString(field->table, CopyString);
+  info.org_table  = OptString(field->org_table, CopyString);
+  info.def        = OptString(field->def, CopyString);
+  info.db         = OptString(field->db, CopyString);
   info.max_length = (int64_t)field->max_length;
   info.length     = (int64_t)field->length;
   info.type       = (int)field->type;
@@ -994,207 +962,6 @@ MySQLFieldInfo *MySQLResult::fetchFieldInfo() {
   return getFieldInfo(m_current_field);
 }
 
-
-///////////////////////////////////////////////////////////////////////////////
-// MySQLStmtVariables
-
-MySQLStmtVariables::MySQLStmtVariables(const Array& arr): m_arr(arr) {
-  int count = m_arr.size();
-  m_vars   = req::calloc_raw_array<MYSQL_BIND>(count);
-  m_null   = req::calloc_raw_array<my_bool>(count);
-  m_length = req::calloc_raw_array<unsigned long>(count);
-
-  for (int i = 0; i < count; i++) {
-    m_null[i] = false;
-    m_length[i] = 0;
-
-    MYSQL_BIND *b = &m_vars[i];
-    b->is_null = &m_null[i];
-    b->length  = &m_length[i];
-    b->buffer = nullptr;
-    b->buffer_length = 0;
-    b->buffer_type = MYSQL_TYPE_STRING;
-  }
-}
-
-MySQLStmtVariables::~MySQLStmtVariables() {
-  for (int i = 0; i < m_arr.size(); i++) {
-    auto buf = &m_vars[i];
-    if (buf->buffer_length > 0) {
-      req::free(buf->buffer);
-    }
-  }
-
-  req::free(m_vars);
-  req::free(m_null);
-  req::free(m_length);
-}
-
-bool MySQLStmtVariables::bind_result(MYSQL_STMT *stmt) {
-  assertx(m_arr.size() == mysql_stmt_field_count(stmt));
-
-  MYSQL_RES *res = mysql_stmt_result_metadata(stmt);
-  MYSQL_FIELD *fields = mysql_fetch_fields(res);
-  for(int i = 0; i < m_arr.size(); i++) {
-    MYSQL_BIND *b = &m_vars[i];
-    b->is_unsigned = (fields[i].flags & UNSIGNED_FLAG) ? 1 : 0;
-
-    switch (fields[i].type) {
-      case MYSQL_TYPE_NULL:
-        b->buffer_type = MYSQL_TYPE_NULL;
-      case MYSQL_TYPE_DOUBLE:
-      case MYSQL_TYPE_FLOAT:
-        b->buffer_type = MYSQL_TYPE_DOUBLE;
-        b->buffer_length = sizeof(double);
-        break;
-      case MYSQL_TYPE_LONGLONG:
-#if MYSQL_VERSION_ID > 50002
-      case MYSQL_TYPE_BIT:
-#endif
-      case MYSQL_TYPE_LONG:
-      case MYSQL_TYPE_INT24:
-      case MYSQL_TYPE_SHORT:
-      case MYSQL_TYPE_YEAR:
-      case MYSQL_TYPE_TINY:
-        b->buffer_type = MYSQL_TYPE_LONGLONG;
-        b->buffer_length = sizeof(int64_t);
-        break;
-      case MYSQL_TYPE_DATE:
-      case MYSQL_TYPE_NEWDATE:
-      case MYSQL_TYPE_DATETIME:
-      case MYSQL_TYPE_TIMESTAMP:
-      case MYSQL_TYPE_TIME:
-      case MYSQL_TYPE_STRING:
-      case MYSQL_TYPE_VARCHAR:
-      case MYSQL_TYPE_VAR_STRING:
-      case MYSQL_TYPE_ENUM:
-      case MYSQL_TYPE_SET:
-      case MYSQL_TYPE_LONG_BLOB:
-      case MYSQL_TYPE_MEDIUM_BLOB:
-      case MYSQL_TYPE_BLOB:
-      case MYSQL_TYPE_TINY_BLOB:
-      case MYSQL_TYPE_GEOMETRY:
-      case MYSQL_TYPE_DECIMAL:
-      case MYSQL_TYPE_NEWDECIMAL:
-        b->buffer_type = MYSQL_TYPE_STRING;
-        b->buffer_length = fields[i].max_length ?
-                             fields[i].max_length :
-                             fields[i].length;
-        break;
-      default:
-        // There exists some more types in this enum like MYSQL_TYPE_TIMESTAMP2,
-        // MYSQL_TYPE_DATETIME2, MYSQL_TYPE_TIME2 but they are just used on the
-        // server
-        assertx(false);
-    }
-
-    if (b->buffer_length > 0) {
-      b->buffer = req::calloc_untyped(b->buffer_length, 1);
-    }
-  }
-  mysql_free_result(res);
-
-  return !mysql_stmt_bind_result(stmt, m_vars);
-}
-
-void MySQLStmtVariables::update_result() {
-  for (int i = 0; i < m_arr.size(); i++) {
-    MYSQL_BIND *b = &m_vars[i];
-    Variant v;
-
-    if (!*b->is_null && b->buffer_type != MYSQL_TYPE_NULL) {
-      switch (b->buffer_type) {
-        case MYSQL_TYPE_DOUBLE:
-          v = *(double*)b->buffer;
-          break;
-        case MYSQL_TYPE_LONGLONG:
-          v = *(int64_t*)b->buffer;
-          break;
-        case MYSQL_TYPE_STRING:
-          v = String((char *)b->buffer, *b->length, CopyString);
-          break;
-        default:
-          // We never ask for anything else than DOUBLE, LONGLONG and STRING
-          // so in the case we get something else back something is really wrong
-          assertx(false);
-      }
-    }
-
-    tvSet(*v.asTypedValue(), m_arr.lvalAt(i));
-  }
-}
-
-bool MySQLStmtVariables::init_params(MYSQL_STMT *stmt, const String& types) {
-  assertx(m_arr.size() == types.size());
-
-  for (int i = 0; i < types.size(); i++) {
-    MYSQL_BIND *b = &m_vars[i];
-    switch (types[i]) {
-      case 'i':
-        b->buffer_type = MYSQL_TYPE_LONGLONG;
-        break;
-      case 'd':
-        b->buffer_type = MYSQL_TYPE_DOUBLE;
-        break;
-      case 's':
-        b->buffer_type = MYSQL_TYPE_STRING;
-        break;
-      case 'b':
-        b->buffer_type = MYSQL_TYPE_LONG_BLOB;
-        break;
-      default:
-        assertx(false);
-    }
-  }
-
-  return !mysql_stmt_bind_param(stmt, m_vars);
-}
-
-bool MySQLStmtVariables::bind_params(MYSQL_STMT *stmt) {
-  m_value_arr.clear();
-  for (int i = 0; i < m_arr.size(); i++) {
-    MYSQL_BIND *b = &m_vars[i];
-    auto const var = m_arr.lvalAt(i).unboxed();
-    Variant v;
-    if (isNullType(var.type())) {
-      *b->is_null = 1;
-    } else {
-      switch (b->buffer_type) {
-        case MYSQL_TYPE_LONGLONG:
-          {
-            m_value_arr.push_back(cellToInt(var.tv()));
-            b->buffer = m_value_arr.back().getInt64Data();
-          }
-          break;
-        case MYSQL_TYPE_DOUBLE:
-          {
-            m_value_arr.push_back(tvCastToDouble(var.tv()));
-            b->buffer = m_value_arr.back().getDoubleData();
-          }
-          break;
-        case MYSQL_TYPE_STRING:
-          {
-            m_value_arr.push_back(tvCastToString(var.tv()));
-            StringData *sd = m_value_arr.back().getStringData();
-            b->buffer = (void *)sd->data();
-            // FIXME: setting buffer_length will cause the destructor to free
-            // memory owned by the string
-            *b->length = sd->size();
-          }
-          break;
-        case MYSQL_TYPE_LONG_BLOB:
-          // The value are set using send_long_data so we don't have to do
-          // anything here
-          break;
-        default:
-          assertx(false);
-      }
-    }
-  }
-
-  return !mysql_stmt_bind_param(stmt, m_vars);
-}
-
 ///////////////////////////////////////////////////////////////////////////////
 // MySQLStmt
 
@@ -1258,20 +1025,6 @@ Variant MySQLStmt::attr_set(int64_t attr, int64_t value) {
   return !mysql_stmt_attr_set(m_stmt, (enum_stmt_attr_type)attr, &value);
 }
 
-Variant MySQLStmt::bind_param(const String& types, const Array& vars) {
-  VALIDATE_PREPARED
-
-  m_param_vars = req::make_unique<MySQLStmtVariables>(vars);
-  return m_param_vars->init_params(m_stmt, types);
-}
-
-Variant MySQLStmt::bind_result(const Array& vars) {
-  VALIDATE_PREPARED
-
-  m_result_vars = req::make_unique<MySQLStmtVariables>(vars);
-  return m_result_vars->bind_result(m_stmt);
-}
-
 Variant MySQLStmt::data_seek(int64_t offset) {
   VALIDATE_PREPARED
 
@@ -1286,7 +1039,7 @@ Variant MySQLStmt::get_errno() {
 
 Variant MySQLStmt::get_error() {
   VALIDATE_STMT
-  return String(mysql_stmt_error(m_stmt), CopyString);
+  return OptString(mysql_stmt_error(m_stmt), CopyString);
 }
 
 Variant MySQLStmt::close() {
@@ -1303,10 +1056,6 @@ Variant MySQLStmt::close() {
 Variant MySQLStmt::execute() {
   VALIDATE_PREPARED
 
-  if (m_param_vars) {
-    m_param_vars->bind_params(m_stmt);
-  }
-
   return !mysql_stmt_execute(m_stmt);
 }
 
@@ -1321,10 +1070,6 @@ Variant MySQLStmt::fetch() {
 
   if (ret) {
     return false;
-  }
-
-  if (m_result_vars) {
-    m_result_vars->update_result();
   }
 
   return true;
@@ -1355,12 +1100,8 @@ Variant MySQLStmt::param_count() {
   return (int64_t)mysql_stmt_param_count(m_stmt);
 }
 
-Variant MySQLStmt::prepare(const String& query) {
+Variant MySQLStmt::prepare(const OptString& query) {
   VALIDATE_STMT
-
-  // Cleaning up just in case they have been set before
-  m_param_vars.reset();
-  m_result_vars.reset();
 
   m_prepared = !mysql_stmt_prepare(m_stmt, query.c_str(), query.size());
   return m_prepared;
@@ -1382,16 +1123,16 @@ Variant MySQLStmt::result_metadata() {
   Array args;
   args.append(Variant(req::make<MySQLResult>(mysql_result)));
 
-  auto cls = Unit::lookupClass(s_mysqli_result.get());
+  auto cls = Class::load(s_mysqli_result.get());
   Object obj{cls};
 
   tvDecRefGen(
-    g_context->invokeFunc(cls->getCtor(), args, obj.get())
+    g_context->invokeFunc(cls->getCtor(), args, nullptr, obj.get())
   );
   return obj;
 }
 
-Variant MySQLStmt::send_long_data(int64_t param_idx, const String& data) {
+Variant MySQLStmt::send_long_data(int64_t param_idx, const OptString& data) {
   VALIDATE_PREPARED
   return !mysql_stmt_send_long_data(m_stmt, param_idx, data.c_str(),
                                     data.size());
@@ -1399,7 +1140,7 @@ Variant MySQLStmt::send_long_data(int64_t param_idx, const String& data) {
 
 Variant MySQLStmt::sqlstate() {
   VALIDATE_STMT
-  return String(mysql_stmt_sqlstate(m_stmt), CopyString);
+  return OptString(mysql_stmt_sqlstate(m_stmt), CopyString);
 }
 
 Variant MySQLStmt::store_result() {
@@ -1416,11 +1157,11 @@ Variant MySQLStmt::store_result() {
 // Zend returns strings and NULL only, not integers or floats.  We
 // return ints (and, sometimes, actual doubles). This behavior can be
 // disabled with MySQL { TypedResults = false } runtime option.
-Variant mysql_makevalue(const String& data, MYSQL_FIELD *mysql_field) {
+Variant mysql_makevalue(const OptString& data, MYSQL_FIELD *mysql_field) {
   return mysql_makevalue(data, mysql_field->type);
 }
 
-Variant mysql_makevalue(const String& data, enum_field_types field_type) {
+Variant mysql_makevalue(const OptString& data, enum_field_types field_type) {
   if (field_type == MYSQL_TYPE_NULL) {
     return init_null();
   } else if (mysqlExtension::TypedResults) {
@@ -1444,12 +1185,11 @@ Variant mysql_makevalue(const String& data, enum_field_types field_type) {
   return data;
 }
 
-MySQLQueryReturn php_mysql_do_query(const String& query, const Variant& link_id,
-                                    bool async_mode) {
+MySQLQueryReturn php_mysql_do_query(const OptString& query, const Variant& link_id) {
   SYNC_VM_REGS_SCOPED();
   if (mysqlExtension::ReadOnly &&
       same(preg_match("/^((\\/\\*.*?\\*\\/)|\\(|\\s)*select/i", query),
-           0)) {
+           static_cast<int64_t>(0))) {
     raise_notice("runtime/ext_mysql: write query not executed [%s]",
                     query.data());
     return MySQLQueryReturn::OK; // pretend it worked
@@ -1459,13 +1199,13 @@ MySQLQueryReturn php_mysql_do_query(const String& query, const Variant& link_id,
   MYSQL* conn = MySQL::GetConn(link_id, &rconn);
   if (!conn || !rconn) return MySQLQueryReturn::FAIL;
 
-  if (RuntimeOption::EnableStats && RuntimeOption::EnableSQLStats) {
+  if (Cfg::Stats::Enable && Cfg::Stats::SQL) {
     ServerStats::Log("sql.query", 1);
 
     // removing comments, which can be wrong actually if some string field's
     // value has /* or */ in it.
     Variant result;
-    String q = preg_replace(result, "/\\/\\*.*?\\*\\//", " ", query) ?
+    OptString q = preg_replace(result, "/\\/\\*.*?\\*\\//", " ", query) ?
       result.toString() : query;
 
     Variant matches;
@@ -1487,7 +1227,7 @@ MySQLQueryReturn php_mysql_do_query(const String& query, const Variant& link_id,
         table = table.substr(1, table.length() - 2);
       }
       ServerStats::Log(std::string("sql.query.") + table + "." + verb, 1);
-      if (RuntimeOption::EnableStats && RuntimeOption::EnableSQLTableStats) {
+      if (Cfg::Stats::Enable && Cfg::Stats::SQLTable) {
         MySqlStats::Record(verb, rconn->m_xaction_count, table);
         if (verb == "update") {
           preg_match("/([^\\s,]+)\\s*=\\s*([^\\s,]+)[\\+\\-]/",
@@ -1514,7 +1254,7 @@ MySQLQueryReturn php_mysql_do_query(const String& query, const Variant& link_id,
         rconn->m_xaction_count = ((verb == "begin" ||
                                    verb == "start transaction") ? 1 : 0);
         ServerStats::Log(std::string("sql.query.") + verb, 1);
-        if (RuntimeOption::EnableStats && RuntimeOption::EnableSQLTableStats) {
+        if (Cfg::Stats::Enable && Cfg::Stats::SQLTable) {
           MySqlStats::Record(verb);
         }
       } else {
@@ -1527,7 +1267,6 @@ MySQLQueryReturn php_mysql_do_query(const String& query, const Variant& link_id,
   SlowTimer timer(mysqlExtension::SlowQueryThreshold,
                   "runtime/ext_mysql: slow query", query.data());
   IOStatusHelper io("mysql::query", rconn->m_host.c_str(), rconn->m_port);
-  unsigned long tid = mysql_thread_id(conn);
 
   // disable explicitly
   auto mySQL = MySQL::Get(link_id);
@@ -1540,50 +1279,11 @@ MySQLQueryReturn php_mysql_do_query(const String& query, const Variant& link_id,
     mySQL->m_multi_query = false;
   }
 
-  if (async_mode) {
-#ifdef FACEBOOK
-    mySQL->m_async_query = query.toCppString();
-    return MySQLQueryReturn::OK;
-#else
-    throw_not_implemented("mysql_async_query_start");
-#endif
-  }
-
   if (mysql_real_query(conn, query.data(), query.size())) {
 #ifdef HHVM_MYSQL_TRACE_MODE
-    if (RuntimeOption::EnableHipHopSyntax) {
-      raise_notice("runtime/ext_mysql: failed executing [%s] [%s]",
-                   query.data(), mysql_error(conn));
-    }
+    raise_notice("runtime/ext_mysql: failed executing [%s] [%s]",
+                 query.data(), mysql_error(conn));
 #endif
-
-    // When we are timed out, and we're SELECT-ing, we're potentially
-    // running a long query on the server without waiting for any results
-    // back, wasting server resource. So we're sending a KILL command
-    // to see if we can stop the query execution.
-    if (tid && mysqlExtension::KillOnTimeout) {
-      unsigned int errcode = mysql_errno(conn);
-      if (errcode == 2058 /* CR_NET_READ_INTERRUPTED */ ||
-          errcode == 2059 /* CR_NET_WRITE_INTERRUPTED */) {
-        Variant ret =
-          preg_match("/^((\\/\\*.*?\\*\\/)|\\(|\\s)*select/is", query);
-        if (!same(ret, false)) {
-          MYSQL *new_conn = create_new_conn();
-          IOStatusHelper io2("mysql::kill", rconn->m_host.c_str(),
-                             rconn->m_port);
-          MYSQL *connected = mysql_real_connect
-            (new_conn, rconn->m_host.c_str(), rconn->m_username.c_str(),
-             rconn->m_password.c_str(), nullptr, rconn->m_port, nullptr, 0);
-          if (connected) {
-            std::string killsql = "KILL " + folly::to<std::string>(tid);
-            if (mysql_real_query(connected, killsql.c_str(), killsql.size())) {
-              raise_warning("Unable to kill thread %lu", tid);
-            }
-          }
-          mysql_close(new_conn);
-        }
-      }
-    }
 
     return MySQLQueryReturn::FAIL;
   }
@@ -1630,9 +1330,9 @@ Variant php_mysql_get_result(const Variant& link_id, bool use_store) {
   return Variant(std::move(r));
 }
 
-Variant php_mysql_do_query_and_get_result(const String& query, const Variant& link_id,
-                                          bool use_store, bool async_mode) {
-  MySQLQueryReturn result = php_mysql_do_query(query, link_id, async_mode);
+Variant php_mysql_do_query_and_get_result(const OptString& query, const Variant& link_id,
+                                          bool use_store) {
+  MySQLQueryReturn result = php_mysql_do_query(query, link_id);
 
   switch (result) {
     case MySQLQueryReturn::OK_FETCH_RESULT:
@@ -1649,9 +1349,9 @@ Variant php_mysql_do_query_and_get_result(const String& query, const Variant& li
 ///////////////////////////////////////////////////////////////////////////////
 // row operations
 
-Variant php_mysql_fetch_hash(const Resource& result, int result_type) {
+Variant php_mysql_fetch_hash(const OptResource& result, int result_type) {
   if ((result_type & PHP_MYSQL_BOTH) == 0) {
-    throw_invalid_argument("result_type: %d", result_type);
+    raise_invalid_argument_warning("result_type: %d", result_type);
     return false;
   }
 
@@ -1668,7 +1368,9 @@ Variant php_mysql_fetch_hash(const Resource& result, int result_type) {
       }
       if (result_type & PHP_MYSQL_ASSOC) {
         MySQLFieldInfo *info = res->getFieldInfo(i);
-        ret.set(info->name, res->getField(i));
+        auto const arrkey =
+          ret.convertKey<IntishCast::Cast>(info->name);
+        ret.set(arrkey, *res->getField(i).asTypedValue());
       }
     }
     return ret;
@@ -1692,63 +1394,19 @@ Variant php_mysql_fetch_hash(const Resource& result, int result_type) {
        mysql_field = mysql_fetch_field(mysql_result), i++) {
     Variant data;
     if (mysql_row[i]) {
-      data = mysql_makevalue(String(mysql_row[i], mysql_row_lengths[i],
-                                    CopyString), mysql_field);
+      data = mysql_makevalue(OptString(mysql_row[i], mysql_row_lengths[i],
+                                       CopyString), mysql_field);
     }
     if (result_type & PHP_MYSQL_NUM) {
       ret.set(i, data);
     }
     if (result_type & PHP_MYSQL_ASSOC) {
-      ret.set(String(mysql_field->name, CopyString), data);
+      OptString str(mysql_field->name, CopyString);
+      auto const array_key = ret.convertKey<IntishCast::Cast>(str);
+      ret.set(array_key, *data.asTypedValue());
     }
   }
   return ret;
 }
-
-/* The mysql_*_nonblocking calls are Facebook extensions to
-   libmysqlclient; for now, protect with an ifdef.  Once open sourced,
-   the client will be detectable via its own ifdef. */
-#ifdef FACEBOOK
-
-const int64_t k_ASYNC_OP_INVALID = 0;
-const int64_t k_ASYNC_OP_UNSET = ASYNC_OP_UNSET;
-const int64_t k_ASYNC_OP_CONNECT = ASYNC_OP_CONNECT;
-const int64_t k_ASYNC_OP_QUERY = ASYNC_OP_QUERY;
-
-bool MySQL::async_connect(const String& host, int port, const String& socket,
-                          const String& username, const String& password,
-                          const String& database) {
-  if (m_conn == nullptr) {
-    m_conn = create_new_conn();
-  }
-  if (RuntimeOption::EnableStats && RuntimeOption::EnableSQLStats) {
-    ServerStats::Log("sql.conn", 1);
-  }
-  IOStatusHelper io("mysql::async_connect", host.data(), port);
-  m_xaction_count = 0;
-  m_host = static_cast<std::string>(host);
-  m_username = static_cast<std::string>(username);
-  m_password = static_cast<std::string>(password);
-  m_socket = static_cast<std::string>(socket);
-  m_database = static_cast<std::string>(database);
-  bool ret = mysql_real_connect_nonblocking_init(
-               m_conn, m_host.c_str(), m_username.c_str(), m_password.c_str(),
-               (m_database.empty() ? nullptr : m_database.c_str()), port,
-               m_socket.empty() ? nullptr : m_socket.c_str(),
-               CLIENT_INTERACTIVE);
-
-  m_state = (ret) ? MySQLState::CONNECTED : MySQLState::CLOSED;
-  return ret;
-}
-
-#else  // FACEBOOK
-
-// Bogus values for non-facebook libmysqlclients.
-const int64_t k_ASYNC_OP_INVALID = 0;
-const int64_t k_ASYNC_OP_UNSET = -1;
-const int64_t k_ASYNC_OP_CONNECT = -2;
-const int64_t k_ASYNC_OP_QUERY = -3;
-
-#endif
 
 }

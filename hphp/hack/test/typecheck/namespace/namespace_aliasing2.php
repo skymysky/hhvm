@@ -7,7 +7,7 @@ namespace HH\SomethingElse\Dict {
 }
 
 namespace {
-  function main() {
+  function main(): void {
     expect_int(Dict\foo()); // error
     expect_int(\Dict\foo()); // error
     expect_int(HH\SomethingElse\Dict\foo()); // ok

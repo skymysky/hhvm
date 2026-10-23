@@ -1,0 +1,46 @@
+Code actions available:
+------------------------------------------
+convert to 'debugger_dump' (CodeActionKind: "quickfix") SELECTED
+Devmate Quick Fix - An expression cannot start with `=` (CodeActionKind: "quickfix")
+Devmate Agent Fix - An expression cannot start with `=` (CodeActionKind: "quickfix")
+Devmate Quick Fix - Unbound global constant (Typing) (CodeActionKind: "quickfix")
+Devmate Agent Fix - Unbound global constant (Typing) (CodeActionKind: "quickfix")
+Devmate Quick Fix - Unbound name: `=` (a global constant) (CodeActionKind: "quickfix")
+Devmate Agent Fix - Unbound name: `=` (a global constant) (CodeActionKind: "quickfix")
+Devmate Quick Fix - Hack does not support top level statements. Use the `__EntryPoint` attribute on a function instead (CodeActionKind: "quickfix")
+Devmate Agent Fix - Hack does not support top level statements. Use the `__EntryPoint` attribute on a function instead (CodeActionKind: "quickfix")
+
+JSON for selected code action:
+------------------------------------------
+{
+  "title": "convert to 'debugger_dump'",
+  "kind": "quickfix",
+  "diagnostics": [],
+  "edit": {
+    "changes": {
+      "FILE.php": [
+        {
+          "range": {
+            "start": { "line": 1, "character": 3 },
+            "end": { "line": 1, "character": 4 }
+          },
+          "newText": "debugger_dump("
+        },
+        {
+          "range": {
+            "start": { "line": 1, "character": 6 },
+            "end": { "line": 1, "character": 6 }
+          },
+          "newText": ")"
+        }
+      ]
+    }
+  }
+}
+
+Applied edit for code action:
+------------------------------------------
+<?hh
+   debugger_dump($x);
+//  ^ at-caret
+

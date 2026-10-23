@@ -1,4 +1,21 @@
-[submodule "third-party"]
-	path = third-party
+[submodule "__FORKS__"]
+	path = third-party/forks
 	url = https://github.com/hhvm/hhvm-third-party.git
-	ignore = dirty
+[submodule "fastlz"]
+	path = third-party/fastlz/src
+	url = https://github.com/ariya/FastLZ
+[submodule "fatal"]
+	path = third-party/fatal
+	url = https://github.com/facebook/fatal
+[submodule "fb303"]
+	path = third-party/fb303/src
+	url = https://github.com/facebookincubator/fb303.git
+[submodule "libafdt"]
+	path = third-party/libafdt/src
+	url = https://github.com/facebook/libafdt
+[submodule "xed-mbuild"]
+	path = third-party/xed/mbuild
+	url = https://github.com/intelxed/mbuild.git
+[submodule "xed-xed"]
+	path = third-party/xed/xed
+	url = https://github.com/intelxed/xed.git

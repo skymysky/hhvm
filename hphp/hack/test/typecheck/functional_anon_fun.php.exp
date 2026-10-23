@@ -1,6 +1,14 @@
-File "functional_anon_fun.php", line 24, characters 10-36:
-Invalid return type (Typing[4110])
-File "functional_anon_fun.php", line 19, characters 21-23:
-This is an int
-File "functional_anon_fun.php", line 14, characters 30-33:
-It is incompatible with void
+error: Typing[4297] Was expecting an object but type is unknown [1]
+-> It is unknown because the type of the lambda parameter could not be determined. Please add a type hint to the parameter [2]
+
+functional_anon_fun.php:21:12
+18 | 
+19 | function f(int $x): int {
+20 |   $f = function($y) use ($x) {
+   |                 ^^ [2]
+21 |     return $y->doStuff();
+   |            ^^ [1]
+22 |   };
+23 |   $result = ($f)(new A());
+
+1 error found

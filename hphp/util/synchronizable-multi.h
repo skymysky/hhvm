@@ -14,13 +14,15 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_SYNCHRONIZABLE_MULTI_H_
-#define incl_HPHP_SYNCHRONIZABLE_MULTI_H_
+#pragma once
 
 #include "hphp/util/mutex.h"
-#include <pthread.h>
-#include <folly/IntrusiveList.h>
+
+#include <chrono>
+#include <condition_variable>
+#include <optional>
 #include <vector>
+#include <folly/IntrusiveList.h>
 
 namespace HPHP {
 ///////////////////////////////////////////////////////////////////////////////
@@ -49,8 +51,9 @@ struct SynchronizableMulti {
    * on.
    */
   void wait(int id, int q, Priority pri);
-  bool wait(int id, int q, Priority pri, long seconds); // false if timed out
-  bool wait(int id, int q, Priority pri, long seconds, long long nanosecs);
+  bool wait(int id, int q, Priority pri,
+            std::chrono::steady_clock::time_point deadline); // false if timed out
+  void notifySpecific(int id);
   void notify();
   void notifyAll();
   void setNumGroups(int num_groups);
@@ -62,18 +65,9 @@ struct SynchronizableMulti {
   int m_group;
 
   struct alignas(64) CondVarNode {
-    pthread_cond_t m_cond;
+    std::condition_variable_any m_cond;
     folly::IntrusiveListHook m_listHook;
 
-    CondVarNode() {
-      pthread_cond_init(&m_cond, nullptr);
-    }
-    ~CondVarNode() {
-      pthread_cond_destroy(&m_cond);
-    }
-    /* implicit */ operator pthread_cond_t*() {
-      return &m_cond;
-    }
     void unlink() {
       if (m_listHook.is_linked()) m_listHook.unlink();
     }
@@ -119,10 +113,10 @@ struct SynchronizableMulti {
   };
   std::vector<CondVarList> m_cond_list_vec;
 
-  bool waitImpl(int id, int q, Priority pri, timespec *ts);
+  bool waitImpl(int id, int q, Priority pri,
+                std::optional<std::chrono::steady_clock::time_point> deadline);
 };
 
 ///////////////////////////////////////////////////////////////////////////////
 }
 
-#endif // incl_HPHP_SYNCHRONIZABLE_MULTI_H_

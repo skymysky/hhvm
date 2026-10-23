@@ -1,0 +1,13 @@
+error: Typing[4477] Module level trait T2 cannot use internal traits. [1]
+-> Trait T1 is internal. [2]
+
+module_level_traits_hierarchy_1b.bad.php--A.php:12:7
+10 | 
+11 | <<__ModuleLevelTrait>>
+12 | trait T2 {
+   |       ^^ [1]
+13 |   use T1;
+   |       ^^ [2]
+14 | }
+
+1 error found

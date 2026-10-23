@@ -17,14 +17,8 @@
 #include "hphp/runtime/base/type-object.h"
 
 #include "hphp/runtime/base/array-iterator.h"
-#include "hphp/runtime/base/builtin-functions.h"
-#include "hphp/runtime/base/collections.h"
-#include "hphp/runtime/base/strings.h"
-#include "hphp/runtime/base/variable-serializer.h"
 
 #include "hphp/runtime/ext/datetime/ext_datetime.h"
-
-#include "hphp/system/systemlib.h"
 
 namespace HPHP {
 
@@ -40,22 +34,12 @@ void ObjNR::compileTimeAssertions() {
   static_assert(offsetof(ObjNR, m_px) == kExpectedMPxOffset, "");
 }
 
-Array Object::toArray() const {
-  return m_obj ? m_obj->toArray() : Array();
+Array Object::toArray(bool ignore_late_init /* = false */) const {
+  return m_obj ? m_obj->toArray(/* pubOnly */ false, ignore_late_init) : Array();
 }
 
-String Object::toString() const {
-  return m_obj ? m_obj->invokeToString() : String();
-}
-
-int64_t Object::toInt64ForCompare() const {
-  check_collection_compare(get());
-  return toInt64();
-}
-
-double Object::toDoubleForCompare() const {
-  check_collection_compare(get());
-  return toDouble();
+OptString Object::toString() const {
+  return m_obj ? m_obj->invokeToString() : OptString();
 }
 
 const char* Object::classname_cstr() const {

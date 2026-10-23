@@ -1,27 +1,6 @@
 *** Testing Invalid file types ***
 
-Warning: %s
-bool(false)
-
-Warning: %s
-bool(false)
-
-Warning: %s
-bool(false)
-
-Warning: %s
-bool(false)
-
-Warning: %s
-bool(false)
-
-Warning: %s
-NULL
-
-Warning: %s
-bool(false)
-
-Warning: %s
+Warning: readlink(): No such file or directory  in %s/zend/good/ext/standard/tests/file/readlink_variation1.php on line 17
 bool(false)
 
 *** Done ***

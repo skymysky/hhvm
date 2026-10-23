@@ -1,7 +1,11 @@
-<?php
+<?hh
 
 class Herp {
-  function derp($derp = [1,2,3]) {}
+  function derp($derp = vec[1,2,3]) :mixed{}
 }
 
-var_dump((string) (new ReflectionClass('Herp')));
+
+<<__EntryPoint>>
+function main_whitespace_reflectionmethod_arraydefault() :mixed{
+  var_dump((new ReflectionClass('Herp'))->__toString());
+}

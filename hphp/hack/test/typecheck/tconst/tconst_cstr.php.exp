@@ -1,6 +1,10 @@
-File "tconst_cstr.php", line 4, characters 14-14:
-Unable to satisfy constraint on this type constant (Typing[4110])
-File "tconst_cstr.php", line 4, characters 19-26:
-This is an array key (int/string)
-File "tconst_cstr.php", line 4, characters 30-34:
-It is incompatible with a mixed value
+error: NastCheck[3093] `as` constraints are only legal on abstract type constants [1]
+
+tconst_cstr.php:4:14
+2 | 
+3 | class C {
+4 |   const type T as arraykey = mixed;
+  |              ^ [1]
+5 | }
+
+1 error found

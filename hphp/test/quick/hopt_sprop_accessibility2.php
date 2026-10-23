@@ -2,13 +2,12 @@
 
 class A {
   private static $priv = 7;
-  function readVar() {
+  function readVar() :mixed{
     A::$priv;
   }
 }
 
-function main() {
+<<__EntryPoint>> function main(): void {
   (new A())->readVar();
   var_dump(isset(A::$priv));
 }
-main();

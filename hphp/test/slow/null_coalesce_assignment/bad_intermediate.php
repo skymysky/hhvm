@@ -1,0 +1,43 @@
+<?hh
+
+class Foo {
+  const bar = 'I am a constant';
+}
+
+function f(): void {
+  try {
+    $arr = dict[
+      4 => dict[
+        2 => dict[],
+        (string)$z => dict[],
+      ],
+    ];
+    $arreq = $arr;
+    $x = 4;
+
+    $arr[$x][(string)$z][Foo::bar] ??= 'Yay!'; // $z warns
+    var_dump(
+      $arr[$x][(string)$z][Foo::bar] === 'Yay!',
+    );
+    var_dump($z === NULL); // $z doesn't get set
+    $arreq[$x][(string)$z][Foo::bar] = 'Yay!'; // Note the `=`
+    var_dump($z === NULL); // $z doesn't get set
+    var_dump($arr === $arreq); // $arr and $arreq get set consistently
+
+  } catch (UndefinedVariableException $e) {
+    var_dump($e->getMessage());
+  }
+  $obj = new Foo;
+  $obj->foo ??= 42; // Warns but sets intermediates
+  var_dump($obj->foo === 42);
+  var_dump($obj);
+  $objeq = new Foo;
+  $objeq->foo = 42; // Consistent with equals
+  var_dump($obj == $objeq);
+}
+
+
+<<__EntryPoint>>
+function main_bad_intermediate() :mixed{
+  f();
+}

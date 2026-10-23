@@ -13,8 +13,7 @@
    | license@php.net so we can mail you a copy immediately.               |
    +----------------------------------------------------------------------+
 */
-#ifndef incl_HPHP_ACCESS_LOG_H_
-#define incl_HPHP_ACCESS_LOG_H_
+#pragma once
 
 #include "hphp/runtime/ext/extension.h"
 #include "hphp/runtime/server/transport.h"
@@ -33,6 +32,11 @@ enum class LogChannel {CRONOLOG, THREADLOCAL, REGULAR};
 
 struct AccessLogFileData {
   AccessLogFileData() {}
+  AccessLogFileData(const std::string& baseDir,
+                    const std::string& fil,
+                    const std::string& lnk,
+                    const std::string& fmt,
+                    int mpl);
   AccessLogFileData(const std::string& fil,
                     const std::string& lnk,
                     const std::string& fmt,
@@ -65,11 +69,15 @@ struct AccessLog {
   explicit AccessLog(GetThreadDataFunc f) :
     m_initialized(false), m_fGetThreadData(f) {}
   ~AccessLog();
+
   void init(const std::string &defaultFormat,
             std::vector<AccessLogFileData> &files,
             const std::string &username);
   void init(const std::string &defaultFormat,
             std::map<std::string, AccessLogFileData> &files,
+            const std::string &username);
+  void init(const std::string &baseDir, const std::string &format,
+            const std::string &symLink, const std::string &file,
             const std::string &username);
   void init(const std::string &format, const std::string &symLink,
             const std::string &file, const std::string &username);
@@ -78,6 +86,7 @@ struct AccessLog {
   void clearThreadLog();
   void onNewRequest();
   void flushAllWriters();
+  void fini();
 private:
   bool m_initialized;
   Mutex m_lock;
@@ -91,7 +100,7 @@ struct LogWriter {
   explicit LogWriter(LogChannel chan)
     : m_channel(chan)
   {}
-  virtual ~LogWriter() {};
+  virtual ~LogWriter() {}
   virtual void init(const std::string& username,
                     AccessLog::GetThreadDataFunc fn) = 0;
   virtual void write(Transport* transport, const VirtualHost* vhost) = 0;
@@ -109,5 +118,3 @@ protected:
 
 ///////////////////////////////////////////////////////////////////////////////
 }
-
-#endif // incl_HPHP_ACCESS_LOG_H_

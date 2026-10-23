@@ -14,14 +14,13 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_EVAL_DEBUGGER_CMD_EXTENDED_H_
-#define incl_HPHP_EVAL_DEBUGGER_CMD_EXTENDED_H_
+#pragma once
 
 #include <map>
 
 #include "hphp/runtime/debugger/debugger_command.h"
 
-namespace HPHP { namespace Eval {
+namespace HPHP::Eval {
 ///////////////////////////////////////////////////////////////////////////////
 
 // we want to use std::map for sorted commands
@@ -39,6 +38,8 @@ struct CmdExtended : DebuggerCommand {
   bool onServer(DebuggerProxy&) override;
   void onClient(DebuggerClient&) override;
 
+  std::string name() const override { return "extended"; }
+
 private:
   const ExtendedCommandMap& getCommandMap();
   void invokeList(DebuggerClient& client, const std::string& cls);
@@ -52,6 +53,5 @@ private:
 };
 
 ///////////////////////////////////////////////////////////////////////////////
-}}
+}
 
-#endif // incl_HPHP_EVAL_DEBUGGER_CMD_EXTENDED_H_

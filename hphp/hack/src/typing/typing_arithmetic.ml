@@ -1,0 +1,632 @@
+(*
+ * Copyright (c) Facebook, Inc. and its affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the "hack" directory of this source tree.
+ *
+ *)
+open Hh_prelude
+open Typing_defs
+module Env = Typing_env
+module MakeType = Typing_make_type
+module Reason = Typing_reason
+module SN = Naming_special_names
+
+let is_float env t =
+  let (r, e) = Typing_solver.is_sub_type env t (MakeType.float Reason.none) in
+  Option.iter ~f:(Typing_error_utils.add_typing_error ~env) e;
+  r
+
+let is_int env t =
+  let (r, e) = Typing_solver.is_sub_type env t (MakeType.int Reason.none) in
+  Option.iter ~f:(Typing_error_utils.add_typing_error ~env) e;
+  r
+
+(** [check_like_num p_exp p env ty] ensures that [ty] is a subtype of num or ~num.
+  In the former case, it returns false and the type, in the latter, it returns
+  true, and the type with the ~ removed. If it is not a subtype of either, the
+  error generated refers to the attempt to make [ty] <: num. If there were errors
+  in both cases, we return the errors from the non ~ case. *)
+let check_like_num ?err p_exp p env ty =
+  let err =
+    match err with
+    | None -> Typing_error.Callback.math_invalid_argument
+    | Some err -> err
+  in
+  let num_ty = MakeType.num (Reason.arith p_exp) in
+  Typing_coercion.coerce_type_like_strip p Reason.URnone env ty num_ty err
+
+(** [expand_type_and_narrow_to_numeric ~allow_nothing env p ty] forces the
+  solving of [ty] to a numeric type, based on its lower bounds. If allow_nothing
+  is set, then it is allowed to return nothing when [ty] doesn't have numeric.
+  Otherwise the default type of int will be solved to. *)
+let expand_type_and_narrow_to_numeric ~allow_nothing env p ty =
+  let widen_for_arithmetic env ty =
+    match get_node ty with
+    | Tprim Tast.Tnum
+    | Tprim Tast.Tfloat
+    | Tprim Tast.Tint ->
+      (env, Some ty)
+    | _ -> (env, None)
+  in
+  let default = MakeType.int (Reason.arith p) in
+  Typing_solver.expand_type_and_narrow
+    env
+    ~default
+    ~force_solve:true
+    ~allow_nothing
+    ~description_of_expected:"a number"
+    widen_for_arithmetic
+    p
+    ty
+
+(** [expand_type_and_try_narrow_to_float env p ty] tries to solve [ty] to
+  float, based on its lower bounds. If it isn't solved to float, no narrowing
+  is done. *)
+let expand_type_and_try_narrow_to_float env p ty =
+  let widen_for_arithmetic env ty =
+    match get_node ty with
+    | Tprim Tast.Tfloat -> (env, Some ty)
+    | Tgeneric _ ->
+      let float = MakeType.float (get_reason ty) in
+      if Typing_subtype.is_sub_type env ty float then
+        (env, Some float)
+      else
+        (env, None)
+    | _ -> (env, None)
+  in
+  Typing_solver.expand_type_and_narrow
+    env
+    ~force_solve:false
+    ~allow_nothing:false
+    ~description_of_expected:"a number"
+    widen_for_arithmetic
+    p
+    ty
+
+(** [expand_type_and_try_narrow_to_nothing env p ty] tries to solve [ty] to
+  nothing, based on its lower bounds. If it isn't solved to nothing, no narrowing
+  is done. *)
+let expand_type_and_try_narrow_to_nothing env p ty =
+  let widen_for_arithmetic env _ty = (env, None) in
+  Typing_solver.expand_type_and_narrow
+    env
+    ~force_solve:false
+    ~allow_nothing:true
+    ~description_of_expected:"a number"
+    widen_for_arithmetic
+    p
+    ty
+
+let hole_on_err ((_, pos, _) as expr) err_opt =
+  Option.value_map err_opt ~default:expr ~f:(fun (ty_have, ty_expect) ->
+      Tast.make_typed_expr pos ty_have
+      @@ Aast.(Hole (expr, ty_have, ty_expect, Typing)))
+
+(** [check_for_float_result p env p1 ty1 p2 ty2] Tries to narrow ty1 or ty2 to float,
+   and if one can narrow, then the result is float. However, we don't want to do early
+   solving otherwise, before we've detected the other cases that don't require full solving. *)
+let check_for_float_result p env p1 ty1 p2 ty2 =
+  let make_float_type ~use_ty1_reason =
+    Some
+      (MakeType.float
+         (if use_ty1_reason then
+           Reason.arith_ret_float (p, get_reason ty1, Reason.Afirst)
+         else
+           Reason.arith_ret_float (p, get_reason ty2, Reason.Asecond)))
+  in
+  let float_no_reason = MakeType.float Reason.none in
+  let ((env, ty_err_opt), ty1) =
+    expand_type_and_try_narrow_to_float env p1 ty1
+  in
+  Option.iter ty_err_opt ~f:(Typing_error_utils.add_typing_error ~env);
+  if Typing_subtype.is_sub_type env ty1 float_no_reason then
+    (env, make_float_type ~use_ty1_reason:true)
+  else
+    let ((env, ty_err_opt), ty2) =
+      expand_type_and_try_narrow_to_float env p2 ty2
+    in
+    Option.iter ty_err_opt ~f:(Typing_error_utils.add_typing_error ~env);
+    if Typing_subtype.is_sub_type env ty2 float_no_reason then
+      (env, make_float_type ~use_ty1_reason:false)
+    else
+      (env, None)
+
+let binop p env bop p1 te1 ty1 p2 te2 ty2 =
+  let make_result ?(is_like = false) env te1 err_opt1 te2 err_opt2 ty =
+    let (env, ty) =
+      if is_like then
+        Typing_union.union env ty (MakeType.dynamic (Reason.witness p))
+      else
+        (env, ty)
+    in
+    let hte1 = hole_on_err te1 err_opt1 and hte2 = hole_on_err te2 err_opt2 in
+    let (env, te) =
+      Typing_helpers.make_simplify_typed_expr
+        env
+        p
+        ty
+        Aast.(Binop { bop; lhs = hte1; rhs = hte2 })
+    in
+    (env, te, ty)
+  in
+  let int_no_reason = MakeType.int Reason.none in
+  let num_no_reason = MakeType.num Reason.none in
+  let nothing_no_reason = MakeType.nothing Reason.none in
+  let make_nothing_type ~use_ty1_reason =
+    MakeType.nothing
+      (if use_ty1_reason then
+        get_reason ty1
+      else
+        get_reason ty2)
+  in
+  let is_any = Typing_utils.is_any env in
+  let contains_any = is_any ty1 || is_any ty2 in
+  match bop with
+  (* Type of addition, subtraction and multiplication is essentially
+   *    (int,int):int
+   *  & (float,num):float
+   *  & (num,float):float
+   *  & (num,num):num
+   *)
+  | Ast_defs.Plus
+  | Ast_defs.Minus
+  | Ast_defs.Star
+    when not contains_any ->
+    let make_int_type () = MakeType.int (Reason.arith_ret_int p) in
+    let make_num_type ~use_ty1_reason =
+      let (r, apos) =
+        if use_ty1_reason then
+          (get_reason ty1, Reason.Afirst)
+        else
+          (get_reason ty2, Reason.Asecond)
+      in
+      MakeType.num (Reason.arith_ret_num (p, r, apos))
+    in
+    let (env, ty1) = Env.expand_type env ty1 in
+    let (env, ty2) = Env.expand_type env ty2 in
+    let is_dynamic1 = Typing_defs.is_dynamic ty1 in
+    let is_dynamic2 = Typing_defs.is_dynamic ty2 in
+    let (env, ty_mismatch1, is_like1, ty1) = check_like_num p p1 env ty1 in
+    let (env, ty_mismatch2, is_like2, ty2) = check_like_num p p2 env ty2 in
+    (* We'll compute the type ignoring whether one of the arguments was a like-type,
+       but we'll add the like type to the result type in the end if one was. *)
+    let is_like = is_like1 || is_like2 in
+    let (env, result_ty) =
+      match check_for_float_result p env p1 ty1 p2 ty2 with
+      | (env, Some ty) -> (env, ty)
+      | (env, None) ->
+        let is_int1 = Typing_subtype.is_sub_type env ty1 int_no_reason in
+        let is_int2 = Typing_subtype.is_sub_type env ty2 int_no_reason in
+        (* If both of the arguments is definitely subtypes of int,
+           then the return is int *)
+        if is_int1 && is_int2 then
+          (env, make_int_type ())
+        else
+          let is_num1 = Typing_subtype.is_sub_type env num_no_reason ty1 in
+          let is_num2 = Typing_subtype.is_sub_type env num_no_reason ty2 in
+          (* If one argument is exactly num, then the return is num. *)
+          if is_num1 || is_num2 then
+            (env, make_num_type ~use_ty1_reason:is_num1)
+          else
+            (* Otherwise, at least one of the arguments is unsolved, and we need
+               to take care to not solve too eagerly.
+               Put the first one to try in ty1,
+               and the second, if any in ty2. Keep the result of the previous
+               check whether the second type was an int. *)
+            let ( (ty1, p1, is_dynamic1),
+                  (ty2, p2, is_int2, is_dynamic2),
+                  swapped ) =
+              if is_int1 then
+                ((ty2, p2, is_dynamic2), (ty1, p1, is_int1, is_dynamic1), true)
+              else
+                ((ty1, p1, is_dynamic1), (ty2, p2, is_int2, is_dynamic2), false)
+            in
+            let ((env, ty_err_opt), ty1) =
+              expand_type_and_narrow_to_numeric
+                ~allow_nothing:is_dynamic1
+                env
+                p1
+                ty1
+            in
+            Option.iter ty_err_opt ~f:(Typing_error_utils.add_typing_error ~env);
+            (* If the first type solved a subtype of int, and the second was
+               already int, then it is sound to return int. *)
+            let is_int1 = Typing_subtype.is_sub_type env ty1 int_no_reason in
+            if is_int1 && is_int2 then
+              (env, make_int_type ())
+            else
+              (* If the first type solved to exactly num, then we can just return that *)
+              let is_num1 = Typing_subtype.is_sub_type env num_no_reason ty1 in
+              if is_num1 then
+                (env, make_num_type ~use_ty1_reason:swapped)
+              else
+                (* The second type needs solving too *)
+                let ((env, ty_err_opt), ty2) =
+                  expand_type_and_narrow_to_numeric
+                    ~allow_nothing:is_dynamic2
+                    env
+                    p2
+                    ty2
+                in
+                Option.iter
+                  ty_err_opt
+                  ~f:(Typing_error_utils.add_typing_error ~env);
+                if
+                  Typing_subtype.is_sub_type env ty1 nothing_no_reason
+                  && Typing_subtype.is_sub_type env ty2 nothing_no_reason
+                then
+                  (env, make_nothing_type ~use_ty1_reason:swapped)
+                else if
+                  is_int1 && Typing_subtype.is_sub_type env ty2 int_no_reason
+                then
+                  (env, make_int_type ())
+                else
+                  (env, make_num_type ~use_ty1_reason:(not swapped))
+    in
+    make_result ~is_like env te1 ty_mismatch1 te2 ty_mismatch2 result_ty
+  (* Type of division and exponentiation is essentially
+   *    (float,num):float
+   *  & (num,float):float
+   *  & (num,num):num
+   *)
+  | Ast_defs.Slash
+  | Ast_defs.Starstar
+    when not contains_any ->
+    let make_num_type () =
+      match bop with
+      | Ast_defs.Slash -> MakeType.num (Reason.ret_div p)
+      | _ -> MakeType.num (Reason.arith_ret p)
+    in
+    let (env, ty_mismatch1, is_like1, ty1) = check_like_num p p1 env ty1 in
+    let (env, ty_mismatch2, is_like2, ty2) = check_like_num p p2 env ty2 in
+    (* We'll compute the type ignoring whether one of the arguments was a like-type,
+       but we'll add the like type to the result type in the end if one was. *)
+    let is_like = is_like1 || is_like2 in
+    let (env, result_ty) =
+      match check_for_float_result p env p1 ty1 p2 ty2 with
+      | (env, Some ty) -> (env, ty)
+      | (env, None) ->
+        (* We return num, unless both ty1 and ty2 will solve to nothing. This
+           would happen for dynamic / dynamic, and in that case we want to
+           return nothing, in order to get back dynamic in the end. For that to happen,
+           we would have to have detected like types on both arguments. *)
+        if not (is_like1 && is_like2) then
+          (env, make_num_type ())
+        else
+          let ((env, ty_err_opt), ty1) =
+            expand_type_and_try_narrow_to_nothing env p1 ty1
+          in
+          Option.iter ty_err_opt ~f:(Typing_error_utils.add_typing_error ~env);
+          let ((env, ty_err_opt), ty2) =
+            expand_type_and_try_narrow_to_nothing env p2 ty2
+          in
+          Option.iter ty_err_opt ~f:(Typing_error_utils.add_typing_error ~env);
+          if
+            Typing_subtype.is_sub_type env ty1 nothing_no_reason
+            && Typing_subtype.is_sub_type env ty2 nothing_no_reason
+          then
+            (env, make_nothing_type ~use_ty1_reason:true)
+          else
+            (env, make_num_type ())
+    in
+    make_result ~is_like env te1 ty_mismatch1 te2 ty_mismatch2 result_ty
+  | Ast_defs.Percent
+  | Ast_defs.Ltlt
+  | Ast_defs.Gtgt
+    when not contains_any ->
+    let (env, err_opt1, _used_dynamic1) =
+      Typing_argument.check_argument_type_against_parameter_type
+        ~ignore_readonly:false
+        ~dynamic_func:(Some Typing_argument.Supportdyn_function)
+        env
+        (Typing_make_type.int (Reason.arith p1))
+        p1
+        ty1
+    in
+    let (env, err_opt2, _used_dynamic2) =
+      Typing_argument.check_argument_type_against_parameter_type
+        ~ignore_readonly:false
+        ~dynamic_func:(Some Typing_argument.Supportdyn_function)
+        env
+        (Typing_make_type.int (Reason.arith p2))
+        p2
+        ty2
+    in
+    let r =
+      match bop with
+      | Ast_defs.Percent -> Reason.arith_ret_int p
+      | _ -> Reason.bitwise_ret p
+    in
+    (* Result is int regardless of whether the arguments are int or ~int *)
+    make_result env te1 err_opt1 te2 err_opt2 (MakeType.int r)
+  | Ast_defs.Xor
+  | Ast_defs.Amp
+  | Ast_defs.Bar
+    when not contains_any ->
+    (* Type-check a bitwise operation as if it's a call to a function of type
+     *   <<__SupportDynamicType>> function bitwise_math(int $x, int $y): int
+     * With one samll improvement: if checking of *either* argument succeeds against int
+     * rather than ~int, then return int, because we know that it will simply throw if
+     * the other argument is not int at runtime.
+     *)
+    let (env, err_opt1, used_dynamic1) =
+      Typing_argument.check_argument_type_against_parameter_type
+        ~ignore_readonly:false
+        ~dynamic_func:(Some Typing_argument.Supportdyn_function)
+        env
+        (Typing_make_type.int (Reason.bitwise p1))
+        p1
+        ty1
+    in
+    let (env, err_opt2, used_dynamic2) =
+      Typing_argument.check_argument_type_against_parameter_type
+        ~ignore_readonly:false
+        ~dynamic_func:(Some Typing_argument.Supportdyn_function)
+        env
+        (Typing_make_type.int (Reason.bitwise p2))
+        p2
+        ty2
+    in
+    make_result
+      ~is_like:(used_dynamic1 && used_dynamic2)
+      env
+      te1
+      err_opt1
+      te2
+      err_opt2
+      (MakeType.int (Reason.bitwise_ret p))
+  | Ast_defs.Eqeq
+  | Ast_defs.Diff ->
+    make_result env te1 None te2 None (MakeType.bool (Reason.comp p))
+  | Ast_defs.Eqeqeq
+  | Ast_defs.Diff2 ->
+    make_result env te1 None te2 None (MakeType.bool (Reason.comp p))
+  | Ast_defs.Lt
+  | Ast_defs.Lte
+  | Ast_defs.Gt
+  | Ast_defs.Gte
+  | Ast_defs.Cmp ->
+    let ty_num = MakeType.num (Reason.comp p) in
+    let ty_int = MakeType.int (Reason.comp p) in
+    let ty_bool = MakeType.bool (Reason.comp p) in
+    let ty_result =
+      match bop with
+      | Ast_defs.Cmp -> ty_int
+      | _ -> ty_bool
+    in
+    let ty_string = MakeType.string (Reason.comp p) in
+    let ty_datetime = MakeType.datetime (Reason.comp p) in
+    let ty_datetimeimmutable = MakeType.datetime_immutable (Reason.comp p) in
+    let ty_dynamic = MakeType.dynamic (Reason.comp p) in
+    let ty_all =
+      MakeType.union
+        (Reason.comp p)
+        [ty_num; ty_string; ty_datetime; ty_datetimeimmutable; ty_dynamic]
+    in
+    let both_sub ty =
+      Typing_subtype.can_sub_type env ty1 ty
+      && Typing_subtype.can_sub_type env ty2 ty
+    in
+    (*
+     * Comparison here is allowed when both args are num, both string, or both
+     * DateTime | DateTimeImmutable. Alternatively, either or both args can be
+     * dynamic. We use both_sub to check that both arguments subtype a type.
+     *
+     * This actually does not properly handle union types. For instance,
+     * DateTime | DateTimeImmutable is neither a subtype of DateTime nor
+     * DateTimeImmutable, but it will be the type of an element coming out
+     * of a vector containing both. Further, dynamic could be comparable to
+     * num | string | DateTime | DateTimeImmutable | dynamic. Better union
+     * handling would be an improvement.
+     *)
+    (if
+     (not contains_any)
+     && not
+          (both_sub (MakeType.union (Reason.comp p) [ty_num; ty_dynamic])
+          || both_sub (MakeType.union (Reason.comp p) [ty_string; ty_dynamic])
+          || both_sub
+               (MakeType.union
+                  (Reason.comp p)
+                  [ty_datetime; ty_datetimeimmutable; ty_dynamic]))
+    then
+      (* There is definitely an error if we get here *)
+      let ty1 = lazy (Typing_expand.fully_expand env ty1)
+      and ty2 = lazy (Typing_expand.fully_expand env ty2) in
+      let tys1 = Lazy.map ty1 ~f:(fun ty -> (ty, Typing_print.error env ty))
+      and tys2 = Lazy.map ty2 ~f:(fun ty -> (ty, Typing_print.error env ty)) in
+      Typing_error_utils.add_typing_error
+        ~env
+        Typing_error.(
+          primary
+          @@ Primary.Comparison_invalid_types
+               {
+                 pos = p;
+                 left =
+                   Lazy.map tys1 ~f:(fun (ty1, tys1) ->
+                       Reason.to_string ("This is " ^ tys1) (get_reason ty1));
+                 right =
+                   Lazy.map tys2 ~f:(fun (ty2, tys2) ->
+                       Reason.to_string ("This is " ^ tys2) (get_reason ty2));
+               })
+    else
+      (* If we get here, there might be an error that was obscured by can_subtype returning
+         true on an unresolved type variables. Insist that each type is separately allowed.
+         This leaves the potential of letting two acceptable, but incompatible types through. *)
+      let (env, err1) =
+        Typing_subtype.sub_type
+          env
+          ty1
+          ty_all
+          (Some
+             Typing_error.Reasons_callback.(
+               with_code
+                 (unify_error_at p)
+                 ~code:Typing_error.Error_code.ComparisonInvalidTypes))
+      in
+      Option.iter ~f:(Typing_error_utils.add_typing_error ~env) err1;
+      let (env, err2) =
+        Typing_subtype.sub_type
+          env
+          ty2
+          ty_all
+          (Some
+             Typing_error.Reasons_callback.(
+               with_code
+                 (unify_error_at p)
+                 ~code:Typing_error.Error_code.ComparisonInvalidTypes))
+      in
+      Option.iter ~f:(Typing_error_utils.add_typing_error ~env) err2);
+    make_result env te1 None te2 None ty_result
+  | Ast_defs.Dot ->
+    let sub_arraykey env p ty =
+      let expected_ty = Typing_make_type.arraykey (Reason.concat_operand p) in
+      let (env, ty_mismatch, _used_dynamic) =
+        Typing_argument.check_argument_type_against_parameter_type
+          ~ureason:Reason.URstr_concat
+          ~ignore_readonly:false
+          ~dynamic_func:(Some Typing_argument.Supportdyn_function)
+          env
+          expected_ty
+          p
+          ty
+      in
+      (env, ty_mismatch)
+    in
+    let (env, err_opt1) = sub_arraykey env p1 ty1 in
+    let (env, err_opt2) = sub_arraykey env p2 ty2 in
+    let r = Reason.concat_ret p in
+    let ty =
+      begin
+        (* Special case for TypedFormatString operands.
+         * If  e1 has type TypedFormatString<I,(t1,...,tn)>
+         * and e2 has type TypedFormatString<I,(u1,...,um)>
+         * then e1 . e2 has type TypedFormatString<I,(t1,...,tn,u1,...,um)>
+         *)
+        match (get_node ty1, get_node ty2) with
+        | ( Tnewtype (fs1, [ty1; tuple1], _),
+            Tnewtype (fs2, [ty2; tuple2], bound) )
+          when SN.Classes.is_typed_format_string fs1
+               && SN.Classes.is_typed_format_string fs2
+               && Typing_defs.equal_locl_ty ty1 ty2 -> begin
+          match (get_node tuple1, get_node tuple2) with
+          | ( Ttuple { t_required = req1; t_optional = []; t_extra = _ },
+              Ttuple { t_required = req2; t_optional = []; t_extra = _ } ) ->
+            mk
+              ( r,
+                Tnewtype
+                  (fs1, [ty1; Typing_make_type.tuple r (req1 @ req2)], bound) )
+          | _ -> MakeType.string r
+        end
+        | _ -> MakeType.string r
+      end
+    in
+    make_result env te1 err_opt1 te2 err_opt2 ty
+  | Ast_defs.Barbar
+  | Ast_defs.Ampamp ->
+    make_result env te1 None te2 None (MakeType.bool (Reason.logic_ret p))
+  | Ast_defs.QuestionQuestion when not contains_any -> assert false
+  | _ ->
+    assert contains_any;
+    if is_any ty1 then
+      make_result env te1 None te2 None ty1
+    else
+      make_result env te1 None te2 None ty2
+
+let unop p env uop te ty =
+  let make_result ?(is_like = false) env te err_opt ty =
+    let (env, ty) =
+      if is_like then
+        Typing_union.union env ty (MakeType.dynamic (Reason.witness p))
+      else
+        (env, ty)
+    in
+
+    let hte = hole_on_err te err_opt in
+    let (env, te) =
+      Typing_helpers.make_simplify_typed_expr env p ty (Aast.Unop (uop, hte))
+    in
+    (env, te, ty)
+  in
+  let is_any = Typing_utils.is_any env in
+  match uop with
+  | Ast_defs.Unot ->
+    if is_any ty then
+      make_result env te None ty
+    else
+      (* args isn't any or a variant thereof so can actually do stuff *)
+      (* !$x (logical not) works with any type, so we just return Tbool *)
+      make_result env te None (MakeType.bool (Reason.logic_ret p))
+  | Ast_defs.Utild ->
+    if is_any ty then
+      make_result env te None ty
+    else
+      let (env, err_opt, used_dynamic) =
+        Typing_argument.check_argument_type_against_parameter_type
+          ~ignore_readonly:false
+          ~dynamic_func:(Some Typing_argument.Supportdyn_function)
+          env
+          (Typing_make_type.int (Reason.bitwise p))
+          p
+          ty
+      in
+      make_result
+        ~is_like:used_dynamic
+        env
+        te
+        err_opt
+        (MakeType.int (Reason.bitwise_ret p))
+  | Ast_defs.Uplus
+  | Ast_defs.Uminus
+  | Ast_defs.Uincr
+  | Ast_defs.Upincr
+  | Ast_defs.Udecr
+  | Ast_defs.Updecr ->
+    if is_any ty then
+      make_result env te None ty
+    else
+      let allow_nothing = Typing_defs.is_dynamic ty in
+      let (env, ty_mismatch, is_like, ty) =
+        check_like_num
+          ?err:
+            (match uop with
+            | Ast_defs.Uincr
+            | Ast_defs.Upincr
+            | Ast_defs.Udecr
+            | Ast_defs.Updecr ->
+              Some Typing_error.Callback.inc_dec_invalid_argument
+            | _ -> None)
+          p
+          p
+          env
+          ty
+      in
+      let ((env, ty_err_opt), (ty : locl_ty)) =
+        expand_type_and_narrow_to_numeric ~allow_nothing env p ty
+      in
+      Option.iter ty_err_opt ~f:(Typing_error_utils.add_typing_error ~env);
+      let result_ty =
+        if Typing_subtype.is_sub_type env ty (MakeType.nothing Reason.none) then
+          MakeType.nothing (get_reason ty)
+        else if is_float env ty then
+          MakeType.float
+            (Reason.arith_ret_float (p, get_reason ty, Reason.Aonly))
+        else if is_int env ty then
+          MakeType.int (Reason.arith_ret_int p)
+        else
+          MakeType.num (Reason.arith_ret_num (p, get_reason ty, Reason.Aonly))
+      in
+      let (env, result_ty) =
+        if is_like then
+          Typing_union.union
+            env
+            result_ty
+            (MakeType.dynamic (get_reason result_ty))
+        else
+          (env, result_ty)
+      in
+      make_result env te ty_mismatch result_ty
+  | Ast_defs.Usilence ->
+    (* Silencing does not change the type *)
+    (* any check omitted because would return the same anyway *)
+    make_result env te None ty

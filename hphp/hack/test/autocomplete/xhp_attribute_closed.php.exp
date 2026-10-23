@@ -1,0 +1,6 @@
+number
+  INSERT number
+  ~int
+style
+  INSERT style
+  ~?string

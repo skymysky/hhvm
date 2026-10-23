@@ -1,0 +1,35 @@
+error: Typing[4073] Cannot call `parent::__construct()`; it is abstract [1]
+-> Declaration is here [2]
+
+parent_abstract_missing.php:7:5
+1 | <?hh
+2 | 
+3 | abstract class BaseClass {}
+  |                ^^^^^^^^^ [2]
+4 | 
+5 | final class ChildClass extends BaseClass {
+6 |   public function __construct() {
+7 |     parent::__construct();
+  |     ^^^^^^^^^^^^^^^^^^^ [1]
+8 |   }
+9 | }
+
+error: Typing[4053] No instance method `__construct` in `BaseClass` [1]
+-> This is why I think it is an object of type BaseClass [2]
+-> Declaration of `BaseClass` is here [3]
+
+parent_abstract_missing.php:7:13
+1 | <?hh
+2 | 
+3 | abstract class BaseClass {}
+  |                ^^^^^^^^^ [3]
+4 | 
+5 | final class ChildClass extends BaseClass {
+  |                                ^^^^^^^^^ [2]
+6 |   public function __construct() {
+7 |     parent::__construct();
+  |             ^^^^^^^^^^^ [1]
+8 |   }
+9 | }
+
+2 errors found

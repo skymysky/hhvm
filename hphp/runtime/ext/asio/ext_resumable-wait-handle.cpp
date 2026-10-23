@@ -18,11 +18,10 @@
 #include "hphp/runtime/ext/asio/ext_resumable-wait-handle.h"
 
 #include "hphp/runtime/ext/asio/ext_asio.h"
-#include "hphp/runtime/ext/asio/ext_async-function-wait-handle.h"
 #include "hphp/runtime/ext/asio/ext_async-generator.h"
 #include "hphp/runtime/ext/asio/ext_async-generator-wait-handle.h"
-#include "hphp/runtime/vm/bytecode.h"
 #include "hphp/runtime/vm/func.h"
+#include "hphp/runtime/vm/resumable.h"
 #include "hphp/runtime/vm/runtime.h"
 
 namespace HPHP {
@@ -50,7 +49,7 @@ void HHVM_STATIC_METHOD(ResumableWaitHandle, setOnFailCallback,
 
 c_ResumableWaitHandle* c_ResumableWaitHandle::getRunning(ActRec* fp) {
   for (; fp; fp = g_context->getPrevVMState(fp)) {
-    if (fp->resumed() && fp->func()->isAsync()) {
+    if (isResumed(fp) && fp->func()->isAsync()) {
       if (fp->func()->isGenerator()) {
         // async generator
         auto generator = frame_async_generator(fp);
@@ -69,7 +68,7 @@ c_ResumableWaitHandle* c_ResumableWaitHandle::getRunning(ActRec* fp) {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-void AsioExtension::initResumableWaitHandle() {
+void AsioExtension::registerNativeResumableWaitHandle() {
 #define RWH_SME(meth) \
   HHVM_STATIC_MALIAS(HH\\ResumableWaitHandle, meth, ResumableWaitHandle, meth)
   RWH_SME(setOnCreateCallback);
@@ -77,6 +76,9 @@ void AsioExtension::initResumableWaitHandle() {
   RWH_SME(setOnSuccessCallback);
   RWH_SME(setOnFailCallback);
 #undef RWH_SME
+
+  Native::registerClassExtraDataHandler(
+    c_ResumableWaitHandle::className(), finish_class<c_ResumableWaitHandle>);
 }
 
 ///////////////////////////////////////////////////////////////////////////////

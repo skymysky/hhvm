@@ -43,7 +43,7 @@ function foo32<T as shape('x' => int, 'y' => string,)>(T $pt) : T {
   return $pt;
 }
 
-function foo4() {
+function foo4() :mixed{
   $x = shape(
     'x' => 12,
     'y' => 12
@@ -97,3 +97,8 @@ const SCALAR_SHAPE3 = shape(
   'x' => 12,
   'foo' => 1.0
 );
+
+<<__EntryPoint>>
+function main(): void {
+  echo "Done.\n";
+}

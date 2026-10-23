@@ -21,6 +21,7 @@
 #include <assert.h>
 #include <iomanip>
 #include <sys/stat.h>
+#include <fmt/core.h>
 
 #include "hphp/tools/tc-print/tc-print.h"
 #include "hphp/tools/tc-print/offline-trans-data.h"
@@ -30,14 +31,10 @@
 #define MAX_INSTR_ASM_LEN 128
 
 using std::string;
-using std::vector;
 
 namespace HPHP { namespace jit {
 
-#if defined(__x86_64__)
-#if defined(HAVE_LIBXED)
-
-const char* OfflineCode::getArchName() { return "X64"; }
+const char* OfflineCode::getArchNameX86() { return "X64"; }
 
 void OfflineCode::xedInit() {
   xed_state_init(&xed_state, XED_MACHINE_MODE_LONG_64,
@@ -46,24 +43,20 @@ void OfflineCode::xedInit() {
   xed_syntax = getenv("HHVM_INTEL_DISAS") ? XED_SYNTAX_INTEL : XED_SYNTAX_ATT;
 }
 
-TCA OfflineCode::collectJmpTargets(FILE  *file,
-                                      TCA    fileStartAddr,
-                                      TCA    codeStartAddr,
-                                      uint64_t codeLen,
-                                      vector<TCA> *jmpTargets) {
-
-  xed_uint8_t* code = (xed_uint8_t*) alloca(codeLen);
-  xed_uint8_t* frontier;
-  TCA          ip;
+TCA OfflineCode::collectJmpTargetsX86(const TCRegionRec& region,
+                                         TCA    codeStartAddr,
+                                         uint64_t codeLen,
+                                         vector<TCA> *jmpTargets) {
 
   if (codeLen == 0) return 0;
 
-  if (fseek(file, codeStartAddr - fileStartAddr, SEEK_SET)) {
-    error("collectJmpTargets error: seeking file");
-  }
+  std::vector<xed_uint8_t> codeVec(codeLen);
+  xed_uint8_t* code = codeVec.data();
+  xed_uint8_t* frontier;
+  TCA          ip;
 
-  size_t readLen = fread(code, codeLen, 1, file);
-  if (readLen != 1) error("collectJmpTargets error: reading file");
+  auto const offset = codeStartAddr - region.baseAddr;
+  readFromRegion(region, offset, codeLen, code);
 
   xed_decoded_inst_t xedd;
   xed_iclass_enum_t iclass = XED_ICLASS_NOP;
@@ -116,40 +109,35 @@ TCA OfflineCode::collectJmpTargets(FILE  *file,
 // by fileStartAddr, for the address range given by
 // [codeStartAddr, codeStartAddr + codeLen)
 
-void OfflineCode::disasm(FILE* file,
-                            TCA   fileStartAddr,
-                            TCA   codeStartAddr,
-                            uint64_t codeLen,
-                            const PerfEventsMap<TCA>& perfEvents,
-                            BCMappingInfo bcMappingInfo,
-                            bool printAddr,
-                            bool printBinary) {
+TCRegionInfo OfflineCode::getRegionInfoX86(const TCRegionRec& region,
+                                            TCA   codeStartAddr,
+                                            uint64_t codeLen,
+                                            const PerfEventsMap<TCA>& perfEvents,
+                                            BCMappingInfo bcMappingInfo) {
+  if (codeLen == 0) return TCRegionInfo{bcMappingInfo.tcRegion};
+
+  auto const codeEndAddr = codeStartAddr + codeLen;
+  TCRegionInfo regionInfo{bcMappingInfo.tcRegion,
+                           getRanges(bcMappingInfo,
+                                     codeStartAddr,
+                                     codeEndAddr)};
+  auto& ranges = regionInfo.ranges;
 
   char codeStr[MAX_INSTR_ASM_LEN];
-  xed_uint8_t* code = (xed_uint8_t*) alloca(codeLen);
+  std::vector<xed_uint8_t> codeVec(codeLen);
+  xed_uint8_t* code = codeVec.data();
   xed_uint8_t* frontier;
   TCA          ip;
   TCA          r10val = 0;
   size_t       currBC = 0;
 
-  if (codeLen == 0) return;
-
-  auto const offset = codeStartAddr - fileStartAddr;
-  if (fseek(file, offset, SEEK_SET)) {
-    error("disasm error: seeking file");
-  }
-
-  size_t readLen = fread(code, codeLen, 1, file);
-  if (readLen != 1) {
-    error("Failed to read {} bytes at offset {} from code file due to {}",
-          codeLen, offset, feof(file) ? "EOF" : "read error");
-  }
+  auto const offset = codeStartAddr - region.baseAddr;
+  readFromRegion(region, offset, codeLen, code);
 
   xed_decoded_inst_t xedd;
 
   // Decode and print each instruction
   for (frontier = code, ip = codeStartAddr; frontier < code + codeLen; ) {
-
     xed_decoded_inst_zero_set_mode(&xedd, &xed_state);
     xed_decoded_inst_set_input_chip(&xedd, XED_CHIP_INVALID);
     xed_error_enum_t xed_error = xed_decode(&xedd, frontier, 15);
@@ -158,37 +146,19 @@ void OfflineCode::disasm(FILE* file,
 
     // Get disassembled instruction in codeStr
     if (!xed_format_context(xed_syntax, &xedd, codeStr,
-                            MAX_INSTR_ASM_LEN, (uint64_t)ip, nullptr
-#if XED_ENCODE_ORDER_MAX_ENTRIES != 28 // Newer version of XED library
-                            , 0
-#endif
+                            MAX_INSTR_ASM_LEN, (uint64_t)ip, nullptr, 0
                            )) {
       error("disasm error: xed_format_context failed");
     }
 
-    // Annotate the x86 with its bytecode.
-    currBC = printBCMapping(bcMappingInfo, currBC, (TCA)ip);
-
-    if (printAddr) g_logger->printAsm("%14p: ", ip);
-
     uint32_t instrLen = xed_decoded_inst_get_length(&xedd);
-
-    if (printBinary) {
-      uint32_t i;
-      for (i=0; i < instrLen; i++) {
-        g_logger->printAsm("%02X", frontier[i]);
-      }
-      for (; i < 16; i++) {
-        g_logger->printAsm("  ");
-      }
-    }
 
     // For calls, we try to figure out the destination symbol name.
     // We look both at relative branches and the pattern:
     //    move r10, IMMEDIATE
     //    call r10
     xed_iclass_enum_t iclass = xed_decoded_inst_get_iclass(&xedd);
-    string callDest = "";
+    string callDest;
 
     if (iclass == XED_ICLASS_CALL_NEAR || iclass == XED_ICLASS_CALL_FAR) {
       const xed_inst_t    *xi       = xed_decoded_inst_inst(&xedd);
@@ -227,21 +197,28 @@ void OfflineCode::disasm(FILE* file,
       }
     }
 
-    if (!perfEvents.empty()) {
-      printEventStats((TCA)ip, instrLen, perfEvents);
-    } else {
-      g_logger->printAsm("%48s", "");
-    }
-    g_logger->printAsm("%s%s\n", codeStr, callDest.c_str());
+    auto const binaryStr = [&] {
+      std::ostringstream binary_os;
+      uint32_t i;
+      for (i = 0; i < instrLen; i++) {
+        binary_os << fmt::format("{:02X}", frontier[i]);
+      }
+      for (; i < 16; i++) {
+        binary_os << "  ";
+      }
+      return binary_os.str();
+    }();
+
+    while (currBC < ranges.size() - 1 && ip >= ranges[currBC].end) currBC++;
+
+    auto const disasmInfo = getDisasmInfo(ip, instrLen, perfEvents,
+                                          binaryStr, callDest, codeStr);
+    ranges[currBC].disasm.push_back(disasmInfo);
 
     frontier += instrLen;
     ip       += instrLen;
   }
+  return regionInfo;
 }
-#else
-  // cmake should prevent this.
-#error "tc-print on x86_64 requires libxed"
-#endif
-#endif
 
 } } // HPHP::jit

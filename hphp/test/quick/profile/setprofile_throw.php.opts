@@ -1,1 +1,2 @@
--vEval.JitEnableRenameFunction=1
+-vEval.HHIREnableGenTimeInlining=0
+-vEval.ForbidDynamicCallsToFunc=0

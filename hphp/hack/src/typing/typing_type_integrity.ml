@@ -1,0 +1,474 @@
+(*
+ * Copyright (c) Facebook, Inc. and its affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the "hack" directory of this source tree.
+ *
+ *)
+open Hh_prelude
+open Common
+open Typing_defs
+module Env = Typing_env
+module Cls = Folded_class
+module KindDefs = Typing_kinding_defs
+
+module Locl_Inst = struct
+  let rec instantiate subst (ty : locl_ty) =
+    let merge_hk_type orig_r orig_var ty args =
+      let (r, ty_) = deref ty in
+      let res_ty_ =
+        match ty_ with
+        | Tclass (n, exact, existing_args) ->
+          (* We could insist on existing_args = [] here unless we want to support partial application. *)
+          Tclass (n, exact, existing_args @ args)
+        | Tnewtype (n, existing_args, bound) ->
+          Tnewtype (n, existing_args @ args, bound)
+        | Tgeneric n ->
+          (* Same here *)
+          Tgeneric n
+        | _ ->
+          (* We could insist on args = [] here, everything else is a kinding error *)
+          ty_
+      in
+      mk (Reason.instantiate ~type_:r orig_var ~var:orig_r, res_ty_)
+    in
+
+    (* PERF: If subst is empty then instantiation is a no-op. We can save a
+     * significant amount of CPU by avoiding recursively deconstructing the ty
+     * data type.
+     *)
+    if S_map.is_empty subst then
+      ty
+    else
+      match deref ty with
+      | (r, Tgeneric x) ->
+        let args = [] in
+        (match S_map.find_opt x subst with
+        | Some x_ty -> merge_hk_type r x x_ty args
+        | None -> mk (r, Tgeneric x))
+      | (r, ty) ->
+        let ty = instantiate_ subst ty in
+        mk (r, ty)
+
+  and instantiate_ subst x =
+    match x with
+    | Tgeneric _ -> assert false
+    | Tvec_or_dict (ty1, ty2) ->
+      let ty1 = instantiate subst ty1 in
+      let ty2 = instantiate subst ty2 in
+      Tvec_or_dict (ty1, ty2)
+    | (Tvar _ | Tdynamic _ | Tnonnull | Tany _ | Tprim _ | Tneg _ | Tlabel _) as
+      x ->
+      x
+    | Ttuple { t_required; t_optional; t_extra } ->
+      let t_extra = instantiate_tuple_extra subst t_extra in
+      let t_required = List.map t_required ~f:(instantiate subst) in
+      let t_optional = List.map t_optional ~f:(instantiate subst) in
+      Ttuple { t_required; t_optional; t_extra }
+    | Tunion tyl ->
+      let tyl = List.map tyl ~f:(instantiate subst) in
+      Tunion tyl
+    | Tintersection tyl ->
+      let tyl = List.map tyl ~f:(instantiate subst) in
+      Tintersection tyl
+    | Toption ty ->
+      let ty = instantiate subst ty in
+      (* we want to avoid double option: ??T *)
+      (match get_node ty with
+      | Toption _ as ty_node -> ty_node
+      | _ -> Toption ty)
+    | Tfun ft ->
+      let tparams = ft.ft_tparams in
+      let outer_subst = subst in
+      let subst =
+        List.fold_left
+          ~f:
+            begin
+              (fun subst t -> S_map.remove (snd t.tp_name) subst)
+            end
+          ~init:subst
+          tparams
+      in
+      let params =
+        List.map ft.ft_params ~f:(fun param ->
+            let ty = instantiate subst param.fp_type in
+            { param with fp_type = ty })
+      in
+      let ret = instantiate subst ft.ft_ret in
+      let tparams =
+        List.map tparams ~f:(fun t ->
+            {
+              t with
+              tp_constraints =
+                List.map t.tp_constraints ~f:(fun (ck, ty) ->
+                    (ck, instantiate subst ty));
+            })
+      in
+      let where_constraints =
+        List.map ft.ft_where_constraints ~f:(fun (ty1, ck, ty2) ->
+            (instantiate subst ty1, ck, instantiate outer_subst ty2))
+      in
+      Tfun
+        {
+          ft with
+          ft_params = params;
+          ft_ret = ret;
+          ft_tparams = tparams;
+          ft_where_constraints = where_constraints;
+        }
+    | Tnewtype (x, tyl, bound) ->
+      let tyl = List.map tyl ~f:(instantiate subst) in
+      let bound = instantiate subst bound in
+      Tnewtype (x, tyl, bound)
+    | Tclass (x, exact, tyl) ->
+      let tyl = List.map tyl ~f:(instantiate subst) in
+      Tclass (x, exact, tyl)
+    | Tshape
+        (Shape_simple { s_origin = _; s_unknown_value = kind; s_fields = fdm })
+      ->
+      let fdm = ShapeFieldMap.map (instantiate subst) fdm in
+      Tshape
+        (Shape_simple
+           {
+             s_origin = Missing_origin;
+             s_unknown_value = kind;
+             (* TODO(shapes) instantiate s_unknown_value *)
+             s_fields = fdm;
+           })
+    | Tshape (Shape_splat { ss_elems }) ->
+      let ss_elems = List.map ss_elems ~f:(instantiate subst) in
+      Tshape (Shape_splat { ss_elems })
+    | Tdependent (dep, ty) ->
+      let ty = instantiate subst ty in
+      Tdependent (dep, ty)
+    | Taccess (ty, ids) ->
+      let ty = instantiate subst ty in
+      Taccess (ty, ids)
+    | Tclass_ptr ty ->
+      let ty = instantiate subst ty in
+      Tclass_ptr ty
+
+  and instantiate_tuple_extra subst e =
+    match e with
+    | Tvariadic t_variadic ->
+      let t_variadic = instantiate subst t_variadic in
+      Tvariadic t_variadic
+    | Tsplat t_splat ->
+      let t_splat = instantiate subst t_splat in
+      Tsplat t_splat
+end
+
+(** True iff the typedef ultimately resolves to a name-enforced type — a
+    class or interface — whose name HHVM looks up at runtime. False for
+    structural types (shape, tuple, primitive, vec<...>) that unfold and
+    are enforced by shape, for traits (not legal in type positions), for
+    regular enums (HHVM enforces the underlying base type, not the enum
+    name), and for enum classes (cannot appear as typehints directly). *)
+let rec typedef_resolves_to_class_like
+    env ?(seen = S_set.empty) (typedef : typedef_type) : bool =
+  match typedef.td_type_assignment with
+  | CaseType _ -> false
+  | SimpleTypeDef (_, ty) ->
+    let (_r, ty_) = Typing_defs.deref ty in
+    (match ty_ with
+    | Tapply ((_pos, name), _argl) ->
+      if S_set.mem name seen then
+        false
+      else
+        let seen = S_set.add name seen in
+        (match Env.get_class_or_typedef env name with
+        | Decl_entry.Found (Env.ClassResult cls) ->
+          let kind = Cls.kind cls in
+          Ast_defs.is_c_class kind || Ast_defs.is_c_interface kind
+        | Decl_entry.Found (Env.TypedefResult nested_typedef) ->
+          typedef_resolves_to_class_like env ~seen nested_typedef
+        | Decl_entry.DoesNotExist
+        | Decl_entry.NotYetAvailable ->
+          false)
+    | _ -> false)
+
+(** Check for arity mismatch between type params and type arguments
+  then check that each type argument is well-formed. *)
+let rec check_targs_integrity
+    ~allow_missing_targs
+    ~in_signature
+    ~def_pos
+    ~use_pos
+    env
+    (tyargs : decl_ty list)
+    (tparams : decl_tparam list) =
+  let exp_len = List.length tparams in
+  let act_len = List.length tyargs in
+  let arity_mistmatch_okay = Int.equal act_len 0 && allow_missing_targs in
+  if Int.( <> ) exp_len act_len && not arity_mistmatch_okay then
+    Typing_error_utils.add_typing_error
+      ~env
+      Typing_error.(
+        primary
+        @@ Primary.Type_arity_mismatch
+             {
+               pos = use_pos;
+               decl_pos = def_pos;
+               expected = exp_len;
+               actual = act_len;
+             });
+  let length = min exp_len act_len in
+  let (tyargs, tparams) = (List.take tyargs length, List.take tparams length) in
+  List.iter2_exn tyargs tparams ~f:(check_targ_well_formed ~in_signature env)
+
+(** Checks that a type argument is well-kinded against its corresponding
+  type parameter. Also checks that the wildcard type argument is not used
+  if the type parameter is higher kinded (i.e. it expected type arguments itself) *)
+and check_targ_well_formed ~in_signature env tyarg (tparam : decl_tparam) =
+  let in_reified = not @@ Aast.is_erased tparam.tp_reified in
+  let should_check_package_boundary =
+    let open Typing_error.Primary.Package in
+    if in_reified then
+      `Yes Reified_generic
+    else
+      `No
+  in
+  check_type_integrity
+    ~allow_missing_targs:false
+    ~in_signature
+    ~should_check_package_boundary
+    env
+    tyarg
+
+and check_type_integrity
+    ~allow_missing_targs
+    ~in_signature
+    ~should_check_package_boundary
+    env
+    (ty : decl_ty) =
+  let (r, ty_) = deref ty in
+  let use_pos = Reason.to_pos r |> Pos_or_decl.unsafe_to_raw_pos in
+  let check ?(should_check_package_boundary = should_check_package_boundary) ty
+      =
+    check_type_integrity
+      ~allow_missing_targs:false
+      ~in_signature
+      ~should_check_package_boundary
+      env
+      ty
+  in
+  let check_targs_integrity def_pos tyargs tparams =
+    check_targs_integrity
+      ~allow_missing_targs
+      ~def_pos
+      ~use_pos
+      env
+      tyargs
+      tparams
+  in
+  match ty_ with
+  (* Boring recursive cases first---------------------- *)
+  | Tany _
+  | Tnonnull
+  | Tprim _
+  | Tdynamic _
+  | Tmixed
+  | Twildcard
+  | Tthis ->
+    ()
+  | Tvec_or_dict (tk, tv) ->
+    check ~should_check_package_boundary:`No tk;
+    check ~should_check_package_boundary:`No tv
+  | Tlike ty
+  | Toption ty ->
+    check ty
+  | Ttuple { t_required; t_optional; t_extra = Tvariadic t_vs | Tsplat t_vs } ->
+    (* HHVM enforces a tuple hint structurally as a vec of the right arity, but
+       does not enforce the element types. So skip the enforceable_type_alias
+       check on tuple elements. *)
+    let should_check_package_boundary =
+      match should_check_package_boundary with
+      | `Yes Typing_error.Primary.Package.Enforceable_type_alias -> `No
+      | other -> other
+    in
+    let check = check ~should_check_package_boundary in
+    List.iter t_required ~f:check;
+    List.iter t_optional ~f:check;
+    check t_vs
+  | Tunion tyl
+  | Tintersection tyl ->
+    List.iter tyl ~f:check
+  | Taccess (ty, _) ->
+    (* Because type constants cannot depend on type parameters,
+       we allow Foo::the_type even if Foo has type parameters *)
+    check_type_integrity
+      ~allow_missing_targs:true
+      ~in_signature
+      ~should_check_package_boundary
+      env
+      ty
+  | Trefinement (ty, rs) ->
+    check ty;
+    (* Refinement bodies (`Foo with {type TC = X}`) are typechecker-only;
+       HHVM enforces only the base class at runtime. Skip package checks on
+       the refinement members entirely. *)
+    Class_refinement.iter (check ~should_check_package_boundary:`No) rs
+  | Tshape (Shape_simple { s_fields = map; _ }) ->
+    (* Shape field types are runtime-enforced under `as` (modulo `enforce_deep`),
+       so propagate the boundary reason for as-expression contexts. Other
+       contexts continue to skip field-type checking to preserve prior behavior. *)
+    let should_check_package_boundary =
+      match should_check_package_boundary with
+      | `Yes Typing_error.Primary.Package.As_expression
+      | `LintOnly ->
+        should_check_package_boundary
+      | _ -> `No
+    in
+    TShapeMap.iter
+      (fun _ sft -> check ~should_check_package_boundary sft.sft_ty)
+      map
+  | Tshape (Shape_splat { ss_elems }) ->
+    (* Splat elements are shapes whose field types are runtime-enforced under
+       `as` just like simple shapes, so propagate the boundary reason the same
+       way (see the `Shape_simple` case above) to keep the same guarantees. *)
+    let should_check_package_boundary =
+      match should_check_package_boundary with
+      | `Yes Typing_error.Primary.Package.As_expression
+      | `LintOnly ->
+        should_check_package_boundary
+      | _ -> `No
+    in
+    List.iter ss_elems ~f:(check ~should_check_package_boundary)
+  | Tfun ({ ft_params; ft_ret; _ } : _ fun_type) ->
+    (* FIXME shall we inspect tparams and where_constraints? *)
+    check ~should_check_package_boundary:`No ft_ret;
+    List.iter ft_params ~f:(fun p ->
+        check ~should_check_package_boundary:`No p.fp_type)
+  (* Interesting cases--------------------------------- *)
+  | Tgeneric _ -> ()
+  | Tapply ((_p, cid), argl) -> begin
+    match Env.get_class_or_typedef env cid with
+    | Decl_entry.Found (Env.ClassResult class_info) ->
+      let should_check_package_boundary =
+        if
+          Typing_packages.is_strict_isolation_target
+            env
+            (Cls.get_package class_info)
+        then
+          (* A strict-isolation package is enforced at every type position,
+             including ones the rollout carve-outs normally skip (bare
+             class/interface hints, nested type arguments, function-type
+             parameters, refinement members). *)
+          `Yes Typing_error.Primary.Package.Type_hint
+        else
+          match should_check_package_boundary with
+          (* Class/interface are covered by the class-name access check, so carve
+             them out (and enums too when enum violations are allowed). *)
+          | `Yes Typing_error.Primary.Package.Enforceable_type_alias
+            when Env.package_allow_enforceable_enum_violations env
+                 || Ast_defs.is_c_class (Cls.kind class_info)
+                 || Ast_defs.is_c_interface (Cls.kind class_info) ->
+            `No
+          (* An enum is enforced by its base type, not its name, so the
+             class-name check does not cover it; report it specifically. Any
+             other kind (e.g. a trait or enum class reaching here) keeps the
+             generic diagnostic. *)
+          | `Yes Typing_error.Primary.Package.Enforceable_type_alias
+            when Ast_defs.is_c_enum (Cls.kind class_info) ->
+            `Yes Typing_error.Primary.Package.Enforceable_enum
+          | other -> other
+      in
+      (let (errs, linter_errs) =
+         Typing_visibility.check_top_level_access
+           ~should_check_package_boundary
+           ~in_signature
+           ~use_pos
+           ~def_pos:(Cls.pos class_info)
+           ~tests_bypass_visibility:(Cls.tests_bypass_visibility class_info)
+           ~target_supports_tests_bypass_visibility:true
+           env
+           (Cls.internal class_info)
+           (Cls.get_module class_info)
+           (Cls.get_package class_info)
+           cid
+       in
+       List.iter linter_errs ~f:(fun (pos, w) ->
+           Lints_diagnostics.crosspackage_linter
+             pos
+             ~current_package:w.current_package
+             ~current_package_before_override:w.current_package_before_override
+             ~caller_has_package_override:w.caller_has_package_override
+             ~target_package:w.target_package
+             ~target_package_before_override:w.target_package_before_override
+             ~callee_has_package_override:w.callee_has_package_override
+             ~classptr_reference_warning:w.classptr_reference_warning);
+       List.iter errs ~f:(Typing_error_utils.add_typing_error ~env));
+      (* Note: class gating via __GatedByFeatureFlag is not yet supported
+         because folded classes don't carry user attributes. If needed,
+         add a gc_gated_by_feature_flag field to folded class decls. *)
+      let tparams = Cls.tparams class_info in
+      check_targs_integrity ~in_signature (Cls.pos class_info) argl tparams
+    | Decl_entry.Found (Env.TypedefResult typedef) ->
+      let should_check_package_boundary =
+        if Typing_packages.is_strict_isolation_target env typedef.td_package
+        then
+          `Yes Typing_error.Primary.Package.Type_hint
+        else
+          match should_check_package_boundary with
+          | `Yes Typing_error.Primary.Package.Enforceable_type_alias
+            when typedef_resolves_to_class_like env typedef ->
+            `No
+          | other -> other
+      in
+      (let (errs, linter_errs) =
+         Typing_visibility.check_top_level_access
+           ~should_check_package_boundary
+           ~in_signature
+           ~use_pos
+           ~def_pos:typedef.td_pos
+           ~tests_bypass_visibility:false
+           ~target_supports_tests_bypass_visibility:false
+           env
+           typedef.td_internal
+           (Option.map typedef.td_module ~f:snd)
+           typedef.td_package
+           cid
+       in
+       List.iter linter_errs ~f:(fun (pos, w) ->
+           Lints_diagnostics.crosspackage_linter
+             pos
+             ~current_package:w.current_package
+             ~current_package_before_override:w.current_package_before_override
+             ~caller_has_package_override:w.caller_has_package_override
+             ~target_package:w.target_package
+             ~target_package_before_override:w.target_package_before_override
+             ~callee_has_package_override:w.callee_has_package_override
+             ~classptr_reference_warning:w.classptr_reference_warning);
+       List.iter errs ~f:(Typing_error_utils.add_typing_error ~env));
+      Typing_visibility.check_gated_by_feature_flag
+        env
+        (Pos_or_decl.of_raw_pos use_pos)
+        cid
+        typedef.td_attributes;
+      check_targs_integrity ~in_signature typedef.td_pos argl typedef.td_tparams
+    | Decl_entry.DoesNotExist
+    | Decl_entry.NotYetAvailable ->
+      ()
+  end
+  | Tclass_ptr ty -> check ty
+
+let check_type_integrity
+    ~in_signature ~should_check_package_boundary env (ty : decl_ty) =
+  check_type_integrity
+    ~allow_missing_targs:false
+    ~in_signature
+    ~should_check_package_boundary
+    env
+    ty
+
+let check_hint_integrity ~in_signature ~should_check_package_boundary env hint =
+  let decl_ty = Decl_hint.hint env.Typing_env_types.decl_env hint in
+  check_type_integrity ~in_signature ~should_check_package_boundary env decl_ty
+
+let check_context_hint_integrity ~in_signature env hint =
+  let decl_ty = Decl_hint.context_hint env.Typing_env_types.decl_env hint in
+  check_type_integrity
+    ~in_signature
+    ~should_check_package_boundary:`No
+    env
+    decl_ty

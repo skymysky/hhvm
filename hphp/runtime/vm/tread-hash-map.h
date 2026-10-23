@@ -13,10 +13,10 @@
    | license@php.net so we can mail you a copy immediately.               |
    +----------------------------------------------------------------------+
 */
-#ifndef incl_HPHP_VM_TREAD_HASH_MAP_H_
-#define incl_HPHP_VM_TREAD_HASH_MAP_H_
+#pragma once
 
 #include <atomic>
+#include <memory>
 #include <type_traits>
 
 #include <boost/iterator/iterator_facade.hpp>
@@ -27,6 +27,28 @@
 #include "hphp/util/assertions.h"
 
 namespace HPHP {
+
+namespace detail {
+
+template <typename T>
+struct is_atomic : std::false_type {};
+
+template <typename U>
+struct is_atomic<std::atomic<U>> : std::true_type {};
+
+template <typename T>
+struct val_ops {
+  static void store(T& dst, T v) { dst = v; }
+  using type = T;
+};
+
+template <typename U>
+struct val_ops<std::atomic<U>> {
+  static void store(std::atomic<U>& dst, U v) { dst.store(v, std::memory_order_release); }
+  using type = U;
+};
+
+}
 
 extern uint64_t g_emptyTable;
 
@@ -50,10 +72,11 @@ extern uint64_t g_emptyTable;
 
 template<class Key, class Val,
          class HashFunc = std::hash<Key>,
-         class Allocator = std::allocator<char>>
-struct TreadHashMap {
+         class Alloc = std::allocator<char>>
+struct TreadHashMap : private HashFunc,
+                      private std::allocator_traits<Alloc>::template rebind_alloc<char> {
+  using Allocator = typename std::allocator_traits<Alloc>::template rebind_alloc<char>;
   using value_type = std::pair<std::atomic<Key>,Val>;
-
   static_assert(
     std::is_trivially_destructible<Key>::value &&
     std::is_trivially_destructible<Val>::value,
@@ -79,7 +102,7 @@ public:
   {}
 
   ~TreadHashMap() {
-    auto t = m_table.load(std::memory_order_relaxed);
+    auto t = m_table.load(std::memory_order_acquire);
     if (t != staticEmptyTable()) {
       freeTable(t);
     }
@@ -145,8 +168,8 @@ public:
     size_t m_offset;
   };
 
-  typedef thm_iterator<value_type> iterator;
-  typedef thm_iterator<const value_type> const_iterator;
+  using iterator = thm_iterator<value_type>;
+  using const_iterator = thm_iterator<const value_type>;
 
   size_t size() const {
     return m_table.load(std::memory_order_acquire)->size;
@@ -168,15 +191,21 @@ public:
     return const_cast<TreadHashMap*>(this)->end();
   }
 
-  Val* insert(Key key, Val val) {
+  void insert(Key key, detail::val_ops<Val>::type val) {
     assertx(key != 0);
-    return insertImpl(acquireAndGrowIfNeeded(), key, val);
+    insertImpl<false>(acquireAndGrowIfNeeded(), key, val);
+  }
+
+  template <typename V = Val, typename = std::enable_if_t<detail::is_atomic<V>::value>>
+  detail::val_ops<Val>::type insertOrUpdate(Key key, detail::val_ops<Val>::type val) {
+    assertx(key != 0);
+    return insertImpl<true>(acquireAndGrowIfNeeded(), key, val);
   }
 
   Val* find(Key key) const {
     assertx(key != 0);
 
-    auto tab = m_table.load(std::memory_order_consume);
+    auto tab = m_table.load(std::memory_order_acquire);
     if (tab->size == 0) return nullptr; // empty
     assertx(tab->capac > tab->size);
     auto idx = project(tab, key);
@@ -189,25 +218,46 @@ public:
     }
   }
 
+  template<typename F> void filter_keys(F fn) {
+    auto const old = m_table.load(std::memory_order_acquire);
+    if (UNLIKELY(old == staticEmptyTable())) return;
+
+    Table* newTable = allocTable(old->capac);
+    for (auto i = uint32_t{}; i < old->capac; ++i) {
+      auto const ent = &old->entries[i];
+      auto const key = ent->first.load(std::memory_order_acquire);
+      if (key && !fn(key)) insertImpl<false>(newTable, key, ent->second);
+    }
+    Treadmill::enqueue([this, old] { freeTable(old); });
+    m_table.store(newTable, std::memory_order_release);
+  }
+
 private:
-  Val* insertImpl(Table* const tab, Key newKey, Val newValue) {
+  template <bool canUpdate>
+  std::conditional_t<canUpdate, typename detail::val_ops<Val>::type, void>
+  insertImpl(Table* const tab, Key newKey, detail::val_ops<Val>::type newValue) {
+    static_assert(!canUpdate || detail::is_atomic<Val>::value, "canUpdate requires Val to be std::atomic");
+
     auto probe = &tab->entries[project(tab, newKey)];
     assertx(size_t(probe - tab->entries) < tab->capac);
 
-    // Since we're the only thread allowed to write, we're allowed to
-    // do a relaxed load here.  (No need for an acquire/release
-    // handshake with ourselves.)
-    while (Key currentProbe = probe->first) {
-      assertx(currentProbe != newKey); // insertions must be unique
+    while (Key currentProbe = probe->first.load(std::memory_order_acquire)) {
+      if constexpr (canUpdate) {
+        if (currentProbe == newKey) {
+          return probe->second.exchange(newValue, std::memory_order_acq_rel);
+        }
+      } else {
+        assertx(currentProbe != newKey); // insertions must be unique
+      }
+
       assertx(probe <= (tab->entries + tab->capac));
-      // can't loop forever; acquireAndGrowIfNeeded ensures there's
-      // some slack.
+      // acquireAndGrowIfNeeded ensures there's at least one empty slot.
       (void)currentProbe;
       if (++probe == (tab->entries + tab->capac)) probe = tab->entries;
     }
 
-    // Copy over the value before we publish.
-    probe->second = newValue;
+    // First copy over the value then update the key to make it visible.
+    detail::val_ops<Val>::store(probe->second, newValue);
 
     // Make it visible.
     probe->first.store(newKey, std::memory_order_release);
@@ -216,15 +266,16 @@ private:
     // ordering is ok.
     ++tab->size;
 
-    return &probe->second;
+    if constexpr (canUpdate) {
+      return nullptr;
+    }
   }
 
   Table* acquireAndGrowIfNeeded() {
-    // Relaxed load is ok---there's only one writer thread.
-    auto old = m_table.load(std::memory_order_relaxed);
+    auto old = m_table.load(std::memory_order_acquire);
 
-    // 75% occupancy, avoiding the FPU.
-    if (LIKELY((old->size) < (old->capac / 4 + old->capac / 2))) {
+    // 50% occupancy, avoiding the FPU.
+    if (LIKELY((old->size) < (old->capac / 2))) {
       return old;
     }
 
@@ -234,10 +285,9 @@ private:
     } else {
       newTable = allocTable(old->capac * 2);
       for (uint32_t i = 0; i < old->capac; ++i) {
-        value_type* ent = old->entries + i;
-        if (ent->first.load()) {
-          insertImpl(newTable, ent->first, ent->second);
-        }
+        auto const ent = old->entries + i;
+        auto const key = ent->first.load(std::memory_order_acquire);
+        if (key) insertImpl<false>(newTable, key, ent->second);
       }
       Treadmill::enqueue([this, old] { freeTable(old); });
     }
@@ -248,7 +298,7 @@ private:
 
   size_t project(Table* tab, Key key) const {
     assertx(folly::isPowTwo(tab->capac));
-    return m_hash(key) & (tab->capac - 1);
+    return HashFunc::operator()(key) & (tab->capac - 1);
   }
 
   constexpr size_t allocSize(uint32_t cap) {
@@ -257,7 +307,7 @@ private:
 
   Table* allocTable(uint32_t capacity) {
     auto size = allocSize(capacity);
-    auto ret = reinterpret_cast<Table*>(m_alloc.allocate(size));
+    auto ret = reinterpret_cast<Table*>(Allocator::allocate(size));
     memset(ret, 0, size);
     ret->capac = capacity;
     ret->size = 0;
@@ -265,18 +315,14 @@ private:
   }
 
   void freeTable(Table* t) {
-    m_alloc.deallocate(reinterpret_cast<char*>(t), allocSize(t->capac));
+    Allocator::deallocate(reinterpret_cast<char*>(t), allocSize(t->capac));
   }
 
 private:
   std::atomic<Table*> m_table;
   uint32_t m_initialSize;
-  HashFunc m_hash;
-  Allocator m_alloc;
 };
 
 //////////////////////////////////////////////////////////////////////
 
 }
-
-#endif

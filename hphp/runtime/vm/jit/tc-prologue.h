@@ -2,7 +2,7 @@
    +----------------------------------------------------------------------+
    | HipHop for PHP                                                       |
    +----------------------------------------------------------------------+
-   | Copyright (c) 2010-2016 Facebook, Inc. (http://www.facebook.com)     |
+   | Copyright (c) 2010-present Facebook, Inc. (http://www.facebook.com)  |
    +----------------------------------------------------------------------+
    | This source file is subject to version 3.01 of the PHP license,      |
    | that is bundled with this package in the file LICENSE, and is        |
@@ -14,57 +14,43 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_JIT_TC_PROLOGUE_H_
-#define incl_HPHP_JIT_TC_PROLOGUE_H_
+#pragma once
 
-#include "hphp/runtime/vm/jit/types.h"
+#include "hphp/runtime/vm/jit/tc.h"
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit::tc {
 
-struct ProfTransRec;
-
-namespace tc {
-
-/*
- * Emit a function prologue from rec.
- *
- * Precondition: calling thread owns both code and metadata locks
- */
-TCA emitFuncPrologueOptInternal(PrologueMetaInfo& info);
-
-/*
- * Publish the metadata for the given func prologue.  Returns whether or not it
- * succeeded.
- */
-bool publishFuncPrologueMeta(Func* func, int nArgs, TransKind kind,
-                             PrologueMetaInfo& info);
-
-/*
- * Publish the code for the given func prologue.  Returns whether or not it
- * succeeded.
- */
-bool publishFuncPrologueCode(Func* func, int nArgs, PrologueMetaInfo& info);
-
-/*
- * Smash the callers of the ProfPrologue associated with `rec' to call a new
- * prologue at `start' address.
- */
-void smashFuncCallers(TCA start, ProfTransRec* rec);
-
-/*
- * Emit the prologue dispatch for func which contains dvs DV initializers, and
- * return its start address.  The `kind' of translation argument is used to
- * decide what area of the code cache will be used (hot, main, or prof).
- *
- * Precondition: calling thread owns both code and metadata locks
- */
-TCA emitFuncBodyDispatchInternal(Func* func, const DVFuncletsVec& dvs,
-                                 CodeCache::View view);
-
-void publishFuncBodyDispatch(Func* func, TCA start, TCA end);
+struct PrologueTranslator final : Translator {
+  // Although the srckey (sk member of translator) knows the func,
+  // it holds it as a const Func* and won't work for the mutations
+  // required for publishing.
+  Func* func;
+  // Number of passed positionals.
+  uint32_t nPassed;
+  PrologueTranslator(Func* func, uint32_t nPassed,
+                     TransKind kind = TransKind::Invalid)
+    : Translator(
+        SrcKey{
+          func,
+          paramIndexHelper(func, nPassed),
+          SrcKey::PrologueTag{}
+        },
+        kind
+      )
+    , func(func)
+    , nPassed(nPassed)
+  {}
+  uint32_t paramIndex() const;
+  Optional<TranslationResult> getCached() override;
+  void resetCached() override;
+  void setCachedForProcessFail() override;
+  void smashBackup() override;
+  static uint32_t paramIndexHelper(const Func*, uint32_t);
+private:
+  void computeKind() override;
+  void gen() override;
+  void publishMetaImpl() override;
+  void publishCodeImpl() override;
+};
 
 }
-
-}}
-
-#endif

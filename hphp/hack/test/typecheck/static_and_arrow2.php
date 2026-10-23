@@ -10,11 +10,11 @@
  */
 
 class Bar {
-  public static function f2() {
+  public static function f2(): void {
   }
 }
 class Foo {
-  public function f1() {
+  public function f1(): void {
     $bar = new Bar();
     $bar->f2();
   }

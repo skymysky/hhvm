@@ -1,7 +1,7 @@
-<?php
+<?hh
 
 class X {
-  function foo($x,$y) {
+  function foo($x,$y) :mixed{
     $a = null;
     if ($x) {
       $a = new X;
@@ -10,5 +10,9 @@ class X {
     return $a;
   }
 }
+
+<<__EntryPoint>>
+function main_1325() :mixed{
 $x = new X;
 var_dump($x->foo(false, true));
+}

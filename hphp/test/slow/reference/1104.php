@@ -1,25 +1,19 @@
-<?php
-
-function f($x) {
-  global $u;
-  if (isset($u)) return null;
-  return $x;
+<?hh
+function postinc_val(inout $x):mixed{ $r=$x; $x++; return $r; }
+<<__DynamicallyCallable>>
+function test($a) :mixed{
+  try {
+    return postinc_val(inout $a);
+  } catch (Exception $e) {
+    print("Error: ".$e->getMessage()."\n");
+    return null;
+  }
 }
-function test($a) {
-  $a++;
-  return $a;
+<<__DynamicallyCallable>>
+function foo() :mixed{
+  return \HH\global_get('x');
 }
-function &foo() {
-  return $GLOBALS['x'];
+<<__EntryPoint>>
+function main_1104() :mixed{
+var_dump(test(foo()));
 }
-$x = 1;
-test(foo());
-var_dump($x);
-$f = f('foo');
-$x = 1;
-test($f());
-var_dump($x);
-$t = f('test');
-$x = 1;
-$t(foo());
-var_dump($x);

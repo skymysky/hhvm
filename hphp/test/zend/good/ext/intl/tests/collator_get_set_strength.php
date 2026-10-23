@@ -1,4 +1,4 @@
-<?php
+<?hh
 
 /*
  * Try to set/get collation strength.
@@ -9,14 +9,14 @@
  * and check if it's the same.
  */
 function check_set_strength( $coll, $val )
-{
+:mixed{
     ut_coll_set_strength( $coll, $val );
     $new_val = ut_coll_get_strength( $coll );
     return ( $new_val == $val ? "ok" : "failed" ) . "\n";
 }
 
 function ut_main()
-{
+:mixed{
     $res = '';
     $coll = ut_coll_create( 'en_US' );
 
@@ -27,6 +27,7 @@ function ut_main()
     return $res;
 }
 
-include_once( 'ut_common.inc' );
-ut_run();
-?>
+<<__EntryPoint>> function main_entry(): void {
+    include_once( 'ut_common.inc' );
+    ut_run();
+}

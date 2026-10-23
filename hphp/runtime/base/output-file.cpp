@@ -27,7 +27,7 @@ const StaticString s_php_output("php://output");
 const StaticString s_php("PHP");
 const StaticString s_output("Output");
 
-OutputFile::OutputFile(const String& filename): File(true, s_php, s_output) {
+OutputFile::OutputFile(const OptString& filename): File(true, s_php, s_output) {
   if (filename != s_php_output) {
     raise_fatal_error("not a php://output file ");
   }
@@ -35,25 +35,19 @@ OutputFile::OutputFile(const String& filename): File(true, s_php, s_output) {
 }
 
 OutputFile::~OutputFile() {
-  OutputFile::closeImpl();
+  OutputFile::close();
 }
 
 void OutputFile::sweep() {
-  closeImpl();
+  OutputFile::close();
   File::sweep();
 }
 
-bool OutputFile::open(const String& /*filename*/, const String& /*mode*/) {
+bool OutputFile::open(const OptString& /*filename*/, const OptString& /*mode*/) {
   raise_fatal_error("cannot open a php://output file ");
 }
 
-bool OutputFile::close() {
-  invokeFiltersOnClose();
-  return closeImpl();
-}
-
-bool OutputFile::closeImpl() {
-  s_pcloseRet = 0;
+bool OutputFile::close(int*) {
   if (!isClosed()) {
     setIsClosed(true);
     return true;
@@ -66,7 +60,7 @@ bool OutputFile::closeImpl() {
 
 int64_t OutputFile::readImpl(char* /*buffer*/, int64_t /*length*/) {
   raise_warning("cannot read from a php://output stream");
-  return -1;
+  return 0;
 }
 
 int OutputFile::getc() {

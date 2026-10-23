@@ -1,5 +1,5 @@
 <?hh
-function gcd($x, $y) {
+function gcd($x, $y) :mixed{
   if ($x >= $y) {
     $a = $x;
     $b = $y;
@@ -14,5 +14,7 @@ function gcd($x, $y) {
   }
   return gcd($b+0, $a-$b);
 }
+<<__EntryPoint>> function main(): void {
 echo gcd(330, 462);
 echo "\n";
+}

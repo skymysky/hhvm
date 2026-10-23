@@ -1,4 +1,4 @@
-<?hh     /* -*- php -*- */
+<?hh /* -*- php -*- */
 /**
  * Copyright (c) 2014, Facebook, Inc.
  * All rights reserved.
@@ -8,209 +8,308 @@
  *
  */
 
-define('AF_UNIX', 0);
-define('AF_INET', 0);
-define('AF_INET6', 0);
-define('SOCK_STREAM', 0);
-define('SOCK_DGRAM', 0);
-define('SOCK_RAW', 0);
-define('SOCK_SEQPACKET', 0);
-define('SOCK_RDM', 0);
-define('MSG_OOB', 0);
-define('MSG_WAITALL', 0);
-define('MSG_PEEK', 0);
-define('MSG_DONTROUTE', 0);
-define('MSG_EOR', 0);
-define('MSG_EOF', 0);
-define('SO_DEBUG', 0);
-define('SO_REUSEADDR', 0);
-define('SO_REUSEPORT', 0);
-define('SO_KEEPALIVE', 0);
-define('SO_DONTROUTE', 0);
-define('SO_LINGER', 0);
-define('SO_BROADCAST', 0);
-define('SO_OOBINLINE', 0);
-define('SO_SNDBUF', 0);
-define('SO_RCVBUF', 0);
-define('SO_SNDLOWAT', 0);
-define('SO_RCVLOWAT', 0);
-define('SO_SNDTIMEO', 0);
-define('SO_RCVTIMEO', 0);
-define('SO_TYPE', 0);
-define('SO_ERROR', 0);
-define('TCP_NODELAY', 0);
-define('SOL_SOCKET', 0);
-define('PHP_NORMAL_READ', 0);
-define('PHP_BINARY_READ', 0);
-define('SOL_TCP', 0);
-define('SOL_UDP', 0);
-define('SOCKET_EINTR', 0);
-define('SOCKET_EBADF', 0);
-define('SOCKET_EACCES', 0);
-define('SOCKET_EFAULT', 0);
-define('SOCKET_EINVAL', 0);
-define('SOCKET_EMFILE', 0);
-define('SOCKET_ENAMETOOLONG', 0);
-define('SOCKET_ENOTEMPTY', 0);
-define('SOCKET_ELOOP', 0);
-define('SOCKET_EWOULDBLOCK', 0);
-define('SOCKET_EREMOTE', 0);
-define('SOCKET_EUSERS', 0);
-define('SOCKET_ENOTSOCK', 0);
-define('SOCKET_EDESTADDRREQ', 0);
-define('SOCKET_EMSGSIZE', 0);
-define('SOCKET_EPROTOTYPE', 0);
-define('SOCKET_EPROTONOSUPPORT', 0);
-define('SOCKET_ESOCKTNOSUPPORT', 0);
-define('SOCKET_EOPNOTSUPP', 0);
-define('SOCKET_EPFNOSUPPORT', 0);
-define('SOCKET_EAFNOSUPPORT', 0);
-define('SOCKET_EADDRNOTAVAIL', 0);
-define('SOCKET_ENETDOWN', 0);
-define('SOCKET_ENETUNREACH', 0);
-define('SOCKET_ENETRESET', 0);
-define('SOCKET_ECONNABORTED', 0);
-define('SOCKET_ECONNRESET', 0);
-define('SOCKET_ENOBUFS', 0);
-define('SOCKET_EISCONN', 0);
-define('SOCKET_ENOTCONN', 0);
-define('SOCKET_ESHUTDOWN', 0);
-define('SOCKET_ETIMEDOUT', 0);
-define('SOCKET_ECONNREFUSED', 0);
-define('SOCKET_EHOSTDOWN', 0);
-define('SOCKET_EHOSTUNREACH', 0);
-define('SOCKET_EALREADY', 0);
-define('SOCKET_EINPROGRESS', 0);
-define('SOCKET_ENOPROTOOPT', 0);
-define('SOCKET_EADDRINUSE', 0);
-define('SOCKET_ETOOMYREFS', 0);
-define('SOCKET_EPROCLIM', 0);
-define('SOCKET_EDUOT', 0);
-define('SOCKET_ESTALE', 0);
-define('SOCKET_EDISCON', 0);
-define('SOCKET_SYSNOTREADY', 0);
-define('SOCKET_VERNOTSUPPORTED', 0);
-define('SOCKET_NOTINITIALISED', 0);
-define('SOCKET_HOST_NOT_FOUND', 0);
-define('SOCKET_TRY_AGAIN', 0);
-define('SOCKET_NO_RECOVERY', 0);
-define('SOCKET_NO_DATA', 0);
-define('SOCKET_NO_ADDRESS', 0);
-define('SOCKET_EPERM', 0);
-define('SOCKET_ENOENT', 0);
-define('SOCKET_EIO', 0);
-define('SOCKET_ENXIO', 0);
-define('SOCKET_E2BIG', 0);
-define('SOCKET_EAGAIN', 0);
-define('SOCKET_ENOMEM', 0);
-define('SOCKET_ENOTBLK', 0);
-define('SOCKET_EBUSY', 0);
-define('SOCKET_EEXIST', 0);
-define('SOCKET_EXDEV', 0);
-define('SOCKET_ENODEV', 0);
-define('SOCKET_ENOTDIR', 0);
-define('SOCKET_EISDIR', 0);
-define('SOCKET_ENFILE', 0);
-define('SOCKET_ENOTTY', 0);
-define('SOCKET_ENOSPC', 0);
-define('SOCKET_ESPIPE', 0);
-define('SOCKET_EROFS', 0);
-define('SOCKET_EMLINK', 0);
-define('SOCKET_EPIPE', 0);
-define('SOCKET_ENOLCK', 0);
-define('SOCKET_ENOSYS', 0);
-define('SOCKET_ENOMSG', 0);
-define('SOCKET_EIDRM', 0);
-define('SOCKET_ECHRNG', 0);
-define('SOCKET_EL2NSYNC', 0);
-define('SOCKET_EL3HLT', 0);
-define('SOCKET_EL3RST', 0);
-define('SOCKET_ELNRNG', 0);
-define('SOCKET_EUNATCH', 0);
-define('SOCKET_ENOCSI', 0);
-define('SOCKET_EL2HLT', 0);
-define('SOCKET_EBADE', 0);
-define('SOCKET_EBADR', 0);
-define('SOCKET_EXFULL', 0);
-define('SOCKET_ENOANO', 0);
-define('SOCKET_EBADRQC', 0);
-define('SOCKET_EBADSLT', 0);
-define('SOCKET_ENOSTR', 0);
-define('SOCKET_ENODATA', 0);
-define('SOCKET_ETIME', 0);
-define('SOCKET_ENOSR', 0);
-define('SOCKET_ENONET', 0);
-define('SOCKET_ENOLINK', 0);
-define('SOCKET_EADV', 0);
-define('SOCKET_ESRMNT', 0);
-define('SOCKET_ECOMM', 0);
-define('SOCKET_EPROTO', 0);
-define('SOCKET_EMULTIHOP', 0);
-define('SOCKET_EBADMSG', 0);
-define('SOCKET_ENOTUNIQ', 0);
-define('SOCKET_EBADFD', 0);
-define('SOCKET_EREMCHG', 0);
-define('SOCKET_ERESTART', 0);
-define('SOCKET_ESTRPIPE', 0);
-define('SOCKET_EPROTOOPT', 0);
-define('SOCKET_ADDRINUSE', 0);
-define('SOCKET_ETOOMANYREFS', 0);
-define('SOCKET_EISNAM', 0);
-define('SOCKET_EREMOTEIO', 0);
-define('SOCKET_EDQUOT', 0);
-define('SOCKET_ENOMEDIUM', 0);
-define('SOCKET_EMEDIUMTYPE', 0);
+const int AF_UNIX;
+const int AF_INET;
+const int AF_INET6;
+const int SOCK_STREAM;
+const int SOCK_DGRAM;
+const int SOCK_RAW;
+const int SOCK_SEQPACKET;
+const int SOCK_RDM;
+const int MSG_OOB;
+const int MSG_WAITALL;
+const int MSG_PEEK;
+const int MSG_DONTROUTE;
+const int MSG_EOR;
+const int MSG_EOF;
+const int SO_DEBUG;
+const int SO_REUSEADDR;
+const int SO_REUSEPORT;
+const int SO_KEEPALIVE;
+const int SO_DONTROUTE;
+const int SO_LINGER;
+const int SO_BROADCAST;
+const int SO_OOBINLINE;
+const int SO_SNDBUF;
+const int SO_RCVBUF;
+const int SO_SNDLOWAT;
+const int SO_RCVLOWAT;
+const int SO_SNDTIMEO;
+const int SO_RCVTIMEO;
+const int SO_TYPE;
+const int SO_ERROR;
+const int TCP_NODELAY;
+const int SOL_SOCKET;
+const int PHP_NORMAL_READ;
+const int PHP_BINARY_READ;
+const int SOL_TCP;
+const int SOL_UDP;
+const int SOCKET_EINTR;
+const int SOCKET_EBADF;
+const int SOCKET_EACCES;
+const int SOCKET_EFAULT;
+const int SOCKET_EINVAL;
+const int SOCKET_EMFILE;
+const int SOCKET_ENAMETOOLONG;
+const int SOCKET_ENOTEMPTY;
+const int SOCKET_ELOOP;
+const int SOCKET_EWOULDBLOCK;
+const int SOCKET_EREMOTE;
+const int SOCKET_EUSERS;
+const int SOCKET_ENOTSOCK;
+const int SOCKET_EDESTADDRREQ;
+const int SOCKET_EMSGSIZE;
+const int SOCKET_EPROTOTYPE;
+const int SOCKET_EPROTONOSUPPORT;
+const int SOCKET_ESOCKTNOSUPPORT;
+const int SOCKET_EOPNOTSUPP;
+const int SOCKET_EPFNOSUPPORT;
+const int SOCKET_EAFNOSUPPORT;
+const int SOCKET_EADDRNOTAVAIL;
+const int SOCKET_ENETDOWN;
+const int SOCKET_ENETUNREACH;
+const int SOCKET_ENETRESET;
+const int SOCKET_ECONNABORTED;
+const int SOCKET_ECONNRESET;
+const int SOCKET_ENOBUFS;
+const int SOCKET_EISCONN;
+const int SOCKET_ENOTCONN;
+const int SOCKET_ESHUTDOWN;
+const int SOCKET_ETIMEDOUT;
+const int SOCKET_ECONNREFUSED;
+const int SOCKET_EHOSTDOWN;
+const int SOCKET_EHOSTUNREACH;
+const int SOCKET_EALREADY;
+const int SOCKET_EINPROGRESS;
+const int SOCKET_ENOPROTOOPT;
+const int SOCKET_EADDRINUSE;
+const int SOCKET_ETOOMYREFS;
+const int SOCKET_EPROCLIM;
+const int SOCKET_EDUOT;
+const int SOCKET_ESTALE;
+const int SOCKET_EDISCON;
+const int SOCKET_SYSNOTREADY;
+const int SOCKET_VERNOTSUPPORTED;
+const int SOCKET_NOTINITIALISED;
+const int SOCKET_HOST_NOT_FOUND;
+const int SOCKET_TRY_AGAIN;
+const int SOCKET_NO_RECOVERY;
+const int SOCKET_NO_DATA;
+const int SOCKET_NO_ADDRESS;
+const int SOCKET_EPERM;
+const int SOCKET_ENOENT;
+const int SOCKET_EIO;
+const int SOCKET_ENXIO;
+const int SOCKET_E2BIG;
+const int SOCKET_EAGAIN;
+const int SOCKET_ENOMEM;
+const int SOCKET_ENOTBLK;
+const int SOCKET_EBUSY;
+const int SOCKET_EEXIST;
+const int SOCKET_EXDEV;
+const int SOCKET_ENODEV;
+const int SOCKET_ENOTDIR;
+const int SOCKET_EISDIR;
+const int SOCKET_ENFILE;
+const int SOCKET_ENOTTY;
+const int SOCKET_ENOSPC;
+const int SOCKET_ESPIPE;
+const int SOCKET_EROFS;
+const int SOCKET_EMLINK;
+const int SOCKET_EPIPE;
+const int SOCKET_ENOLCK;
+const int SOCKET_ENOSYS;
+const int SOCKET_ENOMSG;
+const int SOCKET_EIDRM;
+const int SOCKET_ECHRNG;
+const int SOCKET_EL2NSYNC;
+const int SOCKET_EL3HLT;
+const int SOCKET_EL3RST;
+const int SOCKET_ELNRNG;
+const int SOCKET_EUNATCH;
+const int SOCKET_ENOCSI;
+const int SOCKET_EL2HLT;
+const int SOCKET_EBADE;
+const int SOCKET_EBADR;
+const int SOCKET_EXFULL;
+const int SOCKET_ENOANO;
+const int SOCKET_EBADRQC;
+const int SOCKET_EBADSLT;
+const int SOCKET_ENOSTR;
+const int SOCKET_ENODATA;
+const int SOCKET_ETIME;
+const int SOCKET_ENOSR;
+const int SOCKET_ENONET;
+const int SOCKET_ENOLINK;
+const int SOCKET_EADV;
+const int SOCKET_ESRMNT;
+const int SOCKET_ECOMM;
+const int SOCKET_EPROTO;
+const int SOCKET_EMULTIHOP;
+const int SOCKET_EBADMSG;
+const int SOCKET_ENOTUNIQ;
+const int SOCKET_EBADFD;
+const int SOCKET_EREMCHG;
+const int SOCKET_ERESTART;
+const int SOCKET_ESTRPIPE;
+const int SOCKET_EPROTOOPT;
+const int SOCKET_ADDRINUSE;
+const int SOCKET_ETOOMANYREFS;
+const int SOCKET_EISNAM;
+const int SOCKET_EREMOTEIO;
+const int SOCKET_EDQUOT;
+const int SOCKET_ENOMEDIUM;
+const int SOCKET_EMEDIUMTYPE;
 <<__PHPStdLib>>
-function socket_create($domain, $type, $protocol) { }
+function socket_create(
+  int $domain,
+  int $type,
+  int $protocol,
+)[leak_safe]: HH\FIXME\MISSING_RETURN_TYPE {}
 <<__PHPStdLib>>
-function socket_create_listen($port, $backlog = 128) { }
+function socket_create_listen(
+  int $port,
+  int $backlog = 128,
+): HH\FIXME\MISSING_RETURN_TYPE {}
 <<__PHPStdLib>>
-function socket_create_pair($domain, $type, $protocol, &$fd) { }
+function socket_create_pair(
+  int $domain,
+  int $type,
+  int $protocol,
+  inout HH\FIXME\MISSING_PARAM_TYPE $fd,
+): HH\FIXME\MISSING_RETURN_TYPE {}
 <<__PHPStdLib>>
-function socket_get_option($socket, $level, $optname) { }
+function socket_get_option(
+  resource $socket,
+  int $level,
+  int $optname,
+)[leak_safe]: HH\FIXME\MISSING_RETURN_TYPE {}
 <<__PHPStdLib>>
-function socket_getpeername($socket, &$address, &$port = null) { }
+function socket_getpeername(
+  resource $socket,
+  inout HH\FIXME\MISSING_PARAM_TYPE $address,
+  inout HH\FIXME\MISSING_PARAM_TYPE $port,
+)[leak_safe]: HH\FIXME\MISSING_RETURN_TYPE {}
 <<__PHPStdLib>>
-function socket_getsockname($socket, &$address, &$port = null) { }
+function socket_getsockname(
+  resource $socket,
+  inout HH\FIXME\MISSING_PARAM_TYPE $address,
+  inout HH\FIXME\MISSING_PARAM_TYPE $port,
+)[]: HH\FIXME\MISSING_RETURN_TYPE {}
 <<__PHPStdLib>>
-function socket_set_block($socket) { }
+function socket_set_block(resource $socket): HH\FIXME\MISSING_RETURN_TYPE {}
 <<__PHPStdLib>>
-function socket_set_nonblock($socket) { }
+function socket_set_nonblock(resource $socket): HH\FIXME\MISSING_RETURN_TYPE {}
 <<__PHPStdLib>>
-function socket_set_option($socket, $level, $optname, $optval) { }
+function socket_set_option(
+  resource $socket,
+  int $level,
+  int $optname,
+  HH\FIXME\MISSING_PARAM_TYPE $optval,
+)[leak_safe]: HH\FIXME\MISSING_RETURN_TYPE {}
 <<__PHPStdLib>>
-function socket_connect($socket, $address, $port = 0) { }
+function socket_connect(
+  resource $socket,
+  string $address,
+  int $port = 0,
+): HH\FIXME\MISSING_RETURN_TYPE {}
 <<__PHPStdLib>>
-function socket_bind($socket, $address, $port = 0) { }
+function socket_bind(
+  resource $socket,
+  string $address,
+  int $port = 0,
+): HH\FIXME\MISSING_RETURN_TYPE {}
 <<__PHPStdLib>>
-function socket_listen($socket, $backlog = 0) { }
+function socket_listen(
+  resource $socket,
+  int $backlog = 0,
+): HH\FIXME\MISSING_RETURN_TYPE {}
 <<__PHPStdLib>>
-function socket_select(&$read, &$write, &$except, $vtv_sec, $tv_usec = 0) { }
+function socket_select(
+  inout HH\FIXME\MISSING_PARAM_TYPE $read,
+  inout HH\FIXME\MISSING_PARAM_TYPE $write,
+  inout HH\FIXME\MISSING_PARAM_TYPE $except,
+  HH\FIXME\MISSING_PARAM_TYPE $vtv_sec,
+  int $tv_usec = 0,
+)[leak_safe]: HH\FIXME\MISSING_RETURN_TYPE {}
 <<__PHPStdLib>>
-function socket_server($hostname, $port = -1, &$errnum = null, &$errstr = null) { }
+function socket_server(
+  string $hostname,
+  int $port,
+  inout HH\FIXME\MISSING_PARAM_TYPE $errnum,
+  inout HH\FIXME\MISSING_PARAM_TYPE $errstr,
+): HH\FIXME\MISSING_RETURN_TYPE {}
 <<__PHPStdLib>>
-function socket_accept($socket) { }
+function socket_accept(resource $socket): HH\FIXME\MISSING_RETURN_TYPE {}
 <<__PHPStdLib>>
-function socket_read($socket, $length, $type = 0) { }
+function socket_read(
+  resource $socket,
+  int $length,
+  int $type = 0,
+): HH\FIXME\MISSING_RETURN_TYPE {}
 <<__PHPStdLib>>
-function socket_write($socket, $buffer, $length = 0) { }
+function socket_write(
+  resource $socket,
+  string $buffer,
+  int $length = 0,
+): HH\FIXME\MISSING_RETURN_TYPE {}
 <<__PHPStdLib>>
-function socket_send($socket, $buf, $len, $flags) { }
+function socket_send(
+  resource $socket,
+  string $buf,
+  int $len,
+  int $flags,
+): HH\FIXME\MISSING_RETURN_TYPE {}
 <<__PHPStdLib>>
-function socket_sendto($socket, $buf, $len, $flags, $addr, $port = 0) { }
+function socket_sendto(
+  resource $socket,
+  string $buf,
+  int $len,
+  int $flags,
+  string $addr,
+  int $port = 0,
+): HH\FIXME\MISSING_RETURN_TYPE {}
 <<__PHPStdLib>>
-function socket_recv($socket, &$buf, $len, $flags) { }
+function socket_recv(
+  resource $socket,
+  inout HH\FIXME\MISSING_PARAM_TYPE $buf,
+  int $len,
+  int $flags,
+): HH\FIXME\MISSING_RETURN_TYPE {}
 <<__PHPStdLib>>
-function socket_recvfrom($socket, &$buf, $len, $flags, &$name, &$port = 0) { }
+function socket_recvfrom(
+  resource $socket,
+  inout HH\FIXME\MISSING_PARAM_TYPE $buf,
+  int $len,
+  int $flags,
+  inout HH\FIXME\MISSING_PARAM_TYPE $name,
+  inout HH\FIXME\MISSING_PARAM_TYPE $port,
+): HH\FIXME\MISSING_RETURN_TYPE {}
 <<__PHPStdLib>>
-function socket_shutdown($socket, $how = 0) { }
+function socket_shutdown(
+  resource $socket,
+  int $how = 0,
+): HH\FIXME\MISSING_RETURN_TYPE {}
 <<__PHPStdLib>>
-function socket_close($socket) { }
+function socket_close(
+  resource $socket,
+)[write_props]: HH\FIXME\MISSING_RETURN_TYPE {}
 <<__PHPStdLib>>
-function socket_strerror($errnum) { }
+function socket_strerror(int $errnum)[]: HH\FIXME\MISSING_RETURN_TYPE {}
 <<__PHPStdLib>>
-function socket_last_error($socket = null) { }
+function socket_last_error(
+  HH\FIXME\MISSING_PARAM_TYPE $socket = null,
+)[read_globals]: HH\FIXME\MISSING_RETURN_TYPE {}
 <<__PHPStdLib>>
-function socket_clear_error($socket = null) { }
+function socket_clear_error(
+  HH\FIXME\MISSING_PARAM_TYPE $socket = null,
+): HH\FIXME\MISSING_RETURN_TYPE {}
 <<__PHPStdLib>>
-function getaddrinfo($host, $port, $family = 0, $socktype = 0, $protocol = 0, $flags = 0) { }
+function getaddrinfo(
+  string $host,
+  string $port,
+  int $family = 0,
+  int $socktype = 0,
+  int $protocol = 0,
+  int $flags = 0,
+): HH\FIXME\MISSING_RETURN_TYPE;

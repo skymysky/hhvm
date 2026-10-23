@@ -1,4 +1,5 @@
 <?hh
+
 /* Tests the 20 function matrix of:
  *   v(),  vf(),  vm(),  vfk(),  vmk(),
  *   m(),  mf(),  mm(),  mfk(),  mmk(),
@@ -8,25 +9,26 @@
  * Using static wait handles which yield results in various types
  */
 
-$vals = array(
+<<__EntryPoint>>
+function main_hh_async_matrix() :mixed{
+$vals = vec[
   NULL,
   true,
   false,
   1,
   2.0,
   "Hello World",
-  array(3.14),
-  (object)array(4, 8, 15, 16, 23, 42),
-);
+  vec[3.14],
+];
 
 
 
-$typeMap = array(
+$typeMap = dict[
   'v'  => new Vector($vals),
   'm'  => new Map($vals),
-);
+];
 
-$callMap = array(
+$callMap = dict[
   ''  => (($f, $inputs) ==>
     $f($inputs->map(async $input ==> $input))),
   'f' => (($f, $inputs) ==>
@@ -36,21 +38,22 @@ $callMap = array(
   'fk' => (($f, $inputs) ==>
     $f($inputs, async ($k, $v) ==> (bool) $v)),
   'mk' => (($f, $inputs) ==>
-    $f($inputs, async ($k, $v) ==> var_export([$k => $v], true))),
-);
-$wrapMap = array(
+    $f($inputs, async ($k, $v) ==> var_export(dict[$k => $v], true))),
+];
+$wrapMap = dict[
   ''  => ($r ==> $r),
   'w' => ($r ==> (is_array($r) ? array_map($o ==> $o->getResult(), $r)
                                : $r->map($o ==> $o->getResult()))),
-);
+];
 
 foreach ($typeMap as $type => $inputs) {
   foreach ($callMap as $call => $cgen) {
     foreach ($wrapMap as $wrap => $wgen) {
       $func = "HH\\Asio\\{$type}{$call}{$wrap}";
-      $wh = $cgen($func, $inputs);
+      $wh = $cgen(HH\dynamic_fun($func), $inputs);
       echo "{$func}() => ";
       var_dump($wgen(\HH\Asio\join($wh)));
     }
   }
+}
 }

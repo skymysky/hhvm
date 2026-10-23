@@ -1,43 +1,39 @@
-<?php
+<?hh
 
 class A {
-	private $x;
+    private $x;
 
-	function __construct($x) {
-		$this->x = $x;
-	}
+    function __construct($x) {
+        $this->x = $x;
+    }
 
-	function __destruct() {
-		echo "Destroyed\n";
-	}
+    function getIncer($val) :mixed{
+        return function() use ($val) {
+            $this->x += $val;
+        };
+    }
 
-	function getIncer($val) {
-		return function() use ($val) {
-			$this->x += $val;
-		};
-	}
+    function getPrinter() :mixed{
+        return function() {
+            echo $this->x."\n";
+        };
+    }
 
-	function getPrinter() {
-		return function() {
-			echo $this->x."\n";
-		};
-	}
-	
-	function getError() {
-		return static function() {
-			echo $this->x."\n";
-		};
-	}
-	
-	function printX() {
-		echo $this->x."\n";
-	}
+
+
+
+
+
+
+    function printX() :mixed{
+        echo $this->x."\n";
+    }
 }
-
+<<__EntryPoint>> function main(): void {
 $a = new A(3);
 $incer = $a->getIncer(2);
 $printer = $a->getPrinter();
-$error = $a->getError();
+
 
 $a->printX();
 $printer();
@@ -45,17 +41,17 @@ $incer();
 $a->printX();
 $printer();
 
-unset($a);
+$a = null;
 
 $incer();
 $printer();
 
-unset($incer);
+$incer = null;
 $printer();
 
-unset($printer);
+$printer = null;
 
-$error();
+
 
 echo "Done\n";
-?>
+}

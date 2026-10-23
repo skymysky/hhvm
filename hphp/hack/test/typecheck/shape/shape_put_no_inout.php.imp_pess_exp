@@ -1,0 +1,40 @@
+error: Typing[4138] Invalid return type [1]
+-> This shape type allows unknown fields, and so it may contain fields other than those explicitly declared in its declaration. [2]
+-> It is incompatible with a shape that does not allow unknown fields. [3]
+
+shape_put_no_inout.php:4:10
+  1 | <?hh
+  2 | 
+  3 | function test(shape('y' => num) $shape): shape('x' => string, 'y' => num) {
+    |                                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ [3]
+  4 |   return Shapes::put(inout $shape, 'x', 'test');
+    |          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ [1]
+  5 | }
+
+Shapes.hhi:112:10
+110 |       arraykey $index,
+111 |       mixed $value,
+112 |     )[]: shape(...);
+    |          ^^^^^^^^^^ [2]
+113 |   }
+114 | 
+
+error: Typing[4183] Unexpected `inout` annotation for argument [1]
+-> This is a normal parameter (does not have `inout`) [2]
+
+shape_put_no_inout.php:4:22
+  2 | 
+  3 | function test(shape('y' => num) $shape): shape('x' => string, 'y' => num) {
+  4 |   return Shapes::put(inout $shape, 'x', 'test');
+    |                      ^^^^^^^^^^^^ [1]
+  5 | }
+
+Shapes.hhi:109:18
+107 |     <<__NoAutoDynamic, __SupportDynamicType>>
+108 |     public static function put(
+109 |       shape(...) $shape,
+    |                  ^^^^^^ [2]
+110 |       arraykey $index,
+111 |       mixed $value,
+
+2 errors found

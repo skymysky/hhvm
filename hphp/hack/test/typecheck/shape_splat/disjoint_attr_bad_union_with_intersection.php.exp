@@ -1,0 +1,18 @@
+error: Typing[4419] Type alias marked `<<__DisjointShapeSplat>>` may contain overlapping shapes [1]
+-> Shape field `x` is defined here [2]
+-> Shape field `x` may also be provided by type parameter `TA` [3]
+-> Shape field `x` may also be provided by type parameter `TB` [4]
+
+disjoint_attr_bad_union_with_intersection.php:7:9
+ 5 | // intersection branch must not hide the overlap demonstrated by the witness.
+ 6 | <<__DisjointShapeSplat>>
+ 7 | newtype Bad<TA as shape(...), TB as shape(...)> =
+   |         ^^^ [1]
+ 8 |   shape(...((TA & TB) | shape('a' => int)), 'x' => bool);
+   |              ^^ [3]
+   |                   ^^ [4]
+   |                                             ^^^ [2]
+ 9 | 
+10 | type Witness = Bad<shape('x' => int), shape('x' => int)>;
+
+1 error found

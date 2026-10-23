@@ -1,4 +1,2 @@
-Fun \NS\bar -> Fun \NS\bar
-Fun \NS\bar -> GConst \NS\C
-GConst \C -> GConst \C
-GConst \NS\C -> GConst \NS\C
+GConst NS\C -> Fun NS\bar
+Type HH\string -> Fun NS\bar

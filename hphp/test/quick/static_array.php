@@ -1,96 +1,71 @@
 <?hh
-
-# Static arrays.
-$a = array();
+// Static arrays.
+<<__EntryPoint>> function main(): void {
+$a = vec[];
 var_dump($a);
 
-$a = array(null);
+$a = vec[null];
 var_dump($a);
 
-$a = array(true);
+$a = vec[true];
 var_dump($a);
 
-$a = array(42);
+$a = vec[42];
 var_dump($a);
 
-$a = array(12.34);
+$a = vec[12.34];
 var_dump($a);
 
-$a = array("hello");
+$a = vec["hello"];
 var_dump($a);
 
-$a = array(array());
+$a = vec[vec[]];
 var_dump($a);
 
-$a = array(null, true, 42, 12.34, "hello", array(1, array(2, array(3))));
+$a = vec[null, true, 42, 12.34, "hello", vec[1, vec[2, vec[3]]]];
 var_dump($a);
-$a = array(null, true, 42, 12.34, "hello", array(1, array(2, array(3))));
-var_dump($a);
-
-$a = array(null => "null");
+$a = vec[null, true, 42, 12.34, "hello", vec[1, vec[2, vec[3]]]];
 var_dump($a);
 
-$a = array(false => "false");
+$a = dict[0 => "0"];
 var_dump($a);
 
-$a = array(true => "true");
+$a = dict[42 => "42"];
 var_dump($a);
 
-$a = array(0 => "0");
+$a = dict["hello" => "world"];
 var_dump($a);
 
-$a = array(42 => "42");
-var_dump($a);
-
-$a = array(12.34 => "12.34");
-var_dump($a);
-
-$a = array("hello" => "world");
-var_dump($a);
-
-$a = array(0 => "0", true => "1", "hello" => "world", 12.34 => array());
-var_dump($a);
-
-# Non-static arrays.
+// Non-static arrays.
 $v = null;
-$a = array($v);
+$a = vec[$v];
 var_dump($a);
 
 $k = 0;
-$a = array($k => "0");
+$a = dict[$k => "0"];
 var_dump($a);
 
 $v = "0";
-$a = array(0 => $v);
+$a = dict[0 => $v];
 var_dump($a);
 
 $k = "hello";
-$a = array($k => "world");
+$a = dict[$k => "world"];
 var_dump($a);
 
 $v = "world";
-$a = array("hello" => $v);
+$a = dict["hello" => $v];
 var_dump($a);
 
 $v = 0;
-$a = array(array($v));
+$a = vec[vec[$v]];
 var_dump($a);
 
 $v = 0;
-$a = array(array($v), array(0));
+$a = vec[vec[$v], vec[0]];
 var_dump($a);
 
 $v = 0;
-$a = array(array(0), array($v));
+$a = vec[vec[0], vec[$v]];
 var_dump($a);
-
-# Invalid key, prevents static array optimization.
-$a = array(array() => 1);
-var_dump($a);
-
-$a = array(INF => 0);
-var_dump($a);
-
-$a = array(NAN => 0);
-var_dump($a);
-
+}

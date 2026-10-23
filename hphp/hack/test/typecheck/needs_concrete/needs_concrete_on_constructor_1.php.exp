@@ -1,0 +1,11 @@
+error: Typing[4507] The `__NeedsConcrete` attribute is not allowed on a constructor. The `__NeedsConcrete` attribute is only meaningful on static methods. [1]
+
+needs_concrete_on_constructor_1.php:5:19
+3 | abstract class A {
+4 |   <<__NeedsConcrete>>
+5 |   public function __construct() {
+  |                   ^^^^^^^^^^^ [1]
+6 |   }
+7 | }
+
+1 error found

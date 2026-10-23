@@ -1,7 +1,7 @@
-<?php
+<?hh
 
 function ut_main()
-{
+:mixed{
     $fmt = ut_nfmt_create( 'en_US', NumberFormatter::DECIMAL );
     $number = 1234567.891234567890000;
 
@@ -9,9 +9,8 @@ function ut_main()
     return $str_res;
 }
 
-include_once( 'ut_common.inc' );
-
-// Run the test
-ut_run();
-
-?>
+<<__EntryPoint>> function main_entry(): void {
+    include_once( 'ut_common.inc' );
+    // Run the test
+    ut_run();
+}

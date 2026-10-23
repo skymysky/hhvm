@@ -14,18 +14,14 @@
    +----------------------------------------------------------------------+
 */
 
-#ifndef incl_HPHP_STRING_DATA_MACROS_H_
-#define incl_HPHP_STRING_DATA_MACROS_H_
+#pragma once
 
-#ifdef USE_LOWPTR
-#define NO_M_DATA 1
-#endif
-
-#ifdef NO_M_DATA
-// Offsets of fields in StringData, when NO_M_DATA
 #define SD_LEN    8
 #define SD_DATA   16
 #define SD_HASH   12
-#endif
 
+// Under certain conditions, we implement both StringData::hash and certain
+// hash table lookup methods in x86 assembly.
+#if defined(__SSE4_2__) && !defined(NO_HWCRC)
+#define USE_X86_STRING_HELPERS
 #endif

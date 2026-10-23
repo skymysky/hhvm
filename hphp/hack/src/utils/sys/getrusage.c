@@ -9,13 +9,6 @@
 
 #include <caml/alloc.h>
 #include <caml/memory.h>
-#ifdef _WIN32
-#include <windows.h>
-
-value hh_getrusage(void) {
-  caml_failwith("getrusage is unimplemented for Windows");
-}
-#else
 #include <sys/resource.h>
 
 
@@ -59,5 +52,3 @@ value hh_getrusage(void) {
 
   CAMLreturn(result);
 }
-
-#endif

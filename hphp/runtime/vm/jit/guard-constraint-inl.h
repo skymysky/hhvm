@@ -16,7 +16,7 @@
 
 #include "hphp/runtime/vm/class.h"
 
-namespace HPHP { namespace jit {
+namespace HPHP::jit {
 ///////////////////////////////////////////////////////////////////////////////
 
 inline GuardConstraint::GuardConstraint(DataTypeCategory cat
@@ -58,15 +58,15 @@ inline bool GuardConstraint::isSpecialized() const {
   return category == DataTypeSpecialized;
 }
 
-inline GuardConstraint& GuardConstraint::setWantArrayKind() {
+inline GuardConstraint& GuardConstraint::setArrayLayoutSensitive() {
   assertx(!wantClass());
   assertx(isSpecialized());
-  m_specialized |= kWantArrayKind;
+  m_specialized |= kWantArrayLayout;
   return *this;
 }
 
-inline bool GuardConstraint::wantArrayKind() const {
-  return m_specialized & kWantArrayKind;
+inline bool GuardConstraint::isArrayLayoutSensitive() const {
+  return m_specialized & kWantArrayLayout;
 }
 
 inline GuardConstraint& GuardConstraint::setDesiredClass(const Class* cls) {
@@ -79,7 +79,7 @@ inline GuardConstraint& GuardConstraint::setDesiredClass(const Class* cls) {
 }
 
 inline bool GuardConstraint::wantClass() const {
-  return m_specialized && !wantArrayKind();
+  return m_specialized && !isArrayLayoutSensitive();
 }
 
 inline const Class* GuardConstraint::desiredClass() const {
@@ -88,4 +88,4 @@ inline const Class* GuardConstraint::desiredClass() const {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-}}
+}
