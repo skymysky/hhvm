@@ -102,6 +102,8 @@ constexpr size_t kIndexSizeLimit       = 1ull << 28;
 // If you hit this limit you also need to change Blob::HashMapIndex::Bucket.
 constexpr size_t kIndexDataSizeLimit   = std::numeric_limits<uint32_t>::max();
 
+constexpr size_t kUnitEmitterBufferSize = 64ull << 20;
+
 ////////////////////////////////////////////////////////////////////////////////
 
 const StringData* relativePathToSourceRoot(const StringData* path) {
@@ -197,6 +199,27 @@ struct RepoFileBuilder::Data : Blob::Writer<RepoFileChunks, RepoFileIndexes> {
   uint64_t peakPendingBytes{0};
   size_t outOfOrderWrites{0};
 
+  // Callers serialize add() behind a lock, so batch the unit emitter
+  // writes instead of making a syscall per unit. Must be flushed before
+  // anything else writes to fd.
+  std::vector<char> unitEmitterBuffer;
+
+  void writeUnitEmitter(const char* data, size_t size) {
+    if (unitEmitterBuffer.size() + size > kUnitEmitterBufferSize) {
+      flushUnitEmitters();
+      write(RepoFileChunks::UNIT_EMITTERS, data, size);
+      return;
+    }
+    unitEmitterBuffer.insert(unitEmitterBuffer.end(), data, data + size);
+    sizes.add(RepoFileChunks::UNIT_EMITTERS, size);
+  }
+
+  void flushUnitEmitters() {
+    if (unitEmitterBuffer.empty()) return;
+    fd.write(unitEmitterBuffer.data(), unitEmitterBuffer.size());
+    unitEmitterBuffer.clear();
+  }
+
   void finish(const RepoGlobalData&,
               std::vector<RepoUnitSymbols>,
               std::vector<UnitMethCallers>,
@@ -222,6 +245,7 @@ RepoFileBuilder::RepoFileBuilder(const std::string& path,
   }
   m_data->enableUnitEmitterReuse = enableUnitEmitterReuse;
   m_data->header(path, kMagic, kCurrentVersion);
+  m_data->unitEmitterBuffer.reserve(kUnitEmitterBufferSize);
 }
 
 RepoFileBuilder::~RepoFileBuilder() {
@@ -296,7 +320,7 @@ void RepoFileBuilder::writeUnit(const EncodedUE& ue) {
     }
   );
 
-  m_data->write(RepoFileChunks::UNIT_EMITTERS, ue.blob.data(), size);
+  m_data->writeUnitEmitter(ue.blob.data(), size);
 
   if (m_data->inSnOrder) {
     m_data->outOfOrderWrites += ue.sn != m_data->nextSn;
@@ -324,6 +348,7 @@ void RepoFileBuilder::finish(const RepoGlobalData& global,
       m_data->outOfOrderWrites
     );
   }
+  m_data->flushUnitEmitters();
 
   std::vector<RepoUnitSymbols> unitSymbols(
     m_data->unitEmittersIndex.size());
@@ -834,6 +859,7 @@ void RepoFileBuilder::addFrom(
     const PackageInfo& packageInfo) {
   assertx(m_data);
   assertx(base.m_data);
+  m_data->flushUnitEmitters();
   auto& baseData = *base.m_data;
 
   auto const aliasesBase = [&](const std::string& candidate) {
